@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "local:HSCUSTOM",
+			"uri": "isfs://local:hscustom/?system=1"
+		}
+	],
+	"settings": {
+		"typescript.tsc.autoDetect": "off",
+		"objectscript.overwriteServerChanges": true,
+		"objectscript.syncLocalChanges": "all",
+		"intersystems.servers": {
+			"local": {
+				"webServer": {
+					"scheme": "http",
+					"host": "localhost",
+					"port": 52773
+				},
+				"description": "local",
+				"username": "_SYSTEM",
+				"password": "SYS"
+			}
+		}
+	}
+}
