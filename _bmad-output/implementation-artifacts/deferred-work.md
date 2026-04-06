@@ -49,3 +49,8 @@
 ## Deferred from: code review of 2-4-compilation-tools (2026-04-05)
 
 - Test helper duplication across test files (`createMockHttp`, `createMockCtx`, `envelope` in both `compile.test.ts` and `doc.test.ts`). Consider extracting shared test helpers into a common test utility module to reduce maintenance burden and ensure consistency.
+
+## Deferred from: code review of 2-6-document-format-and-xml-tools (2026-04-05)
+
+- Duplicated body construction logic in `docXmlExportTool` handler: the `import` and `list` switch branches both split content by `\r?\n` and wrap in `[{ file: "import.xml", content: lines }]`. Consider extracting a shared helper (e.g., `buildXmlPayload(content: string)`) to reduce duplication.
+- Missing error propagation test for `docXmlExportTool`. The `docConvertTool` tests include a "propagate connection failures" test but `docXmlExportTool` does not have an equivalent test for HTTP/connection errors. Consider adding one for consistency.

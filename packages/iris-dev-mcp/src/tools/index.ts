@@ -19,6 +19,7 @@ import {
   docSearchTool,
   macroInfoTool,
 } from "./intelligence.js";
+import { docConvertTool, docXmlExportTool } from "./format.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -30,4 +31,6 @@ export const tools: ToolDefinition[] = [
   docIndexTool,
   docSearchTool,
   macroInfoTool,
+  docConvertTool,
+  docXmlExportTool,
 ];
