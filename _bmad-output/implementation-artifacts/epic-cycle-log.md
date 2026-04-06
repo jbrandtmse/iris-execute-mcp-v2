@@ -50,3 +50,19 @@
   - Version parsing extracts major from semver, caps at v8, defaults to v1
 - **Review findings:**
   - Code review passed, deferred items logged
+
+### Story 1.4: MCP Server Base & Tool Registration Framework
+- **Status:** done
+- **Commit:** c4ae838
+- **Files touched:** 11 files
+  - New modules: tool-types.ts, server-base.ts
+  - New tests: tool-types.test.ts, server-base.test.ts — 112 total tests
+  - Modified: shared/package.json (added @modelcontextprotocol/sdk), shared/index.ts (exports)
+- **Key decisions:**
+  - Used MCP SDK's McpServer (high-level API) rather than deprecated Server class
+  - Zod v4 `.shape` property for passing input schemas to SDK's registerTool
+  - Cursor-based pagination via base64-encoded JSON offset (50/page default)
+  - stdio transport default, HTTP transport via StreamableHTTPServerTransport
+  - Namespace resolution: NS/BOTH use override or config default, SYS always %SYS, NONE empty
+- **Review findings:**
+  - HIGH/MEDIUM auto-resolved, 4 LOW items deferred

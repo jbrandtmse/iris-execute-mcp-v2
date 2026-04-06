@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint src/",
     "type-check": "tsc --noEmit"
   },
