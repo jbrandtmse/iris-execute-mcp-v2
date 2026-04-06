@@ -246,6 +246,10 @@ export const globalListTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Substring filter on global names (e.g., 'Temp' matches 'TempData', 'MyTemp')"),
+    cursor: z
+      .string()
+      .optional()
+      .describe("Pagination cursor from a previous response's nextCursor field"),
     namespace: z
       .string()
       .optional()
@@ -259,8 +263,9 @@ export const globalListTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { filter, namespace } = args as {
+    const { filter, cursor, namespace } = args as {
       filter?: string;
+      cursor?: string;
       namespace?: string;
     };
 
@@ -274,7 +279,15 @@ export const globalListTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
-      const result = response.result;
+      const rawResult = response.result as { globals?: string[]; count?: number; filter?: string };
+      const allGlobals: string[] = rawResult.globals ?? [];
+      const { page, nextCursor } = ctx.paginate(allGlobals, cursor);
+      const result = {
+        globals: page,
+        count: page.length,
+        ...(rawResult.filter ? { filter: rawResult.filter } : {}),
+        ...(nextCursor ? { nextCursor } : {}),
+      };
       return {
         content: [
           { type: "text", text: JSON.stringify(result, null, 2) },

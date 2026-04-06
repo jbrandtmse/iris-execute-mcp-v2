@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError } from "@iris-mcp/shared";
+import type { ToolContext, PaginateResult } from "@iris-mcp/shared";
+import { IrisApiError, encodeCursor, decodeCursor } from "@iris-mcp/shared";
 import {
   globalGetTool,
   globalSetTool,
@@ -387,5 +387,93 @@ describe("iris.global.list", () => {
 
   it("should have scope NS", () => {
     expect(globalListTool.scope).toBe("NS");
+  });
+
+  it("should accept cursor parameter in schema", () => {
+    const shape = globalListTool.inputSchema.shape as Record<string, unknown>;
+    expect(shape).toHaveProperty("cursor");
+  });
+
+  it("should paginate results via ctx.paginate()", async () => {
+    const globals = Array.from({ length: 5 }, (_, i) => `Global${i}`);
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals, count: 5 }),
+    );
+
+    // Override paginate to simulate a page size of 2
+    const paginatingCtx: ToolContext = {
+      ...ctx,
+      paginate<T>(items: T[], cursor?: string, _pageSize?: number): PaginateResult<T> {
+        const offset = decodeCursor(cursor);
+        const size = 2;
+        const page = items.slice(offset, offset + size);
+        const nextOffset = offset + size;
+        const nextCursor =
+          nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
+        return { page, nextCursor };
+      },
+    };
+
+    const result = await globalListTool.handler({}, paginatingCtx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number; nextCursor?: string };
+    expect(structured.globals).toEqual(["Global0", "Global1"]);
+    expect(structured.count).toBe(2);
+    expect(structured.nextCursor).toBeDefined();
+  });
+
+  it("should forward cursor to ctx.paginate()", async () => {
+    const globals = Array.from({ length: 5 }, (_, i) => `Global${i}`);
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals, count: 5 }),
+    );
+
+    const cursor = encodeCursor(2);
+
+    // Override paginate to simulate a page size of 2 starting at offset 2
+    const paginatingCtx: ToolContext = {
+      ...ctx,
+      paginate<T>(items: T[], cur?: string, _pageSize?: number): PaginateResult<T> {
+        const offset = decodeCursor(cur);
+        const size = 2;
+        const page = items.slice(offset, offset + size);
+        const nextOffset = offset + size;
+        const nextCur =
+          nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
+        return { page, nextCursor: nextCur };
+      },
+    };
+
+    const result = await globalListTool.handler({ cursor }, paginatingCtx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number; nextCursor?: string };
+    expect(structured.globals).toEqual(["Global2", "Global3"]);
+    expect(structured.count).toBe(2);
+    expect(structured.nextCursor).toBeDefined();
+  });
+
+  it("should omit nextCursor on last page", async () => {
+    const globals = ["A", "B"];
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals, count: 2 }),
+    );
+
+    // Default mock paginate returns all items with no nextCursor
+    const result = await globalListTool.handler({}, ctx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number; nextCursor?: string };
+    expect(structured.globals).toEqual(["A", "B"]);
+    expect(structured.nextCursor).toBeUndefined();
+  });
+
+  it("should preserve filter field in paginated response", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals: ["CacheTemp"], count: 1, filter: "Cache" }),
+    );
+
+    const result = await globalListTool.handler({ filter: "Cache" }, ctx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number; filter?: string };
+    expect(structured.filter).toBe("Cache");
   });
 });

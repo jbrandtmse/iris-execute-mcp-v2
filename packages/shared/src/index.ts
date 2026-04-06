@@ -1,5 +1,6 @@
 // @iris-mcp/shared — barrel export
 
+export { booleanParam } from "./zod-helpers.js";
 export type { IrisConnectionConfig } from "./config.js";
 export { loadConfig } from "./config.js";
 export {

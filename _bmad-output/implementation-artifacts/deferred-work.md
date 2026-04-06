@@ -78,3 +78,9 @@
 ## Deferred from: code review of 3-3-objectscript-execution-rest-handler-and-tools (2026-04-06)
 
 - AC2 specifies that "output parameters are supported and returned" for the classmethod handler, but the current ClassMethod() implementation only captures return values via $ClassMethod(). ByRef/Output parameter support requires complex dynamic argument handling in ObjectScript (no spread/apply equivalent). Consider adding ByRef support in a future enhancement if use cases arise.
+
+## Deferred from: code review of 4-0-epic-3-deferred-cleanup (2026-04-06)
+
+- `./test-helpers` subpath export in `@iris-mcp/shared` package.json points to raw TypeScript source files (`./src/__tests__/test-helpers.ts`) rather than compiled dist output. This works in the monorepo because Vitest resolves TS directly, but would break for any external consumer using standard Node.js module resolution. Consider adding a build step for test-helpers or documenting the constraint.
+- `iris.global.list` pagination is client-side: the handler fetches all globals from the server, then slices the array via `ctx.paginate()`. For namespaces with thousands of globals, every page request re-fetches the full list. Consider server-side pagination via query parameters (offset/limit) in the custom REST endpoint in a future story.
+- `decodeCursor` with an offset beyond the array length produces an empty page without error. While safe, it could confuse API consumers who receive `{ globals: [], count: 0 }` from a valid cursor. Consider returning a user-friendly message or warning when cursor is past end-of-list.
