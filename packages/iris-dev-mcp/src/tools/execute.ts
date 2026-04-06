@@ -211,21 +211,27 @@ export const executeTestsTool: ToolDefinition = {
         const pollResp = await ctx.http.get<unknown>(pollPath);
         const pollResult = pollResp.result;
         const pollEnvelope = pollResp as unknown as Record<string, unknown>;
+        const hasRetry = !!pollEnvelope.retryafter;
 
-        if (Array.isArray(pollResult)) {
-          // Tests finished — result is the array of test results
+        // Tests finished when result is a non-empty array of TestResult objects
+        if (Array.isArray(pollResult) && pollResult.length > 0) {
           testResults = pollResult as AtelierTestResult[];
           break;
         }
 
-        if (!pollEnvelope.retryafter) {
-          // No retryafter and no array result — check if result has content array
+        if (!hasRetry) {
+          // No retryafter — job completed. Check various result shapes.
+          if (Array.isArray(pollResult)) {
+            // Empty array — tests ran but produced no results
+            testResults = [];
+            break;
+          }
           const resultObj = pollResult as Record<string, unknown> | undefined;
-          if (Array.isArray(resultObj?.content)) {
+          if (Array.isArray(resultObj?.content) && (resultObj!.content as unknown[]).length > 0) {
             testResults = resultObj!.content as AtelierTestResult[];
             break;
           }
-          // Unexpected response shape — treat as done with no results
+          // Job done with no results — break to avoid infinite loop
           testResults = [];
           break;
         }

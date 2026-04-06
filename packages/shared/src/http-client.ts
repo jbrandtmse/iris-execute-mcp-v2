@@ -297,13 +297,19 @@ export class IrisHttpClient {
       );
     }
 
-    // For async work queue responses (HTTP 202), capture the Location header
-    // as `result.location` so callers can poll for job completion.
+    // For async work queue responses, capture HTTP headers into the envelope
+    // so callers can access job IDs and retry signals without raw header access.
+    // POST /work (202): Location header → result.location (job ID)
+    // GET /work/{id}: Retry-After header → envelope.retryafter (poll again)
     if (response.status === 202) {
       const location = response.headers.get("Location");
       if (location && envelope.result && typeof envelope.result === "object") {
         (envelope.result as Record<string, unknown>).location = location;
       }
+    }
+    const retryAfter = response.headers.get("Retry-After");
+    if (retryAfter) {
+      (envelope as unknown as Record<string, unknown>).retryafter = retryAfter;
     }
 
     // Check for HTTP errors.
