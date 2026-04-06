@@ -48,7 +48,7 @@ export const docCompileTool: ToolDefinition = {
   inputSchema: z.object({
     doc: z
       .union([z.string(), z.array(z.string())])
-      .describe("Document name(s) to compile (e.g., 'MyApp.Service.cls' or ['A.cls','B.cls'])"),
+      .describe("Document name(s) to compile. Pass a single string for one doc (e.g., 'MyApp.Service.cls') or a JSON array for multiple (e.g., [\"A.cls\", \"B.cls\"]). Each name must include the file extension."),
     flags: z
       .string()
       .optional()

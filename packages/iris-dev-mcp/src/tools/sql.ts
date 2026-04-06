@@ -27,17 +27,17 @@ export const sqlExecuteTool: ToolDefinition = {
   inputSchema: z.object({
     query: z
       .string()
-      .describe("SQL query to execute"),
+      .describe("SQL query to execute (e.g., 'SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ?')"),
     parameters: z
       .array(z.unknown())
       .optional()
-      .describe("Parameterized query values to prevent SQL injection"),
+      .describe("Parameterized query values as a JSON array matching ? placeholders in the query (e.g., [\"MyApp.\"] for a single parameter)"),
     maxRows: z
-      .number()
+      .coerce.number()
       .int()
       .min(1)
       .optional()
-      .describe("Maximum number of rows to return (default: 1000)"),
+      .describe("Maximum number of rows to return as an integer (default: 1000)"),
     namespace: z
       .string()
       .optional()

@@ -33,7 +33,7 @@ export const globalGetTool: ToolDefinition = {
     subscripts: z
       .string()
       .optional()
-      .describe("Comma-separated subscripts (e.g., '\"key1\",\"key2\"' or '1,2,3')"),
+      .describe("Subscripts as a comma-separated string. Use quotes for string keys: '\"key1\",\"key2\"'. Use plain numbers for numeric keys: '1,2,3'. Leave empty for the root node."),
     namespace: z
       .string()
       .optional()
@@ -106,7 +106,7 @@ export const globalSetTool: ToolDefinition = {
     subscripts: z
       .string()
       .optional()
-      .describe("Comma-separated subscripts (e.g., '\"key1\",\"key2\"' or '1,2,3')"),
+      .describe("Subscripts as a comma-separated string. Use quotes for string keys: '\"key1\",\"key2\"'. Use plain numbers for numeric keys: '1,2,3'. Leave empty for the root node."),
     namespace: z
       .string()
       .optional()
@@ -179,7 +179,7 @@ export const globalKillTool: ToolDefinition = {
     subscripts: z
       .string()
       .optional()
-      .describe("Comma-separated subscripts (e.g., '\"key1\",\"key2\"' or '1,2,3')"),
+      .describe("Subscripts as a comma-separated string. Use quotes for string keys: '\"key1\",\"key2\"'. Use plain numbers for numeric keys: '1,2,3'. Leave empty for the root node."),
     namespace: z
       .string()
       .optional()

@@ -99,9 +99,9 @@ export const docSearchTool: ToolDefinition = {
       .optional()
       .describe("Include generated items (default: false)"),
     max: z
-      .number()
+      .coerce.number()
       .optional()
-      .describe("Maximum number of results to return"),
+      .describe("Maximum number of results to return (integer)"),
     namespace: z
       .string()
       .optional()
@@ -184,7 +184,7 @@ export const macroInfoTool: ToolDefinition = {
   inputSchema: z.object({
     name: z
       .string()
-      .describe("Macro name to look up (e.g., 'OK', 'ISERR')"),
+      .describe("Macro name without the $$$ prefix (e.g., 'OK' for $$$OK, 'ISERR' for $$$ISERR)"),
     document: z
       .string()
       .optional()

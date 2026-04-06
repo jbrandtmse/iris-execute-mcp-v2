@@ -133,7 +133,7 @@ export const docPutTool: ToolDefinition = {
       .describe("Document name (e.g., 'MyApp.Service.cls')"),
     content: z
       .union([z.string(), z.array(z.string())])
-      .describe("Document content as a single string (split on newlines automatically) or array of lines"),
+      .describe("Document content. Pass as a single string with newlines (preferred) or a JSON array of lines. The full class/routine source including 'Class ... {' header."),
     namespace: z
       .string()
       .optional()
@@ -191,7 +191,7 @@ export const docDeleteTool: ToolDefinition = {
     name: z
       .union([z.string(), z.array(z.string())])
       .describe(
-        "Document name or array of names to delete (e.g., 'MyApp.Service.cls')",
+        "Document name(s) to delete. Pass a single string (e.g., 'MyApp.Service.cls') or a JSON array for multiple (e.g., [\"A.cls\", \"B.cls\"]).",
       ),
     namespace: z
       .string()

@@ -320,7 +320,7 @@ export const executeClassMethodTool: ToolDefinition = {
     args: z
       .array(z.any())
       .optional()
-      .describe("Positional arguments to pass to the method (max 10)"),
+      .describe("Positional arguments as a JSON array (max 10). Strings, numbers, and booleans are supported (e.g., [\"hello\", 42, true])."),
     namespace: z
       .string()
       .optional()
