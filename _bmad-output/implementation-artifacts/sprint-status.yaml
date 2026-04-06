@@ -67,7 +67,7 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Custom REST Service, Auto-Bootstrap & Execution Tools
-  epic-3: in-progress
+  epic-3: done
   3-0-epic-2-deferred-cleanup: done
   3-1-objectscript-rest-dispatch-and-utils-classes: done
   3-2-global-operations-rest-handler-and-tools: done
@@ -78,7 +78,7 @@ development_status:
   3-7-epic-3-unit-and-integration-tests: done
   3-8-configurable-http-client-timeout: done
   3-9-bulk-document-load-from-disk: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   # Epic 4: IRIS Administration (iris-admin-mcp)
   epic-4: backlog
