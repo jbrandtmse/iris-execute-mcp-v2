@@ -1,12 +1,23 @@
 /**
  * Tool definitions for the IRIS Development MCP server.
  *
- * Initially exports an empty array; individual tool modules
- * (doc, compile, intelligence, format, sql, server, macro)
- * will be added in Stories 2.2 through 2.7.
+ * Exports all tool definitions to be registered with
+ * {@link McpServerBase}. Individual tool modules are imported
+ * and combined into a single array.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
+import {
+  docGetTool,
+  docPutTool,
+  docDeleteTool,
+  docListTool,
+} from "./doc.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
-export const tools: ToolDefinition[] = [];
+export const tools: ToolDefinition[] = [
+  docGetTool,
+  docPutTool,
+  docDeleteTool,
+  docListTool,
+];

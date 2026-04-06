@@ -101,3 +101,19 @@
   - executeFetch() returns raw Response for callers to handle body/headers
 - **Issues resolved:** None required user input
 - **Test totals:** 118 unit tests (6 new) + 13 integration tests = 131 total
+
+### Story 2.1: iris-dev-mcp Package Setup & Server Entry Point
+- **Status:** done
+- **Commit:** b64b4ee
+- **Files touched:**
+  - packages/iris-dev-mcp/package.json — added bin field, @modelcontextprotocol/sdk dep
+  - packages/iris-dev-mcp/src/index.ts — full MCP server entry point
+  - packages/iris-dev-mcp/src/tools/index.ts — empty ToolDefinition[] export
+  - packages/iris-dev-mcp/src/__tests__/index.test.ts — 7 unit tests
+  - packages/iris-dev-mcp/vitest.config.ts — per-package vitest config
+- **Key decisions:**
+  - createRequire for ESM-safe package.json version reading
+  - Transport from CLI args or MCP_TRANSPORT env var, default stdio
+  - console.error warning on invalid transport value (review fix)
+- **Review findings:** 1 MEDIUM auto-resolved (silent transport fallback), 3 LOW deferred
+- **Test totals:** 126 unit tests (119 shared + 7 new) + 13 integration tests = 139 total

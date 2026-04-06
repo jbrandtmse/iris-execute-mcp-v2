@@ -34,3 +34,9 @@
 - No unit tests for `resolveTransport()` function in `src/index.ts`. The function has multiple code paths (CLI `--transport` flag, `--transport=` form, `MCP_TRANSPORT` env var, default fallback) that are not tested. Currently not easily testable since it reads `process.argv` and `process.env` directly and is not exported. Consider exporting it or extracting into a testable module.
 - No unit tests for the entry point bootstrap flow (`server.start().catch()` pattern). This would require mocking the full startup sequence including `loadConfig`, health check, and transport connection.
 - Package `exports` field in `package.json` advertises importable paths (`"."`) but `src/index.ts` has no exports (it is a side-effect-only CLI entry point). If another package imports from `@iris-mcp/dev`, they get an empty module. Consider whether the `exports` field should be removed or a separate library entry point should be created.
+
+## Deferred from: code review of 2-2-document-crud-tools (2026-04-05)
+
+- Batch delete uses individual DELETE calls instead of the Atelier batch endpoint (`DELETE /api/atelier/v{N}/{ns}/docs` with body array). This is because `IrisHttpClient.delete()` does not accept a body parameter. Consider adding a `deleteWithBody()` method to IrisHttpClient in a future story to support the batch endpoint for better performance with large deletions.
+- No input validation/sanitization on document name path parameter. Names like `../../etc/passwd` or `foo?bar=baz` are interpolated directly into the URL path. The Atelier API will likely reject malformed names, but client-side validation would provide earlier, clearer error messages.
+- `ctx.paginate()` is not available on ToolContext, so `iris.doc.list` cannot paginate large result sets as specified in the story tasks. The `paginate` method lives on McpServerBase, not ToolContext. Consider adding a `paginate` function to ToolContext or passing it via a callback in a future story.

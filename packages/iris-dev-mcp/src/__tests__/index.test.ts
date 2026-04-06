@@ -19,12 +19,16 @@ describe("iris-dev-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export an empty array", () => {
-      expect(tools).toHaveLength(0);
+    it("should export the document CRUD tools", () => {
+      expect(tools).toHaveLength(4);
+      const names = tools.map((t) => t.name);
+      expect(names).toContain("iris.doc.get");
+      expect(names).toContain("iris.doc.put");
+      expect(names).toContain("iris.doc.delete");
+      expect(names).toContain("iris.doc.list");
     });
 
-    it("should be a ToolDefinition[] (empty array is assignable)", () => {
-      // Type-level check: ensure it's accepted by McpServerBaseOptions
+    it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
       const opts: McpServerBaseOptions = {
         name: "test",
         version: "0.0.0",
@@ -34,24 +38,29 @@ describe("iris-dev-mcp", () => {
     });
   });
 
-  describe("McpServerBase instantiation with empty tools", () => {
-    it("should create a server instance with no tools", () => {
+  describe("McpServerBase instantiation with doc tools", () => {
+    it("should create a server instance with 4 doc tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(0);
+      expect(server.toolCount).toBe(4);
     });
 
-    it("should report empty tool names list", () => {
+    it("should report all doc tool names", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
-      expect(server.getToolNames()).toEqual([]);
+      expect(server.getToolNames()).toEqual([
+        "iris.doc.get",
+        "iris.doc.put",
+        "iris.doc.delete",
+        "iris.doc.list",
+      ]);
     });
 
     it("should expose the underlying MCP SDK server", () => {
@@ -63,7 +72,18 @@ describe("iris-dev-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return undefined for any tool lookup", () => {
+    it("should return a tool definition for iris.doc.get", () => {
+      const server = new McpServerBase({
+        name: "@iris-mcp/dev",
+        version: "0.0.0",
+        tools,
+      });
+      const tool = server.getTool("iris.doc.get");
+      expect(tool).toBeDefined();
+      expect(tool?.name).toBe("iris.doc.get");
+    });
+
+    it("should return undefined for unknown tool lookup", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",

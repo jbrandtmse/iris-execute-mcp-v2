@@ -1,0 +1,344 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope } from "@iris-mcp/shared";
+import { IrisApiError } from "@iris-mcp/shared";
+import { docGetTool, docPutTool, docDeleteTool, docListTool } from "../tools/doc.js";
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function createMockHttp() {
+  return {
+    get: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    post: vi.fn(),
+    head: vi.fn(),
+  } as unknown as IrisHttpClient & {
+    get: ReturnType<typeof vi.fn>;
+    put: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
+}
+
+function createMockCtx(http: IrisHttpClient): ToolContext {
+  return {
+    resolveNamespace: (override?: string) => override ?? "USER",
+    http,
+    atelierVersion: 7,
+    config: {
+      host: "localhost",
+      port: 52773,
+      username: "_SYSTEM",
+      password: "SYS",
+      namespace: "USER",
+      https: false,
+      baseUrl: "http://localhost:52773",
+    } as IrisConnectionConfig,
+  };
+}
+
+function envelope<T>(result: T): AtelierEnvelope<T> {
+  return {
+    status: { errors: [] },
+    console: [],
+    result,
+  };
+}
+
+// ── iris.doc.get ────────────────────────────────────────────────────
+
+describe("iris.doc.get", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("should retrieve document content as text", async () => {
+    const docContent = {
+      name: "MyApp.Service.cls",
+      content: ["Class MyApp.Service {", "}"],
+    };
+    mockHttp.get.mockResolvedValue(envelope(docContent));
+
+    const result = await docGetTool.handler(
+      { name: "MyApp.Service.cls" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/MyApp.Service.cls",
+    );
+    expect(result.content[0]?.text).toContain("MyApp.Service.cls");
+    expect(result.structuredContent).toEqual(docContent);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should pass format=xml as query parameter", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ name: "Test.cls", content: [] }));
+
+    await docGetTool.handler(
+      { name: "Test.cls", format: "xml" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/Test.cls?format=xml",
+    );
+  });
+
+  it("should use namespace override when provided", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ name: "Test.cls", content: [] }));
+
+    await docGetTool.handler(
+      { name: "Test.cls", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/HSCUSTOM/doc/Test.cls",
+    );
+  });
+
+  it("should return isError: true with descriptive message on 404", async () => {
+    mockHttp.get.mockRejectedValue(
+      new IrisApiError(404, [], "/api/atelier/v7/USER/doc/Missing.cls"),
+    );
+
+    const result = await docGetTool.handler(
+      { name: "Missing.cls" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe(
+      "Document 'Missing.cls' not found in namespace 'USER'",
+    );
+  });
+
+  it("should re-throw non-404 errors", async () => {
+    mockHttp.get.mockRejectedValue(
+      new IrisApiError(500, [], "/api/atelier/v7/USER/doc/Broken.cls"),
+    );
+
+    await expect(
+      docGetTool.handler({ name: "Broken.cls" }, ctx),
+    ).rejects.toThrow(IrisApiError);
+  });
+});
+
+// ── iris.doc.put ────────────────────────────────────────────────────
+
+describe("iris.doc.put", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("should send correct PUT body with content lines array", async () => {
+    const lines = ["Class MyApp.Service {", "}"];
+    mockHttp.put.mockResolvedValue(envelope({ name: "MyApp.Service.cls" }));
+
+    const result = await docPutTool.handler(
+      { name: "MyApp.Service.cls", content: lines },
+      ctx,
+    );
+
+    expect(mockHttp.put).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/MyApp.Service.cls",
+      { enc: false, content: lines },
+    );
+    expect(result.content[0]?.text).toContain("saved successfully");
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should split string content into lines", async () => {
+    const content = "Class MyApp.Service {\n  Property Name As %String;\n}";
+    mockHttp.put.mockResolvedValue(envelope({ name: "MyApp.Service.cls" }));
+
+    await docPutTool.handler(
+      { name: "MyApp.Service.cls", content },
+      ctx,
+    );
+
+    expect(mockHttp.put).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/MyApp.Service.cls",
+      {
+        enc: false,
+        content: [
+          "Class MyApp.Service {",
+          "  Property Name As %String;",
+          "}",
+        ],
+      },
+    );
+  });
+
+  it("should pass ignoreConflict as query parameter", async () => {
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+
+    await docPutTool.handler(
+      { name: "Test.cls", content: ["// test"], ignoreConflict: true },
+      ctx,
+    );
+
+    expect(mockHttp.put).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/Test.cls?ignoreConflict=1",
+      { enc: false, content: ["// test"] },
+    );
+  });
+});
+
+// ── iris.doc.delete ─────────────────────────────────────────────────
+
+describe("iris.doc.delete", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("should send DELETE to correct path for single document", async () => {
+    mockHttp.delete.mockResolvedValue(envelope(null));
+
+    const result = await docDeleteTool.handler(
+      { name: "MyApp.Service.cls" },
+      ctx,
+    );
+
+    expect(mockHttp.delete).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/MyApp.Service.cls",
+    );
+    expect(result.content[0]?.text).toContain("deleted");
+    expect(result.content[0]?.text).toContain("MyApp.Service.cls");
+  });
+
+  it("should delete each document individually for multiple docs", async () => {
+    mockHttp.delete.mockResolvedValue(envelope(null));
+
+    const names = ["One.cls", "Two.cls", "Three.cls"];
+    const result = await docDeleteTool.handler({ name: names }, ctx);
+
+    expect(mockHttp.delete).toHaveBeenCalledTimes(3);
+    expect(mockHttp.delete).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/One.cls",
+    );
+    expect(mockHttp.delete).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/Two.cls",
+    );
+    expect(mockHttp.delete).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/Three.cls",
+    );
+    expect(result.content[0]?.text).toContain("3 document(s) deleted");
+  });
+
+  it("should report partial failure in batch delete", async () => {
+    mockHttp.delete
+      .mockResolvedValueOnce(envelope(null))
+      .mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v7/USER/doc/Missing.cls"))
+      .mockResolvedValueOnce(envelope(null));
+
+    const names = ["One.cls", "Missing.cls", "Three.cls"];
+    const result = await docDeleteTool.handler({ name: names }, ctx);
+
+    expect(result.content[0]?.text).toContain("2 document(s) deleted");
+    expect(result.content[0]?.text).toContain("1 document(s) failed");
+    expect(result.content[0]?.text).toContain("Missing.cls");
+    expect(result.isError).toBe(true);
+  });
+
+  it("should propagate errors for single-doc delete", async () => {
+    mockHttp.delete.mockRejectedValue(
+      new IrisApiError(500, [], "/api/atelier/v7/USER/doc/Broken.cls"),
+    );
+
+    await expect(
+      docDeleteTool.handler({ name: "Broken.cls" }, ctx),
+    ).rejects.toThrow(IrisApiError);
+  });
+
+  it("should handle empty name array gracefully", async () => {
+    const result = await docDeleteTool.handler({ name: [] }, ctx);
+
+    expect(mockHttp.delete).not.toHaveBeenCalled();
+    expect(result.content[0]?.text).toBe("No documents specified for deletion.");
+  });
+});
+
+// ── iris.doc.list ───────────────────────────────────────────────────
+
+describe("iris.doc.list", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("should return all documents with default category and type", async () => {
+    const docs = [
+      { name: "MyApp.Service.cls", cat: "CLS" },
+      { name: "MyApp.Utils.cls", cat: "CLS" },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(docs));
+
+    const result = await docListTool.handler({}, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/docnames/*/*",
+    );
+    expect(result.structuredContent).toEqual(docs);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should pass category filter to endpoint", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler({ category: "CLS" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/docnames/CLS/*",
+    );
+  });
+
+  it("should pass type filter to endpoint", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler({ category: "CLS", type: "cls" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/docnames/CLS/cls",
+    );
+  });
+
+  it("should pass filter and generated query parameters", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler(
+      { filter: "MyApp.*", generated: true },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("/docnames/*/");
+    expect(calledPath).toContain("filter=MyApp.*");
+    expect(calledPath).toContain("generated=1");
+  });
+
+  it("should return empty array for empty result (not error)", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    const result = await docListTool.handler({}, ctx);
+
+    expect(result.structuredContent).toEqual([]);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe("[]");
+  });
+});
