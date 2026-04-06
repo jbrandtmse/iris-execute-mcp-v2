@@ -200,7 +200,7 @@ Mei is a data analyst who uses IRIS as the backend for a document management sys
 ### Installation & Distribution
 
 - **Primary distribution:** npm registry
-  - `@iris-mcp/dev` — Development tools (20 tools)
+  - `@iris-mcp/dev` — Development tools (21 tools)
   - `@iris-mcp/admin` — Administration tools (22 tools)
   - `@iris-mcp/interop` — Interoperability tools (19 tools)
   - `@iris-mcp/ops` — Operations tools (16 tools)
@@ -338,7 +338,7 @@ Each server is configured independently in the client's MCP configuration with i
 - MCP server base: tool registration framework, pagination support, tool annotations, listChanged notifications
 - Build and test scripts via Turborepo task orchestration
 
-**Epic 2: iris-dev-mcp (20 tools)**
+**Epic 2: iris-dev-mcp (21 tools)**
 - Document management via Atelier API (get, put, delete, list, head, modified)
 - Compilation (sync and async) via Atelier API
 - Code intelligence (index, search, macros) via Atelier API
@@ -629,7 +629,7 @@ FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MV
 
 - Full compliance with MCP specification v2025-11-25 — pagination, tool annotations, listChanged, structured output, outputSchema
 - Atelier API compatibility with auto-negotiated versions (v1 through v8)
-- HTTP client must handle IRIS session cookies (automatic re-send), CSRF tokens (extract and include in subsequent requests), and connection timeouts (configurable, default 30 seconds, with specific error code on timeout)
+- HTTP client must handle IRIS session cookies (automatic re-send), CSRF tokens (extract and include in subsequent requests), and connection timeouts (configurable via IRIS_TIMEOUT env var, default 60 seconds, with specific error code on timeout)
 - Tool responses must follow the MCP content format (TextContent with optional structuredContent)
 - Error responses must use MCP's two-tier model: protocol errors (JSON-RPC) for structural issues, tool execution errors (`isError: true`) with actionable messages for IRIS-side failures
 

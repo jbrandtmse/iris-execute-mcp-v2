@@ -144,7 +144,7 @@ NFR10: The custom REST service must validate all inputs at the REST boundary bef
 NFR11: The custom REST service must not expose internal IRIS error details (stack traces, global references) to external callers
 NFR12: Full compliance with MCP specification v2025-11-25 (pagination, tool annotations, listChanged, structured output, outputSchema)
 NFR13: Atelier API compatibility with auto-negotiated versions (v1 through v8)
-NFR14: HTTP client must handle IRIS session cookies, CSRF tokens, and connection timeouts (configurable, default 30s)
+NFR14: HTTP client must handle IRIS session cookies, CSRF tokens, and connection timeouts (configurable via IRIS_TIMEOUT env var, default 60s)
 NFR15: Tool responses must follow MCP content format (TextContent with optional structuredContent)
 NFR16: Error responses must use MCP two-tier model: protocol errors (JSON-RPC) for structural issues, tool execution errors (isError: true) for IRIS-side failures
 NFR17: Connection loss to IRIS must be detected within 2 seconds and reported with actionable error response
@@ -978,6 +978,92 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 **And** each integration test cleans up any test globals or artifacts it creates
 **And** integration tests verify namespace restoration after each tool call
 **And** integration tests are in `__tests__/*.integration.test.ts` files using Vitest
+
+### Story 3.8: Configurable HTTP Client Timeout
+
+As a developer,
+I want the HTTP client timeout to be configurable via an IRIS_TIMEOUT environment variable with a 60-second default,
+So that long-running operations like package compilation and unit test execution don't prematurely abort.
+
+**Acceptance Criteria:**
+
+**Given** no IRIS_TIMEOUT environment variable is set
+**When** the MCP server starts
+**Then** the IrisHttpClient uses a 60,000ms default timeout (up from 30,000ms)
+
+**Given** IRIS_TIMEOUT=120000 is set in the environment
+**When** the MCP server starts
+**Then** the IrisHttpClient uses 120,000ms as the default timeout
+
+**Given** a tool handler that passes a per-request timeout via RequestOptions.timeout
+**When** the request is made
+**Then** the per-request timeout overrides the server-level default
+
+**Given** the health check and ping functions
+**When** they execute
+**Then** they continue to use their own independent timeouts (5s and 2s respectively)
+
+**Given** the .env.example file
+**When** a developer reviews configuration options
+**Then** IRIS_TIMEOUT is documented with its default value and purpose
+
+**Given** the README.md
+**When** a developer is configuring for long-running operations (large compiles, full test suites)
+**Then** documentation explains the web server gateway timeout (Apache default ~60s, IIS equivalent) as a separate layer that may need adjustment, with specific instructions for both web servers
+
+**Technical scope:**
+- Update IrisConnectionConfig in config.ts to include optional timeout field
+- Update loadConfig() to read IRIS_TIMEOUT from environment (default 60000)
+- Update McpServerBase.start() in server-base.ts to pass config timeout to IrisHttpClient constructor
+- Update .env.example with IRIS_TIMEOUT documentation
+- Add web server gateway timeout section to README.md
+- Update unit tests for config loading and timeout behavior
+
+### Story 3.9: Bulk Document Load from Disk (iris.doc.load)
+
+As a developer,
+I want to load multiple ObjectScript files from a local directory into IRIS in a single tool call,
+So that I can efficiently deploy entire packages or project directories without making individual iris.doc.put calls.
+
+**Acceptance Criteria:**
+
+**Given** a directory path with a glob pattern (e.g., "c:/projects/myapp/src/**/*.cls")
+**When** `iris.doc.load` is called with the path pattern
+**Then** all matching files are read from disk and uploaded to IRIS one by one via the Atelier doc/PUT endpoint
+
+**Given** uploaded files and `compile: true` specified
+**When** all uploads complete successfully
+**Then** all uploaded documents are compiled via the Atelier action/compile endpoint
+**And** compilation results including any errors are returned
+
+**Given** `compile: true` and a `flags` parameter (e.g., "ck")
+**When** compilation runs
+**Then** the specified compilation flags are passed to the compile endpoint
+
+**Given** a file that fails to upload
+**When** the error occurs
+**Then** the tool continues uploading remaining files and reports all failures at the end (continue-on-error behavior)
+
+**Given** the `ignoreConflict` parameter is set to true (default)
+**When** files are uploaded
+**Then** server-side versions are overwritten without conflict checking
+
+**Given** uploaded files
+**When** document names are derived from file paths
+**Then** the tool maps filesystem paths to IRIS document names correctly (e.g., MyPackage/MyClass.cls -> MyPackage.MyClass.cls)
+
+**Given** the tool completes
+**When** results are returned
+**Then** the response includes: total files found, files uploaded successfully, files failed, and if compilation was requested, compilation results with any errors
+
+**Technical scope:**
+- New tool definition in packages/iris-dev-mcp/src/tools/ (new file, e.g., load.ts)
+- Extract compile result parsing from compile.ts into a shared helper function
+- Register tool in tools/index.ts
+- Supported file types: .cls, .mac, .inc, .int
+- Tool annotations: readOnlyHint: false, destructiveHint: false, idempotentHint: true
+- Unit tests with mocked filesystem and HTTP responses
+- iris-dev-mcp tool count increases from 20 to 21
 
 ## Epic 4: IRIS Administration (iris-admin-mcp)
 

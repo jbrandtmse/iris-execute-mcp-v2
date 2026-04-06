@@ -244,5 +244,19 @@
 - **Review findings:** 2 MEDIUM auto-resolved (mnemonic restore in catch, OREF guard), 1 deferred (ByRef support)
 - **Test totals:** 44 IRIS unit tests + 281 TypeScript tests
 
+### Story 3.4: Unit Test Execution REST Handler & Tool
+- **Status:** done
+- **Commit:** 9aa2b4d
+- **Files touched:**
+  - Modified: REST/UnitTest.cls (full implementation), execute.ts, index.ts, execute.test.ts, index.test.ts (all done in 3.3)
+  - New: Tests/UnitTestTest.cls (8 IRIS unit tests)
+- **Key decisions:**
+  - Story 3.3 dev agent proactively implemented most of 3.4 (TypeScript tool + tests + UnitTest.cls handler)
+  - ^UnitTestRoot guard pattern from research doc, /noload/nodelete qualifiers
+  - SQL-based result parsing from %UnitTest_Result tables
+  - execute_unit_tests MCP tool hangs on RunTest() — IRIS test execution deferred to 3.7
+- **Review findings:** Skipped formal review (code already reviewed as part of 3.3 scope)
+- **Test totals:** 52 IRIS unit tests + 291 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

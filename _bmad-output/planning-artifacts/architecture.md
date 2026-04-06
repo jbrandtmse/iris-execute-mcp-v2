@@ -208,7 +208,7 @@ iris-mcp-v2/
   - Cookie jar (simple Map-based — IRIS uses one session cookie)
   - CSRF token extraction from response headers and injection into mutating requests
   - Basic Auth header for initial authentication
-  - Configurable timeout via AbortController
+  - Configurable timeout via AbortController (default 60s, overridable via IRIS_TIMEOUT env var)
   - Auto re-auth on 401 response
 - Version: Node.js 18+ native fetch (no polyfill)
 
@@ -226,7 +226,7 @@ iris-mcp-v2/
 - Matches the VS Code ObjectScript extension's authentication pattern
 
 **Credential Storage: Environment Variables Only**
-- `IRIS_HOST` (default: `localhost`), `IRIS_PORT` (default: `52773`), `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE` (default namespace for NS-scoped tools), `IRIS_HTTPS` (boolean, default: `false`)
+- `IRIS_HOST` (default: `localhost`), `IRIS_PORT` (default: `52773`), `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE` (default namespace for NS-scoped tools), `IRIS_HTTPS` (boolean, default: `false`), `IRIS_TIMEOUT` (default: `60000`) — per-server HTTP request timeout in milliseconds
 - No config file with credentials — MCP client passes these via its server configuration
 - All 5 servers share identical env var names (same IRIS connection)
 
@@ -587,7 +587,7 @@ iris-mcp-v2/
 ├── .eslintrc.js                      # Root ESLint config (TypeScript rules)
 ├── .prettierrc                       # Prettier config
 ├── .gitignore
-├── .env.example                      # IRIS_HOST, IRIS_PORT, IRIS_USERNAME, IRIS_PASSWORD, IRIS_NAMESPACE, IRIS_HTTPS
+├── .env.example                      # IRIS_HOST, IRIS_PORT, IRIS_USERNAME, IRIS_PASSWORD, IRIS_NAMESPACE, IRIS_HTTPS, IRIS_TIMEOUT
 ├── turbo.json                        # Turborepo task config (build, test, lint, type-check)
 ├── pnpm-workspace.yaml               # Workspace: packages/*
 ├── package.json                      # Root: scripts, devDeps (turbo, changesets, eslint, prettier, vitest)
@@ -889,7 +889,7 @@ IrisHttpClient (http-client.ts)
 | NFR | Architectural Support | Status |
 |-----|----------------------|--------|
 | 2s read latency | Native fetch + keepAlive agent, minimal wrapper overhead | Covered |
-| 30s/120s compile timeout | AbortController timeout in IrisHttpClient | Covered |
+| 60s default / configurable compile timeout | AbortController timeout in IrisHttpClient, configurable via IRIS_TIMEOUT env var (default 60s) | Covered |
 | 500ms tool listing | Static tool arrays, pagination is simple offset | Covered |
 | 60s bootstrap | Sequential steps with progress tracking | Covered |
 | No credential leakage | Logger pattern (no credentials), error stripping at REST boundary | Covered |
