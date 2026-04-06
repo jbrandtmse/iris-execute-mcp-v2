@@ -45,8 +45,12 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
             Set tProps("NameSpace") = pNamespace
             Set tProps("DispatchClass") = "ExecuteMCPv2.REST.Dispatch"
             Set tProps("Enabled") = 1
-            Set tProps("AutheEnabled") = 64
+            Set tProps("AutheEnabled") = 32
+            Set tProps("Type") = 2
             Set tProps("CSPZENEnabled") = 1
+            Set tProps("InbndWebServicesEnabled") = 0
+            Set tProps("CookiePath") = "/api/executemcp/v2/"
+            Set tProps("Resource") = "%Development"
 
             Set tSC = ##class(Security.Applications).Modify(tAppName, .tProps)
             If $$$ISERR(tSC) Quit
@@ -57,10 +61,12 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
             Set tProps("DispatchClass") = "ExecuteMCPv2.REST.Dispatch"
             Set tProps("Description") = "ExecuteMCPv2 REST Service for MCP Tool Execution"
             Set tProps("Enabled") = 1
-            Set tProps("AutheEnabled") = 64
+            Set tProps("AutheEnabled") = 32
+            Set tProps("Type") = 2
             Set tProps("CSPZENEnabled") = 1
-            Set tProps("CookiePath") = "/"
-            Set tProps("Resource") = ""
+            Set tProps("InbndWebServicesEnabled") = 0
+            Set tProps("CookiePath") = "/api/executemcp/v2/"
+            Set tProps("Resource") = "%Development"
 
             Set tSC = ##class(Security.Applications).Create(tAppName, .tProps)
             If $$$ISERR(tSC) Quit

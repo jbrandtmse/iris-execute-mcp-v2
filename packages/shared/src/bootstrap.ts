@@ -39,10 +39,14 @@ To complete setup manually, choose one of:
 
 1. Terminal: Open an IRIS Terminal in %SYS namespace and run:
    Do ##class(ExecuteMCPv2.Setup).Configure("NAMESPACE")
-   (Replace NAMESPACE with your target namespace, e.g. "USER")
+   (Replace NAMESPACE with your target namespace, e.g. "HSCUSTOM")
 
 2. Management Portal: Navigate to System Administration > Security > Applications > Web Applications
-   Create application "/api/executemcp/v2" with DispatchClass "ExecuteMCPv2.REST.Dispatch"
+   Create application "/api/executemcp/v2" with:
+   - Namespace: your target namespace (e.g. HSCUSTOM)
+   - Enable: REST, Dispatch Class: ExecuteMCPv2.REST.Dispatch
+   - Allowed Authentication: Password
+   - Resource Required: %Development
 
 3. IPM: If IPM is installed, run in any namespace:
    zpm "install iris-execute-mcp-v2"`;

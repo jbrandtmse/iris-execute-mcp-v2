@@ -23,16 +23,16 @@ ClassMethod GetGlobal() As %Status
 
         ; Validate required inputs
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGlobal, "global")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Validate global name format (alphanumeric, may start with %)
         Set tSC = ..ValidateGlobalName(tGlobal)
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Switch namespace if specified
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
         ; Build global reference and get value
@@ -48,6 +48,7 @@ ClassMethod GetGlobal() As %Status
     } Catch ex {
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
     }
     ; Always restore namespace
     If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
@@ -65,10 +66,11 @@ ClassMethod SetGlobal() As %Status
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
             Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
             Quit
         }
 
@@ -79,16 +81,16 @@ ClassMethod SetGlobal() As %Status
 
         ; Validate required inputs
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGlobal, "global")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Validate global name format
         Set tSC = ..ValidateGlobalName(tGlobal)
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Switch namespace if specified
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
         ; Build global reference and set value
@@ -106,6 +108,7 @@ ClassMethod SetGlobal() As %Status
     } Catch ex {
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
     }
     ; Always restore namespace
     If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
@@ -127,16 +130,16 @@ ClassMethod KillGlobal() As %Status
 
         ; Validate required inputs
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGlobal, "global")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Validate global name format
         Set tSC = ..ValidateGlobalName(tGlobal)
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Switch namespace if specified
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
         ; Build global reference and kill
@@ -152,6 +155,7 @@ ClassMethod KillGlobal() As %Status
     } Catch ex {
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
     }
     ; Always restore namespace
     If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
@@ -174,7 +178,7 @@ ClassMethod ListGlobals() As %Status
         ; Switch namespace if specified
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
         ; Iterate through globals
@@ -197,6 +201,7 @@ ClassMethod ListGlobals() As %Status
     } Catch ex {
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
     }
     ; Always restore namespace
     If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)

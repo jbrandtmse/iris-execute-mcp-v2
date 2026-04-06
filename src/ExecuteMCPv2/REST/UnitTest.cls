@@ -27,7 +27,7 @@ ClassMethod RunTests() As %Status
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Extract parameters
         Set tTarget = ""
@@ -41,24 +41,25 @@ ClassMethod RunTests() As %Status
 
         ; Validate required target
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTarget, "target")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Validate level
         If (tLevel '= "package") && (tLevel '= "class") && (tLevel '= "method") {
             Set tSC = $$$ERROR($$$GeneralError, "Parameter 'level' must be one of: package, class, method")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
             Quit
         }
 
         ; Switch namespace if specified
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
         ; Ensure test environment (^UnitTestRoot guard)
         Set tSC = ..EnsureTestEnvironment()
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Quit }
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Build testspec based on level
         Set tTestSpec = ..BuildTestSpec(tTarget, tLevel)
@@ -112,6 +113,7 @@ ClassMethod RunTests() As %Status
             }
         } Catch {}
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
     }
     ; Always restore namespace
     If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
