@@ -103,3 +103,7 @@
 - `UserPassword` validate action uses `$Replace(tMsg, tPassword, "***")` to strip the password from IRIS validation messages. If IRIS reformats, truncates, or encodes the password in its error message, the simple string-replace may not catch all occurrences. Consider a more robust sanitization approach (e.g., regex-based or returning only a generic validation failure message) if password leak concerns escalate.
 - `UserRoles` does not validate that `role` is non-whitespace. `ValidateRequired` may accept whitespace-only strings depending on its implementation, which could result in empty role entries being appended to the user's role list.
 - GET requests to `/security/user/roles` or `/security/user/password` match the `/security/user/:name` wildcard route, causing `UserGet` to look up a user named "roles" or "password" instead of returning 404. This is a cosmetic issue since the sub-resource routes are POST-only, but could confuse API consumers probing endpoints.
+
+## Deferred from: code review of 4-5-role-and-resource-management-tools (2026-04-06)
+
+- `PermissionCheck` in Security.cls does not check a user's directly-assigned resources (`Security.Users` `Resources` property). It only aggregates resources from the user's assigned roles. If a user has resources granted directly (not through a role), those resources will not be checked. Consider adding `$Get(tUserProps("Resources"))` to the permission aggregation logic for complete coverage.

@@ -51,6 +51,17 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/user/roles" Method="POST" Call="ExecuteMCPv2.REST.Security:UserRoles" />
   <Route Url="/security/user/password" Method="POST" Call="ExecuteMCPv2.REST.Security:UserPassword" />
 
+  <!-- Epic 4: Security / Role Management -->
+  <Route Url="/security/role" Method="GET" Call="ExecuteMCPv2.REST.Security:RoleList" />
+  <Route Url="/security/role" Method="POST" Call="ExecuteMCPv2.REST.Security:RoleManage" />
+
+  <!-- Epic 4: Security / Resource Management -->
+  <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
+  <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
+
+  <!-- Epic 4: Security / Permission Check -->
+  <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />
+
   <!-- Future Epic 5: Interoperability Management -->
   <!-- <Route Url="/production/:action" Method="POST" Call="ExecuteMCPv2.REST.Production:Execute" /> -->
 

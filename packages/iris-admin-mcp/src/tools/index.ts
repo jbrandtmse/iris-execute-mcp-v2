@@ -2,8 +2,9 @@
  * Tool definitions for the IRIS Administration MCP server.
  *
  * Exports all tool definitions to be registered with
- * {@link McpServerBase}. Includes namespace and database
- * management tools from Stories 4.2+.
+ * {@link McpServerBase}. Includes namespace, database, mapping,
+ * user, role, resource, and permission management tools from
+ * Stories 4.2+.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -16,6 +17,9 @@ import {
   userRolesTool,
   userPasswordTool,
 } from "./user.js";
+import { roleManageTool, roleListTool } from "./role.js";
+import { resourceManageTool, resourceListTool } from "./resource.js";
+import { permissionCheckTool } from "./permission.js";
 
 /** All tool definitions registered by the iris-admin-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -29,4 +33,9 @@ export const tools: ToolDefinition[] = [
   userGetTool,
   userRolesTool,
   userPasswordTool,
+  roleManageTool,
+  roleListTool,
+  resourceManageTool,
+  resourceListTool,
+  permissionCheckTool,
 ];

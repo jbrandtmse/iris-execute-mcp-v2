@@ -1,9 +1,11 @@
-/// REST handler for user and password management operations.
-/// <p>Provides user account CRUD, role assignment, and password
-/// management via the custom REST endpoint
-/// <code>/api/executemcp/v2/security/user</code>. All operations
-/// execute in the <code>%SYS</code> namespace since <class>Security.Users</class>
-/// requires it.</p>
+/// REST handler for security management operations.
+/// <p>Provides user account CRUD, role assignment, password
+/// management, role management, resource management, and permission
+/// checking via the custom REST endpoint
+/// <code>/api/executemcp/v2/security/</code>. All operations
+/// execute in the <code>%SYS</code> namespace since <class>Security.Users</class>,
+/// <class>Security.Roles</class>, and <class>Security.Resources</class>
+/// require it.</p>
 /// <p>Follows the handler pattern established by <class>ExecuteMCPv2.REST.Config</class>:
 /// namespace switch/restore, try/catch, input validation, error sanitization,
 /// and RenderResponseBody envelope.</p>
@@ -392,6 +394,363 @@ ClassMethod UserPassword() As %Status
             }
             Do ..RenderResponseBody($$$OK, , tResult)
         }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List all security roles.
+/// <p>Switches to <code>%SYS</code> and iterates over roles via the
+/// <class>Security.Roles</class> SQL query. Returns a JSON array of role
+/// objects with <code>name</code>, <code>description</code>,
+/// <code>resources</code>, and <code>grantedRoles</code>.</p>
+ClassMethod RoleList() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        Set tResult = []
+
+        ; Use SQL to enumerate all roles
+        Set tRS = ##class(%ResultSet).%New("Security.Roles:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        While tRS.Next() {
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tEntry.%Set("resources", tRS.Get("Resources"))
+            Do tEntry.%Set("grantedRoles", tRS.Get("GrantedRoles"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, modify, or delete a security role.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code>, and optional properties (<code>description</code>,
+/// <code>resources</code>, <code>grantedRoles</code>). Dispatches to
+/// <class>Security.Roles</class> in <code>%SYS</code>.</p>
+ClassMethod RoleManage() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "create" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("resources") Set tProps("Resources") = tBody.%Get("resources")
+            If tBody.%IsDefined("grantedRoles") Set tProps("GrantedRoles") = tBody.%Get("grantedRoles")
+
+            Set tSC = ##class(Security.Roles).Create(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "created", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "modify" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("resources") Set tProps("Resources") = tBody.%Get("resources")
+            If tBody.%IsDefined("grantedRoles") Set tProps("GrantedRoles") = tBody.%Get("grantedRoles")
+
+            Set tSC = ##class(Security.Roles).Modify(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "modified", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = ##class(Security.Roles).Delete(tName)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List all security resources.
+/// <p>Switches to <code>%SYS</code> and iterates over resources via the
+/// <class>Security.Resources</class> SQL query. Returns a JSON array of
+/// resource objects with <code>name</code>, <code>description</code>,
+/// <code>publicPermission</code>, and <code>type</code>.</p>
+ClassMethod ResourceList() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        Set tResult = []
+
+        ; Use SQL to enumerate all resources
+        Set tRS = ##class(%ResultSet).%New("Security.Resources:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        While tRS.Next() {
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tEntry.%Set("publicPermission", tRS.Get("PublicPermission"))
+            Do tEntry.%Set("type", tRS.Get("Type"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, modify, or delete a security resource.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code>, and optional properties (<code>description</code>,
+/// <code>publicPermission</code>). Dispatches to
+/// <class>Security.Resources</class> in <code>%SYS</code>.</p>
+ClassMethod ResourceManage() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "create" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("publicPermission") Set tProps("PublicPermission") = tBody.%Get("publicPermission")
+
+            Set tSC = ##class(Security.Resources).Create(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "created", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "modify" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("publicPermission") Set tProps("PublicPermission") = tBody.%Get("publicPermission")
+
+            Set tSC = ##class(Security.Resources).Modify(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "modified", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = ##class(Security.Resources).Delete(tName)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Check whether a user or role has a specific permission on a resource.
+/// <p>Reads a JSON body with <code>target</code> (username or role name),
+/// <code>resource</code>, and <code>permission</code> (R, W, U, or combination).
+/// Looks up the target's assigned resources (via <class>Security.Users</class>
+/// or <class>Security.Roles</class>) and checks if the requested permission
+/// is granted on the specified resource.</p>
+ClassMethod PermissionCheck() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tTarget = tBody.%Get("target")
+        Set tResource = tBody.%Get("resource")
+        Set tPermission = tBody.%Get("permission")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTarget, "target")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tResource, "resource")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPermission, "permission")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Switch to %SYS for Security operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        ; Determine if target is a user or role by checking existence
+        Set tIsUser = ##class(Security.Users).Exists(tTarget)
+        Set tIsRole = ##class(Security.Roles).Exists(tTarget)
+
+        If 'tIsUser && 'tIsRole {
+            Set tSC = $$$ERROR($$$GeneralError, "Target '"_tTarget_"' is not a known user or role")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Get the resources string for the target
+        Set tGrantedResources = ""
+        Set tTargetType = ""
+
+        If tIsUser {
+            Set tTargetType = "user"
+            ; Get user's roles, then collect all resources from those roles
+            Set tSC = ##class(Security.Users).Get(tTarget, .tUserProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tUserRoles = $Get(tUserProps("Roles"))
+            ; Collect resources from all assigned roles
+            For tI = 1:1:$Length(tUserRoles, ",") {
+                Set tRoleName = $Piece(tUserRoles, ",", tI)
+                If tRoleName = "" Continue
+                Set tRoleSC = ##class(Security.Roles).Get(tRoleName, .tRoleProps)
+                If $$$ISOK(tRoleSC) {
+                    Set tRoleRes = $Get(tRoleProps("Resources"))
+                    If tRoleRes '= "" {
+                        If tGrantedResources '= "" Set tGrantedResources = tGrantedResources _ ","
+                        Set tGrantedResources = tGrantedResources _ tRoleRes
+                    }
+                }
+            }
+        }
+        Else {
+            Set tTargetType = "role"
+            Set tSC = ##class(Security.Roles).Get(tTarget, .tRoleProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tGrantedResources = $Get(tRoleProps("Resources"))
+        }
+
+        ; Parse the resources string to check if the requested permission is granted
+        ; Resources format: "ResName:RWU,ResName2:R"
+        Set tHasPermission = 0
+        Set tFoundResource = 0
+        Set tGrantedPermission = ""
+        For tI = 1:1:$Length(tGrantedResources, ",") {
+            Set tPair = $Piece(tGrantedResources, ",", tI)
+            Set tResName = $Piece(tPair, ":", 1)
+            Set tResPerm = $Piece(tPair, ":", 2)
+            If tResName = tResource {
+                Set tFoundResource = 1
+                Set tGrantedPermission = tResPerm
+                ; Check each character of requested permission exists in granted
+                Set tHasPermission = 1
+                For tJ = 1:1:$Length(tPermission) {
+                    Set tChar = $Extract(tPermission, tJ)
+                    If tResPerm '[ tChar {
+                        Set tHasPermission = 0
+                        Quit
+                    }
+                }
+                Quit
+            }
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("target", tTarget)
+        Do tResult.%Set("targetType", tTargetType)
+        Do tResult.%Set("resource", tResource)
+        Do tResult.%Set("permission", tPermission)
+        Do tResult.%Set("granted", tHasPermission, "boolean")
+        If tFoundResource Do tResult.%Set("grantedPermission", tGrantedPermission)
+
+        Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
         Set tSC = ex.AsStatus()
