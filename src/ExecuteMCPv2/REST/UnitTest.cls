@@ -23,6 +23,7 @@ ClassMethod RunTests() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = ""
+    Set tRedirected = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -84,7 +85,7 @@ ClassMethod RunTests() As %Status
 
         ; Run tests with /noload/nodelete qualifiers
         Try {
-            Set tTestSC = ##class(%UnitTest.Manager).RunTest(tTestSpec, "/noload/nodelete")
+            Set tTestSC = ##class(%UnitTest.Manager).RunTest(tTestSpec, "/noload/nodelete/norecursive")
         } Catch exTest {
             Set tTestSC = exTest.AsStatus()
         }
@@ -98,8 +99,6 @@ ClassMethod RunTests() As %Status
         ; Parse results regardless of RunTest status (tests may have failed but ran)
         Set tResult = ..ParseTestResults(tMethodFilter)
 
-        ; RunTest returns error status when tests fail - but that is not a handler error.
-        ; We always return the parsed results. isError is only for handler-level failures.
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
         Set tSC = ex.AsStatus()
@@ -139,8 +138,15 @@ ClassMethod EnsureTestEnvironment() As %Status
 {
     Set tSC = $$$OK
     Try {
-        If '$Data(^UnitTestRoot) {
-            Set ^UnitTestRoot = ""
+        ; ^UnitTestRoot must point to a valid directory. When empty,
+        ; %UnitTest.Manager.Root() falls back to the IRIS source dir.
+        ; We create a temp directory so the framework doesn't error on
+        ; directory checks even though /noload skips file loading.
+        Set tRoot = $Get(^UnitTestRoot)
+        If (tRoot = "") || ('##class(%File).DirectoryExists(tRoot)) {
+            Set tDir = ##class(%File).NormalizeDirectory($ZU(12)_"unittest_mcp")
+            Do ##class(%File).CreateDirectoryChain(tDir)
+            Set ^UnitTestRoot = tDir
         }
     } Catch ex {
         Set tSC = ex.AsStatus()
@@ -149,21 +155,44 @@ ClassMethod EnsureTestEnvironment() As %Status
 }
 
 /// Build the testspec string for <method>%UnitTest.Manager.RunTest</method>.
+/// Build testspec for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
+/// <p>With /noload, testspec MUST use colon format to specify classes directly.
+/// The framework cannot discover classes from directories when ^UnitTestRoot="".</p>
 ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 {
-    If pLevel = "package" {
-        Quit pTarget
-    }
     If pLevel = "class" {
-        Quit pTarget
+        Quit ":"_pTarget
     }
     If pLevel = "method" {
         If pTarget [ ":" {
-            Quit $Piece(pTarget, ":", 1)
+            Set tClass = $Piece(pTarget, ":", 1)
+            Set tMethod = $Piece(pTarget, ":", 2)
+            Quit ":"_tClass_":"_tMethod
         }
-        Quit pTarget
+        Quit ":"_pTarget
     }
-    Quit pTarget
+    If pLevel = "package" {
+        ; Query class dictionary for all %UnitTest.TestCase subclasses in the package
+        Set tSpec = ""
+        Set tSQL = "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ? AND Abstract = 0"
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tSC = tStmt.%Prepare(tSQL)
+        If $$$ISOK(tSC) {
+            Set tRS = tStmt.%Execute(pTarget_".")
+            While tRS.%Next() {
+                Set tClassName = tRS.%Get("Name")
+                Try {
+                    If $ClassMethod(tClassName, "%Extends", "%UnitTest.TestCase") {
+                        If tSpec '= "" Set tSpec = tSpec _ ";"
+                        Set tSpec = tSpec _ ":" _ tClassName
+                    }
+                } Catch {}
+            }
+        }
+        If tSpec = "" Quit ":"_pTarget
+        Quit tSpec
+    }
+    Quit ":"_pTarget
 }
 
 /// Parse test results from the <code>%UnitTest_Result</code> SQL tables.

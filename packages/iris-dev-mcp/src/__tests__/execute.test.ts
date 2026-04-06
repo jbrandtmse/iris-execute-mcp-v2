@@ -297,69 +297,88 @@ describe("iris.execute.tests", () => {
     ctx = createMockCtx(mockHttp);
   });
 
-  it("should send POST with target and level in body and return structured results", async () => {
-    const testResult = {
-      total: 3,
-      passed: 3,
-      failed: 0,
-      skipped: 0,
-      duration: 50,
-      details: [
-        { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: "passed", duration: 10, message: "" },
-        { class: "MyApp.Tests.UtilsTest", method: "TestFormat", status: "passed", duration: 15, message: "" },
-        { class: "MyApp.Tests.UtilsTest", method: "TestParse", status: "passed", duration: 25, message: "" },
-      ],
-    };
-    mockHttp.post.mockResolvedValue(envelope(testResult));
-
-    const result = await executeTestsTool.handler(
-      { target: "MyApp.Tests", level: "package" },
-      ctx,
+  /** Helper: mock queue + immediate poll response (no retryafter) */
+  function mockQueueAndPoll(testResults: unknown[]) {
+    // First post = SQL discover (for package), second post = queue work
+    // For class/method level, first post = queue work directly
+    mockHttp.post.mockResolvedValue(
+      envelope({ location: "job-123" }),
     );
+    mockHttp.get.mockResolvedValue({
+      status: { errors: [] },
+      console: [],
+      result: testResults,
+    });
+  }
 
-    expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/executemcp/v2/tests",
-      expect.objectContaining({
-        target: "MyApp.Tests",
-        level: "package",
-        namespace: "USER",
-      }),
-    );
+  /** Helper: mock package discovery + queue + poll */
+  function mockPackageDiscoverAndRun(classes: string[], testResults: unknown[]) {
+    let postCallCount = 0;
+    mockHttp.post.mockImplementation(() => {
+      postCallCount++;
+      if (postCallCount === 1) {
+        // First call: SQL query for package discovery
+        return Promise.resolve(envelope({ content: classes.map((c) => ({ Name: c })) }));
+      }
+      // Second call: queue work
+      return Promise.resolve(envelope({ location: "job-456" }));
+    });
+    mockHttp.get.mockResolvedValue({
+      status: { errors: [] },
+      console: [],
+      result: testResults,
+    });
+  }
 
-    const structured = result.structuredContent as typeof testResult;
-    expect(structured.total).toBe(3);
-    expect(structured.passed).toBe(3);
-    expect(structured.failed).toBe(0);
-    expect(structured.details).toHaveLength(3);
-    expect(result.isError).toBeUndefined();
-  });
-
-  it("should handle mixed results (some pass, some fail)", async () => {
-    const testResult = {
-      total: 2,
-      passed: 1,
-      failed: 1,
-      skipped: 0,
-      duration: 30,
-      details: [
-        { class: "MyApp.Tests.UtilsTest", method: "TestGood", status: "passed", duration: 10, message: "" },
-        {
-          class: "MyApp.Tests.UtilsTest",
-          method: "TestBad",
-          status: "failed",
-          duration: 20,
-          message: "AssertEquals: Expected 'foo' but got 'bar'",
-        },
-      ],
-    };
-    mockHttp.post.mockResolvedValue(envelope(testResult));
+  it("should queue async unittest and return structured results for class level", async () => {
+    const atelierResults = [
+      { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: 1, duration: 10, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", method: "TestFormat", status: 1, duration: 15, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", status: 1, duration: 25, failures: [] },
+    ];
+    mockQueueAndPoll(atelierResults);
 
     const result = await executeTestsTool.handler(
       { target: "MyApp.Tests.UtilsTest", level: "class" },
       ctx,
     );
 
-    const structured = result.structuredContent as typeof testResult;
+    // Verify queue POST to Atelier work endpoint
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/work"),
+      expect.objectContaining({
+        request: "unittest",
+        tests: [{ class: "MyApp.Tests.UtilsTest" }],
+      }),
+    );
+
+    const structured = result.structuredContent as { total: number; passed: number; failed: number };
+    expect(structured.total).toBe(2); // Only method-level results counted
+    expect(structured.passed).toBe(2);
+    expect(structured.failed).toBe(0);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should handle mixed results (some pass, some fail)", async () => {
+    const atelierResults = [
+      { class: "MyApp.Tests.UtilsTest", method: "TestGood", status: 1, duration: 10, failures: [] },
+      {
+        class: "MyApp.Tests.UtilsTest",
+        method: "TestBad",
+        status: 0,
+        duration: 20,
+        failures: [{ message: "AssertEquals: Expected 'foo' but got 'bar'" }],
+      },
+      { class: "MyApp.Tests.UtilsTest", status: 0, duration: 30, failures: [] },
+    ];
+    mockQueueAndPoll(atelierResults);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest", level: "class" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as { total: number; passed: number; failed: number; details: { message: string }[] };
     expect(structured.total).toBe(2);
     expect(structured.passed).toBe(1);
     expect(structured.failed).toBe(1);
@@ -367,10 +386,10 @@ describe("iris.execute.tests", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it("should send method-level target correctly", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ total: 1, passed: 1, failed: 0, skipped: 0, duration: 5, details: [] }),
-    );
+  it("should send method-level with class and methods array", async () => {
+    mockQueueAndPoll([
+      { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: 1, duration: 5, failures: [] },
+    ]);
 
     await executeTestsTool.handler(
       { target: "MyApp.Tests.UtilsTest:TestValidate", level: "method" },
@@ -378,63 +397,61 @@ describe("iris.execute.tests", () => {
     );
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/executemcp/v2/tests",
+      expect.stringContaining("/work"),
       expect.objectContaining({
-        target: "MyApp.Tests.UtilsTest:TestValidate",
-        level: "method",
-        namespace: "USER",
+        request: "unittest",
+        tests: [{ class: "MyApp.Tests.UtilsTest", methods: ["TestValidate"] }],
       }),
     );
   });
 
-  it("should forward namespace override in body", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ total: 0, passed: 0, failed: 0, skipped: 0, duration: 0, details: [] }),
+  it("should discover package test classes via SQL then queue", async () => {
+    mockPackageDiscoverAndRun(
+      ["MyApp.Tests.UtilsTest", "MyApp.Tests.OtherTest"],
+      [
+        { class: "MyApp.Tests.UtilsTest", method: "Test1", status: 1, duration: 5, failures: [] },
+        { class: "MyApp.Tests.OtherTest", method: "Test2", status: 1, duration: 3, failures: [] },
+      ],
     );
 
-    await executeTestsTool.handler(
-      { target: "MyApp.Tests", level: "package", namespace: "HSCUSTOM" },
-      ctx,
-    );
-
-    expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/executemcp/v2/tests",
-      expect.objectContaining({
-        namespace: "HSCUSTOM",
-      }),
-    );
-  });
-
-  it("should use default namespace when not specified", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ total: 0, passed: 0, failed: 0, skipped: 0, duration: 0, details: [] }),
-    );
-
-    await executeTestsTool.handler(
+    const result = await executeTestsTool.handler(
       { target: "MyApp.Tests", level: "package" },
       ctx,
     );
 
-    expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/executemcp/v2/tests",
-      expect.objectContaining({
-        namespace: "USER",
-      }),
+    // First post was SQL discovery, second was queue
+    expect(mockHttp.post).toHaveBeenCalledTimes(2);
+
+    const structured = result.structuredContent as { total: number; passed: number };
+    expect(structured.total).toBe(2);
+    expect(structured.passed).toBe(2);
+  });
+
+  it("should return empty results when no test classes found for package", async () => {
+    // SQL discover returns empty
+    mockHttp.post.mockResolvedValue(envelope({ content: [] }));
+
+    const result = await executeTestsTool.handler(
+      { target: "NonExistent.Tests", level: "package" },
+      ctx,
     );
+
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("No test classes found");
   });
 
   it("should return isError on IrisApiError", async () => {
     mockHttp.post.mockRejectedValue(
       new IrisApiError(
         400,
-        [{ error: "Required parameter 'target' is missing" }],
-        "/api/executemcp/v2/tests",
-        "Required parameter 'target' is missing",
+        [{ error: "Server error" }],
+        "/api/atelier/v7/USER/work",
+        "Server error",
       ),
     );
 
     const result = await executeTestsTool.handler(
-      { target: "", level: "package" },
+      { target: "MyApp.Tests", level: "class" },
       ctx,
     );
 
@@ -446,7 +463,7 @@ describe("iris.execute.tests", () => {
     mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
 
     await expect(
-      executeTestsTool.handler({ target: "MyApp.Tests", level: "package" }, ctx),
+      executeTestsTool.handler({ target: "MyApp.Tests", level: "class" }, ctx),
     ).rejects.toThrow("ECONNREFUSED");
   });
 
