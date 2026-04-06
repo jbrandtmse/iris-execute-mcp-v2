@@ -74,3 +74,7 @@
 
 - ListGlobals has no pagination or max-count safeguard. On production namespaces with thousands of globals, the response could be very large. Consider adding a `maxItems` parameter or server-side pagination in a future story.
 - BuildGlobalRef comma-separated subscript parsing cannot handle subscript values that themselves contain commas. This is an inherent limitation of the comma-delimited format. Consider supporting a JSON array format for subscripts in a future enhancement if complex subscript values are needed.
+
+## Deferred from: code review of 3-3-objectscript-execution-rest-handler-and-tools (2026-04-06)
+
+- AC2 specifies that "output parameters are supported and returned" for the classmethod handler, but the current ClassMethod() implementation only captures return values via $ClassMethod(). ByRef/Output parameter support requires complex dynamic argument handling in ObjectScript (no spread/apply equivalent). Consider adding ByRef support in a future enhancement if use cases arise.

@@ -216,5 +216,19 @@
 - **Review findings:** 2 HIGH auto-resolved (SanitizeError infinite loop, ReadRequestBody null safety), 1 LOW deferred
 - **Test totals:** 17 IRIS unit tests + 235 TypeScript tests
 
+### Story 3.2: Global Operations REST Handler & Tools
+- **Status:** done
+- **Commit:** 444cf6f
+- **Files touched:**
+  - Modified: REST/Global.cls (replaced stubs), tools/index.ts, __tests__/index.test.ts
+  - New: tools/global.ts (4 tools), global.test.ts (28 tests), Tests/GlobalTest.cls (12 tests)
+- **Key decisions:**
+  - BuildGlobalRef helper for safe global reference construction with subscript parsing
+  - ValidateGlobalName prevents injection via alphanumeric-only validation
+  - Custom REST endpoint /api/executemcp/v2/global (not Atelier API)
+  - Numeric subscript detection via `tSub = (+tSub)` idiom
+- **Review findings:** Auto-resolved and deferred items logged
+- **Test totals:** 29 IRIS unit tests + 263 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

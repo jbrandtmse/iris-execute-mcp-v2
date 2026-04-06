@@ -28,6 +28,10 @@ import {
   globalKillTool,
   globalListTool,
 } from "./global.js";
+import {
+  executeCommandTool,
+  executeClassMethodTool,
+} from "./execute.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -48,4 +52,6 @@ export const tools: ToolDefinition[] = [
   globalSetTool,
   globalKillTool,
   globalListTool,
+  executeCommandTool,
+  executeClassMethodTool,
 ];

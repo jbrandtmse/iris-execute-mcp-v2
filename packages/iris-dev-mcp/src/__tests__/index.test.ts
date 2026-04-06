@@ -19,8 +19,8 @@ describe("iris-dev-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export the document CRUD, compilation, intelligence, format, SQL, server, and global tools", () => {
-      expect(tools).toHaveLength(17);
+    it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, and execute tools", () => {
+      expect(tools).toHaveLength(19);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris.doc.get");
       expect(names).toContain("iris.doc.put");
@@ -39,6 +39,8 @@ describe("iris-dev-mcp", () => {
       expect(names).toContain("iris.global.set");
       expect(names).toContain("iris.global.kill");
       expect(names).toContain("iris.global.list");
+      expect(names).toContain("iris.execute.command");
+      expect(names).toContain("iris.execute.classmethod");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -52,14 +54,14 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 17 tools", () => {
+    it("should create a server instance with 19 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(17);
+      expect(server.toolCount).toBe(19);
     });
 
     it("should report all tool names", () => {
@@ -86,6 +88,8 @@ describe("iris-dev-mcp", () => {
         "iris.global.set",
         "iris.global.kill",
         "iris.global.list",
+        "iris.execute.command",
+        "iris.execute.classmethod",
       ]);
     });
 
