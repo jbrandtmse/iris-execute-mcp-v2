@@ -416,6 +416,47 @@ describe("server-base", () => {
     });
   });
 
+  describe("outputSchema registration", () => {
+    it("should register a tool with outputSchema and pass it to SDK", () => {
+      const outputSchema = z.object({
+        result: z.string(),
+        count: z.number(),
+      });
+      const tool: ToolDefinition = {
+        name: "iris.test.output",
+        title: "Test Output",
+        description: "Test tool with output schema.",
+        inputSchema: z.object({ query: z.string() }),
+        outputSchema,
+        annotations: { readOnlyHint: true },
+        scope: "NONE",
+        handler: async () => ({
+          content: [{ type: "text" as const, text: "ok" }],
+          structuredContent: { result: "hello", count: 1 },
+        }),
+      };
+
+      const server = new McpServerBase(makeServerOpts([tool]));
+      expect(server.toolCount).toBe(1);
+
+      const registered = server.getTool("iris.test.output");
+      expect(registered).toBeDefined();
+      expect(registered?.outputSchema).toBeDefined();
+      expect(registered?.outputSchema?.shape).toHaveProperty("result");
+      expect(registered?.outputSchema?.shape).toHaveProperty("count");
+    });
+
+    it("should register a tool without outputSchema (regression guard)", () => {
+      const tool = makeGetDocTool();
+      const server = new McpServerBase(makeServerOpts([tool]));
+      expect(server.toolCount).toBe(1);
+
+      const registered = server.getTool("iris.doc.get");
+      expect(registered).toBeDefined();
+      expect(registered?.outputSchema).toBeUndefined();
+    });
+  });
+
   describe("tool annotations", () => {
     it("should preserve all annotation hints on registered tools", () => {
       const tool = makeGetDocTool();

@@ -169,12 +169,17 @@ export class McpServerBase {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inputShape = tool.inputSchema.shape as any;
 
+    // Convert outputSchema Zod shape for the SDK (mirrors inputSchema pattern)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const outputShape = tool.outputSchema ? (tool.outputSchema.shape as any) : undefined;
+
     this.mcpServer.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
         inputSchema: inputShape,
+        ...(outputShape !== undefined && { outputSchema: outputShape }),
         annotations: {
           readOnlyHint: tool.annotations.readOnlyHint,
           destructiveHint: tool.annotations.destructiveHint,

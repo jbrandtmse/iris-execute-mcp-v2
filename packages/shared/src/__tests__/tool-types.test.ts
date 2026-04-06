@@ -119,18 +119,15 @@ describe("tool-types", () => {
       expect(tool.scope).toBe("SYS");
     });
 
-    it("should accept optional outputSchema", () => {
+    it("should accept optional outputSchema as a Zod schema", () => {
       const tool: ToolDefinition = {
         name: "iris.test",
         title: "Test Tool",
         description: "A test tool.",
         inputSchema: z.object({ id: z.string() }),
-        outputSchema: {
-          type: "object",
-          properties: {
-            result: { type: "string" },
-          },
-        },
+        outputSchema: z.object({
+          result: z.string(),
+        }),
         annotations: {},
         scope: "NONE",
         handler: async () => ({

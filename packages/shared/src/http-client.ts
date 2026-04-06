@@ -91,22 +91,58 @@ export class IrisHttpClient {
     return this.headRequest(path, options);
   }
 
-  // ── Core request engine ───────────────────────────────────────────
+  // ── CSRF pre-flight ───────────────────────────────────────────────
 
-  private async request<T>(
+  /**
+   * Ensure a CSRF token is available before sending a mutating request.
+   *
+   * If no CSRF token has been obtained yet, performs a lightweight
+   * HEAD request to `/api/atelier/` which establishes the session
+   * (cookie + auth) and extracts the CSRF token as a side effect.
+   */
+  private async ensureCsrfToken(): Promise<void> {
+    if (this.csrfToken) return;
+    await this.headRequest("/api/atelier/");
+    if (!this.csrfToken) {
+      logger.warn(
+        "CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.",
+      );
+    }
+  }
+
+  // ── Shared fetch engine ───────────────────────────────────────────
+
+  /**
+   * Execute a fetch request with shared session/auth/error handling.
+   *
+   * Encapsulates: URL construction, AbortController/timeout, auth header
+   * injection, cookie header injection, fetch call, cookie extraction,
+   * CSRF extraction, session establishment, 401 retry, and error handling
+   * (timeout, network, unexpected).
+   *
+   * Returns the raw {@link Response} so callers can handle body/headers
+   * as needed.
+   *
+   * @param method  - HTTP method (GET, POST, PUT, DELETE, HEAD).
+   * @param path    - URL path appended to the configured base URL.
+   * @param init    - Additional fetch init options (body, extra headers).
+   * @param options - Per-request timeout and header overrides.
+   * @param isRetry - Whether this is a 401 retry attempt.
+   */
+  private async executeFetch(
     method: string,
     path: string,
-    body: unknown | undefined,
+    init: { body?: BodyInit | null; extraHeaders?: Record<string, string> },
     options?: RequestOptions,
     isRetry = false,
-  ): Promise<AtelierEnvelope<T>> {
+  ): Promise<Response> {
     const url = `${this.config.baseUrl}${path}`;
     const timeout = options?.timeout ?? this.defaultTimeout;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
 
     const headers: Record<string, string> = {
-      Accept: "application/json",
+      ...init.extraHeaders,
       ...options?.headers,
     };
 
@@ -121,28 +157,13 @@ export class IrisHttpClient {
       headers["Cookie"] = cookieStr;
     }
 
-    // CSRF token for mutating methods
-    if (
-      this.csrfToken &&
-      ["POST", "PUT", "DELETE"].includes(method)
-    ) {
-      headers["X-CSRF-Token"] = this.csrfToken;
-    }
-
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-    }
-
     const start = Date.now();
 
     try {
-      const fetchBody: BodyInit | null =
-        body !== undefined ? JSON.stringify(body) : null;
-
       const response = await fetch(url, {
         method,
         headers,
-        body: fetchBody,
+        body: init.body ?? null,
         signal: controller.signal,
         keepalive: true,
       });
@@ -150,9 +171,8 @@ export class IrisHttpClient {
       clearTimeout(timer);
       const duration = Date.now() - start;
 
-      // Extract session cookie from response
+      // Extract session cookie and CSRF token from response
       this.extractCookies(response);
-      // Extract CSRF token
       this.extractCsrfToken(response);
 
       // Mark session as established on successful auth
@@ -164,60 +184,11 @@ export class IrisHttpClient {
       if (response.status === 401 && !isRetry) {
         logger.warn(`Session expired for ${method} ${path}, re-authenticating`);
         this.sessionEstablished = false;
-        return this.request<T>(method, path, body, options, true);
+        return this.executeFetch(method, path, init, options, true);
       }
 
-      // Parse response body
-      let envelope: AtelierEnvelope<T>;
-      try {
-        envelope = (await response.json()) as AtelierEnvelope<T>;
-      } catch {
-        // IRIS may return non-JSON responses (e.g., HTML error pages)
-        if (!response.ok) {
-          throw new IrisApiError(
-            response.status,
-            [],
-            path,
-            `IRIS returned HTTP ${response.status} for ${method} ${path} with a non-JSON response. Check the IRIS web server configuration.`,
-          );
-        }
-        throw new IrisApiError(
-          response.status,
-          [],
-          path,
-          `IRIS returned a non-JSON response for ${method} ${path}. Expected an Atelier envelope but could not parse the body.`,
-        );
-      }
-
-      // Check for HTTP errors
-      if (!response.ok) {
-        const errors = envelope?.status?.errors ?? [];
-        throw new IrisApiError(
-          response.status,
-          errors,
-          path,
-          `IRIS returned HTTP ${response.status} for ${method} ${path}. Check the request parameters and try again.`,
-        );
-      }
-
-      // Check for Atelier-level errors
-      if (
-        envelope?.status?.errors &&
-        envelope.status.errors.length > 0
-      ) {
-        throw new IrisApiError(
-          response.status,
-          envelope.status.errors,
-          path,
-          `IRIS reported errors for ${method} ${path}. Review the error details and correct the request.`,
-        );
-      }
-
-      logger.info(
-        `${method} ${path} completed in ${duration}ms`,
-      );
-
-      return envelope;
+      logger.info(`${method} ${path} completed in ${duration}ms`);
+      return response;
     } catch (error: unknown) {
       clearTimeout(timer);
 
@@ -255,104 +226,124 @@ export class IrisHttpClient {
     }
   }
 
-  // ── HEAD request engine ────────────────────────────────────────────
+  // ── Core request engine ───────────────────────────────────────────
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body: unknown | undefined,
+    options?: RequestOptions,
+    isRetry = false,
+  ): Promise<AtelierEnvelope<T>> {
+    // Ensure CSRF token is available for mutating methods
+    if (["POST", "PUT", "DELETE"].includes(method) && !this.csrfToken && !isRetry) {
+      await this.ensureCsrfToken();
+    }
+
+    const extraHeaders: Record<string, string> = {
+      Accept: "application/json",
+    };
+
+    // CSRF token for mutating methods
+    if (
+      this.csrfToken &&
+      ["POST", "PUT", "DELETE"].includes(method)
+    ) {
+      extraHeaders["X-CSRF-Token"] = this.csrfToken;
+    }
+
+    if (body !== undefined) {
+      extraHeaders["Content-Type"] = "application/json";
+    }
+
+    const fetchBody: BodyInit | null =
+      body !== undefined ? JSON.stringify(body) : null;
+
+    const response = await this.executeFetch(
+      method,
+      path,
+      { body: fetchBody, extraHeaders },
+      options,
+      isRetry,
+    );
+
+    // Parse response body
+    let envelope: AtelierEnvelope<T>;
+    try {
+      envelope = (await response.json()) as AtelierEnvelope<T>;
+    } catch {
+      // IRIS may return non-JSON responses (e.g., HTML error pages)
+      if (!response.ok) {
+        throw new IrisApiError(
+          response.status,
+          [],
+          path,
+          `IRIS returned HTTP ${response.status} for ${method} ${path} with a non-JSON response. Check the IRIS web server configuration.`,
+        );
+      }
+      throw new IrisApiError(
+        response.status,
+        [],
+        path,
+        `IRIS returned a non-JSON response for ${method} ${path}. Expected an Atelier envelope but could not parse the body.`,
+      );
+    }
+
+    // Check for HTTP errors
+    if (!response.ok) {
+      const errors = envelope?.status?.errors ?? [];
+      throw new IrisApiError(
+        response.status,
+        errors,
+        path,
+        `IRIS returned HTTP ${response.status} for ${method} ${path}. Check the request parameters and try again.`,
+      );
+    }
+
+    // Check for Atelier-level errors
+    if (
+      envelope?.status?.errors &&
+      envelope.status.errors.length > 0
+    ) {
+      throw new IrisApiError(
+        response.status,
+        envelope.status.errors,
+        path,
+        `IRIS reported errors for ${method} ${path}. Review the error details and correct the request.`,
+      );
+    }
+
+    return envelope;
+  }
+
+  // ── HEAD request engine ───────────────────────────────────────────
 
   /**
    * Internal HEAD request handler — no response body parsing.
    *
-   * Handles cookies, auth, and 401 retry identically to the main
-   * request engine, but does not attempt to read or parse the
-   * response body. CSRF tokens are not sent (HEAD is idempotent).
+   * Delegates to {@link executeFetch} for shared session/auth/error
+   * handling, then checks the response status. CSRF tokens are not
+   * sent since HEAD is idempotent.
    */
   private async headRequest(
     path: string,
     options?: RequestOptions,
     isRetry = false,
   ): Promise<void> {
-    const url = `${this.config.baseUrl}${path}`;
-    const timeout = options?.timeout ?? this.defaultTimeout;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    const response = await this.executeFetch(
+      "HEAD",
+      path,
+      { extraHeaders: {} },
+      options,
+      isRetry,
+    );
 
-    const headers: Record<string, string> = {
-      ...options?.headers,
-    };
-
-    if (!this.sessionEstablished || isRetry) {
-      headers["Authorization"] = this.basicAuthHeader();
-    }
-
-    const cookieStr = this.buildCookieHeader();
-    if (cookieStr) {
-      headers["Cookie"] = cookieStr;
-    }
-
-    const start = Date.now();
-
-    try {
-      const response = await fetch(url, {
-        method: "HEAD",
-        headers,
-        signal: controller.signal,
-        keepalive: true,
-      });
-
-      clearTimeout(timer);
-      const duration = Date.now() - start;
-
-      this.extractCookies(response);
-      this.extractCsrfToken(response);
-
-      if (response.ok) {
-        this.sessionEstablished = true;
-      }
-
-      // Auto re-auth on 401 (single retry)
-      if (response.status === 401 && !isRetry) {
-        logger.warn(`Session expired for HEAD ${path}, re-authenticating`);
-        this.sessionEstablished = false;
-        return this.headRequest(path, options, true);
-      }
-
-      if (!response.ok) {
-        throw new IrisApiError(
-          response.status,
-          [],
-          path,
-          `IRIS returned HTTP ${response.status} for HEAD ${path}. Check the request parameters and try again.`,
-        );
-      }
-
-      logger.info(`HEAD ${path} completed in ${duration}ms`);
-    } catch (error: unknown) {
-      clearTimeout(timer);
-
-      if (error instanceof IrisApiError) throw error;
-      if (error instanceof IrisConnectionError) throw error;
-
-      if (
-        error instanceof DOMException ||
-        (error instanceof Error && error.name === "AbortError")
-      ) {
-        throw new IrisConnectionError(
-          "TIMEOUT",
-          `Connection to IRIS timed out after ${timeout}ms`,
-          `Check that the IRIS web port is accessible at ${this.config.host}:${this.config.port}`,
-        );
-      }
-
-      if (error instanceof TypeError) {
-        throw new IrisConnectionError(
-          "NETWORK_ERROR",
-          `Failed to connect to IRIS at ${this.config.host}:${this.config.port}`,
-          `Verify the host and port are correct, and that IRIS is running`,
-        );
-      }
-
-      throw new IrisConnectionError(
-        "UNKNOWN",
-        `Unexpected error during HEAD ${path}`,
-        `Check network connectivity and IRIS availability`,
+    if (!response.ok) {
+      throw new IrisApiError(
+        response.status,
+        [],
+        path,
+        `IRIS returned HTTP ${response.status} for HEAD ${path}. Check the request parameters and try again.`,
       );
     }
   }

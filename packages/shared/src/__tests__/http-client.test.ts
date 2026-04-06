@@ -220,6 +220,174 @@ describe("IrisHttpClient", () => {
     });
   });
 
+  // ── CSRF preflight on first POST ─────────────────────────────────
+
+  describe("CSRF preflight", () => {
+    it("should perform preflight HEAD before first POST when no CSRF token", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Preflight HEAD response (returns CSRF token)
+      const headResp = new Response(null, { status: 200 });
+      const originalGetSetCookie = headResp.headers.getSetCookie?.bind(headResp.headers);
+      headResp.headers.getSetCookie = () => {
+        const real = originalGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=preflight; path=/"];
+      };
+      // Patch X-CSRF-Token header
+      const originalGet = headResp.headers.get.bind(headResp.headers);
+      headResp.headers.get = (name: string) => {
+        if (name === "X-CSRF-Token") return "csrf-preflight-token";
+        return originalGet(name);
+      };
+      fetchMock.mockResolvedValueOnce(headResp);
+
+      // Actual POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({ created: true }), {
+          setCookie: ["CSPSESSIONID=preflight; path=/"],
+        }),
+      );
+
+      const result = await client.post("/api/create", { data: 1 });
+      expect(result.result).toEqual({ created: true });
+
+      // Should have made 2 calls: HEAD preflight + POST
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // First call should be HEAD to /api/atelier/
+      const [headUrl, headOpts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(headUrl).toBe("http://localhost:52773/api/atelier/");
+      expect(headOpts.method).toBe("HEAD");
+
+      // Second call should be POST with CSRF token
+      const [postUrl, postOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(postUrl).toBe("http://localhost:52773/api/create");
+      expect(postOpts.method).toBe("POST");
+      expect((postOpts.headers as Record<string, string>)["X-CSRF-Token"]).toBe("csrf-preflight-token");
+
+      client.destroy();
+    });
+
+    it("should not perform preflight on subsequent POSTs after CSRF obtained", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // First GET returns CSRF token
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({}), {
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+          headers: { "X-CSRF-Token": "existing-token" },
+        }),
+      );
+      await client.get("/api/init");
+
+      // POST should not trigger preflight since we already have a CSRF token
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({ ok: true })));
+      await client.post("/api/action", { data: 1 });
+
+      // Should have made exactly 2 calls: GET + POST (no preflight HEAD)
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      const [, postOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(postOpts.method).toBe("POST");
+
+      client.destroy();
+    });
+
+    it("should propagate error when preflight HEAD fails", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Preflight HEAD fails with network error
+      fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+      await expect(client.post("/api/create", { data: 1 })).rejects.toThrow(
+        IrisConnectionError,
+      );
+
+      // Should have made only 1 call (the failed HEAD)
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      client.destroy();
+    });
+
+    it("should perform preflight for PUT and DELETE too", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Preflight HEAD for PUT
+      const headResp1 = new Response(null, { status: 200 });
+      const originalGetSetCookie1 = headResp1.headers.getSetCookie?.bind(headResp1.headers);
+      headResp1.headers.getSetCookie = () => {
+        const real = originalGetSetCookie1?.() ?? [];
+        return [...real, "CSPSESSIONID=s1; path=/"];
+      };
+      const originalGet1 = headResp1.headers.get.bind(headResp1.headers);
+      headResp1.headers.get = (name: string) => {
+        if (name === "X-CSRF-Token") return "csrf-token-1";
+        return originalGet1(name);
+      };
+      fetchMock.mockResolvedValueOnce(headResp1);
+
+      // PUT response
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({})));
+      await client.put("/api/update", { data: 1 });
+
+      // HEAD preflight + PUT = 2 calls
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect((fetchMock.mock.calls[0] as [string, RequestInit])[1].method).toBe("HEAD");
+      expect((fetchMock.mock.calls[1] as [string, RequestInit])[1].method).toBe("PUT");
+
+      // DELETE should NOT trigger another preflight (token already cached)
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({})));
+      await client.delete("/api/remove");
+
+      // Total: HEAD + PUT + DELETE = 3
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect((fetchMock.mock.calls[2] as [string, RequestInit])[1].method).toBe("DELETE");
+
+      client.destroy();
+    });
+
+    it("should warn when preflight HEAD succeeds but returns no CSRF token", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+      const consoleSpy = vi.spyOn(console, "error");
+
+      // Preflight HEAD response WITHOUT CSRF token
+      const headResp = new Response(null, { status: 200 });
+      const originalGetSetCookie = headResp.headers.getSetCookie?.bind(headResp.headers);
+      headResp.headers.getSetCookie = () => {
+        const real = originalGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=preflight; path=/"];
+      };
+      fetchMock.mockResolvedValueOnce(headResp);
+
+      // POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({ ok: true }), {
+          setCookie: ["CSPSESSIONID=preflight; path=/"],
+        }),
+      );
+
+      await client.post("/api/create", { data: 1 });
+
+      // Verify warning was logged about missing CSRF token
+      const allCalls = consoleSpy.mock.calls.map((c) => c.map(String).join(" "));
+      const csrfWarning = allCalls.some((msg) => msg.includes("CSRF preflight completed but no X-CSRF-Token"));
+      expect(csrfWarning).toBe(true);
+
+      // POST should still proceed (without CSRF token)
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const [, postOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(postOpts.method).toBe("POST");
+      expect((postOpts.headers as Record<string, string>)["X-CSRF-Token"]).toBeUndefined();
+
+      client.destroy();
+    });
+  });
+
   // ── Auto re-auth on 401 ────────────────────────────────────────
 
   describe("auto re-auth on 401", () => {
@@ -596,9 +764,28 @@ describe("IrisHttpClient", () => {
   // ── Typed methods ───────────────────────────────────────────────
 
   describe("typed methods", () => {
+    /** Helper: mock a HEAD preflight response that provides a CSRF token. */
+    function mockPreflightHead(): void {
+      const headResp = new Response(null, { status: 200 });
+      const origGetSetCookie = headResp.headers.getSetCookie?.bind(headResp.headers);
+      headResp.headers.getSetCookie = () => {
+        const real = origGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=preflight; path=/"];
+      };
+      const origGet = headResp.headers.get.bind(headResp.headers);
+      headResp.headers.get = (name: string) => {
+        if (name === "X-CSRF-Token") return "csrf-typed";
+        return origGet(name);
+      };
+      fetchMock.mockResolvedValueOnce(headResp);
+    }
+
     it("should send POST with JSON body", async () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);
+
+      // CSRF preflight HEAD (triggered because this is first mutating request)
+      mockPreflightHead();
 
       fetchMock.mockResolvedValueOnce(
         mockResponse(atelierResponse({ id: 1 }), {
@@ -608,7 +795,8 @@ describe("IrisHttpClient", () => {
 
       await client.post("/api/create", { name: "test" });
 
-      const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Call index 1 is the actual POST (index 0 is HEAD preflight)
+      const [, opts] = fetchMock.mock.calls[1] as [string, RequestInit];
       expect(opts.method).toBe("POST");
       expect(opts.body).toBe(JSON.stringify({ name: "test" }));
       expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
@@ -622,6 +810,9 @@ describe("IrisHttpClient", () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);
 
+      // CSRF preflight HEAD
+      mockPreflightHead();
+
       fetchMock.mockResolvedValueOnce(
         mockResponse(atelierResponse({}), {
           setCookie: ["CSPSESSIONID=s1; path=/"],
@@ -630,7 +821,7 @@ describe("IrisHttpClient", () => {
 
       await client.put("/api/update", { name: "updated" });
 
-      const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const [, opts] = fetchMock.mock.calls[1] as [string, RequestInit];
       expect(opts.method).toBe("PUT");
       expect(opts.body).toBe(JSON.stringify({ name: "updated" }));
 
@@ -641,6 +832,9 @@ describe("IrisHttpClient", () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);
 
+      // CSRF preflight HEAD
+      mockPreflightHead();
+
       fetchMock.mockResolvedValueOnce(
         mockResponse(atelierResponse({}), {
           setCookie: ["CSPSESSIONID=s1; path=/"],
@@ -649,7 +843,7 @@ describe("IrisHttpClient", () => {
 
       await client.delete("/api/remove");
 
-      const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const [, opts] = fetchMock.mock.calls[1] as [string, RequestInit];
       expect(opts.method).toBe("DELETE");
       expect(opts.body).toBeNull();
 

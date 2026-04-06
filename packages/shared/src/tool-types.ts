@@ -53,8 +53,9 @@ export interface ToolDefinition {
   /** Zod schema used for argument validation. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   inputSchema: ZodObject<any>;
-  /** Optional JSON Schema for structured output. */
-  outputSchema?: object;
+  /** Optional Zod schema for structured output validation. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  outputSchema?: ZodObject<any>;
   /** Annotation hints for clients. */
   annotations: ToolAnnotations;
   /** Namespace scope governing how namespace is resolved. */
