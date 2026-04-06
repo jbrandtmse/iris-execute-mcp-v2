@@ -10,6 +10,12 @@ import type { ToolDefinition } from "@iris-mcp/shared";
 import { namespaceManageTool, namespaceListTool } from "./namespace.js";
 import { databaseManageTool, databaseListTool } from "./database.js";
 import { mappingManageTool, mappingListTool } from "./mapping.js";
+import {
+  userManageTool,
+  userGetTool,
+  userRolesTool,
+  userPasswordTool,
+} from "./user.js";
 
 /** All tool definitions registered by the iris-admin-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -19,4 +25,8 @@ export const tools: ToolDefinition[] = [
   databaseListTool,
   mappingManageTool,
   mappingListTool,
+  userManageTool,
+  userGetTool,
+  userRolesTool,
+  userPasswordTool,
 ];

@@ -97,3 +97,9 @@
 ## Deferred from: code review of 4-3-namespace-mapping-tools (2026-04-06)
 
 - `tProps` not killed between loop iterations in `MappingList` (Config.cls). Properties from a prior mapping's `Config.Map*.Get` call could leak into the next entry if the Get response doesn't overwrite all subscripts (e.g., Collation from mapping A appearing on mapping B). Pre-existing pattern -- `NamespaceList` has the same issue with its `tProps` variable. Consider adding `Kill tProps` before each `Get` call across all list methods.
+
+## Deferred from: code review of 4-4-user-and-password-management-tools (2026-04-06)
+
+- `UserPassword` validate action uses `$Replace(tMsg, tPassword, "***")` to strip the password from IRIS validation messages. If IRIS reformats, truncates, or encodes the password in its error message, the simple string-replace may not catch all occurrences. Consider a more robust sanitization approach (e.g., regex-based or returning only a generic validation failure message) if password leak concerns escalate.
+- `UserRoles` does not validate that `role` is non-whitespace. `ValidateRequired` may accept whitespace-only strings depending on its implementation, which could result in empty role entries being appended to the user's role list.
+- GET requests to `/security/user/roles` or `/security/user/password` match the `/security/user/:name` wildcard route, causing `UserGet` to look up a user named "roles" or "password" instead of returning 404. This is a cosmetic issue since the sub-resource routes are POST-only, but could confuse API consumers probing endpoints.
