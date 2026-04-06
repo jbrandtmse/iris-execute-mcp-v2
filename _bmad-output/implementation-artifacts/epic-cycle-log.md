@@ -81,3 +81,23 @@
 - **Review findings:**
   - 3 MEDIUM auto-resolved, 1 LOW deferred
 - **Test totals:** 112 unit tests + 13 integration tests = 125 total
+
+## Epic 2: IRIS Development Tools — Atelier API (iris-dev-mcp)
+
+### Story 2.0: Epic 1 Deferred Cleanup
+- **Status:** done
+- **Commit:** d757dfb
+- **Files touched:**
+  - packages/shared/src/tool-types.ts — outputSchema type changed to ZodObject<any>
+  - packages/shared/src/server-base.ts — registerTool passes outputSchema.shape to SDK
+  - packages/shared/src/http-client.ts — added ensureCsrfToken(), extracted executeFetch(), refactored request()/headRequest()
+  - packages/shared/src/__tests__/server-base.test.ts — 2 new outputSchema tests
+  - packages/shared/src/__tests__/http-client.test.ts — 4 new CSRF preflight tests, 3 updated typed-method tests
+  - packages/shared/src/__tests__/tool-types.test.ts — updated outputSchema test to use Zod
+  - _bmad-output/implementation-artifacts/deferred-work.md — added code review deferred items
+- **Key decisions:**
+  - Used ZodObject<any> for outputSchema type (mirrors inputSchema pattern)
+  - CSRF preflight uses HEAD to /api/atelier/ (lightweight, also establishes session)
+  - executeFetch() returns raw Response for callers to handle body/headers
+- **Issues resolved:** None required user input
+- **Test totals:** 118 unit tests (6 new) + 13 integration tests = 131 total

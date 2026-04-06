@@ -28,3 +28,9 @@
 ## Deferred from: code review of 1-5-shared-package-integration-tests (2026-04-05)
 
 - Windows-specific network timeout behavior: The connection error test for invalid host uses RFC 5737 TEST-NET IP (192.0.2.1) which may behave differently on Windows vs Linux (faster ICMP reject vs true timeout). The 2-second timeout and 3-second assertion bound may not hold on all Windows configurations. Consider platform-specific timeout adjustments or skip annotation for Windows CI runners.
+
+## Deferred from: code review of 2-1-iris-dev-mcp-package-setup-and-server-entry-point (2026-04-05)
+
+- No unit tests for `resolveTransport()` function in `src/index.ts`. The function has multiple code paths (CLI `--transport` flag, `--transport=` form, `MCP_TRANSPORT` env var, default fallback) that are not tested. Currently not easily testable since it reads `process.argv` and `process.env` directly and is not exported. Consider exporting it or extracting into a testable module.
+- No unit tests for the entry point bootstrap flow (`server.start().catch()` pattern). This would require mocking the full startup sequence including `loadConfig`, health check, and transport connection.
+- Package `exports` field in `package.json` advertises importable paths (`"."`) but `src/index.ts` has no exports (it is a side-effect-only CLI entry point). If another package imports from `@iris-mcp/dev`, they get an empty module. Consider whether the `exports` field should be removed or a separate library entry point should be created.
