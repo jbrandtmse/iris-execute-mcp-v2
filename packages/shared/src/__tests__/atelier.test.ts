@@ -68,7 +68,37 @@ describe("atelier", () => {
   // ── negotiateVersion ──────────────────────────────────────────────
 
   describe("negotiateVersion", () => {
-    it("should return highest version up to v8", async () => {
+    it("should return version from content.api (modern IRIS)", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          atelierResponse({ content: { api: 8, version: "2024.1.0" } }),
+          { setCookie: ["CSPSESSIONID=s1; path=/"] },
+        ),
+      );
+
+      const version = await negotiateVersion(client);
+      expect(version).toBe(8);
+
+      client.destroy();
+    });
+
+    it("should cap content.api at v8 even if server reports higher", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          atelierResponse({ content: { api: 12, version: "2025.2.0" } }),
+          { setCookie: ["CSPSESSIONID=s1; path=/"] },
+        ),
+      );
+
+      const version = await negotiateVersion(client);
+      expect(version).toBe(8);
+
+      client.destroy();
+    });
+
+    it("should fall back to top-level version string when content.api is missing", async () => {
       const client = new IrisHttpClient(makeConfig());
       fetchMock.mockResolvedValueOnce(
         mockResponse(
@@ -83,7 +113,22 @@ describe("atelier", () => {
       client.destroy();
     });
 
-    it("should cap at v8 even if server reports higher", async () => {
+    it("should fall back to top-level version string when content.api is zero", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          atelierResponse({ content: { api: 0 }, version: "4.0.0" }),
+          { setCookie: ["CSPSESSIONID=s1; path=/"] },
+        ),
+      );
+
+      const version = await negotiateVersion(client);
+      expect(version).toBe(4);
+
+      client.destroy();
+    });
+
+    it("should cap at v8 even if server reports higher (legacy path)", async () => {
       const client = new IrisHttpClient(makeConfig());
       fetchMock.mockResolvedValueOnce(
         mockResponse(
@@ -98,7 +143,7 @@ describe("atelier", () => {
       client.destroy();
     });
 
-    it("should return v4 when server reports v4", async () => {
+    it("should return v4 when server reports v4 (legacy path)", async () => {
       const client = new IrisHttpClient(makeConfig());
       fetchMock.mockResolvedValueOnce(
         mockResponse(

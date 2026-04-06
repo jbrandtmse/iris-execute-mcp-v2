@@ -192,6 +192,22 @@ describe("iris.doc.get", () => {
     ).rejects.toThrow(IrisApiError);
   });
 
+  it("should handle missing Last-Modified and ETag headers in metadataOnly mode", async () => {
+    mockHttp.head.mockResolvedValue(headResponse(200, {}));
+
+    const result = await docGetTool.handler(
+      { name: "MyApp.Service.cls", metadataOnly: true },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual({
+      exists: true,
+      name: "MyApp.Service.cls",
+      timestamp: undefined,
+      etag: undefined,
+    });
+  });
+
   it("should still use GET when metadataOnly is not set (regression)", async () => {
     const docContent = { name: "Test.cls", content: ["Class Test {}"] };
     mockHttp.get.mockResolvedValue(envelope(docContent));
@@ -264,6 +280,28 @@ describe("iris.doc.put", () => {
     expect(mockHttp.put).toHaveBeenCalledWith(
       "/api/atelier/v7/USER/doc/Test.cls?ignoreConflict=1",
       { enc: false, content: ["// test"] },
+    );
+  });
+
+  it("should propagate connection errors", async () => {
+    mockHttp.put.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await expect(
+      docPutTool.handler({ name: "Test.cls", content: "test" }, ctx),
+    ).rejects.toThrow("ECONNREFUSED");
+  });
+
+  it("should use namespace override when provided", async () => {
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+
+    await docPutTool.handler(
+      { name: "Test.cls", content: "test", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.put).toHaveBeenCalledWith(
+      "/api/atelier/v7/HSCUSTOM/doc/Test.cls",
+      { enc: false, content: ["test"] },
     );
   });
 });
@@ -448,6 +486,23 @@ describe("iris.doc.list", () => {
     expect(mockHttp.get).toHaveBeenCalledWith(
       `/api/atelier/v7/HSCUSTOM/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`,
     );
+  });
+
+  it("should pass generated=0 when generated is false", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler({ generated: false }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("generated=0");
+  });
+
+  it("should propagate connection errors", async () => {
+    mockHttp.get.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await expect(
+      docListTool.handler({}, ctx),
+    ).rejects.toThrow("ECONNREFUSED");
   });
 
   it("should still call docnames when modifiedSince is not set (regression)", async () => {

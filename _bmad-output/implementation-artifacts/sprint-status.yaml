@@ -36,7 +36,7 @@
 
 generated: 2026-04-05
 last_updated: 2026-04-05
-# Updated by code review: 2-7 moved to done
+# Updated by code review: 2-8 moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   2-5-code-intelligence-tools: done
   2-6-document-format-and-xml-tools: done
   2-7-sql-execution-and-server-info: done
-  2-8-iris-dev-mcp-unit-and-integration-tests: backlog
+  2-8-iris-dev-mcp-unit-and-integration-tests: done
   epic-2-retrospective: optional
 
   # Epic 3: Custom REST Service, Auto-Bootstrap & Execution Tools

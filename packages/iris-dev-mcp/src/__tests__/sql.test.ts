@@ -227,6 +227,18 @@ describe("iris.sql.execute", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
+  it("should not include parameters in body when parameters is empty array", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ content: [{ columns: ["ID"], rows: [[1]] }] }),
+    );
+
+    await sqlExecuteTool.handler({ query: "SELECT 1", parameters: [] }, ctx);
+
+    const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(calledBody).toEqual({ query: "SELECT 1" });
+    expect(calledBody).not.toHaveProperty("parameters");
+  });
+
   it("should not include parameters in body when not provided", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ content: [{ columns: ["ID"], rows: [[1]] }] }),

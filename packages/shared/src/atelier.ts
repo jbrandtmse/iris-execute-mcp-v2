@@ -22,9 +22,16 @@ const DEFAULT_VERSION = 1;
 /**
  * Shape of the server information returned by `GET /api/atelier/`.
  *
- * The full response contains more fields; we only extract what we need.
+ * The Atelier root endpoint wraps server details inside a `content` object.
+ * The `api` field is the numeric Atelier API version (e.g. 8).
+ * The `version` field is the human-readable IRIS build string.
  */
 interface AtelierServerInfo {
+  content?: {
+    api?: number;
+    version?: string;
+  };
+  /** Legacy: some older IRIS versions may expose version at the top level. */
   version?: string;
 }
 
@@ -49,10 +56,21 @@ export async function negotiateVersion(
     const envelope = await client.get<AtelierServerInfo>("/api/atelier/");
     const result = envelope.result;
 
-    if (result && typeof result === "object" && "version" in result) {
-      const parsed = parseVersionString(result.version);
-      if (parsed !== undefined) {
-        version = Math.min(parsed, MAX_VERSION);
+    if (result && typeof result === "object") {
+      // Prefer the numeric `api` field inside `content` (modern IRIS)
+      const apiVersion =
+        result.content && typeof result.content === "object"
+          ? result.content.api
+          : undefined;
+
+      if (typeof apiVersion === "number" && apiVersion > 0) {
+        version = Math.min(apiVersion, MAX_VERSION);
+      } else if ("version" in result) {
+        // Fallback: parse semver-ish string from legacy responses
+        const parsed = parseVersionString(result.version);
+        if (parsed !== undefined) {
+          version = Math.min(parsed, MAX_VERSION);
+        }
       }
     }
   } catch {
