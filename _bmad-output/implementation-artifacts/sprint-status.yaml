@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-06"  # Updated by code review: 3-1 moved to done
+last_updated: "2026-04-06"  # Updated: 3-2 moved to done after code review
 # Updated by code review: 2-8 moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
@@ -70,7 +70,7 @@ development_status:
   epic-3: in-progress
   3-0-epic-2-deferred-cleanup: done
   3-1-objectscript-rest-dispatch-and-utils-classes: done
-  3-2-global-operations-rest-handler-and-tools: backlog
+  3-2-global-operations-rest-handler-and-tools: done
   3-3-objectscript-execution-rest-handler-and-tools: backlog
   3-4-unit-test-execution-rest-handler-and-tool: backlog
   3-5-setup-class-and-ipm-module: backlog

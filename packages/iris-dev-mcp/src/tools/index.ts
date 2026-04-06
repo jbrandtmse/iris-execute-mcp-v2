@@ -22,6 +22,12 @@ import {
 import { docConvertTool, docXmlExportTool } from "./format.js";
 import { sqlExecuteTool } from "./sql.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
+import {
+  globalGetTool,
+  globalSetTool,
+  globalKillTool,
+  globalListTool,
+} from "./global.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -38,4 +44,8 @@ export const tools: ToolDefinition[] = [
   sqlExecuteTool,
   serverInfoTool,
   serverNamespaceTool,
+  globalGetTool,
+  globalSetTool,
+  globalKillTool,
+  globalListTool,
 ];

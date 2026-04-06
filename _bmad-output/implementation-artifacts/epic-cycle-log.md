@@ -203,5 +203,18 @@
 - **Review findings:** 1 MEDIUM auto-resolved (JSDoc), 3 LOW deferred
 - **Test totals:** 235 tests (128 shared + 107 dev)
 
+### Story 3.1: ObjectScript REST Dispatch & Utils Classes
+- **Status:** done
+- **Commit:** 0b3c517
+- **Files touched:**
+  - New: Utils.cls, REST/Dispatch.cls, REST/Command.cls (stub), REST/UnitTest.cls (stub), REST/Global.cls (stub), Tests/UtilsTest.cls
+- **Key decisions:**
+  - Dispatch extends %Atelier.REST for built-in envelope response format
+  - Utils provides 8 class methods: SwitchNamespace, RestoreNamespace, ValidateRequired/String/Integer/Boolean, SanitizeError, ReadRequestBody
+  - Stub handlers extend %Atelier.REST directly for independent RenderResponseBody access
+  - Test methods require `As %Status` return type for DirectTestRunner compatibility
+- **Review findings:** 2 HIGH auto-resolved (SanitizeError infinite loop, ReadRequestBody null safety), 1 LOW deferred
+- **Test totals:** 17 IRIS unit tests + 235 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

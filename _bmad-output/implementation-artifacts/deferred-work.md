@@ -68,4 +68,9 @@
 
 ## Deferred from: code review of 3-1-objectscript-rest-dispatch-and-utils-classes (2026-04-06)
 
-- Stub handler catch blocks (Command.cls, UnitTest.cls, Global.cls) do not call RenderResponseBody in the catch path, so errors return a bare %Status rather than the Atelier three-part envelope. These stubs will be replaced with full implementations in Stories 3.2-3.4, at which point the catch blocks must render a proper error response.
+- ~~Stub handler catch blocks (Command.cls, UnitTest.cls, Global.cls) do not call RenderResponseBody in the catch path, so errors return a bare %Status rather than the Atelier three-part envelope. These stubs will be replaced with full implementations in Stories 3.2-3.4, at which point the catch blocks must render a proper error response.~~ **RESOLVED in Story 3.2:** All four Global.cls methods now call `RenderResponseBody` in catch blocks.
+
+## Deferred from: code review of 3-2-global-operations-rest-handler-and-tools (2026-04-06)
+
+- ListGlobals has no pagination or max-count safeguard. On production namespaces with thousands of globals, the response could be very large. Consider adding a `maxItems` parameter or server-side pagination in a future story.
+- BuildGlobalRef comma-separated subscript parsing cannot handle subscript values that themselves contain commas. This is an inherent limitation of the comma-delimited format. Consider supporting a JSON array format for subscripts in a future enhancement if complex subscript values are needed.
