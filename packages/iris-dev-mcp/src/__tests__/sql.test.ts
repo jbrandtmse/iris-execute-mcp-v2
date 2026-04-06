@@ -1,50 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope } from "@iris-mcp/shared";
+import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { sqlExecuteTool } from "../tools/sql.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function createMockHttp() {
-  return {
-    get: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    post: vi.fn(),
-    head: vi.fn(),
-  } as unknown as IrisHttpClient & {
-    get: ReturnType<typeof vi.fn>;
-    put: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-    post: ReturnType<typeof vi.fn>;
-    head: ReturnType<typeof vi.fn>;
-  };
-}
-
-function createMockCtx(http: IrisHttpClient): ToolContext {
-  return {
-    resolveNamespace: (override?: string) => override ?? "USER",
-    http,
-    atelierVersion: 7,
-    config: {
-      host: "localhost",
-      port: 52773,
-      username: "_SYSTEM",
-      password: "SYS",
-      namespace: "USER",
-      https: false,
-      baseUrl: "http://localhost:52773",
-    } as IrisConnectionConfig,
-  };
-}
-
-function envelope<T>(result: T, console: string[] = []): AtelierEnvelope<T> {
-  return {
-    status: { errors: [] },
-    console,
-    result,
-  };
-}
+import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── iris.sql.execute ──────────────────────────────────────────────
 
@@ -58,16 +16,12 @@ describe("iris.sql.execute", () => {
   });
 
   it("should return columns and rows from SQL query", async () => {
+    // New Atelier format: content is an array of row objects
     mockHttp.post.mockResolvedValue(
       envelope({
         content: [
-          {
-            columns: ["ID", "Name", "DOB"],
-            rows: [
-              [1, "Smith", "1990-01-01"],
-              [2, "Jones", "1985-06-15"],
-            ],
-          },
+          { ID: 1, Name: "Smith", DOB: "1990-01-01" },
+          { ID: 2, Name: "Jones", DOB: "1985-06-15" },
         ],
       }),
     );
@@ -86,6 +40,7 @@ describe("iris.sql.execute", () => {
     };
     expect(structured.columns).toEqual(["ID", "Name", "DOB"]);
     expect(structured.rows).toHaveLength(2);
+    expect(structured.rows[0]).toEqual([1, "Smith", "1990-01-01"]);
     expect(structured.rowCount).toBe(2);
     expect(result.isError).toBeUndefined();
   });
@@ -94,10 +49,7 @@ describe("iris.sql.execute", () => {
     mockHttp.post.mockResolvedValue(
       envelope({
         content: [
-          {
-            columns: ["ID", "Name"],
-            rows: [[1, "Smith"]],
-          },
+          { ID: 1, Name: "Smith" },
         ],
       }),
     );
@@ -114,15 +66,10 @@ describe("iris.sql.execute", () => {
   });
 
   it("should limit results when maxRows is specified", async () => {
-    const manyRows = Array.from({ length: 50 }, (_, i) => [i, `Name${i}`]);
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i, Name: `Name${i}` }));
     mockHttp.post.mockResolvedValue(
       envelope({
-        content: [
-          {
-            columns: ["ID", "Name"],
-            rows: manyRows,
-          },
-        ],
+        content: manyRows,
       }),
     );
 
@@ -144,15 +91,10 @@ describe("iris.sql.execute", () => {
   });
 
   it("should apply default maxRows limit of 1000", async () => {
-    const manyRows = Array.from({ length: 1500 }, (_, i) => [i]);
+    const manyRows = Array.from({ length: 1500 }, (_, i) => ({ ID: i }));
     mockHttp.post.mockResolvedValue(
       envelope({
-        content: [
-          {
-            columns: ["ID"],
-            rows: manyRows,
-          },
-        ],
+        content: manyRows,
       }),
     );
 
@@ -192,7 +134,7 @@ describe("iris.sql.execute", () => {
 
   it("should use namespace override when provided", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ columns: ["ID"], rows: [[1]] }] }),
+      envelope({ content: [{ ID: 1 }] }),
     );
 
     await sqlExecuteTool.handler(
@@ -229,7 +171,7 @@ describe("iris.sql.execute", () => {
 
   it("should not include parameters in body when parameters is empty array", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ columns: ["ID"], rows: [[1]] }] }),
+      envelope({ content: [{ ID: 1 }] }),
     );
 
     await sqlExecuteTool.handler({ query: "SELECT 1", parameters: [] }, ctx);
@@ -241,7 +183,7 @@ describe("iris.sql.execute", () => {
 
   it("should not include parameters in body when not provided", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ columns: ["ID"], rows: [[1]] }] }),
+      envelope({ content: [{ ID: 1 }] }),
     );
 
     await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
@@ -254,12 +196,7 @@ describe("iris.sql.execute", () => {
   it("should handle empty result set gracefully", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({
-        content: [
-          {
-            columns: ["ID", "Name"],
-            rows: [],
-          },
-        ],
+        content: [],
       }),
     );
 
@@ -273,7 +210,8 @@ describe("iris.sql.execute", () => {
       rows: unknown[][];
       rowCount: number;
     };
-    expect(structured.columns).toEqual(["ID", "Name"]);
+    // Empty content array means no rows, so columns are derived as empty
+    expect(structured.columns).toEqual([]);
     expect(structured.rows).toHaveLength(0);
     expect(structured.rowCount).toBe(0);
     expect(result.isError).toBeUndefined();

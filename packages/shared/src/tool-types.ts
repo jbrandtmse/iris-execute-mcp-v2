@@ -10,6 +10,12 @@ import type { ZodObject } from "zod";
 import type { IrisHttpClient } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
 
+/** Result shape from pagination helpers. */
+export interface PaginateResult<T> {
+  page: T[];
+  nextCursor: string | undefined;
+}
+
 /**
  * Additional properties describing a tool to MCP clients.
  *
@@ -88,6 +94,17 @@ export interface ToolContext {
   atelierVersion: number;
   /** Full connection configuration. */
   config: IrisConnectionConfig;
+  /**
+   * Paginate an array of items with cursor-based pagination.
+   *
+   * Returns the current page of items and a `nextCursor` (undefined when
+   * no more pages exist).
+   *
+   * @param items    - Full array to paginate.
+   * @param cursor   - Opaque cursor from a previous page (undefined for first page).
+   * @param pageSize - Items per page (default: server default, typically 50).
+   */
+  paginate<T>(items: T[], cursor?: string, pageSize?: number): PaginateResult<T>;
 }
 
 /**

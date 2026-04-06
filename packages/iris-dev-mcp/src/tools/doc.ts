@@ -300,6 +300,10 @@ export const docListTool: ToolDefinition = {
         "ISO 8601 timestamp — when provided, only documents modified since this time are returned " +
         "(uses the Atelier /modified/ endpoint instead of /docnames/)",
       ),
+    cursor: z
+      .string()
+      .optional()
+      .describe("Pagination cursor from a previous response's nextCursor field"),
   }),
   annotations: {
     readOnlyHint: true,
@@ -309,13 +313,14 @@ export const docListTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { category, type, filter, generated, namespace, modifiedSince } = args as {
+    const { category, type, filter, generated, namespace, modifiedSince, cursor } = args as {
       category?: string;
       type?: string;
       filter?: string;
       generated?: boolean;
       namespace?: string;
       modifiedSince?: string;
+      cursor?: string;
     };
 
     const ns = ctx.resolveNamespace(namespace);
@@ -324,12 +329,14 @@ export const docListTool: ToolDefinition = {
     if (modifiedSince) {
       const path = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
       const response = await ctx.http.get(path);
-      const docs = response.result;
+      const allDocs: unknown[] = Array.isArray(response.result) ? response.result : [];
+      const { page, nextCursor } = ctx.paginate(allDocs, cursor);
+      const result = { items: page, ...(nextCursor ? { nextCursor } : {}) };
       return {
         content: [
-          { type: "text", text: JSON.stringify(docs, null, 2) },
+          { type: "text", text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: docs,
+        structuredContent: result,
       };
     }
 
@@ -348,13 +355,15 @@ export const docListTool: ToolDefinition = {
     const response = await ctx.http.get(fullPath);
 
     // result.content contains the document list from Atelier
-    const docs = response.result;
+    const allDocs: unknown[] = Array.isArray(response.result) ? response.result : [];
+    const { page, nextCursor } = ctx.paginate(allDocs, cursor);
+    const result = { items: page, ...(nextCursor ? { nextCursor } : {}) };
 
     return {
       content: [
-        { type: "text", text: JSON.stringify(docs, null, 2) },
+        { type: "text", text: JSON.stringify(result, null, 2) },
       ],
-      structuredContent: docs,
+      structuredContent: result,
     };
   },
 };

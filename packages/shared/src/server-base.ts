@@ -23,6 +23,7 @@ import type {
   ToolContext,
   ToolResult,
   ToolScope,
+  PaginateResult,
 } from "./tool-types.js";
 
 /** Default page size for tools/list pagination. */
@@ -40,11 +41,8 @@ export interface McpServerBaseOptions {
   config?: IrisConnectionConfig;
 }
 
-/** Result shape from {@link McpServerBase.paginate}. */
-export interface PaginateResult<T> {
-  page: T[];
-  nextCursor: string | undefined;
-}
+// PaginateResult is defined in tool-types.ts and re-exported from index.ts.
+export type { PaginateResult } from "./tool-types.js";
 
 /**
  * Encode a pagination cursor from an offset number.
@@ -89,12 +87,14 @@ export function decodeCursor(cursor: string | undefined): number {
  * @param config          - IRIS connection config.
  * @param http            - Shared HTTP client.
  * @param atelierVersion  - Negotiated Atelier version.
+ * @param pageSize        - Default page size for pagination (default: {@link DEFAULT_PAGE_SIZE}).
  */
 export function buildToolContext(
   scope: ToolScope,
   config: IrisConnectionConfig,
   http: IrisHttpClient,
   atelierVersion: number,
+  pageSize: number = DEFAULT_PAGE_SIZE,
 ): ToolContext {
   return {
     resolveNamespace(override?: string): string {
@@ -111,6 +111,14 @@ export function buildToolContext(
     http,
     atelierVersion,
     config,
+    paginate<T>(items: T[], cursor?: string, size: number = pageSize): PaginateResult<T> {
+      const offset = decodeCursor(cursor);
+      const page = items.slice(offset, offset + size);
+      const nextOffset = offset + size;
+      const nextCursor =
+        nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
+      return { page, nextCursor };
+    },
   };
 }
 

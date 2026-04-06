@@ -39,7 +39,7 @@
 
 - Batch delete uses individual DELETE calls instead of the Atelier batch endpoint (`DELETE /api/atelier/v{N}/{ns}/docs` with body array). This is because `IrisHttpClient.delete()` does not accept a body parameter. Consider adding a `deleteWithBody()` method to IrisHttpClient in a future story to support the batch endpoint for better performance with large deletions.
 - No input validation/sanitization on document name path parameter. Names like `../../etc/passwd` or `foo?bar=baz` are interpolated directly into the URL path. The Atelier API will likely reject malformed names, but client-side validation would provide earlier, clearer error messages.
-- `ctx.paginate()` is not available on ToolContext, so `iris.doc.list` cannot paginate large result sets as specified in the story tasks. The `paginate` method lives on McpServerBase, not ToolContext. Consider adding a `paginate` function to ToolContext or passing it via a callback in a future story.
+- ~~`ctx.paginate()` is not available on ToolContext, so `iris.doc.list` cannot paginate large result sets as specified in the story tasks. The `paginate` method lives on McpServerBase, not ToolContext. Consider adding a `paginate` function to ToolContext or passing it via a callback in a future story.~~ **RESOLVED in Story 3.0:** Added `paginate()` to ToolContext interface and `buildToolContext()`.
 
 ## Deferred from: code review of 2-3-document-metadata-and-modified-tracking (2026-04-05)
 
@@ -48,7 +48,7 @@
 
 ## Deferred from: code review of 2-4-compilation-tools (2026-04-05)
 
-- Test helper duplication across test files (`createMockHttp`, `createMockCtx`, `envelope` in both `compile.test.ts` and `doc.test.ts`). Consider extracting shared test helpers into a common test utility module to reduce maintenance burden and ensure consistency.
+- ~~Test helper duplication across test files (`createMockHttp`, `createMockCtx`, `envelope` in both `compile.test.ts` and `doc.test.ts`). Consider extracting shared test helpers into a common test utility module to reduce maintenance burden and ensure consistency.~~ **RESOLVED in Story 3.0.**
 
 ## Deferred from: code review of 2-6-document-format-and-xml-tools (2026-04-05)
 
@@ -58,4 +58,10 @@
 ## Deferred from: code review of 2-7-sql-execution-and-server-info (2026-04-05)
 
 - Client-side `maxRows` truncation in `iris.sql.execute` fetches all rows from the Atelier API before slicing. For very large result sets (e.g., millions of rows), this could cause excessive memory usage and slow response times. Consider investigating whether the Atelier `action/query` endpoint supports a server-side row limit parameter (e.g., `TOP` in the SQL or a request body parameter) to avoid transferring unnecessary data.
-- Test helper duplication: `createMockHttp`, `createMockCtx`, and `envelope` helper functions are duplicated across `sql.test.ts`, `server.test.ts`, `compile.test.ts`, `doc.test.ts`, and other test files. This is a recurring pattern noted in Story 2-4 as well. Consider extracting into a shared `__tests__/helpers.ts` module during Story 2-8 (unit and integration tests).
+- ~~Test helper duplication: `createMockHttp`, `createMockCtx`, and `envelope` helper functions are duplicated across `sql.test.ts`, `server.test.ts`, `compile.test.ts`, `doc.test.ts`, and other test files. This is a recurring pattern noted in Story 2-4 as well. Consider extracting into a shared `__tests__/helpers.ts` module during Story 2-8 (unit and integration tests).~~ **RESOLVED in Story 3.0:** Extracted to `packages/iris-dev-mcp/src/__tests__/test-helpers.ts`.
+
+## Deferred from: code review of 3-0-epic-2-deferred-cleanup (2026-04-06)
+
+- Mock `createMockCtx()` paginate function ignores cursor and pageSize arguments, always returning all items. If future tests need to verify cursor-forwarding behavior at the tool level (e.g., doc.list integration with pagination), the mock will need to be enhanced to simulate real pagination. Low priority since server-base.test.ts covers pagination logic in isolation.
+- No integration test verifying that `iris.doc.list` correctly forwards the `cursor` parameter through `ctx.paginate()` and returns `nextCursor` in its response. Both sides are tested independently (doc.test.ts tests handler wrapping, server-base.test.ts tests pagination logic), but an end-to-end path is not exercised. Low priority.
+- Invalid/corrupted cursor values silently decode to offset 0 (page 1) in `decodeCursor()`. Pre-existing behavior from Story 1-4, not introduced by this change. Consider returning an error or warning for malformed cursors.

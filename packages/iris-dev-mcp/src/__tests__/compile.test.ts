@@ -1,49 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope } from "@iris-mcp/shared";
+import type { ToolContext } from "@iris-mcp/shared";
 import { docCompileTool } from "../tools/compile.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function createMockHttp() {
-  return {
-    get: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    post: vi.fn(),
-    head: vi.fn(),
-  } as unknown as IrisHttpClient & {
-    get: ReturnType<typeof vi.fn>;
-    put: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-    post: ReturnType<typeof vi.fn>;
-    head: ReturnType<typeof vi.fn>;
-  };
-}
-
-function createMockCtx(http: IrisHttpClient): ToolContext {
-  return {
-    resolveNamespace: (override?: string) => override ?? "USER",
-    http,
-    atelierVersion: 7,
-    config: {
-      host: "localhost",
-      port: 52773,
-      username: "_SYSTEM",
-      password: "SYS",
-      namespace: "USER",
-      https: false,
-      baseUrl: "http://localhost:52773",
-    } as IrisConnectionConfig,
-  };
-}
-
-function envelope<T>(result: T, console: string[] = []): AtelierEnvelope<T> {
-  return {
-    status: { errors: [] },
-    console,
-    result,
-  };
-}
+import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── iris.doc.compile ───────────────────────────────────────────────
 

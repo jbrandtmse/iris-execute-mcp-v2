@@ -1,24 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, HeadResponse } from "@iris-mcp/shared";
+import type { ToolContext, HeadResponse } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { docGetTool, docPutTool, docDeleteTool, docListTool } from "../tools/doc.js";
+import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function createMockHttp() {
-  return {
-    get: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    post: vi.fn(),
-    head: vi.fn(),
-  } as unknown as IrisHttpClient & {
-    get: ReturnType<typeof vi.fn>;
-    put: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-    head: ReturnType<typeof vi.fn>;
-  };
-}
+// ── Local helpers ───────────────────────────────────────────────────
 
 /** Create a mock HeadResponse with optional headers. */
 function headResponse(
@@ -27,31 +13,6 @@ function headResponse(
 ): HeadResponse {
   const headers = new Headers(headerEntries);
   return { status, headers };
-}
-
-function createMockCtx(http: IrisHttpClient): ToolContext {
-  return {
-    resolveNamespace: (override?: string) => override ?? "USER",
-    http,
-    atelierVersion: 7,
-    config: {
-      host: "localhost",
-      port: 52773,
-      username: "_SYSTEM",
-      password: "SYS",
-      namespace: "USER",
-      https: false,
-      baseUrl: "http://localhost:52773",
-    } as IrisConnectionConfig,
-  };
-}
-
-function envelope<T>(result: T): AtelierEnvelope<T> {
-  return {
-    status: { errors: [] },
-    console: [],
-    result,
-  };
 }
 
 // ── iris.doc.get ────────────────────────────────────────────────────
@@ -407,7 +368,7 @@ describe("iris.doc.list", () => {
     expect(mockHttp.get).toHaveBeenCalledWith(
       "/api/atelier/v7/USER/docnames/*/*",
     );
-    expect(result.structuredContent).toEqual(docs);
+    expect(result.structuredContent).toEqual({ items: docs });
     expect(result.isError).toBeUndefined();
   });
 
@@ -445,14 +406,13 @@ describe("iris.doc.list", () => {
     expect(calledPath).toContain("generated=1");
   });
 
-  it("should return empty array for empty result (not error)", async () => {
+  it("should return empty items for empty result (not error)", async () => {
     mockHttp.get.mockResolvedValue(envelope([]));
 
     const result = await docListTool.handler({}, ctx);
 
-    expect(result.structuredContent).toEqual([]);
+    expect(result.structuredContent).toEqual({ items: [] });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0]?.text).toBe("[]");
   });
 
   // ── modifiedSince mode ──────────────────────────────────────────
@@ -471,7 +431,7 @@ describe("iris.doc.list", () => {
     expect(mockHttp.get).toHaveBeenCalledWith(
       `/api/atelier/v7/USER/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
     );
-    expect(result.structuredContent).toEqual(modifiedDocs);
+    expect(result.structuredContent).toEqual({ items: modifiedDocs });
     expect(result.isError).toBeUndefined();
   });
 

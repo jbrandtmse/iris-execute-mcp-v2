@@ -285,6 +285,86 @@ describe("server-base", () => {
     });
   });
 
+  describe("ToolContext.paginate (buildToolContext)", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockHttp = {} as any;
+    const config = makeConfig();
+
+    it("should return all items when they fit in a single page", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7);
+      const items = [1, 2, 3, 4, 5];
+      const result = ctx.paginate(items, undefined);
+      expect(result.page).toEqual(items);
+      expect(result.nextCursor).toBeUndefined();
+    });
+
+    it("should paginate across multiple pages using default page size", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7);
+      const items = Array.from({ length: 120 }, (_, i) => i);
+
+      // Page 1 (default 50)
+      const page1 = ctx.paginate(items, undefined);
+      expect(page1.page).toHaveLength(50);
+      expect(page1.page[0]).toBe(0);
+      expect(page1.nextCursor).toBeDefined();
+
+      // Page 2
+      const page2 = ctx.paginate(items, page1.nextCursor);
+      expect(page2.page).toHaveLength(50);
+      expect(page2.page[0]).toBe(50);
+      expect(page2.nextCursor).toBeDefined();
+
+      // Page 3 (last, partial)
+      const page3 = ctx.paginate(items, page2.nextCursor);
+      expect(page3.page).toHaveLength(20);
+      expect(page3.page[0]).toBe(100);
+      expect(page3.nextCursor).toBeUndefined();
+    });
+
+    it("should support custom page sizes", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7);
+      const items = [1, 2, 3, 4, 5];
+
+      const page1 = ctx.paginate(items, undefined, 2);
+      expect(page1.page).toEqual([1, 2]);
+      expect(page1.nextCursor).toBeDefined();
+
+      const page2 = ctx.paginate(items, page1.nextCursor, 2);
+      expect(page2.page).toEqual([3, 4]);
+      expect(page2.nextCursor).toBeDefined();
+
+      const page3 = ctx.paginate(items, page2.nextCursor, 2);
+      expect(page3.page).toEqual([5]);
+      expect(page3.nextCursor).toBeUndefined();
+    });
+
+    it("should respect custom page size passed to buildToolContext", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7, 3);
+      const items = [1, 2, 3, 4, 5];
+
+      const page1 = ctx.paginate(items, undefined);
+      expect(page1.page).toEqual([1, 2, 3]);
+      expect(page1.nextCursor).toBeDefined();
+
+      const page2 = ctx.paginate(items, page1.nextCursor);
+      expect(page2.page).toEqual([4, 5]);
+      expect(page2.nextCursor).toBeUndefined();
+    });
+
+    it("should handle empty items array", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7);
+      const result = ctx.paginate([], undefined);
+      expect(result.page).toEqual([]);
+      expect(result.nextCursor).toBeUndefined();
+    });
+
+    it("should handle undefined cursor as first page", () => {
+      const ctx = buildToolContext("NS", config, mockHttp, 7, 2);
+      const result = ctx.paginate([1, 2, 3], undefined);
+      expect(result.page).toEqual([1, 2]);
+    });
+  });
+
   describe("tool response format", () => {
     it("should define tools that return content array", async () => {
       const handler = vi.fn(async () => ({

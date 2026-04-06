@@ -1,49 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope } from "@iris-mcp/shared";
+import type { ToolContext } from "@iris-mcp/shared";
 import { docIndexTool, docSearchTool, macroInfoTool } from "../tools/intelligence.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function createMockHttp() {
-  return {
-    get: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    post: vi.fn(),
-    head: vi.fn(),
-  } as unknown as IrisHttpClient & {
-    get: ReturnType<typeof vi.fn>;
-    put: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-    post: ReturnType<typeof vi.fn>;
-    head: ReturnType<typeof vi.fn>;
-  };
-}
-
-function createMockCtx(http: IrisHttpClient, atelierVersion = 7): ToolContext {
-  return {
-    resolveNamespace: (override?: string) => override ?? "USER",
-    http,
-    atelierVersion,
-    config: {
-      host: "localhost",
-      port: 52773,
-      username: "_SYSTEM",
-      password: "SYS",
-      namespace: "USER",
-      https: false,
-      baseUrl: "http://localhost:52773",
-    } as IrisConnectionConfig,
-  };
-}
-
-function envelope<T>(result: T, console: string[] = []): AtelierEnvelope<T> {
-  return {
-    status: { errors: [] },
-    console,
-    result,
-  };
-}
+import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── iris.doc.index ────────────────────────────────────────────────
 
@@ -166,7 +124,7 @@ describe("iris.doc.search", () => {
     const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
     expect(calledPath).toContain("/api/atelier/v7/USER/action/search");
     expect(calledPath).toContain("query=%24%24%24OK");
-    expect(result.structuredContent).toEqual(searchResult);
+    expect(result.structuredContent).toEqual({ matches: searchResult });
   });
 
   it("should pass regex option as query parameter", async () => {
@@ -178,7 +136,7 @@ describe("iris.doc.search", () => {
     );
 
     const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain("regex=true");
+    expect(calledPath).toContain("regex=1");
   });
 
   it("should pass word, case, wild, and max options", async () => {
@@ -190,13 +148,13 @@ describe("iris.doc.search", () => {
     );
 
     const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain("word=true");
-    expect(calledPath).toContain("case=true");
-    expect(calledPath).toContain("wild=false");
+    expect(calledPath).toContain("word=1");
+    expect(calledPath).toContain("case=1");
+    expect(calledPath).toContain("wild=0");
     expect(calledPath).toContain("max=50");
   });
 
-  it("should return empty array when no results found (AC #4)", async () => {
+  it("should return empty matches when no results found (AC #4)", async () => {
     mockHttp.get.mockResolvedValue(envelope([]));
 
     const result = await docSearchTool.handler(
@@ -204,11 +162,11 @@ describe("iris.doc.search", () => {
       ctx,
     );
 
-    expect(result.structuredContent).toEqual([]);
+    expect(result.structuredContent).toEqual({ matches: [] });
     expect(result.isError).toBeUndefined();
   });
 
-  it("should return empty array when result is null/undefined", async () => {
+  it("should return empty matches when result is null/undefined", async () => {
     mockHttp.get.mockResolvedValue(envelope(null));
 
     const result = await docSearchTool.handler(
@@ -216,7 +174,7 @@ describe("iris.doc.search", () => {
       ctx,
     );
 
-    expect(result.structuredContent).toEqual([]);
+    expect(result.structuredContent).toEqual({ matches: [] });
   });
 
   it("should use namespace override when provided", async () => {

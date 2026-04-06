@@ -23,6 +23,7 @@ export type {
   ToolContext,
   ToolResult,
   ToolScope,
+  PaginateResult,
 } from "./tool-types.js";
 export {
   McpServerBase,
@@ -30,4 +31,4 @@ export {
   decodeCursor,
   buildToolContext,
 } from "./server-base.js";
-export type { McpServerBaseOptions, PaginateResult } from "./server-base.js";
+export type { McpServerBaseOptions } from "./server-base.js";

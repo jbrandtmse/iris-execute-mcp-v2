@@ -155,6 +155,7 @@ describe("tool-types", () => {
           https: false,
           baseUrl: "http://localhost:52773",
         },
+        paginate: <T>(items: T[]) => ({ page: items, nextCursor: undefined }),
       };
 
       expect(ctx.resolveNamespace()).toBe("HSCUSTOM");
