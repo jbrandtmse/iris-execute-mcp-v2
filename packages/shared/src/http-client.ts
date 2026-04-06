@@ -297,6 +297,15 @@ export class IrisHttpClient {
       );
     }
 
+    // For async work queue responses (HTTP 202), capture the Location header
+    // as `result.location` so callers can poll for job completion.
+    if (response.status === 202) {
+      const location = response.headers.get("Location");
+      if (location && envelope.result && typeof envelope.result === "object") {
+        (envelope.result as Record<string, unknown>).location = location;
+      }
+    }
+
     // Check for HTTP errors.
     // The Atelier API returns HTTP 400 on certain endpoints (e.g. action/search,
     // action/getmacrodefinition) even when the request is valid but yields no
