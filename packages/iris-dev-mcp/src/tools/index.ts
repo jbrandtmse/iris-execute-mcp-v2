@@ -14,6 +14,11 @@ import {
   docListTool,
 } from "./doc.js";
 import { docCompileTool } from "./compile.js";
+import {
+  docIndexTool,
+  docSearchTool,
+  macroInfoTool,
+} from "./intelligence.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -22,4 +27,7 @@ export const tools: ToolDefinition[] = [
   docDeleteTool,
   docListTool,
   docCompileTool,
+  docIndexTool,
+  docSearchTool,
+  macroInfoTool,
 ];

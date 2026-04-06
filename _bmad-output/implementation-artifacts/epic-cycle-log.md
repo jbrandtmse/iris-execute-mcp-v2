@@ -133,3 +133,26 @@
   - Partial-failure handling for batch deletes (review fix)
 - **Review findings:** 3 MEDIUM auto-resolved, 3 LOW deferred
 - **Test totals:** 145 unit tests (119 shared + 26 dev) + 13 integration tests = 158 total
+
+### Story 2.3: Document Metadata & Modified Tracking
+- **Status:** done
+- **Commit:** 0c5e475
+- **Files touched:**
+  - packages/shared/src/http-client.ts — head() returns HeadResponse now
+  - packages/shared/src/index.ts — HeadResponse export
+  - packages/iris-dev-mcp/src/tools/doc.ts — metadataOnly + modifiedSince params
+  - packages/iris-dev-mcp/src/__tests__/doc.test.ts — 7 new tests
+- **Key decisions:** HEAD for metadata, /modified/{timestamp} endpoint for modifiedSince
+- **Review findings:** 1 MEDIUM auto-resolved (URL encoding), 2 LOW deferred
+- **Test totals:** 152 unit tests + 13 integration tests = 165 total
+
+### Story 2.4: Compilation Tools
+- **Status:** done
+- **Commit:** be5754f
+- **Files touched:**
+  - packages/iris-dev-mcp/src/tools/compile.ts — iris.doc.compile tool
+  - packages/iris-dev-mcp/src/tools/index.ts — wired compile tool
+  - packages/iris-dev-mcp/src/__tests__/compile.test.ts — 11 unit tests
+  - packages/iris-dev-mcp/src/__tests__/index.test.ts — updated count
+- **Key decisions:** Compilation errors return isError: false, async uses async=1 query param
+- **Test totals:** 163 unit tests (119 shared + 44 dev) + 13 integration tests = 176 total
