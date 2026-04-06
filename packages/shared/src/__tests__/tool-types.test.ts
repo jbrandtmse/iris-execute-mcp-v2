@@ -154,6 +154,7 @@ describe("tool-types", () => {
           namespace: "HSCUSTOM",
           https: false,
           baseUrl: "http://localhost:52773",
+          timeout: 60000,
         },
         paginate: <T>(items: T[]) => ({ page: items, nextCursor: undefined }),
       };

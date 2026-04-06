@@ -219,11 +219,11 @@ describe("bootstrap", () => {
       );
       expect(postCalls.length).toBe(1);
 
-      const url = postCalls[0][0] as string;
+      const url = postCalls[0]![0] as string;
       expect(url).toContain("/api/atelier/v7/USER/action/compile");
 
       const body = JSON.parse(
-        postCalls[0][1].body as string,
+        postCalls[0]![1].body as string,
       ) as string[];
       expect(body).toEqual([...BOOTSTRAP_CLASSES.keys()]);
 
@@ -250,11 +250,11 @@ describe("bootstrap", () => {
       );
       expect(postCalls.length).toBe(1);
 
-      const url = postCalls[0][0] as string;
+      const url = postCalls[0]![0] as string;
       expect(url).toContain("/api/atelier/v7/USER/action/query");
 
       const body = JSON.parse(
-        postCalls[0][1].body as string,
+        postCalls[0]![1].body as string,
       ) as { query: string };
       expect(body.query).toContain("ExecuteMCPv2.Setup_Configure");
       expect(body.query).toContain("USER");
