@@ -66,3 +66,18 @@
   - Namespace resolution: NS/BOTH use override or config default, SYS always %SYS, NONE empty
 - **Review findings:**
   - HIGH/MEDIUM auto-resolved, 4 LOW items deferred
+
+### Story 1.5: Shared Package Integration Tests
+- **Status:** done
+- **Commit:** 0c453bc
+- **Files touched:** 13 files
+  - New: 4 integration test files, integration-helpers.ts, integration-setup.ts, vitest.integration.config.ts
+  - Modified: vitest.config.ts (exclude integration), package.json (test:integration script)
+- **Key decisions:**
+  - IRIS availability detection via setupFiles (globalThis.__IRIS_AVAILABLE__) for synchronous describe.skipIf
+  - Separate vitest.integration.config.ts keeps integration tests out of turbo test
+  - Default credentials: _SYSTEM/SYS for local development
+  - Error tests run unconditionally (no IRIS needed)
+- **Review findings:**
+  - 3 MEDIUM auto-resolved, 1 LOW deferred
+- **Test totals:** 112 unit tests + 13 integration tests = 125 total

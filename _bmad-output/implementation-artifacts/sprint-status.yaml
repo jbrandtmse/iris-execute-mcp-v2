@@ -45,13 +45,13 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # Epic 1: Shared Infrastructure & Developer Connection
-  epic-1: in-progress
+  epic-1: done
   1-1-monorepo-scaffold-and-package-structure: done
   1-2-http-client-configuration-and-authentication: done
   1-3-connection-health-and-atelier-version-negotiation: done
   1-4-mcp-server-base-and-tool-registration-framework: done
   1-5-shared-package-integration-tests: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   # Epic 2: IRIS Development Tools — Atelier API (iris-dev-mcp)
   epic-2: backlog
