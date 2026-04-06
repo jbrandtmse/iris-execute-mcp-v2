@@ -45,3 +45,7 @@
 
 - `metadataOnly` combined with `format` parameter silently ignores the `format` option. If both are provided, `format` has no effect because the `metadataOnly` branch returns early before building query parameters. Consider either documenting this behavior or returning a validation error when both are set.
 - No unit test for `metadataOnly` with a `namespace` override. The code path is identical to the non-metadata path (uses `resolveNamespace` the same way), so risk is low, but adding a test would improve coverage symmetry with the `modifiedSince` + namespace test.
+
+## Deferred from: code review of 2-4-compilation-tools (2026-04-05)
+
+- Test helper duplication across test files (`createMockHttp`, `createMockCtx`, `envelope` in both `compile.test.ts` and `doc.test.ts`). Consider extracting shared test helpers into a common test utility module to reduce maintenance burden and ensure consistency.
