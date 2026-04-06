@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-06"  # Updated: Story 4.1 code review passed, moved to done
+last_updated: "2026-04-06"  # Updated: Story 4.2 code review complete, moved to done
 # Updated by code review: 2-8 moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
@@ -84,7 +84,7 @@ development_status:
   epic-4: in-progress
   4-0-epic-3-deferred-cleanup: done
   4-1-iris-admin-mcp-package-setup-and-server-entry-point: done
-  4-2-namespace-and-database-management-tools: backlog
+  4-2-namespace-and-database-management-tools: done
   4-3-namespace-mapping-tools: backlog
   4-4-user-and-password-management-tools: backlog
   4-5-role-and-resource-management-tools: backlog

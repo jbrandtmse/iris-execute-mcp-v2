@@ -20,8 +20,8 @@ describe("iris-admin-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export an empty ToolDefinition array", () => {
-      expect(tools).toHaveLength(0);
+    it("should export 4 tool definitions", () => {
+      expect(tools).toHaveLength(4);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-admin-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 0 tools", () => {
+    it("should create a server instance with 4 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/admin",
         version: "0.0.0",
@@ -43,17 +43,21 @@ describe("iris-admin-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(0);
+      expect(server.toolCount).toBe(4);
     });
 
-    it("should report empty tool names", () => {
+    it("should report correct tool names", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/admin",
         version: "0.0.0",
         tools,
         needsCustomRest: true,
       });
-      expect(server.getToolNames()).toEqual([]);
+      const names = server.getToolNames();
+      expect(names).toContain("iris.namespace.manage");
+      expect(names).toContain("iris.namespace.list");
+      expect(names).toContain("iris.database.manage");
+      expect(names).toContain("iris.database.list");
     });
 
     it("should expose the underlying MCP SDK server", () => {
@@ -74,6 +78,17 @@ describe("iris-admin-mcp", () => {
         needsCustomRest: true,
       });
       expect(server.getTool("nonexistent")).toBeUndefined();
+    });
+
+    it("should find registered tools by name", () => {
+      const server = new McpServerBase({
+        name: "@iris-mcp/admin",
+        version: "0.0.0",
+        tools,
+        needsCustomRest: true,
+      });
+      expect(server.getTool("iris.namespace.manage")).toBeDefined();
+      expect(server.getTool("iris.database.list")).toBeDefined();
     });
   });
 

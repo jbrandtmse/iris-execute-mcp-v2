@@ -304,3 +304,16 @@
   - bootstrap-classes.ts already current (retro item dropped after verification)
 - **Review findings:** Code review passed, deferred items logged
 - **Test totals:** 151 shared + 197 dev = 348 total tests (5 new pagination tests)
+
+### Story 4.1: iris-admin-mcp Package Setup & Server Entry Point
+- **Status:** done
+- **Commit:** 981dccb
+- **Files touched:**
+  - Modified: `packages/iris-admin-mcp/package.json`, `packages/iris-admin-mcp/src/index.ts`, `pnpm-lock.yaml`
+  - New: `packages/iris-admin-mcp/src/transport.ts`, `packages/iris-admin-mcp/src/tools/index.ts`, `packages/iris-admin-mcp/vitest.config.ts`, `packages/iris-admin-mcp/src/__tests__/index.test.ts`
+- **Key decisions:**
+  - Extracted `resolveTransport()` into separate `transport.ts` module (improvement over iris-dev-mcp inlined pattern) for clean unit testing
+  - `needsCustomRest: true` — admin tools use custom REST service for all operations
+  - 14 unit tests covering transport resolution (7) and server creation (7)
+- **Review findings:** 0 HIGH, 0 MEDIUM, 2 LOW deferred (resolveTransport duplication, silent invalid CLI transport)
+- **Test totals:** 151 shared + 197 dev + 14 admin = 362 total tests

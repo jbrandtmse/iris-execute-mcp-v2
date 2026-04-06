@@ -488,8 +488,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 6 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(6);
+    it("should contain exactly 7 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(7);
     });
 
     it("should contain all required class names", () => {
@@ -500,6 +500,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Command.cls",
         "ExecuteMCPv2.REST.UnitTest.cls",
         "ExecuteMCPv2.REST.Global.cls",
+        "ExecuteMCPv2.REST.Config.cls",
       ];
       for (const name of expected) {
         expect(BOOTSTRAP_CLASSES.has(name)).toBe(true);

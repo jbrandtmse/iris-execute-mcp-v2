@@ -36,8 +36,11 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/global" Method="DELETE" Call="ExecuteMCPv2.REST.Global:KillGlobal" />
   <Route Url="/global/list" Method="GET" Call="ExecuteMCPv2.REST.Global:ListGlobals" />
 
-  <!-- Future Epic 4: Configuration Management -->
-  <!-- <Route Url="/config/:entity" Method="GET" Call="ExecuteMCPv2.REST.Config:GetConfig" /> -->
+  <!-- Epic 4: Configuration Management -->
+  <Route Url="/config/namespace" Method="GET" Call="ExecuteMCPv2.REST.Config:NamespaceList" />
+  <Route Url="/config/namespace" Method="POST" Call="ExecuteMCPv2.REST.Config:NamespaceManage" />
+  <Route Url="/config/database" Method="GET" Call="ExecuteMCPv2.REST.Config:DatabaseList" />
+  <Route Url="/config/database" Method="POST" Call="ExecuteMCPv2.REST.Config:DatabaseManage" />
 
   <!-- Future Epic 5: Interoperability Management -->
   <!-- <Route Url="/production/:action" Method="POST" Call="ExecuteMCPv2.REST.Production:Execute" /> -->

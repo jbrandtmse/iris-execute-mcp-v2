@@ -89,3 +89,7 @@
 
 - `resolveTransport()` logic is duplicated between `iris-dev-mcp/src/index.ts` (inline) and `iris-admin-mcp/src/transport.ts` (extracted module). The admin-mcp version is the better pattern (testable, separately importable). Consider moving `resolveTransport()` to `@iris-mcp/shared` and updating both packages to import from there.
 - Invalid CLI `--transport` values (e.g., `--transport=websocket`) are silently ignored without warning, while invalid `MCP_TRANSPORT` env var values produce a warning. Consider adding a warning for unrecognized CLI transport values for consistency. Pre-existing pattern from iris-dev-mcp.
+
+## Deferred from: code review of 4-2-namespace-and-database-management-tools (2026-04-06)
+
+- AC4 specifies "returns all databases with size, free space, and mount status" but `Config.Databases.Get` does not expose a free space property. The current implementation returns `size`, `maxSize`, and `mountAtStartup`/`mountRequired` but no free space. Providing actual free space would require querying the database file system (e.g., via `SYS.Database` class or `%SYS.DatabaseQuery`). Consider adding free space in a future enhancement if the use case is important.
