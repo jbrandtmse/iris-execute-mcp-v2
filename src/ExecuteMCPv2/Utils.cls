@@ -146,20 +146,25 @@ ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
     Set tSC = $$$OK
     Set pBody = ""
     Try {
-        ; Guard against undefined or non-object %request.Content
-        If '$IsObject($Get(%request.Content)) {
-            Quit
+        ; In %CSP.REST context, the POST body is available via %request.Content
+        ; which is a MultiDimensional property in %CSP.Request.
+        ; Use GetMimeData to safely access the body stream.
+        Set tStream = %request.GetMimeData("BODY")
+        If '$IsObject(tStream) {
+            ; Fallback: try reading Content directly using $Get with subscript
+            ; to avoid MultiDimensional property access error
+            Try {
+                Set tStream = %request.Content
+            } Catch {
+                Set tStream = ""
+            }
         }
-        If '%request.Content.Size {
-            Quit
-        }
-        Set tContent = %request.Content.Read()
-        If tContent = "" {
-            Quit
-        }
-        Set pBody = {}.%FromJSON(tContent)
+        If '$IsObject($Get(tStream)) Quit
+        Do tStream.Rewind()
+        If 'tStream.Size Quit
+        Set pBody = ##class(%DynamicObject).%FromJSON(tStream)
     } Catch ex {
-        Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body")
+        Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body: "_ex.DisplayString())
     }
     Quit tSC
 }
