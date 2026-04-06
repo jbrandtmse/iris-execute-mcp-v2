@@ -1692,6 +1692,160 @@ ClassMethod WebAppManage() As %Status
     Quit $$$OK
 }
 
+/// List all SSL/TLS configurations.
+/// <p>Switches to <code>%SYS</code> and queries <class>Security.SSLConfigs</class>
+/// via SQL. Returns a JSON array of SSL configuration objects with
+/// <code>name</code>, <code>description</code>, <code>type</code>,
+/// <code>enabled</code>, <code>certFile</code>, <code>keyFile</code>,
+/// <code>caFile</code>, <code>protocols</code>, <code>verifyPeer</code>,
+/// and other TLS settings.</p>
+ClassMethod SSLList() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        Set tResult = []
+
+        ; Use SQL to enumerate all SSL/TLS configurations
+        Set tStatement = ##class(%SQL.Statement).%New()
+        Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, Protocols, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tRS = tStatement.%Execute()
+
+        If tRS.%SQLCODE < 0 {
+            Set tSC = $$$ERROR($$$GeneralError, "SQL error listing SSL/TLS configurations: " _ tRS.%Message)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.%Next() {
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.%Get("Name"))
+            Do tEntry.%Set("description", tRS.%Get("Description"))
+            Do tEntry.%Set("certFile", tRS.%Get("CertificateFile"))
+            Do tEntry.%Set("keyFile", tRS.%Get("PrivateKeyFile"))
+            Do tEntry.%Set("caFile", tRS.%Get("CAFile"))
+            Do tEntry.%Set("caPath", tRS.%Get("CAPath"))
+            Do tEntry.%Set("cipherList", tRS.%Get("CipherList"))
+            Do tEntry.%Set("protocols", +tRS.%Get("Protocols"), "number")
+            Do tEntry.%Set("verifyPeer", +tRS.%Get("VerifyPeer"), "number")
+            Do tEntry.%Set("verifyDepth", +tRS.%Get("VerifyDepth"), "number")
+            Do tEntry.%Set("type", +tRS.%Get("Type"), "number")
+            Do tEntry.%Set("enabled", +tRS.%Get("Enabled"), "boolean")
+            Do tResult.%Push(tEntry)
+        }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, modify, or delete an SSL/TLS configuration.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code> (configuration name), and optional properties such as
+/// <code>certFile</code>, <code>keyFile</code>, <code>caFile</code>,
+/// <code>protocols</code>, <code>verifyPeer</code>, etc.
+/// Dispatches to <class>Security.SSLConfigs</class> in <code>%SYS</code>.</p>
+ClassMethod SSLManage() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "create" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("certFile") Set tProps("CertificateFile") = tBody.%Get("certFile")
+            If tBody.%IsDefined("keyFile") Set tProps("PrivateKeyFile") = tBody.%Get("keyFile")
+            If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
+            If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
+            If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
+            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
+            If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
+            If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")
+            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
+
+            Set tSC = ##class(Security.SSLConfigs).Create(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "created")
+            Do tResult.%Set("name", tName)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "modify" {
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("certFile") Set tProps("CertificateFile") = tBody.%Get("certFile")
+            If tBody.%IsDefined("keyFile") Set tProps("PrivateKeyFile") = tBody.%Get("keyFile")
+            If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
+            If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
+            If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
+            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
+            If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
+            If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")
+            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
+
+            Set tSC = ##class(Security.SSLConfigs).Modify(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "modified", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = ##class(Security.SSLConfigs).Delete(tName)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -1764,6 +1918,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/webapp" Method="GET" Call="ExecuteMCPv2.REST.Security:WebAppList" />
   <Route Url="/security/webapp" Method="POST" Call="ExecuteMCPv2.REST.Security:WebAppManage" />
   <Route Url="/security/webapp/:name" Method="GET" Call="ExecuteMCPv2.REST.Security:WebAppGet" />
+
+  <!-- Epic 4: Security / SSL/TLS Configuration Management -->
+  <Route Url="/security/ssl" Method="GET" Call="ExecuteMCPv2.REST.Security:SSLList" />
+  <Route Url="/security/ssl" Method="POST" Call="ExecuteMCPv2.REST.Security:SSLManage" />
 
   <!-- Future Epic 5: Interoperability Management -->
   <!-- <Route Url="/production/:action" Method="POST" Call="ExecuteMCPv2.REST.Production:Execute" /> -->

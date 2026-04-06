@@ -25,6 +25,7 @@ import {
   webappGetTool,
   webappListTool,
 } from "./webapp.js";
+import { sslManageTool, sslListTool } from "./ssl.js";
 
 /** All tool definitions registered by the iris-admin-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -46,4 +47,6 @@ export const tools: ToolDefinition[] = [
   webappManageTool,
   webappGetTool,
   webappListTool,
+  sslManageTool,
+  sslListTool,
 ];
