@@ -84,3 +84,8 @@
 - `./test-helpers` subpath export in `@iris-mcp/shared` package.json points to raw TypeScript source files (`./src/__tests__/test-helpers.ts`) rather than compiled dist output. This works in the monorepo because Vitest resolves TS directly, but would break for any external consumer using standard Node.js module resolution. Consider adding a build step for test-helpers or documenting the constraint.
 - `iris.global.list` pagination is client-side: the handler fetches all globals from the server, then slices the array via `ctx.paginate()`. For namespaces with thousands of globals, every page request re-fetches the full list. Consider server-side pagination via query parameters (offset/limit) in the custom REST endpoint in a future story.
 - `decodeCursor` with an offset beyond the array length produces an empty page without error. While safe, it could confuse API consumers who receive `{ globals: [], count: 0 }` from a valid cursor. Consider returning a user-friendly message or warning when cursor is past end-of-list.
+
+## Deferred from: code review of 4-1-iris-admin-mcp-package-setup-and-server-entry-point (2026-04-06)
+
+- `resolveTransport()` logic is duplicated between `iris-dev-mcp/src/index.ts` (inline) and `iris-admin-mcp/src/transport.ts` (extracted module). The admin-mcp version is the better pattern (testable, separately importable). Consider moving `resolveTransport()` to `@iris-mcp/shared` and updating both packages to import from there.
+- Invalid CLI `--transport` values (e.g., `--transport=websocket`) are silently ignored without warning, while invalid `MCP_TRANSPORT` env var values produce a warning. Consider adding a warning for unrecognized CLI transport values for consistency. Pre-existing pattern from iris-dev-mcp.

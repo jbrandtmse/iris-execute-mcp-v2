@@ -287,3 +287,20 @@
 
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.
+
+## Epic 4: IRIS Administration (iris-admin-mcp)
+
+### Story 4.0: Epic 3 Deferred Cleanup
+- **Status:** done
+- **Commit:** d5bd39e
+- **Files touched:**
+  - New: `packages/shared/src/zod-helpers.ts`, `packages/shared/src/__tests__/test-helpers.ts`
+  - Modified: `packages/shared/src/index.ts`, `packages/shared/package.json`, `packages/iris-dev-mcp/src/tools/zod-helpers.ts`, `packages/iris-dev-mcp/src/__tests__/test-helpers.ts`, `packages/iris-dev-mcp/src/tools/global.ts`, `packages/iris-dev-mcp/src/__tests__/global.test.ts`, `README.md`
+- **Key decisions:**
+  - `booleanParam` moved to shared via re-export pattern (iris-dev-mcp re-exports from shared for backwards compat)
+  - Test helpers moved to shared with subpath export `@iris-mcp/shared/test-helpers`
+  - Global list pagination uses `ctx.paginate()` with default 50/page
+  - Debug classes already absent from HSCUSTOM — no deletion needed
+  - bootstrap-classes.ts already current (retro item dropped after verification)
+- **Review findings:** Code review passed, deferred items logged
+- **Test totals:** 151 shared + 197 dev = 348 total tests (5 new pagination tests)
