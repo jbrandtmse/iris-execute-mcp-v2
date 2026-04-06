@@ -52,6 +52,7 @@ export function createMockCtx(
       namespace: "USER",
       https: false,
       baseUrl: "http://localhost:52773",
+      timeout: 60_000,
     } as IrisConnectionConfig,
     paginate<T>(items: T[], _cursor?: string, _pageSize?: number): PaginateResult<T> {
       return { page: items, nextCursor: undefined };

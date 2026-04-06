@@ -21,6 +21,8 @@ export interface IrisConnectionConfig {
   https: boolean;
   /** Computed base URL (`http(s)://host:port`). */
   baseUrl: string;
+  /** Default HTTP request timeout in milliseconds. */
+  timeout: number;
 }
 
 /**
@@ -34,6 +36,7 @@ export interface IrisConnectionConfig {
  * | IRIS_PASSWORD     | *(required)* |
  * | IRIS_NAMESPACE    | HSCUSTOM     |
  * | IRIS_HTTPS        | false        |
+ * | IRIS_TIMEOUT      | 60000        |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
  */
@@ -65,8 +68,16 @@ export function loadConfig(
     );
   }
 
+  const rawTimeout = env.IRIS_TIMEOUT;
+  const timeout = rawTimeout !== undefined ? Number(rawTimeout) : 60_000;
+  if (Number.isNaN(timeout) || timeout <= 0) {
+    throw new Error(
+      `IRIS_TIMEOUT must be a positive number of milliseconds. Received: "${rawTimeout}".`,
+    );
+  }
+
   const protocol = https ? "https" : "http";
   const baseUrl = `${protocol}://${host}:${port}`;
 
-  return { host, port, username, password, namespace, https, baseUrl };
+  return { host, port, username, password, namespace, https, baseUrl, timeout };
 }

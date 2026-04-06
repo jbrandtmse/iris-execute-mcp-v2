@@ -368,8 +368,8 @@ export class McpServerBase {
       this.config = loadConfig();
     }
 
-    // 2. Create HTTP client
-    this.http = new IrisHttpClient(this.config);
+    // 2. Create HTTP client (use config.timeout as server-level default)
+    this.http = new IrisHttpClient(this.config, this.config.timeout);
 
     // 3. Health check
     try {

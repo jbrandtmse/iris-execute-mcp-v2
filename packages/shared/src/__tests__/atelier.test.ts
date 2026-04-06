@@ -15,6 +15,7 @@ function makeConfig(): IrisConnectionConfig {
     namespace: "HSCUSTOM",
     https: false,
     baseUrl: "http://localhost:52773",
+    timeout: 60_000,
   };
 }
 

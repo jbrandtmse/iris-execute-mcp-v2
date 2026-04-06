@@ -85,4 +85,52 @@ describe("loadConfig", () => {
     expect(config.baseUrl).toBe("https://localhost:52773");
     expect(config.https).toBe(true);
   });
+
+  // ── IRIS_TIMEOUT ──────────────────────────────────────────────────
+
+  it("should default timeout to 60000 when IRIS_TIMEOUT is not set", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+    };
+    const config = loadConfig(env);
+    expect(config.timeout).toBe(60_000);
+  });
+
+  it("should parse IRIS_TIMEOUT from env var", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TIMEOUT: "120000",
+    };
+    const config = loadConfig(env);
+    expect(config.timeout).toBe(120_000);
+  });
+
+  it("should throw when IRIS_TIMEOUT is not a valid number", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TIMEOUT: "abc",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_TIMEOUT");
+  });
+
+  it("should throw when IRIS_TIMEOUT is zero", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TIMEOUT: "0",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_TIMEOUT");
+  });
+
+  it("should throw when IRIS_TIMEOUT is negative", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TIMEOUT: "-5000",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_TIMEOUT");
+  });
 });

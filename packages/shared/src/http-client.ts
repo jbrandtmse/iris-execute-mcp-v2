@@ -49,7 +49,7 @@ export class IrisHttpClient {
   /** Whether a session has been established. */
   private sessionEstablished = false;
 
-  constructor(config: IrisConnectionConfig, defaultTimeout = 30_000) {
+  constructor(config: IrisConnectionConfig, defaultTimeout = 60_000) {
     this.config = config;
     this.defaultTimeout = defaultTimeout;
   }
