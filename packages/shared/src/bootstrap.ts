@@ -125,7 +125,8 @@ export async function configureWebApp(
 ): Promise<void> {
   const path = atelierPath(version, config.namespace, "action/query");
   const body = {
-    query: `SELECT ExecuteMCPv2.Setup_Configure('${config.namespace}') AS ConfigureResult`,
+    query: "SELECT ExecuteMCPv2.Setup_Configure(?) AS ConfigureResult",
+    parameters: [config.namespace],
   };
   await http.post(path, body);
 }

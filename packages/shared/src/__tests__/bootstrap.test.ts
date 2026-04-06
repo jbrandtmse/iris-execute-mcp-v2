@@ -255,9 +255,9 @@ describe("bootstrap", () => {
 
       const body = JSON.parse(
         postCalls[0]![1].body as string,
-      ) as { query: string };
+      ) as { query: string; parameters?: string[] };
       expect(body.query).toContain("ExecuteMCPv2.Setup_Configure");
-      expect(body.query).toContain("USER");
+      expect(body.parameters).toContain("USER");
 
       http.destroy();
     });

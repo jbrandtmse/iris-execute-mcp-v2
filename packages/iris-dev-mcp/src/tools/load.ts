@@ -152,7 +152,7 @@ export const docLoadTool: ToolDefinition = {
     const ignoreConflictFlag = ignoreConflict !== false;
 
     // Find matching files
-    const files = globSync(globPattern.replace(/\\/g, "/"), { withFileTypes: false }) as string[];
+    const files = globSync(globPattern.replace(/\\/g, "/"), { withFileTypes: false });
 
     if (files.length === 0) {
       const result = { total: 0, uploaded: 0, failed: 0, failures: [] };

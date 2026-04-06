@@ -1,5 +1,5 @@
 /// Setup and configuration class for the ExecuteMCPv2 REST service.
-/// <p>Provides methods to register and unregister the <code>/api/executemcp</code>
+/// <p>Provides methods to register and unregister the <code>/api/executemcp/v2</code>
 /// web application on IRIS. This class is called by the auto-bootstrap flow
 /// (Story 3.6) and can also be invoked manually from the Terminal:</p>
 /// <example>
@@ -13,7 +13,7 @@ Class ExecuteMCPv2.Setup Extends %RegisteredObject
 /// Default web application name for the ExecuteMCPv2 REST service.
 Parameter WEBAPP = "/api/executemcp/v2";
 
-/// Register the <code>/api/executemcp</code> web application.
+/// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
 /// <class>ExecuteMCPv2.REST.Dispatch</class>. The operation is idempotent —
 /// calling Configure() multiple times has no side effects.</p>
@@ -77,7 +77,7 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
     Quit tSC
 }
 
-/// Remove the <code>/api/executemcp</code> web application.
+/// Remove the <code>/api/executemcp/v2</code> web application.
 /// <p>Deletes the web application registration. Does nothing if the
 /// web application does not exist (idempotent).</p>
 ClassMethod Uninstall() As %Status
@@ -98,7 +98,7 @@ ClassMethod Uninstall() As %Status
     Quit tSC
 }
 
-/// Check whether the <code>/api/executemcp</code> web application exists.
+/// Check whether the <code>/api/executemcp/v2</code> web application exists.
 /// <p>Returns 1 if registered, 0 if not.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {

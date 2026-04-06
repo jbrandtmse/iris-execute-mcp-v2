@@ -21,6 +21,7 @@
       <Resource Name="ExecuteMCPv2.Tests.GlobalTest.CLS"/>
       <Resource Name="ExecuteMCPv2.Tests.CommandTest.CLS"/>
       <Resource Name="ExecuteMCPv2.Tests.UnitTestTest.CLS"/>
+      <Resource Name="ExecuteMCPv2.Tests.SetupTest.CLS"/>
 
       <!-- Register the web application after compilation -->
       <Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>
