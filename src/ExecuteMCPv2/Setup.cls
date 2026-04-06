@@ -11,7 +11,7 @@ Class ExecuteMCPv2.Setup Extends %RegisteredObject
 {
 
 /// Default web application name for the ExecuteMCPv2 REST service.
-Parameter WEBAPP = "/api/executemcp";
+Parameter WEBAPP = "/api/executemcp/v2";
 
 /// Register the <code>/api/executemcp</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -59,6 +59,7 @@ ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
             Set tProps("Enabled") = 1
             Set tProps("AutheEnabled") = 64
             Set tProps("CSPZENEnabled") = 1
+            Set tProps("CookiePath") = "/"
             Set tProps("Resource") = ""
 
             Set tSC = ##class(Security.Applications).Create(tAppName, .tProps)

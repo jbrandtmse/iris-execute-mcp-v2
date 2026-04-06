@@ -42,7 +42,7 @@ To complete setup manually, choose one of:
    (Replace NAMESPACE with your target namespace, e.g. "USER")
 
 2. Management Portal: Navigate to System Administration > Security > Applications > Web Applications
-   Create application "/api/executemcp" with DispatchClass "ExecuteMCPv2.REST.Dispatch"
+   Create application "/api/executemcp/v2" with DispatchClass "ExecuteMCPv2.REST.Dispatch"
 
 3. IPM: If IPM is installed, run in any namespace:
    zpm "install iris-execute-mcp-v2"`;

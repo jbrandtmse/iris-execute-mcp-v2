@@ -195,7 +195,7 @@ Class ExecuteMCPv2.Setup Extends %RegisteredObject
 {
 
 /// Default web application name for the ExecuteMCPv2 REST service.
-Parameter WEBAPP = "/api/executemcp";
+Parameter WEBAPP = "/api/executemcp/v2";
 
 /// Register the <code>/api/executemcp</code> web application.
 /// <p>Creates or updates the web application to route requests to

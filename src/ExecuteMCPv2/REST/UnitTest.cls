@@ -8,6 +8,8 @@
 /// </ul>
 /// Uses the <code>/noload/nodelete</code> qualifiers since test classes are
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
+/// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
+/// its progress output from corrupting the HTTP response body.</p>
 Class ExecuteMCPv2.REST.UnitTest Extends %Atelier.REST
 {
 
@@ -63,14 +65,35 @@ ClassMethod RunTests() As %Status
         ; Determine method filter for "method" level
         Set tMethodFilter = ""
         If tLevel = "method" {
-            ; target format: "Package.ClassName:MethodName"
             If tTarget [ ":" {
                 Set tMethodFilter = $Piece(tTarget, ":", 2)
             }
         }
 
+        ; Redirect I/O to suppress RunTest console output
+        ; %UnitTest.Manager.RunTest writes progress/results directly to the
+        ; current device, which corrupts the HTTP response. We capture and
+        ; discard it using the same redirect pattern from Command.cls.
+        Set %ExecuteMCPOutput = ""
+        Set tInitIO = $IO
+        Set tWasRedirected = ##class(%Library.Device).ReDirectIO()
+        Set tOldMnemonic = ##class(%Library.Device).GetMnemonicRoutine()
+        Use tInitIO::("^"_$ZNAME)
+        Set tRedirected = 1
+        Do ##class(%Library.Device).ReDirectIO(1)
+
         ; Run tests with /noload/nodelete qualifiers
-        Set tSC = ##class(%UnitTest.Manager).RunTest(tTestSpec, "/noload/nodelete")
+        Try {
+            Set tTestSC = ##class(%UnitTest.Manager).RunTest(tTestSpec, "/noload/nodelete")
+        } Catch exTest {
+            Set tTestSC = exTest.AsStatus()
+        }
+
+        ; Restore I/O
+        Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
+        If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
+        Set tRedirected = 0
+        Kill %ExecuteMCPOutput
 
         ; Parse results regardless of RunTest status (tests may have failed but ran)
         Set tResult = ..ParseTestResults(tMethodFilter)
@@ -80,6 +103,15 @@ ClassMethod RunTests() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
         Set tSC = ex.AsStatus()
+        ; Ensure redirection is restored on unexpected error
+        Try {
+            If $Get(tRedirected) {
+                If $Get(tInitIO) '= "" {
+                    Use tInitIO::($Select($Get(tOldMnemonic)=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
+                }
+                Do ##class(%Library.Device).ReDirectIO(0)
+            }
+        } Catch {}
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
     }
     ; Always restore namespace
@@ -87,9 +119,22 @@ ClassMethod RunTests() As %Status
     Quit tSC
 }
 
+/// I/O redirect entry points for suppressing RunTest output.
+/// <p>All output from <code>%UnitTest.Manager.RunTest()</code> is captured
+/// and discarded to prevent it from corrupting the REST response.</p>
+ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
+{
+    Quit
+wstr(s) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s Quit
+wchr(a) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) Quit
+wnl Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) Quit
+wff Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) Quit
+wtab(n) New chars Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars Quit
+rstr(len,time) Quit ""
+rchr(time) Quit ""
+}
+
 /// Ensure <code>^UnitTestRoot</code> is set before running tests.
-/// <p>If the global is not defined, sets it to empty string to indicate
-/// tests are pre-compiled in memory. Preserves existing values.</p>
 ClassMethod EnsureTestEnvironment() As %Status
 {
     Set tSC = $$$OK
@@ -104,21 +149,15 @@ ClassMethod EnsureTestEnvironment() As %Status
 }
 
 /// Build the testspec string for <method>%UnitTest.Manager.RunTest</method>.
-/// <p>Converts the target and level into the appropriate testspec format
-/// for <code>/noload</code> mode.</p>
 ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 {
     If pLevel = "package" {
-        ; For package mode with /noload, use the package name as the testspec
         Quit pTarget
     }
     If pLevel = "class" {
-        ; For class mode with /noload, use the class name as testspec
         Quit pTarget
     }
     If pLevel = "method" {
-        ; For method mode, extract class name and run the whole class
-        ; Method filtering is done on the results
         If pTarget [ ":" {
             Quit $Piece(pTarget, ":", 1)
         }
@@ -128,8 +167,6 @@ ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 }
 
 /// Parse test results from the <code>%UnitTest_Result</code> SQL tables.
-/// <p>Queries the most recent test instance and builds a structured
-/// <class>%DynamicObject</class> with totals and per-method details.</p>
 ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
 {
     Set tResult = {}
@@ -141,7 +178,6 @@ ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
     Set tDuration = 0
 
     Try {
-        ; Get the most recent test instance ID
         Set tInstanceId = ""
         Set tStmt = ##class(%SQL.Statement).%New()
         Set tSC = tStmt.%Prepare("SELECT TOP 1 ID, Duration FROM %UnitTest_Result.TestInstance ORDER BY ID DESC")
@@ -171,7 +207,6 @@ ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
             Quit
         }
 
-        ; Query test methods for this instance
         Set tSQL = "SELECT tm.Name AS MethodName, tm.Status AS MethodStatus, tm.Duration AS MethodDuration, "_
                    "tc.Name AS ClassName "_
                    "FROM %UnitTest_Result.TestMethod tm "_
@@ -199,7 +234,6 @@ ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
             Set tStatus = tRS2.%Get("MethodStatus")
             Set tMethodDur = +tRS2.%Get("MethodDuration")
 
-            ; Apply method filter if specified
             If (pMethodFilter '= "") && (tMethodName '= pMethodFilter) {
                 Continue
             }
@@ -209,14 +243,12 @@ ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
             Do tDetail.%Set("method", tMethodName)
             Do tDetail.%Set("duration", tMethodDur, "number")
 
-            ; Map status: 1 = passed, 0 = failed
             If tStatus = 1 {
                 Do tDetail.%Set("status", "passed")
                 Do tDetail.%Set("message", "")
                 Set tPassed = tPassed + 1
             } Else {
                 Do tDetail.%Set("status", "failed")
-                ; Get failure message from assertions
                 Set tMsg = ..GetFailureMessage(tInstanceId, tClassName, tMethodName)
                 Do tDetail.%Set("message", tMsg)
                 Set tFailed = tFailed + 1
@@ -226,7 +258,6 @@ ClassMethod ParseTestResults(pMethodFilter As %String = "") As %DynamicObject
             Set tTotal = tTotal + 1
         }
     } Catch ex {
-        ; On any error, return what we have so far
         Do tResult.%Set("error", "Error parsing test results: " _ ex.DisplayString())
     }
 
