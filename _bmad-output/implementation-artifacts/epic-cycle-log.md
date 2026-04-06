@@ -156,3 +156,37 @@
   - packages/iris-dev-mcp/src/__tests__/index.test.ts — updated count
 - **Key decisions:** Compilation errors return isError: false, async uses async=1 query param
 - **Test totals:** 163 unit tests (119 shared + 44 dev) + 13 integration tests = 176 total
+
+### Story 2.5: Code Intelligence Tools
+- **Status:** done
+- **Commit:** d8feb4f
+- **Key decisions:** search is GET not POST (per vscode-objectscript), macro uses parallel Promise.all
+- **Test totals:** 184 unit tests (119 shared + 65 dev) + 13 integration tests
+
+### Story 2.6: Document Format & XML Tools
+- **Status:** done
+- **Commit:** 1d3ff1e
+- **Key decisions:** convert reuses doc GET with format param, xml_export uses v7+ action endpoints
+- **Test totals:** 199 unit tests (119 shared + 80 dev) + 13 integration tests
+
+### Story 2.7: SQL Execution & Server Info
+- **Status:** done
+- **Commit:** 4a54a19
+- **Key decisions:** maxRows default 1000 with .int().min(1) validation, server.info uses root endpoint
+- **Test totals:** 220 unit tests (119 shared + 101 dev) + 13 integration tests
+
+### Story 2.8: iris-dev-mcp Unit & Integration Tests
+- **Status:** done
+- **Commit:** 157aecb
+- **Files touched:**
+  - packages/iris-dev-mcp/src/__tests__/tools.integration.test.ts — 19 integration tests
+  - packages/iris-dev-mcp/src/__tests__/integration-setup.ts — IRIS availability + version detection
+  - packages/iris-dev-mcp/vitest.integration.config.ts — integration config
+  - packages/shared/src/atelier.ts — fixed negotiateVersion to read content.api
+  - packages/iris-dev-mcp/src/__tests__/doc.test.ts — 5 edge case tests added
+  - packages/iris-dev-mcp/src/__tests__/sql.test.ts — 1 edge case test added
+- **Key decisions:** Integration setup detects API version for skipIf gating, fixed negotiateVersion bug
+- **Test totals:** 226 unit tests (119 shared + 107 dev) + 32 integration tests (13 shared + 19 dev) = 258 total
+
+### Epic 3 Preparation Note
+- The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

@@ -54,7 +54,7 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: IRIS Development Tools — Atelier API (iris-dev-mcp)
-  epic-2: in-progress
+  epic-2: done
   2-0-epic-1-deferred-cleanup: done
   2-1-iris-dev-mcp-package-setup-and-server-entry-point: done
   2-2-document-crud-tools: done
@@ -64,7 +64,7 @@ development_status:
   2-6-document-format-and-xml-tools: done
   2-7-sql-execution-and-server-info: done
   2-8-iris-dev-mcp-unit-and-integration-tests: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Custom REST Service, Auto-Bootstrap & Execution Tools
   epic-3: backlog
