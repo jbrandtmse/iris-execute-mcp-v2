@@ -20,6 +20,8 @@ import {
   macroInfoTool,
 } from "./intelligence.js";
 import { docConvertTool, docXmlExportTool } from "./format.js";
+import { sqlExecuteTool } from "./sql.js";
+import { serverInfoTool, serverNamespaceTool } from "./server.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -33,4 +35,7 @@ export const tools: ToolDefinition[] = [
   macroInfoTool,
   docConvertTool,
   docXmlExportTool,
+  sqlExecuteTool,
+  serverInfoTool,
+  serverNamespaceTool,
 ];

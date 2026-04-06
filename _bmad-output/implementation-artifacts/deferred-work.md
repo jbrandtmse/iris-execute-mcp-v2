@@ -54,3 +54,8 @@
 
 - Duplicated body construction logic in `docXmlExportTool` handler: the `import` and `list` switch branches both split content by `\r?\n` and wrap in `[{ file: "import.xml", content: lines }]`. Consider extracting a shared helper (e.g., `buildXmlPayload(content: string)`) to reduce duplication.
 - Missing error propagation test for `docXmlExportTool`. The `docConvertTool` tests include a "propagate connection failures" test but `docXmlExportTool` does not have an equivalent test for HTTP/connection errors. Consider adding one for consistency.
+
+## Deferred from: code review of 2-7-sql-execution-and-server-info (2026-04-05)
+
+- Client-side `maxRows` truncation in `iris.sql.execute` fetches all rows from the Atelier API before slicing. For very large result sets (e.g., millions of rows), this could cause excessive memory usage and slow response times. Consider investigating whether the Atelier `action/query` endpoint supports a server-side row limit parameter (e.g., `TOP` in the SQL or a request body parameter) to avoid transferring unnecessary data.
+- Test helper duplication: `createMockHttp`, `createMockCtx`, and `envelope` helper functions are duplicated across `sql.test.ts`, `server.test.ts`, `compile.test.ts`, `doc.test.ts`, and other test files. This is a recurring pattern noted in Story 2-4 as well. Consider extracting into a shared `__tests__/helpers.ts` module during Story 2-8 (unit and integration tests).

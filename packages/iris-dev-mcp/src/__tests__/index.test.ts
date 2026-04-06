@@ -19,8 +19,8 @@ describe("iris-dev-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export the document CRUD, compilation, intelligence, and format tools", () => {
-      expect(tools).toHaveLength(10);
+    it("should export the document CRUD, compilation, intelligence, format, SQL, and server tools", () => {
+      expect(tools).toHaveLength(13);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris.doc.get");
       expect(names).toContain("iris.doc.put");
@@ -32,6 +32,9 @@ describe("iris-dev-mcp", () => {
       expect(names).toContain("iris.macro.info");
       expect(names).toContain("iris.doc.convert");
       expect(names).toContain("iris.doc.xml_export");
+      expect(names).toContain("iris.sql.execute");
+      expect(names).toContain("iris.server.info");
+      expect(names).toContain("iris.server.namespace");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -45,14 +48,14 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 10 tools", () => {
+    it("should create a server instance with 13 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(10);
+      expect(server.toolCount).toBe(13);
     });
 
     it("should report all tool names", () => {
@@ -72,6 +75,9 @@ describe("iris-dev-mcp", () => {
         "iris.macro.info",
         "iris.doc.convert",
         "iris.doc.xml_export",
+        "iris.sql.execute",
+        "iris.server.info",
+        "iris.server.namespace",
       ]);
     });
 
