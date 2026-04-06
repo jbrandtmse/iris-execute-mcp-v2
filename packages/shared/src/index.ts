@@ -8,7 +8,7 @@ export {
   McpProtocolError,
 } from "./errors.js";
 export { IrisHttpClient } from "./http-client.js";
-export type { RequestOptions, AtelierEnvelope } from "./http-client.js";
+export type { RequestOptions, AtelierEnvelope, HeadResponse } from "./http-client.js";
 export { logger } from "./logger.js";
 export type { Logger } from "./logger.js";
 export { checkHealth, ping } from "./health.js";

@@ -19,7 +19,8 @@ export const docGetTool: ToolDefinition = {
   name: "iris.doc.get",
   title: "Get Document",
   description:
-    "Retrieve an ObjectScript class, routine, CSP page, or include file by name.",
+    "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
+    "Use metadataOnly to check existence and get the last-modified timestamp without downloading content.",
   inputSchema: z.object({
     name: z
       .string()
@@ -32,6 +33,12 @@ export const docGetTool: ToolDefinition = {
       .enum(["udl", "xml"])
       .optional()
       .describe("Output format (default: udl)"),
+    metadataOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, only check existence and return metadata (Last-Modified timestamp) without downloading content",
+      ),
   }),
   annotations: {
     readOnlyHint: true,
@@ -41,13 +48,45 @@ export const docGetTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { name, namespace, format } = args as {
+    const { name, namespace, format, metadataOnly } = args as {
       name: string;
       namespace?: string;
       format?: "udl" | "xml";
+      metadataOnly?: boolean;
     };
 
     const ns = ctx.resolveNamespace(namespace);
+
+    // ── Metadata-only mode: HEAD request ──────────────────────────
+    if (metadataOnly) {
+      const path = atelierPath(ctx.atelierVersion, ns, `doc/${name}`);
+      try {
+        const headResp = await ctx.http.head(path);
+        const lastModified = headResp.headers.get("Last-Modified") ?? undefined;
+        const etag = headResp.headers.get("ETag") ?? undefined;
+        const metadata = { exists: true, name, timestamp: lastModified, etag };
+        return {
+          content: [
+            { type: "text", text: JSON.stringify(metadata, null, 2) },
+          ],
+          structuredContent: metadata,
+        };
+      } catch (error: unknown) {
+        if (error instanceof IrisApiError && error.statusCode === 404) {
+          const metadata = { exists: false, name };
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(metadata, null, 2) },
+            ],
+            structuredContent: metadata,
+            isError: false,
+          };
+        }
+        throw error;
+      }
+    }
+
+    // ── Full document retrieval: GET request ──────────────────────
     const params = new URLSearchParams();
     if (format) params.set("format", format);
     const qs = params.toString();
@@ -226,7 +265,8 @@ export const docListTool: ToolDefinition = {
   name: "iris.doc.list",
   title: "List Documents",
   description:
-    "List ObjectScript documents in a namespace with optional category and type filters.",
+    "List ObjectScript documents in a namespace with optional category and type filters. " +
+    "Use modifiedSince to find documents changed after a given timestamp.",
   inputSchema: z.object({
     category: z
       .enum(["CLS", "RTN", "CSP", "OTH", "*"])
@@ -248,6 +288,13 @@ export const docListTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured)"),
+    modifiedSince: z
+      .string()
+      .optional()
+      .describe(
+        "ISO 8601 timestamp — when provided, only documents modified since this time are returned " +
+        "(uses the Atelier /modified/ endpoint instead of /docnames/)",
+      ),
   }),
   annotations: {
     readOnlyHint: true,
@@ -257,15 +304,31 @@ export const docListTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { category, type, filter, generated, namespace } = args as {
+    const { category, type, filter, generated, namespace, modifiedSince } = args as {
       category?: string;
       type?: string;
       filter?: string;
       generated?: boolean;
       namespace?: string;
+      modifiedSince?: string;
     };
 
     const ns = ctx.resolveNamespace(namespace);
+
+    // ── Modified-since mode: use /modified/{timestamp} endpoint ───
+    if (modifiedSince) {
+      const path = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
+      const response = await ctx.http.get(path);
+      const docs = response.result;
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(docs, null, 2) },
+        ],
+        structuredContent: docs,
+      };
+    }
+
+    // ── Standard listing: use /docnames/ endpoint ────────────────
     const cat = category ?? "*";
     const typ = type ?? "*";
     const path = atelierPath(ctx.atelierVersion, ns, `docnames/${cat}/${typ}`);

@@ -117,3 +117,19 @@
   - console.error warning on invalid transport value (review fix)
 - **Review findings:** 1 MEDIUM auto-resolved (silent transport fallback), 3 LOW deferred
 - **Test totals:** 126 unit tests (119 shared + 7 new) + 13 integration tests = 139 total
+
+### Story 2.2: Document CRUD Tools
+- **Status:** done
+- **Commit:** fb4d7db
+- **Files touched:**
+  - packages/iris-dev-mcp/src/tools/doc.ts — 4 tool definitions (get, put, delete, list)
+  - packages/iris-dev-mcp/src/tools/index.ts — wired doc tools
+  - packages/iris-dev-mcp/src/__tests__/doc.test.ts — 18 unit tests (15 original + 3 review additions)
+  - packages/iris-dev-mcp/src/__tests__/index.test.ts — updated for 4-tool array
+  - packages/iris-dev-mcp/package.json — added zod dependency
+- **Key decisions:**
+  - Batch delete uses individual DELETE calls (IrisHttpClient.delete has no body param)
+  - URLSearchParams for all query construction (review standardization)
+  - Partial-failure handling for batch deletes (review fix)
+- **Review findings:** 3 MEDIUM auto-resolved, 3 LOW deferred
+- **Test totals:** 145 unit tests (119 shared + 26 dev) + 13 integration tests = 158 total

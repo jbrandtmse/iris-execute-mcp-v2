@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope } from "@iris-mcp/shared";
+import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, HeadResponse } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { docGetTool, docPutTool, docDeleteTool, docListTool } from "../tools/doc.js";
 
@@ -16,7 +16,17 @@ function createMockHttp() {
     get: ReturnType<typeof vi.fn>;
     put: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
+    head: ReturnType<typeof vi.fn>;
   };
+}
+
+/** Create a mock HeadResponse with optional headers. */
+function headResponse(
+  status: number,
+  headerEntries: Record<string, string> = {},
+): HeadResponse {
+  const headers = new Headers(headerEntries);
+  return { status, headers };
 }
 
 function createMockCtx(http: IrisHttpClient): ToolContext {
@@ -125,6 +135,71 @@ describe("iris.doc.get", () => {
     await expect(
       docGetTool.handler({ name: "Broken.cls" }, ctx),
     ).rejects.toThrow(IrisApiError);
+  });
+
+  // ── metadataOnly mode ───────────────────────────────────────────
+
+  it("should call HEAD and return exists/timestamp when metadataOnly=true", async () => {
+    mockHttp.head.mockResolvedValue(
+      headResponse(200, {
+        "Last-Modified": "Sat, 05 Apr 2026 12:00:00 GMT",
+        "ETag": '"abc123"',
+      }),
+    );
+
+    const result = await docGetTool.handler(
+      { name: "MyApp.Service.cls", metadataOnly: true },
+      ctx,
+    );
+
+    expect(mockHttp.head).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/doc/MyApp.Service.cls",
+    );
+    expect(mockHttp.get).not.toHaveBeenCalled();
+    expect(result.structuredContent).toEqual({
+      exists: true,
+      name: "MyApp.Service.cls",
+      timestamp: "Sat, 05 Apr 2026 12:00:00 GMT",
+      etag: '"abc123"',
+    });
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should return exists=false with isError=false on 404 when metadataOnly=true", async () => {
+    mockHttp.head.mockRejectedValue(
+      new IrisApiError(404, [], "/api/atelier/v7/USER/doc/Missing.cls"),
+    );
+
+    const result = await docGetTool.handler(
+      { name: "Missing.cls", metadataOnly: true },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual({
+      exists: false,
+      name: "Missing.cls",
+    });
+    expect(result.isError).toBe(false);
+  });
+
+  it("should re-throw non-404 errors in metadataOnly mode", async () => {
+    mockHttp.head.mockRejectedValue(
+      new IrisApiError(500, [], "/api/atelier/v7/USER/doc/Broken.cls"),
+    );
+
+    await expect(
+      docGetTool.handler({ name: "Broken.cls", metadataOnly: true }, ctx),
+    ).rejects.toThrow(IrisApiError);
+  });
+
+  it("should still use GET when metadataOnly is not set (regression)", async () => {
+    const docContent = { name: "Test.cls", content: ["Class Test {}"] };
+    mockHttp.get.mockResolvedValue(envelope(docContent));
+
+    await docGetTool.handler({ name: "Test.cls" }, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalled();
+    expect(mockHttp.head).not.toHaveBeenCalled();
   });
 });
 
@@ -340,5 +415,48 @@ describe("iris.doc.list", () => {
     expect(result.structuredContent).toEqual([]);
     expect(result.isError).toBeUndefined();
     expect(result.content[0]?.text).toBe("[]");
+  });
+
+  // ── modifiedSince mode ──────────────────────────────────────────
+
+  it("should call modified endpoint when modifiedSince is provided", async () => {
+    const modifiedDocs = [
+      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(modifiedDocs));
+
+    const result = await docListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      `/api/atelier/v7/USER/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
+    );
+    expect(result.structuredContent).toEqual(modifiedDocs);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should use namespace override with modifiedSince", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler(
+      { modifiedSince: "2026-04-01T00:00:00Z", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      `/api/atelier/v7/HSCUSTOM/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`,
+    );
+  });
+
+  it("should still call docnames when modifiedSince is not set (regression)", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler({ category: "CLS" }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("/docnames/");
+    expect(calledPath).not.toContain("/modified/");
   });
 });

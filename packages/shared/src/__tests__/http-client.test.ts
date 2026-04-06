@@ -663,7 +663,9 @@ describe("IrisHttpClient", () => {
       };
       fetchMock.mockResolvedValueOnce(resp);
 
-      await expect(client.head("/api/atelier/")).resolves.toBeUndefined();
+      const headResult = await client.head("/api/atelier/");
+      expect(headResult).toHaveProperty("status", 200);
+      expect(headResult).toHaveProperty("headers");
 
       const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("http://localhost:52773/api/atelier/");

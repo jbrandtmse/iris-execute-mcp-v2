@@ -9,6 +9,12 @@ import { IrisConnectionConfig } from "./config.js";
 import { IrisApiError, IrisConnectionError } from "./errors.js";
 import { logger } from "./logger.js";
 
+/** Response shape from HEAD requests — status code and response headers. */
+export interface HeadResponse {
+  status: number;
+  headers: Headers;
+}
+
 /** Options that callers may pass to individual requests. */
 export interface RequestOptions {
   /** Additional headers to merge into the request. */
@@ -81,13 +87,15 @@ export class IrisHttpClient {
   }
 
   /**
-   * Send a HEAD request. Returns nothing on success; throws on failure.
+   * Send a HEAD request. Returns status and headers on success; throws on failure.
    *
    * HEAD requests have no response body, so no JSON parsing is performed.
    * Cookies and auth are handled identically to other methods. CSRF tokens
    * are not sent since HEAD is idempotent.
+   *
+   * @returns An object containing the HTTP status code and response headers.
    */
-  async head(path: string, options?: RequestOptions): Promise<void> {
+  async head(path: string, options?: RequestOptions): Promise<HeadResponse> {
     return this.headRequest(path, options);
   }
 
@@ -324,12 +332,14 @@ export class IrisHttpClient {
    * Delegates to {@link executeFetch} for shared session/auth/error
    * handling, then checks the response status. CSRF tokens are not
    * sent since HEAD is idempotent.
+   *
+   * @returns An object containing the HTTP status code and response headers.
    */
   private async headRequest(
     path: string,
     options?: RequestOptions,
     isRetry = false,
-  ): Promise<void> {
+  ): Promise<HeadResponse> {
     const response = await this.executeFetch(
       "HEAD",
       path,
@@ -346,6 +356,8 @@ export class IrisHttpClient {
         `IRIS returned HTTP ${response.status} for HEAD ${path}. Check the request parameters and try again.`,
       );
     }
+
+    return { status: response.status, headers: response.headers };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────

@@ -40,3 +40,8 @@
 - Batch delete uses individual DELETE calls instead of the Atelier batch endpoint (`DELETE /api/atelier/v{N}/{ns}/docs` with body array). This is because `IrisHttpClient.delete()` does not accept a body parameter. Consider adding a `deleteWithBody()` method to IrisHttpClient in a future story to support the batch endpoint for better performance with large deletions.
 - No input validation/sanitization on document name path parameter. Names like `../../etc/passwd` or `foo?bar=baz` are interpolated directly into the URL path. The Atelier API will likely reject malformed names, but client-side validation would provide earlier, clearer error messages.
 - `ctx.paginate()` is not available on ToolContext, so `iris.doc.list` cannot paginate large result sets as specified in the story tasks. The `paginate` method lives on McpServerBase, not ToolContext. Consider adding a `paginate` function to ToolContext or passing it via a callback in a future story.
+
+## Deferred from: code review of 2-3-document-metadata-and-modified-tracking (2026-04-05)
+
+- `metadataOnly` combined with `format` parameter silently ignores the `format` option. If both are provided, `format` has no effect because the `metadataOnly` branch returns early before building query parameters. Consider either documenting this behavior or returning a validation error when both are set.
+- No unit test for `metadataOnly` with a `namespace` override. The code path is identical to the non-metadata path (uses `resolveNamespace` the same way), so risk is low, but adding a test would improve coverage symmetry with the `modifiedSince` + namespace test.
