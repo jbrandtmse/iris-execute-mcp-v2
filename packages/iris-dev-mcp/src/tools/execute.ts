@@ -80,6 +80,79 @@ export const executeCommandTool: ToolDefinition = {
   },
 };
 
+// ── iris.execute.tests ─────────────────────────────────────────
+
+export const executeTestsTool: ToolDefinition = {
+  name: "iris.execute.tests",
+  title: "Execute Tests",
+  description:
+    "Run ObjectScript unit tests at package, class, or method level with structured results. " +
+    "Returns total, passed, failed, skipped counts and per-test details.",
+  inputSchema: z.object({
+    target: z
+      .string()
+      .describe(
+        "Test target: package name (e.g., 'MyApp.Tests'), class name (e.g., 'MyApp.Tests.UtilsTest'), " +
+          "or class:method (e.g., 'MyApp.Tests.UtilsTest:TestSomething')",
+      ),
+    level: z
+      .enum(["package", "class", "method"])
+      .describe("Granularity of test execution"),
+    namespace: z
+      .string()
+      .optional()
+      .describe("Target namespace (default: configured)"),
+  }),
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  scope: "NS",
+  handler: async (args, ctx) => {
+    const { target, level, namespace } = args as {
+      target: string;
+      level: "package" | "class" | "method";
+      namespace?: string;
+    };
+
+    const ns = ctx.resolveNamespace(namespace);
+
+    const body: Record<string, unknown> = {
+      target,
+      level,
+      namespace: ns,
+    };
+
+    const path = `${BASE_URL}/tests`;
+
+    try {
+      const response = await ctx.http.post(path, body);
+      const result = response.result;
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result, null, 2) },
+        ],
+        structuredContent: result,
+      };
+    } catch (error: unknown) {
+      if (error instanceof IrisApiError) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error executing tests for '${target}': ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      throw error;
+    }
+  },
+};
+
 // ── iris.execute.classmethod ────────────────────────────────────
 
 export const executeClassMethodTool: ToolDefinition = {

@@ -31,6 +31,7 @@ import {
 import {
   executeCommandTool,
   executeClassMethodTool,
+  executeTestsTool,
 } from "./execute.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
@@ -54,4 +55,5 @@ export const tools: ToolDefinition[] = [
   globalListTool,
   executeCommandTool,
   executeClassMethodTool,
+  executeTestsTool,
 ];

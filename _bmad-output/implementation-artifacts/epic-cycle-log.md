@@ -230,5 +230,19 @@
 - **Review findings:** Auto-resolved and deferred items logged
 - **Test totals:** 29 IRIS unit tests + 263 TypeScript tests
 
+### Story 3.3: ObjectScript Execution REST Handler & Tools
+- **Status:** done
+- **Commit:** b9cb467
+- **Files touched:**
+  - Modified: REST/Command.cls (replaced stubs), tools/index.ts, __tests__/index.test.ts
+  - New: tools/execute.ts (2 tools), execute.test.ts (18 tests), Tests/CommandTest.cls (15 tests)
+- **Key decisions:**
+  - I/O capture via ##class(%Device).ReDirectIO(1) with label-based redirect tags (wstr/wchr/wnl/wff)
+  - %ExecuteMCPOutput process-private variable for output accumulation
+  - $ClassMethod() branching for 0-10 args (ObjectScript lacks spread/apply)
+  - OREF return values serialized as "<Object:ClassName>" string
+- **Review findings:** 2 MEDIUM auto-resolved (mnemonic restore in catch, OREF guard), 1 deferred (ByRef support)
+- **Test totals:** 44 IRIS unit tests + 281 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

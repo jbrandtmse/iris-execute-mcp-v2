@@ -4,6 +4,7 @@ import { IrisApiError } from "@iris-mcp/shared";
 import {
   executeCommandTool,
   executeClassMethodTool,
+  executeTestsTool,
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
@@ -282,5 +283,188 @@ describe("iris.execute.classmethod", () => {
   it("should have correct name and title", () => {
     expect(executeClassMethodTool.name).toBe("iris.execute.classmethod");
     expect(executeClassMethodTool.title).toBe("Execute Class Method");
+  });
+});
+
+// ── iris.execute.tests ─────────────────────────────────────────
+
+describe("iris.execute.tests", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("should send POST with target and level in body and return structured results", async () => {
+    const testResult = {
+      total: 3,
+      passed: 3,
+      failed: 0,
+      skipped: 0,
+      duration: 50,
+      details: [
+        { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: "passed", duration: 10, message: "" },
+        { class: "MyApp.Tests.UtilsTest", method: "TestFormat", status: "passed", duration: 15, message: "" },
+        { class: "MyApp.Tests.UtilsTest", method: "TestParse", status: "passed", duration: 25, message: "" },
+      ],
+    };
+    mockHttp.post.mockResolvedValue(envelope(testResult));
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests", level: "package" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/tests",
+      expect.objectContaining({
+        target: "MyApp.Tests",
+        level: "package",
+        namespace: "USER",
+      }),
+    );
+
+    const structured = result.structuredContent as typeof testResult;
+    expect(structured.total).toBe(3);
+    expect(structured.passed).toBe(3);
+    expect(structured.failed).toBe(0);
+    expect(structured.details).toHaveLength(3);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should handle mixed results (some pass, some fail)", async () => {
+    const testResult = {
+      total: 2,
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      duration: 30,
+      details: [
+        { class: "MyApp.Tests.UtilsTest", method: "TestGood", status: "passed", duration: 10, message: "" },
+        {
+          class: "MyApp.Tests.UtilsTest",
+          method: "TestBad",
+          status: "failed",
+          duration: 20,
+          message: "AssertEquals: Expected 'foo' but got 'bar'",
+        },
+      ],
+    };
+    mockHttp.post.mockResolvedValue(envelope(testResult));
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest", level: "class" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as typeof testResult;
+    expect(structured.total).toBe(2);
+    expect(structured.passed).toBe(1);
+    expect(structured.failed).toBe(1);
+    expect(structured.details[1]?.message).toContain("AssertEquals");
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should send method-level target correctly", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ total: 1, passed: 1, failed: 0, skipped: 0, duration: 5, details: [] }),
+    );
+
+    await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest:TestValidate", level: "method" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/tests",
+      expect.objectContaining({
+        target: "MyApp.Tests.UtilsTest:TestValidate",
+        level: "method",
+        namespace: "USER",
+      }),
+    );
+  });
+
+  it("should forward namespace override in body", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ total: 0, passed: 0, failed: 0, skipped: 0, duration: 0, details: [] }),
+    );
+
+    await executeTestsTool.handler(
+      { target: "MyApp.Tests", level: "package", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/tests",
+      expect.objectContaining({
+        namespace: "HSCUSTOM",
+      }),
+    );
+  });
+
+  it("should use default namespace when not specified", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ total: 0, passed: 0, failed: 0, skipped: 0, duration: 0, details: [] }),
+    );
+
+    await executeTestsTool.handler(
+      { target: "MyApp.Tests", level: "package" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/tests",
+      expect.objectContaining({
+        namespace: "USER",
+      }),
+    );
+  });
+
+  it("should return isError on IrisApiError", async () => {
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        400,
+        [{ error: "Required parameter 'target' is missing" }],
+        "/api/executemcp/v2/tests",
+        "Required parameter 'target' is missing",
+      ),
+    );
+
+    const result = await executeTestsTool.handler(
+      { target: "", level: "package" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Error executing tests");
+  });
+
+  it("should propagate non-IrisApiError exceptions", async () => {
+    mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await expect(
+      executeTestsTool.handler({ target: "MyApp.Tests", level: "package" }, ctx),
+    ).rejects.toThrow("ECONNREFUSED");
+  });
+
+  it("should have correct annotations (readOnlyHint: true, destructiveHint: false)", () => {
+    expect(executeTestsTool.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+  });
+
+  it("should have scope NS", () => {
+    expect(executeTestsTool.scope).toBe("NS");
+  });
+
+  it("should have correct name and title", () => {
+    expect(executeTestsTool.name).toBe("iris.execute.tests");
+    expect(executeTestsTool.title).toBe("Execute Tests");
   });
 });

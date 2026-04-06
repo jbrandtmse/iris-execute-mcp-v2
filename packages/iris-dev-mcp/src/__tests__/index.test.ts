@@ -20,7 +20,7 @@ describe("iris-dev-mcp", () => {
     });
 
     it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, and execute tools", () => {
-      expect(tools).toHaveLength(19);
+      expect(tools).toHaveLength(20);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris.doc.get");
       expect(names).toContain("iris.doc.put");
@@ -54,14 +54,14 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 19 tools", () => {
+    it("should create a server instance with 20 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(19);
+      expect(server.toolCount).toBe(20);
     });
 
     it("should report all tool names", () => {
@@ -90,6 +90,7 @@ describe("iris-dev-mcp", () => {
         "iris.global.list",
         "iris.execute.command",
         "iris.execute.classmethod",
+        "iris.execute.tests",
       ]);
     });
 
