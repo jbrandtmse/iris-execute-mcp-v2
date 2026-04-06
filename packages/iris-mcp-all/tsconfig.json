@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../shared" },
+    { "path": "../iris-dev-mcp" },
+    { "path": "../iris-admin-mcp" },
+    { "path": "../iris-interop-mcp" },
+    { "path": "../iris-ops-mcp" },
+    { "path": "../iris-data-mcp" }
+  ]
+}

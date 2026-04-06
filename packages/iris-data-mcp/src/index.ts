@@ -1,0 +1,3 @@
+// @iris-mcp/data — IRIS Data & Analytics MCP Server
+// Entry point will be implemented in subsequent stories.
+export {};

@@ -1,0 +1,29 @@
+{
+  "name": "@iris-mcp/all",
+  "version": "0.0.0",
+  "description": "Meta-package that includes all IRIS MCP servers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@iris-mcp/shared": "workspace:*",
+    "@iris-mcp/dev": "workspace:*",
+    "@iris-mcp/admin": "workspace:*",
+    "@iris-mcp/interop": "workspace:*",
+    "@iris-mcp/ops": "workspace:*",
+    "@iris-mcp/data": "workspace:*"
+  }
+}

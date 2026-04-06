@@ -1,0 +1,21 @@
+{
+  "name": "@iris-mcp/shared",
+  "version": "0.0.0",
+  "description": "Shared utilities and types for IRIS MCP servers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  }
+}

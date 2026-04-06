@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Lock files
+pnpm-lock.yaml
+
+# Read-only reference directories
+sources/
+irislib/
+
+# Turbo cache
+.turbo/
+
+# Coverage
+coverage/
