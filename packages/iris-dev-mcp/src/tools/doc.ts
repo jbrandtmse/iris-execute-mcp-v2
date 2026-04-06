@@ -12,6 +12,7 @@
 
 import { atelierPath, IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
+import { booleanParam } from "./zod-helpers.js";
 
 // ── iris.doc.get ────────────────────────────────────────────────────
 
@@ -33,11 +34,10 @@ export const docGetTool: ToolDefinition = {
       .enum(["udl", "xml"])
       .optional()
       .describe("Output format (default: udl)"),
-    metadataOnly: z
-      .boolean()
+    metadataOnly: booleanParam
       .optional()
       .describe(
-        "When true, only check existence and return metadata (Last-Modified timestamp) without downloading content",
+        "Boolean (true/false). When true, only check existence and return metadata (Last-Modified timestamp) without downloading content",
       ),
   }),
   annotations: {
@@ -138,8 +138,7 @@ export const docPutTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured)"),
-    ignoreConflict: z
-      .boolean()
+    ignoreConflict: booleanParam
       .optional()
       .describe("If true, overwrite even when the server copy is newer"),
   }),
@@ -285,8 +284,7 @@ export const docListTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Substring filter on document names (e.g., 'MyApp' matches 'MyApp.Service.cls')"),
-    generated: z
-      .boolean()
+    generated: booleanParam
       .optional()
       .describe("Include generated documents (default: false)"),
     namespace: z

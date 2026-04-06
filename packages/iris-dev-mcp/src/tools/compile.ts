@@ -13,6 +13,7 @@
 
 import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
+import { booleanParam } from "./zod-helpers.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -52,8 +53,7 @@ export const docCompileTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Compilation flags (e.g., 'ck', 'cku'). Default: server default"),
-    async: z
-      .boolean()
+    async: booleanParam
       .optional()
       .describe("When true, queue asynchronous compilation and return a job ID for polling"),
     namespace: z

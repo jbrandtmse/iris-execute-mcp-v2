@@ -13,6 +13,7 @@ import { readFileSync, globSync } from "node:fs";
 import * as path from "node:path";
 import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
+import { booleanParam } from "./zod-helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -106,8 +107,7 @@ export const docLoadTool: ToolDefinition = {
         "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). " +
         "The directory prefix before the first glob metacharacter is used as the base for document name mapping.",
       ),
-    compile: z
-      .boolean()
+    compile: booleanParam
       .optional()
       .describe("When true, compile all successfully uploaded documents after upload (default: false)"),
     flags: z
@@ -118,8 +118,7 @@ export const docLoadTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured)"),
-    ignoreConflict: z
-      .boolean()
+    ignoreConflict: booleanParam
       .optional()
       .describe("If true (default), overwrite server copies even when newer"),
   }),

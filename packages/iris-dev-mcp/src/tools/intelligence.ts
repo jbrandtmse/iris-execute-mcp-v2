@@ -15,6 +15,7 @@ import {
   type ToolDefinition,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import { booleanParam } from "./zod-helpers.js";
 
 // ── iris.doc.index ─────────────────────────────────────────────────
 
@@ -75,32 +76,26 @@ export const docSearchTool: ToolDefinition = {
     query: z
       .string()
       .describe("Search query text or regex pattern"),
-    regex: z
-      .boolean()
+    regex: booleanParam
       .optional()
       .describe("Treat query as a regular expression (default: false)"),
-    word: z
-      .boolean()
+    word: booleanParam
       .optional()
       .describe("Match whole words only (default: false)"),
-    case: z
-      .boolean()
+    case: booleanParam
       .optional()
       .describe("Case-sensitive search (default: false)"),
-    wild: z
-      .boolean()
+    wild: booleanParam
       .optional()
       .describe("Enable wildcard matching (default: false)"),
     files: z
       .string()
       .optional()
       .describe("File pattern filter (e.g., '*.cls,*.mac'). Default: '*.cls,*.mac,*.int,*.inc'"),
-    sys: z
-      .boolean()
+    sys: booleanParam
       .optional()
       .describe("Include system items (default: false)"),
-    gen: z
-      .boolean()
+    gen: booleanParam
       .optional()
       .describe("Include generated items (default: false)"),
     max: z
