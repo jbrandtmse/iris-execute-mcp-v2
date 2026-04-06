@@ -35,3 +35,18 @@
 - **Review findings:**
   - Code review passed with minor deferred items
   - Deferred: license fields, turbo test config for empty packages
+
+### Story 1.3: Connection Health & Atelier Version Negotiation
+- **Status:** done
+- **Commit:** cc7cf2e
+- **Files touched:** 11 files
+  - New modules: health.ts, atelier.ts
+  - New tests: health.test.ts (7 tests), atelier.test.ts (13 tests)
+  - Modified: http-client.ts (added head() method), index.ts (exports), http-client.test.ts (6 new head tests)
+- **Key decisions:**
+  - Separate headRequest() engine in IrisHttpClient to avoid JSON parsing on HEAD
+  - ping() in health module (not on client), returns boolean, never throws
+  - requireMinVersion throws IrisApiError (API capability, not connection issue)
+  - Version parsing extracts major from semver, caps at v8, defaults to v1
+- **Review findings:**
+  - Code review passed, deferred items logged

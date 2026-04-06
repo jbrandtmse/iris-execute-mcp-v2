@@ -17,3 +17,17 @@ export {
   requireMinVersion,
   atelierPath,
 } from "./atelier.js";
+export type {
+  ToolAnnotations,
+  ToolDefinition,
+  ToolContext,
+  ToolResult,
+  ToolScope,
+} from "./tool-types.js";
+export {
+  McpServerBase,
+  encodeCursor,
+  decodeCursor,
+  buildToolContext,
+} from "./server-base.js";
+export type { McpServerBaseOptions, PaginateResult } from "./server-base.js";
