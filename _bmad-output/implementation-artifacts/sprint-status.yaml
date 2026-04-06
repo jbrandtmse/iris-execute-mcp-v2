@@ -73,7 +73,7 @@ development_status:
   3-2-global-operations-rest-handler-and-tools: done
   3-3-objectscript-execution-rest-handler-and-tools: done
   3-4-unit-test-execution-rest-handler-and-tool: done
-  3-5-setup-class-and-ipm-module: backlog
+  3-5-setup-class-and-ipm-module: done
   3-6-auto-bootstrap-flow: backlog
   3-7-epic-3-unit-and-integration-tests: backlog
   3-8-configurable-http-client-timeout: backlog

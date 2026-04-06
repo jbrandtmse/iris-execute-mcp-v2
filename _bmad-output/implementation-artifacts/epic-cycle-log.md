@@ -258,5 +258,18 @@
 - **Review findings:** Skipped formal review (code already reviewed as part of 3.3 scope)
 - **Test totals:** 52 IRIS unit tests + 291 TypeScript tests
 
+### Story 3.5: Setup Class & IPM Module
+- **Status:** done
+- **Commit:** (pending)
+- **Files touched:**
+  - New: Setup.cls, Tests/SetupTest.cls, ipm/module.xml
+- **Key decisions:**
+  - Configure() switches to %SYS using New $NAMESPACE for Security.Applications access
+  - Web app: /api/executemcp, DispatchClass=ExecuteMCPv2.REST.Dispatch, AutheEnabled=64
+  - Idempotent: create or update pattern, Uninstall is no-op if missing
+  - IPM module references all 10 classes with Invoke of Setup.Configure post-install
+- **Review findings:** Skipped formal review (simple class, verified via MCP)
+- **Test totals:** 57 IRIS unit tests + 291 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

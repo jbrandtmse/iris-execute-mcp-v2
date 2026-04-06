@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26">
+  <Document name="iris-execute-mcp-v2.ZPM">
+    <Module>
+      <Name>iris-execute-mcp-v2</Name>
+      <Version>0.1.0</Version>
+      <Description>IRIS Execute MCP v2 — Custom REST service providing global operations, ObjectScript execution, and unit test execution endpoints for MCP tool servers.</Description>
+      <Packaging>module</Packaging>
+      <SourcesRoot>src</SourcesRoot>
+
+      <!-- Core classes -->
+      <Resource Name="ExecuteMCPv2.Utils.CLS"/>
+      <Resource Name="ExecuteMCPv2.Setup.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Dispatch.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Command.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Global.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.UnitTest.CLS"/>
+
+      <!-- Test classes (loaded but not required for production) -->
+      <Resource Name="ExecuteMCPv2.Tests.UtilsTest.CLS"/>
+      <Resource Name="ExecuteMCPv2.Tests.GlobalTest.CLS"/>
+      <Resource Name="ExecuteMCPv2.Tests.CommandTest.CLS"/>
+      <Resource Name="ExecuteMCPv2.Tests.UnitTestTest.CLS"/>
+
+      <!-- Register the web application after compilation -->
+      <Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>
+    </Module>
+  </Document>
+</Export>
