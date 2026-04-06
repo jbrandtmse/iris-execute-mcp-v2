@@ -69,25 +69,28 @@ export const sqlExecuteTool: ToolDefinition = {
     try {
       const response = await ctx.http.post(path, body);
 
-      // The Atelier query response has result.content with columns and rows
-      const content = (response.result as { content?: unknown[] })?.content;
-      const queryResult = Array.isArray(content) ? content[0] : undefined;
+      // The Atelier query response returns result.content as an array of
+      // row objects, e.g. [{ Col1: "val", Col2: 42 }, …].
+      const content = (response.result as { content?: Record<string, unknown>[] })?.content;
+      const allRowObjects = Array.isArray(content) ? content : [];
 
+      // Derive column names from the first row's keys
       const columns: string[] =
-        (queryResult as { columns?: string[] })?.columns ?? [];
-      const allRows: unknown[][] =
-        (queryResult as { rows?: unknown[][] })?.rows ?? [];
+        allRowObjects.length > 0 ? Object.keys(allRowObjects[0] as Record<string, unknown>) : [];
 
       // Apply maxRows limit
       const limit = maxRows ?? DEFAULT_MAX_ROWS;
-      const rows = allRows.slice(0, limit);
-      const truncated = allRows.length > limit;
+      const limited = allRowObjects.slice(0, limit);
+      const truncated = allRowObjects.length > limit;
+
+      // Convert row objects to positional arrays for tabular output
+      const rows = limited.map((row) => columns.map((col) => row[col]));
 
       const result = {
         columns,
         rows,
         rowCount: rows.length,
-        ...(truncated ? { truncated: true, totalAvailable: allRows.length } : {}),
+        ...(truncated ? { truncated: true, totalAvailable: allRowObjects.length } : {}),
       };
 
       return {

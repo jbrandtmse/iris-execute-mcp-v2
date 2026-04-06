@@ -56,7 +56,7 @@ export const docConvertTool: ToolDefinition = {
     const params = new URLSearchParams();
     params.set("format", targetFormat);
     const path =
-      atelierPath(ctx.atelierVersion, ns, `doc/${name}`) +
+      atelierPath(ctx.atelierVersion, ns, `doc/${encodeURIComponent(name)}`) +
       `?${params.toString()}`;
 
     const response = await ctx.http.get(path);

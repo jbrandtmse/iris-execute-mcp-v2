@@ -297,15 +297,23 @@ export class IrisHttpClient {
       );
     }
 
-    // Check for HTTP errors
+    // Check for HTTP errors.
+    // The Atelier API returns HTTP 400 on certain endpoints (e.g. action/search,
+    // action/getmacrodefinition) even when the request is valid but yields no
+    // results. When the envelope contains no Atelier-level errors we treat this
+    // as a successful (empty) response rather than throwing.
     if (!response.ok) {
       const errors = envelope?.status?.errors ?? [];
-      throw new IrisApiError(
-        response.status,
-        errors,
-        path,
-        `IRIS returned HTTP ${response.status} for ${method} ${path}. Check the request parameters and try again.`,
-      );
+      const isEmptyResult400 =
+        response.status === 400 && errors.length === 0;
+      if (!isEmptyResult400) {
+        throw new IrisApiError(
+          response.status,
+          errors,
+          path,
+          `IRIS returned HTTP ${response.status} for ${method} ${path}. Check the request parameters and try again.`,
+        );
+      }
     }
 
     // Check for Atelier-level errors

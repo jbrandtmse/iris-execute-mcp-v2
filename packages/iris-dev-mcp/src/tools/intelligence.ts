@@ -149,15 +149,16 @@ export const docSearchTool: ToolDefinition = {
     const ns = ctx.resolveNamespace(namespace);
 
     // Atelier actionSearch is a GET with query params (v2+)
+    // Boolean flags must be sent as numeric 1/0
     const params = new URLSearchParams();
     params.set("query", query);
-    if (regex !== undefined) params.set("regex", String(regex));
-    if (word !== undefined) params.set("word", String(word));
-    if (caseSensitive !== undefined) params.set("case", String(caseSensitive));
-    if (wild !== undefined) params.set("wild", String(wild));
+    if (regex !== undefined) params.set("regex", regex ? "1" : "0");
+    if (word !== undefined) params.set("word", word ? "1" : "0");
+    if (caseSensitive !== undefined) params.set("case", caseSensitive ? "1" : "0");
+    if (wild !== undefined) params.set("wild", wild ? "1" : "0");
     if (files !== undefined) params.set("files", files);
-    if (sys !== undefined) params.set("sys", String(sys));
-    if (gen !== undefined) params.set("gen", String(gen));
+    if (sys !== undefined) params.set("sys", sys ? "1" : "0");
+    if (gen !== undefined) params.set("gen", gen ? "1" : "0");
     if (max !== undefined) params.set("max", String(max));
 
     const qs = params.toString();
@@ -166,7 +167,8 @@ export const docSearchTool: ToolDefinition = {
     const response = await ctx.http.get(path);
 
     // AC #4: empty results return empty array, not error
-    const result = response.result ?? [];
+    const matches = response.result ?? [];
+    const result = { matches: Array.isArray(matches) ? matches : [] };
     return {
       content: [
         { type: "text", text: JSON.stringify(result, null, 2) },
@@ -191,7 +193,7 @@ export const macroInfoTool: ToolDefinition = {
     document: z
       .string()
       .optional()
-      .describe("Document context for resolving the macro (e.g., 'MyApp.Service.cls'). Default: empty"),
+      .describe("Document context for macro resolution (e.g., 'MyApp.Service.cls'). Required for meaningful results — without it, resolution returns empty"),
     includes: z
       .array(z.string())
       .optional()

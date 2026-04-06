@@ -4,6 +4,28 @@
  * Detects the highest supported Atelier REST API version on the
  * connected IRIS instance and provides helpers for building
  * version-prefixed API paths.
+ *
+ * ## Atelier REST API Parameter Conventions
+ *
+ * When building requests against the Atelier API, observe these rules:
+ *
+ * - **Boolean query parameters** must be sent as numeric `1` or `0`,
+ *   not string `"true"` / `"false"`. The IRIS Atelier endpoint returns
+ *   HTTP 400 for non-numeric boolean flags.
+ *
+ * - **Document names** containing `%` (e.g., `%UnitTest.TestCase.cls`)
+ *   must be URL-encoded via `encodeURIComponent()` before embedding in
+ *   a path segment. A bare `%` is interpreted as a percent-encoding
+ *   prefix and causes HTTP 400 or garbled lookups.
+ *
+ * - **Namespace endpoint** (`/api/atelier/v{n}/{ns}`) must NOT have a
+ *   trailing slash. Use the path directly without an action suffix;
+ *   `atelierPath(v, ns, "")` produces a trailing slash that causes 404.
+ *
+ * - **SQL query responses** (`POST /action/query`) return rows as an
+ *   array of key-value objects at `result.content`, **not** a
+ *   `{ columns, rows }` structure. Each element is one row with column
+ *   names as keys.
  */
 
 import { IrisHttpClient } from "./http-client.js";

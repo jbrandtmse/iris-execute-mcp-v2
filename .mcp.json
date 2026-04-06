@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "node",
+      "args": ["packages/iris-dev-mcp/dist/index.js"],
+      "env": {
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "SYS",
+        "IRIS_NAMESPACE": "HSCUSTOM"
+      }
+    }
+  }
+}

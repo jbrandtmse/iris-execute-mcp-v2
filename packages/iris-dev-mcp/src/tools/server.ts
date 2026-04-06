@@ -8,7 +8,7 @@
  * These tools use the Atelier REST API via the shared {@link IrisHttpClient}.
  */
 
-import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import { type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 
 // ── iris.server.info ──────────────────────────────────────────────
@@ -65,8 +65,8 @@ export const serverNamespaceTool: ToolDefinition = {
     const { namespace } = args as { namespace?: string };
 
     const ns = ctx.resolveNamespace(namespace);
-    // The namespace-level Atelier endpoint returns namespace details
-    const path = atelierPath(ctx.atelierVersion, ns, "");
+    // The namespace-level Atelier endpoint: /api/atelier/v{n}/{ns}
+    const path = `/api/atelier/v${ctx.atelierVersion}/${ns}`;
 
     const response = await ctx.http.get(path);
 

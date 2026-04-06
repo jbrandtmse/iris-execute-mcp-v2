@@ -24,7 +24,7 @@ export const docGetTool: ToolDefinition = {
   inputSchema: z.object({
     name: z
       .string()
-      .describe("Document name (e.g., 'MyApp.Service.cls')"),
+      .describe("Full document name with extension (e.g., 'MyApp.Service.cls', '%UnitTest.TestCase.cls')"),
     namespace: z
       .string()
       .optional()
@@ -57,9 +57,12 @@ export const docGetTool: ToolDefinition = {
 
     const ns = ctx.resolveNamespace(namespace);
 
+    // URL-encode the document name so %-prefixed system classes are handled
+    const encodedName = encodeURIComponent(name);
+
     // ── Metadata-only mode: HEAD request ──────────────────────────
     if (metadataOnly) {
-      const path = atelierPath(ctx.atelierVersion, ns, `doc/${name}`);
+      const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`);
       try {
         const headResp = await ctx.http.head(path);
         const lastModified = headResp.headers.get("Last-Modified") ?? undefined;
@@ -90,7 +93,7 @@ export const docGetTool: ToolDefinition = {
     const params = new URLSearchParams();
     if (format) params.set("format", format);
     const qs = params.toString();
-    const path = atelierPath(ctx.atelierVersion, ns, `doc/${name}`) + (qs ? `?${qs}` : "");
+    const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`) + (qs ? `?${qs}` : "");
 
     try {
       const response = await ctx.http.get(path);
@@ -130,7 +133,7 @@ export const docPutTool: ToolDefinition = {
       .describe("Document name (e.g., 'MyApp.Service.cls')"),
     content: z
       .union([z.string(), z.array(z.string())])
-      .describe("Document content as a string or array of lines"),
+      .describe("Document content as a single string (split on newlines automatically) or array of lines"),
     namespace: z
       .string()
       .optional()
@@ -157,11 +160,12 @@ export const docPutTool: ToolDefinition = {
 
     const ns = ctx.resolveNamespace(namespace);
     const lines = Array.isArray(content) ? content : content.split(/\r?\n/);
+    const encodedName = encodeURIComponent(name);
     const params = new URLSearchParams();
     if (ignoreConflict) params.set("ignoreConflict", "1");
     const qs = params.toString();
     const path =
-      atelierPath(ctx.atelierVersion, ns, `doc/${name}`) + (qs ? `?${qs}` : "");
+      atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`) + (qs ? `?${qs}` : "");
 
     const body = { enc: false, content: lines };
     const response = await ctx.http.put(path, body);
@@ -222,7 +226,7 @@ export const docDeleteTool: ToolDefinition = {
 
     for (const docName of names) {
       try {
-        const path = atelierPath(ctx.atelierVersion, ns, `doc/${docName}`);
+        const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodeURIComponent(docName)}`);
         await ctx.http.delete(path);
         deleted.push(docName);
       } catch (error: unknown) {
@@ -266,6 +270,7 @@ export const docListTool: ToolDefinition = {
   title: "List Documents",
   description:
     "List ObjectScript documents in a namespace with optional category and type filters. " +
+    "WARNING: Without a filter, this returns ALL documents including system classes — use the filter parameter or category to limit results. " +
     "Use modifiedSince to find documents changed after a given timestamp.",
   inputSchema: z.object({
     category: z
@@ -279,7 +284,7 @@ export const docListTool: ToolDefinition = {
     filter: z
       .string()
       .optional()
-      .describe("Name filter pattern (e.g., 'MyApp.*.cls')"),
+      .describe("Substring filter on document names (e.g., 'MyApp' matches 'MyApp.Service.cls')"),
     generated: z
       .boolean()
       .optional()
