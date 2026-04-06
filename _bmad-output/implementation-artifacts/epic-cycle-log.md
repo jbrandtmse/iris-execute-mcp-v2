@@ -188,5 +188,20 @@
 - **Key decisions:** Integration setup detects API version for skipIf gating, fixed negotiateVersion bug
 - **Test totals:** 226 unit tests (119 shared + 107 dev) + 32 integration tests (13 shared + 19 dev) = 258 total
 
+## Epic 3: Custom REST Service, Auto-Bootstrap & Execution Tools
+
+### Story 3.0: Epic 2 Deferred Cleanup
+- **Status:** done
+- **Commit:** 2c3b246
+- **Files touched:**
+  - New: test-helpers.ts, atelier-api-reference.md
+  - Modified: 6 test files (shared helpers), doc.ts (pagination), tool-types.ts + server-base.ts + index.ts (ToolContext.paginate), 2 shared test files, deferred-work.md, sprint-status.yaml
+- **Key decisions:**
+  - Moved PaginateResult to tool-types.ts to avoid circular dependency
+  - iris.doc.list now returns `{ items, nextCursor }` paginated structure
+  - Fixed 11 pre-existing test-source mismatches from commit 3039025
+- **Review findings:** 1 MEDIUM auto-resolved (JSDoc), 3 LOW deferred
+- **Test totals:** 235 tests (128 shared + 107 dev)
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

@@ -65,3 +65,7 @@
 - Mock `createMockCtx()` paginate function ignores cursor and pageSize arguments, always returning all items. If future tests need to verify cursor-forwarding behavior at the tool level (e.g., doc.list integration with pagination), the mock will need to be enhanced to simulate real pagination. Low priority since server-base.test.ts covers pagination logic in isolation.
 - No integration test verifying that `iris.doc.list` correctly forwards the `cursor` parameter through `ctx.paginate()` and returns `nextCursor` in its response. Both sides are tested independently (doc.test.ts tests handler wrapping, server-base.test.ts tests pagination logic), but an end-to-end path is not exercised. Low priority.
 - Invalid/corrupted cursor values silently decode to offset 0 (page 1) in `decodeCursor()`. Pre-existing behavior from Story 1-4, not introduced by this change. Consider returning an error or warning for malformed cursors.
+
+## Deferred from: code review of 3-1-objectscript-rest-dispatch-and-utils-classes (2026-04-06)
+
+- Stub handler catch blocks (Command.cls, UnitTest.cls, Global.cls) do not call RenderResponseBody in the catch path, so errors return a bare %Status rather than the Atelier three-part envelope. These stubs will be replaced with full implementations in Stories 3.2-3.4, at which point the catch blocks must render a proper error response.
