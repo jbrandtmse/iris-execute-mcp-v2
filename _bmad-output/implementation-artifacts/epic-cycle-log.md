@@ -271,5 +271,19 @@
 - **Review findings:** Skipped formal review (simple class, verified via MCP)
 - **Test totals:** 57 IRIS unit tests + 291 TypeScript tests
 
+### Story 3.6: Auto-Bootstrap Flow
+- **Status:** done
+- **Commit:** (pending)
+- **Files touched:**
+  - New: bootstrap.ts, bootstrap-classes.ts, bootstrap.test.ts (15 tests)
+  - Modified: server-base.ts (needsCustomRest option, bootstrap step 4.5), index.ts (exports), iris-dev-mcp/index.ts (needsCustomRest: true), Setup.cls (SqlProc)
+- **Key decisions:**
+  - Solved chicken-and-egg: use Atelier SQL to call Setup.Configure() as stored procedure (no custom REST needed)
+  - Added [SqlProc] to Configure() and IsConfigured() in Setup.cls
+  - Bootstrap is no-throw: errors captured in result.errors[], configure failure is non-fatal
+  - needsCustomRest option on McpServerBaseOptions controls whether bootstrap runs
+  - 6 production .cls files embedded as string literals in bootstrap-classes.ts
+- **Test totals:** 57 IRIS unit tests + 306 TypeScript tests
+
 ### Epic 3 Preparation Note
 - The research document `_bmad-output/planning-artifacts/research/technical-iris-unittest-framework-setup-2026-04-05.md` documents `^UnitTestRoot` global setup and `/noload/nodelete` qualifiers for `%UnitTest.Manager.RunTest()`. This was NOT needed for Epic 2 (Atelier API only) but MUST be consumed during Epic 3 story creation, specifically Story 3.4 (Unit Test Execution REST Handler & Tool) and the `ExecuteMCPv2.REST.UnitTest` handler.

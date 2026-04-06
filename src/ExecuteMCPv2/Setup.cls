@@ -21,7 +21,7 @@ Parameter WEBAPP = "/api/executemcp";
 /// since <class>Security.Applications</class> requires it.</p>
 /// @param pNamespace The namespace where ExecuteMCPv2 classes are installed.
 ///        Defaults to the current namespace before switching to %SYS.
-ClassMethod Configure(pNamespace As %String = "") As %Status
+ClassMethod Configure(pNamespace As %String = "") As %Status [ SqlProc ]
 {
     Set tSC = $$$OK
     Try {
@@ -93,7 +93,7 @@ ClassMethod Uninstall() As %Status
 
 /// Check whether the <code>/api/executemcp</code> web application exists.
 /// <p>Returns 1 if registered, 0 if not.</p>
-ClassMethod IsConfigured() As %Boolean
+ClassMethod IsConfigured() As %Boolean [ SqlProc ]
 {
     Set tResult = 0
     Try {

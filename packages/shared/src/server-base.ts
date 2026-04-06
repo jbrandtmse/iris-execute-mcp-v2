@@ -17,6 +17,7 @@ import { loadConfig } from "./config.js";
 import { IrisHttpClient } from "./http-client.js";
 import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
+import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
 import type {
   ToolDefinition,
@@ -39,6 +40,8 @@ export interface McpServerBaseOptions {
   tools: ToolDefinition[];
   /** IRIS connection configuration. When omitted, {@link loadConfig} is used. */
   config?: IrisConnectionConfig;
+  /** When true, bootstrap the custom REST service on startup if not already deployed. */
+  needsCustomRest?: boolean;
 }
 
 // PaginateResult is defined in tool-types.ts and re-exported from index.ts.
@@ -390,6 +393,31 @@ export class McpServerBase {
     logger.info(
       `${this.options.name} v${this.options.version} starting with Atelier API v${this.atelierVersion}`,
     );
+
+    // 4.5. Bootstrap custom REST service if needed
+    if (this.options.needsCustomRest) {
+      try {
+        const result = await bootstrap(
+          this.http,
+          this.config,
+          this.atelierVersion,
+        );
+        if (result.errors.length > 0) {
+          logger.warn(
+            `Bootstrap completed with errors: ${result.errors.join("; ")}`,
+          );
+        }
+        if (result.manualInstructions) {
+          logger.warn(result.manualInstructions);
+        }
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        logger.warn(
+          `Bootstrap failed: ${message}. Custom REST tools may not work.`,
+        );
+      }
+    }
 
     // 5. Connect transport
     if (transport === "stdio") {

@@ -32,3 +32,12 @@ export {
   buildToolContext,
 } from "./server-base.js";
 export type { McpServerBaseOptions } from "./server-base.js";
+export {
+  bootstrap,
+  probeCustomRest,
+  deployClasses,
+  compileClasses,
+  configureWebApp,
+  MANUAL_INSTRUCTIONS,
+} from "./bootstrap.js";
+export type { BootstrapResult } from "./bootstrap.js";

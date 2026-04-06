@@ -48,6 +48,7 @@ const server = new McpServerBase({
   name: "@iris-mcp/dev",
   version: pkg.version,
   tools,
+  needsCustomRest: true,
 });
 
 const transport = resolveTransport();
