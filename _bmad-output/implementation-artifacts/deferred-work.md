@@ -107,3 +107,7 @@
 ## Deferred from: code review of 4-5-role-and-resource-management-tools (2026-04-06)
 
 - `PermissionCheck` in Security.cls does not check a user's directly-assigned resources (`Security.Users` `Resources` property). It only aggregates resources from the user's assigned roles. If a user has resources granted directly (not through a role), those resources will not be checked. Consider adding `$Get(tUserProps("Resources"))` to the permission aggregation logic for complete coverage.
+
+## Deferred from: code review of 4-6-web-application-management-tools (2026-04-06)
+
+- `WebAppManage` in Security.cls duplicates 11 lines of property-mapping logic between the `create` and `modify` branches (lines 916-927 and 938-949). Consider extracting a private helper method (e.g., `BuildWebAppProps`) that reads properties from the JSON body into the tProps array to eliminate the duplication.

@@ -3,8 +3,8 @@
  *
  * Exports all tool definitions to be registered with
  * {@link McpServerBase}. Includes namespace, database, mapping,
- * user, role, resource, and permission management tools from
- * Stories 4.2+.
+ * user, role, resource, permission, and web application management
+ * tools from Stories 4.2+.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -20,6 +20,11 @@ import {
 import { roleManageTool, roleListTool } from "./role.js";
 import { resourceManageTool, resourceListTool } from "./resource.js";
 import { permissionCheckTool } from "./permission.js";
+import {
+  webappManageTool,
+  webappGetTool,
+  webappListTool,
+} from "./webapp.js";
 
 /** All tool definitions registered by the iris-admin-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -38,4 +43,7 @@ export const tools: ToolDefinition[] = [
   resourceManageTool,
   resourceListTool,
   permissionCheckTool,
+  webappManageTool,
+  webappGetTool,
+  webappListTool,
 ];

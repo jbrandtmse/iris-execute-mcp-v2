@@ -760,4 +760,214 @@ ClassMethod PermissionCheck() As %Status
     Quit $$$OK
 }
 
+/// List all web applications, optionally filtered by namespace.
+/// <p>Switches to <code>%SYS</code> and queries <class>Security.Applications</class>
+/// via SQL. If a <code>namespace</code> query parameter is provided, only web
+/// applications targeting that namespace are returned. Returns a JSON array
+/// of web application objects.</p>
+ClassMethod WebAppList() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        ; Check for optional namespace filter from query parameter
+        Set tNamespaceFilter = $Get(%request.Data("namespace", 1))
+
+        Set tResult = []
+
+        ; Use SQL to enumerate web applications
+        If tNamespaceFilter '= "" {
+            Set tStatement = ##class(%SQL.Statement).%New()
+            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, Resource_, CookiePath FROM Security.Applications WHERE NameSpace = ?")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tRS = tStatement.%Execute(tNamespaceFilter)
+        }
+        Else {
+            Set tStatement = ##class(%SQL.Statement).%New()
+            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, Resource_, CookiePath FROM Security.Applications")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tRS = tStatement.%Execute()
+        }
+
+        If tRS.%SQLCODE < 0 {
+            Set tSC = $$$ERROR($$$GeneralError, "SQL error listing web applications: " _ tRS.%Message)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.%Next() {
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.%Get("Name"))
+            Do tEntry.%Set("namespace", tRS.%Get("NameSpace"))
+            Do tEntry.%Set("dispatchClass", tRS.%Get("DispatchClass"))
+            Do tEntry.%Set("description", tRS.%Get("Description"))
+            Do tEntry.%Set("enabled", +tRS.%Get("Enabled"), "boolean")
+            Do tEntry.%Set("authEnabled", +tRS.%Get("AutheEnabled"), "number")
+            Do tEntry.%Set("isNameSpaceDefault", +tRS.%Get("IsNameSpaceDefault"), "boolean")
+            Do tEntry.%Set("cspZenEnabled", +tRS.%Get("CSPZENEnabled"), "boolean")
+            Do tEntry.%Set("recurse", +tRS.%Get("Recurse"), "boolean")
+            Do tEntry.%Set("matchRoles", tRS.%Get("MatchRoles"))
+            Do tEntry.%Set("resource", tRS.%Get("Resource_"))
+            Do tEntry.%Set("cookiePath", tRS.%Get("CookiePath"))
+            Do tResult.%Push(tEntry)
+        }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Get a single web application by name.
+/// <p>Switches to <code>%SYS</code> and calls <method>Security.Applications.Get</method>
+/// to retrieve web application properties. The <var>pName</var> parameter should
+/// be URL-decoded by the dispatch framework (web app names start with <code>/</code>).</p>
+ClassMethod WebAppGet(pName As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Validate name parameter
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(pName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; URL-decode the name (webapp names contain '/')
+        Set pName = $ZCONVERT(pName, "I", "URL")
+
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        Set tSC = ##class(Security.Applications).Get(pName, .tProps)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tEntry = {}
+        Do tEntry.%Set("name", $Get(tProps("Name")))
+        Do tEntry.%Set("namespace", $Get(tProps("NameSpace")))
+        Do tEntry.%Set("dispatchClass", $Get(tProps("DispatchClass")))
+        Do tEntry.%Set("description", $Get(tProps("Description")))
+        Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+        Do tEntry.%Set("authEnabled", +$Get(tProps("AutheEnabled")), "number")
+        Do tEntry.%Set("isNameSpaceDefault", +$Get(tProps("IsNameSpaceDefault")), "boolean")
+        Do tEntry.%Set("cspZenEnabled", +$Get(tProps("CSPZENEnabled")), "boolean")
+        Do tEntry.%Set("recurse", +$Get(tProps("Recurse")), "boolean")
+        Do tEntry.%Set("matchRoles", $Get(tProps("MatchRoles")))
+        Do tEntry.%Set("resource", $Get(tProps("Resource")))
+        Do tEntry.%Set("cookiePath", $Get(tProps("CookiePath")))
+
+        Do ..RenderResponseBody($$$OK, , tEntry)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, modify, or delete a web application.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code> (web app path, e.g. "/api/myapp"), and optional properties.
+/// Dispatches to <class>Security.Applications</class> in <code>%SYS</code>.</p>
+/// <p><b>NOTE</b>: <method>Security.Applications.Create</method> does NOT notify
+/// the CSP gateway. Newly created web apps require either saving through the
+/// Management Portal or restarting the CSP gateway to become active.</p>
+ClassMethod WebAppManage() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "create" {
+            If tBody.%IsDefined("namespace") Set tProps("NameSpace") = tBody.%Get("namespace")
+            If tBody.%IsDefined("dispatchClass") Set tProps("DispatchClass") = tBody.%Get("dispatchClass")
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
+            If tBody.%IsDefined("authEnabled") Set tProps("AutheEnabled") = +tBody.%Get("authEnabled")
+            If tBody.%IsDefined("isNameSpaceDefault") Set tProps("IsNameSpaceDefault") = +tBody.%Get("isNameSpaceDefault")
+            If tBody.%IsDefined("cspZenEnabled") Set tProps("CSPZENEnabled") = +tBody.%Get("cspZenEnabled")
+            If tBody.%IsDefined("recurse") Set tProps("Recurse") = +tBody.%Get("recurse")
+            If tBody.%IsDefined("matchRoles") Set tProps("MatchRoles") = tBody.%Get("matchRoles")
+            If tBody.%IsDefined("resource") Set tProps("Resource") = tBody.%Get("resource")
+            If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
+
+            Set tSC = ##class(Security.Applications).Create(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "created")
+            Do tResult.%Set("name", tName)
+            Do tResult.%Set("caveat", "CSP gateway was NOT notified. Save through the Management Portal or restart the CSP gateway to activate this web application.")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "modify" {
+            If tBody.%IsDefined("namespace") Set tProps("NameSpace") = tBody.%Get("namespace")
+            If tBody.%IsDefined("dispatchClass") Set tProps("DispatchClass") = tBody.%Get("dispatchClass")
+            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
+            If tBody.%IsDefined("authEnabled") Set tProps("AutheEnabled") = +tBody.%Get("authEnabled")
+            If tBody.%IsDefined("isNameSpaceDefault") Set tProps("IsNameSpaceDefault") = +tBody.%Get("isNameSpaceDefault")
+            If tBody.%IsDefined("cspZenEnabled") Set tProps("CSPZENEnabled") = +tBody.%Get("cspZenEnabled")
+            If tBody.%IsDefined("recurse") Set tProps("Recurse") = +tBody.%Get("recurse")
+            If tBody.%IsDefined("matchRoles") Set tProps("MatchRoles") = tBody.%Get("matchRoles")
+            If tBody.%IsDefined("resource") Set tProps("Resource") = tBody.%Get("resource")
+            If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
+
+            Set tSC = ##class(Security.Applications).Modify(tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "modified", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = ##class(Security.Applications).Delete(tName)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }
