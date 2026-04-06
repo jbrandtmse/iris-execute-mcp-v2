@@ -20,8 +20,8 @@ describe("iris-admin-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export 4 tool definitions", () => {
-      expect(tools).toHaveLength(4);
+    it("should export 6 tool definitions", () => {
+      expect(tools).toHaveLength(6);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-admin-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 4 tools", () => {
+    it("should create a server instance with 6 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/admin",
         version: "0.0.0",
@@ -43,7 +43,7 @@ describe("iris-admin-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(4);
+      expect(server.toolCount).toBe(6);
     });
 
     it("should report correct tool names", () => {
@@ -58,6 +58,8 @@ describe("iris-admin-mcp", () => {
       expect(names).toContain("iris.namespace.list");
       expect(names).toContain("iris.database.manage");
       expect(names).toContain("iris.database.list");
+      expect(names).toContain("iris.mapping.manage");
+      expect(names).toContain("iris.mapping.list");
     });
 
     it("should expose the underlying MCP SDK server", () => {

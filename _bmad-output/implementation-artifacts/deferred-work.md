@@ -93,3 +93,7 @@
 ## Deferred from: code review of 4-2-namespace-and-database-management-tools (2026-04-06)
 
 - AC4 specifies "returns all databases with size, free space, and mount status" but `Config.Databases.Get` does not expose a free space property. The current implementation returns `size`, `maxSize`, and `mountAtStartup`/`mountRequired` but no free space. Providing actual free space would require querying the database file system (e.g., via `SYS.Database` class or `%SYS.DatabaseQuery`). Consider adding free space in a future enhancement if the use case is important.
+
+## Deferred from: code review of 4-3-namespace-mapping-tools (2026-04-06)
+
+- `tProps` not killed between loop iterations in `MappingList` (Config.cls). Properties from a prior mapping's `Config.Map*.Get` call could leak into the next entry if the Get response doesn't overwrite all subscripts (e.g., Collation from mapping A appearing on mapping B). Pre-existing pattern -- `NamespaceList` has the same issue with its `tProps` variable. Consider adding `Kill tProps` before each `Get` call across all list methods.

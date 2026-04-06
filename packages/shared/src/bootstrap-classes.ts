@@ -620,6 +620,185 @@ ClassMethod DatabaseManage() As %Status
     Quit $$$OK
 }
 
+/// List all global, routine, or package mappings for a namespace.
+/// <p>The <var>pType</var> URL parameter selects the mapping class:
+/// <code>global</code> -> <class>Config.MapGlobals</class>,
+/// <code>routine</code> -> <class>Config.MapRoutines</class>,
+/// <code>package</code> -> <class>Config.MapPackages</class>.
+/// Returns a JSON array of mapping objects for the requested namespace.</p>
+ClassMethod MappingList(pType As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Validate type parameter
+        If (pType '= "global") && (pType '= "routine") && (pType '= "package") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'type' must be one of: global, routine, package")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Get namespace from query parameter
+        Set tNamespace = $Get(%request.Data("namespace",1))
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tNamespace, "namespace")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        ; Determine mapping class based on type
+        If pType = "global" {
+            Set tClassName = "Config.MapGlobals"
+        }
+        ElseIf pType = "routine" {
+            Set tClassName = "Config.MapRoutines"
+        }
+        ElseIf pType = "package" {
+            Set tClassName = "Config.MapPackages"
+        }
+
+        ; List mappings for the namespace
+        Do $ClassMethod(tClassName, "List", tNamespace, .tList)
+
+        Set tResult = []
+        Set tKey = ""
+        For {
+            Set tKey = $Order(tList(tKey))
+            Quit:tKey=""
+
+            ; Get detailed properties for each mapping
+            Set tSC2 = $ClassMethod(tClassName, "Get", tNamespace, tKey, .tProps)
+            Set tEntry = {}
+            Do tEntry.%Set("name", tKey)
+            Do tEntry.%Set("type", pType)
+            Do tEntry.%Set("namespace", tNamespace)
+            If $$$ISOK(tSC2) {
+                Do tEntry.%Set("database", $Get(tProps("Database")))
+                If pType = "global" {
+                    If $Get(tProps("Collation")) '= "" Do tEntry.%Set("collation", tProps("Collation"))
+                    If $Get(tProps("LockDatabase")) '= "" Do tEntry.%Set("lockDatabase", tProps("LockDatabase"))
+                    If $Get(tProps("Subscript")) '= "" Do tEntry.%Set("subscript", tProps("Subscript"))
+                }
+            }
+            Do tResult.%Push(tEntry)
+        }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create or delete a global, routine, or package mapping.
+/// <p>The <var>pType</var> URL parameter selects the mapping class.
+/// Reads a JSON body with <code>action</code> (create|delete),
+/// <code>namespace</code>, <code>name</code>, and <code>database</code>
+/// (required for create). Additional type-specific properties are supported
+/// for global mappings: <code>collation</code>, <code>lockDatabase</code>,
+/// <code>subscript</code>.</p>
+ClassMethod MappingManage(pType As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Validate type parameter
+        If (pType '= "global") && (pType '= "routine") && (pType '= "package") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'type' must be one of: global, routine, package")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tNamespace = tBody.%Get("namespace")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tNamespace, "namespace")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value (only create and delete for mappings)
+        If (tAction '= "create") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Determine mapping class based on type
+        If pType = "global" {
+            Set tClassName = "Config.MapGlobals"
+        }
+        ElseIf pType = "routine" {
+            Set tClassName = "Config.MapRoutines"
+        }
+        ElseIf pType = "package" {
+            Set tClassName = "Config.MapPackages"
+        }
+
+        ; Switch to %SYS for Config operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "create" {
+            Set tDatabase = tBody.%Get("database")
+            If tDatabase = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'database' is required for create action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tProps("Database") = tDatabase
+
+            ; Global-specific optional properties
+            If pType = "global" {
+                If tBody.%Get("collation") '= "" Set tProps("Collation") = tBody.%Get("collation")
+                If tBody.%Get("lockDatabase") '= "" Set tProps("LockDatabase") = tBody.%Get("lockDatabase")
+                If tBody.%Get("subscript") '= "" Set tProps("Subscript") = tBody.%Get("subscript")
+            }
+
+            Set tSC = $ClassMethod(tClassName, "Create", tNamespace, tName, .tProps)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "created", "type": (pType), "namespace": (tNamespace), "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = $ClassMethod(tClassName, "Delete", tNamespace, tName)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "type": (pType), "namespace": (tNamespace), "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -667,6 +846,8 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/config/namespace" Method="POST" Call="ExecuteMCPv2.REST.Config:NamespaceManage" />
   <Route Url="/config/database" Method="GET" Call="ExecuteMCPv2.REST.Config:DatabaseList" />
   <Route Url="/config/database" Method="POST" Call="ExecuteMCPv2.REST.Config:DatabaseManage" />
+  <Route Url="/config/mapping/:type" Method="GET" Call="ExecuteMCPv2.REST.Config:MappingList" />
+  <Route Url="/config/mapping/:type" Method="POST" Call="ExecuteMCPv2.REST.Config:MappingManage" />
 
   <!-- Future Epic 5: Interoperability Management -->
   <!-- <Route Url="/production/:action" Method="POST" Call="ExecuteMCPv2.REST.Production:Execute" /> -->
