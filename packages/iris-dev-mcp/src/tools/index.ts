@@ -20,6 +20,7 @@ import {
   macroInfoTool,
 } from "./intelligence.js";
 import { docConvertTool, docXmlExportTool } from "./format.js";
+import { docLoadTool } from "./load.js";
 import { sqlExecuteTool } from "./sql.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
 import {
@@ -56,4 +57,5 @@ export const tools: ToolDefinition[] = [
   executeCommandTool,
   executeClassMethodTool,
   executeTestsTool,
+  docLoadTool,
 ];

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-06"  # Updated: 3-8 moved to done
+last_updated: "2026-04-06"  # Updated: 3-9 moved to done
 # Updated by code review: 2-8 moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
@@ -77,7 +77,7 @@ development_status:
   3-6-auto-bootstrap-flow: done
   3-7-epic-3-unit-and-integration-tests: done
   3-8-configurable-http-client-timeout: done
-  3-9-bulk-document-load-from-disk: backlog
+  3-9-bulk-document-load-from-disk: done
   epic-3-retrospective: optional
 
   # Epic 4: IRIS Administration (iris-admin-mcp)
