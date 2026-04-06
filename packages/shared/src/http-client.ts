@@ -80,6 +80,17 @@ export class IrisHttpClient {
     return this.request<T>("DELETE", path, undefined, options);
   }
 
+  /**
+   * Send a HEAD request. Returns nothing on success; throws on failure.
+   *
+   * HEAD requests have no response body, so no JSON parsing is performed.
+   * Cookies and auth are handled identically to other methods. CSRF tokens
+   * are not sent since HEAD is idempotent.
+   */
+  async head(path: string, options?: RequestOptions): Promise<void> {
+    return this.headRequest(path, options);
+  }
+
   // ── Core request engine ───────────────────────────────────────────
 
   private async request<T>(
@@ -239,6 +250,108 @@ export class IrisHttpClient {
       throw new IrisConnectionError(
         "UNKNOWN",
         `Unexpected error during ${method} ${path}`,
+        `Check network connectivity and IRIS availability`,
+      );
+    }
+  }
+
+  // ── HEAD request engine ────────────────────────────────────────────
+
+  /**
+   * Internal HEAD request handler — no response body parsing.
+   *
+   * Handles cookies, auth, and 401 retry identically to the main
+   * request engine, but does not attempt to read or parse the
+   * response body. CSRF tokens are not sent (HEAD is idempotent).
+   */
+  private async headRequest(
+    path: string,
+    options?: RequestOptions,
+    isRetry = false,
+  ): Promise<void> {
+    const url = `${this.config.baseUrl}${path}`;
+    const timeout = options?.timeout ?? this.defaultTimeout;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    const headers: Record<string, string> = {
+      ...options?.headers,
+    };
+
+    if (!this.sessionEstablished || isRetry) {
+      headers["Authorization"] = this.basicAuthHeader();
+    }
+
+    const cookieStr = this.buildCookieHeader();
+    if (cookieStr) {
+      headers["Cookie"] = cookieStr;
+    }
+
+    const start = Date.now();
+
+    try {
+      const response = await fetch(url, {
+        method: "HEAD",
+        headers,
+        signal: controller.signal,
+        keepalive: true,
+      });
+
+      clearTimeout(timer);
+      const duration = Date.now() - start;
+
+      this.extractCookies(response);
+      this.extractCsrfToken(response);
+
+      if (response.ok) {
+        this.sessionEstablished = true;
+      }
+
+      // Auto re-auth on 401 (single retry)
+      if (response.status === 401 && !isRetry) {
+        logger.warn(`Session expired for HEAD ${path}, re-authenticating`);
+        this.sessionEstablished = false;
+        return this.headRequest(path, options, true);
+      }
+
+      if (!response.ok) {
+        throw new IrisApiError(
+          response.status,
+          [],
+          path,
+          `IRIS returned HTTP ${response.status} for HEAD ${path}. Check the request parameters and try again.`,
+        );
+      }
+
+      logger.info(`HEAD ${path} completed in ${duration}ms`);
+    } catch (error: unknown) {
+      clearTimeout(timer);
+
+      if (error instanceof IrisApiError) throw error;
+      if (error instanceof IrisConnectionError) throw error;
+
+      if (
+        error instanceof DOMException ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw new IrisConnectionError(
+          "TIMEOUT",
+          `Connection to IRIS timed out after ${timeout}ms`,
+          `Check that the IRIS web port is accessible at ${this.config.host}:${this.config.port}`,
+        );
+      }
+
+      if (error instanceof TypeError) {
+        throw new IrisConnectionError(
+          "NETWORK_ERROR",
+          `Failed to connect to IRIS at ${this.config.host}:${this.config.port}`,
+          `Verify the host and port are correct, and that IRIS is running`,
+        );
+      }
+
+      throw new IrisConnectionError(
+        "UNKNOWN",
+        `Unexpected error during HEAD ${path}`,
         `Check network connectivity and IRIS availability`,
       );
     }

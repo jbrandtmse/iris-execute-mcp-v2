@@ -480,6 +480,119 @@ describe("IrisHttpClient", () => {
     });
   });
 
+  // ── HEAD method ─────────────────────────────────────────────────
+
+  describe("head method", () => {
+    it("should send HEAD request without expecting a body", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      const resp = new Response(null, { status: 200 });
+      const originalGetSetCookie = resp.headers.getSetCookie?.bind(resp.headers);
+      resp.headers.getSetCookie = () => {
+        const real = originalGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=s1; path=/"];
+      };
+      fetchMock.mockResolvedValueOnce(resp);
+
+      await expect(client.head("/api/atelier/")).resolves.toBeUndefined();
+
+      const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:52773/api/atelier/");
+      expect(opts.method).toBe("HEAD");
+
+      client.destroy();
+    });
+
+    it("should include Basic Auth on first HEAD request", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      const resp = new Response(null, { status: 200 });
+      fetchMock.mockResolvedValueOnce(resp);
+
+      await client.head("/api/atelier/");
+
+      const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = opts.headers as Record<string, string>;
+      expect(headers["Authorization"]).toMatch(/^Basic /);
+
+      client.destroy();
+    });
+
+    it("should throw IrisConnectionError on network failure", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+      await expect(client.head("/api/test")).rejects.toThrow(IrisConnectionError);
+
+      client.destroy();
+    });
+
+    it("should throw IrisConnectionError on timeout", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config, 50);
+
+      fetchMock.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal;
+            if (signal) {
+              signal.addEventListener("abort", () => {
+                reject(new DOMException("The operation was aborted.", "AbortError"));
+              });
+            }
+          }),
+      );
+
+      await expect(client.head("/api/slow")).rejects.toThrow(IrisConnectionError);
+
+      client.destroy();
+    });
+
+    it("should throw IrisApiError on non-OK response", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      const resp = new Response(null, { status: 500 });
+      fetchMock.mockResolvedValueOnce(resp);
+
+      await expect(client.head("/api/test")).rejects.toThrow(IrisApiError);
+
+      client.destroy();
+    });
+
+    it("should extract cookies from HEAD response", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // HEAD response with cookie
+      const headResp = new Response(null, { status: 200 });
+      const originalGetSetCookie = headResp.headers.getSetCookie?.bind(headResp.headers);
+      headResp.headers.getSetCookie = () => {
+        const real = originalGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=headcookie; path=/"];
+      };
+      fetchMock.mockResolvedValueOnce(headResp);
+
+      await client.head("/api/atelier/");
+
+      // Subsequent GET should include the cookie
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({})),
+      );
+      await client.get("/api/test");
+
+      const [, getOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
+      const headers = getOpts.headers as Record<string, string>;
+      expect(headers["Cookie"]).toContain("CSPSESSIONID=headcookie");
+
+      client.destroy();
+    });
+  });
+
   // ── Typed methods ───────────────────────────────────────────────
 
   describe("typed methods", () => {

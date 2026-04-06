@@ -18,3 +18,20 @@
   - MEDIUM: Added .prettierignore (auto-resolved)
   - LOW: Removed console.warn from ESLint allow list (auto-resolved)
   - LOW: Missing license field in package.json files (deferred to pre-publish)
+
+### Story 1.2: HTTP Client, Configuration & Authentication
+- **Status:** done
+- **Commit:** 50f31db
+- **Files touched:** 16 files
+  - New modules: config.ts, errors.ts, logger.ts, http-client.ts
+  - Tests: 4 test files (config, errors, logger, http-client) — 37 tests total
+  - Modified: shared/package.json (added zod, @types/node), shared/index.ts (barrel exports)
+  - Added: shared/vitest.config.ts (per-package vitest config)
+- **Key decisions:**
+  - Auth helpers inlined in http-client.ts (no separate auth.ts)
+  - Native fetch only — no external HTTP libraries
+  - Map-based cookie jar (IRIS uses single session cookie)
+  - Per-package vitest.config.ts to fix turbo test discovery
+- **Review findings:**
+  - Code review passed with minor deferred items
+  - Deferred: license fields, turbo test config for empty packages
