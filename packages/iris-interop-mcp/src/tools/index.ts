@@ -6,7 +6,8 @@
  * (manage, control, status, summary) from Story 5.2,
  * production item / auto-start tools from Story 5.3,
  * production monitoring tools (logs, queues, messages, adapters) from Story 5.4,
- * and credential / lookup table tools from Story 5.5.
+ * credential / lookup table tools from Story 5.5,
+ * and rules, transforms, and REST API tools from Story 5.6.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -34,6 +35,17 @@ import {
   lookupManageTool,
   lookupTransferTool,
 } from "./lookup.js";
+import {
+  ruleListTool,
+  ruleGetTool,
+} from "./rule.js";
+import {
+  transformListTool,
+  transformTestTool,
+} from "./transform.js";
+import {
+  interopRestTool,
+} from "./rest.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -51,4 +63,9 @@ export const tools: ToolDefinition[] = [
   credentialListTool,
   lookupManageTool,
   lookupTransferTool,
+  ruleListTool,
+  ruleGetTool,
+  transformListTool,
+  transformTestTool,
+  interopRestTool,
 ];

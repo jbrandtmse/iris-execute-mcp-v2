@@ -1199,6 +1199,400 @@ ClassMethod LookupManage() As %Status
     Quit $$$OK
 }
 
+/// List all business rule classes in the namespace.
+/// <p>Queries <code>%Dictionary.ClassDefinition</code> to find non-abstract classes
+/// that extend <code>Ens.Rule.Definition</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>namespace</code> — Target namespace for class queries</li>
+/// </ul></p>
+ClassMethod RuleList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        Set tSQL = "SELECT Name FROM %Dictionary.ClassDefinition WHERE super [ 'Ens.Rule.Definition' AND Abstract = 0 ORDER BY Name"
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tRules = []
+        While tRS.%Next() {
+            Set tRule = {}
+            Do tRule.%Set("name", tRS.Name)
+            Do tRules.%Push(tRule)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("rules", tRules)
+        Do tResult.%Set("count", tRules.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return the rule definition including conditions, actions, and routing logic.
+/// <p>Exports the rule class as UDL text via <code>%Compiler.UDL.TextServices</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>name</code> — Fully-qualified rule class name</li>
+///   <li><code>namespace</code> — Target namespace for class queries</li>
+/// </ul></p>
+ClassMethod RuleGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tName = $Get(%request.Data("name",1))
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Validate required parameters
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Switch to target namespace
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Verify class exists
+        If '##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Rule class '"_tName_"' does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Export class definition as UDL text
+        Set tSC = ##class(%Compiler.UDL.TextServices).GetTextAsString(, tName, .tText)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("name", tName)
+        Do tResult.%Set("definition", tText)
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List all data transformation (DTL) classes in the namespace.
+/// <p>Queries <code>%Dictionary.ClassDefinition</code> to find non-abstract classes
+/// that extend <code>Ens.DataTransformDTL</code> or <code>Ens.DataTransform</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>namespace</code> — Target namespace for class queries</li>
+/// </ul></p>
+ClassMethod TransformList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        Set tSQL = "SELECT Name FROM %Dictionary.ClassDefinition WHERE (super [ 'Ens.DataTransformDTL' OR super [ 'Ens.DataTransform') AND Abstract = 0 ORDER BY Name"
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tTransforms = []
+        While tRS.%Next() {
+            Set tTransform = {}
+            Do tTransform.%Set("name", tRS.Name)
+            Do tTransforms.%Push(tTransform)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("transforms", tTransforms)
+        Do tResult.%Set("count", tTransforms.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Execute a data transformation against sample input and return the output.
+/// <p>Accepts a JSON body with <code>className</code> (transform class name),
+/// <code>sourceClass</code> (source message class name),
+/// <code>sourceData</code> (JSON object with property values for the source message),
+/// and optional <code>namespace</code>.</p>
+ClassMethod TransformTest() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters BEFORE switching namespace
+        Set tClassName = tBody.%Get("className")
+        Set tSourceClass = tBody.%Get("sourceClass")
+        Set tSourceData = tBody.%Get("sourceData")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSourceClass, "sourceClass")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Verify transform class exists
+        If '##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Transform class '"_tClassName_"' does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Verify source class exists
+        If '##class(%Dictionary.ClassDefinition).%ExistsId(tSourceClass) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Source class '"_tSourceClass_"' does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Instantiate the source message object
+        Set tSource = $ClassMethod(tSourceClass, "%New")
+        If '$IsObject(tSource) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Failed to instantiate source class '"_tSourceClass_"'")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Populate source object properties from sourceData JSON
+        If $IsObject(tSourceData) {
+            Set tIter = tSourceData.%GetIterator()
+            While tIter.%GetNext(.tProp, .tVal) {
+                Try {
+                    Set $Property(tSource, tProp) = tVal
+                }
+                Catch setEx {
+                    ; Skip properties that don't exist on the class
+                }
+            }
+        }
+
+        ; Execute the transformation
+        Set tSC = $ClassMethod(tClassName, "Transform", tSource, .tOutput)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Serialize output to JSON
+        Set tOutputJSON = {}
+        If $IsObject(tOutput) {
+            Do tOutputJSON.%Set("className", $ClassName(tOutput))
+            ; Try to serialize properties using JSON export to string
+            Try {
+                Set tSC2 = tOutput.%JSONExportToString(.tJSONStr)
+                If $$$ISOK(tSC2) && (tJSONStr '= "") {
+                    Set tParsed = ##class(%DynamicObject).%FromJSON(tJSONStr)
+                    Do tOutputJSON.%Set("data", tParsed)
+                }
+            }
+            Catch jsonEx {
+                ; Object may not support JSON export, return class name only
+                Do tOutputJSON.%Set("data", "Object does not support JSON serialization")
+            }
+        }
+        Else {
+            Do tOutputJSON.%Set("data", $Get(tOutput))
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("className", tClassName)
+        Do tResult.%Set("sourceClass", tSourceClass)
+        Do tResult.%Set("output", tOutputJSON)
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, delete, or get a REST application.
+/// <p>Accepts a JSON body with <code>action</code> ("create", "delete", or "get"),
+/// <code>name</code> (REST application name),
+/// optional <code>spec</code> (OpenAPI JSON for create),
+/// and optional <code>namespace</code>.</p>
+ClassMethod RestManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters BEFORE switching namespace
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "create") && (tAction '= "delete") && (tAction '= "get") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, delete, get")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "create" {
+            Set tSpec = tBody.%Get("spec")
+            If '$IsObject(tSpec) && (tSpec = "") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'spec' (OpenAPI JSON) is required for create action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; If spec is a string, parse it to %DynamicObject
+            If '$IsObject(tSpec) {
+                Try {
+                    Set tSpec = {}.%FromJSON(tSpec)
+                }
+                Catch parseEx {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in 'spec' parameter: "_parseEx.DisplayString())
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
+            Set tSC = ##class(%REST.API).CreateApplication(tName, tSpec)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "created", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tSC = ##class(%REST.API).DeleteApplication(tName)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "get" {
+            Set tSC = ##class(%REST.API).GetApplication(tName, .tSpec)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("name", tName)
+            Do tResult.%Set("spec", tSpec)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Export or import a lookup table in XML format.
 /// <p>Accepts a JSON body with <code>action</code> ("export" or "import"),
 /// <code>tableName</code>, optional <code>xml</code> (for import),
