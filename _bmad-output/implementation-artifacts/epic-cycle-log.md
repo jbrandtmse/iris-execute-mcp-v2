@@ -473,3 +473,16 @@
 - **Key decisions:** New Task.cls handler class; RunNow is async; task ID accepts string or number
 - **Bugs found & fixed (Step 2.5):** None
 - **Review findings:** 2 LOW deferred
+
+### Story 6.7: System Configuration Tools
+- **Status:** done
+- **Commit:** 45854d3
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/SystemConfig.cls` — New handler: ConfigManage, GetConfig, SetConfig, ExportConfig
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added /system/config route
+  - `ipm/module.xml` — Added SystemConfig.cls resource
+  - `packages/iris-ops-mcp/src/tools/config.ts` — New: configManageTool
+  - `packages/iris-ops-mcp/src/__tests__/config.test.ts` — New: 16 unit tests
+- **Key decisions:** Config.config.Open() returns CPF path not %Status; locale section lists available locales via NLS.Locales:List
+- **Bugs found & fixed (Step 2.5):** Config.config.Open() status check (CPF path not %Status), Config.NLS.Locales.Get("current") doesn't exist
+- **Review findings:** 4 LOW deferred (dynamic annotations, hardcoded property list, no whitelist, export scope)

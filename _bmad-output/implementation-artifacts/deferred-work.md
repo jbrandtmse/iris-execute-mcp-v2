@@ -132,3 +132,8 @@ are listed below.
 - `GetConfig` for config section reads only 11 hardcoded properties from `Config.config` out of ~70 available. Consider iterating all properties via `%Dictionary.PropertyDefinition` for completeness in a future enhancement.
 - No whitelist/validation on property names passed to `SetConfig`. Invalid names are caught by `Config.config.Modify()` returning an error status, so this is defense-in-depth only.
 - `ExportConfig` only includes the "config" section data, not startup or locale. Intentional per dev notes but could be expanded to include all sections in a future enhancement.
+
+## Deferred from: code review of 6-8-iris-ops-mcp-unit-and-integration-tests (2026-04-07)
+
+- Duplicate `getConfig()` function and `declare global` block between `integration-setup.ts` and `ops.integration.test.ts`. Same pattern exists in iris-interop-mcp. Consider extracting shared test config helper in a future cleanup story.
+- Task creation test extracts `createdTaskId` via unchecked `as` cast on `structuredContent`. If the response shape changes, the cast silently produces undefined fields. Low risk since cleanup still runs via afterAll.
