@@ -498,8 +498,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 9 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(9);
+    it("should contain exactly 12 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(12);
     });
 
     it("should contain all required class names", () => {
@@ -512,6 +512,9 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Config.cls",
         "ExecuteMCPv2.REST.Security.cls",
         "ExecuteMCPv2.REST.Interop.cls",
+        "ExecuteMCPv2.REST.Monitor.cls",
+        "ExecuteMCPv2.REST.Task.cls",
+        "ExecuteMCPv2.REST.SystemConfig.cls",
         "ExecuteMCPv2.REST.Dispatch.cls",
       ];
       for (const name of expected) {
@@ -541,7 +544,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(9);
+      expect(classes.length).toBe(12);
     });
 
     it("should return classes in compilation order", () => {
@@ -566,6 +569,27 @@ describe("bootstrap", () => {
       const interop = classes.find(c => c.name === "ExecuteMCPv2.REST.Interop.cls");
       expect(interop).toBeDefined();
       expect(interop!.content).toContain("ExecuteMCPv2.REST.Interop");
+    });
+
+    it("should include Monitor.cls (Epic 6)", () => {
+      const classes = getBootstrapClasses();
+      const monitor = classes.find(c => c.name === "ExecuteMCPv2.REST.Monitor.cls");
+      expect(monitor).toBeDefined();
+      expect(monitor!.content).toContain("ExecuteMCPv2.REST.Monitor");
+    });
+
+    it("should include Task.cls (Epic 6)", () => {
+      const classes = getBootstrapClasses();
+      const task = classes.find(c => c.name === "ExecuteMCPv2.REST.Task.cls");
+      expect(task).toBeDefined();
+      expect(task!.content).toContain("ExecuteMCPv2.REST.Task");
+    });
+
+    it("should include SystemConfig.cls (Epic 6)", () => {
+      const classes = getBootstrapClasses();
+      const sysConfig = classes.find(c => c.name === "ExecuteMCPv2.REST.SystemConfig.cls");
+      expect(sysConfig).toBeDefined();
+      expect(sysConfig!.content).toContain("ExecuteMCPv2.REST.SystemConfig");
     });
   });
 });
