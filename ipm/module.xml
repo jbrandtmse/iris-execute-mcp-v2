@@ -15,6 +15,9 @@
       <Resource Name="ExecuteMCPv2.REST.Command.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.Global.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.UnitTest.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Config.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Security.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Interop.CLS"/>
 
       <!-- Test classes (loaded but not required for production) -->
       <Resource Name="ExecuteMCPv2.Tests.UtilsTest.CLS"/>
@@ -23,8 +26,9 @@
       <Resource Name="ExecuteMCPv2.Tests.UnitTestTest.CLS"/>
       <Resource Name="ExecuteMCPv2.Tests.SetupTest.CLS"/>
 
-      <!-- Register the web application after compilation -->
+      <!-- Register the web application and map package to %ALL after compilation -->
       <Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>
+      <Invoke Class="ExecuteMCPv2.Setup" Method="ConfigureMapping"/>
     </Module>
   </Document>
 </Export>
