@@ -61,6 +61,8 @@ Execute `/bmad-create-story` directly via the `Skill` tool.
 - **Capture the story file path** from the skill output.
 - Do NOT delegate this to an agent.
 
+**For package setup stories (X.1):** After dev completes, add the new MCP server to `.mcp.json` with explicit `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS` env vars. Verify the server starts and `tools/list` returns the expected count via the actual MCP protocol (not just unit tests). This is in addition to the normal Step 2.5 verification.
+
 #### Step 2: Develop Story (Agent)
 Spawn a developer agent with a **unique name** `dev-{epic}-{story}` (e.g., `dev-2-3`).
 
@@ -87,11 +89,11 @@ You are a developer agent. Your task is to implement a story using the BMAD deve
 - **Capture the file list** from the completion message.
 - Send `shutdown_request` and **wait for shutdown approval** before proceeding.
 
-#### Step 2.5: Live Verification (Lead — when story modifies ObjectScript)
+#### Step 2.5: Live Verification (Lead — when story modifies ObjectScript or adds MCP tools)
 
-**Skip this step if the story does not create or modify ObjectScript `.cls` files.**
+**Skip this step if the story does not create or modify ObjectScript `.cls` files AND does not add new MCP tools.**
 
-When the story includes ObjectScript changes, the lead performs live verification before code review:
+When the story includes ObjectScript changes or new tools, the lead performs live verification before code review:
 
 1. **Deploy to IRIS:**
    ```
@@ -99,20 +101,25 @@ When the story includes ObjectScript changes, the lead performs live verificatio
    ```
    If `iris.doc.load` does not correctly update classes (e.g., "up-to-date" without recompiling), delete and re-upload via the Atelier API, then force compile with `flags=ck`.
 
-2. **Verify each new or modified REST endpoint:**
-   - For **list** endpoints: call via curl or MCP tool, verify JSON response has correct structure (array of objects with expected fields, no HTTP 500)
+2. **Verify each new or modified REST endpoint via curl:**
+   - For **list** endpoints: call via curl, verify JSON response has correct structure (array of objects with expected fields, no HTTP 500)
    - For **manage** endpoints: call with a missing required parameter, verify a clean error response (not HTTP 500 or non-JSON)
    - For **security-sensitive** endpoints: verify passwords/secrets are NOT in the response
 
-3. **If issues are found:**
+3. **Verify 2-3 tools via the actual MCP server connection:**
+   - Use the MCP tools (e.g., `mcp__iris-dev-mcp__iris_*` or equivalent) to call at least 2-3 of the new or modified tools
+   - **Test cross-namespace**: at least one call must use a `namespace` parameter targeting a different namespace (e.g., OPTIRAG) to verify namespace switching, response parsing, and I/O redirect work end-to-end through the TypeScript HTTP client
+   - This catches bugs that curl misses: content-type rejection, dual-JSON from namespace restore, response envelope parsing errors, and client-side validation issues
+
+4. **If issues are found:**
    - Fix the ObjectScript `.cls` file **on disk** (never edit directly on IRIS)
    - Redeploy to IRIS and retest
    - Add fixed files to the file list for code review
    - Document what was found and fixed
 
-4. **If all endpoints pass:** proceed to code review
+5. **If all endpoints pass:** proceed to code review
 
-**Why this step exists:** Two consecutive epics (3 and 4) shipped stories with passing unit tests but broken live endpoints. Mocked HTTP tests cannot catch wrong IRIS API usage, namespace switching issues, or SQL column name mismatches. This step catches those issues before code review.
+**Why this step exists:** Three consecutive epics (3, 4, and 5) shipped stories with passing unit tests but broken live endpoints. Curl-based testing catches IRIS API errors (wrong methods, missing columns, namespace switching). MCP tool testing catches TypeScript client-side errors (response parsing, dual-JSON, cross-namespace I/O redirect). Both layers are required.
 
 #### Step 3: Code Review (Agent)
 Spawn a code reviewer agent with a **unique name** `cr-{epic}-{story}` (e.g., `cr-2-3`).
