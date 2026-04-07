@@ -262,7 +262,7 @@ ClassMethod ProductionStatus() As %Status
         If tDetail && (tProdName '= "") && ((tState = 1) || (tState = 3) || (tState = 4)) {
             Set tItems = []
             ; Query Ens.Config.Item for item details
-            Set tSQL = "SELECT Name, ClassName, Enabled, BusinessType, AdapterClassName FROM Ens_Config.Item WHERE Production = ?"
+            Set tSQL = "SELECT Name, ClassName, Enabled, Category, PoolSize FROM Ens_Config.Item WHERE Production = ?"
             Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tProdName)
             If $IsObject(tRS) {
                 While tRS.%Next() {
@@ -270,9 +270,9 @@ ClassMethod ProductionStatus() As %Status
                     Do tItem.%Set("name", tRS.Name)
                     Do tItem.%Set("className", tRS.ClassName)
                     Do tItem.%Set("enabled", tRS.Enabled, "boolean")
-                    Do tItem.%Set("businessType", tRS.BusinessType, "number")
-                    If tRS.AdapterClassName '= "" {
-                        Do tItem.%Set("adapter", tRS.AdapterClassName)
+                    Do tItem.%Set("poolSize", +tRS.PoolSize, "number")
+                    If tRS.Category '= "" {
+                        Do tItem.%Set("category", tRS.Category)
                     }
                     Do tItems.%Push(tItem)
                 }
@@ -352,7 +352,7 @@ ClassMethod ItemManage() As %Status
         }
         ElseIf tAction = "get" {
             ; Query config item details via SQL
-            Set tSQL = "SELECT Name, ClassName, Enabled, BusinessType, AdapterClassName, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
+            Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
             Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
             If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
                 Set $NAMESPACE = tOrigNS
@@ -375,10 +375,6 @@ ClassMethod ItemManage() As %Status
             Do tResult.%Set("itemName", tRS.Name)
             Do tResult.%Set("className", tRS.ClassName)
             Do tResult.%Set("enabled", tRS.Enabled, "boolean")
-            Do tResult.%Set("businessType", tRS.BusinessType, "number")
-            If tRS.AdapterClassName '= "" {
-                Do tResult.%Set("adapter", tRS.AdapterClassName)
-            }
             Do tResult.%Set("poolSize", +tRS.PoolSize, "number")
             If tRS.Comment '= "" {
                 Do tResult.%Set("comment", tRS.Comment)

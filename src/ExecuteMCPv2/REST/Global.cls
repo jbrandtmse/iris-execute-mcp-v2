@@ -263,13 +263,15 @@ ClassMethod ValidateGlobalNamePublic(pGlobal As %String) As %Status
 }
 
 /// Validate that a global name follows a safe pattern.
-/// <p>Ensures the name is alphanumeric (with optional leading <code>%</code>)
-/// and does not contain injection patterns.</p>
+/// <p>Ensures the name starts with an optional <code>%</code>, then an alpha
+/// character, followed by alphanumeric characters and dots (e.g., <code>Ens.AutoStart</code>).
+/// Does not allow injection patterns.</p>
 ClassMethod ValidateGlobalName(pGlobal As %String) As %Status [ Private ]
 {
-    ; Allow optional leading %, then one alpha followed by alphanumeric chars
-    If pGlobal '? .1"%"1A.AN {
-        Quit $$$ERROR($$$GeneralError, "Invalid global name '"_pGlobal_"': must be alphanumeric (optional leading %)")
+    ; Allow optional leading %, then one alpha followed by alphanumeric chars and dots
+    ; IRIS global names can contain dots (e.g., Ens.AutoStart, Ens.Config.ItemD)
+    If pGlobal '? .1"%"1A.AN.(1"."1A.AN) {
+        Quit $$$ERROR($$$GeneralError, "Invalid global name '"_pGlobal_"': must be alphanumeric with optional dots (optional leading %)")
     }
     Quit $$$OK
 }
