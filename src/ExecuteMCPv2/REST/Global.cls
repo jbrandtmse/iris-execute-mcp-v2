@@ -14,7 +14,7 @@ Class ExecuteMCPv2.REST.Global Extends %Atelier.REST
 ClassMethod GetGlobal() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Try {
         ; Read query parameters
         Set tGlobal = $Get(%request.Data("global", 1))
@@ -40,18 +40,19 @@ ClassMethod GetGlobal() As %Status
         Set tValue = $Get(@tRef)
         Set tDefined = $Data(@tRef)
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         ; Return result
         Set tResult = {}
         Do tResult.%Set("value", tValue)
         Do tResult.%Set("defined", (tDefined > 0), "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
@@ -62,7 +63,7 @@ ClassMethod GetGlobal() As %Status
 ClassMethod SetGlobal() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -100,18 +101,19 @@ ClassMethod SetGlobal() As %Status
         ; Verify the write
         Set tVerified = $Get(@tRef)
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         ; Return result with verification
         Set tResult = {}
         Do tResult.%Set("value", tVerified)
         Do tResult.%Set("verified", (tVerified = tValue), "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
@@ -121,7 +123,7 @@ ClassMethod SetGlobal() As %Status
 ClassMethod KillGlobal() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Try {
         ; Read query parameters
         Set tGlobal = $Get(%request.Data("global", 1))
@@ -146,6 +148,9 @@ ClassMethod KillGlobal() As %Status
         Set tRef = ..BuildGlobalRef(tGlobal, tSubscripts)
         Kill @tRef
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         ; Return confirmation
         Set tResult = {}
         Do tResult.%Set("deleted", 1, "boolean")
@@ -153,12 +158,10 @@ ClassMethod KillGlobal() As %Status
         If tSubscripts '= "" Do tResult.%Set("subscripts", tSubscripts)
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
@@ -169,7 +172,7 @@ ClassMethod KillGlobal() As %Status
 ClassMethod ListGlobals() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Try {
         ; Read query parameters
         Set tNamespace = $Get(%request.Data("namespace", 1))
@@ -192,6 +195,9 @@ ClassMethod ListGlobals() As %Status
             Do tList.%Push(tGlobal)
         }
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         ; Return result
         Set tResult = {}
         Do tResult.%Set("globals", tList)
@@ -199,12 +205,10 @@ ClassMethod ListGlobals() As %Status
         If tFilter '= "" Do tResult.%Set("filter", tFilter)
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
