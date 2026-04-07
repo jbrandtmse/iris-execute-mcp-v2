@@ -510,3 +510,16 @@
   - `_bmad-output/implementation-artifacts/deferred-work.md` — Closed 26 items, kept 14
 - **Key decisions:** Used gen-bootstrap.mjs generator (not manual edit); placed new classes before Dispatch in compilation order; formally closed all Epic 1-4 deferred items as won't-fix
 - **Review findings:** Clean — zero findings
+
+### Story 7.1: iris-data-mcp Package Setup & Server Entry Point
+- **Status:** done
+- **Commit:** 7ef8637
+- **Files touched:**
+  - `packages/iris-data-mcp/package.json` — Updated: version 0.0.1, bin entry, deps
+  - `packages/iris-data-mcp/vitest.config.ts` — New: test config
+  - `packages/iris-data-mcp/src/index.ts` — Replaced: full McpServerBase entry point
+  - `packages/iris-data-mcp/src/tools/index.ts` — New: empty ToolDefinition[]
+  - `packages/iris-data-mcp/src/__tests__/index.test.ts` — New: 13 unit tests
+  - `.mcp.json` — Added iris-data-mcp server entry
+- **Key decisions:** Replicated iris-ops-mcp pattern exactly; tsconfig.json already correct from scaffold; needsCustomRest: true for DocDB/DeepSee APIs
+- **Review findings:** Clean — zero findings

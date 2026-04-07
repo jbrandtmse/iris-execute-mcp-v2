@@ -7,6 +7,17 @@
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
+import {
+  docdbManageTool,
+  docdbDocumentTool,
+  docdbFindTool,
+  docdbPropertyTool,
+} from "./docdb.js";
 
 /** All tool definitions registered by the iris-data-mcp server. */
-export const tools: ToolDefinition[] = [];
+export const tools: ToolDefinition[] = [
+  docdbManageTool,
+  docdbDocumentTool,
+  docdbFindTool,
+  docdbPropertyTool,
+];

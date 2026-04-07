@@ -20,8 +20,16 @@ describe("iris-data-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export an initially empty tools array", () => {
-      expect(tools.length).toBe(0);
+    it("should export 4 DocDB tools", () => {
+      expect(tools.length).toBe(4);
+    });
+
+    it("should export the expected tool names", () => {
+      const names = tools.map((t) => t.name);
+      expect(names).toContain("iris.docdb.manage");
+      expect(names).toContain("iris.docdb.document");
+      expect(names).toContain("iris.docdb.find");
+      expect(names).toContain("iris.docdb.property");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +43,7 @@ describe("iris-data-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 0 tools", () => {
+    it("should create a server instance with 4 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -43,7 +51,7 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(0);
+      expect(server.toolCount).toBe(4);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +74,7 @@ describe("iris-data-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return empty tool names array", () => {
+    it("should return 4 tool names", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -74,7 +82,11 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(0);
+      expect(names).toHaveLength(4);
+      expect(names).toContain("iris.docdb.manage");
+      expect(names).toContain("iris.docdb.document");
+      expect(names).toContain("iris.docdb.find");
+      expect(names).toContain("iris.docdb.property");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
