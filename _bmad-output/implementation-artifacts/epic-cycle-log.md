@@ -317,3 +317,29 @@
   - 14 unit tests covering transport resolution (7) and server creation (7)
 - **Review findings:** 0 HIGH, 0 MEDIUM, 2 LOW deferred (resolveTransport duplication, silent invalid CLI transport)
 - **Test totals:** 151 shared + 197 dev + 14 admin = 362 total tests
+
+## Epic 5: Interoperability Management (iris-interop-mcp)
+
+### Story 5.0: Epic 4 Deferred Cleanup
+- **Status:** done
+- **Commit:** 1d9ef78
+- **Files touched:** 23 files (20 modified, 2 new, 1 renamed/moved)
+  - Shared: logger.ts, http-client.ts, server-base.ts, atelier.ts, tool-types.ts, index.ts, transport.ts (new, moved from admin-mcp)
+  - Dev: doc.ts, global.ts, index.ts
+  - Admin: index.ts, transport.ts (deleted)
+  - ObjectScript: Security.cls, Config.cls
+  - Tests: logger.test.ts, http-client.test.ts, server-base.test.ts, atelier.test.ts, transport.test.ts (new), doc.test.ts, index.test.ts
+  - Docs: deferred-work.md (scrubbed), 5-0 story file
+- **Key decisions:**
+  - LOG_LEVEL env var with LogLevel enum (ERROR=0, WARN=1, INFO=2, DEBUG=3)
+  - AbortController Set tracking for in-flight request abort on destroy()
+  - PermissionCheck now checks user's direct Resources property before role iteration
+  - Kill tProps before each loop iteration in MappingList, NamespaceList, DatabaseList
+  - Password sanitization uses progressive fragment stripping instead of simple $Replace
+  - resolveTransport moved to @iris-mcp/shared, both packages import from there
+  - BuildWebAppProps/BuildDatabaseProps helpers extracted to eliminate create/modify duplication
+  - atelierPath validates version (positive integer), namespace/action (non-empty)
+  - Document name validation rejects path traversal attempts (.. or leading /)
+  - deferred-work.md scrubbed: resolved items removed, 14 items closed by this story
+- **Live verification:** Security.cls and Config.cls compiled successfully. Mapping list, webapp list, namespace list all return correct JSON. PermissionCheck %All role limitation noted (pre-existing, not a regression).
+- **Review findings:** No HIGH or MEDIUM issues found. All changes clean.

@@ -1,10 +1,13 @@
 {
   "name": "@iris-mcp/interop",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "IRIS Interoperability Management MCP Server",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "iris-interop-mcp": "./dist/index.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,6 +22,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@iris-mcp/shared": "workspace:*"
+    "@iris-mcp/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
   }
 }
