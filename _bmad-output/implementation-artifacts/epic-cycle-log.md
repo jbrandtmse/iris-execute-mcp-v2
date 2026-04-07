@@ -424,3 +424,15 @@
 - **Key decisions:** Used $ZU(190,0/1) for global/routine metrics (190,28/29 don't exist), Config.Databases:List + SYS.Database.%OpenId for DB sizes (SYS.Database SQL table doesn't exist)
 - **Bugs found & fixed (Step 2.5):** $ZU(190,28/29) <FUNCTION> error, SYS.Database SQL table not found, databases array empty
 - **Review findings:** 1 MEDIUM fixed (cross-namespace ResultSet iteration), 1 LOW fixed (stale descriptions)
+
+### Story 6.3: Jobs & Locks Tools
+- **Status:** done
+- **Commit:** 919cf18
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Monitor.cls` — Added JobsList, LocksList methods
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added /monitor/jobs, /monitor/locks routes
+  - `packages/iris-ops-mcp/src/tools/jobs.ts` — New: jobsListTool, locksListTool
+  - `packages/iris-ops-mcp/src/__tests__/jobs.test.ts` — New: 16 unit tests
+- **Key decisions:** %SYS.ProcessQuery via SQL for jobs, %SYS.LockQuery:List via ResultSet for locks, dual-format Owner parsing
+- **Bugs found & fixed (Step 2.5):** Lock Owner field was plain PID not pipe-delimited — added dual-format parsing
+- **Review findings:** 0 HIGH/MEDIUM, 2 LOW deferred (start time spec gap, no automated Owner parsing test)

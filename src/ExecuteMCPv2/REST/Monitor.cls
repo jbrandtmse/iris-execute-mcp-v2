@@ -344,6 +344,174 @@ ClassMethod LocksList() As %Status
     Quit $$$OK
 }
 
+/// Return journal file information in JSON format.
+/// <p>Queries <code>%SYS.Journal.System</code> class methods in the <b>%SYS</b>
+/// namespace for current journal file, directories, file count, offset,
+/// free space, and state.</p>
+ClassMethod JournalInfo() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+
+        ; -- Current journal file info --
+        Set tCurrentFile = ##class(%SYS.Journal.System).GetCurrentFileName()
+        Do tResult.%Set("currentFile", tCurrentFile)
+
+        ; -- Directories --
+        Set tPrimaryDir = ##class(%SYS.Journal.System).GetPrimaryDirectory()
+        Set tAlternateDir = ##class(%SYS.Journal.System).GetAlternateDirectory()
+        Do tResult.%Set("primaryDirectory", tPrimaryDir)
+        Do tResult.%Set("alternateDirectory", tAlternateDir)
+
+        ; -- File count and offset --
+        Set tFileCount = ##class(%SYS.Journal.System).GetCurrentFileCount()
+        Set tFileOffset = ##class(%SYS.Journal.System).GetCurrentFileOffset()
+        Do tResult.%Set("fileCount", +tFileCount, "number")
+        Do tResult.%Set("currentOffset", +tFileOffset, "number")
+
+        ; -- Free space and state --
+        Set tFreeSpace = ##class(%SYS.Journal.System).GetFreeSpace()
+        Set tState = ##class(%SYS.Journal.System).GetStateString()
+        Do tResult.%Set("freeSpaceBytes", +tFreeSpace, "number")
+        Do tResult.%Set("state", tState)
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return mirror configuration and membership status in JSON format.
+/// <p>Queries <code>$SYSTEM.Mirror</code> class methods for mirror membership,
+/// name, member type, and role status. Gracefully returns "not configured"
+/// when the instance is not a mirror member.</p>
+ClassMethod MirrorStatus() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+
+        ; -- Mirror membership --
+        Set tIsMember = +$SYSTEM.Mirror.IsMember()
+        Do tResult.%Set("isMember", tIsMember, "boolean")
+
+        If tIsMember {
+            ; -- Mirror details (only when member) --
+            Set tMirrorName = $SYSTEM.Mirror.MirrorName()
+            Set tMemberType = $SYSTEM.Mirror.GetMemberType()
+            Set tIsPrimary = +$SYSTEM.Mirror.IsPrimary()
+            Set tIsBackup = +$SYSTEM.Mirror.IsBackup()
+            Set tIsAsync = +$SYSTEM.Mirror.IsAsyncMember()
+
+            Do tResult.%Set("mirrorName", tMirrorName)
+            Do tResult.%Set("memberType", tMemberType)
+            Do tResult.%Set("isPrimary", tIsPrimary, "boolean")
+            Do tResult.%Set("isBackup", tIsBackup, "boolean")
+            Do tResult.%Set("isAsyncMember", tIsAsync, "boolean")
+
+            ; -- Mirror status --
+            Set tStatus = $SYSTEM.Mirror.GetStatus(tMirrorName)
+            Do tResult.%Set("status", tStatus)
+        }
+        Else {
+            Do tResult.%Set("mirrorName", "")
+            Do tResult.%Set("memberType", "Not Member")
+            Do tResult.%Set("isPrimary", 0, "boolean")
+            Do tResult.%Set("isBackup", 0, "boolean")
+            Do tResult.%Set("isAsyncMember", 0, "boolean")
+            Do tResult.%Set("status", "Mirror not configured")
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return audit log events in JSON format.
+/// <p>Queries the <code>%SYS.Audit:List</code> named query in <b>%SYS</b>
+/// namespace with optional filters for time range, username, and event type.
+/// Results are limited by the <code>maxRows</code> parameter (default 100,
+/// maximum 1000) to prevent oversized responses.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>beginDate</code> — Start date/time filter (YYYY-MM-DD HH:MM:SS)</li>
+///   <li><code>endDate</code> — End date/time filter (YYYY-MM-DD HH:MM:SS)</li>
+///   <li><code>username</code> — Username filter (default: * = all)</li>
+///   <li><code>eventType</code> — Event type filter (default: * = all)</li>
+///   <li><code>maxRows</code> — Maximum rows to return (default: 100, max: 1000)</li>
+/// </ul></p>
+ClassMethod AuditEvents() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read query parameters before switching namespace
+        Set tBeginDate = $Get(%request.Data("beginDate",1))
+        Set tEndDate = $Get(%request.Data("endDate",1))
+        Set tUsername = $Get(%request.Data("username",1), "*")
+        Set tEventType = $Get(%request.Data("eventType",1), "*")
+        Set tMaxRows = +$Get(%request.Data("maxRows",1), 100)
+        If tMaxRows < 1 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
+
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+        Set tEvents = []
+
+        Set tRS = ##class(%ResultSet).%New("%SYS.Audit:List")
+        If $IsObject(tRS) {
+            ; Execute params: BeginDateTime, EndDateTime, EventSources, EventTypes, Events, Usernames
+            Set tSC2 = tRS.Execute(tBeginDate, tEndDate, "*", tEventType, "*", tUsername)
+            If $$$ISOK(tSC2) {
+                Set tRowCount = 0
+                While tRS.Next() && (tRowCount < tMaxRows) {
+                    Set tEvent = {}
+                    Do tEvent.%Set("timestamp", tRS.Get("TimeStamp"))
+                    Do tEvent.%Set("username", tRS.Get("Username"))
+                    Do tEvent.%Set("eventSource", tRS.Get("EventSource"))
+                    Do tEvent.%Set("eventType", tRS.Get("EventType"))
+                    Do tEvent.%Set("event", tRS.Get("Event"))
+                    Do tEvent.%Set("description", tRS.Get("Description"))
+                    Do tEvent.%Set("clientIPAddress", tRS.Get("ClientIPAddress"))
+                    Do tEvent.%Set("namespace", tRS.Get("Namespace"))
+                    Do tEvents.%Push(tEvent)
+                    Set tRowCount = tRowCount + 1
+                }
+            }
+            Do tRS.Close()
+        }
+
+        Do tResult.%Set("events", tEvents)
+        Do tResult.%Set("count", tEvents.%Size(), "number")
+        Do tResult.%Set("maxRows", tMaxRows, "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
