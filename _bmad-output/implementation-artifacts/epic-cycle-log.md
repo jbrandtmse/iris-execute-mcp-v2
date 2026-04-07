@@ -355,3 +355,17 @@
   - `needsCustomRest: true` — interop tools use custom REST service
   - 12 unit tests covering server creation, transport, tools export
 - **Review findings:** No HIGH or MEDIUM issues. Clean implementation.
+
+### Story 5.2: Production Lifecycle Tools
+- **Status:** done
+- **Commit:** 557d113
+- **Files touched:** 6 files (3 new, 3 modified) + story/sprint files
+  - New: REST/Interop.cls, tools/production.ts, production.test.ts
+  - Modified: REST/Dispatch.cls (4 new routes), tools/index.ts, index.test.ts
+- **Key decisions:**
+  - Ens.* classes run in target namespace, NOT %SYS (unlike Config/Security)
+  - ProductionSummary iterates all namespaces via %SYS with inner try/catch
+  - 4 tools: manage (destructive), control (non-destructive), status (readOnly), summary (readOnly, NONE scope)
+  - 31 unit tests + 14 existing = 45 total interop tests
+- **Live verification:** Summary finds running OptiRAG production. Status returns correct state. Missing-param POSTs return clean errors.
+- **Review findings:** No HIGH or MEDIUM issues.

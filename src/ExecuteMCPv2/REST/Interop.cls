@@ -291,6 +291,236 @@ ClassMethod ProductionStatus() As %Status
     Quit $$$OK
 }
 
+/// Enable, disable, get, or set settings for an individual production config item.
+/// <p>Accepts a JSON body with <code>action</code> ("enable", "disable", "get", "set"),
+/// <code>itemName</code> (the config item name), optional <code>settings</code> (for set),
+/// and optional <code>namespace</code>.</p>
+ClassMethod ItemManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters
+        Set tAction = tBody.%Get("action")
+        Set tItemName = tBody.%Get("itemName")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tItemName, "itemName")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "get") && (tAction '= "set") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, get, set")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "enable" {
+            Set tSC = ##class(Ens.Director).EnableConfigItem(tItemName, 1, 1)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "enabled", "itemName": (tItemName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "disable" {
+            Set tSC = ##class(Ens.Director).EnableConfigItem(tItemName, 0, 1)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "disabled", "itemName": (tItemName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "get" {
+            ; Query config item details via SQL
+            Set tSQL = "SELECT Name, ClassName, Enabled, BusinessType, AdapterClassName, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
+            If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+                Set $NAMESPACE = tOrigNS
+                Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+                Set tSC = $$$ERROR($$$GeneralError, tMsg)
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            If 'tRS.%Next() {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("itemName", tRS.Name)
+            Do tResult.%Set("className", tRS.ClassName)
+            Do tResult.%Set("enabled", tRS.Enabled, "boolean")
+            Do tResult.%Set("businessType", tRS.BusinessType, "number")
+            If tRS.AdapterClassName '= "" {
+                Do tResult.%Set("adapter", tRS.AdapterClassName)
+            }
+            Do tResult.%Set("poolSize", +tRS.PoolSize, "number")
+            If tRS.Comment '= "" {
+                Do tResult.%Set("comment", tRS.Comment)
+            }
+            If tRS.Category '= "" {
+                Do tResult.%Set("category", tRS.Category)
+            }
+
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "set" {
+            Set tSettings = tBody.%Get("settings")
+            If '$IsObject(tSettings) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'settings' object is required for set action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Find the config item ID
+            If '##class(Ens.Config.Item).NameExists(tItemName, .tID) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tItem = ##class(Ens.Config.Item).%OpenId(tID)
+            If '$IsObject(tItem) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open config item '"_tItemName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Apply settings from the JSON object
+            Set tUpdated = []
+            Set tIter = tSettings.%GetIterator()
+            While tIter.%GetNext(.tKey, .tValue) {
+                If tKey = "poolSize" { Set tItem.PoolSize = tValue Do tUpdated.%Push(tKey) }
+                ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
+                ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
+                ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
+                ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                ElseIf tKey = "adapterClassName" { Set tItem.AdapterClassName = tValue Do tUpdated.%Push(tKey) }
+            }
+
+            Set tSC = tItem.%Save()
+            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            ; Apply changes to running production
+            Set tSC = ##class(Ens.Director).UpdateProduction()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "set", "itemName": (tItemName), "updatedSettings": (tUpdated)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Get or set the auto-start production configuration.
+/// <p>Accepts a JSON body with <code>action</code> ("get" or "set"),
+/// optional <code>productionName</code> (for set), and optional <code>namespace</code>.</p>
+ClassMethod AutoStart() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters
+        Set tAction = tBody.%Get("action")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "get") && (tAction '= "set") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: get, set")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.Director operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "get" {
+            Set tAutoStart = $Get(^Ens.AutoStart)
+            Set $NAMESPACE = tOrigNS
+
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("autoStart", tAutoStart)
+            Do tResult.%Set("enabled", (tAutoStart '= ""), "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "set" {
+            Set tProductionName = tBody.%Get("productionName")
+            ; When productionName is absent from JSON, %Get returns "" which disables auto-start
+
+            Set tSC = ##class(Ens.Director).SetAutoStart(tProductionName)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "set")
+            Do tResult.%Set("autoStart", tProductionName)
+            Do tResult.%Set("enabled", (tProductionName '= ""), "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return production status across all namespaces.
 /// <p>Iterates all IRIS namespaces, switches to each, and calls
 /// <method>Ens.Director:GetProductionStatus</method> to collect

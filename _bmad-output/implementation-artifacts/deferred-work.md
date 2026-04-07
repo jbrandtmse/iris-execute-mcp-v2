@@ -130,3 +130,8 @@
 - `ProductionSummary` inner catch block (per-namespace iteration) swallows all errors silently, including security violations. Consider logging skipped namespaces or including them in the response with an error reason.
 - `ProductionManage` uses `%Dictionary.ClassDefinition.%ExistsId` to check existence, which matches any class definition, not specifically production classes. A non-production class with the same name would produce misleading errors.
 - `productionControlTool` Zod schema marks `name` as optional for all actions, but start/restart require it server-side. Consider adding a `.refine()` for client-side validation.
+
+## Deferred from: code review of 5-3-production-item-and-auto-start-tools (2026-04-06)
+
+- `ItemManage` "set" action silently ignores unknown settings keys. If a caller passes an unrecognized key (e.g., `{ "badKey": 1 }`), it is skipped without feedback. Consider returning a list of unrecognized keys in the response.
+- `ItemManage` "set" action: If `tItem.%Save()` succeeds but `Ens.Director.UpdateProduction()` fails, the persisted config and the running production are out of sync. Pre-existing IRIS pattern limitation -- no simple rollback mechanism.

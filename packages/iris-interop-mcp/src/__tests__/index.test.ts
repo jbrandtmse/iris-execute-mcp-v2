@@ -21,7 +21,7 @@ describe("iris-interop-mcp", () => {
     });
 
     it("should export production tool definitions", () => {
-      expect(tools).toHaveLength(4);
+      expect(tools).toHaveLength(6);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-interop-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 4 tools", () => {
+    it("should create a server instance with 6 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(4);
+      expect(server.toolCount).toBe(6);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-interop-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names for all 4 production tools", () => {
+    it("should return tool names for all 6 production tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -74,11 +74,13 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(4);
+      expect(names).toHaveLength(6);
       expect(names).toContain("iris.production.manage");
       expect(names).toContain("iris.production.control");
       expect(names).toContain("iris.production.status");
       expect(names).toContain("iris.production.summary");
+      expect(names).toContain("iris.production.item");
+      expect(names).toContain("iris.production.autostart");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
@@ -102,6 +104,8 @@ describe("iris-interop-mcp", () => {
       expect(server.getTool("iris.production.control")).toBeDefined();
       expect(server.getTool("iris.production.status")).toBeDefined();
       expect(server.getTool("iris.production.summary")).toBeDefined();
+      expect(server.getTool("iris.production.item")).toBeDefined();
+      expect(server.getTool("iris.production.autostart")).toBeDefined();
     });
   });
 

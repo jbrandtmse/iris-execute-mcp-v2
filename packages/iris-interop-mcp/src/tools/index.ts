@@ -3,7 +3,8 @@
  *
  * Exports all tool definitions to be registered with
  * {@link McpServerBase}. Includes production lifecycle tools
- * (manage, control, status, summary) from Story 5.2.
+ * (manage, control, status, summary) from Story 5.2 and
+ * production item / auto-start tools from Story 5.3.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -13,6 +14,10 @@ import {
   productionStatusTool,
   productionSummaryTool,
 } from "./production.js";
+import {
+  productionItemTool,
+  productionAutostartTool,
+} from "./item.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -20,4 +25,6 @@ export const tools: ToolDefinition[] = [
   productionControlTool,
   productionStatusTool,
   productionSummaryTool,
+  productionItemTool,
+  productionAutostartTool,
 ];
