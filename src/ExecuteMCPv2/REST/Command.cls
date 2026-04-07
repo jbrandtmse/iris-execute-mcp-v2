@@ -18,7 +18,7 @@ Class ExecuteMCPv2.REST.Command Extends %Atelier.REST
 ClassMethod Execute() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Set tRedirected = 0
     Try {
         ; Read JSON body
@@ -61,6 +61,7 @@ ClassMethod Execute() As %Status
             If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
             Set tRedirected = 0
 
+            Set $NAMESPACE = tOrigNS
             Set tSC = exCmd.AsStatus()
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
@@ -72,6 +73,9 @@ ClassMethod Execute() As %Status
         If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
         Set tRedirected = 0
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         ; Build result
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput
@@ -79,7 +83,6 @@ ClassMethod Execute() As %Status
         Do tResult.%Set("output", tOutput)
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
         ; Ensure redirection is restored on unexpected error
         Try {
             If tRedirected {
@@ -89,11 +92,10 @@ ClassMethod Execute() As %Status
                 Do ##class(%Library.Device).ReDirectIO(0)
             }
         } Catch {}
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
@@ -105,7 +107,7 @@ ClassMethod Execute() As %Status
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -164,11 +166,15 @@ ClassMethod ClassMethod() As %Status
         } ElseIf tArgCount = 10 {
             Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7), tArgs.%Get(8), tArgs.%Get(9))
         } Else {
+            Set $NAMESPACE = tOrigNS
             Set tSC = $$$ERROR($$$GeneralError, "Too many arguments: maximum is 10, received " _ tArgCount)
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
         }
+
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
 
         ; Build result — convert return value to string for JSON transport
         ; Guard against OREF return values that cannot be serialized to JSON
@@ -182,12 +188,10 @@ ClassMethod ClassMethod() As %Status
         Do tResult.%Set("argCount", tArgCount, "number")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 

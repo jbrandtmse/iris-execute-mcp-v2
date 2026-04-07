@@ -22,7 +22,7 @@ Class ExecuteMCPv2.REST.UnitTest Extends %Atelier.REST
 ClassMethod RunTests() As %Status
 {
     Set tSC = $$$OK
-    Set tOrigNS = ""
+    Set tOrigNS = $NAMESPACE
     Set tRedirected = 0
     Try {
         ; Read JSON body
@@ -100,9 +100,11 @@ ClassMethod RunTests() As %Status
         ; Parse results regardless of RunTest status (tests may have failed but ran)
         Set tResult = ..ParseTestResults(tMethodFilter)
 
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        Set tSC = ex.AsStatus()
         ; Ensure redirection is restored on unexpected error
         Try {
             If $Get(tRedirected) {
@@ -112,11 +114,10 @@ ClassMethod RunTests() As %Status
                 Do ##class(%Library.Device).ReDirectIO(0)
             }
         } Catch {}
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
-    ; Always restore namespace
-    If tOrigNS '= "" Do ##class(ExecuteMCPv2.Utils).RestoreNamespace(tOrigNS)
     Quit tSC
 }
 
