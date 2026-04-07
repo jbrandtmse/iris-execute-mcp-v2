@@ -20,8 +20,8 @@ describe("iris-data-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export 4 DocDB tools", () => {
-      expect(tools.length).toBe(4);
+    it("should export 6 tools (4 DocDB + 2 analytics)", () => {
+      expect(tools.length).toBe(6);
     });
 
     it("should export the expected tool names", () => {
@@ -30,6 +30,8 @@ describe("iris-data-mcp", () => {
       expect(names).toContain("iris.docdb.document");
       expect(names).toContain("iris.docdb.find");
       expect(names).toContain("iris.docdb.property");
+      expect(names).toContain("iris.analytics.mdx");
+      expect(names).toContain("iris.analytics.cubes");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -43,7 +45,7 @@ describe("iris-data-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 4 tools", () => {
+    it("should create a server instance with 6 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -51,7 +53,7 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(4);
+      expect(server.toolCount).toBe(6);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -74,7 +76,7 @@ describe("iris-data-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return 4 tool names", () => {
+    it("should return 6 tool names", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -82,11 +84,13 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(4);
+      expect(names).toHaveLength(6);
       expect(names).toContain("iris.docdb.manage");
       expect(names).toContain("iris.docdb.document");
       expect(names).toContain("iris.docdb.find");
       expect(names).toContain("iris.docdb.property");
+      expect(names).toContain("iris.analytics.mdx");
+      expect(names).toContain("iris.analytics.cubes");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

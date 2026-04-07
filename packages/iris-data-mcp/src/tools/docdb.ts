@@ -30,7 +30,7 @@ const BASE_DOCDB_URL = "/api/docdb/v1";
  * @param response - The parsed response from `ctx.http.*`.
  * @returns The actual data payload.
  */
-function extractResult(response: unknown): unknown {
+export function extractResult(response: unknown): unknown {
   if (
     response !== null &&
     typeof response === "object" &&

@@ -58,3 +58,10 @@ are listed below.
 ### From Story 6-8 (Ops Integration Tests)
 - Duplicate `getConfig()` function and `declare global` block between `integration-setup.ts` and `ops.integration.test.ts`. Same pattern exists in iris-interop-mcp. Consider extracting shared test config helper in a future cleanup story.
 - Task creation test extracts `createdTaskId` via unchecked `as` cast on `structuredContent`. If the response shape changes, the cast silently produces undefined fields. Low risk since cleanup still runs via afterAll.
+
+---
+
+## Open Items — Epic 7 (Data & Analytics MCP Tools)
+
+### From Story 7-3 (Analytics Tools) — code review (2026-04-07)
+- `%BuildCube` with `pAsync=0` runs synchronously with no timeout protection. A large cube build could block the HTTP request indefinitely. The story spec explicitly calls for synchronous operation, so adding timeout or async support would be a future enhancement.

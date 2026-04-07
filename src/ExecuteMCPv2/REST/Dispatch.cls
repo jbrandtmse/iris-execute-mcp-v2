@@ -124,8 +124,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 6: System Configuration -->
   <Route Url="/system/config" Method="POST" Call="ExecuteMCPv2.REST.SystemConfig:ConfigManage" />
 
-  <!-- Future Epic 7: Data and Analytics -->
-  <!-- <Route Url="/data/:action" Method="POST" Call="ExecuteMCPv2.REST.Data:Execute" /> -->
+  <!-- Epic 7: Analytics -->
+  <Route Url="/analytics/mdx" Method="POST" Call="ExecuteMCPv2.REST.Analytics:ExecuteMDX" />
+  <Route Url="/analytics/cubes" Method="GET" Call="ExecuteMCPv2.REST.Analytics:CubeList" />
+  <Route Url="/analytics/cubes" Method="POST" Call="ExecuteMCPv2.REST.Analytics:CubeAction" />
 </Routes>
 }
 

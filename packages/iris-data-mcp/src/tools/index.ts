@@ -13,6 +13,7 @@ import {
   docdbFindTool,
   docdbPropertyTool,
 } from "./docdb.js";
+import { analyticsMdxTool, analyticsCubesTool } from "./analytics.js";
 
 /** All tool definitions registered by the iris-data-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -20,4 +21,6 @@ export const tools: ToolDefinition[] = [
   docdbDocumentTool,
   docdbFindTool,
   docdbPropertyTool,
+  analyticsMdxTool,
+  analyticsCubesTool,
 ];

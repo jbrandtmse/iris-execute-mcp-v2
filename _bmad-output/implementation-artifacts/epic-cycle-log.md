@@ -523,3 +523,14 @@
   - `.mcp.json` — Added iris-data-mcp server entry
 - **Key decisions:** Replicated iris-ops-mcp pattern exactly; tsconfig.json already correct from scaffold; needsCustomRest: true for DocDB/DeepSee APIs
 - **Review findings:** Clean — zero findings
+
+### Story 7.2: Document Database Tools
+- **Status:** done
+- **Commit:** 03f21af
+- **Files touched:**
+  - `packages/iris-data-mcp/src/tools/docdb.ts` — New: 4 DocDB tools (manage, document, find, property)
+  - `packages/iris-data-mcp/src/tools/index.ts` — Wired 4 tools
+  - `packages/iris-data-mcp/src/__tests__/docdb.test.ts` — New: 47 unit tests
+  - `packages/iris-data-mcp/src/__tests__/index.test.ts` — Updated tool count to 4
+- **Key decisions:** Used IRIS built-in DocDB REST API (`/api/docdb/v1/`) instead of custom REST handler; extractResult() helper for Atelier/plain JSON response handling; namespace in URL path
+- **Review findings:** 2 MEDIUM auto-resolved (added .min(1) to ID/database/property Zod strings to prevent empty string URL collisions)

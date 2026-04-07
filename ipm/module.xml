@@ -21,6 +21,7 @@
       <Resource Name="ExecuteMCPv2.REST.Monitor.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.Task.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.SystemConfig.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Analytics.CLS"/>
 
       <!-- Test classes (loaded but not required for production) -->
       <Resource Name="ExecuteMCPv2.Tests.UtilsTest.CLS"/>
