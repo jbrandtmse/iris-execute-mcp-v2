@@ -45,7 +45,7 @@ describe("iris.rest.manage", () => {
       expect.stringContaining("/api/mgmnt/v2/USER/"),
     );
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual(apps);
+    expect(result.structuredContent).toEqual({ items: apps, count: 2 });
   });
 
   it("should list REST applications with custom namespace", async () => {
@@ -71,7 +71,7 @@ describe("iris.rest.manage", () => {
       ctx,
     );
 
-    expect(result.structuredContent).toEqual(plainResponse);
+    expect(result.structuredContent).toEqual({ items: plainResponse, count: 1 });
   });
 
   // ── get action ────────────────────────────────────────────

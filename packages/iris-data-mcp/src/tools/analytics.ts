@@ -12,7 +12,7 @@
 
 import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
-import { extractResult } from "./docdb.js";
+import { extractResult, toStructured } from "./docdb.js";
 
 /** Base URL for the ExecuteMCPv2 custom REST API. */
 const BASE_URL = "/api/executemcp/v2";
@@ -64,7 +64,7 @@ export const analyticsMdxTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
@@ -157,7 +157,7 @@ export const analyticsCubesTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {

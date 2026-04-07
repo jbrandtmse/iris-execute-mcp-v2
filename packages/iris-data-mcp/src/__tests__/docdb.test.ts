@@ -45,7 +45,7 @@ describe("iris.docdb.manage", () => {
       expect.stringContaining("/api/docdb/v1/USER"),
     );
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual(dbList);
+    expect(result.structuredContent).toEqual({ items: dbList, count: 2 });
   });
 
   it("should list databases with custom namespace", async () => {
@@ -161,7 +161,7 @@ describe("iris.docdb.manage", () => {
       ctx,
     );
 
-    expect(result.structuredContent).toEqual(plainResponse);
+    expect(result.structuredContent).toEqual({ items: plainResponse, count: 2 });
   });
 });
 
@@ -382,7 +382,7 @@ describe("iris.docdb.find", () => {
       filter,
     );
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual(docs);
+    expect(result.structuredContent).toEqual({ items: docs, count: 2 });
   });
 
   it("should support $eq operator", async () => {

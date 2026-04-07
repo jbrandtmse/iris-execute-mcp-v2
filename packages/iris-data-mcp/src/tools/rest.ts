@@ -11,7 +11,7 @@
 
 import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
-import { extractResult } from "./docdb.js";
+import { extractResult, toStructured } from "./docdb.js";
 
 /** Base URL for the IRIS Management REST API. */
 const BASE_MGMNT_URL = "/api/mgmnt/v2";
@@ -99,11 +99,12 @@ export const restManageTool: ToolDefinition = {
       }
 
       const result = extractResult(response);
+      const structured = toStructured(result);
       return {
         content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          { type: "text" as const, text: JSON.stringify(structured, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: structured,
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {

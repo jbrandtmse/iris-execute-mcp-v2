@@ -42,6 +42,21 @@ export function extractResult(response: unknown): unknown {
   return response;
 }
 
+/**
+ * Ensure a value is a record suitable for MCP `structuredContent`.
+ * MCP requires structuredContent to be a JSON object (record), not an array.
+ * Arrays are wrapped in `{ items, count }`.
+ */
+export function toStructured(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { items: value, count: value.length };
+  }
+  if (value !== null && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return { value };
+}
+
 // ── iris.docdb.manage ──────────────────────────────────────────
 
 export const docdbManageTool: ToolDefinition = {
@@ -128,7 +143,7 @@ export const docdbManageTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
@@ -277,7 +292,7 @@ export const docdbDocumentTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
@@ -344,7 +359,7 @@ export const docdbFindTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
@@ -435,7 +450,7 @@ export const docdbPropertyTool: ToolDefinition = {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
