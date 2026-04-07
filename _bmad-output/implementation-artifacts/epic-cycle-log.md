@@ -497,3 +497,16 @@
 - **Key decisions:** Probe uses /monitor/system endpoint; task lifecycle uses suspended %SYS.Task.PurgeTaskHistory; config tests read-only
 - **Integration test results:** 18/18 passing (12 read-only + 2 config + 4 task lifecycle)
 - **Review findings:** Clean — zero findings
+
+## Epic 7: Data & Analytics (iris-data-mcp)
+
+### Story 7.0: Epic 6 Deferred Cleanup
+- **Status:** done
+- **Commit:** fd8f6a5
+- **Files touched:**
+  - `scripts/gen-bootstrap.mjs` — Added Monitor.cls, Task.cls, SystemConfig.cls entries
+  - `packages/shared/src/bootstrap-classes.ts` — Regenerated: 9→12 classes
+  - `packages/shared/src/__tests__/bootstrap.test.ts` — Updated count, added 3 presence tests
+  - `_bmad-output/implementation-artifacts/deferred-work.md` — Closed 26 items, kept 14
+- **Key decisions:** Used gen-bootstrap.mjs generator (not manual edit); placed new classes before Dispatch in compilation order; formally closed all Epic 1-4 deferred items as won't-fix
+- **Review findings:** Clean — zero findings

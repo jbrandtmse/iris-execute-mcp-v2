@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-07"  # Story 7-0 done (code review passed)
+last_updated: "2026-04-07"  # Story 7-1 done
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -120,7 +120,7 @@ development_status:
   # Epic 7: Data & Analytics (iris-data-mcp)
   epic-7: in-progress
   7-0-epic-6-deferred-cleanup: done
-  7-1-iris-data-mcp-package-setup-and-server-entry-point: backlog
+  7-1-iris-data-mcp-package-setup-and-server-entry-point: done
   7-2-document-database-tools: backlog
   7-3-analytics-tools: backlog
   7-4-rest-api-management-and-debug-placeholders: backlog
