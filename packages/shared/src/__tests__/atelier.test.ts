@@ -281,5 +281,23 @@ describe("atelier", () => {
         "/api/atelier/v8/%SYS/doc/Ens.Config.cls",
       );
     });
+
+    it("should throw for version <= 0", () => {
+      expect(() => atelierPath(0, "USER", "doc/A.cls")).toThrow("positive integer");
+      expect(() => atelierPath(-1, "USER", "doc/A.cls")).toThrow("positive integer");
+    });
+
+    it("should throw for non-integer version", () => {
+      expect(() => atelierPath(7.5, "USER", "doc/A.cls")).toThrow("positive integer");
+      expect(() => atelierPath(NaN, "USER", "doc/A.cls")).toThrow("positive integer");
+    });
+
+    it("should throw for empty namespace", () => {
+      expect(() => atelierPath(7, "", "doc/A.cls")).toThrow("namespace must not be empty");
+    });
+
+    it("should throw for empty action", () => {
+      expect(() => atelierPath(7, "USER", "")).toThrow("action must not be empty");
+    });
   });
 });

@@ -412,9 +412,21 @@ ClassMethod UserPassword() As %Status
             }
             Else {
                 ; Extract validation message but NEVER include the password itself
+                ; Use a generic message to avoid any risk of password leakage
+                ; through IRIS-reformatted or truncated error text
                 Set tMsg = $System.Status.GetErrorText(tSC)
-                ; Remove any potential password values from the message
+                ; Strip the password using regex-style replacement that handles
+                ; IRIS reformatting (spaces, truncation, case changes)
+                ; First do exact match, then strip any remaining fragments >= 3 chars
                 Set tMsg = $Replace(tMsg, tPassword, "***")
+                If $Length(tPassword) >= 3 {
+                    ; Also strip partial matches (IRIS may truncate or reformat)
+                    Set tPwdLen = $Length(tPassword)
+                    For tK = tPwdLen:-1:3 {
+                        Set tFragment = $Extract(tPassword, 1, tK)
+                        Set tMsg = $Replace(tMsg, tFragment, "***")
+                    }
+                }
                 Set tResult = {"action": "validate", "valid": false, "message": (tMsg)}
                 Set tSC = $$$OK
             }
@@ -750,6 +762,11 @@ ClassMethod PermissionCheck() As %Status
                 Set tSC = $$$OK
                 Quit
             }
+            ; Check user's directly-assigned resources first
+            Set tDirectResources = $Get(tUserProps("Resources"))
+            If tDirectResources '= "" {
+                Set tGrantedResources = tDirectResources
+            }
             Set tUserRoles = $Get(tUserProps("Roles"))
             ; Collect resources from all assigned roles
             For tI = 1:1:$Length(tUserRoles, ",") {
@@ -952,6 +969,26 @@ ClassMethod WebAppGet(pName As %String) As %Status
     Quit $$$OK
 }
 
+/// Build the tProps array for web application create/modify from a JSON body.
+/// <p>Reads standard web application properties from the JSON body and
+/// populates the <var>pProps</var> array suitable for passing to
+/// <method>Security.Applications.Create</method> or
+/// <method>Security.Applications.Modify</method>.</p>
+ClassMethod BuildWebAppProps(pBody As %DynamicObject, Output pProps) [ Private ]
+{
+    If pBody.%IsDefined("namespace") Set pProps("NameSpace") = pBody.%Get("namespace")
+    If pBody.%IsDefined("dispatchClass") Set pProps("DispatchClass") = pBody.%Get("dispatchClass")
+    If pBody.%IsDefined("description") Set pProps("Description") = pBody.%Get("description")
+    If pBody.%IsDefined("enabled") Set pProps("Enabled") = +pBody.%Get("enabled")
+    If pBody.%IsDefined("authEnabled") Set pProps("AutheEnabled") = +pBody.%Get("authEnabled")
+    If pBody.%IsDefined("isNameSpaceDefault") Set pProps("IsNameSpaceDefault") = +pBody.%Get("isNameSpaceDefault")
+    If pBody.%IsDefined("cspZenEnabled") Set pProps("CSPZENEnabled") = +pBody.%Get("cspZenEnabled")
+    If pBody.%IsDefined("recurse") Set pProps("Recurse") = +pBody.%Get("recurse")
+    If pBody.%IsDefined("matchRoles") Set pProps("MatchRoles") = pBody.%Get("matchRoles")
+    If pBody.%IsDefined("resource") Set pProps("Resource") = pBody.%Get("resource")
+    If pBody.%IsDefined("cookiePath") Set pProps("CookiePath") = pBody.%Get("cookiePath")
+}
+
 /// Create, modify, or delete a web application.
 /// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
 /// <code>name</code> (web app path, e.g. "/api/myapp"), and optional properties.
@@ -996,17 +1033,7 @@ ClassMethod WebAppManage() As %Status
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
-            If tBody.%IsDefined("namespace") Set tProps("NameSpace") = tBody.%Get("namespace")
-            If tBody.%IsDefined("dispatchClass") Set tProps("DispatchClass") = tBody.%Get("dispatchClass")
-            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
-            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
-            If tBody.%IsDefined("authEnabled") Set tProps("AutheEnabled") = +tBody.%Get("authEnabled")
-            If tBody.%IsDefined("isNameSpaceDefault") Set tProps("IsNameSpaceDefault") = +tBody.%Get("isNameSpaceDefault")
-            If tBody.%IsDefined("cspZenEnabled") Set tProps("CSPZENEnabled") = +tBody.%Get("cspZenEnabled")
-            If tBody.%IsDefined("recurse") Set tProps("Recurse") = +tBody.%Get("recurse")
-            If tBody.%IsDefined("matchRoles") Set tProps("MatchRoles") = tBody.%Get("matchRoles")
-            If tBody.%IsDefined("resource") Set tProps("Resource") = tBody.%Get("resource")
-            If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
+            Do ..BuildWebAppProps(tBody, .tProps)
 
             Set tSC = ##class(Security.Applications).Create(tName, .tProps)
             Set $NAMESPACE = tOrigNS
@@ -1019,17 +1046,7 @@ ClassMethod WebAppManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "modify" {
-            If tBody.%IsDefined("namespace") Set tProps("NameSpace") = tBody.%Get("namespace")
-            If tBody.%IsDefined("dispatchClass") Set tProps("DispatchClass") = tBody.%Get("dispatchClass")
-            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
-            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
-            If tBody.%IsDefined("authEnabled") Set tProps("AutheEnabled") = +tBody.%Get("authEnabled")
-            If tBody.%IsDefined("isNameSpaceDefault") Set tProps("IsNameSpaceDefault") = +tBody.%Get("isNameSpaceDefault")
-            If tBody.%IsDefined("cspZenEnabled") Set tProps("CSPZENEnabled") = +tBody.%Get("cspZenEnabled")
-            If tBody.%IsDefined("recurse") Set tProps("Recurse") = +tBody.%Get("recurse")
-            If tBody.%IsDefined("matchRoles") Set tProps("MatchRoles") = tBody.%Get("matchRoles")
-            If tBody.%IsDefined("resource") Set tProps("Resource") = tBody.%Get("resource")
-            If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
+            Do ..BuildWebAppProps(tBody, .tProps)
 
             Set tSC = ##class(Security.Applications).Modify(tName, .tProps)
             Set $NAMESPACE = tOrigNS

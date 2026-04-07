@@ -191,6 +191,22 @@ describe("server-base", () => {
       expect(decodeCursor(badCursor)).toBe(0);
     });
 
+    it("should throw when encoding a negative offset", () => {
+      expect(() => encodeCursor(-1)).toThrow("non-negative");
+    });
+
+    it("should throw when encoding NaN offset", () => {
+      expect(() => encodeCursor(NaN)).toThrow("non-negative");
+    });
+
+    it("should decode negative offset cursor as 0", () => {
+      // Manually craft a cursor with a negative offset
+      const badCursor = Buffer.from(
+        JSON.stringify({ offset: -5 }),
+      ).toString("base64");
+      expect(decodeCursor(badCursor)).toBe(0);
+    });
+
     it("should paginate within a single page", () => {
       const server = new McpServerBase(makeServerOpts());
       const items = Array.from({ length: 10 }, (_, i) => i);
@@ -242,6 +258,24 @@ describe("server-base", () => {
     it("should return default page size of 50", () => {
       const server = new McpServerBase(makeServerOpts());
       expect(server.pageSize).toBe(50);
+    });
+
+    it("should flag pastEnd when cursor offset exceeds total items", () => {
+      const server = new McpServerBase(makeServerOpts());
+      const items = [1, 2, 3];
+      // Manually create a cursor beyond the end
+      const farCursor = encodeCursor(100);
+      const result = server.paginate(items, farCursor);
+      expect(result.page).toEqual([]);
+      expect(result.nextCursor).toBeUndefined();
+      expect(result.pastEnd).toBe(true);
+    });
+
+    it("should not flag pastEnd for valid cursor", () => {
+      const server = new McpServerBase(makeServerOpts());
+      const items = Array.from({ length: 120 }, (_, i) => i);
+      const page1 = server.paginate(items, undefined);
+      expect(page1.pastEnd).toBeUndefined();
     });
   });
 

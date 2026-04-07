@@ -240,7 +240,9 @@ export const globalListTool: ToolDefinition = {
   name: "iris.global.list",
   title: "List Globals",
   description:
-    "List globals in an IRIS namespace. Optionally filter by substring match on the global name.",
+    "List globals in an IRIS namespace. Optionally filter by substring match on the global name. " +
+    "Note: Pagination is client-side — all globals are fetched from the server per page request. " +
+    "Large namespaces with thousands of globals may experience slower pagination.",
   inputSchema: z.object({
     filter: z
       .string()

@@ -1,5 +1,5 @@
 /**
- * Transport resolution for the iris-admin-mcp server.
+ * Transport resolution for IRIS MCP servers.
  *
  * Determines which MCP transport to use based on CLI arguments
  * or the `MCP_TRANSPORT` environment variable.

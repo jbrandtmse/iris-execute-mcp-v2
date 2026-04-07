@@ -48,6 +48,8 @@ export class IrisHttpClient {
   private csrfToken: string | undefined;
   /** Whether a session has been established. */
   private sessionEstablished = false;
+  /** Active AbortControllers for in-flight requests. */
+  private activeControllers: Set<AbortController> = new Set();
 
   constructor(config: IrisConnectionConfig, defaultTimeout = 60_000) {
     this.config = config;
@@ -147,6 +149,7 @@ export class IrisHttpClient {
     const url = `${this.config.baseUrl}${path}`;
     const timeout = options?.timeout ?? this.defaultTimeout;
     const controller = new AbortController();
+    this.activeControllers.add(controller);
     const timer = setTimeout(() => controller.abort(), timeout);
 
     const headers: Record<string, string> = {
@@ -177,6 +180,7 @@ export class IrisHttpClient {
       });
 
       clearTimeout(timer);
+      this.activeControllers.delete(controller);
       const duration = Date.now() - start;
 
       // Extract session cookie and CSRF token from response
@@ -199,6 +203,7 @@ export class IrisHttpClient {
       return response;
     } catch (error: unknown) {
       clearTimeout(timer);
+      this.activeControllers.delete(controller);
 
       // Re-throw our own error types
       if (error instanceof IrisApiError) throw error;
@@ -421,8 +426,13 @@ export class IrisHttpClient {
     }
   }
 
-  /** Clear session state (cookies, CSRF token, session flag). */
+  /** Clear session state and abort all in-flight requests. */
   destroy(): void {
+    // Abort all pending requests before clearing state
+    for (const controller of this.activeControllers) {
+      controller.abort();
+    }
+    this.activeControllers.clear();
     this.cookies.clear();
     this.csrfToken = undefined;
     this.sessionEstablished = false;

@@ -10,7 +10,7 @@ export {
 } from "./errors.js";
 export { IrisHttpClient } from "./http-client.js";
 export type { RequestOptions, AtelierEnvelope, HeadResponse } from "./http-client.js";
-export { logger } from "./logger.js";
+export { logger, LogLevel, parseLogLevel } from "./logger.js";
 export type { Logger } from "./logger.js";
 export { checkHealth, ping } from "./health.js";
 export {
@@ -42,3 +42,4 @@ export {
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
 export type { BootstrapResult } from "./bootstrap.js";
+export { resolveTransport } from "./transport.js";

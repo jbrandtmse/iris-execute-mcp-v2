@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ToolContext, HeadResponse } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
-import { docGetTool, docPutTool, docDeleteTool, docListTool } from "../tools/doc.js";
+import { docGetTool, docPutTool, docDeleteTool, docListTool, validateDocName } from "../tools/doc.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── Local helpers ───────────────────────────────────────────────────
@@ -473,5 +473,85 @@ describe("iris.doc.list", () => {
     const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
     expect(calledPath).toContain("/docnames/");
     expect(calledPath).not.toContain("/modified/");
+  });
+});
+
+// ── validateDocName ──────────────────────────────────────────────────
+
+describe("validateDocName", () => {
+  it("should accept valid document names", () => {
+    expect(validateDocName("MyApp.Service.cls")).toBeUndefined();
+    expect(validateDocName("%UnitTest.TestCase.cls")).toBeUndefined();
+    expect(validateDocName("User.cls")).toBeUndefined();
+  });
+
+  it("should reject names containing '..'", () => {
+    const error = validateDocName("../../etc/passwd");
+    expect(error).toBeDefined();
+    expect(error).toContain("path traversal");
+  });
+
+  it("should reject names starting with '/'", () => {
+    const error = validateDocName("/etc/passwd.cls");
+    expect(error).toBeDefined();
+    expect(error).toContain("must not start with '/'");
+  });
+
+  it("should reject names with embedded '..'", () => {
+    const error = validateDocName("MyApp..Sneaky.cls");
+    expect(error).toBeDefined();
+    expect(error).toContain("path traversal");
+  });
+});
+
+// ── Document name validation in tool handlers ────��───────────────────
+
+describe("document name validation in handlers", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("docGetTool should reject path traversal names", async () => {
+    const result = await docGetTool.handler(
+      { name: "../../etc/passwd" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("path traversal");
+    expect(mockHttp.get).not.toHaveBeenCalled();
+  });
+
+  it("docPutTool should reject path traversal names", async () => {
+    const result = await docPutTool.handler(
+      { name: "../sneaky.cls", content: "Class Sneaky {}" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("path traversal");
+    expect(mockHttp.put).not.toHaveBeenCalled();
+  });
+
+  it("docDeleteTool should reject path traversal names", async () => {
+    const result = await docDeleteTool.handler(
+      { name: "../../etc/passwd" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("path traversal");
+    expect(mockHttp.delete).not.toHaveBeenCalled();
+  });
+
+  it("docGetTool should reject names starting with /", async () => {
+    const result = await docGetTool.handler(
+      { name: "/absolute/path.cls" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("must not start with '/'");
+    expect(mockHttp.get).not.toHaveBeenCalled();
   });
 });

@@ -9,9 +9,8 @@
  */
 
 import { createRequire } from "node:module";
-import { McpServerBase } from "@iris-mcp/shared";
+import { McpServerBase, resolveTransport } from "@iris-mcp/shared";
 import { tools } from "./tools/index.js";
-import { resolveTransport } from "./transport.js";
 
 // Read version from package.json using createRequire (ESM-safe)
 const require = createRequire(import.meta.url);

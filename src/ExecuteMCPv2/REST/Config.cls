@@ -27,6 +27,7 @@ ClassMethod NamespaceList() As %Status
 
         Set tResult = []
         While tRS.Next() {
+            Kill tProps
             Set tName = tRS.Get("Namespace")
             Set tSC2 = ##class(Config.Namespaces).Get(tName, .tProps)
             Set tEntry = {}
@@ -176,6 +177,7 @@ ClassMethod DatabaseList() As %Status
 
         Set tResult = []
         While tRS.Next() {
+            Kill tProps
             Set tName = tRS.Get("Name")
             Set tSC2 = ##class(Config.Databases).Get(tName, .tProps)
             Set tEntry = {}
@@ -205,6 +207,24 @@ ClassMethod DatabaseList() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Build the tProps array for database create/modify from a JSON body.
+/// <p>Reads standard database properties from the JSON body and
+/// populates the <var>pProps</var> array suitable for passing to
+/// <method>Config.Databases.Create</method> or
+/// <method>Config.Databases.Modify</method>.</p>
+ClassMethod BuildDatabaseProps(pBody As %DynamicObject, Output pProps) [ Private ]
+{
+    If pBody.%Get("directory") '= "" Set pProps("Directory") = pBody.%Get("directory")
+    If pBody.%Get("size") '= "" Set pProps("Size") = +pBody.%Get("size")
+    If pBody.%Get("maxSize") '= "" Set pProps("MaxSize") = +pBody.%Get("maxSize")
+    If pBody.%Get("expansionSize") '= "" Set pProps("ExpansionSize") = +pBody.%Get("expansionSize")
+    If pBody.%Get("globalJournalState") '= "" Set pProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
+    If pBody.%Get("mountRequired") '= "" Set pProps("MountRequired") = +pBody.%Get("mountRequired")
+    If pBody.%Get("mountAtStartup") '= "" Set pProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
+    If pBody.%Get("readOnly") '= "" Set pProps("ReadOnly") = +pBody.%Get("readOnly")
+    If pBody.%Get("resource") '= "" Set pProps("Resource") = pBody.%Get("resource")
 }
 
 /// Create, modify, or delete a database.
@@ -260,14 +280,7 @@ ClassMethod DatabaseManage() As %Status
             }
 
             Set tProps("Directory") = tDir
-            If tBody.%Get("size") '= "" Set tProps("Size") = +tBody.%Get("size")
-            If tBody.%Get("maxSize") '= "" Set tProps("MaxSize") = +tBody.%Get("maxSize")
-            If tBody.%Get("expansionSize") '= "" Set tProps("ExpansionSize") = +tBody.%Get("expansionSize")
-            If tBody.%Get("globalJournalState") '= "" Set tProps("GlobalJournalState") = +tBody.%Get("globalJournalState")
-            If tBody.%Get("mountRequired") '= "" Set tProps("MountRequired") = +tBody.%Get("mountRequired")
-            If tBody.%Get("mountAtStartup") '= "" Set tProps("MountAtStartup") = +tBody.%Get("mountAtStartup")
-            If tBody.%Get("readOnly") '= "" Set tProps("ReadOnly") = +tBody.%Get("readOnly")
-            If tBody.%Get("resource") '= "" Set tProps("Resource") = tBody.%Get("resource")
+            Do ..BuildDatabaseProps(tBody, .tProps)
 
             Set tSC = ##class(Config.Databases).Create(tName, .tProps)
             Set $NAMESPACE = tOrigNS
@@ -277,15 +290,7 @@ ClassMethod DatabaseManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "modify" {
-            If tBody.%Get("directory") '= "" Set tProps("Directory") = tBody.%Get("directory")
-            If tBody.%Get("size") '= "" Set tProps("Size") = +tBody.%Get("size")
-            If tBody.%Get("maxSize") '= "" Set tProps("MaxSize") = +tBody.%Get("maxSize")
-            If tBody.%Get("expansionSize") '= "" Set tProps("ExpansionSize") = +tBody.%Get("expansionSize")
-            If tBody.%Get("globalJournalState") '= "" Set tProps("GlobalJournalState") = +tBody.%Get("globalJournalState")
-            If tBody.%Get("mountRequired") '= "" Set tProps("MountRequired") = +tBody.%Get("mountRequired")
-            If tBody.%Get("mountAtStartup") '= "" Set tProps("MountAtStartup") = +tBody.%Get("mountAtStartup")
-            If tBody.%Get("readOnly") '= "" Set tProps("ReadOnly") = +tBody.%Get("readOnly")
-            If tBody.%Get("resource") '= "" Set tProps("Resource") = tBody.%Get("resource")
+            Do ..BuildDatabaseProps(tBody, .tProps)
 
             Set tSC = ##class(Config.Databases).Modify(tName, .tProps)
             Set $NAMESPACE = tOrigNS
@@ -344,6 +349,7 @@ ClassMethod MappingList(pType As %String) As %Status
 
         Set tResult = []
         While tRS.Next() {
+            Kill tProps
             Set tName = tRS.Get("Name")
             Set tSC2 = $ClassMethod(tClassName, "Get", tNamespace, tName, .tProps)
             Set tEntry = {}

@@ -51,8 +51,13 @@ export type { PaginateResult } from "./tool-types.js";
  * Encode a pagination cursor from an offset number.
  *
  * Cursor format: base64-encoded JSON `{ offset: N }`.
+ *
+ * @throws {Error} When offset is negative or NaN.
  */
 export function encodeCursor(offset: number): string {
+  if (Number.isNaN(offset) || offset < 0) {
+    throw new Error(`encodeCursor: offset must be a non-negative number, got ${offset}`);
+  }
   return Buffer.from(JSON.stringify({ offset })).toString("base64");
 }
 
@@ -73,7 +78,9 @@ export function decodeCursor(cursor: string | undefined): number {
       "offset" in parsed &&
       typeof (parsed as Record<string, unknown>).offset === "number"
     ) {
-      return (parsed as { offset: number }).offset;
+      const offset = (parsed as { offset: number }).offset;
+      if (offset < 0 || Number.isNaN(offset)) return 0;
+      return offset;
     }
     return 0;
   } catch {
@@ -116,6 +123,9 @@ export function buildToolContext(
     config,
     paginate<T>(items: T[], cursor?: string, size: number = pageSize): PaginateResult<T> {
       const offset = decodeCursor(cursor);
+      if (cursor && offset >= items.length && items.length > 0) {
+        return { page: [], nextCursor: undefined, pastEnd: true };
+      }
       const page = items.slice(offset, offset + size);
       const nextOffset = offset + size;
       const nextCursor =
@@ -341,6 +351,9 @@ export class McpServerBase {
     pageSize: number = this.pageSize,
   ): PaginateResult<T> {
     const offset = decodeCursor(cursor);
+    if (cursor && offset >= items.length && items.length > 0) {
+      return { page: [], nextCursor: undefined, pastEnd: true };
+    }
     const page = items.slice(offset, offset + pageSize);
     const nextOffset = offset + pageSize;
     const nextCursor =

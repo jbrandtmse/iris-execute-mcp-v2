@@ -14,6 +14,22 @@ import { atelierPath, IrisApiError, type ToolDefinition } from "@iris-mcp/shared
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 
+/**
+ * Validate a document name to prevent path traversal attacks.
+ *
+ * Rejects names containing `..` (directory traversal) or starting with
+ * `/` (absolute path). Returns an error ToolResult when invalid.
+ */
+export function validateDocName(name: string): string | undefined {
+  if (name.includes("..")) {
+    return `Invalid document name '${name}': must not contain '..' (path traversal)`;
+  }
+  if (name.startsWith("/")) {
+    return `Invalid document name '${name}': must not start with '/'`;
+  }
+  return undefined;
+}
+
 // ── iris.doc.get ────────────────────────────────────────────────────
 
 export const docGetTool: ToolDefinition = {
@@ -54,6 +70,14 @@ export const docGetTool: ToolDefinition = {
       format?: "udl" | "xml";
       metadataOnly?: boolean;
     };
+
+    const nameError = validateDocName(name);
+    if (nameError) {
+      return {
+        content: [{ type: "text" as const, text: nameError }],
+        isError: true,
+      };
+    }
 
     const ns = ctx.resolveNamespace(namespace);
 
@@ -160,6 +184,14 @@ export const docPutTool: ToolDefinition = {
       ignoreConflict?: boolean;
     };
 
+    const nameError = validateDocName(name);
+    if (nameError) {
+      return {
+        content: [{ type: "text" as const, text: nameError }],
+        isError: true,
+      };
+    }
+
     const ns = ctx.resolveNamespace(namespace);
     const lines = Array.isArray(content) ? content : content.split(/\r?\n/);
     const encodedName = encodeURIComponent(name);
@@ -216,6 +248,17 @@ export const docDeleteTool: ToolDefinition = {
 
     const ns = ctx.resolveNamespace(namespace);
     const names = Array.isArray(name) ? name : [name];
+
+    // Validate all names before processing
+    for (const docName of names) {
+      const nameError = validateDocName(docName);
+      if (nameError) {
+        return {
+          content: [{ type: "text" as const, text: nameError }],
+          isError: true,
+        };
+      }
+    }
 
     if (names.length === 0) {
       return {

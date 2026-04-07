@@ -143,12 +143,24 @@ export function requireMinVersion(
  * @example
  * atelierPath(7, "HSCUSTOM", "doc/MyClass.cls")
  * // → "/api/atelier/v7/HSCUSTOM/doc/MyClass.cls"
+ *
+ * @throws {Error} When version is not a positive integer, namespace is
+ *   empty, or action is empty.
  */
 export function atelierPath(
   version: number,
   namespace: string,
   action: string,
 ): string {
+  if (!Number.isInteger(version) || version <= 0) {
+    throw new Error(`atelierPath: version must be a positive integer, got ${version}`);
+  }
+  if (!namespace) {
+    throw new Error("atelierPath: namespace must not be empty");
+  }
+  if (!action) {
+    throw new Error("atelierPath: action must not be empty");
+  }
   return `/api/atelier/v${version}/${namespace}/${action}`;
 }
 

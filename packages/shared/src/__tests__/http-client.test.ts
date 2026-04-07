@@ -941,4 +941,57 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
   });
+
+  // ── destroy() abort in-flight ──────────────────────────────────────
+
+  describe("destroy aborts in-flight requests", () => {
+    it("should abort active requests when destroy is called", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Create a fetch that captures the signal and rejects when aborted
+      let capturedSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+        capturedSignal = init.signal as AbortSignal;
+        // Return a promise that rejects when the signal is aborted
+        return new Promise((_resolve, reject) => {
+          if (capturedSignal!.aborted) {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+            return;
+          }
+          capturedSignal!.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        });
+      });
+
+      // Start a request (don't await it - it will reject after abort)
+      const requestPromise = client.get("/api/slow").catch(() => {});
+
+      // Give the event loop a tick to register the fetch call
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Verify we captured the signal
+      expect(capturedSignal).toBeDefined();
+      expect(capturedSignal!.aborted).toBe(false);
+
+      // Destroy should abort it
+      client.destroy();
+
+      expect(capturedSignal!.aborted).toBe(true);
+
+      // Clean up - let the rejection propagate
+      await requestPromise;
+    });
+
+    it("should clear all state on destroy", () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Just call destroy and verify no errors
+      client.destroy();
+      // Calling destroy again should be safe
+      client.destroy();
+    });
+  });
 });

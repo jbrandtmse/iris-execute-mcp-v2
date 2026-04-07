@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import type { McpServerBaseOptions } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
-import { resolveTransport } from "../transport.js";
+import { resolveTransport } from "@iris-mcp/shared";
 
 // ── Tests ───────────────────────────────────────────────────────────
 
