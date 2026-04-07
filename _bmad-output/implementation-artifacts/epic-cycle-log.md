@@ -547,3 +547,14 @@
 - **Key decisions:** DeepSee runs in target namespace (not %SYS); used %DeepSee.ResultSet.%ExecuteDirect for MDX; %BuildCube with pAsync=0 for synchronous builds; verified all APIs via %Dictionary.MethodDefinition
 - **Bugs found & fixed (Step 2.5):** None — all endpoints returned correct JSON on first test
 - **Review findings:** 1 LOW deferred (extractResult duplication between docdb.ts and analytics.ts)
+
+### Story 7.4: REST API Management & Debug Placeholders
+- **Status:** done
+- **Commit:** bac08ce
+- **Files touched:**
+  - `packages/iris-data-mcp/src/tools/rest.ts` — New: restManageTool (list/get/delete)
+  - `packages/iris-data-mcp/src/tools/debug.ts` — New: placeholder for FR106-FR107
+  - `packages/iris-data-mcp/src/__tests__/rest.test.ts` — New: 16 unit tests
+  - `packages/iris-data-mcp/src/tools/index.ts` — Wired restManageTool (7 total)
+- **Key decisions:** Used IRIS built-in Management API (`/api/mgmnt/v2/`); imported extractResult from docdb.ts; debug.ts is placeholder only with no exports
+- **Review findings:** Clean — zero findings

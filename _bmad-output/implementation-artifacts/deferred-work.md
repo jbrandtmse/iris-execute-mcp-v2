@@ -68,3 +68,7 @@ are listed below.
 
 ### From Story 7-4 (REST API Management) — code review (2026-04-07)
 - `encodeURIComponent()` on the `application` parameter encodes forward slashes (e.g., `/api/myapp` becomes `%2Fapi%2Fmyapp`). Whether the IRIS Management API v2 correctly decodes percent-encoded slashes in the URL path segment is unverified. If not, application paths with slashes may need to be split and encoded segment-by-segment. Requires live IRIS testing to confirm. Low risk -- follows the spec-prescribed pattern.
+
+### From Story 7-5 (Data Integration Tests) — code review (2026-04-07)
+- `insertedDocId` extraction regex in `data.integration.test.ts` (line ~178) only matches numeric IDs (`(\d+)`). If DocDB returns UUID or string-based IDs in a future IRIS version, the fallback extraction would fail silently. Low risk since `structuredContent` extraction is tried first and the regex is a fallback only.
+- Find-with-filter test (test 7) does not assert on the number of returned documents or verify that the found document content matches the inserted data. The test only checks for a non-error response. Low priority -- the other lifecycle tests (get, update) verify content correctness.
