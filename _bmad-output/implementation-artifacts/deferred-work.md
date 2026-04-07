@@ -123,3 +123,10 @@
 ## Deferred from: code review of 5-0-epic-4-deferred-cleanup (2026-04-06)
 
 - `pastEnd` flag added to `PaginateResult` and set in `paginate()` (server-base.ts) but no tool handler currently checks or returns it to the MCP client. The flag is available for future consumers but has no effect today.
+
+## Deferred from: code review of 5-2-production-lifecycle-tools (2026-04-06)
+
+- `ProductionControl` tTimeout=0 is silently overridden to 120. If a user explicitly passes `timeout: 0`, the intent may be "no wait" but the code treats it as "use default". Consider distinguishing null/undefined from explicit zero.
+- `ProductionSummary` inner catch block (per-namespace iteration) swallows all errors silently, including security violations. Consider logging skipped namespaces or including them in the response with an error reason.
+- `ProductionManage` uses `%Dictionary.ClassDefinition.%ExistsId` to check existence, which matches any class definition, not specifically production classes. A non-production class with the same name would produce misleading errors.
+- `productionControlTool` Zod schema marks `name` as optional for all actions, but start/restart require it server-side. Consider adding a `.refine()` for client-side validation.

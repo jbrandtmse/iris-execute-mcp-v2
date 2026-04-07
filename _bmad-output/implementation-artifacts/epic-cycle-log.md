@@ -343,3 +343,15 @@
   - deferred-work.md scrubbed: resolved items removed, 14 items closed by this story
 - **Live verification:** Security.cls and Config.cls compiled successfully. Mapping list, webapp list, namespace list all return correct JSON. PermissionCheck %All role limitation noted (pre-existing, not a regression).
 - **Review findings:** No HIGH or MEDIUM issues found. All changes clean.
+
+### Story 5.1: iris-interop-mcp Package Setup & Server Entry Point
+- **Status:** done
+- **Commit:** a6484cf
+- **Files touched:** 5 files (2 modified, 3 new) + pnpm-lock.yaml
+  - Modified: package.json, src/index.ts
+  - New: vitest.config.ts, src/tools/index.ts, src/__tests__/index.test.ts
+- **Key decisions:**
+  - Package skeleton already existed from Story 5.0, updated rather than created from scratch
+  - `needsCustomRest: true` — interop tools use custom REST service
+  - 12 unit tests covering server creation, transport, tools export
+- **Review findings:** No HIGH or MEDIUM issues. Clean implementation.
