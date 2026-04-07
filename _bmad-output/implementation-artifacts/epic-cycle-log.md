@@ -397,3 +397,17 @@
 - **Key decisions:** Created reusable gen-bootstrap.mjs script for future regeneration; compilation order: Utils, Setup, handlers, Dispatch last
 - **Issues resolved:** Pre-existing test gap in bootstrap orchestration test (missing configurePackageMapping mock)
 - **Review findings:** 2 LOW deferred (npm script entry, error handling in gen script)
+
+### Story 6.1: iris-ops-mcp Package Setup & Server Entry Point
+- **Status:** done
+- **Commit:** 012fe9f
+- **Files touched:**
+  - `packages/iris-ops-mcp/package.json` — Updated: version 0.0.1, bin entry, deps
+  - `packages/iris-ops-mcp/vitest.config.ts` — New: test config
+  - `packages/iris-ops-mcp/src/index.ts` — Replaced: full McpServerBase entry point
+  - `packages/iris-ops-mcp/src/tools/index.ts` — New: empty ToolDefinition[]
+  - `packages/iris-ops-mcp/src/__tests__/index.test.ts` — New: 13 unit tests
+  - `.mcp.json` — Added iris-ops-mcp server entry
+- **Key decisions:** Replicated iris-interop-mcp pattern exactly; tsconfig.json already correct from scaffold
+- **Issues resolved:** None — clean implementation
+- **Review findings:** Zero findings across all three review layers

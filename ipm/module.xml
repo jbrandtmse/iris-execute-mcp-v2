@@ -18,6 +18,7 @@
       <Resource Name="ExecuteMCPv2.REST.Config.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.Security.CLS"/>
       <Resource Name="ExecuteMCPv2.REST.Interop.CLS"/>
+      <Resource Name="ExecuteMCPv2.REST.Monitor.CLS"/>
 
       <!-- Test classes (loaded but not required for production) -->
       <Resource Name="ExecuteMCPv2.Tests.UtilsTest.CLS"/>

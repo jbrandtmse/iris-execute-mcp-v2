@@ -20,8 +20,8 @@ describe("iris-ops-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export an empty array initially", () => {
-      expect(tools).toHaveLength(0);
+    it("should export metrics tools", () => {
+      expect(tools.length).toBeGreaterThanOrEqual(3);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 0 tools", () => {
+    it("should create a server instance with 3 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(0);
+      expect(server.toolCount).toBe(3);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-ops-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return empty tool names array", () => {
+    it("should return tool names array with 3 entries", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -74,7 +74,10 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(0);
+      expect(names).toHaveLength(3);
+      expect(names).toContain("iris.metrics.system");
+      expect(names).toContain("iris.metrics.alerts");
+      expect(names).toContain("iris.metrics.interop");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

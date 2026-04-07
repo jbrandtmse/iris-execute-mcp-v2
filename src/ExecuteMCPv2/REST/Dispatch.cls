@@ -102,8 +102,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/transform/test" Method="POST" Call="ExecuteMCPv2.REST.Interop:TransformTest" />
   <Route Url="/interop/rest" Method="POST" Call="ExecuteMCPv2.REST.Interop:RestManage" />
 
-  <!-- Future Epic 6: Operations and Monitoring -->
-  <!-- <Route Url="/system/:metric" Method="GET" Call="ExecuteMCPv2.REST.Ops:GetMetric" /> -->
+  <!-- Epic 6: Operations and Monitoring -->
+  <Route Url="/monitor/system" Method="GET" Call="ExecuteMCPv2.REST.Monitor:SystemMetrics" />
+  <Route Url="/monitor/alerts" Method="GET" Call="ExecuteMCPv2.REST.Monitor:SystemAlerts" />
+  <Route Url="/monitor/interop" Method="GET" Call="ExecuteMCPv2.REST.Monitor:InteropMetrics" />
 
   <!-- Future Epic 7: Data and Analytics -->
   <!-- <Route Url="/data/:action" Method="POST" Call="ExecuteMCPv2.REST.Data:Execute" /> -->
