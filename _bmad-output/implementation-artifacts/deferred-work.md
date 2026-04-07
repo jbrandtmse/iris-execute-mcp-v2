@@ -116,6 +116,11 @@ are listed below.
 - No npm script entry for `scripts/gen-bootstrap.mjs`. Developers must know to run `node scripts/gen-bootstrap.mjs` manually. Consider adding a `gen:bootstrap` script to root `package.json`.
 - No error handling in `gen-bootstrap.mjs` for missing `.cls` files. `readFileSync` will throw with unhelpful stack trace if a class file is missing or renamed. Consider adding try-catch with user-friendly error message.
 
+## Deferred from: code review of 6-6-task-scheduling-tools (2026-04-07)
+
+- AC6 mentions "duration" in task history but no explicit duration field is computed. The handler returns `lastStart` and `completed` timestamps from which duration can be derived client-side. Computing duration server-side would require parsing IRIS internal date/time format (`$HOROLOG`-based strings). Low risk — data is available for derivation.
+- No schedule properties (TimePeriod, DailyStartTime, DailyEndTime, etc.) exposed in `iris.task.manage` create action. Users can create tasks with name, class, namespace, description, and suspended flag, but cannot set a schedule. The `%SYS.Task` scheduling subsystem has many interrelated properties. Consider adding schedule configuration in a future enhancement story.
+
 ## Deferred from: code review of 6-3-jobs-and-locks-tools (2026-04-07)
 
 - AC1 specifies "start time" for jobs but `%SYS.ProcessQuery` does not expose a start time column. The verified SQL table lacks this field. Consider updating AC1 wording or adding a derived start time if IRIS exposes it in a future version.

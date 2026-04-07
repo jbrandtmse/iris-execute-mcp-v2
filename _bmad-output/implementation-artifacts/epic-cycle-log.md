@@ -448,3 +448,15 @@
 - **Key decisions:** Mirror handler gracefully returns "not configured" for non-mirrored instances; audit has maxRows limit (100 default, 1000 max)
 - **Bugs found & fixed (Step 2.5):** freeSpaceMB field renamed to freeSpaceBytes (GetFreeSpace returns bytes not MB), TS tool converts to GB for display
 - **Review findings:** Clean — zero findings across all three layers
+
+### Story 6.5: Database, License & ECP Tools
+- **Status:** done
+- **Commit:** fc72118
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Monitor.cls` — Added DatabaseCheck, LicenseInfo, ECPStatus methods
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added 3 routes
+  - `packages/iris-ops-mcp/src/tools/infrastructure.ts` — New: 3 tool definitions
+  - `packages/iris-ops-mcp/src/__tests__/infrastructure.test.ts` — New: 24 unit tests
+- **Key decisions:** LicenseInfo doesn't need %SYS switch ($SYSTEM.License works anywhere); ECP gracefully returns "not configured"; database name filter supported
+- **Bugs found & fixed (Step 2.5):** None — all endpoints worked correctly on first test
+- **Review findings:** Clean — zero findings

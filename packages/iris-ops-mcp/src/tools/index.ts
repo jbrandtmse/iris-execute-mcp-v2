@@ -23,6 +23,12 @@ import {
   licenseInfoTool,
   ecpStatusTool,
 } from "./infrastructure.js";
+import {
+  taskManageTool,
+  taskListTool,
+  taskRunTool,
+  taskHistoryTool,
+} from "./task.js";
 
 /** All tool definitions registered by the iris-ops-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -37,4 +43,8 @@ export const tools: ToolDefinition[] = [
   databaseCheckTool,
   licenseInfoTool,
   ecpStatusTool,
+  taskManageTool,
+  taskListTool,
+  taskRunTool,
+  taskHistoryTool,
 ];

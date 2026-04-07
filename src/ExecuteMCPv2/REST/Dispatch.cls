@@ -115,6 +115,12 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 
+  <!-- Epic 6: Task Scheduling -->
+  <Route Url="/task/list" Method="GET" Call="ExecuteMCPv2.REST.Task:TaskList" />
+  <Route Url="/task/manage" Method="POST" Call="ExecuteMCPv2.REST.Task:TaskManage" />
+  <Route Url="/task/run" Method="POST" Call="ExecuteMCPv2.REST.Task:TaskRun" />
+  <Route Url="/task/history" Method="GET" Call="ExecuteMCPv2.REST.Task:TaskHistory" />
+
   <!-- Future Epic 7: Data and Analytics -->
   <!-- <Route Url="/data/:action" Method="POST" Call="ExecuteMCPv2.REST.Data:Execute" /> -->
 </Routes>
