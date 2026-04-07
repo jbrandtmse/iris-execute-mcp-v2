@@ -125,3 +125,10 @@ are listed below.
 
 - AC1 specifies "start time" for jobs but `%SYS.ProcessQuery` does not expose a start time column. The verified SQL table lacks this field. Consider updating AC1 wording or adding a derived start time if IRIS exposes it in a future version.
 - No ObjectScript-side unit test for the dual-format Owner parsing in `LocksList` (pipe-delimited vs plain PID). The fix was verified by the lead during Step 2.5 but has no automated regression test on the IRIS side.
+
+## Deferred from: code review of 6-7-system-configuration-tools (2026-04-07)
+
+- Dynamic annotations via `_meta.readOnly` in config tool response don't affect MCP protocol-level tool hints. The tool is statically marked `destructiveHint: true` to cover the worst-case "set" action. MCP annotations are per-tool, not per-invocation, so this is a known trade-off for single-tool multi-action patterns.
+- `GetConfig` for config section reads only 11 hardcoded properties from `Config.config` out of ~70 available. Consider iterating all properties via `%Dictionary.PropertyDefinition` for completeness in a future enhancement.
+- No whitelist/validation on property names passed to `SetConfig`. Invalid names are caught by `Config.config.Modify()` returning an error status, so this is defense-in-depth only.
+- `ExportConfig` only includes the "config" section data, not startup or locale. Intentional per dev notes but could be expanded to include all sections in a future enhancement.

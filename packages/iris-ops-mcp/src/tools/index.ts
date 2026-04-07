@@ -29,6 +29,7 @@ import {
   taskRunTool,
   taskHistoryTool,
 } from "./task.js";
+import { configManageTool } from "./config.js";
 
 /** All tool definitions registered by the iris-ops-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -47,4 +48,5 @@ export const tools: ToolDefinition[] = [
   taskListTool,
   taskRunTool,
   taskHistoryTool,
+  configManageTool,
 ];

@@ -460,3 +460,16 @@
 - **Key decisions:** LicenseInfo doesn't need %SYS switch ($SYSTEM.License works anywhere); ECP gracefully returns "not configured"; database name filter supported
 - **Bugs found & fixed (Step 2.5):** None — all endpoints worked correctly on first test
 - **Review findings:** Clean — zero findings
+
+### Story 6.6: Task Scheduling Tools
+- **Status:** done
+- **Commit:** f0b1d0f
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Task.cls` — New handler: TaskList, TaskManage, TaskRun, TaskHistory
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added 4 task routes
+  - `ipm/module.xml` — Added Task.cls resource
+  - `packages/iris-ops-mcp/src/tools/task.ts` — New: 4 tool definitions
+  - `packages/iris-ops-mcp/src/__tests__/task.test.ts` — New: 33 unit tests
+- **Key decisions:** New Task.cls handler class; RunNow is async; task ID accepts string or number
+- **Bugs found & fixed (Step 2.5):** None
+- **Review findings:** 2 LOW deferred

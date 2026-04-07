@@ -121,6 +121,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/task/run" Method="POST" Call="ExecuteMCPv2.REST.Task:TaskRun" />
   <Route Url="/task/history" Method="GET" Call="ExecuteMCPv2.REST.Task:TaskHistory" />
 
+  <!-- Epic 6: System Configuration -->
+  <Route Url="/system/config" Method="POST" Call="ExecuteMCPv2.REST.SystemConfig:ConfigManage" />
+
   <!-- Future Epic 7: Data and Analytics -->
   <!-- <Route Url="/data/:action" Method="POST" Call="ExecuteMCPv2.REST.Data:Execute" /> -->
 </Routes>

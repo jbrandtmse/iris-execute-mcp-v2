@@ -20,8 +20,8 @@ describe("iris-ops-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export metrics, jobs, system, and task tools", () => {
-      expect(tools.length).toBeGreaterThanOrEqual(15);
+    it("should export metrics, jobs, system, task, and config tools", () => {
+      expect(tools.length).toBeGreaterThanOrEqual(16);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 15 tools", () => {
+    it("should create a server instance with 16 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(15);
+      expect(server.toolCount).toBe(16);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-ops-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names array with 15 entries", () => {
+    it("should return tool names array with 16 entries", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -74,7 +74,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(15);
+      expect(names).toHaveLength(16);
       expect(names).toContain("iris.metrics.system");
       expect(names).toContain("iris.metrics.alerts");
       expect(names).toContain("iris.metrics.interop");
@@ -90,6 +90,7 @@ describe("iris-ops-mcp", () => {
       expect(names).toContain("iris.task.list");
       expect(names).toContain("iris.task.run");
       expect(names).toContain("iris.task.history");
+      expect(names).toContain("iris.config.manage");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
