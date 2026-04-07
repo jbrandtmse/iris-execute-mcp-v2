@@ -21,7 +21,7 @@ describe("iris-ops-mcp", () => {
     });
 
     it("should export metrics, jobs, and system tools", () => {
-      expect(tools.length).toBeGreaterThanOrEqual(8);
+      expect(tools.length).toBeGreaterThanOrEqual(11);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 8 tools", () => {
+    it("should create a server instance with 11 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(8);
+      expect(server.toolCount).toBe(11);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-ops-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names array with 8 entries", () => {
+    it("should return tool names array with 11 entries", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -74,7 +74,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(8);
+      expect(names).toHaveLength(11);
       expect(names).toContain("iris.metrics.system");
       expect(names).toContain("iris.metrics.alerts");
       expect(names).toContain("iris.metrics.interop");
@@ -83,6 +83,9 @@ describe("iris-ops-mcp", () => {
       expect(names).toContain("iris.journal.info");
       expect(names).toContain("iris.mirror.status");
       expect(names).toContain("iris.audit.events");
+      expect(names).toContain("iris.database.check");
+      expect(names).toContain("iris.license.info");
+      expect(names).toContain("iris.ecp.status");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

@@ -436,3 +436,15 @@
 - **Key decisions:** %SYS.ProcessQuery via SQL for jobs, %SYS.LockQuery:List via ResultSet for locks, dual-format Owner parsing
 - **Bugs found & fixed (Step 2.5):** Lock Owner field was plain PID not pipe-delimited — added dual-format parsing
 - **Review findings:** 0 HIGH/MEDIUM, 2 LOW deferred (start time spec gap, no automated Owner parsing test)
+
+### Story 6.4: Journal, Mirror & Audit Tools
+- **Status:** done
+- **Commit:** 5eca927
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Monitor.cls` — Added JournalInfo, MirrorStatus, AuditEvents methods
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added 3 routes
+  - `packages/iris-ops-mcp/src/tools/system.ts` — New: 3 tool definitions
+  - `packages/iris-ops-mcp/src/__tests__/system.test.ts` — New: 23 unit tests
+- **Key decisions:** Mirror handler gracefully returns "not configured" for non-mirrored instances; audit has maxRows limit (100 default, 1000 max)
+- **Bugs found & fixed (Step 2.5):** freeSpaceMB field renamed to freeSpaceBytes (GetFreeSpace returns bytes not MB), TS tool converts to GB for display
+- **Review findings:** Clean — zero findings across all three layers

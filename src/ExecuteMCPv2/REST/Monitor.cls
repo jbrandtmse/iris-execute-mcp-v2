@@ -586,4 +586,160 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     Quit tMetrics
 }
 
+/// Return database status information in JSON format.
+/// <p>Queries <code>Config.Databases:List</code> in <b>%SYS</b> for database names
+/// and directories, then opens each via <code>SYS.Database.%OpenId</code> to collect
+/// mounted status, encryption, journal state, and size information.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>name</code> — Optional database name filter (returns single database)</li>
+/// </ul></p>
+ClassMethod DatabaseCheck() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tName = $Get(%request.Data("name",1))
+        Set $NAMESPACE = "%SYS"
+
+        Set tResult = {}
+        Set tDatabases = []
+
+        ; Collect database names/directories into array first, then close ResultSet
+        ; (same pattern as SystemMetrics — avoids namespace issues during iteration)
+        Set tDBRS = ##class(%ResultSet).%New("Config.Databases:List")
+        Set tDBCount = 0
+        If $IsObject(tDBRS) {
+            Set tSC2 = tDBRS.Execute("*")
+            If $$$ISOK(tSC2) {
+                While tDBRS.Next() {
+                    Set tDBName = tDBRS.Get("Name")
+                    ; If name filter specified, skip non-matching databases
+                    If (tName '= "") && ($ZConvert(tDBName, "U") '= $ZConvert(tName, "U")) Continue
+                    Set tDBCount = tDBCount + 1
+                    Set tDBList(tDBCount, "name") = tDBName
+                    Set tDBList(tDBCount, "dir") = tDBRS.Get("Directory")
+                }
+            }
+            Do tDBRS.Close()
+        }
+
+        ; Now iterate collected databases and open each for details
+        For tIdx = 1:1:tDBCount {
+            Set tDB = {}
+            Set tDBName = tDBList(tIdx, "name")
+            Set tDBDir = tDBList(tIdx, "dir")
+            Do tDB.%Set("name", tDBName)
+            Do tDB.%Set("directory", tDBDir)
+            Try {
+                Set tDBObj = ##class(SYS.Database).%OpenId(tDBDir)
+                If $IsObject(tDBObj) {
+                    Do tDB.%Set("mounted", +tDBObj.Mounted, "boolean")
+                    Do tDB.%Set("readOnly", +tDBObj.ReadOnly, "boolean")
+                    Do tDB.%Set("encrypted", +tDBObj.EncryptedDB, "boolean")
+                    Do tDB.%Set("journalState", +tDBObj.GlobalJournalState, "number")
+                    Do tDB.%Set("sizeMB", +tDBObj.Size, "number")
+                    Do tDB.%Set("maxSizeMB", +tDBObj.MaxSize, "number")
+                }
+            }
+            Catch {
+                Do tDB.%Set("mounted", 0, "boolean")
+                Do tDB.%Set("error", "Unable to open database")
+            }
+            Do tDatabases.%Push(tDB)
+        }
+
+        Do tResult.%Set("databases", tDatabases)
+        Do tResult.%Set("count", tDatabases.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return license information in JSON format.
+/// <p>Queries <code>$SYSTEM.License</code> class methods for license type,
+/// capacity, current usage, and expiration. Converts <code>$Horolog</code>
+/// expiration date to <code>YYYY-MM-DD</code> format using <code>$ZDate</code>.</p>
+ClassMethod LicenseInfo() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Set tResult = {}
+
+        ; -- License identification --
+        Set tResult."customerName" = $SYSTEM.License.KeyCustomerName()
+        Set tResult."licenseCapacity" = $SYSTEM.License.KeyLicenseCapacity()
+
+        ; -- Expiration (convert $Horolog date to YYYY-MM-DD) --
+        Set tExpDate = $SYSTEM.License.KeyExpirationDate()
+        If +tExpDate > 0 {
+            Set tResult."expirationDate" = $ZDate(tExpDate, 3)
+        }
+        Else {
+            Set tResult."expirationDate" = "N/A"
+        }
+
+        ; -- Capacity limits --
+        Do tResult.%Set("connectionLimit", +$SYSTEM.License.GetConnectionLimit(), "number")
+        Do tResult.%Set("userLimit", +$SYSTEM.License.GetUserLimit(), "number")
+        Do tResult.%Set("coresLicensed", +$SYSTEM.License.KeyCoresLicensed(), "number")
+        Do tResult.%Set("cpusLicensed", +$SYSTEM.License.KeyCPUsLicensed(), "number")
+
+        ; -- Current usage --
+        Do tResult.%Set("currentCSPUsers", +$SYSTEM.License.CSPUsers(), "number")
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return ECP (Enterprise Cache Protocol) connection status in JSON format.
+/// <p>Checks whether ECP is configured on this instance. Returns connection
+/// health when configured, or a graceful "not configured" status when ECP
+/// is not in use.</p>
+ClassMethod ECPStatus() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+
+        ; Check ECP configuration by probing $SYSTEM.ECP.GetClientIndex
+        ; Returns -1 if ECP is not configured
+        Set tClientIdx = $SYSTEM.ECP.GetClientIndex("test")
+        Set tConfigured = (tClientIdx '= -1)
+
+        Do tResult.%Set("configured", tConfigured, "boolean")
+
+        If tConfigured {
+            Do tResult.%Set("status", "ECP is configured")
+            Do tResult.%Set("clientIndex", +tClientIdx, "number")
+        }
+        Else {
+            Do tResult.%Set("status", "ECP not configured")
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }

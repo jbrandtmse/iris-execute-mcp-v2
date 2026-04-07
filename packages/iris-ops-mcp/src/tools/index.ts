@@ -18,6 +18,11 @@ import {
   mirrorStatusTool,
   auditEventsTool,
 } from "./system.js";
+import {
+  databaseCheckTool,
+  licenseInfoTool,
+  ecpStatusTool,
+} from "./infrastructure.js";
 
 /** All tool definitions registered by the iris-ops-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -29,4 +34,7 @@ export const tools: ToolDefinition[] = [
   journalInfoTool,
   mirrorStatusTool,
   auditEventsTool,
+  databaseCheckTool,
+  licenseInfoTool,
+  ecpStatusTool,
 ];
