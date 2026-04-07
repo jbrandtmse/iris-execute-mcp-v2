@@ -382,3 +382,18 @@
   - 22 new unit tests, 67 total interop tests
 - **Bugs found & fixed:** GetAutoStart() doesn't exist → $Get(^Ens.AutoStart); SQL error handling improved
 - **Review findings:** 1 MEDIUM patched (SQL error check), 2 LOW patched, 2 deferred
+
+## Epic 6: Operations & Monitoring (iris-ops-mcp)
+
+### Story 6.0: Epic 5 Deferred Cleanup
+- **Status:** done
+- **Commit:** 4a59fb3
+- **Files touched:**
+  - `packages/shared/src/bootstrap-classes.ts` — Regenerated with 9 classes (added Interop.cls)
+  - `packages/shared/src/__tests__/bootstrap.test.ts` — Updated tests, added getBootstrapClasses tests
+  - `packages/shared/src/index.ts` — Export updates
+  - `scripts/gen-bootstrap.mjs` — New generator script
+  - `_bmad-output/implementation-artifacts/deferred-work.md` — Scrubbed
+- **Key decisions:** Created reusable gen-bootstrap.mjs script for future regeneration; compilation order: Utils, Setup, handlers, Dispatch last
+- **Issues resolved:** Pre-existing test gap in bootstrap orchestration test (missing configurePackageMapping mock)
+- **Review findings:** 2 LOW deferred (npm script entry, error handling in gen script)
