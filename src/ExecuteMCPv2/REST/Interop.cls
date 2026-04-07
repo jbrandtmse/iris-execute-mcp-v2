@@ -521,6 +521,332 @@ ClassMethod AutoStart() As %Status
     Quit $$$OK
 }
 
+/// Query event log entries filtered by type, item name, and count.
+/// <p>Returns entries from <code>Ens_Util.Log</code> with timestamp, type,
+/// item name, and message text. Supports filtering by log type
+/// (Info/Warning/Error/Trace/Assert/Alert), config item name, and row count.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>type</code> — Log type filter: Info, Warning, Error, Trace, Assert, Alert</li>
+///   <li><code>itemName</code> — Config item name filter (exact match on ConfigName)</li>
+///   <li><code>count</code> — Maximum number of rows to return (default 100)</li>
+///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod EventLog() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tType = $Get(%request.Data("type",1))
+        Set tItemName = $Get(%request.Data("itemName",1))
+        Set tCount = +$Get(%request.Data("count",1), 100)
+        If tCount < 1 Set tCount = 100
+        If tCount > 10000 Set tCount = 10000
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Build SQL query with filters
+        Set tSQL = "SELECT TOP "_tCount_" ID, TimeLogged, Type, ConfigName, Text, SourceClass, SourceMethod, SessionId FROM Ens_Util.Log"
+        Set tWhere = ""
+        Set tParamCount = 0
+
+        If tType '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" Type = ?"
+            Set tParamCount = tParamCount + 1
+            Set tParams(tParamCount) = tType
+        }
+        If tItemName '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ConfigName = ?"
+            Set tParamCount = tParamCount + 1
+            Set tParams(tParamCount) = tItemName
+        }
+        If tWhere '= "" {
+            Set tSQL = tSQL_" WHERE"_tWhere
+        }
+        Set tSQL = tSQL_" ORDER BY ID DESC"
+
+        ; Execute SQL based on parameter count
+        If tParamCount = 0 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+        }
+        ElseIf tParamCount = 1 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1))
+        }
+        Else {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2))
+        }
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tEntries = []
+        While tRS.%Next() {
+            Set tEntry = {}
+            Do tEntry.%Set("id", tRS.ID, "number")
+            Do tEntry.%Set("timestamp", tRS.TimeLogged)
+            Do tEntry.%Set("type", tRS.Type)
+            Do tEntry.%Set("itemName", tRS.ConfigName)
+            Do tEntry.%Set("text", tRS.Text)
+            If tRS.SourceClass '= "" {
+                Do tEntry.%Set("sourceClass", tRS.SourceClass)
+            }
+            If tRS.SourceMethod '= "" {
+                Do tEntry.%Set("sourceMethod", tRS.SourceMethod)
+            }
+            If tRS.SessionId '= "" {
+                Do tEntry.%Set("sessionId", tRS.SessionId, "number")
+            }
+            Do tEntries.%Push(tEntry)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("entries", tEntries)
+        Do tResult.%Set("count", tEntries.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return queue status for all production items including queue count.
+/// <p>Queries <code>Ens.Queue</code> to return the current count of messages
+/// queued for each production config item.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod QueueStatus() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Use Ens.Queue:Enumerate named query (Ens.Queue is not a SQL table)
+        Set tRS = ##class(%ResultSet).%New("Ens.Queue:Enumerate")
+        Set tSC = tRS.Execute()
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tQueues = []
+        While tRS.Next() {
+            Set tQueue = {}
+            Do tQueue.%Set("name", tRS.Get("Name"))
+            Do tQueue.%Set("count", +tRS.Get("Count"), "number")
+            Do tQueues.%Push(tQueue)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("queues", tQueues)
+        Do tResult.%Set("count", tQueues.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Trace message flow by session ID or header ID.
+/// <p>Queries <code>Ens.MessageHeader</code> to trace the flow of messages
+/// through the production. Each step includes source item, target item,
+/// message class, timestamp, and status.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>sessionId</code> — Session ID to trace (returns all messages in session)</li>
+///   <li><code>headerId</code> — Specific message header ID to look up</li>
+///   <li><code>count</code> — Maximum number of rows (default 100)</li>
+///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod MessageTrace() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSessionId = $Get(%request.Data("sessionId",1))
+        Set tHeaderId = $Get(%request.Data("headerId",1))
+        Set tCount = +$Get(%request.Data("count",1), 100)
+        If tCount < 1 Set tCount = 100
+        If tCount > 10000 Set tCount = 10000
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Validate at least one filter
+        If (tSessionId = "") && (tHeaderId = "") {
+            Set tSC = $$$ERROR($$$GeneralError, "Either 'sessionId' or 'headerId' parameter is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Build SQL query
+        Set tSQL = "SELECT TOP "_tCount_" ID, MessageBodyClassName, MessageBodyId, SourceConfigName, TargetConfigName, TimeCreated, TimeProcessed, Status, SessionId, CorrespondingMessageId FROM Ens.MessageHeader"
+        If tHeaderId '= "" {
+            Set tSQL = tSQL_" WHERE ID = ?"
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, +tHeaderId)
+        }
+        Else {
+            Set tSQL = tSQL_" WHERE SessionId = ? ORDER BY TimeCreated"
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, +tSessionId)
+        }
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tMessages = []
+        While tRS.%Next() {
+            Set tMsg = {}
+            Do tMsg.%Set("id", tRS.ID, "number")
+            Do tMsg.%Set("sourceItem", tRS.SourceConfigName)
+            Do tMsg.%Set("targetItem", tRS.TargetConfigName)
+            Do tMsg.%Set("messageClass", tRS.MessageBodyClassName)
+            Do tMsg.%Set("timeCreated", tRS.TimeCreated)
+            If tRS.TimeProcessed '= "" {
+                Do tMsg.%Set("timeProcessed", tRS.TimeProcessed)
+            }
+            Do tMsg.%Set("status", tRS.Status)
+            Do tMsg.%Set("sessionId", tRS.SessionId, "number")
+            If tRS.MessageBodyId '= "" {
+                Do tMsg.%Set("messageBodyId", tRS.MessageBodyId, "number")
+            }
+            If tRS.CorrespondingMessageId '= "" {
+                Do tMsg.%Set("correspondingMessageId", tRS.CorrespondingMessageId, "number")
+            }
+            Do tMessages.%Push(tMsg)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("messages", tMessages)
+        Do tResult.%Set("count", tMessages.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List available adapter types grouped by category.
+/// <p>Queries <code>%Dictionary.ClassDefinition</code> to find adapter classes
+/// that extend <code>Ens.InboundAdapter</code> or <code>Ens.OutboundAdapter</code>.
+/// Results are grouped by category (Inbound/Outbound).</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>category</code> — Filter by category: inbound, outbound (optional)</li>
+///   <li><code>namespace</code> — Target namespace for class queries</li>
+/// </ul></p>
+ClassMethod AdapterList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tCategory = $Get(%request.Data("category",1))
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        Set tInbound = []
+        Set tOutbound = []
+
+        ; Query inbound adapters
+        If (tCategory = "") || ($ZConvert(tCategory, "L") = "inbound") {
+            Set tSQL = "SELECT Name FROM %Dictionary.ClassDefinition WHERE super [ 'Ens.InboundAdapter' AND Abstract = 0"
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+            If $IsObject(tRS) && (tRS.%SQLCODE '< 0) {
+                While tRS.%Next() {
+                    Set tAdapter = {}
+                    Do tAdapter.%Set("name", tRS.Name)
+                    Do tInbound.%Push(tAdapter)
+                }
+            }
+        }
+
+        ; Query outbound adapters
+        If (tCategory = "") || ($ZConvert(tCategory, "L") = "outbound") {
+            Set tSQL = "SELECT Name FROM %Dictionary.ClassDefinition WHERE super [ 'Ens.OutboundAdapter' AND Abstract = 0"
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+            If $IsObject(tRS) && (tRS.%SQLCODE '< 0) {
+                While tRS.%Next() {
+                    Set tAdapter = {}
+                    Do tAdapter.%Set("name", tRS.Name)
+                    Do tOutbound.%Push(tAdapter)
+                }
+            }
+        }
+
+        Set tResult = {}
+        If (tCategory = "") || ($ZConvert(tCategory, "L") = "inbound") {
+            Do tResult.%Set("inbound", tInbound)
+        }
+        If (tCategory = "") || ($ZConvert(tCategory, "L") = "outbound") {
+            Do tResult.%Set("outbound", tOutbound)
+        }
+        Set tTotal = 0
+        If $IsObject(tResult.%Get("inbound")) Set tTotal = tTotal + tInbound.%Size()
+        If $IsObject(tResult.%Get("outbound")) Set tTotal = tTotal + tOutbound.%Size()
+        Do tResult.%Set("totalCount", tTotal, "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return production status across all namespaces.
 /// <p>Iterates all IRIS namespaces, switches to each, and calls
 /// <method>Ens.Director:GetProductionStatus</method> to collect

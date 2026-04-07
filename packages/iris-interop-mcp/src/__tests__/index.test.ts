@@ -21,7 +21,7 @@ describe("iris-interop-mcp", () => {
     });
 
     it("should export production tool definitions", () => {
-      expect(tools).toHaveLength(6);
+      expect(tools).toHaveLength(10);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-interop-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 6 tools", () => {
+    it("should create a server instance with 10 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(6);
+      expect(server.toolCount).toBe(10);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-interop-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names for all 6 production tools", () => {
+    it("should return tool names for all 10 production tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -74,13 +74,17 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(6);
+      expect(names).toHaveLength(10);
       expect(names).toContain("iris.production.manage");
       expect(names).toContain("iris.production.control");
       expect(names).toContain("iris.production.status");
       expect(names).toContain("iris.production.summary");
       expect(names).toContain("iris.production.item");
       expect(names).toContain("iris.production.autostart");
+      expect(names).toContain("iris.production.logs");
+      expect(names).toContain("iris.production.queues");
+      expect(names).toContain("iris.production.messages");
+      expect(names).toContain("iris.production.adapters");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
@@ -106,6 +110,10 @@ describe("iris-interop-mcp", () => {
       expect(server.getTool("iris.production.summary")).toBeDefined();
       expect(server.getTool("iris.production.item")).toBeDefined();
       expect(server.getTool("iris.production.autostart")).toBeDefined();
+      expect(server.getTool("iris.production.logs")).toBeDefined();
+      expect(server.getTool("iris.production.queues")).toBeDefined();
+      expect(server.getTool("iris.production.messages")).toBeDefined();
+      expect(server.getTool("iris.production.adapters")).toBeDefined();
     });
   });
 

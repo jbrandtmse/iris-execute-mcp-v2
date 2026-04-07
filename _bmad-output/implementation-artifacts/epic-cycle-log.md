@@ -369,3 +369,16 @@
   - 31 unit tests + 14 existing = 45 total interop tests
 - **Live verification:** Summary finds running OptiRAG production. Status returns correct state. Missing-param POSTs return clean errors.
 - **Review findings:** No HIGH or MEDIUM issues.
+
+### Story 5.3: Production Item & Auto-Start Tools
+- **Status:** done
+- **Commit:** e8c7a7e
+- **Files touched:** 6 files (2 new, 4 modified)
+  - New: tools/item.ts, item.test.ts
+  - Modified: REST/Interop.cls (+ItemManage, AutoStart), REST/Dispatch.cls (+2 routes), tools/index.ts, index.test.ts
+- **Key decisions:**
+  - Auto-start reads `^Ens.AutoStart` global directly (GetAutoStart method doesn't exist)
+  - ItemManage "get" uses SQL query on Ens_Config.Item
+  - 22 new unit tests, 67 total interop tests
+- **Bugs found & fixed:** GetAutoStart() doesn't exist → $Get(^Ens.AutoStart); SQL error handling improved
+- **Review findings:** 1 MEDIUM patched (SQL error check), 2 LOW patched, 2 deferred
