@@ -135,3 +135,8 @@
 
 - `ItemManage` "set" action silently ignores unknown settings keys. If a caller passes an unrecognized key (e.g., `{ "badKey": 1 }`), it is skipped without feedback. Consider returning a list of unrecognized keys in the response.
 - `ItemManage` "set" action: If `tItem.%Save()` succeeds but `Ens.Director.UpdateProduction()` fails, the persisted config and the running production are out of sync. Pre-existing IRIS pattern limitation -- no simple rollback mechanism.
+
+## Deferred from: code review of 5-5-credential-and-lookup-table-tools (2026-04-06)
+
+- `LookupTransfer` import action is additive/merge -- it sets entries from XML but does not remove pre-existing entries not present in the XML. The tool description implies full import. Consider adding a `replace` option or documenting the merge behavior.
+- `CredentialManage` update action: passing empty string for `username` or `password` is silently ignored (`If tPassword '= ""`). A user cannot explicitly clear the username to empty. Consider using `%IsDefined` to distinguish missing from empty.

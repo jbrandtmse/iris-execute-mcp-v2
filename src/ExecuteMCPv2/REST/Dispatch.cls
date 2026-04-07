@@ -89,6 +89,12 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/messages" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageTrace" />
   <Route Url="/interop/production/adapters" Method="GET" Call="ExecuteMCPv2.REST.Interop:AdapterList" />
 
+  <!-- Epic 5: Credentials and Lookup Tables -->
+  <Route Url="/interop/credential" Method="GET" Call="ExecuteMCPv2.REST.Interop:CredentialList" />
+  <Route Url="/interop/credential" Method="POST" Call="ExecuteMCPv2.REST.Interop:CredentialManage" />
+  <Route Url="/interop/lookup" Method="POST" Call="ExecuteMCPv2.REST.Interop:LookupManage" />
+  <Route Url="/interop/lookup/transfer" Method="POST" Call="ExecuteMCPv2.REST.Interop:LookupTransfer" />
+
   <!-- Future Epic 6: Operations and Monitoring -->
   <!-- <Route Url="/system/:metric" Method="GET" Call="ExecuteMCPv2.REST.Ops:GetMetric" /> -->
 

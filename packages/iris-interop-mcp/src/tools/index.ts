@@ -4,8 +4,9 @@
  * Exports all tool definitions to be registered with
  * {@link McpServerBase}. Includes production lifecycle tools
  * (manage, control, status, summary) from Story 5.2,
- * production item / auto-start tools from Story 5.3, and
- * production monitoring tools (logs, queues, messages, adapters) from Story 5.4.
+ * production item / auto-start tools from Story 5.3,
+ * production monitoring tools (logs, queues, messages, adapters) from Story 5.4,
+ * and credential / lookup table tools from Story 5.5.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -25,6 +26,14 @@ import {
   productionMessagesTool,
   productionAdaptersTool,
 } from "./monitor.js";
+import {
+  credentialManageTool,
+  credentialListTool,
+} from "./credential.js";
+import {
+  lookupManageTool,
+  lookupTransferTool,
+} from "./lookup.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -38,4 +47,8 @@ export const tools: ToolDefinition[] = [
   productionQueuesTool,
   productionMessagesTool,
   productionAdaptersTool,
+  credentialManageTool,
+  credentialListTool,
+  lookupManageTool,
+  lookupTransferTool,
 ];

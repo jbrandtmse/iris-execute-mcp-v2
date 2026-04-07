@@ -906,4 +906,417 @@ ClassMethod ProductionSummary() As %Status
     Quit $$$OK
 }
 
+/// Create, update, or delete an Ensemble credential.
+/// <p>Accepts a JSON body with <code>action</code> ("create", "update", or "delete"),
+/// <code>id</code> (credential system name), optional <code>username</code>,
+/// optional <code>password</code>, and optional <code>namespace</code>.</p>
+/// <p><b>CRITICAL</b>: Passwords are write-only; they never appear in responses.</p>
+ClassMethod CredentialManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters BEFORE switching namespace
+        Set tAction = tBody.%Get("action")
+        Set tID = tBody.%Get("id")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tID, "id")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "create") && (tAction '= "update") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, update, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "create" {
+            ; Check if credential already exists
+            If ##class(Ens.Config.Credentials).%ExistsId(tID) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Credential '"_tID_"' already exists")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tCred = ##class(Ens.Config.Credentials).%New()
+            Set tCred.SystemName = tID
+            Set tUsername = tBody.%Get("username")
+            If tUsername '= "" Set tCred.Username = tUsername
+            Set tPassword = tBody.%Get("password")
+            If tPassword '= "" Set tCred.Password = tPassword
+
+            Set tSC = tCred.%Save()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "created", "id": (tID)}
+            If tUsername '= "" Do tResult.%Set("username", tUsername)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "update" {
+            ; Check if credential exists
+            If '##class(Ens.Config.Credentials).%ExistsId(tID) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Credential '"_tID_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tCred = ##class(Ens.Config.Credentials).%OpenId(tID)
+            If '$IsObject(tCred) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open credential '"_tID_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tUsername = tBody.%Get("username")
+            If tUsername '= "" Set tCred.Username = tUsername
+            Set tPassword = tBody.%Get("password")
+            If tPassword '= "" Set tCred.Password = tPassword
+
+            Set tSC = tCred.%Save()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "updated", "id": (tID)}
+            If tUsername '= "" Do tResult.%Set("username", tUsername)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            ; Check if credential exists
+            If '##class(Ens.Config.Credentials).%ExistsId(tID) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Credential '"_tID_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tSC = ##class(Ens.Config.Credentials).%DeleteId(tID)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "id": (tID)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List stored Ensemble credentials without passwords.
+/// <p>Returns credential IDs and usernames. <b>Never</b> includes passwords (NFR6).</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod CredentialList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; CRITICAL: Never include Password column (NFR6)
+        Set tSQL = "SELECT SystemName, Username FROM Ens_Config.Credentials ORDER BY SystemName"
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tCredentials = []
+        While tRS.%Next() {
+            Set tCred = {}
+            Do tCred.%Set("id", tRS.SystemName)
+            Do tCred.%Set("username", tRS.Username)
+            Do tCredentials.%Push(tCred)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("credentials", tCredentials)
+        Do tResult.%Set("count", tCredentials.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Get, set, or delete a lookup table entry.
+/// <p>Accepts a JSON body with <code>action</code> ("get", "set", or "delete"),
+/// <code>tableName</code>, <code>key</code>, optional <code>value</code> (for set),
+/// and optional <code>namespace</code>.</p>
+ClassMethod LookupManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters BEFORE switching namespace
+        Set tAction = tBody.%Get("action")
+        Set tTableName = tBody.%Get("tableName")
+        Set tKey = tBody.%Get("key")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTableName, "tableName")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "get") && (tAction '= "set") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: get, set, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Key is required for all actions
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tKey, "key")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "get" {
+            Set tValue = $Get(^Ens.LookupTable(tTableName, tKey))
+            Set tExists = $Data(^Ens.LookupTable(tTableName, tKey))
+
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("tableName", tTableName)
+            Do tResult.%Set("key", tKey)
+            Do tResult.%Set("value", tValue)
+            Do tResult.%Set("exists", (tExists > 0), "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "set" {
+            ; Use %IsDefined to check presence — ValidateRequired rejects empty strings
+            ; which are valid lookup table values
+            If 'tBody.%IsDefined("value") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'value' is required")
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tValue = tBody.%Get("value")
+
+            Set ^Ens.LookupTable(tTableName, tKey) = tValue
+
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "set")
+            Do tResult.%Set("tableName", tTableName)
+            Do tResult.%Set("key", tKey)
+            Do tResult.%Set("value", tValue)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            Set tExists = $Data(^Ens.LookupTable(tTableName, tKey))
+            If 'tExists {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Lookup table entry '"_tTableName_"/"_tKey_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Kill ^Ens.LookupTable(tTableName, tKey)
+
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "deleted")
+            Do tResult.%Set("tableName", tTableName)
+            Do tResult.%Set("key", tKey)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Export or import a lookup table in XML format.
+/// <p>Accepts a JSON body with <code>action</code> ("export" or "import"),
+/// <code>tableName</code>, optional <code>xml</code> (for import),
+/// and optional <code>namespace</code>.</p>
+/// <p>Export reads entries from the <code>^Ens.LookupTable</code> global
+/// and builds XML output. Import parses XML and sets entries in the global.</p>
+ClassMethod LookupTransfer() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters BEFORE switching namespace
+        Set tAction = tBody.%Get("action")
+        Set tTableName = tBody.%Get("tableName")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTableName, "tableName")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "export") && (tAction '= "import") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: export, import")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "export" {
+            ; Build XML from global data
+            Set tXML = "<lookupTable name="""_$ZConvert(tTableName,"O","XML")_""">"_$Char(10)
+            Set tKey = ""
+            Set tEntryCount = 0
+            For {
+                Set tKey = $Order(^Ens.LookupTable(tTableName, tKey))
+                If tKey = "" Quit
+                Set tValue = $Get(^Ens.LookupTable(tTableName, tKey))
+                Set tXML = tXML_"  <entry key="""_$ZConvert(tKey,"O","XML")_""" value="""_$ZConvert(tValue,"O","XML")_""" />"_$Char(10)
+                Set tEntryCount = tEntryCount + 1
+            }
+            Set tXML = tXML_"</lookupTable>"
+
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "exported")
+            Do tResult.%Set("tableName", tTableName)
+            Do tResult.%Set("entryCount", tEntryCount, "number")
+            Do tResult.%Set("xml", tXML)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "import" {
+            Set tXML = tBody.%Get("xml")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tXML, "xml")
+            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            ; Parse XML and set entries in global using string extraction
+            Set tEntryCount = 0
+            Set tPos = 1
+            For {
+                Set tIdx = $Find(tXML, "<entry ", tPos)
+                If tIdx = 0 Quit
+                Set tPos = tIdx
+
+                ; Find the end of this entry element to scope attribute search
+                Set tEntryEnd = $Find(tXML, "/>", tPos)
+                If tEntryEnd = 0 Set tEntryEnd = $Find(tXML, ">", tPos)
+                If tEntryEnd = 0 Continue
+                Set tEntryFragment = $Extract(tXML, tPos, tEntryEnd - 1)
+
+                ; Extract key attribute (search within this entry element only)
+                Set tKeyStart = $Find(tEntryFragment, "key=""", 1)
+                If tKeyStart = 0 Continue
+                Set tKeyEnd = $Find(tEntryFragment, """", tKeyStart)
+                If tKeyEnd = 0 Continue
+                Set tEntryKey = $ZConvert($Extract(tEntryFragment, tKeyStart, tKeyEnd - 2), "I", "XML")
+
+                ; Extract value attribute (search within this entry element only)
+                Set tValStart = $Find(tEntryFragment, "value=""", 1)
+                If tValStart = 0 Continue
+                Set tValEnd = $Find(tEntryFragment, """", tValStart)
+                If tValEnd = 0 Continue
+                Set tEntryValue = $ZConvert($Extract(tEntryFragment, tValStart, tValEnd - 2), "I", "XML")
+
+                Set ^Ens.LookupTable(tTableName, tEntryKey) = tEntryValue
+                Set tEntryCount = tEntryCount + 1
+            }
+
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "imported")
+            Do tResult.%Set("tableName", tTableName)
+            Do tResult.%Set("entryCount", tEntryCount, "number")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }
