@@ -65,3 +65,6 @@ are listed below.
 
 ### From Story 7-3 (Analytics Tools) — code review (2026-04-07)
 - `%BuildCube` with `pAsync=0` runs synchronously with no timeout protection. A large cube build could block the HTTP request indefinitely. The story spec explicitly calls for synchronous operation, so adding timeout or async support would be a future enhancement.
+
+### From Story 7-4 (REST API Management) — code review (2026-04-07)
+- `encodeURIComponent()` on the `application` parameter encodes forward slashes (e.g., `/api/myapp` becomes `%2Fapi%2Fmyapp`). Whether the IRIS Management API v2 correctly decodes percent-encoded slashes in the URL path segment is unverified. If not, application paths with slashes may need to be split and encoded segment-by-segment. Requires live IRIS testing to confirm. Low risk -- follows the spec-prescribed pattern.

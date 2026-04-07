@@ -534,3 +534,16 @@
   - `packages/iris-data-mcp/src/__tests__/index.test.ts` — Updated tool count to 4
 - **Key decisions:** Used IRIS built-in DocDB REST API (`/api/docdb/v1/`) instead of custom REST handler; extractResult() helper for Atelier/plain JSON response handling; namespace in URL path
 - **Review findings:** 2 MEDIUM auto-resolved (added .min(1) to ID/database/property Zod strings to prevent empty string URL collisions)
+
+### Story 7.3: Analytics Tools
+- **Status:** done
+- **Commit:** b36c104
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Analytics.cls` — New: ExecuteMDX, CubeList, CubeAction handlers
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added 3 analytics routes
+  - `ipm/module.xml` — Added Analytics.cls resource
+  - `packages/iris-data-mcp/src/tools/analytics.ts` — New: 2 tool definitions
+  - `packages/iris-data-mcp/src/__tests__/analytics.test.ts` — New: 23 unit tests
+- **Key decisions:** DeepSee runs in target namespace (not %SYS); used %DeepSee.ResultSet.%ExecuteDirect for MDX; %BuildCube with pAsync=0 for synchronous builds; verified all APIs via %Dictionary.MethodDefinition
+- **Bugs found & fixed (Step 2.5):** None — all endpoints returned correct JSON on first test
+- **Review findings:** 1 LOW deferred (extractResult duplication between docdb.ts and analytics.ts)
