@@ -111,3 +111,7 @@
 ## Deferred from: code review of 4-6-web-application-management-tools (2026-04-06)
 
 - `WebAppManage` in Security.cls duplicates 11 lines of property-mapping logic between the `create` and `modify` branches (lines 916-927 and 938-949). Consider extracting a private helper method (e.g., `BuildWebAppProps`) that reads properties from the JSON body into the tProps array to eliminate the duplication.
+
+## Deferred from: code review of 4-8-oauth2-management-tools (2026-04-06)
+
+- The TypeScript `oauthManageTool` handler passes through the entire response from the IRIS backend without client-side stripping of sensitive fields. If the IRIS backend were to accidentally include a `clientSecret` field in a response, it would be forwarded to the MCP client. The IRIS backend correctly excludes secrets (NFR6), so this is defense-in-depth only. Consider adding a client-side filter (e.g., `delete result.clientSecret`) before returning responses from OAuth2 operations.

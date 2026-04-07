@@ -1846,6 +1846,275 @@ ClassMethod SSLManage() As %Status
     Quit $$$OK
 }
 
+/// List all OAuth2 server definitions and their registered clients.
+/// <p>Switches to <code>%SYS</code> and queries
+/// <class>OAuth2.Server.Configuration</class> for server definitions,
+/// then <class>OAuth2.Client</class> for registered clients.
+/// Returns a JSON object with <code>servers</code> and <code>clients</code>
+/// arrays.</p>
+/// <p><b>CRITICAL</b>: Client secrets are NEVER included in response bodies
+/// (NFR6).</p>
+ClassMethod OAuthList() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        Set tServers = []
+        Set tClients = []
+
+        ; List OAuth2 server definitions via SQL
+        Set tStatement = ##class(%SQL.Statement).%New()
+        Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2.Server.Configuration")
+        If $$$ISERR(tSC) {
+            ; Table may not exist - return empty results
+            Set tResult = {}
+            Do tResult.%Set("servers", [])
+            Do tResult.%Set("clients", [])
+            Do tResult.%Set("serverCount", 0, "number")
+            Do tResult.%Set("clientCount", 0, "number")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tRS = tStatement.%Execute()
+
+        If tRS.%SQLCODE '< 0 {
+            While tRS.%Next() {
+                Set tEntry = {}
+                Do tEntry.%Set("id", tRS.%Get("ID"))
+                Do tEntry.%Set("issuerEndpoint", tRS.%Get("IssuerEndpoint"))
+                Do tEntry.%Set("description", tRS.%Get("Description"))
+                Do tEntry.%Set("supportedScopes", tRS.%Get("SupportedScopes"))
+                Do tEntry.%Set("accessTokenInterval", +tRS.%Get("AccessTokenInterval"), "number")
+                Do tEntry.%Set("authorizationCodeInterval", +tRS.%Get("AuthorizationCodeInterval"), "number")
+                Do tEntry.%Set("refreshTokenInterval", +tRS.%Get("RefreshTokenInterval"), "number")
+                Do tEntry.%Set("signingAlgorithm", tRS.%Get("SigningAlgorithm"))
+                Do tServers.%Push(tEntry)
+            }
+        }
+
+        ; List OAuth2 client registrations via SQL
+        Set tStatement2 = ##class(%SQL.Statement).%New()
+        Set tSC2 = tStatement2.%Prepare("SELECT ApplicationName, ServerDefinition, ClientId, ClientType, RedirectURL, Description, Enabled FROM OAuth2.Client")
+        If '$$$ISERR(tSC2) {
+            Set tRS2 = tStatement2.%Execute()
+            If tRS2.%SQLCODE '< 0 {
+                While tRS2.%Next() {
+                    Set tEntry = {}
+                    Do tEntry.%Set("applicationName", tRS2.%Get("ApplicationName"))
+                    Do tEntry.%Set("serverDefinition", tRS2.%Get("ServerDefinition"))
+                    Do tEntry.%Set("clientId", tRS2.%Get("ClientId"))
+                    ; CRITICAL: Never include clientSecret (NFR6)
+                    Do tEntry.%Set("clientType", tRS2.%Get("ClientType"))
+                    Do tEntry.%Set("redirectURL", tRS2.%Get("RedirectURL"))
+                    Do tEntry.%Set("description", tRS2.%Get("Description"))
+                    Do tEntry.%Set("enabled", +tRS2.%Get("Enabled"), "boolean")
+                    Do tClients.%Push(tEntry)
+                }
+            }
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("servers", tServers)
+        Do tResult.%Set("clients", tClients)
+        Do tResult.%Set("serverCount", tServers.%Size(), "number")
+        Do tResult.%Set("clientCount", tClients.%Size(), "number")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Create, delete, or discover OAuth2 server definitions and client registrations.
+/// <p>Reads a JSON body with <code>action</code> (create|delete|discover),
+/// <code>entity</code> (server|client for create/delete), and action-specific
+/// parameters. Dispatches to the appropriate OAuth2 classes in <code>%SYS</code>.</p>
+/// <p><b>CRITICAL</b>: Client secrets are NEVER included in response bodies
+/// or error messages (NFR6).</p>
+ClassMethod OAuthManage() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate action
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "delete") && (tAction '= "discover") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, delete, discover")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for OAuth2 operations
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "discover" {
+            ; OIDC Discovery from issuer URL
+            Set tIssuerURL = tBody.%Get("issuerURL")
+            If tIssuerURL = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'issuerURL' is required for discover action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, .tConfig)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "discovered")
+            Do tResult.%Set("issuerURL", tIssuerURL)
+            ; Return discovered configuration as a nested object
+            Set tDiscovered = {}
+            If $IsObject(tConfig) {
+                If tConfig.%IsA("%DynamicObject") {
+                    Set tDiscovered = tConfig
+                }
+                Else {
+                    ; Convert discovered config properties to JSON
+                    If $Property(tConfig, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tConfig, "IssuerEndpoint"))
+                    If $Property(tConfig, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tConfig, "AuthorizationEndpoint"))
+                    If $Property(tConfig, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tConfig, "TokenEndpoint"))
+                    If $Property(tConfig, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tConfig, "UserinfoEndpoint"))
+                    If $Property(tConfig, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tConfig, "RevocationEndpoint"))
+                    If $Property(tConfig, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tConfig, "IntrospectionEndpoint"))
+                    If $Property(tConfig, "JWKSEndpoint") '= "" Do tDiscovered.%Set("jwksEndpoint", $Property(tConfig, "JWKSEndpoint"))
+                }
+            }
+            Do tResult.%Set("configuration", tDiscovered)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "create" || (tAction = "delete") {
+            ; Entity type required for create/delete
+            Set tEntity = tBody.%Get("entity")
+            If (tEntity '= "server") && (tEntity '= "client") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'entity' must be 'server' or 'client' for " _ tAction _ " action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If tAction = "create" {
+                If tEntity = "server" {
+                    ; Create OAuth2 server definition
+                    Set tIssuerURL = tBody.%Get("issuerURL")
+                    If tIssuerURL = "" {
+                        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'issuerURL' is required for server creation")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    Set tConfig = ##class(OAuth2.Server.Configuration).%New()
+                    Set tConfig.IssuerEndpoint = tIssuerURL
+                    If tBody.%IsDefined("description") Set tConfig.Description = tBody.%Get("description")
+                    If tBody.%IsDefined("supportedScopes") Set tConfig.SupportedScopes = tBody.%Get("supportedScopes")
+                    If tBody.%IsDefined("accessTokenInterval") Set tConfig.AccessTokenInterval = +tBody.%Get("accessTokenInterval")
+                    If tBody.%IsDefined("authorizationCodeInterval") Set tConfig.AuthorizationCodeInterval = +tBody.%Get("authorizationCodeInterval")
+                    If tBody.%IsDefined("refreshTokenInterval") Set tConfig.RefreshTokenInterval = +tBody.%Get("refreshTokenInterval")
+                    If tBody.%IsDefined("signingAlgorithm") Set tConfig.SigningAlgorithm = tBody.%Get("signingAlgorithm")
+
+                    Set tSC = tConfig.%Save()
+                    If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+                    Set tResult = {}
+                    Do tResult.%Set("action", "created")
+                    Do tResult.%Set("entity", "server")
+                    Do tResult.%Set("issuerEndpoint", tIssuerURL)
+                    Do ..RenderResponseBody($$$OK, , tResult)
+                }
+                ElseIf tEntity = "client" {
+                    ; Register OAuth2 client application
+                    Set tServerName = tBody.%Get("serverName")
+                    Set tClientName = tBody.%Get("clientName")
+                    If tServerName = "" {
+                        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'serverName' is required for client registration")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    If tClientName = "" {
+                        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'clientName' is required for client registration")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    Set tProps("ApplicationName") = tClientName
+                    Set tProps("ServerDefinition") = tServerName
+                    If tBody.%IsDefined("redirectURIs") Set tProps("RedirectURL") = tBody.%Get("redirectURIs")
+                    If tBody.%IsDefined("grantTypes") Set tProps("GrantTypes") = tBody.%Get("grantTypes")
+                    If tBody.%IsDefined("clientType") Set tProps("ClientType") = tBody.%Get("clientType")
+                    If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+
+                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tServerName, .tProps)
+                    If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+                    ; Return client ID but NEVER the client secret (NFR6)
+                    Set tResult = {}
+                    Do tResult.%Set("action", "created")
+                    Do tResult.%Set("entity", "client")
+                    Do tResult.%Set("clientName", tClientName)
+                    Do tResult.%Set("serverName", tServerName)
+                    If $Data(tProps("ClientId")) Do tResult.%Set("clientId", tProps("ClientId"))
+                    ; CRITICAL: Never include clientSecret in response
+                    Do ..RenderResponseBody($$$OK, , tResult)
+                }
+            }
+            ElseIf tAction = "delete" {
+                Set tName = tBody.%Get("name")
+                If tName = "" {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter 'name' is required for " _ tEntity _ " deletion")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+
+                If tEntity = "server" {
+                    Set tSC = ##class(OAuth2.Server.Configuration).Delete(tName)
+                }
+                ElseIf tEntity = "client" {
+                    Set tSC = ##class(OAuth2.Client).Delete(tName)
+                }
+                If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+                Set tResult = {}
+                Do tResult.%Set("action", "deleted")
+                Do tResult.%Set("entity", tEntity)
+                Do tResult.%Set("name", tName)
+                Do ..RenderResponseBody($$$OK, , tResult)
+            }
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+        ; CRITICAL: Sanitize error to avoid leaking secrets
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -1922,6 +2191,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 4: Security / SSL/TLS Configuration Management -->
   <Route Url="/security/ssl" Method="GET" Call="ExecuteMCPv2.REST.Security:SSLList" />
   <Route Url="/security/ssl" Method="POST" Call="ExecuteMCPv2.REST.Security:SSLManage" />
+
+  <!-- Epic 4: Security / OAuth2 Configuration Management -->
+  <Route Url="/security/oauth" Method="GET" Call="ExecuteMCPv2.REST.Security:OAuthList" />
+  <Route Url="/security/oauth" Method="POST" Call="ExecuteMCPv2.REST.Security:OAuthManage" />
 
   <!-- Future Epic 5: Interoperability Management -->
   <!-- <Route Url="/production/:action" Method="POST" Call="ExecuteMCPv2.REST.Production:Execute" /> -->
