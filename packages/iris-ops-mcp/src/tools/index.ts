@@ -12,10 +12,13 @@ import {
   metricsAlertsTool,
   metricsInteropTool,
 } from "./metrics.js";
+import { jobsListTool, locksListTool } from "./jobs.js";
 
 /** All tool definitions registered by the iris-ops-mcp server. */
 export const tools: ToolDefinition[] = [
   metricsSystemTool,
   metricsAlertsTool,
   metricsInteropTool,
+  jobsListTool,
+  locksListTool,
 ];

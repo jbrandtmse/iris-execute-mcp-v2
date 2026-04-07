@@ -240,6 +240,110 @@ ClassMethod InteropMetrics() As %Status
     Quit $$$OK
 }
 
+/// Return running IRIS jobs/processes in JSON format.
+/// <p>Queries <code>%SYS.ProcessQuery</code> in the <b>%SYS</b> namespace
+/// to list all active IRIS processes with their process ID, namespace,
+/// routine, state, username, and resource usage.</p>
+ClassMethod JobsList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+        Set tJobs = []
+
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(,
+            "SELECT Pid, NameSpace, Routine, State, UserName, ClientIPAddress, "_
+            "JobType, CommandsExecuted, GlobalReferences, InTransaction, CPUTime "_
+            "FROM %SYS.ProcessQuery ORDER BY Pid")
+        If $IsObject(tRS) {
+            While tRS.%Next() {
+                Set tJob = {}
+                Do tJob.%Set("pid", +tRS.Pid, "number")
+                Do tJob.%Set("namespace", tRS.NameSpace)
+                Do tJob.%Set("routine", tRS.Routine)
+                Do tJob.%Set("state", tRS.State)
+                Do tJob.%Set("userName", tRS.UserName)
+                Do tJob.%Set("clientIPAddress", tRS.ClientIPAddress)
+                Do tJob.%Set("jobType", +tRS.JobType, "number")
+                Do tJob.%Set("commandsExecuted", +tRS.CommandsExecuted, "number")
+                Do tJob.%Set("globalReferences", +tRS.GlobalReferences, "number")
+                Do tJob.%Set("inTransaction", +tRS.InTransaction, "number")
+                Do tJob.%Set("cpuTime", +tRS.CPUTime, "number")
+                Do tJobs.%Push(tJob)
+            }
+        }
+
+        Do tResult.%Set("jobs", tJobs)
+        Do tResult.%Set("count", tJobs.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return current system locks in JSON format.
+/// <p>Uses the <code>%SYS.LockQuery:List</code> named query in the
+/// <b>%SYS</b> namespace to enumerate all active locks. Parses the
+/// pipe-delimited <code>Owner</code> field to extract the owning
+/// process ID.</p>
+ClassMethod LocksList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+        Set tLocks = []
+
+        Set tRS = ##class(%ResultSet).%New("%SYS.LockQuery:List")
+        If $IsObject(tRS) {
+            Set tSC2 = tRS.Execute()
+            If $$$ISOK(tSC2) {
+                While tRS.Next() {
+                    Set tLock = {}
+                    Set tOwner = tRS.Get("Owner")
+                    ; Owner may be pipe-delimited (|<pid>|<info>||<count>) or plain PID
+                    ; Handle both formats gracefully
+                    If $Find(tOwner, "|") {
+                        Set tOwnerPid = +$Piece(tOwner, "|", 2)
+                    }
+                    Else {
+                        Set tOwnerPid = +tOwner
+                    }
+                    Do tLock.%Set("lockName", tRS.Get("FullReference"))
+                    Do tLock.%Set("ownerPid", tOwnerPid, "number")
+                    Do tLock.%Set("owner", tOwner)
+                    Do tLock.%Set("mode", tRS.Get("Mode"))
+                    Do tLock.%Set("flags", tRS.Get("Flags"))
+                    Do tLock.%Set("counts", tRS.Get("Counts"))
+                    Do tLocks.%Push(tLock)
+                }
+            }
+            Do tRS.Close()
+        }
+
+        Do tResult.%Set("locks", tLocks)
+        Do tResult.%Set("count", tLocks.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>

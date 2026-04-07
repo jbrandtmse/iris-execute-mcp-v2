@@ -115,3 +115,8 @@ are listed below.
 
 - No npm script entry for `scripts/gen-bootstrap.mjs`. Developers must know to run `node scripts/gen-bootstrap.mjs` manually. Consider adding a `gen:bootstrap` script to root `package.json`.
 - No error handling in `gen-bootstrap.mjs` for missing `.cls` files. `readFileSync` will throw with unhelpful stack trace if a class file is missing or renamed. Consider adding try-catch with user-friendly error message.
+
+## Deferred from: code review of 6-3-jobs-and-locks-tools (2026-04-07)
+
+- AC1 specifies "start time" for jobs but `%SYS.ProcessQuery` does not expose a start time column. The verified SQL table lacks this field. Consider updating AC1 wording or adding a derived start time if IRIS exposes it in a future version.
+- No ObjectScript-side unit test for the dual-format Owner parsing in `LocksList` (pipe-delimited vs plain PID). The fix was verified by the lead during Step 2.5 but has no automated regression test on the IRIS side.

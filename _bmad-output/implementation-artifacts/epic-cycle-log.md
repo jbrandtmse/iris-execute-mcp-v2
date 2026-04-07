@@ -411,3 +411,16 @@
 - **Key decisions:** Replicated iris-interop-mcp pattern exactly; tsconfig.json already correct from scaffold
 - **Issues resolved:** None — clean implementation
 - **Review findings:** Zero findings across all three review layers
+
+### Story 6.2: System Metrics & Alerts Tools
+- **Status:** done
+- **Commit:** 420a700
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Monitor.cls` — New: SystemMetrics, SystemAlerts, InteropMetrics handlers
+  - `src/ExecuteMCPv2/REST/Dispatch.cls` — Added 3 monitor routes
+  - `ipm/module.xml` — Added Monitor.CLS resource
+  - `packages/iris-ops-mcp/src/tools/metrics.ts` — New: 3 tool definitions
+  - `packages/iris-ops-mcp/src/__tests__/metrics.test.ts` — New: 24 unit tests
+- **Key decisions:** Used $ZU(190,0/1) for global/routine metrics (190,28/29 don't exist), Config.Databases:List + SYS.Database.%OpenId for DB sizes (SYS.Database SQL table doesn't exist)
+- **Bugs found & fixed (Step 2.5):** $ZU(190,28/29) <FUNCTION> error, SYS.Database SQL table not found, databases array empty
+- **Review findings:** 1 MEDIUM fixed (cross-namespace ResultSet iteration), 1 LOW fixed (stale descriptions)
