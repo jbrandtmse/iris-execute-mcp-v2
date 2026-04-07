@@ -113,6 +113,24 @@
    - Maintain backward compatibility with mock implementations as fallbacks
    - CRITICAL: ##class(%SYS.Python).IsAvailable() does NOT exist. To check for Python, you must first attempt to load it by importing a library (e.g., `do ##class(%SYS.Python).Import("sys")`), and *then* check the status with `##class(%SYS.Python).GetPythonVersion()`. The `GetPythonVersion()` method only detects if Python has *already been loaded*; it does not load Python itself.
 
+## Namespace Switching in REST Handlers
+   - **CRITICAL**: Never use `New $NAMESPACE` in REST dispatch handler classes (classes extending `%Atelier.REST` or called from Dispatch UrlMap routes)
+   - `New $NAMESPACE` + `Set $NAMESPACE = "%SYS"` makes classes from the original namespace (e.g., `ExecuteMCPv2.Utils`) invisible in catch blocks, causing `<CLASS DOES NOT EXIST>` crashes on any error path
+   - **Safe pattern**: Use explicit save/restore with a local variable:
+     ```objectscript
+     Set tOrigNS = $NAMESPACE
+     Set $NAMESPACE = "%SYS"
+     ; ... do work in %SYS ...
+     Set $NAMESPACE = tOrigNS
+     ; ... now safe to call ExecuteMCPv2.Utils, RenderResponseBody, etc.
+     ```
+   - In catch blocks, ALWAYS restore namespace as the first line: `Set $NAMESPACE = tOrigNS`
+   - Do all input validation (Utils.ValidateRequired, Utils.ReadRequestBody) BEFORE switching to %SYS
+   - After each system class call (Config.*, Security.*), restore namespace before error handling
+   - `Config.Namespaces`, `Config.Databases`, `Config.Map*` classes only exist in %SYS — they require the namespace switch
+   - `Security.Users`, `Security.Roles`, `Security.Resources`, `Security.Applications`, `Security.SSLConfigs` also require %SYS
+   - For listing operations, prefer `##class(%ResultSet).%New("Config.Namespaces:List")` named queries over non-existent class methods like `Config.Namespaces.NamespaceList()`
+
 ## Storage Sections
    - IMPORTANT: Storage sections of ObjectScript classes should NEVER be edited or added.  The compiler will add/maintain these sections of the class based on properties declared in the class and superclasses.
 

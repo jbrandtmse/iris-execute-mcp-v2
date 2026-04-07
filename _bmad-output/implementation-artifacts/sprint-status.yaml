@@ -81,7 +81,7 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: IRIS Administration (iris-admin-mcp)
-  epic-4: in-progress
+  epic-4: done
   4-0-epic-3-deferred-cleanup: done
   4-1-iris-admin-mcp-package-setup-and-server-entry-point: done
   4-2-namespace-and-database-management-tools: done
@@ -92,7 +92,7 @@ development_status:
   4-7-ssl-tls-configuration-tools: done
   4-8-oauth2-management-tools: done
   4-9-iris-admin-mcp-unit-and-integration-tests: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   # Epic 5: Interoperability Management (iris-interop-mcp)
   epic-5: backlog
