@@ -158,6 +158,7 @@ export const productionMessagesTool: ToolDefinition = {
   title: "Production Messages",
   description:
     "Trace message flow through a production by session ID or header ID. " +
+    "At least one of sessionId or headerId is required. " +
     "Each message step includes source item, target item, message class, timestamp, " +
     "and status. Use sessionId to see all messages in a session, or headerId for a specific message.",
   inputSchema: z.object({
@@ -172,7 +173,9 @@ export const productionMessagesTool: ToolDefinition = {
     count: z
       .number()
       .optional()
-      .describe("Maximum number of messages to return (default: 100, max: 10000)"),
+      .describe(
+        "Maximum number of messages to return (default: 100, max: 10000)",
+      ),
     namespace: z
       .string()
       .optional()
@@ -192,6 +195,18 @@ export const productionMessagesTool: ToolDefinition = {
       count?: number;
       namespace?: string;
     };
+
+    if (sessionId === undefined && headerId === undefined) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Error: at least one of 'sessionId' or 'headerId' is required",
+          },
+        ],
+        isError: true,
+      };
+    }
 
     const ns = ctx.resolveNamespace(namespace);
     const params = new URLSearchParams();

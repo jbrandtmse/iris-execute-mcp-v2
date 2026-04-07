@@ -212,7 +212,7 @@ describe("iris.webapp.get", () => {
     ctx = createMockCtx(mockHttp);
   });
 
-  it("should GET single web application by name", async () => {
+  it("should POST to get single web application by name", async () => {
     const appData = {
       name: "/csp/user",
       namespace: "USER",
@@ -227,12 +227,13 @@ describe("iris.webapp.get", () => {
       resource: "",
       cookiePath: "/csp/user/",
     };
-    mockHttp.get.mockResolvedValue(envelope(appData));
+    mockHttp.post.mockResolvedValue(envelope(appData));
 
     const result = await webappGetTool.handler({ name: "/csp/user" }, ctx);
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      "/api/executemcp/v2/security/webapp/%2Fcsp%2Fuser",
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/webapp/get",
+      { name: "/csp/user" },
     );
 
     const structured = result.structuredContent as typeof appData;
@@ -241,24 +242,25 @@ describe("iris.webapp.get", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it("should URL-encode the web application name", async () => {
-    mockHttp.get.mockResolvedValue(
+  it("should pass app name with slashes in body without encoding", async () => {
+    mockHttp.post.mockResolvedValue(
       envelope({ name: "/api/my/app", namespace: "USER" }),
     );
 
     await webappGetTool.handler({ name: "/api/my/app" }, ctx);
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      "/api/executemcp/v2/security/webapp/%2Fapi%2Fmy%2Fapp",
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/webapp/get",
+      { name: "/api/my/app" },
     );
   });
 
   it("should return isError on IrisApiError", async () => {
-    mockHttp.get.mockRejectedValue(
+    mockHttp.post.mockRejectedValue(
       new IrisApiError(
         404,
         [{ error: "Not found" }],
-        "/api/executemcp/v2/security/webapp/%2Fbad",
+        "/api/executemcp/v2/security/webapp/get",
         "Not found",
       ),
     );
@@ -273,7 +275,7 @@ describe("iris.webapp.get", () => {
   });
 
   it("should propagate non-IrisApiError exceptions", async () => {
-    mockHttp.get.mockRejectedValue(new Error("ECONNREFUSED"));
+    mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
 
     await expect(
       webappGetTool.handler({ name: "/test" }, ctx),

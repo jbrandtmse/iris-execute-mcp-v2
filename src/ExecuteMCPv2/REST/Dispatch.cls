@@ -65,6 +65,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 4: Security / Web Application Management -->
   <Route Url="/security/webapp" Method="GET" Call="ExecuteMCPv2.REST.Security:WebAppList" />
   <Route Url="/security/webapp" Method="POST" Call="ExecuteMCPv2.REST.Security:WebAppManage" />
+  <Route Url="/security/webapp/get" Method="POST" Call="ExecuteMCPv2.REST.Security:WebAppGetByPost" />
   <Route Url="/security/webapp/:name" Method="GET" Call="ExecuteMCPv2.REST.Security:WebAppGet" />
 
   <!-- Epic 4: Security / SSL/TLS Configuration Management -->

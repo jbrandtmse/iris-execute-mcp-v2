@@ -285,6 +285,15 @@ describe("iris.production.messages", () => {
   it("should have scope NS", () => {
     expect(productionMessagesTool.scope).toBe("NS");
   });
+
+  it("should return error when neither sessionId nor headerId is provided", async () => {
+    const result = await productionMessagesTool.handler({}, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      "at least one of 'sessionId' or 'headerId' is required",
+    );
+  });
 });
 
 // ── iris.production.adapters ────────────────────────────────

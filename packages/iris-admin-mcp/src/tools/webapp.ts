@@ -172,7 +172,8 @@ export const webappGetTool: ToolDefinition = {
   description:
     "Get an IRIS CSP/REST web application by name. Returns all web application " +
     "properties including namespace, dispatch class, authentication settings, " +
-    "and enabled status.",
+    "and enabled status. Uses POST to avoid URL-encoding issues with forward " +
+    "slashes in application paths.",
   inputSchema: z.object({
     name: z
       .string()
@@ -188,10 +189,10 @@ export const webappGetTool: ToolDefinition = {
   handler: async (args, ctx) => {
     const { name } = args as { name: string };
 
-    const path = `${BASE_URL}/security/webapp/${encodeURIComponent(name)}`;
+    const path = `${BASE_URL}/security/webapp/get`;
 
     try {
-      const response = await ctx.http.get(path);
+      const response = await ctx.http.post(path, { name });
       const result = response.result;
       return {
         content: [

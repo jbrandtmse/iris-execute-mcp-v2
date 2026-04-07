@@ -969,6 +969,55 @@ ClassMethod WebAppGet(pName As %String) As %Status
     Quit $$$OK
 }
 
+/// Get a single web application by name (POST variant).
+/// <p>Reads the web application name from the JSON request body to avoid
+/// URL-encoding issues with forward slashes in application paths.
+/// This is the preferred endpoint for <code>iris.webapp.get</code>.</p>
+ClassMethod WebAppGetByPost() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read name from request body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tName = tBody.%Get("name")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Switch to %SYS for Security operations
+        Set $NAMESPACE = "%SYS"
+
+        Set tSC = ##class(Security.Applications).Get(tName, .tProps)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tEntry = {}
+        Do tEntry.%Set("name", $Get(tProps("Name")))
+        Do tEntry.%Set("namespace", $Get(tProps("NameSpace")))
+        Do tEntry.%Set("dispatchClass", $Get(tProps("DispatchClass")))
+        Do tEntry.%Set("description", $Get(tProps("Description")))
+        Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+        Do tEntry.%Set("authEnabled", +$Get(tProps("AutheEnabled")), "number")
+        Do tEntry.%Set("isNameSpaceDefault", +$Get(tProps("IsNameSpaceDefault")), "boolean")
+        Do tEntry.%Set("cspZenEnabled", +$Get(tProps("CSPZENEnabled")), "boolean")
+        Do tEntry.%Set("recurse", +$Get(tProps("Recurse")), "boolean")
+        Do tEntry.%Set("matchRoles", $Get(tProps("MatchRoles")))
+        Do tEntry.%Set("resource", $Get(tProps("Resource")))
+        Do tEntry.%Set("cookiePath", $Get(tProps("CookiePath")))
+
+        Do ..RenderResponseBody($$$OK, , tEntry)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Build the tProps array for web application create/modify from a JSON body.
 /// <p>Reads standard web application properties from the JSON body and
 /// populates the <var>pProps</var> array suitable for passing to
