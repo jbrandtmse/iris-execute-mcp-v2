@@ -10,7 +10,7 @@ import {
   bootstrap,
   MANUAL_INSTRUCTIONS,
 } from "../bootstrap.js";
-import { BOOTSTRAP_CLASSES } from "../bootstrap-classes.js";
+import { BOOTSTRAP_CLASSES, getBootstrapClasses } from "../bootstrap-classes.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -338,7 +338,7 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [{ IsConfigured: 0 }] })),
       );
 
-      // Deploy: 6 PUT responses (CSRF already established)
+      // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
         fetchMock.mockResolvedValueOnce(
           mockResponse(envelope({ result: [] })),
@@ -351,6 +351,11 @@ describe("bootstrap", () => {
       );
 
       // Configure: POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [] })),
+      );
+
+      // Package mapping: POST response
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [] })),
       );
@@ -384,7 +389,7 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [{ IsConfigured: 0 }] })),
       );
 
-      // Deploy: 6 PUT responses
+      // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
         fetchMock.mockResolvedValueOnce(
           mockResponse(envelope({ result: [] })),
@@ -409,6 +414,11 @@ describe("bootstrap", () => {
           },
           { status: 403 },
         ),
+      );
+
+      // Package mapping: POST response (still attempted after configure failure)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [] })),
       );
 
       const result = await bootstrap(http, config, 7);
@@ -488,20 +498,21 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 8 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(8);
+    it("should contain exactly 9 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(9);
     });
 
     it("should contain all required class names", () => {
       const expected = [
         "ExecuteMCPv2.Utils.cls",
         "ExecuteMCPv2.Setup.cls",
-        "ExecuteMCPv2.REST.Dispatch.cls",
+        "ExecuteMCPv2.REST.Global.cls",
         "ExecuteMCPv2.REST.Command.cls",
         "ExecuteMCPv2.REST.UnitTest.cls",
-        "ExecuteMCPv2.REST.Global.cls",
         "ExecuteMCPv2.REST.Config.cls",
         "ExecuteMCPv2.REST.Security.cls",
+        "ExecuteMCPv2.REST.Interop.cls",
+        "ExecuteMCPv2.REST.Dispatch.cls",
       ];
       for (const name of expected) {
         expect(BOOTSTRAP_CLASSES.has(name)).toBe(true);
@@ -514,6 +525,47 @@ describe("bootstrap", () => {
         expect(content).toContain("Class ");
         expect(content).toContain("Extends");
       }
+    });
+
+    it("should have Dispatch last in iteration order (compilation order)", () => {
+      const keys = [...BOOTSTRAP_CLASSES.keys()];
+      expect(keys[0]).toBe("ExecuteMCPv2.Utils.cls");
+      expect(keys[1]).toBe("ExecuteMCPv2.Setup.cls");
+      expect(keys[keys.length - 1]).toBe("ExecuteMCPv2.REST.Dispatch.cls");
+    });
+  });
+
+  // ── getBootstrapClasses ──────────────────────────────────────────
+
+  describe("getBootstrapClasses", () => {
+    it("should return an array of BootstrapClass objects", () => {
+      const classes = getBootstrapClasses();
+      expect(Array.isArray(classes)).toBe(true);
+      expect(classes.length).toBe(9);
+    });
+
+    it("should return classes in compilation order", () => {
+      const classes = getBootstrapClasses();
+      expect(classes[0]!.name).toBe("ExecuteMCPv2.Utils.cls");
+      expect(classes[1]!.name).toBe("ExecuteMCPv2.Setup.cls");
+      expect(classes[classes.length - 1]!.name).toBe("ExecuteMCPv2.REST.Dispatch.cls");
+    });
+
+    it("should include name and content for each class", () => {
+      const classes = getBootstrapClasses();
+      for (const cls of classes) {
+        expect(cls.name).toBeDefined();
+        expect(cls.content).toBeDefined();
+        expect(cls.content.length).toBeGreaterThan(0);
+        expect(cls.content).toContain("Class ");
+      }
+    });
+
+    it("should include Interop.cls", () => {
+      const classes = getBootstrapClasses();
+      const interop = classes.find(c => c.name === "ExecuteMCPv2.REST.Interop.cls");
+      expect(interop).toBeDefined();
+      expect(interop!.content).toContain("ExecuteMCPv2.REST.Interop");
     });
   });
 });

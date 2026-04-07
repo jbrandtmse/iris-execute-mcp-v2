@@ -42,4 +42,6 @@ export {
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
 export type { BootstrapResult } from "./bootstrap.js";
+export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
+export type { BootstrapClass } from "./bootstrap-classes.js";
 export { resolveTransport } from "./transport.js";
