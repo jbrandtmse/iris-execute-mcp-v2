@@ -486,3 +486,14 @@
 - **Key decisions:** Config.config.Open() returns CPF path not %Status; locale section lists available locales via NLS.Locales:List
 - **Bugs found & fixed (Step 2.5):** Config.config.Open() status check (CPF path not %Status), Config.NLS.Locales.Get("current") doesn't exist
 - **Review findings:** 4 LOW deferred (dynamic annotations, hardcoded property list, no whitelist, export scope)
+
+### Story 6.8: iris-ops-mcp Unit & Integration Tests
+- **Status:** done
+- **Commit:** 300d2bd
+- **Files touched:**
+  - `packages/iris-ops-mcp/src/__tests__/integration-setup.ts` — New: IRIS probe setup
+  - `packages/iris-ops-mcp/src/__tests__/ops.integration.test.ts` — New: 18 integration tests
+  - `packages/iris-ops-mcp/vitest.integration.config.ts` — New: integration config
+- **Key decisions:** Probe uses /monitor/system endpoint; task lifecycle uses suspended %SYS.Task.PurgeTaskHistory; config tests read-only
+- **Integration test results:** 18/18 passing (12 read-only + 2 config + 4 task lifecycle)
+- **Review findings:** Clean — zero findings
