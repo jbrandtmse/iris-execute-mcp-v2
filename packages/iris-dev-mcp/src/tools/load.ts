@@ -99,7 +99,9 @@ export const docLoadTool: ToolDefinition = {
   description:
     "Upload multiple ObjectScript files from a local directory into IRIS. " +
     "Accepts a glob pattern to match files. File paths are mapped to IRIS document names " +
-    "(path separators become dots). Optionally compiles all uploaded documents afterward.",
+    "(path separators become dots). Optionally compiles all uploaded documents afterward. " +
+    "This is the preferred way to deploy ObjectScript classes to IRIS — always create or edit .cls files on disk first, " +
+    "then use this tool to upload and compile. This ensures all code is source-controlled and reviewable.",
   inputSchema: z.object({
     path: z
       .string()

@@ -9,6 +9,9 @@
 /// <p>Follows the handler pattern established by <class>ExecuteMCPv2.REST.Config</class>:
 /// namespace switch/restore, try/catch, input validation, error sanitization,
 /// and RenderResponseBody envelope.</p>
+/// <p><b>CRITICAL</b>: Namespace switching uses <code>Set tOrigNS = $NAMESPACE</code>
+/// and manual restore (never <code>New $NAMESPACE</code>) so that
+/// <class>ExecuteMCPv2.Utils</class> remains visible in catch blocks.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER included in response bodies
 /// or error messages (NFR6).</p>
 Class ExecuteMCPv2.REST.Security Extends %Atelier.REST
@@ -22,8 +25,8 @@ Class ExecuteMCPv2.REST.Security Extends %Atelier.REST
 ClassMethod UserList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         Set tResult = []
@@ -31,7 +34,12 @@ ClassMethod UserList() As %Status
         ; Use SQL to enumerate all users
         Set tRS = ##class(%ResultSet).%New("Security.Users:List")
         Set tSC = tRS.Execute("*")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
 
         While tRS.Next() {
             Set tEntry = {}
@@ -48,9 +56,11 @@ ClassMethod UserList() As %Status
         }
         Do tRS.Close()
 
+        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -64,15 +74,17 @@ ClassMethod UserList() As %Status
 ClassMethod UserGet(pName As %String) As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Validate name parameter
+        ; Validate name parameter (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(pName, "name")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-        New $NAMESPACE
+        ; Switch to %SYS for Security operations
         Set $NAMESPACE = "%SYS"
 
         Set tSC = ##class(Security.Users).Get(pName, .tProps)
+        Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
@@ -90,6 +102,7 @@ ClassMethod UserGet(pName As %String) As %Status
         Do ..RenderResponseBody($$$OK, , tEntry)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -106,8 +119,9 @@ ClassMethod UserGet(pName As %String) As %Status
 ClassMethod UserManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -117,7 +131,7 @@ ClassMethod UserManage() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tName = tBody.%Get("name")
 
@@ -136,13 +150,13 @@ ClassMethod UserManage() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
             ; Password is required for create
             Set tPassword = tBody.%Get("password")
             If tPassword = "" {
+                Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Parameter 'password' is required for create action")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
@@ -160,6 +174,7 @@ ClassMethod UserManage() As %Status
             If tBody.%IsDefined("changePasswordOnNextLogin") Set tProps("ChangePassword") = +tBody.%Get("changePasswordOnNextLogin")
 
             Set tSC = ##class(Security.Users).Create(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             ; CRITICAL: Never include password in response
@@ -178,6 +193,7 @@ ClassMethod UserManage() As %Status
             If tBody.%IsDefined("changePasswordOnNextLogin") Set tProps("ChangePassword") = +tBody.%Get("changePasswordOnNextLogin")
 
             Set tSC = ##class(Security.Users).Modify(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             ; CRITICAL: Never include password in response
@@ -186,6 +202,7 @@ ClassMethod UserManage() As %Status
         }
         ElseIf tAction = "delete" {
             Set tSC = ##class(Security.Users).Delete(tName)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
@@ -193,6 +210,7 @@ ClassMethod UserManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -208,8 +226,9 @@ ClassMethod UserManage() As %Status
 ClassMethod UserRoles() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -219,7 +238,7 @@ ClassMethod UserRoles() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tUsername = tBody.%Get("username")
         Set tRole = tBody.%Get("role")
@@ -242,11 +261,11 @@ ClassMethod UserRoles() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         ; Get current user properties
         Set tSC = ##class(Security.Users).Get(tUsername, .tProps)
+        Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tRoles = $Get(tProps("Roles"))
@@ -296,7 +315,10 @@ ClassMethod UserRoles() As %Status
         ; Update user with new role list
         Kill tProps
         Set tProps("Roles") = tNewRoles
+
+        Set $NAMESPACE = "%SYS"
         Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
+        Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tResult = {}
@@ -307,6 +329,7 @@ ClassMethod UserRoles() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -325,8 +348,9 @@ ClassMethod UserRoles() As %Status
 ClassMethod UserPassword() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -336,7 +360,7 @@ ClassMethod UserPassword() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tPassword = tBody.%Get("password")
 
@@ -354,18 +378,18 @@ ClassMethod UserPassword() As %Status
             Quit
         }
 
-        ; Switch to %SYS for Security operations
-        New $NAMESPACE
-        Set $NAMESPACE = "%SYS"
-
         If tAction = "change" {
             Set tUsername = tBody.%Get("username")
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tUsername, "username")
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+            ; Switch to %SYS for Security operations
+            Set $NAMESPACE = "%SYS"
+
             ; Use ChangePassword property to change password
             Set tProps("ChangePassword") = tPassword
             Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) {
                 ; CRITICAL: Sanitize error — do NOT include password in error message
                 Set tSC = $$$ERROR($$$GeneralError, "Failed to change password for user '"_tUsername_"'")
@@ -380,7 +404,9 @@ ClassMethod UserPassword() As %Status
         }
         ElseIf tAction = "validate" {
             ; Validate password against system password rules
+            Set $NAMESPACE = "%SYS"
             Set tSC = $SYSTEM.Security.ValidatePassword(tPassword)
+            Set $NAMESPACE = tOrigNS
             If $$$ISOK(tSC) {
                 Set tResult = {"action": "validate", "valid": true}
             }
@@ -396,6 +422,7 @@ ClassMethod UserPassword() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -411,8 +438,8 @@ ClassMethod UserPassword() As %Status
 ClassMethod RoleList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         Set tResult = []
@@ -420,7 +447,12 @@ ClassMethod RoleList() As %Status
         ; Use SQL to enumerate all roles
         Set tRS = ##class(%ResultSet).%New("Security.Roles:List")
         Set tSC = tRS.Execute("*")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
 
         While tRS.Next() {
             Set tEntry = {}
@@ -432,9 +464,11 @@ ClassMethod RoleList() As %Status
         }
         Do tRS.Close()
 
+        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -450,8 +484,9 @@ ClassMethod RoleList() As %Status
 ClassMethod RoleManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -461,7 +496,7 @@ ClassMethod RoleManage() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tName = tBody.%Get("name")
 
@@ -480,7 +515,6 @@ ClassMethod RoleManage() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
@@ -489,6 +523,7 @@ ClassMethod RoleManage() As %Status
             If tBody.%IsDefined("grantedRoles") Set tProps("GrantedRoles") = tBody.%Get("grantedRoles")
 
             Set tSC = ##class(Security.Roles).Create(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "created", "name": (tName)}
@@ -500,6 +535,7 @@ ClassMethod RoleManage() As %Status
             If tBody.%IsDefined("grantedRoles") Set tProps("GrantedRoles") = tBody.%Get("grantedRoles")
 
             Set tSC = ##class(Security.Roles).Modify(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "modified", "name": (tName)}
@@ -507,6 +543,7 @@ ClassMethod RoleManage() As %Status
         }
         ElseIf tAction = "delete" {
             Set tSC = ##class(Security.Roles).Delete(tName)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
@@ -514,6 +551,7 @@ ClassMethod RoleManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -529,8 +567,8 @@ ClassMethod RoleManage() As %Status
 ClassMethod ResourceList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         Set tResult = []
@@ -538,7 +576,12 @@ ClassMethod ResourceList() As %Status
         ; Use SQL to enumerate all resources
         Set tRS = ##class(%ResultSet).%New("Security.Resources:List")
         Set tSC = tRS.Execute("*")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
 
         While tRS.Next() {
             Set tEntry = {}
@@ -550,9 +593,11 @@ ClassMethod ResourceList() As %Status
         }
         Do tRS.Close()
 
+        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -568,8 +613,9 @@ ClassMethod ResourceList() As %Status
 ClassMethod ResourceManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -579,7 +625,7 @@ ClassMethod ResourceManage() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tName = tBody.%Get("name")
 
@@ -598,7 +644,6 @@ ClassMethod ResourceManage() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
@@ -606,6 +651,7 @@ ClassMethod ResourceManage() As %Status
             If tBody.%IsDefined("publicPermission") Set tProps("PublicPermission") = tBody.%Get("publicPermission")
 
             Set tSC = ##class(Security.Resources).Create(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "created", "name": (tName)}
@@ -616,6 +662,7 @@ ClassMethod ResourceManage() As %Status
             If tBody.%IsDefined("publicPermission") Set tProps("PublicPermission") = tBody.%Get("publicPermission")
 
             Set tSC = ##class(Security.Resources).Modify(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "modified", "name": (tName)}
@@ -623,6 +670,7 @@ ClassMethod ResourceManage() As %Status
         }
         ElseIf tAction = "delete" {
             Set tSC = ##class(Security.Resources).Delete(tName)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
@@ -630,6 +678,7 @@ ClassMethod ResourceManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -646,8 +695,9 @@ ClassMethod ResourceManage() As %Status
 ClassMethod PermissionCheck() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -657,7 +707,7 @@ ClassMethod PermissionCheck() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tTarget = tBody.%Get("target")
         Set tResource = tBody.%Get("resource")
         Set tPermission = tBody.%Get("permission")
@@ -672,7 +722,6 @@ ClassMethod PermissionCheck() As %Status
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         ; Determine if target is a user or role by checking existence
@@ -680,6 +729,7 @@ ClassMethod PermissionCheck() As %Status
         Set tIsRole = ##class(Security.Roles).Exists(tTarget)
 
         If 'tIsUser && 'tIsRole {
+            Set $NAMESPACE = tOrigNS
             Set tSC = $$$ERROR($$$GeneralError, "Target '"_tTarget_"' is not a known user or role")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
@@ -694,7 +744,12 @@ ClassMethod PermissionCheck() As %Status
             Set tTargetType = "user"
             ; Get user's roles, then collect all resources from those roles
             Set tSC = ##class(Security.Users).Get(tTarget, .tUserProps)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tUserRoles = $Get(tUserProps("Roles"))
             ; Collect resources from all assigned roles
             For tI = 1:1:$Length(tUserRoles, ",") {
@@ -713,9 +768,17 @@ ClassMethod PermissionCheck() As %Status
         Else {
             Set tTargetType = "role"
             Set tSC = ##class(Security.Roles).Get(tTarget, .tRoleProps)
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tGrantedResources = $Get(tRoleProps("Resources"))
         }
+
+        ; Done with %SYS — restore namespace for response rendering
+        Set $NAMESPACE = tOrigNS
 
         ; Parse the resources string to check if the requested permission is granted
         ; Resources format: "ResName:RWU,ResName2:R"
@@ -753,6 +816,7 @@ ClassMethod PermissionCheck() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -768,30 +832,43 @@ ClassMethod PermissionCheck() As %Status
 ClassMethod WebAppList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
-        Set $NAMESPACE = "%SYS"
 
         ; Check for optional namespace filter from query parameter
         Set tNamespaceFilter = $Get(%request.Data("namespace", 1))
 
         Set tResult = []
 
+        ; Switch to %SYS for Security operations
+        Set $NAMESPACE = "%SYS"
+
         ; Use SQL to enumerate web applications
         If tNamespaceFilter '= "" {
             Set tStatement = ##class(%SQL.Statement).%New()
-            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, Resource_, CookiePath FROM Security.Applications WHERE NameSpace = ?")
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, CookiePath FROM Security.Applications WHERE NameSpace = ?")
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tRS = tStatement.%Execute(tNamespaceFilter)
         }
         Else {
             Set tStatement = ##class(%SQL.Statement).%New()
-            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, Resource_, CookiePath FROM Security.Applications")
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = tStatement.%Prepare("SELECT Name, NameSpace, DispatchClass, Description, Enabled, AutheEnabled, IsNameSpaceDefault, CSPZENEnabled, Recurse, MatchRoles, CookiePath FROM Security.Applications")
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tRS = tStatement.%Execute()
         }
 
         If tRS.%SQLCODE < 0 {
+            Set $NAMESPACE = tOrigNS
             Set tSC = $$$ERROR($$$GeneralError, "SQL error listing web applications: " _ tRS.%Message)
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
@@ -810,14 +887,16 @@ ClassMethod WebAppList() As %Status
             Do tEntry.%Set("cspZenEnabled", +tRS.%Get("CSPZENEnabled"), "boolean")
             Do tEntry.%Set("recurse", +tRS.%Get("Recurse"), "boolean")
             Do tEntry.%Set("matchRoles", tRS.%Get("MatchRoles"))
-            Do tEntry.%Set("resource", tRS.%Get("Resource_"))
+            ; Resource column omitted — reserved word conflict in SQL projection
             Do tEntry.%Set("cookiePath", tRS.%Get("CookiePath"))
             Do tResult.%Push(tEntry)
         }
 
+        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -832,18 +911,20 @@ ClassMethod WebAppList() As %Status
 ClassMethod WebAppGet(pName As %String) As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Validate name parameter
+        ; Validate name parameter (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(pName, "name")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; URL-decode the name (webapp names contain '/')
         Set pName = $ZCONVERT(pName, "I", "URL")
 
-        New $NAMESPACE
+        ; Switch to %SYS for Security operations
         Set $NAMESPACE = "%SYS"
 
         Set tSC = ##class(Security.Applications).Get(pName, .tProps)
+        Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
@@ -863,6 +944,7 @@ ClassMethod WebAppGet(pName As %String) As %Status
         Do ..RenderResponseBody($$$OK, , tEntry)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -880,8 +962,9 @@ ClassMethod WebAppGet(pName As %String) As %Status
 ClassMethod WebAppManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -891,7 +974,7 @@ ClassMethod WebAppManage() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tName = tBody.%Get("name")
 
@@ -910,7 +993,6 @@ ClassMethod WebAppManage() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
@@ -927,6 +1009,7 @@ ClassMethod WebAppManage() As %Status
             If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
 
             Set tSC = ##class(Security.Applications).Create(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
@@ -949,6 +1032,7 @@ ClassMethod WebAppManage() As %Status
             If tBody.%IsDefined("cookiePath") Set tProps("CookiePath") = tBody.%Get("cookiePath")
 
             Set tSC = ##class(Security.Applications).Modify(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "modified", "name": (tName)}
@@ -956,6 +1040,7 @@ ClassMethod WebAppManage() As %Status
         }
         ElseIf tAction = "delete" {
             Set tSC = ##class(Security.Applications).Delete(tName)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
@@ -963,6 +1048,7 @@ ClassMethod WebAppManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -980,8 +1066,8 @@ ClassMethod WebAppManage() As %Status
 ClassMethod SSLList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         Set tResult = []
@@ -989,10 +1075,16 @@ ClassMethod SSLList() As %Status
         ; Use SQL to enumerate all SSL/TLS configurations
         Set tStatement = ##class(%SQL.Statement).%New()
         Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, Protocols, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
-        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
         Set tRS = tStatement.%Execute()
 
         If tRS.%SQLCODE < 0 {
+            Set $NAMESPACE = tOrigNS
             Set tSC = $$$ERROR($$$GeneralError, "SQL error listing SSL/TLS configurations: " _ tRS.%Message)
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
@@ -1016,9 +1108,11 @@ ClassMethod SSLList() As %Status
             Do tResult.%Push(tEntry)
         }
 
+        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -1035,8 +1129,9 @@ ClassMethod SSLList() As %Status
 ClassMethod SSLManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -1046,7 +1141,7 @@ ClassMethod SSLManage() As %Status
             Quit
         }
 
-        ; Extract and validate parameters
+        ; Extract and validate parameters (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tName = tBody.%Get("name")
 
@@ -1065,7 +1160,6 @@ ClassMethod SSLManage() As %Status
         }
 
         ; Switch to %SYS for Security operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
@@ -1082,6 +1176,7 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
 
             Set tSC = ##class(Security.SSLConfigs).Create(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
@@ -1103,6 +1198,7 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
 
             Set tSC = ##class(Security.SSLConfigs).Modify(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "modified", "name": (tName)}
@@ -1110,6 +1206,7 @@ ClassMethod SSLManage() As %Status
         }
         ElseIf tAction = "delete" {
             Set tSC = ##class(Security.SSLConfigs).Delete(tName)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
@@ -1117,6 +1214,7 @@ ClassMethod SSLManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -1135,8 +1233,8 @@ ClassMethod SSLManage() As %Status
 ClassMethod OAuthList() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         Set tServers = []
@@ -1147,6 +1245,7 @@ ClassMethod OAuthList() As %Status
         Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2.Server.Configuration")
         If $$$ISERR(tSC) {
             ; Table may not exist - return empty results
+            Set $NAMESPACE = tOrigNS
             Set tResult = {}
             Do tResult.%Set("servers", [])
             Do tResult.%Set("clients", [])
@@ -1194,6 +1293,8 @@ ClassMethod OAuthList() As %Status
             }
         }
 
+        Set $NAMESPACE = tOrigNS
+
         Set tResult = {}
         Do tResult.%Set("servers", tServers)
         Do tResult.%Set("clients", tClients)
@@ -1202,6 +1303,7 @@ ClassMethod OAuthList() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
@@ -1218,8 +1320,9 @@ ClassMethod OAuthList() As %Status
 ClassMethod OAuthManage() As %Status
 {
     Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
     Try {
-        ; Read JSON body
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         If '$IsObject(tBody) {
@@ -1229,7 +1332,7 @@ ClassMethod OAuthManage() As %Status
             Quit
         }
 
-        ; Extract and validate action
+        ; Extract and validate action (before namespace switch)
         Set tAction = tBody.%Get("action")
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -1243,13 +1346,13 @@ ClassMethod OAuthManage() As %Status
         }
 
         ; Switch to %SYS for OAuth2 operations
-        New $NAMESPACE
         Set $NAMESPACE = "%SYS"
 
         If tAction = "discover" {
             ; OIDC Discovery from issuer URL
             Set tIssuerURL = tBody.%Get("issuerURL")
             If tIssuerURL = "" {
+                Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Parameter 'issuerURL' is required for discover action")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
@@ -1257,6 +1360,7 @@ ClassMethod OAuthManage() As %Status
             }
 
             Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, .tConfig)
+            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
@@ -1286,6 +1390,7 @@ ClassMethod OAuthManage() As %Status
             ; Entity type required for create/delete
             Set tEntity = tBody.%Get("entity")
             If (tEntity '= "server") && (tEntity '= "client") {
+                Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Parameter 'entity' must be 'server' or 'client' for " _ tAction _ " action")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
@@ -1297,6 +1402,7 @@ ClassMethod OAuthManage() As %Status
                     ; Create OAuth2 server definition
                     Set tIssuerURL = tBody.%Get("issuerURL")
                     If tIssuerURL = "" {
+                        Set $NAMESPACE = tOrigNS
                         Set tSC = $$$ERROR($$$GeneralError, "Parameter 'issuerURL' is required for server creation")
                         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                         Set tSC = $$$OK
@@ -1313,6 +1419,7 @@ ClassMethod OAuthManage() As %Status
                     If tBody.%IsDefined("signingAlgorithm") Set tConfig.SigningAlgorithm = tBody.%Get("signingAlgorithm")
 
                     Set tSC = tConfig.%Save()
+                    Set $NAMESPACE = tOrigNS
                     If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
                     Set tResult = {}
@@ -1326,12 +1433,14 @@ ClassMethod OAuthManage() As %Status
                     Set tServerName = tBody.%Get("serverName")
                     Set tClientName = tBody.%Get("clientName")
                     If tServerName = "" {
+                        Set $NAMESPACE = tOrigNS
                         Set tSC = $$$ERROR($$$GeneralError, "Parameter 'serverName' is required for client registration")
                         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                         Set tSC = $$$OK
                         Quit
                     }
                     If tClientName = "" {
+                        Set $NAMESPACE = tOrigNS
                         Set tSC = $$$ERROR($$$GeneralError, "Parameter 'clientName' is required for client registration")
                         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                         Set tSC = $$$OK
@@ -1346,6 +1455,7 @@ ClassMethod OAuthManage() As %Status
                     If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
 
                     Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tServerName, .tProps)
+                    Set $NAMESPACE = tOrigNS
                     If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
                     ; Return client ID but NEVER the client secret (NFR6)
@@ -1362,6 +1472,7 @@ ClassMethod OAuthManage() As %Status
             ElseIf tAction = "delete" {
                 Set tName = tBody.%Get("name")
                 If tName = "" {
+                    Set $NAMESPACE = tOrigNS
                     Set tSC = $$$ERROR($$$GeneralError, "Parameter 'name' is required for " _ tEntity _ " deletion")
                     Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                     Set tSC = $$$OK
@@ -1374,6 +1485,7 @@ ClassMethod OAuthManage() As %Status
                 ElseIf tEntity = "client" {
                     Set tSC = ##class(OAuth2.Client).Delete(tName)
                 }
+                Set $NAMESPACE = tOrigNS
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
                 Set tResult = {}
@@ -1385,6 +1497,7 @@ ClassMethod OAuthManage() As %Status
         }
     }
     Catch ex {
+        Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         ; CRITICAL: Sanitize error to avoid leaking secrets
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
