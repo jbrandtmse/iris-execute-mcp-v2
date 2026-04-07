@@ -130,8 +130,8 @@ ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
         ; Create it if it doesn't exist yet (uses same databases as %SYS).
         If '##class(Config.Namespaces).Exists("%ALL") {
             Kill tALLProps
-            Set tALLProps("Globals") = "IRISSYS"
-            Set tALLProps("Routines") = "IRISSYS"
+            Set tALLProps("Globals") = "%DEFAULTDB"
+            Set tALLProps("Routines") = "%DEFAULTDB"
             Set tALLProps("Library") = "IRISLIB"
             Set tALLProps("TempGlobals") = "IRISTEMP"
             Set tSC = ##class(Config.Namespaces).Create("%ALL", .tALLProps)
