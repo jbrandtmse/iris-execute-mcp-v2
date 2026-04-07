@@ -25,6 +25,8 @@ export interface BootstrapResult {
   compiled: boolean;
   /** Whether web application registration succeeded. */
   configured: boolean;
+  /** Whether package mapping to %All was created. */
+  mapped: boolean;
   /** Errors encountered during bootstrap steps. */
   errors: string[];
   /** Manual instructions when configure step fails. */
@@ -132,6 +134,24 @@ export async function configureWebApp(
 }
 
 /**
+ * Map the ExecuteMCPv2 package to %All namespace so compiled routines
+ * (including I/O redirect mnemonic labels) are available in every namespace.
+ * This enables cross-namespace `iris.execute.command` with I/O capture.
+ */
+export async function configurePackageMapping(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+): Promise<void> {
+  const path = atelierPath(version, config.namespace, "action/query");
+  const body = {
+    query: "SELECT ExecuteMCPv2.Setup_ConfigureMapping(?) AS MappingResult",
+    parameters: [config.namespace],
+  };
+  await http.post(path, body);
+}
+
+/**
  * Full bootstrap orchestration.
  *
  * 1. Probe whether the REST service is already configured.
@@ -154,6 +174,7 @@ export async function bootstrap(
     deployed: false,
     compiled: false,
     configured: false,
+    mapped: false,
     errors: [],
   };
 
@@ -170,6 +191,7 @@ export async function bootstrap(
     result.deployed = true;
     result.compiled = true;
     result.configured = true;
+    result.mapped = true;
     logger.info("Bootstrap: REST service already configured, skipping");
     return result;
   }
@@ -212,6 +234,19 @@ export async function bootstrap(
       "NAMESPACE",
       config.namespace,
     );
+  }
+
+  // Step 5: Map ExecuteMCPv2 package to %All namespace
+  try {
+    await configurePackageMapping(http, config, version);
+    result.mapped = true;
+    logger.info(
+      "Bootstrap: ExecuteMCPv2 package mapped to %All namespace for cross-namespace support",
+    );
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    result.errors.push(`Package mapping failed: ${msg}`);
+    // Non-fatal: cross-namespace iris.execute.command won't work but everything else will
   }
 
   return result;

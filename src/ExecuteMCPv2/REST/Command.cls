@@ -37,19 +37,16 @@ ClassMethod Execute() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tCommand, "command")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-        ; Cross-namespace execute_command is not supported because I/O redirect
-        ; mnemonic labels (wstr, wchr, wnl) are resolved in the CURRENT namespace.
-        ; The compiled routine ExecuteMCPv2.REST.Command.1 only exists in HSCUSTOM,
-        ; so Write output in other namespaces causes <NOROUTINE>.
-        ; Use iris.execute.classmethod for cross-namespace operations instead.
-        If (tNamespace '= "") && (tNamespace '= $NAMESPACE) {
-            Set tSC = $$$ERROR($$$GeneralError, "iris.execute.command does not support cross-namespace execution due to I/O redirect limitations. Use iris.execute.classmethod with namespace parameter instead.")
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-            Set tSC = $$$OK
-            Quit
+        ; Switch namespace if specified
+        ; The ExecuteMCPv2 package is mapped to %All namespace at bootstrap time,
+        ; so the compiled routine (with I/O redirect mnemonic labels) is available
+        ; in every namespace, enabling cross-namespace command execution.
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
-        ; Same-namespace: use mnemonic I/O redirect (labels are in this routine)
+        ; Set up I/O redirect to capture Write output
         Set %ExecuteMCPOutput = ""
         Set tInitIO = $IO
         Set tWasRedirected = ##class(%Library.Device).ReDirectIO()
@@ -67,6 +64,7 @@ ClassMethod Execute() As %Status
             If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
             Set tRedirected = 0
 
+            Set $NAMESPACE = tOrigNS
             Set tSC = exCmd.AsStatus()
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
@@ -77,6 +75,9 @@ ClassMethod Execute() As %Status
         Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
         If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
         Set tRedirected = 0
+
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
 
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput

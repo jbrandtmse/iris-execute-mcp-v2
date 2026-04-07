@@ -98,6 +98,56 @@ ClassMethod Uninstall() As %Status
     Quit tSC
 }
 
+/// Map the <code>ExecuteMCPv2</code> package to the <code>%All</code> namespace.
+/// <p>This makes ExecuteMCPv2 classes (including compiled routines used for
+/// I/O redirect mnemonic labels) available in every namespace. Without this
+/// mapping, cross-namespace <code>iris.execute.command</code> fails with
+/// <code>&lt;NOROUTINE&gt;</code> because the mnemonic labels are resolved in
+/// the current namespace at call time.</p>
+/// <p>The mapping points to the database where ExecuteMCPv2 classes are
+/// compiled (determined by the routines database of <code>pNamespace</code>).</p>
+/// @param pNamespace The namespace where ExecuteMCPv2 is installed (e.g., HSCUSTOM).
+ClassMethod ConfigureMapping(pNamespace As %String = "") As %Status [ SqlProc ]
+{
+    Set tSC = $$$OK
+    Try {
+        If pNamespace = "" Set pNamespace = $NAMESPACE
+
+        New $NAMESPACE
+        Set $NAMESPACE = "%SYS"
+
+        ; Get the routines database for the source namespace
+        Set tSC = ##class(Config.Namespaces).Get(pNamespace, .tNSProps)
+        If $$$ISERR(tSC) Quit
+        Set tDatabase = tNSProps("Routines")
+
+        ; Check if mapping already exists
+        If ##class(Config.MapPackages).Exists("%ALL", "ExecuteMCPv2") {
+            Quit  ; Already mapped
+        }
+
+        ; %ALL is a virtual namespace that must exist before creating mappings.
+        ; Create it if it doesn't exist yet (uses same databases as %SYS).
+        If '##class(Config.Namespaces).Exists("%ALL") {
+            Kill tALLProps
+            Set tALLProps("Globals") = "IRISSYS"
+            Set tALLProps("Routines") = "IRISSYS"
+            Set tALLProps("Library") = "IRISLIB"
+            Set tALLProps("TempGlobals") = "IRISTEMP"
+            Set tSC = ##class(Config.Namespaces).Create("%ALL", .tALLProps)
+            If $$$ISERR(tSC) Quit
+        }
+
+        ; Now create the package mapping: ExecuteMCPv2 -> source database in %ALL
+        Kill tMapProps
+        Set tMapProps("Database") = tDatabase
+        Set tSC = ##class(Config.MapPackages).Create("%ALL", "ExecuteMCPv2", .tMapProps)
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
 /// Check whether the <code>/api/executemcp/v2</code> web application exists.
 /// <p>Returns 1 if registered, 0 if not.</p>
 ClassMethod IsConfigured() As %Boolean [ SqlProc ]
