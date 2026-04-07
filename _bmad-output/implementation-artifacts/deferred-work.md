@@ -140,3 +140,8 @@
 
 - `LookupTransfer` import action is additive/merge -- it sets entries from XML but does not remove pre-existing entries not present in the XML. The tool description implies full import. Consider adding a `replace` option or documenting the merge behavior.
 - `CredentialManage` update action: passing empty string for `username` or `password` is silently ignored (`If tPassword '= ""`). A user cannot explicitly clear the username to empty. Consider using `%IsDefined` to distinguish missing from empty.
+
+## Deferred from: code review of 5-7-iris-interop-mcp-unit-and-integration-tests (2026-04-06)
+
+- `probeCustomRest` in `integration-setup.ts` uses duck-typing (`"statusCode" in error`) instead of `instanceof IrisApiError`. Same pattern as iris-admin-mcp (deferred in Story 4.9). Low priority cosmetic improvement.
+- No integration tests for `interopRestTool`, `ruleGetTool`, or `transformTestTool`. These tools are not required by any AC but represent uncovered surface area. Low priority -- can be added when specific test productions with rules/transforms are available.
