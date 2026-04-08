@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-07"  # Story 8-2 code review passed, moved to done
+last_updated: "2026-04-07"  # Story 8-3 migration guide code review passed, moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -132,7 +132,7 @@ development_status:
   8-0-epic-7-deferred-cleanup: done
   8-1-suite-level-readme-and-architecture-overview: done
   8-2-per-package-readmes-and-tool-references: done
-  8-3-migration-guide-v1-to-v2: backlog
+  8-3-migration-guide-v1-to-v2: done
   8-4-mcp-client-configuration-examples: backlog
   8-5-tool-annotation-audit-and-cross-server-validation: backlog
   8-6-meta-package-iris-mcp-all: backlog
