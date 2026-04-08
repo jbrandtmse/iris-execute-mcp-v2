@@ -14,8 +14,6 @@ import type { IrisConnectionConfig } from "./config.js";
 export interface PaginateResult<T> {
   page: T[];
   nextCursor: string | undefined;
-  /** True when the cursor offset was beyond the total number of items. */
-  pastEnd?: boolean;
 }
 
 /**

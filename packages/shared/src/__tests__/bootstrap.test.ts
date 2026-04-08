@@ -498,8 +498,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 12 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(12);
+    it("should contain exactly 13 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(13);
     });
 
     it("should contain all required class names", () => {
@@ -515,6 +515,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Task.cls",
         "ExecuteMCPv2.REST.SystemConfig.cls",
+        "ExecuteMCPv2.REST.Analytics.cls",
         "ExecuteMCPv2.REST.Dispatch.cls",
       ];
       for (const name of expected) {
@@ -544,7 +545,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(12);
+      expect(classes.length).toBe(13);
     });
 
     it("should return classes in compilation order", () => {
@@ -590,6 +591,13 @@ describe("bootstrap", () => {
       const sysConfig = classes.find(c => c.name === "ExecuteMCPv2.REST.SystemConfig.cls");
       expect(sysConfig).toBeDefined();
       expect(sysConfig!.content).toContain("ExecuteMCPv2.REST.SystemConfig");
+    });
+
+    it("should include Analytics.cls (Epic 7)", () => {
+      const classes = getBootstrapClasses();
+      const analytics = classes.find(c => c.name === "ExecuteMCPv2.REST.Analytics.cls");
+      expect(analytics).toBeDefined();
+      expect(analytics!.content).toContain("ExecuteMCPv2.REST.Analytics");
     });
   });
 });

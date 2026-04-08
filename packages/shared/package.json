@@ -13,6 +13,10 @@
     "./test-helpers": {
       "types": "./src/__tests__/test-helpers.ts",
       "import": "./src/__tests__/test-helpers.ts"
+    },
+    "./test-helpers/integration-config": {
+      "types": "./src/test-helpers/integration-config.ts",
+      "import": "./src/test-helpers/integration-config.ts"
     }
   },
   "files": [

@@ -112,7 +112,15 @@ export const productionControlTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured namespace)"),
-  }),
+  }).refine(
+    (data) => {
+      if (data.action === "start" || data.action === "restart") {
+        return !!data.name;
+      }
+      return true;
+    },
+    { message: "'name' is required for 'start' and 'restart' actions", path: ["name"] },
+  ),
   annotations: {
     destructiveHint: false,
     readOnlyHint: false,

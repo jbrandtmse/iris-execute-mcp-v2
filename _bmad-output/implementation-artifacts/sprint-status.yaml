@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-07"  # Story 7-5 code review passed, status → done
+last_updated: "2026-04-07"  # Story 8-0 code review passed, moved to done
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -128,7 +128,8 @@ development_status:
   epic-7-retrospective: done
 
   # Epic 8: Documentation & Release Preparation
-  epic-8: backlog
+  epic-8: in-progress
+  8-0-epic-7-deferred-cleanup: done
   8-1-suite-level-readme-and-architecture-overview: backlog
   8-2-per-package-readmes-and-tool-references: backlog
   8-3-migration-guide-v1-to-v2: backlog

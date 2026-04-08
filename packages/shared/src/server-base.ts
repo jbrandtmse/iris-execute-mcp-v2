@@ -124,7 +124,7 @@ export function buildToolContext(
     paginate<T>(items: T[], cursor?: string, size: number = pageSize): PaginateResult<T> {
       const offset = decodeCursor(cursor);
       if (cursor && offset >= items.length && items.length > 0) {
-        return { page: [], nextCursor: undefined, pastEnd: true };
+        return { page: [], nextCursor: undefined };
       }
       const page = items.slice(offset, offset + size);
       const nextOffset = offset + size;
@@ -352,7 +352,7 @@ export class McpServerBase {
   ): PaginateResult<T> {
     const offset = decodeCursor(cursor);
     if (cursor && offset >= items.length && items.length > 0) {
-      return { page: [], nextCursor: undefined, pastEnd: true };
+      return { page: [], nextCursor: undefined };
     }
     const page = items.slice(offset, offset + pageSize);
     const nextOffset = offset + pageSize;

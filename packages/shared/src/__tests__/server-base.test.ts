@@ -260,7 +260,7 @@ describe("server-base", () => {
       expect(server.pageSize).toBe(50);
     });
 
-    it("should flag pastEnd when cursor offset exceeds total items", () => {
+    it("should return empty page when cursor offset exceeds total items", () => {
       const server = new McpServerBase(makeServerOpts());
       const items = [1, 2, 3];
       // Manually create a cursor beyond the end
@@ -268,14 +268,6 @@ describe("server-base", () => {
       const result = server.paginate(items, farCursor);
       expect(result.page).toEqual([]);
       expect(result.nextCursor).toBeUndefined();
-      expect(result.pastEnd).toBe(true);
-    });
-
-    it("should not flag pastEnd for valid cursor", () => {
-      const server = new McpServerBase(makeServerOpts());
-      const items = Array.from({ length: 120 }, (_, i) => i);
-      const page1 = server.paginate(items, undefined);
-      expect(page1.pastEnd).toBeUndefined();
     });
   });
 

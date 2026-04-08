@@ -251,6 +251,29 @@ describe("iris.production.control", () => {
   it("should have scope NS", () => {
     expect(productionControlTool.scope).toBe("NS");
   });
+
+  it("should reject start without name via Zod refinement", () => {
+    const result = productionControlTool.inputSchema.safeParse({ action: "start" });
+    expect(result.success).toBe(false);
+  });
+
+  it("should reject restart without name via Zod refinement", () => {
+    const result = productionControlTool.inputSchema.safeParse({ action: "restart" });
+    expect(result.success).toBe(false);
+  });
+
+  it("should accept stop without name via Zod refinement", () => {
+    const result = productionControlTool.inputSchema.safeParse({ action: "stop" });
+    expect(result.success).toBe(true);
+  });
+
+  it("should accept start with name via Zod refinement", () => {
+    const result = productionControlTool.inputSchema.safeParse({
+      action: "start",
+      name: "MyApp.Production",
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 // ─��� iris.production.status ─────────────────────────────────────

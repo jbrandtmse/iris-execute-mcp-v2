@@ -887,7 +887,8 @@ ClassMethod ProductionSummary() As %Status
                 }
             }
             Catch innerEx {
-                ; Skip namespaces that don't have Ensemble installed
+                ; Log skipped namespace with reason (e.g. no Ensemble installed, security violation)
+                Do ##class(%SYS.System).WriteToConsoleLog("ProductionSummary: skipped namespace '"_tNS_"': "_innerEx.DisplayString(), 1, 1)
             }
         }
 

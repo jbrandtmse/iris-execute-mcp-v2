@@ -10,6 +10,7 @@
     "type-check": "turbo run type-check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
     "changeset": "changeset"
   },
   "devDependencies": {

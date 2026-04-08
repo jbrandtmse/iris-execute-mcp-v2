@@ -14,12 +14,12 @@
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import {
   IrisHttpClient,
-  loadConfig,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
   type IrisConnectionConfig,
 } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
 
 import {
   metricsSystemTool,
@@ -47,12 +47,6 @@ import { configManageTool } from "../tools/config.js";
 
 // ── Globals set by integration-setup.ts ──────────────────────────────
 
-declare global {
-  var __IRIS_AVAILABLE__: boolean;
-  var __ATELIER_VERSION__: number;
-  var __CUSTOM_REST_AVAILABLE__: boolean;
-}
-
 const IRIS_OK = globalThis.__IRIS_AVAILABLE__;
 const REST_OK = globalThis.__CUSTOM_REST_AVAILABLE__;
 
@@ -72,17 +66,6 @@ let createdTaskId: string | number | undefined;
 
 // ── Setup / Teardown ─────────────────────────────────────────────────
 
-function getConfig(): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 /** Safely attempt a tool call, ignoring errors. */
 async function safeCall(
   tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> },
@@ -98,7 +81,7 @@ async function safeCall(
 
 describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("NONE", config, client, version);

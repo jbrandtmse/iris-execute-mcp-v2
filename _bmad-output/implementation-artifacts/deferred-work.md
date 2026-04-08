@@ -1,74 +1,77 @@
 # Deferred Work
 
-Items deferred from code reviews across all epics. Only open and genuinely actionable items
-are listed below.
+All deferred items have been formally triaged and closed as of Story 8.0 (Epic 7 Deferred Cleanup).
+This is the final feature epic; no further feature work is planned beyond Epic 8 (Documentation).
 
-> **Epic 1-4 items formally closed in Story 7.0** (26 items). These were triaged as won't-fix
-> based on: no production incidents, no external consumers, IRIS API limitations, or
-> acceptable-risk trade-offs after 6 epics of stable operation. See git history for full
-> provenance.
+> **Epic 1-4 items formally closed in Story 7.0** (26 items). See git history for provenance.
 
 ---
 
-## Open Items — Epic 5 (Interoperability MCP Tools)
+## Closed Items --- Epic 5 (Interoperability MCP Tools)
 
 ### From Story 5-0 (Epic 4 Deferred Cleanup)
-- `pastEnd` flag added to `PaginateResult` and set in `paginate()` (server-base.ts) but no tool handler currently checks or returns it to the MCP client. The flag is available for future consumers but has no effect today.
+- ~~`pastEnd` flag added to `PaginateResult`~~ --- **Closed (Story 8.0)**: Removed as dead code. No consumer existed after 7 epics. The `pastEnd` field has been removed from `PaginateResult`, `paginate()` in server-base.ts, and related tests.
 
 ### From Story 5-2 (Production Lifecycle)
-- `ProductionControl` tTimeout=0 is silently overridden to 120. If a user explicitly passes `timeout: 0`, the intent may be "no wait" but the code treats it as "use default". Consider distinguishing null/undefined from explicit zero.
-- `ProductionSummary` inner catch block (per-namespace iteration) swallows all errors silently, including security violations. Consider logging skipped namespaces or including them in the response with an error reason.
-- `ProductionManage` uses `%Dictionary.ClassDefinition.%ExistsId` to check existence, which matches any class definition, not specifically production classes. A non-production class with the same name would produce misleading errors.
-- `productionControlTool` Zod schema marks `name` as optional for all actions, but start/restart require it server-side. Consider adding a `.refine()` for client-side validation.
+- ~~`ProductionControl` tTimeout=0 silently overridden to 120~~ --- **Closed (won't-fix, Story 8.0)**: Edge case with no reported incidents. The server-side default is acceptable for all known use cases.
+- ~~`ProductionSummary` inner catch block swallows errors silently~~ --- **Closed (Story 8.0)**: Added console log for skipped namespaces with error reason in Interop.cls.
+- ~~`ProductionManage` uses `%Dictionary.ClassDefinition.%ExistsId`~~ --- **Closed (won't-fix, Story 8.0)**: IRIS API limitation. Non-production classes with the same name is an unlikely edge case with no practical impact.
+- ~~`productionControlTool` Zod schema marks `name` as optional for all actions~~ --- **Closed (Story 8.0)**: Added `.refine()` validation requiring `name` for `start` and `restart` actions.
 
 ### From Story 5-3 (Production Item and Auto-Start)
-- `ItemManage` "set" action silently ignores unknown settings keys. If a caller passes an unrecognized key (e.g., `{ "badKey": 1 }`), it is skipped without feedback. Consider returning a list of unrecognized keys in the response.
-- `ItemManage` "set" action: If `tItem.%Save()` succeeds but `Ens.Director.UpdateProduction()` fails, the persisted config and the running production are out of sync. Pre-existing IRIS pattern limitation -- no simple rollback mechanism.
+- ~~`ItemManage` "set" silently ignores unknown settings keys~~ --- **Closed (won't-fix, Story 8.0)**: Acceptable behavior. Unknown keys are ignored per standard IRIS configuration patterns.
+- ~~`ItemManage` "set" save/update consistency~~ --- **Closed (won't-fix, Story 8.0)**: Pre-existing IRIS pattern limitation with no simple rollback mechanism. No incidents reported.
 
 ### From Story 5-5 (Credential and Lookup Table)
-- `LookupTransfer` import action is additive/merge -- it sets entries from XML but does not remove pre-existing entries not present in the XML. The tool description implies full import. Consider adding a `replace` option or documenting the merge behavior.
-- `CredentialManage` update action: passing empty string for `username` or `password` is silently ignored (`If tPassword '= ""`). A user cannot explicitly clear the username to empty. Consider using `%IsDefined` to distinguish missing from empty.
+- ~~`LookupTransfer` import is additive/merge~~ --- **Closed (won't-fix, Story 8.0)**: Merge semantics are safer than replace. Tool description is adequate.
+- ~~`CredentialManage` empty string username/password handling~~ --- **Closed (won't-fix, Story 8.0)**: Edge case. Users can delete and recreate credentials instead of clearing fields.
 
 ### From Story 5-7 (Interop Integration Tests)
-- `probeCustomRest` in `integration-setup.ts` uses duck-typing (`"statusCode" in error`) instead of `instanceof IrisApiError`. Same pattern as iris-admin-mcp (deferred in Story 4.9). Low priority cosmetic improvement.
-- No integration tests for `interopRestTool`, `ruleGetTool`, or `transformTestTool`. These tools are not required by any AC but represent uncovered surface area. Low priority -- can be added when specific test productions with rules/transforms are available.
+- ~~`probeCustomRest` duck-typing instead of instanceof~~ --- **Closed (won't-fix, Story 8.0)**: Cosmetic improvement. Works reliably in practice.
+- ~~No integration tests for interopRest/ruleGet/transformTest~~ --- **Closed (won't-fix, Story 8.0)**: Requires IRIS test production setup. Unit tests provide adequate coverage.
 
 ---
 
-## Open Items — Epic 6 (Operations & Monitoring MCP Tools)
+## Closed Items --- Epic 6 (Operations & Monitoring MCP Tools)
 
 ### From Story 6-0 (Epic 5 Deferred Cleanup)
-- No npm script entry for `scripts/gen-bootstrap.mjs`. Developers must know to run `node scripts/gen-bootstrap.mjs` manually. Consider adding a `gen:bootstrap` script to root `package.json`.
-- No error handling in `gen-bootstrap.mjs` for missing `.cls` files. `readFileSync` will throw with unhelpful stack trace if a class file is missing or renamed. Consider adding try-catch with user-friendly error message.
+- ~~No npm script for gen-bootstrap.mjs~~ --- **Closed (Story 8.0)**: Added `gen:bootstrap` script to root package.json.
+- ~~No error handling in gen-bootstrap.mjs for missing .cls files~~ --- **Closed (won't-fix, Story 8.0)**: Node.js already provides clear error messages for missing files. Low value add.
 
 ### From Story 6-3 (Jobs and Locks Tools)
-- AC1 specifies "start time" for jobs but `%SYS.ProcessQuery` does not expose a start time column. The verified SQL table lacks this field. Consider updating AC1 wording or adding a derived start time if IRIS exposes it in a future version.
-- No ObjectScript-side unit test for the dual-format Owner parsing in `LocksList` (pipe-delimited vs plain PID). The fix was verified by the lead during Step 2.5 but has no automated regression test on the IRIS side.
+- ~~AC1 "start time" field~~ --- **Closed (won't-fix, Story 8.0)**: IRIS %SYS.ProcessQuery does not expose start time. Cannot be implemented without IRIS-side changes.
+- ~~No ObjectScript unit test for dual-format Owner parsing~~ --- **Closed (won't-fix, Story 8.0)**: Verified by lead during review. TypeScript-side tests cover the parsing.
 
 ### From Story 6-6 (Task Scheduling Tools)
-- AC6 mentions "duration" in task history but no explicit duration field is computed. The handler returns `lastStart` and `completed` timestamps from which duration can be derived client-side. Computing duration server-side would require parsing IRIS internal date/time format (`$HOROLOG`-based strings). Low risk — data is available for derivation.
-- No schedule properties (TimePeriod, DailyStartTime, DailyEndTime, etc.) exposed in `iris.task.manage` create action. Users can create tasks with name, class, namespace, description, and suspended flag, but cannot set a schedule. The `%SYS.Task` scheduling subsystem has many interrelated properties. Consider adding schedule configuration in a future enhancement story.
+- ~~AC6 "duration" not computed~~ --- **Closed (won't-fix, Story 8.0)**: lastStart and completed timestamps are available for client-side derivation.
+- ~~No schedule properties in iris.task.manage create action~~ --- **Closed (won't-fix, Story 8.0)**: Complex scheduling subsystem. No planned future enhancement epics.
 
 ### From Story 6-7 (System Configuration Tools)
-- Dynamic annotations via `_meta.readOnly` in config tool response don't affect MCP protocol-level tool hints. The tool is statically marked `destructiveHint: true` to cover the worst-case "set" action. MCP annotations are per-tool, not per-invocation, so this is a known trade-off for single-tool multi-action patterns.
-- `GetConfig` for config section reads only 11 hardcoded properties from `Config.config` out of ~70 available. Consider iterating all properties via `%Dictionary.PropertyDefinition` for completeness in a future enhancement.
-- No whitelist/validation on property names passed to `SetConfig`. Invalid names are caught by `Config.config.Modify()` returning an error status, so this is defense-in-depth only.
-- `ExportConfig` only includes the "config" section data, not startup or locale. Intentional per dev notes but could be expanded to include all sections in a future enhancement.
+- ~~Dynamic annotations via `_meta.readOnly`~~ --- **Closed (won't-fix, Story 8.0)**: Known MCP protocol limitation. Static annotations are the correct approach.
+- ~~GetConfig reads only 11 hardcoded properties~~ --- **Closed (won't-fix, Story 8.0)**: Covers most common configuration needs. Full property iteration is a future enhancement.
+- ~~No whitelist/validation on SetConfig property names~~ --- **Closed (won't-fix, Story 8.0)**: Config.config.Modify() validates server-side. Defense-in-depth only.
+- ~~ExportConfig only includes config section~~ --- **Closed (won't-fix, Story 8.0)**: Intentional per original design. No incidents or requests for expansion.
 
 ### From Story 6-8 (Ops Integration Tests)
-- Duplicate `getConfig()` function and `declare global` block between `integration-setup.ts` and `ops.integration.test.ts`. Same pattern exists in iris-interop-mcp. Consider extracting shared test config helper in a future cleanup story.
-- Task creation test extracts `createdTaskId` via unchecked `as` cast on `structuredContent`. If the response shape changes, the cast silently produces undefined fields. Low risk since cleanup still runs via afterAll.
+- ~~Duplicate getConfig()/declare global blocks~~ --- **Closed (Story 8.0)**: Extracted shared `getIntegrationConfig()` helper to `@iris-mcp/shared/test-helpers/integration-config`.
+- ~~Task creation unchecked `as` cast~~ --- **Closed (won't-fix, Story 8.0)**: Low risk. Cleanup runs via afterAll regardless.
 
 ---
 
-## Open Items — Epic 7 (Data & Analytics MCP Tools)
+## Closed Items --- Epic 7 (Data & Analytics MCP Tools)
 
-### From Story 7-3 (Analytics Tools) — code review (2026-04-07)
-- `%BuildCube` with `pAsync=0` runs synchronously with no timeout protection. A large cube build could block the HTTP request indefinitely. The story spec explicitly calls for synchronous operation, so adding timeout or async support would be a future enhancement.
+### From Story 7-3 (Analytics Tools)
+- ~~`%BuildCube` synchronous with no timeout~~ --- **Closed (won't-fix, Story 8.0)**: Story spec explicitly calls for synchronous operation. Timeout/async is a future enhancement.
 
-### From Story 7-4 (REST API Management) — code review (2026-04-07)
-- `encodeURIComponent()` on the `application` parameter encodes forward slashes (e.g., `/api/myapp` becomes `%2Fapi%2Fmyapp`). Whether the IRIS Management API v2 correctly decodes percent-encoded slashes in the URL path segment is unverified. If not, application paths with slashes may need to be split and encoded segment-by-segment. Requires live IRIS testing to confirm. Low risk -- follows the spec-prescribed pattern.
+### From Story 7-4 (REST API Management)
+- ~~`encodeURIComponent()` percent-encoding slashes~~ --- **Closed (won't-fix, Story 8.0)**: Follows spec-prescribed pattern. No reported issues.
 
-### From Story 7-5 (Data Integration Tests) — code review (2026-04-07)
-- `insertedDocId` extraction regex in `data.integration.test.ts` (line ~178) only matches numeric IDs (`(\d+)`). If DocDB returns UUID or string-based IDs in a future IRIS version, the fallback extraction would fail silently. Low risk since `structuredContent` extraction is tried first and the regex is a fallback only.
-- Find-with-filter test (test 7) does not assert on the number of returned documents or verify that the found document content matches the inserted data. The test only checks for a non-error response. Low priority -- the other lifecycle tests (get, update) verify content correctness.
+### From Story 7-5 (Data Integration Tests)
+- ~~`insertedDocId` regex only matches numeric IDs~~ --- **Closed (won't-fix, Story 8.0)**: Fallback only; structuredContent extraction is primary. Low risk.
+- ~~Find-with-filter test does not assert document count~~ --- **Closed (won't-fix, Story 8.0)**: Other lifecycle tests verify content correctness. Low priority.
+
+---
+
+## Deferred from: code review of 8-0-epic-7-deferred-cleanup (2026-04-07)
+
+- Duplicate `getIntegrationConfig` helper: `packages/shared/src/__tests__/integration-helpers.ts` (pre-existing, accepts overrides) and `packages/shared/src/test-helpers/integration-config.ts` (new, includes `declare global` augmentation). Both produce the same config from env vars. Functionally harmless but could be consolidated into the new cross-package helper if `integration-helpers.ts` is refactored to delegate to it.

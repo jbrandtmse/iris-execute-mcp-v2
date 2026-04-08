@@ -16,12 +16,12 @@
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import {
   IrisHttpClient,
-  loadConfig,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
   type IrisConnectionConfig,
 } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
 
 import {
   docdbManageTool,
@@ -33,13 +33,6 @@ import { analyticsCubesTool, analyticsMdxTool } from "../tools/analytics.js";
 import { restManageTool } from "../tools/rest.js";
 
 // ── Globals set by integration-setup.ts ──────────────────────────────
-
-declare global {
-  var __IRIS_AVAILABLE__: boolean;
-  var __ATELIER_VERSION__: number;
-  var __CUSTOM_REST_AVAILABLE__: boolean;
-  var __DOCDB_AVAILABLE__: boolean;
-}
 
 const IRIS_OK = globalThis.__IRIS_AVAILABLE__;
 const REST_OK = globalThis.__CUSTOM_REST_AVAILABLE__;
@@ -60,17 +53,6 @@ let insertedDocId: string | undefined;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function getConfig(): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 /** Safely attempt a tool call, ignoring errors. */
 async function safeCall(
   tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> },
@@ -90,7 +72,7 @@ async function safeCall(
 
 describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("NS", config, client, version);
@@ -280,7 +262,7 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
 
 describe.skipIf(!IRIS_OK || !REST_OK)("Analytics integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("NS", config, client, version);
@@ -326,7 +308,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("Analytics integration", () => {
 
 describe.skipIf(!IRIS_OK)("REST management integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("NS", config, client, version);
