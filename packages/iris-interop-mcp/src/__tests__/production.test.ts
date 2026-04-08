@@ -239,9 +239,9 @@ describe("iris.production.control", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have destructiveHint: false annotation", () => {
+  it("should have destructiveHint: true annotation", () => {
     expect(productionControlTool.annotations).toEqual({
-      destructiveHint: false,
+      destructiveHint: true,
       readOnlyHint: false,
       idempotentHint: false,
       openWorldHint: false,

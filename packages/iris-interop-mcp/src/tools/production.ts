@@ -122,7 +122,7 @@ export const productionControlTool: ToolDefinition = {
     { message: "'name' is required for 'start' and 'restart' actions", path: ["name"] },
   ),
   annotations: {
-    destructiveHint: false,
+    destructiveHint: true,
     readOnlyHint: false,
     idempotentHint: false,
     openWorldHint: false,
