@@ -75,3 +75,7 @@ This is the final feature epic; no further feature work is planned beyond Epic 8
 ## Deferred from: code review of 8-0-epic-7-deferred-cleanup (2026-04-07)
 
 - Duplicate `getIntegrationConfig` helper: `packages/shared/src/__tests__/integration-helpers.ts` (pre-existing, accepts overrides) and `packages/shared/src/test-helpers/integration-config.ts` (new, includes `declare global` augmentation). Both produce the same config from env vars. Functionally harmless but could be consolidated into the new cross-package helper if `integration-helpers.ts` is refactored to delegate to it.
+
+## Deferred from: code review of 8-1-suite-level-readme-and-architecture-overview (2026-04-07)
+
+- Per-package README links in root README.md point to files that do not yet exist (e.g., `packages/iris-dev-mcp/README.md`). These will be created in Story 8.2. Until then, links are dead. Pre-existing by design (story spec says to link ahead).

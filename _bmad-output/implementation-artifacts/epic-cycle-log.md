@@ -570,3 +570,27 @@
 - **Key decisions:** DocDB probe handles 403 (disabled %Service_DocDB) in addition to 404; each test section has independent skip conditions; safety-net cleanup in afterAll
 - **Integration test results:** 3/12 passing (DocDB 9 skipped — %Service_DocDB disabled), 2 analytics + 1 REST pass
 - **Review findings:** 2 LOW deferred (getConfig duplication, unchecked structuredContent cast)
+
+## Epic 8: Documentation & Release Preparation
+
+### Story 8.0: Epic 7 Deferred Cleanup
+- **Date:** 2026-04-07
+- **Files touched:**
+  - `scripts/gen-bootstrap.mjs` — Added Analytics.cls entry
+  - `packages/shared/src/bootstrap-classes.ts` — Regenerated with 13 classes
+  - `packages/shared/src/__tests__/bootstrap.test.ts` — Updated count to 13
+  - `package.json` — Added gen:bootstrap npm script
+  - `packages/iris-interop-mcp/src/tools/production.ts` — Added .refine() for name on start/restart
+  - `packages/iris-interop-mcp/src/__tests__/production.test.ts` — 4 new Zod refinement tests
+  - `packages/shared/src/test-helpers/integration-config.ts` — New: shared getIntegrationConfig
+  - `packages/shared/package.json` — Added test-helpers/integration-config export
+  - `packages/iris-data-mcp/src/__tests__/data.integration.test.ts` — Uses shared config
+  - `packages/iris-ops-mcp/src/__tests__/ops.integration.test.ts` — Uses shared config
+  - `packages/iris-interop-mcp/src/__tests__/interop.integration.test.ts` — Uses shared config
+  - `packages/shared/src/tool-types.ts` — Removed pastEnd from PaginateResult
+  - `packages/shared/src/server-base.ts` — Removed pastEnd from paginate()
+  - `packages/shared/src/__tests__/server-base.test.ts` — Updated pastEnd test
+  - `src/ExecuteMCPv2/REST/Interop.cls` — Added ProductionSummary error logging
+  - `_bmad-output/implementation-artifacts/deferred-work.md` — All items formally closed
+- **Key decisions:** Removed pastEnd as dead code (no consumers after 7 epics); extracted shared test config to DRY 3 integration test files; Zod .refine() works with ZodObject<any> in v4; ProductionSummary logging via WriteToConsoleLog
+- **Review findings:** No HIGH/MEDIUM issues; 1 LOW deferred (duplicate helper consolidation)
