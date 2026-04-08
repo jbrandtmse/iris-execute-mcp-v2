@@ -1,5 +1,7 @@
 # IRIS MCP Server Suite
 
+> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release.
+
 **Give AI assistants structured, safe access to InterSystems IRIS.**
 
 The IRIS MCP Server Suite is a collection of five specialized [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers that let AI coding assistants — Claude, Copilot, Cursor, and others — work directly with InterSystems IRIS. Each server covers a distinct operational domain so you can install only what you need.
@@ -20,13 +22,7 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 ### Meta-package
 
-Install every server at once with the `@iris-mcp/all` meta-package:
-
-```bash
-npm install -g @iris-mcp/all
-```
-
-> `@iris-mcp/all` installs all five servers as dependencies so you can set up everything in one step. See the [meta-package README](packages/iris-mcp-all/README.md) for full MCP client configuration.
+Once published, all servers will be installable at once with `npm install -g @iris-mcp/all`. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
 
 ---
 
@@ -39,7 +35,7 @@ npm install -g @iris-mcp/all
 | **Integration engineer** | `@iris-mcp/interop` — control productions, configure credentials, manage business rules and transforms |
 | **Operations / SRE** | `@iris-mcp/ops` — monitor metrics, inspect jobs and locks, review journals, audit events, manage tasks |
 | **Data / BI analyst** | `@iris-mcp/data` — query DocDB collections, run MDX against DeepSee cubes, manage REST APIs |
-| **Full-stack / getting started** | `@iris-mcp/dev` + `@iris-mcp/admin`, or `@iris-mcp/all` for everything |
+| **Full-stack / getting started** | `@iris-mcp/dev` + `@iris-mcp/admin`, or all five servers |
 
 ---
 
@@ -53,19 +49,18 @@ npm install -g @iris-mcp/all
 
 ## Quick Start
 
-The fastest path is to install the development server and point your MCP client at it.
+Until packages are published to npm, install by cloning the repository and building from source.
 
-### 1. Install
-
-```bash
-npm install -g @iris-mcp/dev
-```
-
-Or run directly without installing:
+### 1. Clone and Build
 
 ```bash
-npx @iris-mcp/dev
+git clone https://github.com/jbrandtmse/iris-execute-mcp-v2.git
+cd iris-execute-mcp-v2
+pnpm install
+pnpm turbo run build
 ```
+
+> **Requires:** [Node.js](https://nodejs.org/) 18+ and [pnpm](https://pnpm.io/) 9+. Install pnpm with `npm install -g pnpm` if needed.
 
 ### 2. Set Environment Variables
 
@@ -82,6 +77,8 @@ All servers use the same environment variables:
 
 ### 3. Configure Your MCP Client
 
+Point your MCP client at the built server using `node` and the local `dist/index.js` path. Replace `/path/to/iris-execute-mcp-v2` with the actual path where you cloned the repo.
+
 #### Claude Code (`.mcp.json`)
 
 Create a `.mcp.json` file in your project root:
@@ -90,8 +87,8 @@ Create a `.mcp.json` file in your project root:
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -114,8 +111,8 @@ Add to your Claude Desktop configuration:
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -134,18 +131,28 @@ To add more servers, include additional entries under `mcpServers` using the sam
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
       "env": { "IRIS_PASSWORD": "SYS" }
     },
     "iris-admin-mcp": {
-      "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-admin-mcp/dist/index.js"],
       "env": { "IRIS_PASSWORD": "SYS" }
     }
   }
 }
 ```
+
+**All server entry points:**
+
+| Server | Path (relative to repo root) |
+|--------|------------------------------|
+| dev | `packages/iris-dev-mcp/dist/index.js` |
+| admin | `packages/iris-admin-mcp/dist/index.js` |
+| interop | `packages/iris-interop-mcp/dist/index.js` |
+| ops | `packages/iris-ops-mcp/dist/index.js` |
+| data | `packages/iris-data-mcp/dist/index.js` |
 
 ### 4. Verify
 
