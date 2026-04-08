@@ -83,3 +83,7 @@ This is the final feature epic; no further feature work is planned beyond Epic 8
 ## Deferred from: code review of 8-4-mcp-client-configuration-examples (2026-04-07)
 
 - DRY: Env var table and shell export examples (bash/PowerShell) are duplicated identically across all three client-config docs (`claude-desktop.md`, `claude-code.md`, `cursor.md`). This is a deliberate design choice for self-contained docs but creates a maintenance burden if variables change. Could be consolidated into a shared include or a single env-var reference page linked from each doc.
+
+## Deferred from: code review of 8-6-meta-package-iris-mcp-all (2026-04-07)
+
+- Missing `license` field in `packages/iris-mcp-all/package.json`. All packages in the monorepo may need license, repository, author, and keywords fields added before npm publish. Pre-existing publish-readiness concern applicable to all packages.

@@ -20,13 +20,13 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 ### Meta-package
 
-Once released, install every server at once with the `@iris-mcp/all` meta-package:
+Install every server at once with the `@iris-mcp/all` meta-package:
 
 ```bash
-npx @iris-mcp/all
+npm install -g @iris-mcp/all
 ```
 
-> `@iris-mcp/all` re-exports all five servers so you can run them from a single dependency. *(Coming soon — see [meta-package README](packages/iris-mcp-all/README.md) once available.)*
+> `@iris-mcp/all` installs all five servers as dependencies so you can set up everything in one step. See the [meta-package README](packages/iris-mcp-all/README.md) for full MCP client configuration.
 
 ---
 
