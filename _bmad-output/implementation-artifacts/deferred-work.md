@@ -79,3 +79,7 @@ This is the final feature epic; no further feature work is planned beyond Epic 8
 ## Deferred from: code review of 8-1-suite-level-readme-and-architecture-overview (2026-04-07)
 
 - Per-package README links in root README.md point to files that do not yet exist (e.g., `packages/iris-dev-mcp/README.md`). These will be created in Story 8.2. Until then, links are dead. Pre-existing by design (story spec says to link ahead).
+
+## Deferred from: code review of 8-4-mcp-client-configuration-examples (2026-04-07)
+
+- DRY: Env var table and shell export examples (bash/PowerShell) are duplicated identically across all three client-config docs (`claude-desktop.md`, `claude-code.md`, `cursor.md`). This is a deliberate design choice for self-contained docs but creates a maintenance burden if variables change. Could be consolidated into a shared include or a single env-var reference page linked from each doc.
