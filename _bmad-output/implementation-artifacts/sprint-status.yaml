@@ -128,7 +128,7 @@ development_status:
   epic-7-retrospective: done
 
   # Epic 8: Documentation & Release Preparation
-  epic-8: in-progress
+  epic-8: done
   8-0-epic-7-deferred-cleanup: done
   8-1-suite-level-readme-and-architecture-overview: done
   8-2-per-package-readmes-and-tool-references: done
@@ -136,4 +136,4 @@ development_status:
   8-4-mcp-client-configuration-examples: done
   8-5-tool-annotation-audit-and-cross-server-validation: done
   8-6-meta-package-iris-mcp-all: done
-  epic-8-retrospective: optional
+  epic-8-retrospective: done
