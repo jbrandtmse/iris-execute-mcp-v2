@@ -558,3 +558,15 @@
   - `packages/iris-data-mcp/src/tools/index.ts` — Wired restManageTool (7 total)
 - **Key decisions:** Used IRIS built-in Management API (`/api/mgmnt/v2/`); imported extractResult from docdb.ts; debug.ts is placeholder only with no exports
 - **Review findings:** Clean — zero findings
+
+### Story 7.5: iris-data-mcp Unit & Integration Tests
+- **Status:** done
+- **Commit:** a164c20
+- **Files touched:**
+  - `packages/iris-data-mcp/src/__tests__/integration-setup.ts` — New: IRIS/DocDB/REST probe
+  - `packages/iris-data-mcp/src/__tests__/data.integration.test.ts` — New: 12 integration tests
+  - `packages/iris-data-mcp/vitest.integration.config.ts` — New: integration config
+  - `packages/iris-data-mcp/package.json` — Added test:integration script
+- **Key decisions:** DocDB probe handles 403 (disabled %Service_DocDB) in addition to 404; each test section has independent skip conditions; safety-net cleanup in afterAll
+- **Integration test results:** 3/12 passing (DocDB 9 skipped — %Service_DocDB disabled), 2 analytics + 1 REST pass
+- **Review findings:** 2 LOW deferred (getConfig duplication, unchecked structuredContent cast)

@@ -118,14 +118,14 @@ development_status:
   epic-6-retrospective: done
 
   # Epic 7: Data & Analytics (iris-data-mcp)
-  epic-7: in-progress
+  epic-7: done
   7-0-epic-6-deferred-cleanup: done
   7-1-iris-data-mcp-package-setup-and-server-entry-point: done
   7-2-document-database-tools: done
   7-3-analytics-tools: done
   7-4-rest-api-management-and-debug-placeholders: done
   7-5-iris-data-mcp-unit-and-integration-tests: done
-  epic-7-retrospective: optional
+  epic-7-retrospective: done
 
   # Epic 8: Documentation & Release Preparation
   epic-8: backlog
