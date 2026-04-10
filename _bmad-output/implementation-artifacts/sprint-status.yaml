@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-07"  # Story 8-6 code review passed, status done
+last_updated: "2026-04-09"  # Epic 9 added via bmad-correct-course (Anthropic API / Claude Desktop compat)
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -137,3 +137,13 @@ development_status:
   8-5-tool-annotation-audit-and-cross-server-validation: done
   8-6-meta-package-iris-mcp-all: done
   epic-8-retrospective: done
+
+  # Epic 9: Tool Name Flattening for Anthropic API / Claude Desktop Compatibility
+  # Added 2026-04-09 via bmad-correct-course. See sprint-change-proposal-2026-04-09.md.
+  # Note: Story X.0 (Epic 8 deferred cleanup) will be auto-created by /epic-cycle step 0.5
+  # Note: Planning artifacts (architecture.md, prd.md, epics.md) already updated by analyst — out of scope for dev stories
+  epic-9: backlog
+  9-1-rename-tool-identifiers-in-source-and-tests: backlog
+  9-2-documentation-changelog-and-regression-guard: backlog
+  9-3-pre-publish-smoke-test-and-beta-user-notification: backlog
+  epic-9-retrospective: optional

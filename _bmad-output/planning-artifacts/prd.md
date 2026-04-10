@@ -104,11 +104,11 @@ Marcus is a senior ObjectScript developer at a healthcare organization. He's bee
 
 **Opening Scene:** Marcus runs `npm install -g @iris-mcp/dev` and adds the server to his Claude Code config. He types his IRIS web port URL and credentials. That's it — no Python, no native drivers, no IT ticket for port 1972.
 
-**Rising Action:** He asks Claude: "Show me all the classes in the MyApp package." Claude calls `iris.doc.list` and returns the class listing. He says "Open MyApp.Service.PatientLookup" — Claude calls `iris.doc.get` and shows the source. He asks Claude to add input validation to the ProcessInput method. Claude edits the code, calls `iris.doc.put` to save, then `iris.doc.compile`. Compilation fails — a typo in a macro. Claude reads the error, fixes it, recompiles. Green.
+**Rising Action:** He asks Claude: "Show me all the classes in the MyApp package." Claude calls `iris_doc_list` and returns the class listing. He says "Open MyApp.Service.PatientLookup" — Claude calls `iris_doc_get` and shows the source. He asks Claude to add input validation to the ProcessInput method. Claude edits the code, calls `iris_doc_put` to save, then `iris_doc_compile`. Compilation fails — a typo in a macro. Claude reads the error, fixes it, recompiles. Green.
 
-**Climax:** Marcus says "Run the unit tests for MyApp.Test." Claude calls `iris.execute.tests`, and 14/15 tests pass. One failure — an edge case Marcus hadn't considered. Claude suggests a fix, applies it, recompiles, retests. 15/15 pass. Marcus hasn't left the conversation once.
+**Climax:** Marcus says "Run the unit tests for MyApp.Test." Claude calls `iris_execute_tests`, and 14/15 tests pass. One failure — an edge case Marcus hadn't considered. Claude suggests a fix, applies it, recompiles, retests. 15/15 pass. Marcus hasn't left the conversation once.
 
-**Resolution:** What used to be a 45-minute context-switching dance is now a 10-minute flow state. Marcus starts using Claude for all his IRIS work — not just editing, but searching code (`iris.doc.search`), running SQL queries (`iris.sql.execute`), and debugging with globals (`iris.global.get`).
+**Resolution:** What used to be a 45-minute context-switching dance is now a 10-minute flow state. Marcus starts using Claude for all his IRIS work — not just editing, but searching code (`iris_doc_search`), running SQL queries (`iris_sql_execute`), and debugging with globals (`iris_global_get`).
 
 ### Journey 2: Priya — The System Administrator (Secondary, Admin Path)
 
@@ -116,9 +116,9 @@ Priya is an IRIS system administrator responsible for provisioning new namespace
 
 **Opening Scene:** Priya installs `@iris-mcp/admin` and connects it to her IRIS instance. She has %Admin_Manage privileges, so the auto-bootstrap deploys the custom REST service automatically.
 
-**Rising Action:** A new project team needs a development environment. Priya tells Claude: "Create a new namespace called DEVPROJECT with a new database, a developer user account with %Developer role, and a REST web application at /api/devproject." Claude orchestrates the calls: `iris.database.manage` (create), `iris.namespace.manage` (create), `iris.user.manage` (create with roles), `iris.webapp.manage` (create). Each step confirms success.
+**Rising Action:** A new project team needs a development environment. Priya tells Claude: "Create a new namespace called DEVPROJECT with a new database, a developer user account with %Developer role, and a REST web application at /api/devproject." Claude orchestrates the calls: `iris_database_manage` (create), `iris_namespace_manage` (create), `iris_user_manage` (create with roles), `iris_webapp_manage` (create). Each step confirms success.
 
-**Climax:** The team also needs SSL configured for their external API. Priya says "Set up an SSL configuration called DevProjectSSL using the certificates in /opt/certs/." Claude calls `iris.ssl.manage` to create the config, then `iris.webapp.manage` to update the web application with the SSL reference. Done in 2 minutes instead of 15 clicks through the SMP.
+**Climax:** The team also needs SSL configured for their external API. Priya says "Set up an SSL configuration called DevProjectSSL using the certificates in /opt/certs/." Claude calls `iris_ssl_manage` to create the config, then `iris_webapp_manage` to update the web application with the SSL reference. Done in 2 minutes instead of 15 clicks through the SMP.
 
 **Resolution:** Priya creates a Claude prompt template for "provision new project environment" and uses it every time. What was a 30-minute manual checklist is now a 3-minute conversation. She starts exploring OAuth2 configuration and credential management through the same interface.
 
@@ -128,11 +128,11 @@ Raj builds and manages HL7 FHIR integrations using IRIS Interoperability. He spe
 
 **Opening Scene:** Raj installs `@iris-mcp/interop` alongside the dev server. He's troubleshooting why messages from Hospital B stopped flowing this morning.
 
-**Rising Action:** He asks Claude: "What's the status of the HL7FeedProduction?" Claude calls `iris.production.status` with full item details — the TCP inbound adapter for HospitalB is in error state. He asks "Show me the last 20 error logs for HospitalB.TCPService." Claude calls `iris.production.logs` filtered by item and type. Connection refused — Hospital B changed their firewall rules overnight.
+**Rising Action:** He asks Claude: "What's the status of the HL7FeedProduction?" Claude calls `iris_production_status` with full item details — the TCP inbound adapter for HospitalB is in error state. He asks "Show me the last 20 error logs for HospitalB.TCPService." Claude calls `iris_production_logs` filtered by item and type. Connection refused — Hospital B changed their firewall rules overnight.
 
-**Climax:** Raj updates the adapter settings: "Change the IP address for HospitalB.TCPService to 10.0.5.42 and restart that item." Claude calls `iris.production.item` to update the setting, then `iris.production.control` to restart just that item. Messages start flowing again. He verifies with `iris.production.messages` — new messages are completing successfully.
+**Climax:** Raj updates the adapter settings: "Change the IP address for HospitalB.TCPService to 10.0.5.42 and restart that item." Claude calls `iris_production_item` to update the setting, then `iris_production_control` to restart just that item. Messages start flowing again. He verifies with `iris_production_messages` — new messages are completing successfully.
 
-**Resolution:** Raj realizes he can do most of his production monitoring and configuration from Claude without ever opening the Management Portal. He starts using `iris.production.queues` to proactively check for backlogs and `iris.lookup.manage` to update routing tables on the fly.
+**Resolution:** Raj realizes he can do most of his production monitoring and configuration from Claude without ever opening the Management Portal. He starts using `iris_production_queues` to proactively check for backlogs and `iris_lookup_manage` to update routing tables on the fly.
 
 ### Journey 4: Marcus Again — First-Time Setup with Limited Privileges (Edge Case)
 
@@ -150,13 +150,13 @@ Marcus tries to install `@iris-mcp/admin` but his account only has %Development 
 
 Chen is the on-call operations engineer responsible for IRIS system health across three production instances. He monitors dashboards, investigates alerts, and manages scheduled maintenance tasks. Today he's investigating a system alert that fired at 3 AM.
 
-**Opening Scene:** Chen installs `@iris-mcp/ops` and connects it to the production IRIS instance. He asks Claude: "Show me any system alerts from the last 12 hours." Claude calls `iris.metrics.alerts` and returns two alerts — one for high lock contention and one for a failed scheduled task.
+**Opening Scene:** Chen installs `@iris-mcp/ops` and connects it to the production IRIS instance. He asks Claude: "Show me any system alerts from the last 12 hours." Claude calls `iris_metrics_alerts` and returns two alerts — one for high lock contention and one for a failed scheduled task.
 
-**Rising Action:** Chen investigates the lock contention first: "Show me current system locks." Claude calls `iris.locks.list` — a long-running batch job is holding 15 locks. He checks the job details: "List running jobs." Claude calls `iris.jobs.list` and identifies the batch process. He then checks the failed task: "Show me the task execution history for the nightly backup task." Claude calls `iris.task.history` — last night's backup failed with a disk space error. He checks the journal: "Show me journal file information." Claude calls `iris.journal.info` and confirms the journal directory is 92% full.
+**Rising Action:** Chen investigates the lock contention first: "Show me current system locks." Claude calls `iris_locks_list` — a long-running batch job is holding 15 locks. He checks the job details: "List running jobs." Claude calls `iris_jobs_list` and identifies the batch process. He then checks the failed task: "Show me the task execution history for the nightly backup task." Claude calls `iris_task_history` — last night's backup failed with a disk space error. He checks the journal: "Show me journal file information." Claude calls `iris_journal_info` and confirms the journal directory is 92% full.
 
-**Climax:** Chen resolves both issues: "Run the journal purge task immediately." Claude calls `iris.task.run` to execute the purge. He verifies with `iris.metrics.system` — disk utilization drops to 61%. He then checks mirror status: "What's the mirror health?" Claude calls `iris.mirror.status` — both failover members are synchronized and healthy. Finally, he reviews the audit trail: "Show me audit events from the last 24 hours for the SYSTEM user." Claude calls `iris.audit.events` — no unexpected administrative actions.
+**Climax:** Chen resolves both issues: "Run the journal purge task immediately." Claude calls `iris_task_run` to execute the purge. He verifies with `iris_metrics_system` — disk utilization drops to 61%. He then checks mirror status: "What's the mirror health?" Claude calls `iris_mirror_status` — both failover members are synchronized and healthy. Finally, he reviews the audit trail: "Show me audit events from the last 24 hours for the SYSTEM user." Claude calls `iris_audit_events` — no unexpected administrative actions.
 
-**Resolution:** Chen documented and resolved both alerts in 15 minutes without opening the Management Portal or SSH-ing into any server. He updates the nightly backup task schedule to run the purge first: Claude calls `iris.task.manage` to modify the task sequence. He also exports the current system configuration for the change management record using `iris.config.manage`.
+**Resolution:** Chen documented and resolved both alerts in 15 minutes without opening the Management Portal or SSH-ing into any server. He updates the nightly backup task schedule to run the purge first: Claude calls `iris_task_manage` to modify the task sequence. He also exports the current system configuration for the change management record using `iris_config_manage`.
 
 ### Journey 6: Mei — The Data Analyst (Tertiary, Data Path)
 
@@ -164,9 +164,9 @@ Mei is a data analyst who uses IRIS as the backend for a document management sys
 
 **Opening Scene:** Mei installs `@iris-mcp/data` alongside the dev server. She asks Claude: "Create a new document database called PilotFeedback with properties for respondentId, category, rating, and comments."
 
-**Rising Action:** Claude calls `iris.docdb.manage` to create the database, then `iris.docdb.property` to define the four properties and add an index on category. Mei imports her pilot data: "Insert these 50 feedback documents." Claude calls `iris.docdb.document` for each batch. She verifies: "Find all documents where category is 'usability' and rating is less than 3." Claude calls `iris.docdb.find` with the filter criteria — 12 documents match.
+**Rising Action:** Claude calls `iris_docdb_manage` to create the database, then `iris_docdb_property` to define the four properties and add an index on category. Mei imports her pilot data: "Insert these 50 feedback documents." Claude calls `iris_docdb_document` for each batch. She verifies: "Find all documents where category is 'usability' and rating is less than 3." Claude calls `iris_docdb_find` with the filter criteria — 12 documents match.
 
-**Climax:** Mei pivots to analytics: "List the available DeepSee cubes." Claude calls `iris.analytics.cubes` — she sees the CustomerSatisfaction cube. "Run an MDX query to show average satisfaction score by region for Q1." Claude calls `iris.analytics.mdx` with her query and returns the pivot table. One region is significantly below average. She triggers a cube rebuild to include the latest data: Claude calls `iris.analytics.cubes` with the build action.
+**Climax:** Mei pivots to analytics: "List the available DeepSee cubes." Claude calls `iris_analytics_cubes` — she sees the CustomerSatisfaction cube. "Run an MDX query to show average satisfaction score by region for Q1." Claude calls `iris_analytics_mdx` with her query and returns the pivot table. One region is significantly below average. She triggers a cube rebuild to include the latest data: Claude calls `iris_analytics_cubes` with the build action.
 
 **Resolution:** Mei has stood up a new document collection, populated it, queried it, and run cross-dimensional analytics — all through her AI assistant. She starts building a routine where Claude runs her standard reports weekly using the same tool calls.
 
@@ -242,15 +242,15 @@ Each server is configured independently in the client's MCP configuration with i
 
 | v1 Tool | v2 Tool | Server |
 |---------|---------|--------|
-| `execute_command` | `iris.execute.command` | iris-dev-mcp |
-| `execute_classmethod` | `iris.execute.classmethod` | iris-dev-mcp |
-| `get_global` | `iris.global.get` | iris-dev-mcp |
-| `set_global` | `iris.global.set` | iris-dev-mcp |
-| `get_system_info` | `iris.server.info` | iris-dev-mcp |
-| `compile_objectscript_class` | `iris.doc.compile` | iris-dev-mcp |
-| `compile_objectscript_package` | `iris.doc.compile` | iris-dev-mcp |
-| `execute_unit_tests` | `iris.execute.tests` | iris-dev-mcp |
-| `execute_sql` | `iris.sql.execute` | iris-dev-mcp |
+| `execute_command` | `iris_execute_command` | iris-dev-mcp |
+| `execute_classmethod` | `iris_execute_classmethod` | iris-dev-mcp |
+| `get_global` | `iris_global_get` | iris-dev-mcp |
+| `set_global` | `iris_global_set` | iris-dev-mcp |
+| `get_system_info` | `iris_server_info` | iris-dev-mcp |
+| `compile_objectscript_class` | `iris_doc_compile` | iris-dev-mcp |
+| `compile_objectscript_package` | `iris_doc_compile` | iris-dev-mcp |
+| `execute_unit_tests` | `iris_execute_tests` | iris-dev-mcp |
+| `execute_sql` | `iris_sql_execute` | iris-dev-mcp |
 | `interoperability_production_*` | `iris.production.*` | iris-interop-mcp |
 
 **Breaking changes:** Connection switches from SuperServer (port 1972) to web port (52773). Python native driver replaced with HTTP. Tool names change to dot-namespaced format. Namespace parameter behavior preserved.
@@ -279,39 +279,39 @@ Each server is configured independently in the client's MCP configuration with i
 
 **iris-dev-mcp — Compile and test a class:**
 ```json
-// Tool: iris.doc.compile
+// Tool: iris_doc_compile
 { "doc": "MyApp.Service.PatientLookup.cls", "flags": "ck" }
 // Response: { "status": "success", "errors": [], "time": 0.234 }
 
-// Tool: iris.execute.tests
+// Tool: iris_execute_tests
 { "package": "MyApp.Test", "level": "class" }
 // Response: { "passed": 14, "failed": 1, "skipped": 0, "results": [...] }
 ```
 
 **iris-admin-mcp — Provision a namespace:**
 ```json
-// Tool: iris.namespace.manage
+// Tool: iris_namespace_manage
 { "action": "create", "name": "DEVPROJECT", "codeDatabase": "DEVPROJECT-CODE", "dataDatabase": "DEVPROJECT-DATA" }
 // Response: { "status": "created", "namespace": "DEVPROJECT" }
 ```
 
 **iris-interop-mcp — Check production status:**
 ```json
-// Tool: iris.production.status
+// Tool: iris_production_status
 { "namespace": "ENSDEMO", "detail": true }
 // Response: { "name": "Demo.Production", "status": "Running", "items": [...] }
 ```
 
 **iris-ops-mcp — Retrieve system metrics:**
 ```json
-// Tool: iris.metrics.system
+// Tool: iris_metrics_system
 {}
 // Response: { "format": "prometheus", "metrics": "iris_cache_hit_ratio 0.97\n..." }
 ```
 
 **iris-data-mcp — Query a document database:**
 ```json
-// Tool: iris.docdb.find
+// Tool: iris_docdb_find
 { "database": "PilotFeedback", "filter": { "category": "usability", "rating": { "$lt": 3 } } }
 // Response: { "count": 12, "documents": [...] }
 ```
@@ -649,112 +649,112 @@ The following table defines the namespace scope for every tool across all five s
 
 | Tool | Scope | Namespace Parameter |
 |------|-------|-------------------|
-| `iris.doc.get` | NS | Yes — target namespace |
-| `iris.doc.put` | NS | Yes — target namespace |
-| `iris.doc.delete` | NS | Yes — target namespace |
-| `iris.doc.list` | NS | Yes — target namespace |
-| `iris.doc.compile` | NS | Yes — target namespace |
-| `iris.doc.search` | NS | Yes — target namespace |
-| `iris.doc.index` | NS | Yes — target namespace |
-| `iris.doc.xml_export` | NS | Yes — target namespace |
-| `iris.doc.convert` | NS | Yes — target namespace |
-| `iris.macro.info` | NS | Yes — target namespace |
-| `iris.sql.execute` | NS | Yes — target namespace |
-| `iris.global.get` | NS | Yes — target namespace |
-| `iris.global.set` | NS | Yes — target namespace |
-| `iris.global.kill` | NS | Yes — target namespace |
-| `iris.global.list` | NS | Yes — target namespace |
-| `iris.execute.command` | NS | Yes — target namespace |
-| `iris.execute.classmethod` | NS | Yes — target namespace |
-| `iris.execute.tests` | NS | Yes — target namespace |
-| `iris.server.info` | NONE | No |
-| `iris.server.namespace` | NS | Yes — target namespace |
+| `iris_doc_get` | NS | Yes — target namespace |
+| `iris_doc_put` | NS | Yes — target namespace |
+| `iris_doc_delete` | NS | Yes — target namespace |
+| `iris_doc_list` | NS | Yes — target namespace |
+| `iris_doc_compile` | NS | Yes — target namespace |
+| `iris_doc_search` | NS | Yes — target namespace |
+| `iris_doc_index` | NS | Yes — target namespace |
+| `iris_doc_xml_export` | NS | Yes — target namespace |
+| `iris_doc_convert` | NS | Yes — target namespace |
+| `iris_macro_info` | NS | Yes — target namespace |
+| `iris_sql_execute` | NS | Yes — target namespace |
+| `iris_global_get` | NS | Yes — target namespace |
+| `iris_global_set` | NS | Yes — target namespace |
+| `iris_global_kill` | NS | Yes — target namespace |
+| `iris_global_list` | NS | Yes — target namespace |
+| `iris_execute_command` | NS | Yes — target namespace |
+| `iris_execute_classmethod` | NS | Yes — target namespace |
+| `iris_execute_tests` | NS | Yes — target namespace |
+| `iris_server_info` | NONE | No |
+| `iris_server_namespace` | NS | Yes — target namespace |
 
 ### iris-admin-mcp
 
 | Tool | Scope | Namespace Parameter |
 |------|-------|-------------------|
-| `iris.namespace.manage` | SYS | No — always %SYS (target namespace is a data parameter) |
-| `iris.namespace.list` | NONE | No |
-| `iris.database.manage` | SYS | No — always %SYS |
-| `iris.database.list` | SYS | No — always %SYS |
-| `iris.mapping.manage` | SYS | No — always %SYS (target namespace is a data parameter) |
-| `iris.mapping.list` | SYS | No — always %SYS (target namespace is a data parameter) |
-| `iris.user.manage` | SYS | No — always %SYS |
-| `iris.user.get` | SYS | No — always %SYS |
-| `iris.user.roles` | SYS | No — always %SYS |
-| `iris.user.password` | SYS | No — always %SYS |
-| `iris.role.manage` | SYS | No — always %SYS |
-| `iris.role.list` | SYS | No — always %SYS |
-| `iris.resource.manage` | SYS | No — always %SYS |
-| `iris.resource.list` | SYS | No — always %SYS |
-| `iris.permission.check` | SYS | No — always %SYS |
-| `iris.webapp.manage` | SYS | No — always %SYS |
-| `iris.webapp.get` | SYS | No — always %SYS |
-| `iris.webapp.list` | BOTH | Optional — filter by namespace |
-| `iris.ssl.manage` | SYS | No — always %SYS |
-| `iris.ssl.list` | SYS | No — always %SYS |
-| `iris.oauth.manage` | SYS | No — always %SYS |
-| `iris.oauth.list` | SYS | No — always %SYS |
+| `iris_namespace_manage` | SYS | No — always %SYS (target namespace is a data parameter) |
+| `iris_namespace_list` | NONE | No |
+| `iris_database_manage` | SYS | No — always %SYS |
+| `iris_database_list` | SYS | No — always %SYS |
+| `iris_mapping_manage` | SYS | No — always %SYS (target namespace is a data parameter) |
+| `iris_mapping_list` | SYS | No — always %SYS (target namespace is a data parameter) |
+| `iris_user_manage` | SYS | No — always %SYS |
+| `iris_user_get` | SYS | No — always %SYS |
+| `iris_user_roles` | SYS | No — always %SYS |
+| `iris_user_password` | SYS | No — always %SYS |
+| `iris_role_manage` | SYS | No — always %SYS |
+| `iris_role_list` | SYS | No — always %SYS |
+| `iris_resource_manage` | SYS | No — always %SYS |
+| `iris_resource_list` | SYS | No — always %SYS |
+| `iris_permission_check` | SYS | No — always %SYS |
+| `iris_webapp_manage` | SYS | No — always %SYS |
+| `iris_webapp_get` | SYS | No — always %SYS |
+| `iris_webapp_list` | BOTH | Optional — filter by namespace |
+| `iris_ssl_manage` | SYS | No — always %SYS |
+| `iris_ssl_list` | SYS | No — always %SYS |
+| `iris_oauth_manage` | SYS | No — always %SYS |
+| `iris_oauth_list` | SYS | No — always %SYS |
 
 ### iris-interop-mcp
 
 | Tool | Scope | Namespace Parameter |
 |------|-------|-------------------|
-| `iris.production.manage` | NS | Yes — target namespace |
-| `iris.production.control` | NS | Yes — target namespace |
-| `iris.production.status` | NS | Yes — target namespace |
-| `iris.production.summary` | NONE | No — queries all namespaces |
-| `iris.production.item` | NS | Yes — target namespace |
-| `iris.production.autostart` | NS | Yes — target namespace |
-| `iris.production.logs` | NS | Yes — target namespace |
-| `iris.production.queues` | NS | Yes — target namespace |
-| `iris.production.messages` | NS | Yes — target namespace |
-| `iris.production.adapters` | NS | Yes — target namespace |
-| `iris.credential.manage` | NS | Yes — target namespace |
-| `iris.credential.list` | NS | Yes — target namespace |
-| `iris.lookup.manage` | NS | Yes — target namespace |
-| `iris.lookup.transfer` | NS | Yes — target namespace |
-| `iris.rule.list` | NS | Yes — target namespace |
-| `iris.rule.get` | NS | Yes — target namespace |
-| `iris.transform.list` | NS | Yes — target namespace |
-| `iris.transform.test` | NS | Yes — target namespace |
-| `iris.interop.rest` | NS | Yes — target namespace |
+| `iris_production_manage` | NS | Yes — target namespace |
+| `iris_production_control` | NS | Yes — target namespace |
+| `iris_production_status` | NS | Yes — target namespace |
+| `iris_production_summary` | NONE | No — queries all namespaces |
+| `iris_production_item` | NS | Yes — target namespace |
+| `iris_production_autostart` | NS | Yes — target namespace |
+| `iris_production_logs` | NS | Yes — target namespace |
+| `iris_production_queues` | NS | Yes — target namespace |
+| `iris_production_messages` | NS | Yes — target namespace |
+| `iris_production_adapters` | NS | Yes — target namespace |
+| `iris_credential_manage` | NS | Yes — target namespace |
+| `iris_credential_list` | NS | Yes — target namespace |
+| `iris_lookup_manage` | NS | Yes — target namespace |
+| `iris_lookup_transfer` | NS | Yes — target namespace |
+| `iris_rule_list` | NS | Yes — target namespace |
+| `iris_rule_get` | NS | Yes — target namespace |
+| `iris_transform_list` | NS | Yes — target namespace |
+| `iris_transform_test` | NS | Yes — target namespace |
+| `iris_interop_rest` | NS | Yes — target namespace |
 
 ### iris-ops-mcp
 
 | Tool | Scope | Namespace Parameter |
 |------|-------|-------------------|
-| `iris.metrics.system` | NONE | No |
-| `iris.metrics.alerts` | NONE | No |
-| `iris.metrics.interop` | NONE | No |
-| `iris.jobs.list` | NONE | No |
-| `iris.locks.list` | NONE | No |
-| `iris.journal.info` | SYS | No — always %SYS |
-| `iris.mirror.status` | SYS | No — always %SYS |
-| `iris.audit.events` | SYS | No — always %SYS |
-| `iris.database.check` | SYS | No — always %SYS |
-| `iris.license.info` | NONE | No |
-| `iris.ecp.status` | SYS | No — always %SYS |
-| `iris.task.manage` | SYS | No — always %SYS |
-| `iris.task.list` | SYS | No — always %SYS |
-| `iris.task.run` | SYS | No — always %SYS |
-| `iris.task.history` | SYS | No — always %SYS |
-| `iris.config.manage` | SYS | No — always %SYS |
+| `iris_metrics_system` | NONE | No |
+| `iris_metrics_alerts` | NONE | No |
+| `iris_metrics_interop` | NONE | No |
+| `iris_jobs_list` | NONE | No |
+| `iris_locks_list` | NONE | No |
+| `iris_journal_info` | SYS | No — always %SYS |
+| `iris_mirror_status` | SYS | No — always %SYS |
+| `iris_audit_events` | SYS | No — always %SYS |
+| `iris_database_check` | SYS | No — always %SYS |
+| `iris_license_info` | NONE | No |
+| `iris_ecp_status` | SYS | No — always %SYS |
+| `iris_task_manage` | SYS | No — always %SYS |
+| `iris_task_list` | SYS | No — always %SYS |
+| `iris_task_run` | SYS | No — always %SYS |
+| `iris_task_history` | SYS | No — always %SYS |
+| `iris_config_manage` | SYS | No — always %SYS |
 
 ### iris-data-mcp
 
 | Tool | Scope | Namespace Parameter |
 |------|-------|-------------------|
-| `iris.docdb.manage` | NS | Yes — target namespace |
-| `iris.docdb.document` | NS | Yes — target namespace |
-| `iris.docdb.find` | NS | Yes — target namespace |
-| `iris.docdb.property` | NS | Yes — target namespace |
-| `iris.analytics.mdx` | NS | Yes — target namespace |
-| `iris.analytics.cubes` | NS | Yes — target namespace |
-| `iris.debug.session` | NS | Yes — target namespace |
-| `iris.debug.terminal` | NS | Yes — target namespace |
-| `iris.rest.manage` | NS | Yes — target namespace |
+| `iris_docdb_manage` | NS | Yes — target namespace |
+| `iris_docdb_document` | NS | Yes — target namespace |
+| `iris_docdb_find` | NS | Yes — target namespace |
+| `iris_docdb_property` | NS | Yes — target namespace |
+| `iris_analytics_mdx` | NS | Yes — target namespace |
+| `iris_analytics_cubes` | NS | Yes — target namespace |
+| `iris_debug_session` | NS | Yes — target namespace |
+| `iris_debug_terminal` | NS | Yes — target namespace |
+| `iris_rest_manage` | NS | Yes — target namespace |
 
 ### Scope Summary
 

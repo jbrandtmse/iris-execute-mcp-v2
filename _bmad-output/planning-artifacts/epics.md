@@ -194,8 +194,8 @@ FR16: Epic 2 — Retrieve document content
 FR17: Epic 2 — Create or update documents
 FR18: Epic 2 — Delete documents
 FR19: Epic 2 — List documents filtered by category/type
-FR20: Epic 2 — Check document existence and timestamps (via iris.doc.get metadata mode)
-FR21: Epic 2 — Retrieve documents modified since timestamp (via iris.doc.list modifiedSince filter)
+FR20: Epic 2 — Check document existence and timestamps (via iris_doc_get metadata mode)
+FR21: Epic 2 — Retrieve documents modified since timestamp (via iris_doc_list modifiedSince filter)
 FR22: Epic 2 — Compile documents with configurable flags
 FR23: Epic 2 — Queue async compilation and poll status
 FR24: Epic 2 — Detailed compilation errors with source locations
@@ -203,9 +203,9 @@ FR25: Epic 2 — Class structure (methods, properties, parameters)
 FR26: Epic 2 — Full-text search across documents
 FR27: Epic 2 — Macro definitions and expansion
 FR28: Epic 2 — Convert documents between UDL and XML
-FR29: Epic 2 — Export documents to XML format (via iris.doc.xml_export action "export")
-FR30: Epic 2 — Import documents from XML (via iris.doc.xml_export action "import")
-FR31: Epic 2 — List XML file contents before import (via iris.doc.xml_export action "list")
+FR29: Epic 2 — Export documents to XML format (via iris_doc_xml_export action "export")
+FR30: Epic 2 — Import documents from XML (via iris_doc_xml_export action "import")
+FR31: Epic 2 — List XML file contents before import (via iris_doc_xml_export action "list")
 FR32: Epic 2 — Execute SQL queries with parameters
 FR33: Epic 3 — Retrieve global values
 FR34: Epic 3 — Set global values with verification
@@ -325,6 +325,11 @@ A data engineer or analyst can create and query document databases, manage docum
 Users can find comprehensive documentation — suite-level README, per-package tool references, v1-to-v2 migration guide, and MCP client config examples — enabling self-service installation and adoption.
 **FRs covered:** Documentation requirements (non-numbered)
 **NFRs addressed:** N/A
+
+### Epic 9: Tool Name Flattening for Anthropic API / Claude Desktop Compatibility
+A beta-testing defect in Claude Desktop revealed that dotted tool names (`iris.doc.get`) are rejected by the Anthropic Messages API regex `^[a-zA-Z0-9_-]+$`. All 85 tool names are flattened to `iris_<domain>_<verb>`, package READMEs are updated, a regression-guard test is added, and a CHANGELOG entry documents the pre-release breaking change. Unblocks first npm publish. Living planning artifacts (architecture.md, prd.md, epics.md) were updated by the analyst as part of the Sprint Change Proposal on 2026-04-09 and are out of scope for the dev stories.
+**FRs covered:** None (cross-cutting cleanup for release compatibility)
+**NFRs addressed:** NFR1 (MCP client compatibility)
 
 ## Epic 1: Shared Infrastructure & Developer Connection
 
@@ -526,28 +531,28 @@ So that I can manage source code on IRIS without leaving the AI conversation.
 **Acceptance Criteria:**
 
 **Given** a valid IRIS connection with an existing class document
-**When** `iris.doc.get` is called with the document name (e.g., "MyApp.Service.cls")
+**When** `iris_doc_get` is called with the document name (e.g., "MyApp.Service.cls")
 **Then** the document content is returned in UDL format by default (FR16)
 **And** an optional `format` parameter allows requesting XML format
 **And** an optional `namespace` parameter overrides the default namespace
 
 **Given** new or modified ObjectScript source code
-**When** `iris.doc.put` is called with the document name and content
+**When** `iris_doc_put` is called with the document name and content
 **Then** the document is created or updated on IRIS via the Atelier API (FR17)
 **And** the response confirms the save was successful
 
 **Given** one or more existing documents
-**When** `iris.doc.delete` is called with the document name(s)
+**When** `iris_doc_delete` is called with the document name(s)
 **Then** the specified documents are deleted from IRIS (FR18)
 **And** the response confirms deletion
 
 **Given** a namespace with ObjectScript documents
-**When** `iris.doc.list` is called with optional category filter (CLS, RTN, CSP, OTH)
+**When** `iris_doc_list` is called with optional category filter (CLS, RTN, CSP, OTH)
 **Then** a filtered list of documents in the namespace is returned (FR19)
 **And** results support pagination via the server base
 
 **Given** a document that does not exist
-**When** `iris.doc.get` is called
+**When** `iris_doc_get` is called
 **Then** an MCP tool error is returned with `isError: true` and message: "Document '{name}' not found in namespace '{ns}'. Check the document name or try a different namespace."
 
 **And** all four tools follow the ToolDefinition interface with appropriate annotations (readOnlyHint for get/list, destructiveHint for delete)
@@ -563,19 +568,19 @@ So that I can efficiently track modifications without downloading full document 
 **Acceptance Criteria:**
 
 **Given** an existing document name
-**When** `iris.doc.get` is called with a metadata-only option (e.g., HEAD verb on the Atelier /doc/ endpoint)
+**When** `iris_doc_get` is called with a metadata-only option (e.g., HEAD verb on the Atelier /doc/ endpoint)
 **Then** the response includes the document's existence status and last modification timestamp without transferring content (FR20)
 
 **Given** a timestamp
-**When** `iris.doc.list` is called with a `modifiedSince` filter parameter
+**When** `iris_doc_list` is called with a `modifiedSince` filter parameter
 **Then** only documents modified since that timestamp are returned (FR21)
 **And** an optional namespace parameter scopes the query
 
 **Given** a document that does not exist
-**When** `iris.doc.get` is called with metadata-only option
+**When** `iris_doc_get` is called with metadata-only option
 **Then** the response indicates the document does not exist without raising an error
 
-**And** these capabilities are modes of existing tools (iris.doc.get and iris.doc.list), not separate tools — keeping iris-dev-mcp at exactly 20 tools per the PRD specification
+**And** these capabilities are modes of existing tools (iris_doc_get and iris_doc_list), not separate tools — keeping iris-dev-mcp at exactly 20 tools per the PRD specification
 **And** responses complete within 2 seconds (NFR1)
 
 ### Story 2.4: Compilation Tools
@@ -587,16 +592,16 @@ So that I can fix compilation issues directly through my AI assistant without sw
 **Acceptance Criteria:**
 
 **Given** one or more valid document names
-**When** `iris.doc.compile` is called with default flags
+**When** `iris_doc_compile` is called with default flags
 **Then** synchronous compilation is performed via the Atelier API (FR22)
 **And** the response includes success/failure status and compilation time
 
 **Given** compilation flags (e.g., "ck", "cku")
-**When** `iris.doc.compile` is called with the flags parameter
+**When** `iris_doc_compile` is called with the flags parameter
 **Then** the specified flags are passed to the Atelier compilation endpoint
 
 **Given** a large package or multiple documents
-**When** `iris.doc.compile` is called with an async option
+**When** `iris_doc_compile` is called with an async option
 **Then** asynchronous compilation is queued and the response includes a job ID for polling completion status (FR23)
 
 **Given** source code with errors
@@ -624,22 +629,22 @@ So that I can understand and navigate the IRIS codebase through my AI assistant.
 **Acceptance Criteria:**
 
 **Given** a class document name
-**When** `iris.doc.index` is called
+**When** `iris_doc_index` is called
 **Then** the class structure is returned including methods, properties, parameters, and superclasses (FR25)
 **And** each member includes its type, signature, and relevant metadata
 
 **Given** a search query (text or regex pattern)
-**When** `iris.doc.search` is called with the pattern
+**When** `iris_doc_search` is called with the pattern
 **Then** matching documents and locations are returned (FR26)
 **And** options for regex, wildcard, and case-sensitivity are supported
 **And** an optional namespace parameter scopes the search
 
 **Given** a macro name
-**When** `iris.macro.info` is called
+**When** `iris_macro_info` is called
 **Then** the macro definition, source location, and expanded value are returned (FR27)
 
 **Given** a search with no results
-**When** `iris.doc.search` returns empty
+**When** `iris_doc_search` returns empty
 **Then** an empty result set is returned (not an error)
 
 **And** all three tools are annotated as readOnlyHint: true
@@ -654,29 +659,29 @@ So that I can work with legacy XML-based workflows and convert between UDL and X
 **Acceptance Criteria:**
 
 **Given** a document in UDL format
-**When** `iris.doc.convert` is called with target format XML
+**When** `iris_doc_convert` is called with target format XML
 **Then** the document is converted and returned in XML format (FR28)
 
 **Given** a document in XML format
-**When** `iris.doc.convert` is called with target format UDL
+**When** `iris_doc_convert` is called with target format UDL
 **Then** the document is converted and returned in UDL format (FR28)
 
 **Given** one or more document names
-**When** `iris.doc.xml_export` is called with action "export"
+**When** `iris_doc_xml_export` is called with action "export"
 **Then** the documents are exported to legacy XML format and the XML content is returned (FR29)
 
 **Given** XML content containing ObjectScript documents
-**When** `iris.doc.xml_export` is called with action "import"
+**When** `iris_doc_xml_export` is called with action "import"
 **Then** the documents are imported into IRIS from the provided XML content (FR30)
 
 **Given** XML content
-**When** `iris.doc.xml_export` is called with action "list"
+**When** `iris_doc_xml_export` is called with action "list"
 **Then** a list of documents contained in the XML is returned without importing them (FR31)
 
-**And** FR29-FR31 are handled as action parameters on `iris.doc.xml_export` — no separate tools are created, keeping iris-dev-mcp at exactly 20 tools per the PRD specification
-**And** iris.doc.xml_export with action "export"/"list" is annotated as readOnlyHint: true
-**And** iris.doc.xml_export with action "import" is annotated as destructiveHint: true
-**And** iris.doc.convert is annotated as readOnlyHint: true
+**And** FR29-FR31 are handled as action parameters on `iris_doc_xml_export` — no separate tools are created, keeping iris-dev-mcp at exactly 20 tools per the PRD specification
+**And** iris_doc_xml_export with action "export"/"list" is annotated as readOnlyHint: true
+**And** iris_doc_xml_export with action "import" is annotated as destructiveHint: true
+**And** iris_doc_convert is annotated as readOnlyHint: true
 
 ### Story 2.7: SQL Execution & Server Info
 
@@ -687,7 +692,7 @@ So that I can query data and understand my IRIS environment without leaving the 
 **Acceptance Criteria:**
 
 **Given** a valid SQL query
-**When** `iris.sql.execute` is called with the query string
+**When** `iris_sql_execute` is called with the query string
 **Then** the query is executed via the Atelier API and results are returned with column names and row data (FR32)
 **And** parameterized inputs are supported to prevent SQL injection
 **And** a configurable row limit parameter prevents unbounded result sets (default reasonable limit)
@@ -697,21 +702,21 @@ So that I can query data and understand my IRIS environment without leaving the 
 **Then** first results are returned within 5 seconds (NFR3)
 
 **Given** an invalid SQL query
-**When** `iris.sql.execute` is called
+**When** `iris_sql_execute` is called
 **Then** an MCP tool error is returned with the SQL error message
 
 **Given** a connected IRIS instance
-**When** `iris.server.info` is called
+**When** `iris_server_info` is called
 **Then** server information is returned including IRIS version, platform, and instance name
 **And** the tool has scope NONE (no namespace context)
 
 **Given** a namespace name
-**When** `iris.server.namespace` is called
+**When** `iris_server_namespace` is called
 **Then** namespace details are returned including associated databases and enabled features
 **And** the tool has scope NS (accepts namespace parameter)
 
-**And** iris.sql.execute is annotated as readOnlyHint: false (can execute INSERT/UPDATE/DELETE)
-**And** iris.server.info and iris.server.namespace are annotated as readOnlyHint: true
+**And** iris_sql_execute is annotated as readOnlyHint: false (can execute INSERT/UPDATE/DELETE)
+**And** iris_server_info and iris_server_namespace are annotated as readOnlyHint: true
 
 ### Story 2.8: iris-dev-mcp Unit & Integration Tests
 
@@ -723,21 +728,21 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance
 **When** the integration test suite runs
-**Then** iris.doc.get retrieves an existing class document successfully
-**And** iris.doc.put creates a new test document and iris.doc.get confirms it exists
-**And** iris.doc.delete removes the test document and iris.doc.head confirms it is gone
-**And** iris.doc.list returns documents filtered by category (CLS)
-**And** iris.doc.head returns metadata for an existing document
-**And** iris.doc.modified returns documents modified in the last hour
-**And** iris.doc.compile compiles a valid class successfully and returns compilation errors for an invalid class
-**And** iris.doc.index returns class structure for a known class
-**And** iris.doc.search finds a known string in a document
-**And** iris.macro.info returns definition for a known macro
-**And** iris.doc.convert converts between UDL and XML
-**And** iris.doc.xml_export exports a document to XML
-**And** iris.sql.execute runs a SELECT query and returns results
-**And** iris.server.info returns valid server information
-**And** iris.server.namespace returns details for the configured namespace
+**Then** iris_doc_get retrieves an existing class document successfully
+**And** iris_doc_put creates a new test document and iris_doc_get confirms it exists
+**And** iris_doc_delete removes the test document and iris_doc_head confirms it is gone
+**And** iris_doc_list returns documents filtered by category (CLS)
+**And** iris_doc_head returns metadata for an existing document
+**And** iris_doc_modified returns documents modified in the last hour
+**And** iris_doc_compile compiles a valid class successfully and returns compilation errors for an invalid class
+**And** iris_doc_index returns class structure for a known class
+**And** iris_doc_search finds a known string in a document
+**And** iris_macro_info returns definition for a known macro
+**And** iris_doc_convert converts between UDL and XML
+**And** iris_doc_xml_export exports a document to XML
+**And** iris_sql_execute runs a SELECT query and returns results
+**And** iris_server_info returns valid server information
+**And** iris_server_namespace returns details for the configured namespace
 
 **And** unit tests (`__tests__/*.test.ts`) with mocked HTTP responses verify parameter validation, response parsing, and error handling for every tool
 **And** each integration test cleans up any test documents it creates
@@ -789,21 +794,21 @@ So that I can inspect and manipulate IRIS data structures without using the Term
 **Acceptance Criteria:**
 
 **Given** a global name and optional subscripts
-**When** `iris.global.get` is called
+**When** `iris_global_get` is called
 **Then** the value at the specified global node is returned via the custom REST endpoint GET /api/executemcp/v2/global (FR33)
 **And** complex subscript expressions are supported (multi-level, string subscripts)
 
 **Given** a global name, subscripts, and a value
-**When** `iris.global.set` is called
+**When** `iris_global_set` is called
 **Then** the global value is set via PUT /api/executemcp/v2/global (FR34)
 **And** the response includes automatic verification that the value was set correctly
 
 **Given** a global name and optional subscripts
-**When** `iris.global.kill` is called
+**When** `iris_global_kill` is called
 **Then** the specified global node or subtree is deleted via DELETE /api/executemcp/v2/global (FR35)
 
 **Given** a namespace
-**When** `iris.global.list` is called with an optional filter pattern
+**When** `iris_global_list` is called with an optional filter pattern
 **Then** a list of globals in the namespace is returned (FR36)
 
 **Given** a global operation that would leave IRIS in an inconsistent state
@@ -813,9 +818,9 @@ So that I can inspect and manipulate IRIS data structures without using the Term
 
 **And** the ExecuteMCPv2.REST.Global handler class is created and compiles on IRIS
 **And** the four iris.global.* tools are registered in iris-dev-mcp's tool registry (src/tools/global.ts exported via src/tools/index.ts)
-**And** iris.global.get and iris.global.list are annotated as readOnlyHint: true
-**And** iris.global.set is annotated as destructiveHint: false (creates/updates data)
-**And** iris.global.kill is annotated as destructiveHint: true
+**And** iris_global_get and iris_global_list are annotated as readOnlyHint: true
+**And** iris_global_set is annotated as destructiveHint: false (creates/updates data)
+**And** iris_global_kill is annotated as destructiveHint: true
 **And** unit tests with mocked HTTP responses verify parameter validation, response parsing, and error handling
 **And** all tools respond within 2 seconds for read operations (NFR1)
 
@@ -828,12 +833,12 @@ So that I can run code on IRIS directly from the AI conversation.
 **Acceptance Criteria:**
 
 **Given** a valid ObjectScript command string
-**When** `iris.execute.command` is called
+**When** `iris_execute_command` is called
 **Then** the command is executed on IRIS via POST /api/executemcp/v2/command (FR37)
 **And** captured I/O output (Write statements, error messages) is returned in the response
 
 **Given** a class name, method name, and optional positional parameters
-**When** `iris.execute.classmethod` is called
+**When** `iris_execute_classmethod` is called
 **Then** the class method is invoked on IRIS via POST /api/executemcp/v2/classmethod (FR38)
 **And** the return value is included in the response
 **And** output parameters are supported and returned
@@ -862,16 +867,16 @@ So that I can verify code correctness without leaving the AI conversation.
 **Acceptance Criteria:**
 
 **Given** a test package name (e.g., "MyApp.Test")
-**When** `iris.execute.tests` is called with level "package"
+**When** `iris_execute_tests` is called with level "package"
 **Then** all test classes in the package are executed via POST /api/executemcp/v2/tests (FR39)
 **And** structured results are returned including: total tests, passed, failed, skipped, and per-test details (class, method, status, message)
 
 **Given** a test class name
-**When** `iris.execute.tests` is called with level "class"
+**When** `iris_execute_tests` is called with level "class"
 **Then** only the specified test class is executed
 
 **Given** a test class name and method name
-**When** `iris.execute.tests` is called with level "method"
+**When** `iris_execute_tests` is called with level "method"
 **Then** only the specified test method is executed
 
 **Given** the REST handler processing a test request
@@ -962,13 +967,13 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance with the ExecuteMCPv2 REST service deployed
 **When** the integration test suite runs
-**Then** iris.global.get retrieves a known global value
-**And** iris.global.set writes a test global and iris.global.get confirms the value
-**And** iris.global.kill removes the test global and iris.global.get confirms it is gone
-**And** iris.global.list returns globals in the test namespace
-**And** iris.execute.command runs a simple SET command and returns captured output
-**And** iris.execute.classmethod calls a known class method and returns the result
-**And** iris.execute.tests runs a simple test class and returns structured pass/fail results
+**Then** iris_global_get retrieves a known global value
+**And** iris_global_set writes a test global and iris_global_get confirms the value
+**And** iris_global_kill removes the test global and iris_global_get confirms it is gone
+**And** iris_global_list returns globals in the test namespace
+**And** iris_execute_command runs a simple SET command and returns captured output
+**And** iris_execute_classmethod calls a known class method and returns the result
+**And** iris_execute_tests runs a simple test class and returns structured pass/fail results
 
 **Given** the bootstrap flow
 **When** tested against the local IRIS instance
@@ -1019,16 +1024,16 @@ So that long-running operations like package compilation and unit test execution
 - Add web server gateway timeout section to README.md
 - Update unit tests for config loading and timeout behavior
 
-### Story 3.9: Bulk Document Load from Disk (iris.doc.load)
+### Story 3.9: Bulk Document Load from Disk (iris_doc_load)
 
 As a developer,
 I want to load multiple ObjectScript files from a local directory into IRIS in a single tool call,
-So that I can efficiently deploy entire packages or project directories without making individual iris.doc.put calls.
+So that I can efficiently deploy entire packages or project directories without making individual iris_doc_put calls.
 
 **Acceptance Criteria:**
 
 **Given** a directory path with a glob pattern (e.g., "c:/projects/myapp/src/**/*.cls")
-**When** `iris.doc.load` is called with the path pattern
+**When** `iris_doc_load` is called with the path pattern
 **Then** all matching files are read from disk and uploaded to IRIS one by one via the Atelier doc/PUT endpoint
 
 **Given** uploaded files and `compile: true` specified
@@ -1095,28 +1100,28 @@ So that I can provision IRIS environments without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** a namespace name, code database, and data database
-**When** `iris.namespace.manage` is called with action "create"
+**When** `iris_namespace_manage` is called with action "create"
 **Then** a new namespace is created on IRIS with the specified database bindings via the custom REST endpoint (FR40)
 **And** the tool executes in %SYS scope (no namespace parameter — target namespace is a data parameter)
 
 **Given** an existing namespace
-**When** `iris.namespace.manage` is called with action "modify"
+**When** `iris_namespace_manage` is called with action "modify"
 **Then** the namespace configuration is updated (FR40)
 
 **Given** an existing namespace
-**When** `iris.namespace.manage` is called with action "delete"
+**When** `iris_namespace_manage` is called with action "delete"
 **Then** the namespace is removed from IRIS (FR40)
 
 **Given** no parameters
-**When** `iris.namespace.list` is called
+**When** `iris_namespace_list` is called
 **Then** all namespaces are returned with their associated code and data databases (FR41)
 
 **Given** database configuration parameters (name, directory, size options)
-**When** `iris.database.manage` is called with action "create"
+**When** `iris_database_manage` is called with action "create"
 **Then** a new database is created with full configuration options (FR42)
 
 **Given** no parameters or optional filters
-**When** `iris.database.list` is called
+**When** `iris_database_list` is called
 **Then** all databases are returned with size, free space, and mount status (FR43)
 
 **Given** a failed namespace or database operation
@@ -1125,8 +1130,8 @@ So that I can provision IRIS environments without the Management Portal.
 
 **And** the ExecuteMCPv2.REST.Config handler class is created and compiles on IRIS
 **And** the Dispatch UrlMap is extended with /config/:entity route and Dispatch is recompiled
-**And** iris.namespace.manage and iris.database.manage are annotated as destructiveHint: true (can delete)
-**And** iris.namespace.list and iris.database.list are annotated as readOnlyHint: true
+**And** iris_namespace_manage and iris_database_manage are annotated as destructiveHint: true (can delete)
+**And** iris_namespace_list and iris_database_list are annotated as readOnlyHint: true
 **And** all inputs are validated at the REST boundary (NFR10)
 **And** unit tests with mocked HTTP responses verify parameter validation, response parsing, and error handling
 
@@ -1139,20 +1144,20 @@ So that I can configure cross-namespace data and code access.
 **Acceptance Criteria:**
 
 **Given** a source namespace, mapping type (global, routine, or package), and mapping details
-**When** `iris.mapping.manage` is called with action "create"
+**When** `iris_mapping_manage` is called with action "create"
 **Then** the specified mapping is created between namespaces (FR44)
 **And** the tool executes in %SYS (target namespace is a data parameter)
 
 **Given** an existing mapping
-**When** `iris.mapping.manage` is called with action "delete"
+**When** `iris_mapping_manage` is called with action "delete"
 **Then** the mapping is removed (FR44)
 
 **Given** a namespace name
-**When** `iris.mapping.list` is called
+**When** `iris_mapping_list` is called
 **Then** all global, routine, and package mappings for that namespace are returned (FR45)
 
-**And** iris.mapping.manage is annotated as destructiveHint: true
-**And** iris.mapping.list is annotated as readOnlyHint: true
+**And** iris_mapping_manage is annotated as destructiveHint: true
+**And** iris_mapping_list is annotated as readOnlyHint: true
 
 ### Story 4.4: User & Password Management Tools
 
@@ -1163,42 +1168,42 @@ So that I can provision user access without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** user account details (username, password, roles, properties)
-**When** `iris.user.manage` is called with action "create"
+**When** `iris_user_manage` is called with action "create"
 **Then** a new IRIS user account is created with the specified configuration (FR46)
 
 **Given** an existing username
-**When** `iris.user.manage` is called with action "modify"
+**When** `iris_user_manage` is called with action "modify"
 **Then** the user properties are updated (FR46)
 
 **Given** an existing username
-**When** `iris.user.manage` is called with action "delete"
+**When** `iris_user_manage` is called with action "delete"
 **Then** the user account is removed (FR46)
 
 **Given** a username
-**When** `iris.user.get` is called
+**When** `iris_user_get` is called
 **Then** user properties are returned (roles, status, last login, etc.) (FR47)
 
 **Given** no parameters
-**When** `iris.user.get` is called with action "list"
+**When** `iris_user_get` is called with action "list"
 **Then** all users are returned with their properties (FR47)
 
 **Given** a username and a role name
-**When** `iris.user.roles` is called with action "add" or "remove"
+**When** `iris_user_roles` is called with action "add" or "remove"
 **Then** the role is added to or removed from the user (FR48)
 
 **Given** a username and a new password
-**When** `iris.user.password` is called with action "change"
+**When** `iris_user_password` is called with action "change"
 **Then** the password is updated (FR49)
 
 **Given** a username and a candidate password
-**When** `iris.user.password` is called with action "validate"
+**When** `iris_user_password` is called with action "validate"
 **Then** the password is checked against IRIS password policy and the result is returned (FR49)
 
 **And** the ExecuteMCPv2.REST.Security handler class is created and compiles on IRIS
 **And** the Dispatch UrlMap is extended with /security/:entity route and Dispatch is recompiled
 **And** passwords are never included in log output or error messages (NFR6)
-**And** iris.user.manage is annotated as destructiveHint: true
-**And** iris.user.get is annotated as readOnlyHint: true
+**And** iris_user_manage is annotated as destructiveHint: true
+**And** iris_user_get is annotated as readOnlyHint: true
 **And** all tools execute in %SYS scope
 **And** unit tests with mocked HTTP responses verify parameter validation, response parsing, and error handling
 
@@ -1211,35 +1216,35 @@ So that I can configure IRIS security without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** role details (name, description, resource grants)
-**When** `iris.role.manage` is called with action "create"
+**When** `iris_role_manage` is called with action "create"
 **Then** a new security role is created with the specified resource grants (FR50)
 
 **Given** an existing role
-**When** `iris.role.manage` is called with action "modify" or "delete"
+**When** `iris_role_manage` is called with action "modify" or "delete"
 **Then** the role is updated or removed (FR50)
 
 **Given** no parameters
-**When** `iris.role.list` is called
+**When** `iris_role_list` is called
 **Then** all security roles are returned (FR51)
 
 **Given** resource details (name, description, public permission)
-**When** `iris.resource.manage` is called with action "create"
+**When** `iris_resource_manage` is called with action "create"
 **Then** a new security resource is created (FR52)
 
 **Given** an existing resource
-**When** `iris.resource.manage` is called with action "modify" or "delete"
+**When** `iris_resource_manage` is called with action "modify" or "delete"
 **Then** the resource is updated or removed (FR52)
 
 **Given** no parameters
-**When** `iris.resource.list` is called
+**When** `iris_resource_list` is called
 **Then** all security resources are returned (FR53)
 
 **Given** a user or role name and a resource name
-**When** `iris.permission.check` is called
+**When** `iris_permission_check` is called
 **Then** the response indicates whether the user/role has the specified permission on the resource (FR54)
 
-**And** iris.role.manage and iris.resource.manage are annotated as destructiveHint: true
-**And** iris.role.list, iris.resource.list, and iris.permission.check are annotated as readOnlyHint: true
+**And** iris_role_manage and iris_resource_manage are annotated as destructiveHint: true
+**And** iris_role_list, iris_resource_list, and iris_permission_check are annotated as readOnlyHint: true
 
 ### Story 4.6: Web Application Management Tools
 
@@ -1250,29 +1255,29 @@ So that I can configure web access to IRIS without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** web application configuration (name, namespace, dispatch class, authentication methods, CSP path)
-**When** `iris.webapp.manage` is called with action "create"
+**When** `iris_webapp_manage` is called with action "create"
 **Then** a new web application is registered on IRIS (FR55)
 
 **Given** an existing web application name
-**When** `iris.webapp.manage` is called with action "modify"
+**When** `iris_webapp_manage` is called with action "modify"
 **Then** the web application configuration is updated (FR55)
 
 **Given** an existing web application name
-**When** `iris.webapp.manage` is called with action "delete"
+**When** `iris_webapp_manage` is called with action "delete"
 **Then** the web application is removed (FR55)
 
 **Given** a web application name
-**When** `iris.webapp.get` is called
+**When** `iris_webapp_get` is called
 **Then** the full web application properties are returned (FR56)
 
 **Given** an optional namespace filter
-**When** `iris.webapp.list` is called
+**When** `iris_webapp_list` is called
 **Then** all web applications are returned, optionally filtered by namespace (FR57)
 **And** the tool has scope BOTH (accepts optional namespace for filtering)
 
-**And** iris.webapp.manage is annotated as destructiveHint: true
-**And** iris.webapp.get is annotated as readOnlyHint: true
-**And** iris.webapp.list is annotated as readOnlyHint: true
+**And** iris_webapp_manage is annotated as destructiveHint: true
+**And** iris_webapp_get is annotated as readOnlyHint: true
+**And** iris_webapp_list is annotated as readOnlyHint: true
 
 ### Story 4.7: SSL/TLS Configuration Tools
 
@@ -1283,20 +1288,20 @@ So that I can set up secure communications without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** SSL configuration details (name, certificate file paths, key file, CA file, protocols)
-**When** `iris.ssl.manage` is called with action "create"
+**When** `iris_ssl_manage` is called with action "create"
 **Then** a new SSL/TLS configuration is created on IRIS (FR58)
 
 **Given** an existing SSL configuration
-**When** `iris.ssl.manage` is called with action "modify" or "delete"
+**When** `iris_ssl_manage` is called with action "modify" or "delete"
 **Then** the SSL configuration is updated or removed (FR58)
 
 **Given** no parameters
-**When** `iris.ssl.list` is called
+**When** `iris_ssl_list` is called
 **Then** all SSL/TLS configurations are returned with their details (certificate paths, enabled protocols, verification settings) (FR59)
 
 **And** the ExecuteMCPv2.REST.SSL handler is included in the Security handler or created separately
-**And** iris.ssl.manage is annotated as destructiveHint: true
-**And** iris.ssl.list is annotated as readOnlyHint: true
+**And** iris_ssl_manage is annotated as destructiveHint: true
+**And** iris_ssl_list is annotated as readOnlyHint: true
 
 ### Story 4.8: OAuth2 Management Tools
 
@@ -1307,25 +1312,25 @@ So that I can configure OAuth2 authentication without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** OAuth2 server definition parameters (issuer URL, scopes, endpoints)
-**When** `iris.oauth.manage` is called with action "create" and entity "server"
+**When** `iris_oauth_manage` is called with action "create" and entity "server"
 **Then** a new OAuth2 server definition is created (FR60)
 
 **Given** client registration parameters (client name, redirect URIs, grant types)
-**When** `iris.oauth.manage` is called with action "create" and entity "client"
+**When** `iris_oauth_manage` is called with action "create" and entity "client"
 **Then** a new OAuth2 client application is registered (FR60)
 
 **Given** an issuer URL
-**When** `iris.oauth.manage` is called with action "discover"
+**When** `iris_oauth_manage` is called with action "discover"
 **Then** OpenID Connect discovery is performed and the discovered configuration is returned (FR61)
 
 **Given** no parameters or optional filters
-**When** `iris.oauth.list` is called
+**When** `iris_oauth_list` is called
 **Then** OAuth2 configurations are returned including server definitions and registered client details (FR62)
 
 **And** the ExecuteMCPv2.REST.OAuth handler is created and compiles on IRIS
 **And** client secrets are never included in log output (NFR6)
-**And** iris.oauth.manage is annotated as destructiveHint: true
-**And** iris.oauth.list is annotated as readOnlyHint: true
+**And** iris_oauth_manage is annotated as destructiveHint: true
+**And** iris_oauth_list is annotated as readOnlyHint: true
 
 ### Story 4.9: iris-admin-mcp Unit & Integration Tests
 
@@ -1337,19 +1342,19 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance with the ExecuteMCPv2 REST service deployed
 **When** the integration test suite runs
-**Then** iris.namespace.manage creates a test namespace and iris.namespace.list confirms it exists
-**And** iris.database.manage creates a test database and iris.database.list confirms it exists
-**And** iris.mapping.manage creates a test mapping and iris.mapping.list confirms it exists
-**And** iris.user.manage creates a test user and iris.user.get confirms the user properties
-**And** iris.user.roles adds a role to the test user and confirms assignment
-**And** iris.user.password validates a password against policy
-**And** iris.role.manage creates a test role and iris.role.list confirms it exists
-**And** iris.resource.manage creates a test resource and iris.resource.list confirms it exists
-**And** iris.permission.check verifies permissions for the test user/role
-**And** iris.webapp.manage creates a test web application and iris.webapp.get confirms its properties
-**And** iris.webapp.list returns the test web application
-**And** iris.ssl.manage creates a test SSL configuration and iris.ssl.list confirms it exists
-**And** iris.oauth.manage creates a test OAuth2 configuration and iris.oauth.list confirms it exists
+**Then** iris_namespace_manage creates a test namespace and iris_namespace_list confirms it exists
+**And** iris_database_manage creates a test database and iris_database_list confirms it exists
+**And** iris_mapping_manage creates a test mapping and iris_mapping_list confirms it exists
+**And** iris_user_manage creates a test user and iris_user_get confirms the user properties
+**And** iris_user_roles adds a role to the test user and confirms assignment
+**And** iris_user_password validates a password against policy
+**And** iris_role_manage creates a test role and iris_role_list confirms it exists
+**And** iris_resource_manage creates a test resource and iris_resource_list confirms it exists
+**And** iris_permission_check verifies permissions for the test user/role
+**And** iris_webapp_manage creates a test web application and iris_webapp_get confirms its properties
+**And** iris_webapp_list returns the test web application
+**And** iris_ssl_manage creates a test SSL configuration and iris_ssl_list confirms it exists
+**And** iris_oauth_manage creates a test OAuth2 configuration and iris_oauth_list confirms it exists
 
 **And** unit tests (`__tests__/*.test.ts`) with mocked HTTP responses verify parameter validation, response parsing, and error handling for every admin tool
 **And** integration test cleanup follows dependency order: remove web apps before namespaces, remove role assignments before roles, remove users before roles they reference
@@ -1387,36 +1392,36 @@ So that I can manage production lifecycle without opening the Management Portal.
 **Acceptance Criteria:**
 
 **Given** a production class name and namespace
-**When** `iris.production.manage` is called with action "create"
+**When** `iris_production_manage` is called with action "create"
 **Then** a new Interoperability production is created in the specified namespace (FR63)
 
 **Given** an existing production
-**When** `iris.production.manage` is called with action "delete"
+**When** `iris_production_manage` is called with action "delete"
 **Then** the production is removed (FR63)
 
 **Given** an existing production
-**When** `iris.production.control` is called with action "start"
+**When** `iris_production_control` is called with action "start"
 **Then** the production is started (FR64)
 
 **Given** a running production
-**When** `iris.production.control` is called with action "stop", "restart", "update", or "recover"
+**When** `iris_production_control` is called with action "stop", "restart", "update", or "recover"
 **Then** the corresponding lifecycle action is performed (FR64)
 
 **Given** a namespace with a production
-**When** `iris.production.status` is called
+**When** `iris_production_status` is called
 **Then** the production status is returned including name, state (Running/Stopped/Suspended/Troubled), and start time (FR65)
 **And** when the detail flag is true, item-level status is included (each config item's state, adapter, queue count)
 
 **Given** no parameters
-**When** `iris.production.summary` is called
+**When** `iris_production_summary` is called
 **Then** a summary of productions across all namespaces is returned (FR66)
 **And** the tool has scope NONE
 
 **And** the ExecuteMCPv2.REST.Interop handler class is created and compiles on IRIS
 **And** the Dispatch UrlMap is extended with /interop/:entity route and Dispatch is recompiled
-**And** iris.production.manage is annotated as destructiveHint: true
-**And** iris.production.control is annotated as destructiveHint: false (lifecycle management, not data deletion)
-**And** iris.production.status and iris.production.summary are annotated as readOnlyHint: true
+**And** iris_production_manage is annotated as destructiveHint: true
+**And** iris_production_control is annotated as destructiveHint: false (lifecycle management, not data deletion)
+**And** iris_production_status and iris_production_summary are annotated as readOnlyHint: true
 **And** unit tests with mocked HTTP responses verify parameter validation, response parsing, and error handling
 **And** all tools respond within 2 seconds for status queries (NFR1)
 
@@ -1429,31 +1434,31 @@ So that I can fine-tune production behavior without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** a production item name and namespace
-**When** `iris.production.item` is called with action "enable"
+**When** `iris_production_item` is called with action "enable"
 **Then** the specified config item is enabled (FR67)
 
 **Given** a production item name
-**When** `iris.production.item` is called with action "disable"
+**When** `iris_production_item` is called with action "disable"
 **Then** the specified config item is disabled (FR67)
 
 **Given** a production item name
-**When** `iris.production.item` is called with action "get"
+**When** `iris_production_item` is called with action "get"
 **Then** the config item's host and adapter settings are returned (FR68)
 
 **Given** a production item name and settings to update
-**When** `iris.production.item` is called with action "set"
+**When** `iris_production_item` is called with action "set"
 **Then** the config item's host and/or adapter settings are updated (FR68)
 
 **Given** a namespace and production name
-**When** `iris.production.autostart` is called with action "get"
+**When** `iris_production_autostart` is called with action "get"
 **Then** the current auto-start configuration is returned (FR69)
 
 **Given** a namespace, production name, and auto-start flag
-**When** `iris.production.autostart` is called with action "set"
+**When** `iris_production_autostart` is called with action "set"
 **Then** the production auto-start setting is updated (FR69)
 
-**And** iris.production.item with action "get" is annotated as readOnlyHint: true
-**And** iris.production.item with action "set"/"enable"/"disable" is annotated as destructiveHint: false
+**And** iris_production_item with action "get" is annotated as readOnlyHint: true
+**And** iris_production_item with action "set"/"enable"/"disable" is annotated as destructiveHint: false
 **And** all tools have scope NS
 
 ### Story 5.4: Production Monitoring Tools
@@ -1465,21 +1470,21 @@ So that I can troubleshoot production issues through my AI assistant.
 **Acceptance Criteria:**
 
 **Given** a namespace with a production
-**When** `iris.production.logs` is called with optional filters (type, item name, count)
+**When** `iris_production_logs` is called with optional filters (type, item name, count)
 **Then** production event log entries are returned matching the filters (FR70)
 **And** log entries include timestamp, type (Info/Warning/Error), item name, and message text
 
 **Given** a namespace with a running production
-**When** `iris.production.queues` is called
+**When** `iris_production_queues` is called
 **Then** queue status for all production items is returned including queue count and processing rate (FR71)
 
 **Given** a session ID or header ID
-**When** `iris.production.messages` is called
+**When** `iris_production_messages` is called
 **Then** the message flow trace is returned showing the complete path through the production (FR72)
 **And** each step includes source item, target item, message class, timestamp, and status
 
 **Given** an optional category filter (inbound, outbound, process)
-**When** `iris.production.adapters` is called
+**When** `iris_production_adapters` is called
 **Then** available adapter types are returned grouped by category (FR73)
 
 **And** all four tools are annotated as readOnlyHint: true
@@ -1495,40 +1500,40 @@ So that I can configure integration settings without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** credential details (ID, username, password)
-**When** `iris.credential.manage` is called with action "create"
+**When** `iris_credential_manage` is called with action "create"
 **Then** a new Ensemble credential is stored (FR74)
 
 **Given** an existing credential ID
-**When** `iris.credential.manage` is called with action "update" or "delete"
+**When** `iris_credential_manage` is called with action "update" or "delete"
 **Then** the credential is updated or removed (FR74)
 
 **Given** a namespace
-**When** `iris.credential.list` is called
+**When** `iris_credential_list` is called
 **Then** stored credentials are returned (credential IDs and usernames, never passwords) (FR75)
 
 **Given** a lookup table name and key-value pair
-**When** `iris.lookup.manage` is called with action "set"
+**When** `iris_lookup_manage` is called with action "set"
 **Then** the lookup table entry is created or updated (FR76)
 
 **Given** a lookup table name and key
-**When** `iris.lookup.manage` is called with action "get"
+**When** `iris_lookup_manage` is called with action "get"
 **Then** the value for the specified key is returned (FR76)
 
 **Given** a lookup table name and key
-**When** `iris.lookup.manage` is called with action "delete"
+**When** `iris_lookup_manage` is called with action "delete"
 **Then** the lookup table entry is removed (FR76)
 
 **Given** a lookup table name and format "xml"
-**When** `iris.lookup.transfer` is called with action "export"
+**When** `iris_lookup_transfer` is called with action "export"
 **Then** the lookup table is exported in XML format (FR77)
 
 **Given** XML content containing a lookup table
-**When** `iris.lookup.transfer` is called with action "import"
+**When** `iris_lookup_transfer` is called with action "import"
 **Then** the lookup table is imported from the XML (FR77)
 
 **And** credential passwords are never included in list responses or log output (NFR6)
-**And** iris.credential.manage and iris.lookup.manage are annotated as destructiveHint: true
-**And** iris.credential.list is annotated as readOnlyHint: true
+**And** iris_credential_manage and iris_lookup_manage are annotated as destructiveHint: true
+**And** iris_credential_list is annotated as readOnlyHint: true
 
 ### Story 5.6: Rules, Transforms & REST API Tools
 
@@ -1539,36 +1544,36 @@ So that I can inspect and validate integration logic without the Management Port
 **Acceptance Criteria:**
 
 **Given** a namespace
-**When** `iris.rule.list` is called
+**When** `iris_rule_list` is called
 **Then** all business rule classes in the namespace are returned (FR78)
 
 **Given** a rule class name
-**When** `iris.rule.get` is called
+**When** `iris_rule_get` is called
 **Then** the rule definition is returned including conditions, actions, and routing logic (FR78)
 
 **Given** a namespace
-**When** `iris.transform.list` is called
+**When** `iris_transform_list` is called
 **Then** all data transformation classes in the namespace are returned (FR79)
 
 **Given** a transform class name and sample input data
-**When** `iris.transform.test` is called
+**When** `iris_transform_test` is called
 **Then** the transformation is executed against the sample input and the output is returned (FR79)
 
 **Given** an OpenAPI specification
-**When** `iris.interop.rest` is called with action "create"
+**When** `iris_interop_rest` is called with action "create"
 **Then** a REST application is created from the OpenAPI spec (FR80)
 
 **Given** an existing REST application
-**When** `iris.interop.rest` is called with action "delete"
+**When** `iris_interop_rest` is called with action "delete"
 **Then** the REST application is removed (FR80)
 
 **Given** an existing REST application name
-**When** `iris.interop.rest` is called with action "get"
+**When** `iris_interop_rest` is called with action "get"
 **Then** the OpenAPI spec for the REST application is returned (FR80)
 
-**And** iris.rule.list, iris.rule.get, iris.transform.list are annotated as readOnlyHint: true
-**And** iris.transform.test is annotated as readOnlyHint: false (executes code)
-**And** iris.interop.rest is annotated as destructiveHint: true (can delete)
+**And** iris_rule_list, iris_rule_get, iris_transform_list are annotated as readOnlyHint: true
+**And** iris_transform_test is annotated as readOnlyHint: false (executes code)
+**And** iris_interop_rest is annotated as destructiveHint: true (can delete)
 
 ### Story 5.7: iris-interop-mcp Unit & Integration Tests
 
@@ -1580,18 +1585,18 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance with the ExecuteMCPv2 REST service deployed
 **When** the integration test suite runs
-**Then** iris.production.manage creates a test production and iris.production.status confirms it exists
-**And** iris.production.control starts and stops the test production
-**And** iris.production.item retrieves and updates config item settings
-**And** iris.production.autostart gets and sets auto-start configuration
-**And** iris.production.logs returns event log entries for the test production
-**And** iris.production.queues returns queue status
-**And** iris.production.adapters returns available adapter types
-**And** iris.credential.manage creates a test credential and iris.credential.list confirms it exists
-**And** iris.lookup.manage sets and gets a test lookup table entry
-**And** iris.lookup.transfer exports and re-imports the test lookup table
-**And** iris.rule.list returns business rule classes (if any exist in test namespace)
-**And** iris.transform.list returns data transformation classes (if any exist in test namespace)
+**Then** iris_production_manage creates a test production and iris_production_status confirms it exists
+**And** iris_production_control starts and stops the test production
+**And** iris_production_item retrieves and updates config item settings
+**And** iris_production_autostart gets and sets auto-start configuration
+**And** iris_production_logs returns event log entries for the test production
+**And** iris_production_queues returns queue status
+**And** iris_production_adapters returns available adapter types
+**And** iris_credential_manage creates a test credential and iris_credential_list confirms it exists
+**And** iris_lookup_manage sets and gets a test lookup table entry
+**And** iris_lookup_transfer exports and re-imports the test lookup table
+**And** iris_rule_list returns business rule classes (if any exist in test namespace)
+**And** iris_transform_list returns data transformation classes (if any exist in test namespace)
 
 **And** unit tests (`__tests__/*.test.ts`) with mocked HTTP responses verify parameter validation, response parsing, and error handling for every interop tool
 **And** integration test cleanup follows dependency order: stop production before deleting, remove credentials and lookups before production
@@ -1628,19 +1633,19 @@ So that I can monitor IRIS health without dashboards or the Management Portal.
 **Acceptance Criteria:**
 
 **Given** a connected IRIS instance
-**When** `iris.metrics.system` is called
+**When** `iris_metrics_system` is called
 **Then** system metrics are returned in Prometheus text exposition format (FR81)
 **And** metrics include cache hit ratio, database size, process count, and other key indicators
 **And** the tool has scope NONE
 
 **Given** a connected IRIS instance
-**When** `iris.metrics.alerts` is called
+**When** `iris_metrics_alerts` is called
 **Then** active system alerts are returned (FR82)
 **And** each alert includes severity, category, message, and timestamp
 **And** the tool has scope NONE
 
 **Given** a connected IRIS instance
-**When** `iris.metrics.interop` is called
+**When** `iris_metrics_interop` is called
 **Then** interoperability volume and interface metrics are returned (FR83)
 **And** metrics include message throughput, queue depths, and error rates by interface
 **And** the tool has scope NONE
@@ -1660,13 +1665,13 @@ So that I can identify resource contention and long-running processes.
 **Acceptance Criteria:**
 
 **Given** a connected IRIS instance
-**When** `iris.jobs.list` is called
+**When** `iris_jobs_list` is called
 **Then** all running IRIS jobs and processes are returned (FR84)
 **And** each job includes process ID, routine, namespace, state, and start time
 **And** the tool has scope NONE
 
 **Given** a connected IRIS instance
-**When** `iris.locks.list` is called
+**When** `iris_locks_list` is called
 **Then** all current system locks are returned (FR85)
 **And** each lock includes lock name, owner process ID, lock type, and lock count
 **And** the tool has scope NONE
@@ -1683,18 +1688,18 @@ So that I can verify data protection and compliance without the Management Porta
 **Acceptance Criteria:**
 
 **Given** a connected IRIS instance
-**When** `iris.journal.info` is called
+**When** `iris_journal_info` is called
 **Then** journal file information is returned including current journal file, directory, size, and available journal files (FR86)
 **And** the tool executes in %SYS scope
 
 **Given** a connected IRIS instance
-**When** `iris.mirror.status` is called
+**When** `iris_mirror_status` is called
 **Then** mirror configuration, membership, and synchronization status are returned (FR87)
 **And** the response includes member roles (primary/backup/async), sync status, and last sync time
 **And** the tool executes in %SYS scope
 
 **Given** optional filters (time range, user, event type)
-**When** `iris.audit.events` is called
+**When** `iris_audit_events` is called
 **Then** matching audit log events are returned (FR88)
 **And** each event includes timestamp, user, event type, description, and source
 **And** the tool executes in %SYS scope
@@ -1711,19 +1716,19 @@ So that I can verify system health and capacity.
 **Acceptance Criteria:**
 
 **Given** a connected IRIS instance
-**When** `iris.database.check` is called
+**When** `iris_database_check` is called
 **Then** database integrity status is returned for all databases or a specified database (FR89)
 **And** the response includes last integrity check time and any reported issues
 **And** the tool executes in %SYS scope
 
 **Given** a connected IRIS instance
-**When** `iris.license.info` is called
+**When** `iris_license_info` is called
 **Then** license usage and details are returned (FR90)
 **And** the response includes license type, total capacity, current usage, and expiration date
 **And** the tool has scope NONE
 
 **Given** a connected IRIS instance
-**When** `iris.ecp.status` is called
+**When** `iris_ecp_status` is called
 **Then** ECP client and server connection status is returned (FR91)
 **And** the response includes connected data servers, application servers, and connection health
 **And** the tool executes in %SYS scope
@@ -1739,35 +1744,35 @@ So that I can automate IRIS maintenance without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** task details (name, class/routine to execute, schedule, namespace)
-**When** `iris.task.manage` is called with action "create"
+**When** `iris_task_manage` is called with action "create"
 **Then** a new scheduled task is created on IRIS (FR92)
 
 **Given** an existing task ID
-**When** `iris.task.manage` is called with action "modify"
+**When** `iris_task_manage` is called with action "modify"
 **Then** the task configuration is updated (FR92)
 
 **Given** an existing task ID
-**When** `iris.task.manage` is called with action "delete"
+**When** `iris_task_manage` is called with action "delete"
 **Then** the scheduled task is removed (FR92)
 
 **Given** no parameters or optional filters
-**When** `iris.task.list` is called
+**When** `iris_task_list` is called
 **Then** all scheduled tasks are returned with their schedules, last run time, and next run time (FR93)
 
 **Given** a task ID
-**When** `iris.task.run` is called
+**When** `iris_task_run` is called
 **Then** the task is executed immediately regardless of its schedule (FR94)
 **And** the response confirms execution was triggered
 
 **Given** a task ID
-**When** `iris.task.history` is called
+**When** `iris_task_history` is called
 **Then** the task execution history is returned including past run times, status (success/failure), and duration (FR95)
 
 **And** the ExecuteMCPv2.REST.Task handler class is created and compiles on IRIS
 **And** all tools execute in %SYS scope
-**And** iris.task.manage is annotated as destructiveHint: true
-**And** iris.task.list and iris.task.history are annotated as readOnlyHint: true
-**And** iris.task.run is annotated as destructiveHint: false (triggers execution, doesn't delete)
+**And** iris_task_manage is annotated as destructiveHint: true
+**And** iris_task_list and iris_task_history are annotated as readOnlyHint: true
+**And** iris_task_run is annotated as destructiveHint: false (triggers execution, doesn't delete)
 
 ### Story 6.7: System Configuration Tools
 
@@ -1778,33 +1783,33 @@ So that I can manage system settings without the Management Portal.
 **Acceptance Criteria:**
 
 **Given** a configuration section or parameter name
-**When** `iris.config.manage` is called with action "get"
+**When** `iris_config_manage` is called with action "get"
 **Then** the current value of the specified system configuration parameter is returned (FR96)
 
 **Given** a configuration parameter name and new value
-**When** `iris.config.manage` is called with action "set"
+**When** `iris_config_manage` is called with action "set"
 **Then** the system configuration parameter is updated (FR96)
 
 **Given** a request for startup configuration
-**When** `iris.config.manage` is called with action "get" and section "startup"
+**When** `iris_config_manage` is called with action "get" and section "startup"
 **Then** the startup configuration is returned (FR97)
 
 **Given** a request for startup configuration changes
-**When** `iris.config.manage` is called with action "set" and section "startup"
+**When** `iris_config_manage` is called with action "set" and section "startup"
 **Then** the startup configuration is updated (FR97)
 
 **Given** a request for NLS/locale configuration
-**When** `iris.config.manage` is called with action "get" and section "locale"
+**When** `iris_config_manage` is called with action "get" and section "locale"
 **Then** the NLS/locale configuration is returned (FR98)
 
 **Given** no parameters
-**When** `iris.config.manage` is called with action "export"
+**When** `iris_config_manage` is called with action "export"
 **Then** the complete system configuration is exported (FR99)
 
 **And** the ExecuteMCPv2.REST.SystemConfig handler class is created and compiles on IRIS
 **And** the tool executes in %SYS scope
-**And** iris.config.manage with action "get" and "export" is annotated as readOnlyHint: true
-**And** iris.config.manage with action "set" is annotated as destructiveHint: true (modifying system config is high-impact)
+**And** iris_config_manage with action "get" and "export" is annotated as readOnlyHint: true
+**And** iris_config_manage with action "set" is annotated as destructiveHint: true (modifying system config is high-impact)
 **And** inputs are validated at the REST boundary (NFR10)
 
 ### Story 6.8: iris-ops-mcp Unit & Integration Tests
@@ -1817,20 +1822,20 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance with the ExecuteMCPv2 REST service deployed
 **When** the integration test suite runs
-**Then** iris.metrics.system returns Prometheus-format metrics
-**And** iris.metrics.alerts returns alerts (possibly empty if no active alerts)
-**And** iris.metrics.interop returns interoperability metrics
-**And** iris.jobs.list returns running jobs
-**And** iris.locks.list returns current locks (possibly empty)
-**And** iris.journal.info returns journal file information
-**And** iris.mirror.status returns mirror configuration (or indicates mirroring is not configured)
-**And** iris.audit.events returns audit events for a recent time range
-**And** iris.database.check returns integrity status
-**And** iris.license.info returns license details
-**And** iris.ecp.status returns ECP status (or indicates ECP is not configured)
-**And** iris.task.manage creates a test task and iris.task.list confirms it exists
-**And** iris.task.run triggers the test task and iris.task.history shows the execution
-**And** iris.config.manage retrieves a known system configuration parameter
+**Then** iris_metrics_system returns Prometheus-format metrics
+**And** iris_metrics_alerts returns alerts (possibly empty if no active alerts)
+**And** iris_metrics_interop returns interoperability metrics
+**And** iris_jobs_list returns running jobs
+**And** iris_locks_list returns current locks (possibly empty)
+**And** iris_journal_info returns journal file information
+**And** iris_mirror_status returns mirror configuration (or indicates mirroring is not configured)
+**And** iris_audit_events returns audit events for a recent time range
+**And** iris_database_check returns integrity status
+**And** iris_license_info returns license details
+**And** iris_ecp_status returns ECP status (or indicates ECP is not configured)
+**And** iris_task_manage creates a test task and iris_task_list confirms it exists
+**And** iris_task_run triggers the test task and iris_task_history shows the execution
+**And** iris_config_manage retrieves a known system configuration parameter
 
 **And** unit tests (`__tests__/*.test.ts`) with mocked HTTP responses verify parameter validation, response parsing, and error handling for every ops tool
 **And** each integration test cleans up any created resources (test tasks) after execution
@@ -1867,49 +1872,49 @@ So that I can work with IRIS document storage without writing SQL or using the M
 **Acceptance Criteria:**
 
 **Given** a database name and optional property definitions
-**When** `iris.docdb.manage` is called with action "create"
+**When** `iris_docdb_manage` is called with action "create"
 **Then** a new document database is created in the specified namespace (FR100)
 
 **Given** an existing document database name
-**When** `iris.docdb.manage` is called with action "drop"
+**When** `iris_docdb_manage` is called with action "drop"
 **Then** the document database is dropped (FR100)
 
 **Given** a document database name and document content (JSON)
-**When** `iris.docdb.document` is called with action "insert"
+**When** `iris_docdb_document` is called with action "insert"
 **Then** a new document is inserted and its generated ID is returned (FR101)
 
 **Given** a document database name and document ID
-**When** `iris.docdb.document` is called with action "get"
+**When** `iris_docdb_document` is called with action "get"
 **Then** the document content is retrieved by ID (FR101)
 
 **Given** a document database name, document ID, and updated content
-**When** `iris.docdb.document` is called with action "update"
+**When** `iris_docdb_document` is called with action "update"
 **Then** the document is updated (FR101)
 
 **Given** a document database name and document ID
-**When** `iris.docdb.document` is called with action "delete"
+**When** `iris_docdb_document` is called with action "delete"
 **Then** the document is deleted (FR101)
 
 **Given** a document database name and filter criteria (JSON query)
-**When** `iris.docdb.find` is called
+**When** `iris_docdb_find` is called
 **Then** matching documents are returned based on the filter (FR102)
 **And** filter supports comparison operators ($eq, $lt, $gt, $ne, etc.)
 
 **Given** a document database name and property definition (name, type)
-**When** `iris.docdb.property` is called with action "create"
+**When** `iris_docdb_property` is called with action "create"
 **Then** a new property is defined on the document database (FR103)
 
 **Given** a document database name and property name
-**When** `iris.docdb.property` is called with action "drop"
+**When** `iris_docdb_property` is called with action "drop"
 **Then** the property is removed (FR103)
 
 **Given** a document database name and property name
-**When** `iris.docdb.property` is called with action "index"
+**When** `iris_docdb_property` is called with action "index"
 **Then** an index is created on the specified property (FR103)
 
-**And** iris.docdb.manage is annotated as destructiveHint: true (can drop databases)
-**And** iris.docdb.document with action "delete" is annotated as destructiveHint: true
-**And** iris.docdb.find is annotated as readOnlyHint: true
+**And** iris_docdb_manage is annotated as destructiveHint: true (can drop databases)
+**And** iris_docdb_document with action "delete" is annotated as destructiveHint: true
+**And** iris_docdb_find is annotated as readOnlyHint: true
 **And** all tools have scope NS
 **And** all inputs are validated at the REST boundary (NFR10)
 
@@ -1922,31 +1927,31 @@ So that I can run analytics and maintain BI infrastructure without the Managemen
 **Acceptance Criteria:**
 
 **Given** an MDX query string and a namespace
-**When** `iris.analytics.mdx` is called
+**When** `iris_analytics_mdx` is called
 **Then** the MDX query is executed against the specified DeepSee cube and results are returned as a structured pivot table (FR104)
 **And** the response includes axis labels, measure values, and dimension members
 
 **Given** an invalid MDX query
-**When** `iris.analytics.mdx` is called
+**When** `iris_analytics_mdx` is called
 **Then** an MCP tool error is returned with the MDX error message
 
 **Given** a namespace
-**When** `iris.analytics.cubes` is called with action "list"
+**When** `iris_analytics_cubes` is called with action "list"
 **Then** all available DeepSee cubes in the namespace are returned (FR105)
 **And** each cube includes its name, source class, last build time, and record count
 
 **Given** a cube name
-**When** `iris.analytics.cubes` is called with action "build"
+**When** `iris_analytics_cubes` is called with action "build"
 **Then** a full cube rebuild is triggered (FR105)
 
 **Given** a cube name
-**When** `iris.analytics.cubes` is called with action "sync"
+**When** `iris_analytics_cubes` is called with action "sync"
 **Then** an incremental cube synchronization is triggered (FR105)
 
 **And** the ExecuteMCPv2.REST.Analytics handler class is created and compiles on IRIS
-**And** iris.analytics.mdx is annotated as readOnlyHint: true
-**And** iris.analytics.cubes with action "list" is annotated as readOnlyHint: true
-**And** iris.analytics.cubes with action "build"/"sync" is annotated as destructiveHint: false (rebuilds data, doesn't delete)
+**And** iris_analytics_mdx is annotated as readOnlyHint: true
+**And** iris_analytics_cubes with action "list" is annotated as readOnlyHint: true
+**And** iris_analytics_cubes with action "build"/"sync" is annotated as destructiveHint: false (rebuilds data, doesn't delete)
 **And** all tools have scope NS
 **And** MDX queries respond within 5 seconds for typical cube sizes (NFR1)
 
@@ -1959,25 +1964,25 @@ So that I can inspect REST services and know that debug features are planned for
 **Acceptance Criteria:**
 
 **Given** a namespace
-**When** `iris.rest.manage` is called with action "list"
+**When** `iris_rest_manage` is called with action "list"
 **Then** available REST API dispatch classes and their URL maps in the namespace are returned
 
 **Given** a REST application name
-**When** `iris.rest.manage` is called with action "get"
+**When** `iris_rest_manage` is called with action "get"
 **Then** the REST application details (dispatch class, URL map, routes) are returned
 
 **Given** an existing REST application
-**When** `iris.rest.manage` is called with action "delete"
+**When** `iris_rest_manage` is called with action "delete"
 **Then** the REST application is removed
 
-**Note:** Creating REST applications from OpenAPI specs is handled by `iris.interop.rest` (FR80) in iris-interop-mcp, not this tool. `iris.rest.manage` provides REST API viewing and management from the data/management perspective via the Management API.
+**Note:** Creating REST applications from OpenAPI specs is handled by `iris_interop_rest` (FR80) in iris-interop-mcp, not this tool. `iris_rest_manage` provides REST API viewing and management from the data/management perspective via the Management API.
 
 **Given** a client that lists tools
 **When** `tools/list` is called on iris-data-mcp
-**Then** iris.debug.session and iris.debug.terminal are NOT listed (deferred to post-MVP, FR106-FR107)
+**Then** iris_debug_session and iris_debug_terminal are NOT listed (deferred to post-MVP, FR106-FR107)
 **And** the debug.ts tool file exists as a placeholder with a code comment indicating these tools are deferred to post-MVP and will require WebSocket transport
 
-**And** iris.rest.manage is annotated as destructiveHint: true (can delete)
+**And** iris_rest_manage is annotated as destructiveHint: true (can delete)
 **And** the tool has scope NS
 
 ### Story 7.5: iris-data-mcp Unit & Integration Tests
@@ -1990,16 +1995,16 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 **Given** a local IRIS development instance with the ExecuteMCPv2 REST service deployed
 **When** the integration test suite runs
-**Then** iris.docdb.manage creates a test document database
-**And** iris.docdb.property creates a property and an index on the test database
-**And** iris.docdb.document inserts a test document and retrieves it by ID
-**And** iris.docdb.document updates the test document and confirms the update
-**And** iris.docdb.find queries the test database with a filter and returns matching documents
-**And** iris.docdb.document deletes the test document and confirms deletion
-**And** iris.docdb.manage drops the test database
-**And** iris.analytics.cubes lists available cubes (may be empty if no cubes configured)
-**And** iris.analytics.mdx executes a simple MDX query against a cube (if cubes exist, otherwise verifies error handling)
-**And** iris.rest.manage lists REST applications in the namespace
+**Then** iris_docdb_manage creates a test document database
+**And** iris_docdb_property creates a property and an index on the test database
+**And** iris_docdb_document inserts a test document and retrieves it by ID
+**And** iris_docdb_document updates the test document and confirms the update
+**And** iris_docdb_find queries the test database with a filter and returns matching documents
+**And** iris_docdb_document deletes the test document and confirms deletion
+**And** iris_docdb_manage drops the test database
+**And** iris_analytics_cubes lists available cubes (may be empty if no cubes configured)
+**And** iris_analytics_mdx executes a simple MDX query against a cube (if cubes exist, otherwise verifies error handling)
+**And** iris_rest_manage lists REST applications in the namespace
 
 **And** unit tests (`__tests__/*.test.ts`) with mocked HTTP responses verify parameter validation, response parsing, and error handling for every data tool
 **And** integration test cleanup follows dependency order: delete documents before dropping properties/indexes, drop database last
@@ -2061,7 +2066,7 @@ So that I can upgrade without losing functionality.
 
 **Given** the docs/ directory
 **When** a v1 user views docs/migration-v1-v2.md
-**Then** a complete tool mapping table shows every v1 tool and its v2 equivalent (e.g., execute_command → iris.execute.command in iris-dev-mcp)
+**Then** a complete tool mapping table shows every v1 tool and its v2 equivalent (e.g., execute_command → iris_execute_command in iris-dev-mcp)
 **And** breaking changes are clearly listed: connection change (SuperServer port 1972 → web port 52773), Python → Node.js, tool name changes
 **And** configuration migration steps show how to update MCP client config from v1 to v2
 **And** a note about the namespace parameter behavior being preserved
@@ -2130,3 +2135,126 @@ So that I don't have to install and configure five packages individually.
 **When** a user views it
 **Then** it explains the meta-package purpose and links to individual server documentation
 **And** it shows MCP client configuration for running all five servers
+
+## Epic 9: Tool Name Flattening for Anthropic API / Claude Desktop Compatibility
+
+During beta testing prior to first npm publish, a user attempting to install the IRIS MCP v2 suite in Claude Desktop received *"tool name not valid"* errors. Research confirmed the root cause: the MCP specification permits dots in tool names (`^[a-zA-Z0-9._-]{1,128}$`), but the Anthropic Messages API `tools[].name` field uses a stricter regex (`^[a-zA-Z0-9_-]+$`) that rejects dots. Claude Desktop routes tool registrations through the Anthropic Messages API and rejects them at registration time. Claude Code silently rewrites dots to underscores in its `mcp__{server}__{tool}` prefix, which is why the defect was invisible during the development of Epics 1–8.
+
+The epic flattens all 85 tool names from `iris.<domain>.<verb>` to `iris_<domain>_<verb>`, updates package READMEs and test suites to match, adds a regression-guard unit test that prevents the pattern from ever returning, creates a root CHANGELOG documenting the pre-release breaking change, and performs a live Claude Desktop smoke test to confirm the fix before npm publish.
+
+**Scope:** Mechanical rename across `packages/*/src/tools/` and test files, regeneration of 5 package READMEs, new `tool-naming.test.ts` regression guard, `CHANGELOG.md` creation, clone-install banner update, and a live Claude Desktop compatibility smoke test.
+
+**Out of scope:**
+- Historical planning snapshots (product brief, implementation-readiness report, 2026-04-06 sprint-change-proposal, prior epic retrospectives) — frozen as point-in-time records
+- Living planning artifacts (`architecture.md`, `prd.md`, `epics.md`) — **already updated by the analyst on 2026-04-09** as part of the Sprint Change Proposal, including a new "Tool Naming Convention" subsection in architecture.md
+- Any tool capability or signature change
+- Any rename beyond the dot-strip character swap (no server-scoping, no hyphens)
+
+**Driving document:** [`sprint-change-proposal-2026-04-09.md`](sprint-change-proposal-2026-04-09.md)
+
+### Story 9.1: Rename Tool Identifiers in Source and Tests
+
+As a user of Claude Desktop or any MCP client that routes through the Anthropic Messages API,
+I want all IRIS MCP v2 tool names to match `^[a-z0-9_]+$`,
+So that the suite registers successfully without "tool name not valid" errors.
+
+**Acceptance Criteria:**
+
+**Given** all 36 tool definition files under `packages/*/src/tools/`
+**When** a developer searches for the pattern `name:\s*"iris\.`
+**Then** zero matches are returned
+**And** all 85 tool definitions use the pattern `name: "iris_<domain>_<verb>"` with only lowercase ASCII letters, digits, and underscores
+
+**Given** the iris-dev-mcp, iris-admin-mcp, iris-interop-mcp, iris-ops-mcp, and iris-data-mcp packages
+**When** each package is built (`npm run build`)
+**Then** TypeScript compilation succeeds with no errors
+**And** each server's `tools/list` returns the expected count with the new flat names when connected via an MCP client
+
+**Given** all test files under `packages/**/__tests__/**/*.test.ts`
+**When** a developer searches for the pattern `iris\.[a-z]+\.[a-z]+` (excluding ObjectScript class/file references like `MyClass.cls`)
+**Then** zero matches are returned
+**And** all test assertions, mock fixtures, and `describe`/`it` block descriptions reference the new flat tool names
+
+**Given** the full test suite
+**When** `npm test` is run across the monorepo
+**Then** all unit tests pass
+**And** all integration tests pass
+**And** no test was skipped or disabled to achieve this
+
+**Given** the transformation is mechanical
+**When** the pattern `iris\.([a-z_]+)\.([a-z_]+)` is replaced by `iris_$1_$2`
+**Then** each of the 85 original tool names maps to exactly one new name with no collisions
+**And** tool names remain unique across all 5 server packages
+
+### Story 9.2: Documentation, CHANGELOG, and Regression Guard
+
+As a developer maintaining the IRIS MCP v2 suite,
+I want the package READMEs, CHANGELOG, and a regression-guard test to reflect the flat tool naming convention,
+So that documentation is accurate and the dot-notation defect can never silently return.
+
+**Acceptance Criteria:**
+
+**Given** the 5 package README files (`packages/iris-dev-mcp/README.md`, `packages/iris-admin-mcp/README.md`, `packages/iris-interop-mcp/README.md`, `packages/iris-ops-mcp/README.md`, `packages/iris-data-mcp/README.md`)
+**When** a developer searches each README for the pattern `iris\.[a-z]+\.[a-z]+`
+**Then** zero matches are returned
+**And** all tool tables, usage examples, and inline references use the flat underscore naming
+**And** narrative content (installation, env vars, annotations descriptions) is unchanged except for the tool-name strings
+
+**Given** the `packages/shared/src/__tests__/` directory
+**When** a developer inspects the test file list
+**Then** a new file `tool-naming.test.ts` exists
+**And** the test iterates every tool registered across all 5 server packages
+**And** the test asserts every `tool.name` matches `/^[a-z0-9_]{1,64}$/`
+**And** the test asserts tool names are unique across the suite (no collisions)
+**And** the test passes when run via `npm test`
+
+**Given** the repository root
+**When** a developer inspects the file list
+**Then** a new `CHANGELOG.md` file exists
+**And** its first entry documents the pre-release breaking change with the header "[Pre-release breaking change — 2026-04-09]"
+**And** the entry explains the rename (`iris.doc.get` → `iris_doc_get`), the reason (Anthropic API / Claude Desktop compatibility), and the audience impact (Claude Desktop beta users affected, Claude Code users unaffected)
+
+**Given** the root `README.md` pre-release banner
+**When** a clone-install beta user reads it after pulling the latest
+**Then** the banner includes a one-line note pointing at `CHANGELOG.md` for the breaking change
+
+**Given** the bootstrap generator (`npm run gen:bootstrap`)
+**When** the developer runs the generator after stories 9.1 and 9.2 are complete
+**Then** the generator produces a diff on `packages/shared/src/bootstrap-classes.ts` that is either empty or contains only changes the developer understands and intends
+**And** any non-empty diff is committed as part of Story 9.2
+
+### Story 9.3: Pre-Publish Smoke Test and Beta-User Notification
+
+As a release engineer,
+I want a live Claude Desktop installation smoke test and a beta-user notification,
+So that the first npm publish ships a suite that is verified to work on the platform that surfaced the original defect.
+
+**Acceptance Criteria:**
+
+**Given** a clean Claude Desktop installation with no prior IRIS MCP configuration
+**When** a tester configures Claude Desktop with the iris-dev-mcp server using the config snippet from `docs/client-config/claude-desktop.md`
+**And** restarts Claude Desktop
+**Then** Claude Desktop loads the server without any "tool name not valid" errors
+**And** all 20 iris-dev-mcp tools appear in Claude Desktop's tool list
+**And** at least 3 tools can be invoked successfully end-to-end against a live IRIS instance (e.g., `iris_server_info`, `iris_doc_list`, `iris_sql_execute`)
+
+**Given** the same Claude Desktop instance
+**When** the tester configures it with all 5 servers (dev, admin, interop, ops, data)
+**And** restarts Claude Desktop
+**Then** all 5 servers load without errors
+**And** the full tool count is visible (85 tools total)
+
+**Given** the beta user who reported the original defect
+**When** the tester (or the developer) notifies them that Epic 9 is complete
+**Then** the notification points at the relevant CHANGELOG entry
+**And** the notification explains that cloning the latest main branch and restarting Claude Desktop should resolve the error
+
+**Given** the full monorepo test suite including the new `tool-naming.test.ts` regression guard
+**When** the developer runs `npm test` from the repository root
+**Then** all tests pass
+**And** the new regression guard test is included in the run
+
+**Given** all success criteria from this epic are met
+**When** the developer confirms readiness for first npm publish
+**Then** no Epic 9 work items remain open in `sprint-status.yaml`
+**And** the path to `npm publish` for each package is unblocked

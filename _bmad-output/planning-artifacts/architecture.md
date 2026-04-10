@@ -292,7 +292,7 @@ The TypeScript side maps: `status.errors` empty → MCP `content`/`structuredCon
 **Tool Registration: Declarative ToolDefinition Objects**
 ```typescript
 interface ToolDefinition {
-  name: string;                    // e.g., "iris.doc.get"
+  name: string;                    // e.g., "iris_doc_get"
   title: string;                   // Human-readable title
   description: string;             // LLM-optimized description
   inputSchema: ZodObject;          // Zod schema for validation
@@ -304,7 +304,15 @@ interface ToolDefinition {
 ```
 - Each server package exports an array of ToolDefinition objects
 - Shared `server-base.ts` handles: MCP registration, Zod validation, pagination, listChanged notifications, namespace injection based on `scope`, and transport setup (stdio/HTTP)
-- Annotation patterns enforced by the shared base: `*.list`/`*.get` → readOnly, `*.manage` → destructive, etc.
+- Annotation patterns enforced by the shared base: `*_list`/`*_get` → readOnly, `*_manage` → destructive, etc.
+
+**Tool Naming Convention: Flat Underscore**
+
+Tool names use the flat `iris_<domain>_<verb>` pattern — lowercase ASCII letters, digits, and underscores only. Examples: `iris_doc_get`, `iris_task_manage`, `iris_execute_classmethod`.
+
+This convention matches the Anthropic Messages API `tools[].name` regex `^[a-zA-Z0-9_-]+$`, which is stricter than the MCP specification. The MCP spec (2025-03-26) permits dots in tool names, but Claude Desktop — which routes tool registrations through the Anthropic Messages API — rejects dotted names at registration time with a "tool name not valid" error. Claude Code silently rewrites dotted names to underscores as part of its internal `mcp__{server}__{tool}` prefixing, but other MCP clients may not. The flat underscore convention is the only naming style that works reliably across all current MCP clients in the ecosystem.
+
+**Enforcement:** A regression test in `packages/shared/src/__tests__/tool-naming.test.ts` iterates every registered tool across all 5 servers and asserts `/^[a-z0-9_]{1,64}$/`, preventing any future regression from landing. The rename from the original dot-notation (`iris.doc.get`) to flat underscore (`iris_doc_get`) was performed in Epic 9 after the defect was discovered during beta testing.
 
 **Pagination: Server-Controlled, Opaque Cursors**
 - Default 50 tools per page (spec-compliant but practically single-page for all servers — max is 22 tools)
@@ -415,7 +423,7 @@ packages/iris-dev-mcp/
 **Test Organization:**
 - Unit tests: `__tests__/{module}.test.ts` — co-located within each package, mocked HTTP responses
 - Integration tests: `__tests__/{module}.integration.test.ts` — suffix distinguishes, runs against local IRIS instance
-- Test naming: `describe("iris.doc.get")` → `it("should retrieve a class document by name")`
+- Test naming: `describe("iris_doc_get")` → `it("should retrieve a class document by name")`
 
 **ObjectScript Class Organization:**
 ```
@@ -444,7 +452,7 @@ Every tool handler follows the same structure:
 ```typescript
 // In tools/doc.ts
 export const docGetTool: ToolDefinition = {
-  name: "iris.doc.get",
+  name: "iris_doc_get",
   title: "Get Document",
   description: "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
     "Use this when the user asks to read or view source code. " +
@@ -523,7 +531,7 @@ If '$Data(^UnitTestRoot) {
 Set tSC = ##class(%UnitTest.Manager).RunTest(testspec, "/noload/nodelete")
 ```
 - `^UnitTestRoot` is namespace-specific — the guard runs in whichever namespace the tests execute in
-- The MCP tool caller (`iris.execute.tests`) should never need to know about `^UnitTestRoot` — the REST handler handles it transparently
+- The MCP tool caller (`iris_execute_tests`) should never need to know about `^UnitTestRoot` — the REST handler handles it transparently
 - Fresh namespaces get `^UnitTestRoot = ""` automatically; pre-configured namespaces are left untouched
 
 **Error Message Pattern:**
@@ -623,12 +631,12 @@ iris-mcp-v2/
 │   │   │   ├── index.ts              # Entry: create McpServer, register tools, connect transport
 │   │   │   └── tools/
 │   │   │       ├── index.ts          # Barrel export of all ToolDefinition arrays
-│   │   │       ├── doc.ts            # iris.doc.get/put/delete/list/compile/search/index/xml_export/convert (FR16-FR31)
-│   │   │       ├── macro.ts          # iris.macro.info (FR27)
-│   │   │       ├── sql.ts            # iris.sql.execute (FR32)
-│   │   │       ├── global.ts         # iris.global.get/set/kill/list (FR33-FR36) — custom REST
-│   │   │       ├── execute.ts        # iris.execute.command/classmethod/tests (FR37-FR39) — custom REST
-│   │   │       └── server.ts         # iris.server.info/namespace (FR2, server info)
+│   │   │       ├── doc.ts            # iris_doc_get/put/delete/list/compile/search/index/xml_export/convert (FR16-FR31)
+│   │   │       ├── macro.ts          # iris_macro_info (FR27)
+│   │   │       ├── sql.ts            # iris_sql_execute (FR32)
+│   │   │       ├── global.ts         # iris_global_get/set/kill/list (FR33-FR36) — custom REST
+│   │   │       ├── execute.ts        # iris_execute_command/classmethod/tests (FR37-FR39) — custom REST
+│   │   │       └── server.ts         # iris_server_info/namespace (FR2, server info)
 │   │   ├── __tests__/
 │   │   │   ├── doc.test.ts           # Unit: mocked Atelier API responses
 │   │   │   ├── doc.integration.test.ts
@@ -646,15 +654,15 @@ iris-mcp-v2/
 │   │   │   ├── index.ts
 │   │   │   └── tools/
 │   │   │       ├── index.ts
-│   │   │       ├── namespace.ts      # iris.namespace.manage/list (FR40-FR41)
-│   │   │       ├── database.ts       # iris.database.manage/list (FR42-FR43)
-│   │   │       ├── mapping.ts        # iris.mapping.manage/list (FR44-FR45)
-│   │   │       ├── user.ts           # iris.user.manage/get/roles/password (FR46-FR49)
-│   │   │       ├── role.ts           # iris.role.manage/list (FR50-FR51)
-│   │   │       ├── resource.ts       # iris.resource.manage/list/permission.check (FR52-FR54)
-│   │   │       ├── webapp.ts         # iris.webapp.manage/get/list (FR55-FR57)
-│   │   │       ├── ssl.ts            # iris.ssl.manage/list (FR58-FR59)
-│   │   │       └── oauth.ts          # iris.oauth.manage/list (FR60-FR62)
+│   │   │       ├── namespace.ts      # iris_namespace_manage/list (FR40-FR41)
+│   │   │       ├── database.ts       # iris_database_manage/list (FR42-FR43)
+│   │   │       ├── mapping.ts        # iris_mapping_manage/list (FR44-FR45)
+│   │   │       ├── user.ts           # iris_user_manage/get/roles/password (FR46-FR49)
+│   │   │       ├── role.ts           # iris_role_manage/list (FR50-FR51)
+│   │   │       ├── resource.ts       # iris_resource_manage/list/permission.check (FR52-FR54)
+│   │   │       ├── webapp.ts         # iris_webapp_manage/get/list (FR55-FR57)
+│   │   │       ├── ssl.ts            # iris_ssl_manage/list (FR58-FR59)
+│   │   │       └── oauth.ts          # iris_oauth_manage/list (FR60-FR62)
 │   │   ├── __tests__/
 │   │   │   ├── namespace.test.ts
 │   │   │   ├── namespace.integration.test.ts
@@ -669,13 +677,13 @@ iris-mcp-v2/
 │   │   │   ├── index.ts
 │   │   │   └── tools/
 │   │   │       ├── index.ts
-│   │   │       ├── production.ts     # iris.production.manage/control/status/summary/item/autostart (FR63-FR69)
-│   │   │       ├── production-monitor.ts  # iris.production.logs/queues/messages/adapters (FR70-FR73)
-│   │   │       ├── credential.ts     # iris.credential.manage/list (FR74-FR75)
-│   │   │       ├── lookup.ts         # iris.lookup.manage/transfer (FR76-FR77)
-│   │   │       ├── rule.ts           # iris.rule.list/get (FR78)
-│   │   │       ├── transform.ts      # iris.transform.list/test (FR79)
-│   │   │       └── rest.ts           # iris.interop.rest (FR80)
+│   │   │       ├── production.ts     # iris_production_manage/control/status/summary/item/autostart (FR63-FR69)
+│   │   │       ├── production-monitor.ts  # iris_production_logs/queues/messages/adapters (FR70-FR73)
+│   │   │       ├── credential.ts     # iris_credential_manage/list (FR74-FR75)
+│   │   │       ├── lookup.ts         # iris_lookup_manage/transfer (FR76-FR77)
+│   │   │       ├── rule.ts           # iris_rule_list/get (FR78)
+│   │   │       ├── transform.ts      # iris_transform_list/test (FR79)
+│   │   │       └── rest.ts           # iris_interop_rest (FR80)
 │   │   ├── __tests__/
 │   │   │   ├── production.test.ts
 │   │   │   ├── production.integration.test.ts
@@ -688,17 +696,17 @@ iris-mcp-v2/
 │   │   │   ├── index.ts
 │   │   │   └── tools/
 │   │   │       ├── index.ts
-│   │   │       ├── metrics.ts        # iris.metrics.system/alerts/interop (FR81-FR83)
-│   │   │       ├── jobs.ts           # iris.jobs.list (FR84)
-│   │   │       ├── locks.ts          # iris.locks.list (FR85)
-│   │   │       ├── journal.ts        # iris.journal.info (FR86)
-│   │   │       ├── mirror.ts         # iris.mirror.status (FR87)
-│   │   │       ├── audit.ts          # iris.audit.events (FR88)
-│   │   │       ├── database.ts       # iris.database.check (FR89)
-│   │   │       ├── license.ts        # iris.license.info (FR90)
-│   │   │       ├── ecp.ts            # iris.ecp.status (FR91)
-│   │   │       ├── task.ts           # iris.task.manage/list/run/history (FR92-FR95)
-│   │   │       └── config.ts         # iris.config.manage (FR96-FR99)
+│   │   │       ├── metrics.ts        # iris_metrics_system/alerts/interop (FR81-FR83)
+│   │   │       ├── jobs.ts           # iris_jobs_list (FR84)
+│   │   │       ├── locks.ts          # iris_locks_list (FR85)
+│   │   │       ├── journal.ts        # iris_journal_info (FR86)
+│   │   │       ├── mirror.ts         # iris_mirror_status (FR87)
+│   │   │       ├── audit.ts          # iris_audit_events (FR88)
+│   │   │       ├── database.ts       # iris_database_check (FR89)
+│   │   │       ├── license.ts        # iris_license_info (FR90)
+│   │   │       ├── ecp.ts            # iris_ecp_status (FR91)
+│   │   │       ├── task.ts           # iris_task_manage/list/run/history (FR92-FR95)
+│   │   │       └── config.ts         # iris_config_manage (FR96-FR99)
 │   │   ├── __tests__/
 │   │   │   └── ...
 │   │   ├── package.json              # name: @iris-mcp/ops
@@ -709,10 +717,10 @@ iris-mcp-v2/
 │   │   │   ├── index.ts
 │   │   │   └── tools/
 │   │   │       ├── index.ts
-│   │   │       ├── docdb.ts          # iris.docdb.manage/document/find/property (FR100-FR103)
-│   │   │       ├── analytics.ts      # iris.analytics.mdx/cubes (FR104-FR105)
-│   │   │       ├── debug.ts          # iris.debug.session/terminal (FR106-FR107, post-MVP placeholder)
-│   │   │       └── rest.ts           # iris.rest.manage
+│   │   │       ├── docdb.ts          # iris_docdb_manage/document/find/property (FR100-FR103)
+│   │   │       ├── analytics.ts      # iris_analytics_mdx/cubes (FR104-FR105)
+│   │   │       ├── debug.ts          # iris_debug_session/terminal (FR106-FR107, post-MVP placeholder)
+│   │   │       └── rest.ts           # iris_rest_manage
 │   │   ├── __tests__/
 │   │   │   └── ...
 │   │   ├── package.json              # name: @iris-mcp/data
