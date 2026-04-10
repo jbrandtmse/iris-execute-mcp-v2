@@ -13,12 +13,36 @@ import { IrisHttpClient } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
 import { atelierPath } from "./atelier.js";
 import { logger } from "./logger.js";
-import { BOOTSTRAP_CLASSES } from "./bootstrap-classes.js";
+import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
+
+/**
+ * Probe result tri-state.
+ *
+ * - `missing`: the REST service is not deployed (probe query failed —
+ *    either the class does not exist or the web application isn't
+ *    registered yet). Bootstrap runs the full deploy + compile + configure
+ *    + mapping flow.
+ *
+ * - `current`: the deployed classes match the embedded classes exactly
+ *    (version hash matches). Bootstrap skips everything.
+ *
+ * - `stale`: the REST service is deployed but the classes don't match
+ *    what's embedded in this MCP server build. Bootstrap redeploys and
+ *    recompiles the classes, but skips the one-time privileged steps
+ *    (web app registration + package mapping), because those aren't
+ *    affected by class-content drift.
+ */
+export type ProbeResult =
+  | { status: "missing" }
+  | { status: "current" }
+  | { status: "stale"; deployedVersion: string };
 
 /** Result of a full bootstrap run. */
 export interface BootstrapResult {
   /** Whether the probe detected the REST service is already configured. */
   probeFound: boolean;
+  /** The probe result — lets callers distinguish first-time install from auto-upgrade. */
+  probeStatus: "missing" | "current" | "stale";
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -54,20 +78,41 @@ To complete setup manually, choose one of:
    zpm "install iris-execute-mcp-v2"`;
 
 /**
- * Probe whether the custom REST service is already configured on IRIS.
+ * Probe the custom REST service deployment status on IRIS.
  *
- * Uses the Atelier SQL endpoint to call `ExecuteMCPv2.Setup_IsConfigured()`.
- * If the class does not exist (SQL fails), returns `false`.
+ * Calls `ExecuteMCPv2.Setup_GetBootstrapVersion()` via the Atelier SQL
+ * endpoint, which returns the short SHA-256 hash baked into the deployed
+ * Setup class at generation time. The hash is compared against the
+ * embedded {@link BOOTSTRAP_VERSION} constant to determine whether the
+ * IRIS-side classes match the classes embedded in this MCP server.
+ *
+ * Three outcomes:
+ *
+ * - SQL query throws (class doesn't exist, method doesn't exist, or any
+ *   other error) → `{ status: "missing" }`. The most common cause is a
+ *   first-time install where nothing has been deployed yet. A less
+ *   common but important case: an existing deployment from a
+ *   pre-version-stamp commit that lacks `GetBootstrapVersion()` — the
+ *   SQL call fails with "no such method" and we treat it as missing,
+ *   which triggers a full bootstrap that upgrades the stale classes.
+ *   This is the one-shot upgrade path for existing beta users.
+ *
+ * - Returned hash matches `BOOTSTRAP_VERSION` → `{ status: "current" }`.
+ *
+ * - Returned hash differs from `BOOTSTRAP_VERSION` → `{ status: "stale", deployedVersion }`.
+ *   Someone already ran bootstrap with a different class version; we
+ *   need to redeploy and recompile but the webapp registration and
+ *   package mapping (privileged, one-time operations) can be skipped.
  */
 export async function probeCustomRest(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
-): Promise<boolean> {
+): Promise<ProbeResult> {
   try {
     const path = atelierPath(version, config.namespace, "action/query");
     const body = {
-      query: "SELECT ExecuteMCPv2.Setup_IsConfigured() AS IsConfigured",
+      query: "SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version",
     };
     const response = await http.post(path, body);
     const content = (
@@ -75,12 +120,24 @@ export async function probeCustomRest(
     )?.content;
     if (Array.isArray(content) && content.length > 0) {
       const row = content[0] as Record<string, unknown>;
-      return row["IsConfigured"] === 1 || row["IsConfigured"] === true;
+      const deployedVersion = String(row["Version"] ?? "");
+      if (deployedVersion === "") {
+        // SQL succeeded but no row / empty version — treat as missing
+        return { status: "missing" };
+      }
+      if (deployedVersion === BOOTSTRAP_VERSION) {
+        return { status: "current" };
+      }
+      return { status: "stale", deployedVersion };
     }
-    return false;
+    return { status: "missing" };
   } catch {
-    // SQL failure means class doesn't exist or other issue
-    return false;
+    // SQL failure usually means the class or method doesn't exist.
+    // For users upgrading from a pre-version-stamp deployment, this is
+    // the entry point — their old Setup.cls has IsConfigured but not
+    // GetBootstrapVersion, the query throws, and we fall back to a full
+    // bootstrap that replaces their stale classes.
+    return { status: "missing" };
   }
 }
 
@@ -171,6 +228,7 @@ export async function bootstrap(
 ): Promise<BootstrapResult> {
   const result: BootstrapResult = {
     probeFound: false,
+    probeStatus: "missing",
     deployed: false,
     compiled: false,
     configured: false,
@@ -178,25 +236,44 @@ export async function bootstrap(
     errors: [],
   };
 
-  // Step 1: Probe
+  // Step 1: Probe — distinguishes missing, current, and stale deployments.
+  let probe: ProbeResult;
   try {
-    result.probeFound = await probeCustomRest(http, config, version);
+    probe = await probeCustomRest(http, config, version);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     result.errors.push(`Probe failed: ${msg}`);
+    probe = { status: "missing" };
   }
 
-  // If already configured, skip everything
-  if (result.probeFound) {
+  result.probeStatus = probe.status;
+  result.probeFound = probe.status !== "missing";
+
+  // If already current (deployed version matches embedded version), skip everything.
+  if (probe.status === "current") {
     result.deployed = true;
     result.compiled = true;
     result.configured = true;
     result.mapped = true;
-    logger.info("Bootstrap: REST service already configured, skipping");
+    logger.info(
+      `Bootstrap: REST service is current (version ${BOOTSTRAP_VERSION}), skipping deploy`,
+    );
     return result;
   }
 
-  // Step 2: Deploy
+  // If stale (deployed but different version), log the upgrade transition
+  // so operators can see in logs which version replaced which.
+  if (probe.status === "stale") {
+    logger.info(
+      `Bootstrap: upgrading REST service from version ${probe.deployedVersion} to ${BOOTSTRAP_VERSION}`,
+    );
+  } else {
+    logger.info(
+      `Bootstrap: REST service not found, running full install (version ${BOOTSTRAP_VERSION})`,
+    );
+  }
+
+  // Step 2: Deploy — required for both `missing` and `stale` cases.
   try {
     await deployClasses(http, config, version);
     result.deployed = true;
@@ -210,7 +287,7 @@ export async function bootstrap(
     return result;
   }
 
-  // Step 3: Compile
+  // Step 3: Compile — required for both `missing` and `stale` cases.
   try {
     await compileClasses(http, config, version);
     result.compiled = true;
@@ -222,7 +299,20 @@ export async function bootstrap(
     return result;
   }
 
-  // Step 4: Configure web app
+  // Steps 4 and 5 are one-time privileged operations that only need to run
+  // on a fresh install. On a stale upgrade the webapp is already registered
+  // and the package mapping already exists, so we skip them — this means
+  // an upgrade works even when the running user no longer has %Admin_Manage.
+  if (probe.status === "stale") {
+    result.configured = true;
+    result.mapped = true;
+    logger.info(
+      "Bootstrap: upgrade complete — webapp registration and package mapping already exist, skipped",
+    );
+    return result;
+  }
+
+  // Step 4: Configure web app (first-time install only).
   try {
     await configureWebApp(http, config, version);
     result.configured = true;
@@ -236,7 +326,7 @@ export async function bootstrap(
     );
   }
 
-  // Step 5: Map ExecuteMCPv2 package to %All namespace
+  // Step 5: Map ExecuteMCPv2 package to %All namespace (first-time install only).
   try {
     await configurePackageMapping(http, config, version);
     result.mapped = true;

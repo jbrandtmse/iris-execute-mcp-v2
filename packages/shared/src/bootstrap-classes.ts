@@ -7,7 +7,22 @@
  *
  * This file is auto-generated from the src/ExecuteMCPv2/ directory.
  * Do not edit the class content manually.
+ *
+ * The BOOTSTRAP_VERSION export is a short SHA-256 hash of the concatenated
+ * class content. The bootstrap flow compares this value against the version
+ * stamp baked into the deployed Setup.cls to detect drift and trigger
+ * automatic redeployment of stale classes. See packages/shared/src/bootstrap.ts
+ * for the upgrade logic.
  */
+
+/**
+ * Bootstrap version stamp — short SHA-256 hash of concatenated class content.
+ *
+ * Auto-bumps on every `npm run gen:bootstrap` run when any class file
+ * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
+ * MCP server startup to detect stale deployments.
+ */
+export const BOOTSTRAP_VERSION = "8421e86fed0f";
 
 export interface BootstrapClass {
   name: string;
@@ -207,6 +222,19 @@ Class ExecuteMCPv2.Setup Extends %RegisteredObject
 /// Default web application name for the ExecuteMCPv2 REST service.
 Parameter WEBAPP = "/api/executemcp/v2";
 
+/// Bootstrap version stamp — a short SHA-256 hash of the concatenated
+/// content of all embedded ObjectScript handler classes, injected by
+/// <code>scripts/gen-bootstrap.mjs</code> at generation time.
+/// <p>The value on disk is <code>"dev"</code> (a placeholder for local
+/// development). The bootstrap generator replaces it with the real hash
+/// before embedding the class source into
+/// <code>packages/shared/src/bootstrap-classes.ts</code>.</p>
+/// <p>Used by the auto-bootstrap flow to detect whether the deployed
+/// classes match the embedded classes. When they differ, the bootstrap
+/// automatically redeploys the classes (skipping the one-time web
+/// application registration and package mapping steps).</p>
+Parameter BOOTSTRAPVERSION = "8421e86fed0f";
+
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
 /// <class>ExecuteMCPv2.REST.Dispatch</class>. The operation is idempotent —
@@ -355,6 +383,21 @@ ClassMethod IsConfigured() As %Boolean [ SqlProc ]
         Set tResult = 0
     }
     Quit tResult
+}
+
+/// Return the bootstrap version stamp baked into this class at embed time.
+/// <p>The auto-bootstrap flow calls this via the Atelier SQL endpoint to
+/// determine whether the classes deployed on IRIS match the classes
+/// embedded in the currently-running MCP server. A mismatch triggers an
+/// automatic redeploy of all 13 handler classes.</p>
+/// <p>If this method does not exist on the deployed Setup class (because
+/// the user is running an older version that predates the version-stamp
+/// mechanism), the SQL query throws and the bootstrap treats the
+/// deployment as "missing", triggering a full bootstrap. This is the
+/// one-shot upgrade path from pre-version-stamp deployments.</p>
+ClassMethod GetBootstrapVersion() As %String [ SqlProc ]
+{
+    Quit ..#BOOTSTRAPVERSION
 }
 
 }`,

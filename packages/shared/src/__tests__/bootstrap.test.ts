@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { createHash } from "crypto";
 import { IrisHttpClient } from "../http-client.js";
 import type { IrisConnectionConfig } from "../config.js";
 import type { AtelierEnvelope } from "../http-client.js";
@@ -10,7 +14,11 @@ import {
   bootstrap,
   MANUAL_INSTRUCTIONS,
 } from "../bootstrap.js";
-import { BOOTSTRAP_CLASSES, getBootstrapClasses } from "../bootstrap-classes.js";
+import {
+  BOOTSTRAP_CLASSES,
+  BOOTSTRAP_VERSION,
+  getBootstrapClasses,
+} from "../bootstrap-classes.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -93,21 +101,35 @@ describe("bootstrap", () => {
   // ── probeCustomRest ─────────────────────────────────────────────
 
   describe("probeCustomRest", () => {
-    it("should return true when SQL says configured", async () => {
+    it("should return {status: 'current'} when deployed version matches BOOTSTRAP_VERSION", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
       setupCsrfThenRequest(
-        envelope({ content: [{ IsConfigured: 1 }] }),
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
       );
 
       const result = await probeCustomRest(http, config, 7);
-      expect(result).toBe(true);
+      expect(result).toEqual({ status: "current" });
 
       http.destroy();
     });
 
-    it("should return false when SQL fails (class not found)", async () => {
+    it("should return {status: 'stale', deployedVersion} when deployed version differs", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: "abcdef123456" }] }),
+      );
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: "stale", deployedVersion: "abcdef123456" });
+
+      http.destroy();
+    });
+
+    it("should return {status: 'missing'} when SQL fails (class/method not found)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
@@ -119,12 +141,13 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // SQL call fails with 400
+      // SQL call fails with 400 — this is the pre-version-stamp upgrade
+      // path, where old Setup.cls lacks GetBootstrapVersion()
       fetchMock.mockResolvedValueOnce(
         mockResponse(
           {
             status: {
-              errors: [{ error: "Class not found" }],
+              errors: [{ error: "Method not found" }],
               summary: "Error",
             },
             console: [],
@@ -135,21 +158,21 @@ describe("bootstrap", () => {
       );
 
       const result = await probeCustomRest(http, config, 7);
-      expect(result).toBe(false);
+      expect(result).toEqual({ status: "missing" });
 
       http.destroy();
     });
 
-    it("should return false when IsConfigured is 0", async () => {
+    it("should return {status: 'missing'} when SQL returns empty version string", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
       setupCsrfThenRequest(
-        envelope({ content: [{ IsConfigured: 0 }] }),
+        envelope({ content: [{ Version: "" }] }),
       );
 
       const result = await probeCustomRest(http, config, 7);
-      expect(result).toBe(false);
+      expect(result).toEqual({ status: "missing" });
 
       http.destroy();
     });
@@ -300,28 +323,30 @@ describe("bootstrap", () => {
   // ── bootstrap (full orchestration) ──────────────────────────────
 
   describe("bootstrap (full orchestration)", () => {
-    it("should skip when probe finds service already configured", async () => {
+    it("should skip everything when probe is current (hash match)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      // Probe: CSRF + SQL returning IsConfigured=1
+      // Probe: CSRF + SQL returning matching version
       setupCsrfThenRequest(
-        envelope({ content: [{ IsConfigured: 1 }] }),
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
       );
 
       const result = await bootstrap(http, config, 7);
 
+      expect(result.probeStatus).toBe("current");
       expect(result.probeFound).toBe(true);
       expect(result.deployed).toBe(true);
       expect(result.compiled).toBe(true);
       expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
       http.destroy();
     });
 
-    it("should run deploy + compile + configure when probe returns false", async () => {
+    it("should run full install when probe is missing", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
@@ -333,9 +358,16 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // Probe: SQL returns IsConfigured=0
+      // Probe: SQL fails with 400 (GetBootstrapVersion not found)
       fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [{ IsConfigured: 0 }] })),
+        mockResponse(
+          {
+            status: { errors: [{ error: "Method not found" }], summary: "Error" },
+            console: [],
+            result: null,
+          },
+          { status: 400 },
+        ),
       );
 
       // Deploy: PUT responses for each class (CSRF already established)
@@ -362,12 +394,65 @@ describe("bootstrap", () => {
 
       const result = await bootstrap(http, config, 7);
 
+      expect(result.probeStatus).toBe("missing");
       expect(result.probeFound).toBe(false);
       expect(result.deployed).toBe(true);
       expect(result.compiled).toBe(true);
       expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
+
+      http.destroy();
+    });
+
+    // Regression: when the deployed version differs from the embedded
+    // version (stale), bootstrap must redeploy and recompile the classes
+    // but SKIP the privileged webapp registration and package mapping
+    // steps — those are one-time operations that don't need to rerun on
+    // a class-content upgrade.
+    it("should redeploy + recompile but skip webapp+mapping when probe is stale", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe: CSRF + SQL returning an OLD version hash
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: "oldhash12345" }] }),
+      );
+
+      // Deploy: PUT responses for each class (CSRF already established)
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(
+          mockResponse(envelope({ result: [] })),
+        );
+      }
+
+      // Compile: POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ result: [] })),
+      );
+
+      // NO Configure, NO Package mapping — they are intentionally skipped
+      // on stale upgrades. If the implementation mistakenly calls them,
+      // the next fetchMock call will be undefined and the test will fail.
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.probeFound).toBe(true);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(true);
+      // These are marked true on stale because the one-time install
+      // already ran successfully in the past.
+      expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.manualInstructions).toBeUndefined();
+
+      // Verify the fetch call count: 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile = 16
+      // (no configure, no mapping)
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1;
+      expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
     });
@@ -384,9 +469,16 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // Probe: SQL returns IsConfigured=0
+      // Probe: SQL fails → missing → full install
       fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [{ IsConfigured: 0 }] })),
+        mockResponse(
+          {
+            status: { errors: [{ error: "Method not found" }], summary: "Error" },
+            console: [],
+            result: null,
+          },
+          { status: 400 },
+        ),
       );
 
       // Deploy: PUT responses for each class
@@ -449,9 +541,16 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // Probe: SQL returns IsConfigured=0
+      // Probe: SQL fails → missing → full install
       fetchMock.mockResolvedValueOnce(
-        mockResponse(envelope({ content: [{ IsConfigured: 0 }] })),
+        mockResponse(
+          {
+            status: { errors: [{ error: "Method not found" }], summary: "Error" },
+            console: [],
+            result: null,
+          },
+          { status: 400 },
+        ),
       );
 
       // Deploy: first PUT fails with 500
@@ -598,6 +697,124 @@ describe("bootstrap", () => {
       const analytics = classes.find(c => c.name === "ExecuteMCPv2.REST.Analytics.cls");
       expect(analytics).toBeDefined();
       expect(analytics!.content).toContain("ExecuteMCPv2.REST.Analytics");
+    });
+  });
+
+  // ── BOOTSTRAP_VERSION ───────────────────────────────────────────
+
+  describe("BOOTSTRAP_VERSION", () => {
+    it("should be a non-empty hex string", () => {
+      expect(typeof BOOTSTRAP_VERSION).toBe("string");
+      expect(BOOTSTRAP_VERSION.length).toBeGreaterThan(0);
+      // 12-char short SHA-256 is the current format (gen-bootstrap.mjs)
+      expect(BOOTSTRAP_VERSION).toMatch(/^[0-9a-f]{12}$/);
+    });
+
+    it("should be injected into the embedded Setup.cls BOOTSTRAPVERSION parameter", () => {
+      // The embedded copy of Setup.cls must contain the real hash, not the
+      // "dev" placeholder that lives in src/ExecuteMCPv2/Setup.cls on disk.
+      // This is the contract that makes the auto-upgrade mechanism work.
+      const setupSource = BOOTSTRAP_CLASSES.get("ExecuteMCPv2.Setup.cls");
+      expect(setupSource).toBeDefined();
+      expect(setupSource).toContain(
+        `Parameter BOOTSTRAPVERSION = "${BOOTSTRAP_VERSION}";`,
+      );
+      // And the disk placeholder must NOT have leaked into the embedded copy.
+      expect(setupSource).not.toContain('Parameter BOOTSTRAPVERSION = "dev";');
+    });
+  });
+
+  // ── Bootstrap drift check ──────────────────────────────────────
+  //
+  // These tests enforce the workflow discipline "after editing any
+  // ObjectScript class, run `npm run gen:bootstrap` and commit the
+  // regenerated bootstrap-classes.ts". They compare the embedded class
+  // content (and the BOOTSTRAP_VERSION hash) against the disk .cls files
+  // and fail with a clear "run gen:bootstrap" message on drift. Without
+  // this test, a dev could edit Security.cls, forget to regenerate, and
+  // ship a bug that auto-upgrade wouldn't detect because the embedded
+  // BOOTSTRAP_VERSION would still match the deployed (stale) version.
+
+  describe("bootstrap drift check", () => {
+    // Repo root is 4 levels up from this test file:
+    // packages/shared/src/__tests__/bootstrap.test.ts → repo root
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = resolve(__dirname, "../../../..");
+
+    // MUST stay in sync with scripts/gen-bootstrap.mjs
+    const classPaths: ReadonlyArray<readonly [string, string]> = [
+      ["ExecuteMCPv2.Utils.cls", "src/ExecuteMCPv2/Utils.cls"],
+      ["ExecuteMCPv2.Setup.cls", "src/ExecuteMCPv2/Setup.cls"],
+      ["ExecuteMCPv2.REST.Global.cls", "src/ExecuteMCPv2/REST/Global.cls"],
+      ["ExecuteMCPv2.REST.Command.cls", "src/ExecuteMCPv2/REST/Command.cls"],
+      ["ExecuteMCPv2.REST.UnitTest.cls", "src/ExecuteMCPv2/REST/UnitTest.cls"],
+      ["ExecuteMCPv2.REST.Config.cls", "src/ExecuteMCPv2/REST/Config.cls"],
+      ["ExecuteMCPv2.REST.Security.cls", "src/ExecuteMCPv2/REST/Security.cls"],
+      ["ExecuteMCPv2.REST.Interop.cls", "src/ExecuteMCPv2/REST/Interop.cls"],
+      ["ExecuteMCPv2.REST.Monitor.cls", "src/ExecuteMCPv2/REST/Monitor.cls"],
+      ["ExecuteMCPv2.REST.Task.cls", "src/ExecuteMCPv2/REST/Task.cls"],
+      ["ExecuteMCPv2.REST.SystemConfig.cls", "src/ExecuteMCPv2/REST/SystemConfig.cls"],
+      ["ExecuteMCPv2.REST.Analytics.cls", "src/ExecuteMCPv2/REST/Analytics.cls"],
+      ["ExecuteMCPv2.REST.Dispatch.cls", "src/ExecuteMCPv2/REST/Dispatch.cls"],
+    ];
+
+    const VERSION_PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
+    const DRIFT_HINT =
+      "bootstrap-classes.ts is out of sync with disk. " +
+      "Run `npm run gen:bootstrap` and commit the regenerated file.";
+
+    /**
+     * Read a .cls file and normalize line endings to LF, mirroring the
+     * normalization in gen-bootstrap.mjs. This is required because
+     * template literals in bootstrap-classes.ts get their CRLFs
+     * normalized to LF at JS parse time, so the runtime embedded string
+     * always has LF regardless of the disk EOL style.
+     */
+    const readClsNormalized = (relPath: string): string => {
+      return readFileSync(resolve(repoRoot, relPath), "utf-8")
+        .replace(/\r\n/g, "\n")
+        .trimEnd();
+    };
+
+    it("embedded class contents match disk .cls files", () => {
+      for (const [name, relPath] of classPaths) {
+        const diskContent = readClsNormalized(relPath);
+        const embedded = BOOTSTRAP_CLASSES.get(name);
+
+        expect(embedded, `Missing class in BOOTSTRAP_CLASSES: ${name}`).toBeDefined();
+
+        // Setup.cls gets hash injection in gen-bootstrap.mjs — apply
+        // the same transform here before comparing.
+        const expected =
+          name === "ExecuteMCPv2.Setup.cls"
+            ? diskContent.replace(
+                VERSION_PLACEHOLDER_LINE,
+                `Parameter BOOTSTRAPVERSION = "${BOOTSTRAP_VERSION}";`,
+              )
+            : diskContent;
+
+        expect(
+          embedded,
+          `${DRIFT_HINT} (class: ${name})`,
+        ).toBe(expected);
+      }
+    });
+
+    it("BOOTSTRAP_VERSION matches SHA-256 hash of concatenated disk contents", () => {
+      // Re-compute the hash with the same formula as gen-bootstrap.mjs.
+      // If a dev edits any .cls file without running gen:bootstrap, this
+      // test fails with a clear instruction.
+      const hasher = createHash("sha256");
+      for (const [, relPath] of classPaths) {
+        hasher.update(readClsNormalized(relPath));
+        hasher.update("\n--CLASS-SEPARATOR--\n");
+      }
+      const expectedVersion = hasher.digest("hex").substring(0, 12);
+
+      expect(
+        BOOTSTRAP_VERSION,
+        `BOOTSTRAP_VERSION drift: ${DRIFT_HINT}`,
+      ).toBe(expectedVersion);
     });
   });
 });
