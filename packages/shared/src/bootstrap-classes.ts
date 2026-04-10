@@ -295,7 +295,7 @@ ClassMethod Uninstall() As %Status
 /// Map the <code>ExecuteMCPv2</code> package to the <code>%All</code> namespace.
 /// <p>This makes ExecuteMCPv2 classes (including compiled routines used for
 /// I/O redirect mnemonic labels) available in every namespace. Without this
-/// mapping, cross-namespace <code>iris.execute.command</code> fails with
+/// mapping, cross-namespace <code>iris_execute_command</code> fails with
 /// <code>&lt;NOROUTINE&gt;</code> because the mnemonic labels are resolved in
 /// the current namespace at call time.</p>
 /// <p>The mapping points to the database where ExecuteMCPv2 classes are
@@ -2651,7 +2651,7 @@ ClassMethod WebAppGet(pName As %String) As %Status
 /// Get a single web application by name (POST variant).
 /// <p>Reads the web application name from the JSON request body to avoid
 /// URL-encoding issues with forward slashes in application paths.
-/// This is the preferred endpoint for <code>iris.webapp.get</code>.</p>
+/// This is the preferred endpoint for <code>iris_webapp_get</code>.</p>
 ClassMethod WebAppGetByPost() As %Status
 {
     Set tSC = $$$OK

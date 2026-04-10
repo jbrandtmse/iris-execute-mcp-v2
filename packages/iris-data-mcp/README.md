@@ -111,30 +111,30 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.docdb.manage` | Create, drop, or list document databases | `action`, `database?`, `namespace?` | destructive |
-| `iris.docdb.document` | Insert, get, update, or delete documents | `action`, `database`, `id?`, `document?`, `namespace?` | destructive |
-| `iris.docdb.find` | Query documents with filter criteria | `database`, `filter`, `namespace?` | readOnly, idempotent |
-| `iris.docdb.property` | Create, drop, or index properties | `action`, `database`, `property`, `type?`, `namespace?` | destructive |
+| `iris_docdb_manage` | Create, drop, or list document databases | `action`, `database?`, `namespace?` | destructive |
+| `iris_docdb_document` | Insert, get, update, or delete documents | `action`, `database`, `id?`, `document?`, `namespace?` | destructive |
+| `iris_docdb_find` | Query documents with filter criteria | `database`, `filter`, `namespace?` | readOnly, idempotent |
+| `iris_docdb_property` | Create, drop, or index properties | `action`, `database`, `property`, `type?`, `namespace?` | destructive |
 
 ### Analytics Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.analytics.mdx` | Execute MDX queries against DeepSee | `query`, `namespace?` | readOnly, idempotent |
-| `iris.analytics.cubes` | List, build, or synchronize DeepSee cubes | `action`, `cube?`, `namespace?` | -- |
+| `iris_analytics_mdx` | Execute MDX queries against DeepSee | `query`, `namespace?` | readOnly, idempotent |
+| `iris_analytics_cubes` | List, build, or synchronize DeepSee cubes | `action`, `cube?`, `namespace?` | -- |
 
 ### REST API Management Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.rest.manage` | List, get details, or delete REST applications | `action`, `application?`, `namespace?` | destructive |
+| `iris_rest_manage` | List, get details, or delete REST applications | `action`, `application?`, `namespace?` | destructive |
 
 ---
 
 ## Tool Examples
 
 <details>
-<summary><strong>iris.docdb.manage</strong> -- List document databases</summary>
+<summary><strong>iris_docdb_manage</strong> -- List document databases</summary>
 
 **Input:**
 ```json
@@ -156,7 +156,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.manage</strong> -- Create a document database</summary>
+<summary><strong>iris_docdb_manage</strong> -- Create a document database</summary>
 
 **Input:**
 ```json
@@ -176,7 +176,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.document</strong> -- Insert a document</summary>
+<summary><strong>iris_docdb_document</strong> -- Insert a document</summary>
 
 **Input:**
 ```json
@@ -201,7 +201,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.document</strong> -- Get a document by ID</summary>
+<summary><strong>iris_docdb_document</strong> -- Get a document by ID</summary>
 
 **Input:**
 ```json
@@ -224,7 +224,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.find</strong> -- Query documents</summary>
+<summary><strong>iris_docdb_find</strong> -- Query documents</summary>
 
 **Input:**
 ```json
@@ -248,7 +248,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.property</strong> -- Create a property</summary>
+<summary><strong>iris_docdb_property</strong> -- Create a property</summary>
 
 **Input:**
 ```json
@@ -271,7 +271,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.docdb.property</strong> -- Index a property</summary>
+<summary><strong>iris_docdb_property</strong> -- Index a property</summary>
 
 **Input:**
 ```json
@@ -292,7 +292,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.analytics.mdx</strong> -- Execute MDX query</summary>
+<summary><strong>iris_analytics_mdx</strong> -- Execute MDX query</summary>
 
 **Input:**
 ```json
@@ -317,7 +317,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.analytics.cubes</strong> -- List cubes</summary>
+<summary><strong>iris_analytics_cubes</strong> -- List cubes</summary>
 
 **Input:**
 ```json
@@ -338,7 +338,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.analytics.cubes</strong> -- Build a cube</summary>
+<summary><strong>iris_analytics_cubes</strong> -- Build a cube</summary>
 
 **Input:**
 ```json
@@ -360,7 +360,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.rest.manage</strong> -- List REST applications</summary>
+<summary><strong>iris_rest_manage</strong> -- List REST applications</summary>
 
 **Input:**
 ```json
@@ -382,7 +382,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris.rest.manage</strong> -- Get REST application details</summary>
+<summary><strong>iris_rest_manage</strong> -- Get REST application details</summary>
 
 **Input:**
 ```json
@@ -430,11 +430,11 @@ REST management tools use the IRIS built-in Management API at `/api/mgmnt/v2/{na
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials | Check `IRIS_USERNAME` and `IRIS_PASSWORD` |
 | `DocDB service not available` | `%Service_DocDB` not enabled | Enable the service via SMP: *System Administration > Security > Services* |
-| `Database not found` | DocDB database does not exist | Use `iris.docdb.manage` with action `list` to check available databases |
-| `Document not found` | Invalid document ID | Verify the document ID with `iris.docdb.find` |
-| `Cube not found` | DeepSee cube does not exist | Use `iris.analytics.cubes` with action `list` to see available cubes |
+| `Database not found` | DocDB database does not exist | Use `iris_docdb_manage` with action `list` to check available databases |
+| `Document not found` | Invalid document ID | Verify the document ID with `iris_docdb_find` |
+| `Cube not found` | DeepSee cube does not exist | Use `iris_analytics_cubes` with action `list` to see available cubes |
 | `MDX syntax error` | Invalid MDX query | Check MDX syntax; ensure the cube and dimension names are correct |
-| `REST application not found` | Invalid application path | Use `iris.rest.manage` with action `list` to see available applications |
+| `REST application not found` | Invalid application path | Use `iris_rest_manage` with action `list` to see available applications |
 
 ### Error Response Format
 

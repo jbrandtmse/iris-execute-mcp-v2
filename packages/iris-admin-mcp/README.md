@@ -105,65 +105,65 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.namespace.manage` | Create, modify, or delete a namespace | `action`, `name`, `codeDatabase?`, `dataDatabase?`, `library?`, `tempGlobals?` | destructive |
-| `iris.namespace.list` | List all namespaces with DB associations | `cursor?` | readOnly, idempotent |
-| `iris.database.manage` | Create, modify, or delete a database | `action`, `name`, `directory?`, `size?`, `maxSize?`, `expansionSize?`, `readOnly?`, `resource?` | destructive |
-| `iris.database.list` | List all databases with size and mount status | `cursor?` | readOnly, idempotent |
+| `iris_namespace_manage` | Create, modify, or delete a namespace | `action`, `name`, `codeDatabase?`, `dataDatabase?`, `library?`, `tempGlobals?` | destructive |
+| `iris_namespace_list` | List all namespaces with DB associations | `cursor?` | readOnly, idempotent |
+| `iris_database_manage` | Create, modify, or delete a database | `action`, `name`, `directory?`, `size?`, `maxSize?`, `expansionSize?`, `readOnly?`, `resource?` | destructive |
+| `iris_database_list` | List all databases with size and mount status | `cursor?` | readOnly, idempotent |
 
 ### Namespace Mapping Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.mapping.manage` | Create or delete global/routine/package mappings | `action`, `type`, `namespace`, `name`, `database?`, `collation?`, `lockDatabase?`, `subscript?` | destructive |
-| `iris.mapping.list` | List mappings for a namespace by type | `namespace`, `type`, `cursor?` | readOnly, idempotent |
+| `iris_mapping_manage` | Create or delete global/routine/package mappings | `action`, `type`, `namespace`, `name`, `database?`, `collation?`, `lockDatabase?`, `subscript?` | destructive |
+| `iris_mapping_list` | List mappings for a namespace by type | `namespace`, `type`, `cursor?` | readOnly, idempotent |
 
 ### User & Security Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.user.manage` | Create, modify, or delete a user account | `action`, `name`, `password?`, `fullName?`, `roles?`, `enabled?`, `namespace?` | destructive |
-| `iris.user.get` | Get a user or list all users | `name?`, `cursor?` | readOnly, idempotent |
-| `iris.user.roles` | Add or remove a role from a user | `action`, `username`, `role` | destructive |
-| `iris.user.password` | Change or validate a password | `action`, `username?`, `password` | destructive |
-| `iris.permission.check` | Check user/role permissions on a resource | `target`, `resource`, `permission` | readOnly, idempotent |
+| `iris_user_manage` | Create, modify, or delete a user account | `action`, `name`, `password?`, `fullName?`, `roles?`, `enabled?`, `namespace?` | destructive |
+| `iris_user_get` | Get a user or list all users | `name?`, `cursor?` | readOnly, idempotent |
+| `iris_user_roles` | Add or remove a role from a user | `action`, `username`, `role` | destructive |
+| `iris_user_password` | Change or validate a password | `action`, `username?`, `password` | destructive |
+| `iris_permission_check` | Check user/role permissions on a resource | `target`, `resource`, `permission` | readOnly, idempotent |
 
 ### Role & Resource Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.role.manage` | Create, modify, or delete a security role | `action`, `name`, `description?`, `resources?`, `grantedRoles?` | destructive |
-| `iris.role.list` | List all security roles | `cursor?` | readOnly, idempotent |
-| `iris.resource.manage` | Create, modify, or delete a security resource | `action`, `name`, `description?`, `publicPermission?` | destructive |
-| `iris.resource.list` | List all security resources | `cursor?` | readOnly, idempotent |
+| `iris_role_manage` | Create, modify, or delete a security role | `action`, `name`, `description?`, `resources?`, `grantedRoles?` | destructive |
+| `iris_role_list` | List all security roles | `cursor?` | readOnly, idempotent |
+| `iris_resource_manage` | Create, modify, or delete a security resource | `action`, `name`, `description?`, `publicPermission?` | destructive |
+| `iris_resource_list` | List all security resources | `cursor?` | readOnly, idempotent |
 
 ### Web Application Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.webapp.manage` | Create, modify, or delete a web application | `action`, `name`, `namespace?`, `dispatchClass?`, `enabled?`, `authEnabled?` | destructive |
-| `iris.webapp.get` | Get a web application by path | `name` | readOnly, idempotent |
-| `iris.webapp.list` | List all web applications | `namespace?`, `cursor?` | readOnly, idempotent |
+| `iris_webapp_manage` | Create, modify, or delete a web application | `action`, `name`, `namespace?`, `dispatchClass?`, `enabled?`, `authEnabled?` | destructive |
+| `iris_webapp_get` | Get a web application by path | `name` | readOnly, idempotent |
+| `iris_webapp_list` | List all web applications | `namespace?`, `cursor?` | readOnly, idempotent |
 
 ### SSL/TLS Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.ssl.manage` | Create, modify, or delete SSL/TLS config | `action`, `name`, `certFile?`, `keyFile?`, `caFile?`, `protocols?`, `verifyPeer?`, `type?` | destructive |
-| `iris.ssl.list` | List all SSL/TLS configurations | `cursor?` | readOnly, idempotent |
+| `iris_ssl_manage` | Create, modify, or delete SSL/TLS config | `action`, `name`, `certFile?`, `keyFile?`, `caFile?`, `protocols?`, `verifyPeer?`, `type?` | destructive |
+| `iris_ssl_list` | List all SSL/TLS configurations | `cursor?` | readOnly, idempotent |
 
 ### OAuth2 Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.oauth.manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `name?`, `serverName?`, `clientName?` | destructive |
-| `iris.oauth.list` | List all OAuth2 server definitions and clients | `cursor?` | readOnly, idempotent |
+| `iris_oauth_manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `name?`, `serverName?`, `clientName?` | destructive |
+| `iris_oauth_list` | List all OAuth2 server definitions and clients | `cursor?` | readOnly, idempotent |
 
 ---
 
 ## Tool Examples
 
 <details>
-<summary><strong>iris.namespace.manage</strong> -- Create a namespace</summary>
+<summary><strong>iris_namespace_manage</strong> -- Create a namespace</summary>
 
 **Input:**
 ```json
@@ -186,7 +186,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.namespace.list</strong> -- List namespaces</summary>
+<summary><strong>iris_namespace_list</strong> -- List namespaces</summary>
 
 **Input:**
 ```json
@@ -206,7 +206,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.database.manage</strong> -- Create a database</summary>
+<summary><strong>iris_database_manage</strong> -- Create a database</summary>
 
 **Input:**
 ```json
@@ -229,7 +229,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.database.list</strong> -- List databases</summary>
+<summary><strong>iris_database_list</strong> -- List databases</summary>
 
 **Input:**
 ```json
@@ -248,7 +248,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.mapping.manage</strong> -- Create a global mapping</summary>
+<summary><strong>iris_mapping_manage</strong> -- Create a global mapping</summary>
 
 **Input:**
 ```json
@@ -273,7 +273,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.mapping.list</strong> -- List mappings</summary>
+<summary><strong>iris_mapping_list</strong> -- List mappings</summary>
 
 **Input:**
 ```json
@@ -295,7 +295,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.user.manage</strong> -- Create a user</summary>
+<summary><strong>iris_user_manage</strong> -- Create a user</summary>
 
 **Input:**
 ```json
@@ -319,7 +319,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.user.get</strong> -- Get user details</summary>
+<summary><strong>iris_user_get</strong> -- Get user details</summary>
 
 **Input:**
 ```json
@@ -341,7 +341,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.user.roles</strong> -- Add role to user</summary>
+<summary><strong>iris_user_roles</strong> -- Add role to user</summary>
 
 **Input:**
 ```json
@@ -362,7 +362,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.user.password</strong> -- Change password</summary>
+<summary><strong>iris_user_password</strong> -- Change password</summary>
 
 **Input:**
 ```json
@@ -384,7 +384,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.permission.check</strong> -- Check permission</summary>
+<summary><strong>iris_permission_check</strong> -- Check permission</summary>
 
 **Input:**
 ```json
@@ -408,7 +408,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.role.manage</strong> -- Create a role</summary>
+<summary><strong>iris_role_manage</strong> -- Create a role</summary>
 
 **Input:**
 ```json
@@ -431,7 +431,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.role.list</strong> -- List roles</summary>
+<summary><strong>iris_role_list</strong> -- List roles</summary>
 
 **Input:**
 ```json
@@ -451,7 +451,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.resource.manage</strong> -- Create a resource</summary>
+<summary><strong>iris_resource_manage</strong> -- Create a resource</summary>
 
 **Input:**
 ```json
@@ -474,7 +474,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.resource.list</strong> -- List resources</summary>
+<summary><strong>iris_resource_list</strong> -- List resources</summary>
 
 **Input:**
 ```json
@@ -493,7 +493,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.webapp.manage</strong> -- Create a web application</summary>
+<summary><strong>iris_webapp_manage</strong> -- Create a web application</summary>
 
 **Input:**
 ```json
@@ -517,7 +517,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.webapp.get</strong> -- Get web application</summary>
+<summary><strong>iris_webapp_get</strong> -- Get web application</summary>
 
 **Input:**
 ```json
@@ -539,7 +539,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.webapp.list</strong> -- List web applications</summary>
+<summary><strong>iris_webapp_list</strong> -- List web applications</summary>
 
 **Input:**
 ```json
@@ -561,7 +561,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.ssl.manage</strong> -- Create SSL config</summary>
+<summary><strong>iris_ssl_manage</strong> -- Create SSL config</summary>
 
 **Input:**
 ```json
@@ -584,7 +584,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.ssl.list</strong> -- List SSL configurations</summary>
+<summary><strong>iris_ssl_list</strong> -- List SSL configurations</summary>
 
 **Input:**
 ```json
@@ -603,7 +603,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.oauth.manage</strong> -- OIDC discovery</summary>
+<summary><strong>iris_oauth_manage</strong> -- OIDC discovery</summary>
 
 **Input:**
 ```json
@@ -624,7 +624,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.oauth.list</strong> -- List OAuth2 configurations</summary>
+<summary><strong>iris_oauth_list</strong> -- List OAuth2 configurations</summary>
 
 **Input:**
 ```json
@@ -651,9 +651,9 @@ All servers use the same environment variables:
 The following tools **do not** accept a user-specified `namespace` parameter (they always execute in `%SYS`):
 - All namespace, database, mapping, user, role, resource, permission, SSL, and OAuth tools
 
-The `iris.webapp.list` tool optionally accepts a `namespace` parameter to filter web applications by namespace.
+The `iris_webapp_list` tool optionally accepts a `namespace` parameter to filter web applications by namespace.
 
-The `iris.webapp.manage` tool accepts a `namespace` parameter to set the target namespace for the web application being created/modified.
+The `iris_webapp_manage` tool accepts a `namespace` parameter to set the target namespace for the web application being created/modified.
 
 ---
 
@@ -665,10 +665,10 @@ The `iris.webapp.manage` tool accepts a `namespace` parameter to set the target 
 |-------|-------|------------|
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials or insufficient privileges | Check credentials; admin operations require `%Admin_Manage`, `%Admin_Security`, or `%Admin_Operate` resources |
-| `Namespace already exists` | Attempting to create a namespace that exists | Use `iris.namespace.list` to check existing namespaces |
+| `Namespace already exists` | Attempting to create a namespace that exists | Use `iris_namespace_list` to check existing namespaces |
 | `Database directory not found` | Invalid directory path for database creation | Ensure the directory path is valid and accessible to the IRIS instance |
-| `User does not exist` | Referencing a non-existent user | Use `iris.user.get` without parameters to list all users |
-| `Role does not exist` | Adding a non-existent role | Use `iris.role.list` to see available roles |
+| `User does not exist` | Referencing a non-existent user | Use `iris_user_get` without parameters to list all users |
+| `Role does not exist` | Adding a non-existent role | Use `iris_role_list` to see available roles |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 
 ### Error Response Format

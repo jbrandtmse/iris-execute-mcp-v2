@@ -631,3 +631,22 @@
   - 1 HIGH auto-resolved: dev accidentally modified `sprint-status.yaml` with wrong value — reverted to HEAD
   - 1 MEDIUM auto-resolved: `iris.test` placeholder renames (3 occurrences in shared tests) — applied for consistency
   - 2 LOW informational: Doc-comment references to `iris_execute_command` / `iris_webapp_get` inside embedded ObjectScript class docstrings in `packages/shared/src/bootstrap-classes.ts` — deferred to Story 9.2 (covered by the gen:bootstrap verification task)
+
+### Story 9.2: Documentation, CHANGELOG, and Regression Guard
+- **Status:** done
+- **Date:** 2026-04-09
+- **Scope:** Package README renames, new regression-guard test, root CHANGELOG creation, root README banner update, bootstrap verification
+- **Files touched:** 11 files (+ 2 new)
+  - **New (2):** `CHANGELOG.md` (root), `packages/iris-dev-mcp/tests/cross-server-naming.test.ts`
+  - **Modified docs (6):** root `README.md` (1-line banner append), 5 package READMEs (`packages/iris-{admin,data,dev,interop,ops}-mcp/README.md`)
+  - **Modified config/generated (2):** `packages/iris-dev-mcp/vitest.config.ts` (1 include pattern added), `packages/shared/src/bootstrap-classes.ts` (regenerated)
+  - **Modified `.cls` doc comments (2):** `src/ExecuteMCPv2/Setup.cls` line 104, `src/ExecuteMCPv2/REST/Security.cls` line 975 — scope adjustment from the original story's blanket "no .cls files" guardrail, explicitly approved by the lead because AC5 requires clean bootstrap output and bootstrap is generated from `.cls` source
+- **Key decisions:**
+  - **Regression guard placement:** `packages/iris-dev-mcp/tests/cross-server-naming.test.ts` in a NEW `tests/` directory outside `src/`. Rationale: `@iris-mcp/shared` is the foundational package (dependency cycle if test lives there); each server's `src/index.ts` has runtime side effects (`server.start(transport)`); importing peer packages via relative paths to `src/tools/index.js` (pure re-exports, no side effects) required placing the test outside `src/` to avoid rootDir violations. Added 1 include pattern to `vitest.config.ts`. No peer devDependencies, no new workspace packages, no new test scripts — minimal config delta.
+  - **Test cases (4, exceeded the 2-test minimum):** tool-count sanity, regex match, `iris_` prefix assertion, uniqueness check
+  - **`.cls` doc-comment scope adjustment:** The original story guardrail said "no .cls files" but AC5 required clean bootstrap output. Dev agent correctly identified the tension and made 2 minimal doc-comment edits. Lead reviewed and approved.
+  - **Sprint-status.yaml dirty state:** Dev agent flipped 9-2 to `review` against instructions (same issue as dev-9-1). Code review agent reverted via `git checkout HEAD --`. Lead set to `done` during this commit.
+- **Rename stats:** 208 README rename occurrences across 5 files (49 + 23 + 44 + 43 + 49); 2 doc-comment edits in `.cls` source; 2 regenerated doc-comment refs in bootstrap-classes.ts
+- **Test delta:** Story 9.1 baseline 51 files / 993 tests → Story 9.2 final **52 files / 997 tests / 0 failures** (+1 file / +4 tests, matching the new cross-server-naming.test.ts)
+- **Build:** turbo build 6/6 successful (cached)
+- **Review findings:** 0 HIGH / 0 MEDIUM / 0 LOW. All 5 deliverables PASS. Only auto-resolution was the sprint-status.yaml revert.

@@ -1,6 +1,6 @@
 # IRIS MCP Server Suite
 
-> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release.
+> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release. See [CHANGELOG.md](CHANGELOG.md) for the 2026-04-09 pre-release breaking change to tool names.
 
 **Give AI assistants structured, safe access to InterSystems IRIS.**
 

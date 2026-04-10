@@ -972,7 +972,7 @@ ClassMethod WebAppGet(pName As %String) As %Status
 /// Get a single web application by name (POST variant).
 /// <p>Reads the web application name from the JSON request body to avoid
 /// URL-encoding issues with forward slashes in application paths.
-/// This is the preferred endpoint for <code>iris.webapp.get</code>.</p>
+/// This is the preferred endpoint for <code>iris_webapp_get</code>.</p>
 ClassMethod WebAppGetByPost() As %Status
 {
     Set tSC = $$$OK

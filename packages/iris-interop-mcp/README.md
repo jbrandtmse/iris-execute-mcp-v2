@@ -105,67 +105,67 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.production.manage` | Create or delete a production | `action`, `name`, `namespace?` | destructive |
-| `iris.production.control` | Start, stop, restart, update, or recover | `action`, `name?`, `timeout?`, `force?`, `namespace?` | -- |
-| `iris.production.status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
-| `iris.production.summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
+| `iris_production_manage` | Create or delete a production | `action`, `name`, `namespace?` | destructive |
+| `iris_production_control` | Start, stop, restart, update, or recover | `action`, `name?`, `timeout?`, `force?`, `namespace?` | -- |
+| `iris_production_status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
+| `iris_production_summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
 
 ### Production Item & Config Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.production.item` | Enable, disable, get, or set config item settings | `action`, `itemName`, `settings?`, `namespace?` | -- |
-| `iris.production.autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
+| `iris_production_item` | Enable, disable, get, or set config item settings | `action`, `itemName`, `settings?`, `namespace?` | -- |
+| `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
 
 ### Production Monitoring Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.production.logs` | Query event log entries | `type?`, `itemName?`, `count?`, `namespace?` | readOnly, idempotent |
-| `iris.production.queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
-| `iris.production.messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
-| `iris.production.adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
+| `iris_production_logs` | Query event log entries | `type?`, `itemName?`, `count?`, `namespace?` | readOnly, idempotent |
+| `iris_production_queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
+| `iris_production_messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
+| `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
 
 ### Credential Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.credential.manage` | Create, update, or delete credentials | `action`, `id`, `username?`, `password?`, `namespace?` | destructive |
-| `iris.credential.list` | List all credentials (passwords never returned) | `namespace?` | readOnly, idempotent |
+| `iris_credential_manage` | Create, update, or delete credentials | `action`, `id`, `username?`, `password?`, `namespace?` | destructive |
+| `iris_credential_list` | List all credentials (passwords never returned) | `namespace?` | readOnly, idempotent |
 
 ### Lookup Table Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.lookup.manage` | Get, set, or delete lookup table entries | `action`, `tableName`, `key`, `value?`, `namespace?` | destructive |
-| `iris.lookup.transfer` | Export or import lookup tables as XML | `action`, `tableName`, `xml?`, `namespace?` | destructive |
+| `iris_lookup_manage` | Get, set, or delete lookup table entries | `action`, `tableName`, `key`, `value?`, `namespace?` | destructive |
+| `iris_lookup_transfer` | Export or import lookup tables as XML | `action`, `tableName`, `xml?`, `namespace?` | destructive |
 
 ### Business Rule Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.rule.list` | List all business rule classes | `namespace?` | readOnly, idempotent |
-| `iris.rule.get` | Get full rule definition with conditions and actions | `name`, `namespace?` | readOnly, idempotent |
+| `iris_rule_list` | List all business rule classes | `namespace?` | readOnly, idempotent |
+| `iris_rule_get` | Get full rule definition with conditions and actions | `name`, `namespace?` | readOnly, idempotent |
 
 ### Data Transformation Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.transform.list` | List all DTL transform classes | `namespace?` | readOnly, idempotent |
-| `iris.transform.test` | Execute a transformation against sample input | `className`, `sourceClass`, `sourceData?`, `namespace?` | idempotent |
+| `iris_transform_list` | List all DTL transform classes | `namespace?` | readOnly, idempotent |
+| `iris_transform_test` | Execute a transformation against sample input | `className`, `sourceClass`, `sourceData?`, `namespace?` | idempotent |
 
 ### REST API Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.interop.rest` | Create, delete, or get a REST application | `action`, `name`, `spec?`, `namespace?` | destructive |
+| `iris_interop_rest` | Create, delete, or get a REST application | `action`, `name`, `spec?`, `namespace?` | destructive |
 
 ---
 
 ## Tool Examples
 
 <details>
-<summary><strong>iris.production.manage</strong> -- Create a production</summary>
+<summary><strong>iris_production_manage</strong> -- Create a production</summary>
 
 **Input:**
 ```json
@@ -187,7 +187,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.control</strong> -- Start a production</summary>
+<summary><strong>iris_production_control</strong> -- Start a production</summary>
 
 **Input:**
 ```json
@@ -208,7 +208,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.status</strong> -- Get production status</summary>
+<summary><strong>iris_production_status</strong> -- Get production status</summary>
 
 **Input:**
 ```json
@@ -232,7 +232,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.summary</strong> -- Cross-namespace summary</summary>
+<summary><strong>iris_production_summary</strong> -- Cross-namespace summary</summary>
 
 **Input:**
 ```json
@@ -252,7 +252,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.item</strong> -- Get config item settings</summary>
+<summary><strong>iris_production_item</strong> -- Get config item settings</summary>
 
 **Input:**
 ```json
@@ -277,7 +277,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.autostart</strong> -- Get auto-start config</summary>
+<summary><strong>iris_production_autostart</strong> -- Get auto-start config</summary>
 
 **Input:**
 ```json
@@ -296,7 +296,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.logs</strong> -- Query event logs</summary>
+<summary><strong>iris_production_logs</strong> -- Query event logs</summary>
 
 **Input:**
 ```json
@@ -318,7 +318,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.queues</strong> -- Queue status</summary>
+<summary><strong>iris_production_queues</strong> -- Queue status</summary>
 
 **Input:**
 ```json
@@ -337,7 +337,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.messages</strong> -- Trace messages</summary>
+<summary><strong>iris_production_messages</strong> -- Trace messages</summary>
 
 **Input:**
 ```json
@@ -357,7 +357,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.production.adapters</strong> -- List adapters</summary>
+<summary><strong>iris_production_adapters</strong> -- List adapters</summary>
 
 **Input:**
 ```json
@@ -379,7 +379,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.credential.manage</strong> -- Create a credential</summary>
+<summary><strong>iris_credential_manage</strong> -- Create a credential</summary>
 
 **Input:**
 ```json
@@ -402,7 +402,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.credential.list</strong> -- List credentials</summary>
+<summary><strong>iris_credential_list</strong> -- List credentials</summary>
 
 **Input:**
 ```json
@@ -421,7 +421,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.lookup.manage</strong> -- Set a lookup entry</summary>
+<summary><strong>iris_lookup_manage</strong> -- Set a lookup entry</summary>
 
 **Input:**
 ```json
@@ -445,7 +445,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.lookup.transfer</strong> -- Export lookup table</summary>
+<summary><strong>iris_lookup_transfer</strong> -- Export lookup table</summary>
 
 **Input:**
 ```json
@@ -464,7 +464,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.rule.list</strong> -- List business rules</summary>
+<summary><strong>iris_rule_list</strong> -- List business rules</summary>
 
 **Input:**
 ```json
@@ -481,7 +481,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.rule.get</strong> -- Get rule definition</summary>
+<summary><strong>iris_rule_get</strong> -- Get rule definition</summary>
 
 **Input:**
 ```json
@@ -500,7 +500,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.transform.list</strong> -- List DTL transforms</summary>
+<summary><strong>iris_transform_list</strong> -- List DTL transforms</summary>
 
 **Input:**
 ```json
@@ -517,7 +517,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.transform.test</strong> -- Test a transformation</summary>
+<summary><strong>iris_transform_test</strong> -- Test a transformation</summary>
 
 **Input:**
 ```json
@@ -540,7 +540,7 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris.interop.rest</strong> -- Create REST application</summary>
+<summary><strong>iris_interop_rest</strong> -- Create REST application</summary>
 
 **Input:**
 ```json
@@ -567,11 +567,11 @@ All servers use the same environment variables:
 
 All 19 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
-**Tools that accept the `namespace` parameter** (all except `iris.production.summary`):
+**Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, and monitoring tools
 - All credential, lookup, rule, transform, and REST tools
 
-`iris.production.summary` does **not** accept a namespace parameter -- it iterates all namespaces automatically and returns a cross-namespace view.
+`iris_production_summary` does **not** accept a namespace parameter -- it iterates all namespaces automatically and returns a cross-namespace view.
 
 **Important:** The target namespace must have Ensemble/Interoperability enabled. Namespaces without the Ensemble mappings will return errors when querying production status or items.
 
@@ -585,9 +585,9 @@ All 19 interoperability tools operate in the context of a specific IRIS namespac
 |-------|-------|------------|
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials or insufficient privileges | Check credentials; interop operations may require `%Ens_*` resources |
-| `Production not found` | No production configured in the namespace | Use `iris.production.manage` to create one, or check the namespace |
-| `Production must be stopped` | Attempting to delete a running production | Stop the production first with `iris.production.control` |
-| `Config item not found` | Invalid item name | Check item names with `iris.production.status` (detail=true) |
+| `Production not found` | No production configured in the namespace | Use `iris_production_manage` to create one, or check the namespace |
+| `Production must be stopped` | Attempting to delete a running production | Stop the production first with `iris_production_control` |
+| `Config item not found` | Invalid item name | Check item names with `iris_production_status` (detail=true) |
 | `at least one of sessionId or headerId is required` | Missing filter for message trace | Provide either `sessionId` or `headerId` |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 

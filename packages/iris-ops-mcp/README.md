@@ -105,49 +105,49 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.metrics.system` | System metrics in Prometheus format | *(none)* | readOnly, idempotent |
-| `iris.metrics.alerts` | Active system alerts with severity | *(none)* | readOnly, idempotent |
-| `iris.metrics.interop` | Interoperability volume and interface metrics | `namespace?` | readOnly, idempotent |
+| `iris_metrics_system` | System metrics in Prometheus format | *(none)* | readOnly, idempotent |
+| `iris_metrics_alerts` | Active system alerts with severity | *(none)* | readOnly, idempotent |
+| `iris_metrics_interop` | Interoperability volume and interface metrics | `namespace?` | readOnly, idempotent |
 
 ### Process & Lock Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.jobs.list` | List all running IRIS jobs/processes | *(none)* | readOnly, idempotent |
-| `iris.locks.list` | List all current system locks | *(none)* | readOnly, idempotent |
+| `iris_jobs_list` | List all running IRIS jobs/processes | *(none)* | readOnly, idempotent |
+| `iris_locks_list` | List all current system locks | *(none)* | readOnly, idempotent |
 
 ### Infrastructure Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.journal.info` | Journal file status and directory info | *(none)* | readOnly, idempotent |
-| `iris.mirror.status` | Mirror configuration and membership status | *(none)* | readOnly, idempotent |
-| `iris.audit.events` | Audit log events with filters | `beginDate?`, `endDate?`, `username?`, `eventType?`, `maxRows?` | readOnly, idempotent |
-| `iris.database.check` | Database status (mounted, encrypted, size) | `name?` | readOnly, idempotent |
-| `iris.license.info` | License type, capacity, usage, expiration | *(none)* | readOnly, idempotent |
-| `iris.ecp.status` | ECP connection status | *(none)* | readOnly, idempotent |
+| `iris_journal_info` | Journal file status and directory info | *(none)* | readOnly, idempotent |
+| `iris_mirror_status` | Mirror configuration and membership status | *(none)* | readOnly, idempotent |
+| `iris_audit_events` | Audit log events with filters | `beginDate?`, `endDate?`, `username?`, `eventType?`, `maxRows?` | readOnly, idempotent |
+| `iris_database_check` | Database status (mounted, encrypted, size) | `name?` | readOnly, idempotent |
+| `iris_license_info` | License type, capacity, usage, expiration | *(none)* | readOnly, idempotent |
+| `iris_ecp_status` | ECP connection status | *(none)* | readOnly, idempotent |
 
 ### Task Scheduling Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.task.manage` | Create, modify, or delete a scheduled task | `action`, `id?`, `name?`, `taskClass?`, `namespace?`, `suspended?` | destructive |
-| `iris.task.list` | List all scheduled tasks with details | *(none)* | readOnly, idempotent |
-| `iris.task.run` | Trigger immediate task execution | `id` | -- |
-| `iris.task.history` | View task execution history | `taskId?` | readOnly, idempotent |
+| `iris_task_manage` | Create, modify, or delete a scheduled task | `action`, `id?`, `name?`, `taskClass?`, `namespace?`, `suspended?` | destructive |
+| `iris_task_list` | List all scheduled tasks with details | *(none)* | readOnly, idempotent |
+| `iris_task_run` | Trigger immediate task execution | `id` | -- |
+| `iris_task_history` | View task execution history | `taskId?` | readOnly, idempotent |
 
 ### System Configuration Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.config.manage` | Get, set, or export system configuration | `action`, `section?`, `properties?` | destructive (set) |
+| `iris_config_manage` | Get, set, or export system configuration | `action`, `section?`, `properties?` | destructive (set) |
 
 ---
 
 ## Tool Examples
 
 <details>
-<summary><strong>iris.metrics.system</strong> -- System metrics</summary>
+<summary><strong>iris_metrics_system</strong> -- System metrics</summary>
 
 **Input:**
 ```json
@@ -170,7 +170,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.metrics.alerts</strong> -- System alerts</summary>
+<summary><strong>iris_metrics_alerts</strong> -- System alerts</summary>
 
 **Input:**
 ```json
@@ -190,7 +190,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.metrics.interop</strong> -- Interop metrics</summary>
+<summary><strong>iris_metrics_interop</strong> -- Interop metrics</summary>
 
 **Input:**
 ```json
@@ -219,7 +219,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.jobs.list</strong> -- List running jobs</summary>
+<summary><strong>iris_jobs_list</strong> -- List running jobs</summary>
 
 **Input:**
 ```json
@@ -247,7 +247,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.locks.list</strong> -- List locks</summary>
+<summary><strong>iris_locks_list</strong> -- List locks</summary>
 
 **Input:**
 ```json
@@ -273,7 +273,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.journal.info</strong> -- Journal status</summary>
+<summary><strong>iris_journal_info</strong> -- Journal status</summary>
 
 **Input:**
 ```json
@@ -295,7 +295,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.mirror.status</strong> -- Mirror status</summary>
+<summary><strong>iris_mirror_status</strong> -- Mirror status</summary>
 
 **Input:**
 ```json
@@ -317,7 +317,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.audit.events</strong> -- Query audit log</summary>
+<summary><strong>iris_audit_events</strong> -- Query audit log</summary>
 
 **Input:**
 ```json
@@ -349,7 +349,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.database.check</strong> -- Database health</summary>
+<summary><strong>iris_database_check</strong> -- Database health</summary>
 
 **Input:**
 ```json
@@ -379,7 +379,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.license.info</strong> -- License info</summary>
+<summary><strong>iris_license_info</strong> -- License info</summary>
 
 **Input:**
 ```json
@@ -402,7 +402,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.ecp.status</strong> -- ECP status</summary>
+<summary><strong>iris_ecp_status</strong> -- ECP status</summary>
 
 **Input:**
 ```json
@@ -419,7 +419,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.task.manage</strong> -- Create a task</summary>
+<summary><strong>iris_task_manage</strong> -- Create a task</summary>
 
 **Input:**
 ```json
@@ -442,7 +442,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.task.list</strong> -- List tasks</summary>
+<summary><strong>iris_task_list</strong> -- List tasks</summary>
 
 **Input:**
 ```json
@@ -469,7 +469,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.task.run</strong> -- Run a task immediately</summary>
+<summary><strong>iris_task_run</strong> -- Run a task immediately</summary>
 
 **Input:**
 ```json
@@ -489,7 +489,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.task.history</strong> -- Task execution history</summary>
+<summary><strong>iris_task_history</strong> -- Task execution history</summary>
 
 **Input:**
 ```json
@@ -519,7 +519,7 @@ iris_db_size_mb{db="IRISSYS"} 1024
 </details>
 
 <details>
-<summary><strong>iris.config.manage</strong> -- Get system configuration</summary>
+<summary><strong>iris_config_manage</strong> -- Get system configuration</summary>
 
 **Input:**
 ```json
@@ -550,16 +550,16 @@ iris_db_size_mb{db="IRISSYS"} 1024
 Most operations tools are **system-level** and do not require a namespace parameter. They operate across the entire IRIS instance.
 
 **Tools that accept the `namespace` parameter:**
-- `iris.metrics.interop` -- optionally filter interop metrics to a single namespace
-- `iris.task.manage` -- specify the execution namespace for a new task
+- `iris_metrics_interop` -- optionally filter interop metrics to a single namespace
+- `iris_task_manage` -- specify the execution namespace for a new task
 
 **Tools that do NOT accept `namespace`** (system-wide scope):
-- `iris.metrics.system`, `iris.metrics.alerts`
-- `iris.jobs.list`, `iris.locks.list`
-- `iris.journal.info`, `iris.mirror.status`, `iris.audit.events`
-- `iris.database.check`, `iris.license.info`, `iris.ecp.status`
-- `iris.task.list`, `iris.task.run`, `iris.task.history`
-- `iris.config.manage`
+- `iris_metrics_system`, `iris_metrics_alerts`
+- `iris_jobs_list`, `iris_locks_list`
+- `iris_journal_info`, `iris_mirror_status`, `iris_audit_events`
+- `iris_database_check`, `iris_license_info`, `iris_ecp_status`
+- `iris_task_list`, `iris_task_run`, `iris_task_history`
+- `iris_config_manage`
 
 ---
 
@@ -573,7 +573,7 @@ Most operations tools are **system-level** and do not require a namespace parame
 | `401 Unauthorized` | Invalid credentials or insufficient privileges | Check credentials; ops operations may require `%Admin_Operate` or `%Admin_Manage` resources |
 | `ECP not configured` | No ECP setup on this instance | This is an informational response, not an error |
 | `Mirror not configured` | No mirror setup on this instance | This is an informational response, not an error |
-| `Task not found` | Invalid task ID | Use `iris.task.list` to find valid task IDs |
+| `Task not found` | Invalid task ID | Use `iris_task_list` to find valid task IDs |
 | `Configuration section not found` | Invalid section name | Valid sections: `config`, `startup`, `locale` |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 

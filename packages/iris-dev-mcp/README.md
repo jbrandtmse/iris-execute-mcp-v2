@@ -107,69 +107,69 @@ Add to your Cursor MCP settings:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.doc.get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
-| `iris.doc.put` | Create or update a document on IRIS | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
-| `iris.doc.delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
-| `iris.doc.list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
-| `iris.doc.load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
+| `iris_doc_put` | Create or update a document on IRIS | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
+| `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
 
 ### Compilation Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.doc.compile` | Compile one or more documents | `doc` (string or array), `flags?`, `async?`, `namespace?` | idempotent |
+| `iris_doc_compile` | Compile one or more documents | `doc` (string or array), `flags?`, `async?`, `namespace?` | idempotent |
 
 ### Code Intelligence Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.doc.index` | Get class structure (methods, properties, superclasses) | `name`, `namespace?` | readOnly, idempotent |
-| `iris.doc.search` | Search across code with regex/wildcard options | `query`, `regex?`, `word?`, `case?`, `wild?`, `files?`, `sys?`, `gen?`, `max?`, `namespace?` | readOnly, idempotent |
-| `iris.macro.info` | Look up macro definitions and source locations | `name`, `document?`, `includes?`, `namespace?` | readOnly, idempotent |
+| `iris_doc_index` | Get class structure (methods, properties, superclasses) | `name`, `namespace?` | readOnly, idempotent |
+| `iris_doc_search` | Search across code with regex/wildcard options | `query`, `regex?`, `word?`, `case?`, `wild?`, `files?`, `sys?`, `gen?`, `max?`, `namespace?` | readOnly, idempotent |
+| `iris_macro_info` | Look up macro definitions and source locations | `name`, `document?`, `includes?`, `namespace?` | readOnly, idempotent |
 
 ### Format and Export Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.doc.convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris.doc.xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import) |
+| `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import) |
 
 ### SQL Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.sql.execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
+| `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
 
 ### Server Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.server.info` | Get IRIS version, platform, instance name | *(none)* | readOnly, idempotent |
-| `iris.server.namespace` | Get namespace details and features | `namespace?` | readOnly, idempotent |
+| `iris_server_info` | Get IRIS version, platform, instance name | *(none)* | readOnly, idempotent |
+| `iris_server_namespace` | Get namespace details and features | `namespace?` | readOnly, idempotent |
 
 ### Global Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.global.get` | Read a global node value | `global`, `subscripts?`, `namespace?` | readOnly, idempotent |
-| `iris.global.set` | Set a global node value (verified) | `global`, `value`, `subscripts?`, `namespace?` | idempotent |
-| `iris.global.kill` | Delete a global node or subtree | `global`, `subscripts?`, `namespace?` | destructive, idempotent |
-| `iris.global.list` | List globals with optional filter | `filter?`, `cursor?`, `namespace?` | readOnly, idempotent |
+| `iris_global_get` | Read a global node value | `global`, `subscripts?`, `namespace?` | readOnly, idempotent |
+| `iris_global_set` | Set a global node value (verified) | `global`, `value`, `subscripts?`, `namespace?` | idempotent |
+| `iris_global_kill` | Delete a global node or subtree | `global`, `subscripts?`, `namespace?` | destructive, idempotent |
+| `iris_global_list` | List globals with optional filter | `filter?`, `cursor?`, `namespace?` | readOnly, idempotent |
 
 ### Execution Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris.execute.command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
-| `iris.execute.classmethod` | Invoke a class method with arguments | `className`, `methodName`, `args?`, `namespace?` | -- |
-| `iris.execute.tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
+| `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
+| `iris_execute_classmethod` | Invoke a class method with arguments | `className`, `methodName`, `args?`, `namespace?` | -- |
+| `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
 
 ---
 
 ## Tool Examples
 
 <details>
-<summary><strong>iris.doc.get</strong> -- Retrieve a document</summary>
+<summary><strong>iris_doc_get</strong> -- Retrieve a document</summary>
 
 **Input:**
 ```json
@@ -190,7 +190,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.put</strong> -- Create or update a document</summary>
+<summary><strong>iris_doc_put</strong> -- Create or update a document</summary>
 
 **Input:**
 ```json
@@ -207,7 +207,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.delete</strong> -- Delete documents</summary>
+<summary><strong>iris_doc_delete</strong> -- Delete documents</summary>
 
 **Input:**
 ```json
@@ -223,7 +223,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.list</strong> -- List documents</summary>
+<summary><strong>iris_doc_list</strong> -- List documents</summary>
 
 **Input:**
 ```json
@@ -245,7 +245,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.load</strong> -- Bulk load from disk</summary>
+<summary><strong>iris_doc_load</strong> -- Bulk load from disk</summary>
 
 **Input:**
 ```json
@@ -270,7 +270,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.compile</strong> -- Compile documents</summary>
+<summary><strong>iris_doc_compile</strong> -- Compile documents</summary>
 
 **Input:**
 ```json
@@ -290,7 +290,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.index</strong> -- Get class structure</summary>
+<summary><strong>iris_doc_index</strong> -- Get class structure</summary>
 
 **Input:**
 ```json
@@ -315,7 +315,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.search</strong> -- Search across code</summary>
+<summary><strong>iris_doc_search</strong> -- Search across code</summary>
 
 **Input:**
 ```json
@@ -336,7 +336,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.macro.info</strong> -- Look up macro definition</summary>
+<summary><strong>iris_macro_info</strong> -- Look up macro definition</summary>
 
 **Input:**
 ```json
@@ -358,7 +358,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.convert</strong> -- Convert document format</summary>
+<summary><strong>iris_doc_convert</strong> -- Convert document format</summary>
 
 **Input:**
 ```json
@@ -378,7 +378,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.doc.xml_export</strong> -- Export to XML</summary>
+<summary><strong>iris_doc_xml_export</strong> -- Export to XML</summary>
 
 **Input:**
 ```json
@@ -397,7 +397,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.sql.execute</strong> -- Execute SQL</summary>
+<summary><strong>iris_sql_execute</strong> -- Execute SQL</summary>
 
 **Input:**
 ```json
@@ -422,7 +422,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.server.info</strong> -- Get server info</summary>
+<summary><strong>iris_server_info</strong> -- Get server info</summary>
 
 **Input:**
 ```json
@@ -440,7 +440,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.server.namespace</strong> -- Get namespace details</summary>
+<summary><strong>iris_server_namespace</strong> -- Get namespace details</summary>
 
 **Input:**
 ```json
@@ -460,7 +460,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.global.get</strong> -- Read a global</summary>
+<summary><strong>iris_global_get</strong> -- Read a global</summary>
 
 **Input:**
 ```json
@@ -480,7 +480,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.global.set</strong> -- Set a global</summary>
+<summary><strong>iris_global_set</strong> -- Set a global</summary>
 
 **Input:**
 ```json
@@ -501,7 +501,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.global.kill</strong> -- Delete a global</summary>
+<summary><strong>iris_global_kill</strong> -- Delete a global</summary>
 
 **Input:**
 ```json
@@ -520,7 +520,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.global.list</strong> -- List globals</summary>
+<summary><strong>iris_global_list</strong> -- List globals</summary>
 
 **Input:**
 ```json
@@ -539,7 +539,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.execute.command</strong> -- Execute ObjectScript</summary>
+<summary><strong>iris_execute_command</strong> -- Execute ObjectScript</summary>
 
 **Input:**
 ```json
@@ -557,7 +557,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.execute.classmethod</strong> -- Call a class method</summary>
+<summary><strong>iris_execute_classmethod</strong> -- Call a class method</summary>
 
 **Input:**
 ```json
@@ -577,7 +577,7 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris.execute.tests</strong> -- Run unit tests</summary>
+<summary><strong>iris_execute_tests</strong> -- Run unit tests</summary>
 
 **Input:**
 ```json
@@ -609,7 +609,7 @@ Add to your Cursor MCP settings:
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
 **All 21 tools in this package accept the `namespace` parameter** except:
-- `iris.server.info` -- Server-level info, no namespace needed
+- `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.
 
@@ -627,7 +627,7 @@ Tools that use the Atelier REST API (doc, compile, intelligence, sql, server too
 | `Compilation errors` | ObjectScript syntax errors in source code | Review the error details (line/character positions) returned in the compilation result |
 | `SQL error` | Invalid SQL syntax or missing table | Check the query syntax and that referenced tables exist |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
-| `<NAMESPACE> error` | Target namespace does not exist | Use `iris.namespace.list` (admin server) to verify available namespaces |
+| `<NAMESPACE> error` | Target namespace does not exist | Use `iris_namespace_list` (admin server) to verify available namespaces |
 
 ### Error Response Format
 
