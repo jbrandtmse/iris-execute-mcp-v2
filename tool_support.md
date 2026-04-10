@@ -1,0 +1,203 @@
+# Tool Support — API Catalog
+
+This document maps every tool in the IRIS MCP Server Suite to the backing IRIS API it calls. Use this as a reference when debugging tool behavior, planning deployment dependencies, or deciding which servers to install.
+
+## Legend
+
+| Marker | API |
+|:---:|---|
+| 🟦 | **Atelier REST** — standard IRIS API at `/api/atelier/v{N}/...`, shipped with IRIS |
+| 🟥 | **ExecuteMCPv2** custom REST — handlers at `/api/executemcp/v2/...`, deployed automatically via bootstrap |
+| 🟩 | **Other IRIS API** — DocDB (`/api/docdb/v1`), Management (`/api/mgmnt/v2`), etc. — standard IRIS endpoints that are neither Atelier nor custom |
+
+---
+
+## `@iris-mcp/dev` — Development Tools (21)
+
+| # | Tool | API | Endpoint |
+|---|---|:---:|---|
+| 1 | `iris_server_info` | 🟦 Atelier | `GET /api/atelier/` |
+| 2 | `iris_server_namespace` | 🟦 Atelier | `GET /api/atelier/v{N}/{ns}` |
+| 3 | `iris_doc_get` | 🟦 Atelier | `GET \| HEAD /doc/{name}` |
+| 4 | `iris_doc_put` | 🟦 Atelier | `PUT /doc/{name}` |
+| 5 | `iris_doc_delete` | 🟦 Atelier | `DELETE /doc/{name}` |
+| 6 | `iris_doc_list` | 🟦 Atelier | `GET /docnames/{cat}/{type}` + `GET /modified/{ts}` |
+| 7 | `iris_doc_load` | 🟦 Atelier | `PUT /doc/{name}` (bulk) + `POST /action/compile` |
+| 8 | `iris_doc_compile` | 🟦 Atelier | `POST /action/compile` |
+| 9 | `iris_doc_index` | 🟦 Atelier | `POST /action/index` (class structure) |
+| 10 | `iris_doc_search` | 🟦 Atelier | `GET /action/search` |
+| 11 | `iris_doc_convert` | 🟦 Atelier | `GET /doc/{name}?format=...` (UDL ↔ XML) |
+| 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` |
+| 13 | `iris_macro_info` | 🟦 Atelier | `POST /action/getmacrodefinition` + `POST /action/getmacrolocation` |
+| 14 | `iris_sql_execute` | 🟦 Atelier | `POST /action/query` |
+| 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest) |
+| 16 | `iris_execute_command` | 🟥 ExecuteMCPv2 | `POST /command` |
+| 17 | `iris_execute_classmethod` | 🟥 ExecuteMCPv2 | `POST /classmethod` |
+| 18 | `iris_global_get` | 🟥 ExecuteMCPv2 | `GET /global` |
+| 19 | `iris_global_set` | 🟥 ExecuteMCPv2 | `POST /global` |
+| 20 | `iris_global_kill` | 🟥 ExecuteMCPv2 | `DELETE /global` |
+| 21 | `iris_global_list` | 🟥 ExecuteMCPv2 | `GET /global/list` |
+
+**Mix:** 15 Atelier · 6 ExecuteMCPv2 · 0 other
+
+---
+
+## `@iris-mcp/admin` — Administration (22)
+
+| # | Tool | API | Endpoint |
+|---|---|:---:|---|
+| 1 | `iris_namespace_manage` | 🟥 ExecuteMCPv2 | `/config/namespace` |
+| 2 | `iris_namespace_list` | 🟥 ExecuteMCPv2 | `/config/namespace` |
+| 3 | `iris_database_manage` | 🟥 ExecuteMCPv2 | `/config/database` |
+| 4 | `iris_database_list` | 🟥 ExecuteMCPv2 | `/config/database` |
+| 5 | `iris_mapping_manage` | 🟥 ExecuteMCPv2 | `/config/mapping/{type}` |
+| 6 | `iris_mapping_list` | 🟥 ExecuteMCPv2 | `/config/mapping/{type}` |
+| 7 | `iris_user_manage` | 🟥 ExecuteMCPv2 | `/security/user` |
+| 8 | `iris_user_get` | 🟥 ExecuteMCPv2 | `/security/user` or `/security/user/{name}` |
+| 9 | `iris_user_roles` | 🟥 ExecuteMCPv2 | `/security/user/roles` |
+| 10 | `iris_user_password` | 🟥 ExecuteMCPv2 | `/security/user/password` |
+| 11 | `iris_role_manage` | 🟥 ExecuteMCPv2 | `/security/role` |
+| 12 | `iris_role_list` | 🟥 ExecuteMCPv2 | `/security/role` |
+| 13 | `iris_resource_manage` | 🟥 ExecuteMCPv2 | `/security/resource` |
+| 14 | `iris_resource_list` | 🟥 ExecuteMCPv2 | `/security/resource` |
+| 15 | `iris_permission_check` | 🟥 ExecuteMCPv2 | `/security/permission` |
+| 16 | `iris_webapp_manage` | 🟥 ExecuteMCPv2 | `/security/webapp` |
+| 17 | `iris_webapp_get` | 🟥 ExecuteMCPv2 | `POST /security/webapp/get` (path in body) |
+| 18 | `iris_webapp_list` | 🟥 ExecuteMCPv2 | `/security/webapp` |
+| 19 | `iris_ssl_manage` | 🟥 ExecuteMCPv2 | `/security/ssl` |
+| 20 | `iris_ssl_list` | 🟥 ExecuteMCPv2 | `/security/ssl` |
+| 21 | `iris_oauth_manage` | 🟥 ExecuteMCPv2 | `/security/oauth` |
+| 22 | `iris_oauth_list` | 🟥 ExecuteMCPv2 | `/security/oauth` |
+
+**Mix:** 0 Atelier · 22 ExecuteMCPv2 · 0 other — **fully custom**. Atelier has no security or namespace management endpoints, which is why every one of these needs ObjectScript handlers.
+
+---
+
+## `@iris-mcp/interop` — Interoperability (19)
+
+| # | Tool | API | Endpoint |
+|---|---|:---:|---|
+| 1 | `iris_production_manage` | 🟥 ExecuteMCPv2 | `/interop/production` |
+| 2 | `iris_production_control` | 🟥 ExecuteMCPv2 | `/interop/production/control` |
+| 3 | `iris_production_status` | 🟥 ExecuteMCPv2 | `/interop/production/status` |
+| 4 | `iris_production_summary` | 🟥 ExecuteMCPv2 | `/interop/production/summary` |
+| 5 | `iris_production_item` | 🟥 ExecuteMCPv2 | `/interop/production/item` |
+| 6 | `iris_production_autostart` | 🟥 ExecuteMCPv2 | `/interop/production/autostart` |
+| 7 | `iris_production_logs` | 🟥 ExecuteMCPv2 | `/interop/production/logs` |
+| 8 | `iris_production_queues` | 🟥 ExecuteMCPv2 | `/interop/production/queues` |
+| 9 | `iris_production_messages` | 🟥 ExecuteMCPv2 | `/interop/production/messages` |
+| 10 | `iris_production_adapters` | 🟥 ExecuteMCPv2 | `/interop/production/adapters` |
+| 11 | `iris_credential_manage` | 🟥 ExecuteMCPv2 | `/interop/credential` |
+| 12 | `iris_credential_list` | 🟥 ExecuteMCPv2 | `/interop/credential` |
+| 13 | `iris_lookup_manage` | 🟥 ExecuteMCPv2 | `/interop/lookup` |
+| 14 | `iris_lookup_transfer` | 🟥 ExecuteMCPv2 | `/interop/lookup/transfer` |
+| 15 | `iris_rule_list` | 🟥 ExecuteMCPv2 | `/interop/rule` |
+| 16 | `iris_rule_get` | 🟥 ExecuteMCPv2 | `/interop/rule/get` |
+| 17 | `iris_transform_list` | 🟥 ExecuteMCPv2 | `/interop/transform` |
+| 18 | `iris_transform_test` | 🟥 ExecuteMCPv2 | `/interop/transform/test` |
+| 19 | `iris_interop_rest` | 🟥 ExecuteMCPv2 | `/interop/rest` |
+
+**Mix:** 0 Atelier · 19 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
+
+---
+
+## `@iris-mcp/ops` — Operations & Monitoring (16)
+
+| # | Tool | API | Endpoint |
+|---|---|:---:|---|
+| 1 | `iris_metrics_system` | 🟥 ExecuteMCPv2 | `/monitor/system` |
+| 2 | `iris_metrics_alerts` | 🟥 ExecuteMCPv2 | `/monitor/alerts` |
+| 3 | `iris_metrics_interop` | 🟥 ExecuteMCPv2 | `/monitor/interop` |
+| 4 | `iris_jobs_list` | 🟥 ExecuteMCPv2 | `/monitor/jobs` |
+| 5 | `iris_locks_list` | 🟥 ExecuteMCPv2 | `/monitor/locks` |
+| 6 | `iris_journal_info` | 🟥 ExecuteMCPv2 | `/monitor/journal` |
+| 7 | `iris_mirror_status` | 🟥 ExecuteMCPv2 | `/monitor/mirror` |
+| 8 | `iris_audit_events` | 🟥 ExecuteMCPv2 | `/monitor/audit` |
+| 9 | `iris_database_check` | 🟥 ExecuteMCPv2 | `/monitor/database` |
+| 10 | `iris_license_info` | 🟥 ExecuteMCPv2 | `/monitor/license` |
+| 11 | `iris_ecp_status` | 🟥 ExecuteMCPv2 | `/monitor/ecp` |
+| 12 | `iris_task_manage` | 🟥 ExecuteMCPv2 | `/task/manage` |
+| 13 | `iris_task_list` | 🟥 ExecuteMCPv2 | `/task/list` |
+| 14 | `iris_task_run` | 🟥 ExecuteMCPv2 | `/task/run` |
+| 15 | `iris_task_history` | 🟥 ExecuteMCPv2 | `/task/history` |
+| 16 | `iris_config_manage` | 🟥 ExecuteMCPv2 | `/system/config` |
+
+**Mix:** 0 Atelier · 16 ExecuteMCPv2 · 0 other — **fully custom**.
+
+> Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
+
+---
+
+## `@iris-mcp/data` — Data & Analytics (7)
+
+| # | Tool | API | Endpoint |
+|---|---|:---:|---|
+| 1 | `iris_docdb_manage` | 🟩 **DocDB** | `/api/docdb/v1/{ns}` + `/db/{db}` |
+| 2 | `iris_docdb_document` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/doc/{db}` |
+| 3 | `iris_docdb_find` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/find/{db}` |
+| 4 | `iris_docdb_property` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/prop/{db}/{prop}` |
+| 5 | `iris_analytics_mdx` | 🟥 ExecuteMCPv2 | `/analytics/mdx` |
+| 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
+| 7 | `iris_rest_manage` | 🟩 **Management API** | `/api/mgmnt/v2/{ns}` |
+
+**Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
+
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 85-tool total.
+
+---
+
+## Suite-wide rollup
+
+| Server | Atelier | ExecuteMCPv2 | Other | Total |
+|---|:---:|:---:|:---:|:---:|
+| `@iris-mcp/dev` | 15 | 6 | 0 | **21** |
+| `@iris-mcp/admin` | 0 | 22 | 0 | **22** |
+| `@iris-mcp/interop` | 0 | 19 | 0 | **19** |
+| `@iris-mcp/ops` | 0 | 16 | 0 | **16** |
+| `@iris-mcp/data` | 0 | 2 | 5 | **7** |
+| **Total** | **15** | **65** | **5** | **85** |
+
+---
+
+## Dependency implications
+
+### Only `@iris-mcp/dev` is partially portable without the custom REST
+
+15 of the 21 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, unit tests, and server info. The 6 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`) would fail but the rest would work.
+
+### Four servers are fully dependent on the custom REST handlers
+
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 65 of the 85 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+
+### `@iris-mcp/data` is the outlier — multi-API
+
+It's the only server that integrates with pre-existing IRIS APIs other than Atelier:
+
+- **DocDB** (`/api/docdb/v1`) — 4 tools for document database operations
+- **Management API** (`/api/mgmnt/v2`) — 1 tool for REST application management
+- **ExecuteMCPv2** — 2 tools for DeepSee analytics (MDX queries, cube operations)
+
+If DocDB or the Management API aren't enabled on the IRIS instance (they typically are by default, but can be disabled), 5 of the 7 data tools would error — **independently of your custom REST deployment**.
+
+### Pre-publish implication: bootstrap is critical infrastructure
+
+Because 65 of 85 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+
+---
+
+## Maintenance
+
+When adding a new tool, update this file as part of the same commit. The drift-check unit test in `packages/shared/src/__tests__/bootstrap.test.ts` will catch bootstrap regressions mechanically, but this API catalog is human-maintained.
+
+To regenerate the API mix manually, grep for the markers in each tool file:
+
+```bash
+# Atelier tools
+grep -rn 'atelierPath(' packages/*/src/tools/ | grep -v __tests__
+
+# Custom REST tools
+grep -rn 'BASE_URL = "/api/executemcp/v2"' packages/*/src/tools/
+
+# Other IRIS APIs
+grep -rn 'BASE_DOCDB_URL\|BASE_MGMNT_URL\|/api/docdb\|/api/mgmnt' packages/*/src/tools/
+```
