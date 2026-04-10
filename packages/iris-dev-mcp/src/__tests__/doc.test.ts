@@ -474,6 +474,49 @@ describe("iris_doc_list", () => {
     expect(calledPath).toContain("/docnames/");
     expect(calledPath).not.toContain("/modified/");
   });
+
+  // ── Real Atelier envelope shape regression ──────────────────────
+  // Production Atelier returns docnames as { result: { content: [...] } }
+  // rather than { result: [...] }. The extractAtelierContentArray helper
+  // in doc.ts must unwrap the content field. This test prevents the
+  // "silently returns empty" bug found in 2026-04-10 smoke testing.
+
+  it("should unwrap result.content for /docnames (real Atelier shape)", async () => {
+    const docs = [
+      { name: "MyApp.Service.cls", cat: "CLS", ts: "2026-04-05 12:00:00", db: "USER", upd: true, gen: false },
+      { name: "MyApp.Utils.cls", cat: "CLS", ts: "2026-04-05 12:00:01", db: "USER", upd: true, gen: false },
+    ];
+    mockHttp.get.mockResolvedValue(envelope({ content: docs }));
+
+    const result = await docListTool.handler({ category: "CLS" }, ctx);
+
+    expect(result.structuredContent).toEqual({ items: docs });
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should unwrap result.content for /modified (real Atelier shape)", async () => {
+    const docs = [
+      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
+    ];
+    mockHttp.get.mockResolvedValue(envelope({ content: docs }));
+
+    const result = await docListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z" },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual({ items: docs });
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("should return empty items when result.content is missing or empty", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [] }));
+
+    const result = await docListTool.handler({}, ctx);
+
+    expect(result.structuredContent).toEqual({ items: [] });
+    expect(result.isError).toBeUndefined();
+  });
 });
 
 // ── validateDocName ──────────────────────────────────────────────────

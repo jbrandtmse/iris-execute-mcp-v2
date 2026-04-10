@@ -140,9 +140,15 @@ export function requireMinVersion(
 /**
  * Build a full Atelier API path.
  *
+ * The namespace is URL-encoded so that `%`-prefixed system namespaces
+ * like `%SYS` and `%ALL` become `%25SYS` / `%25ALL` and are not
+ * misinterpreted by the HTTP stack as incomplete percent-encoding.
+ *
  * @example
  * atelierPath(7, "HSCUSTOM", "doc/MyClass.cls")
  * // → "/api/atelier/v7/HSCUSTOM/doc/MyClass.cls"
+ * atelierPath(8, "%SYS", "docnames/CLS/cls")
+ * // → "/api/atelier/v8/%25SYS/docnames/CLS/cls"
  *
  * @throws {Error} When version is not a positive integer, namespace is
  *   empty, or action is empty.
@@ -161,7 +167,7 @@ export function atelierPath(
   if (!action) {
     throw new Error("atelierPath: action must not be empty");
   }
-  return `/api/atelier/v${version}/${namespace}/${action}`;
+  return `/api/atelier/v${version}/${encodeURIComponent(namespace)}/${action}`;
 }
 
 // ── Internal helpers ────────────────────────────────────────────────

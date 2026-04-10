@@ -277,8 +277,21 @@ describe("atelier", () => {
     });
 
     it("should work with v8", () => {
-      expect(atelierPath(8, "%SYS", "doc/Ens.Config.cls")).toBe(
-        "/api/atelier/v8/%SYS/doc/Ens.Config.cls",
+      expect(atelierPath(8, "HSCUSTOM", "doc/Ens.Config.cls")).toBe(
+        "/api/atelier/v8/HSCUSTOM/doc/Ens.Config.cls",
+      );
+    });
+
+    // Regression: `%`-prefixed system namespaces like %SYS and %ALL must
+    // be URL-encoded. Without encoding, the HTTP stack tries to parse
+    // `%SY` as incomplete percent-encoding and Atelier returns HTTP 400.
+    // Bug found in 2026-04-10 smoke testing post-Epic 9 rename.
+    it("should URL-encode %-prefixed system namespaces", () => {
+      expect(atelierPath(8, "%SYS", "docnames/CLS/cls")).toBe(
+        "/api/atelier/v8/%25SYS/docnames/CLS/cls",
+      );
+      expect(atelierPath(8, "%ALL", "doc/%File.cls")).toBe(
+        "/api/atelier/v8/%25ALL/doc/%File.cls",
       );
     });
 

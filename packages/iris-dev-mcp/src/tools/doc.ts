@@ -30,6 +30,21 @@ export function validateDocName(name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Extract a list of items from an Atelier API response `result` payload.
+ *
+ * Atelier endpoints that return document lists (`/docnames/{cat}/{type}`,
+ * `/modified/{timestamp}`) nest the array inside a `content` field:
+ * `{ status, console, result: { content: [...] } }`. Older unit-test
+ * fixtures sometimes passed the array directly as `result: [...]`, so
+ * this helper accepts both shapes for backwards compatibility.
+ */
+export function extractAtelierContentArray(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result;
+  const wrapped = (result as { content?: unknown })?.content;
+  return Array.isArray(wrapped) ? wrapped : [];
+}
+
 // ── iris_doc_get ────────────────────────────────────────────────────
 
 export const docGetTool: ToolDefinition = {
@@ -373,7 +388,7 @@ export const docListTool: ToolDefinition = {
     if (modifiedSince) {
       const path = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
       const response = await ctx.http.get(path);
-      const allDocs: unknown[] = Array.isArray(response.result) ? response.result : [];
+      const allDocs: unknown[] = extractAtelierContentArray(response.result);
       const { page, nextCursor } = ctx.paginate(allDocs, cursor);
       const result = { items: page, ...(nextCursor ? { nextCursor } : {}) };
       return {
@@ -398,8 +413,8 @@ export const docListTool: ToolDefinition = {
 
     const response = await ctx.http.get(fullPath);
 
-    // result.content contains the document list from Atelier
-    const allDocs: unknown[] = Array.isArray(response.result) ? response.result : [];
+    // Atelier /docnames returns { result: { content: [...] } }
+    const allDocs: unknown[] = extractAtelierContentArray(response.result);
     const { page, nextCursor } = ctx.paginate(allDocs, cursor);
     const result = { items: page, ...(nextCursor ? { nextCursor } : {}) };
 
