@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Default maximum number of rows returned when maxRows is not specified. */
 const DEFAULT_MAX_ROWS = 1000;
 
-// ── iris.sql.execute ──────────────────────────────────────────────
+// ── iris_sql_execute ──────────────────────────────────────────────
 
 export const sqlExecuteTool: ToolDefinition = {
-  name: "iris.sql.execute",
+  name: "iris_sql_execute",
   title: "Execute SQL",
   description:
     "Execute a SQL query against an IRIS namespace and return column names and row data. " +

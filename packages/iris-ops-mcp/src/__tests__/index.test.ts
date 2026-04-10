@@ -75,22 +75,22 @@ describe("iris-ops-mcp", () => {
       });
       const names = server.getToolNames();
       expect(names).toHaveLength(16);
-      expect(names).toContain("iris.metrics.system");
-      expect(names).toContain("iris.metrics.alerts");
-      expect(names).toContain("iris.metrics.interop");
-      expect(names).toContain("iris.jobs.list");
-      expect(names).toContain("iris.locks.list");
-      expect(names).toContain("iris.journal.info");
-      expect(names).toContain("iris.mirror.status");
-      expect(names).toContain("iris.audit.events");
-      expect(names).toContain("iris.database.check");
-      expect(names).toContain("iris.license.info");
-      expect(names).toContain("iris.ecp.status");
-      expect(names).toContain("iris.task.manage");
-      expect(names).toContain("iris.task.list");
-      expect(names).toContain("iris.task.run");
-      expect(names).toContain("iris.task.history");
-      expect(names).toContain("iris.config.manage");
+      expect(names).toContain("iris_metrics_system");
+      expect(names).toContain("iris_metrics_alerts");
+      expect(names).toContain("iris_metrics_interop");
+      expect(names).toContain("iris_jobs_list");
+      expect(names).toContain("iris_locks_list");
+      expect(names).toContain("iris_journal_info");
+      expect(names).toContain("iris_mirror_status");
+      expect(names).toContain("iris_audit_events");
+      expect(names).toContain("iris_database_check");
+      expect(names).toContain("iris_license_info");
+      expect(names).toContain("iris_ecp_status");
+      expect(names).toContain("iris_task_manage");
+      expect(names).toContain("iris_task_list");
+      expect(names).toContain("iris_task_run");
+      expect(names).toContain("iris_task_history");
+      expect(names).toContain("iris_config_manage");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

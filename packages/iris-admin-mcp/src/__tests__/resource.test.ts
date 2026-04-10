@@ -11,9 +11,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.resource.manage ───────────────────────────────────────
+// ── iris_resource_manage ───────────────────────────────────────
 
-describe("iris.resource.manage", () => {
+describe("iris_resource_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -163,9 +163,9 @@ describe("iris.resource.manage", () => {
   });
 });
 
-// ── iris.resource.list ─────────────────────────────────────────
+// ── iris_resource_list ─────────────────────────────────────────
 
-describe("iris.resource.list", () => {
+describe("iris_resource_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

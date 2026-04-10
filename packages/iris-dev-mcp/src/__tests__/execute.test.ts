@@ -8,9 +8,9 @@ import {
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.execute.command ────────────────────────────────────────
+// ── iris_execute_command ────────────────────────────────────────
 
-describe("iris.execute.command", () => {
+describe("iris_execute_command", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -119,14 +119,14 @@ describe("iris.execute.command", () => {
   });
 
   it("should have correct name and title", () => {
-    expect(executeCommandTool.name).toBe("iris.execute.command");
+    expect(executeCommandTool.name).toBe("iris_execute_command");
     expect(executeCommandTool.title).toBe("Execute Command");
   });
 });
 
-// ── iris.execute.classmethod ────────────────────────────────────
+// ── iris_execute_classmethod ────────────────────────────────────
 
-describe("iris.execute.classmethod", () => {
+describe("iris_execute_classmethod", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -281,14 +281,14 @@ describe("iris.execute.classmethod", () => {
   });
 
   it("should have correct name and title", () => {
-    expect(executeClassMethodTool.name).toBe("iris.execute.classmethod");
+    expect(executeClassMethodTool.name).toBe("iris_execute_classmethod");
     expect(executeClassMethodTool.title).toBe("Execute Class Method");
   });
 });
 
-// ── iris.execute.tests ─────────────────────────────────────────
+// ── iris_execute_tests ─────────────────────────────────────────
 
-describe("iris.execute.tests", () => {
+describe("iris_execute_tests", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -481,7 +481,7 @@ describe("iris.execute.tests", () => {
   });
 
   it("should have correct name and title", () => {
-    expect(executeTestsTool.name).toBe("iris.execute.tests");
+    expect(executeTestsTool.name).toBe("iris_execute_tests");
     expect(executeTestsTool.title).toBe("Execute Tests");
   });
 });

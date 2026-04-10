@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.oauth.manage ──────────────────────────────────────────
+// ── iris_oauth_manage ──────────────────────────────────────────
 
-describe("iris.oauth.manage", () => {
+describe("iris_oauth_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -361,9 +361,9 @@ describe("iris.oauth.manage", () => {
   });
 });
 
-// ── iris.oauth.list ───────────────────────────────────────────
+// ── iris_oauth_list ───────────────────────────────────────────
 
-describe("iris.oauth.list", () => {
+describe("iris_oauth_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

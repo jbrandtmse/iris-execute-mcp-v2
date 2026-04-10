@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.jobs.list ─────────────────────────────────────────
+// ── iris_jobs_list ─────────────────────────────────────────
 
-describe("iris.jobs.list", () => {
+describe("iris_jobs_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -170,9 +170,9 @@ describe("iris.jobs.list", () => {
   });
 });
 
-// ── iris.locks.list ────────────────────────────────────────
+// ── iris_locks_list ────────────────────────────────────────
 
-describe("iris.locks.list", () => {
+describe("iris_locks_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

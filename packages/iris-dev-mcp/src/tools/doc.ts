@@ -30,10 +30,10 @@ export function validateDocName(name: string): string | undefined {
   return undefined;
 }
 
-// ── iris.doc.get ────────────────────────────────────────────────────
+// ── iris_doc_get ────────────────────────────────────────────────────
 
 export const docGetTool: ToolDefinition = {
-  name: "iris.doc.get",
+  name: "iris_doc_get",
   title: "Get Document",
   description:
     "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
@@ -144,16 +144,16 @@ export const docGetTool: ToolDefinition = {
   },
 };
 
-// ── iris.doc.put ────────────────────────────────────────────────────
+// ── iris_doc_put ────────────────────────────────────────────────────
 
 export const docPutTool: ToolDefinition = {
-  name: "iris.doc.put",
+  name: "iris_doc_put",
   title: "Put Document",
   description:
     "Create or update an ObjectScript class, routine, CSP page, or include file on IRIS. " +
     "IMPORTANT: This tool uploads content directly to IRIS without creating a file on disk. " +
-    "For production code, always create or edit the .cls file on disk first, then use iris.doc.load to deploy. " +
-    "Only use iris.doc.put for temporary debugging or one-off operations where source control is not needed.",
+    "For production code, always create or edit the .cls file on disk first, then use iris_doc_load to deploy. " +
+    "Only use iris_doc_put for temporary debugging or one-off operations where source control is not needed.",
   inputSchema: z.object({
     name: z
       .string()
@@ -216,10 +216,10 @@ export const docPutTool: ToolDefinition = {
   },
 };
 
-// ── iris.doc.delete ─────────────────────────────────────────────────
+// ── iris_doc_delete ─────────────────────────────────────────────────
 
 export const docDeleteTool: ToolDefinition = {
-  name: "iris.doc.delete",
+  name: "iris_doc_delete",
   title: "Delete Document",
   description: "Delete one or more ObjectScript documents from IRIS.",
   inputSchema: z.object({
@@ -308,10 +308,10 @@ export const docDeleteTool: ToolDefinition = {
   },
 };
 
-// ── iris.doc.list ───────────────────────────────────────────────────
+// ── iris_doc_list ───────────────────────────────────────────────────
 
 export const docListTool: ToolDefinition = {
-  name: "iris.doc.list",
+  name: "iris_doc_list",
   title: "List Documents",
   description:
     "List ObjectScript documents in a namespace with optional category and type filters. " +

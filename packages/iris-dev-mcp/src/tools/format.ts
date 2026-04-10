@@ -16,10 +16,10 @@ import {
 } from "@iris-mcp/shared";
 import { z } from "zod";
 
-// ── iris.doc.convert ──────────────────────────────────────────────────
+// ── iris_doc_convert ──────────────────────────────────────────────────
 
 export const docConvertTool: ToolDefinition = {
-  name: "iris.doc.convert",
+  name: "iris_doc_convert",
   title: "Convert Document Format",
   description:
     "Convert an ObjectScript document between UDL and XML formats. " +
@@ -70,10 +70,10 @@ export const docConvertTool: ToolDefinition = {
   },
 };
 
-// ── iris.doc.xml_export ───────────────────────────────────────────────
+// ── iris_doc_xml_export ───────────────────────────────────────────────
 
 export const docXmlExportTool: ToolDefinition = {
-  name: "iris.doc.xml_export",
+  name: "iris_doc_xml_export",
   title: "XML Export/Import",
   description:
     "Export, import, or list ObjectScript documents in legacy XML format. " +
@@ -116,7 +116,7 @@ export const docXmlExportTool: ToolDefinition = {
       namespace?: string;
     };
 
-    requireMinVersion(ctx.atelierVersion, 7, "iris.doc.xml_export");
+    requireMinVersion(ctx.atelierVersion, 7, "iris_doc_xml_export");
 
     const ns = ctx.resolveNamespace(namespace);
 

@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.database.manage ────────────────────────────────────────
+// ── iris_database_manage ────────────────────────────────────────
 
 export const databaseManageTool: ToolDefinition = {
-  name: "iris.database.manage",
+  name: "iris_database_manage",
   title: "Manage Database",
   description:
     "Create, modify, or delete an IRIS database. For 'create', directory is required. " +
@@ -141,10 +141,10 @@ export const databaseManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.database.list ──────────────────────────────────────────
+// ── iris_database_list ──────────────────────────────────────────
 
 export const databaseListTool: ToolDefinition = {
-  name: "iris.database.list",
+  name: "iris_database_list",
   title: "List Databases",
   description:
     "List all IRIS databases with size, free space, and mount status. " +

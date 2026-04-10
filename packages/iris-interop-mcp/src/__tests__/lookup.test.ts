@@ -7,9 +7,9 @@ import {
 } from "../tools/lookup.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.lookup.manage ──────────────────────────────────────────
+// ── iris_lookup_manage ──────────────────────────────────────────
 
-describe("iris.lookup.manage", () => {
+describe("iris_lookup_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -19,7 +19,7 @@ describe("iris.lookup.manage", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(lookupManageTool.name).toBe("iris.lookup.manage");
+    expect(lookupManageTool.name).toBe("iris_lookup_manage");
     expect(lookupManageTool.annotations?.destructiveHint).toBe(true);
     expect(lookupManageTool.annotations?.readOnlyHint).toBe(false);
     expect(lookupManageTool.scope).toBe("NS");
@@ -175,9 +175,9 @@ describe("iris.lookup.manage", () => {
   });
 });
 
-// ── iris.lookup.transfer ────────────────────────────────────────
+// ── iris_lookup_transfer ────────────────────────────────────────
 
-describe("iris.lookup.transfer", () => {
+describe("iris_lookup_transfer", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -187,7 +187,7 @@ describe("iris.lookup.transfer", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(lookupTransferTool.name).toBe("iris.lookup.transfer");
+    expect(lookupTransferTool.name).toBe("iris_lookup_transfer");
     expect(lookupTransferTool.annotations?.destructiveHint).toBe(true);
     expect(lookupTransferTool.annotations?.readOnlyHint).toBe(false);
     expect(lookupTransferTool.scope).toBe("NS");

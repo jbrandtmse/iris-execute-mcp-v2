@@ -4,9 +4,9 @@ import { IrisApiError } from "@iris-mcp/shared";
 import { mappingManageTool, mappingListTool } from "../tools/mapping.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.mapping.manage ────────────────────────────────────────
+// ── iris_mapping_manage ────────────────────────────────────────
 
-describe("iris.mapping.manage", () => {
+describe("iris_mapping_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -226,9 +226,9 @@ describe("iris.mapping.manage", () => {
   });
 });
 
-// ── iris.mapping.list ──────────────────────────────────────────
+// ── iris_mapping_list ──────────────────────────────────────────
 
-describe("iris.mapping.list", () => {
+describe("iris_mapping_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

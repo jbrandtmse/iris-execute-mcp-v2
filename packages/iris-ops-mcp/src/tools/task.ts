@@ -17,10 +17,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.task.manage ────────────────────────────────────────
+// ── iris_task_manage ────────────────────────────────────────
 
 export const taskManageTool: ToolDefinition = {
-  name: "iris.task.manage",
+  name: "iris_task_manage",
   title: "Manage Task",
   description:
     "Create, modify, or delete an IRIS scheduled task. " +
@@ -118,10 +118,10 @@ export const taskManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.task.list ──────────────────────────────────────────
+// ── iris_task_list ──────────────────────────────────────────
 
 export const taskListTool: ToolDefinition = {
-  name: "iris.task.list",
+  name: "iris_task_list",
   title: "List Tasks",
   description:
     "List all IRIS scheduled tasks with schedule, status, and configuration details. " +
@@ -215,10 +215,10 @@ export const taskListTool: ToolDefinition = {
   },
 };
 
-// ── iris.task.run ───────────────────────────────────────────
+// ── iris_task_run ───────────────────────────────────────────
 
 export const taskRunTool: ToolDefinition = {
-  name: "iris.task.run",
+  name: "iris_task_run",
   title: "Run Task",
   description:
     "Trigger immediate execution of an IRIS scheduled task by ID. " +
@@ -276,10 +276,10 @@ export const taskRunTool: ToolDefinition = {
   },
 };
 
-// ── iris.task.history ───────────────────────────────────────
+// ── iris_task_history ───────────────────────────────────────
 
 export const taskHistoryTool: ToolDefinition = {
-  name: "iris.task.history",
+  name: "iris_task_history",
   title: "Task History",
   description:
     "View execution history for IRIS scheduled tasks. " +

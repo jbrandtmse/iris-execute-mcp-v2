@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.config.manage ─────────────────────────────────────
+// ── iris_config_manage ─────────────────────────────────────
 
 export const configManageTool: ToolDefinition = {
-  name: "iris.config.manage",
+  name: "iris_config_manage",
   title: "Manage System Configuration",
   description:
     "View or modify IRIS system configuration parameters. " +

@@ -3,9 +3,9 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { docConvertTool, docXmlExportTool } from "../tools/format.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.doc.convert ──────────────────────────────────────────────────
+// ── iris_doc_convert ──────────────────────────────────────────────────
 
-describe("iris.doc.convert", () => {
+describe("iris_doc_convert", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -82,9 +82,9 @@ describe("iris.doc.convert", () => {
   });
 });
 
-// ── iris.doc.xml_export ───────────────────────────────────────────────
+// ── iris_doc_xml_export ───────────────────────────────────────────────
 
-describe("iris.doc.xml_export", () => {
+describe("iris_doc_xml_export", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

@@ -9,9 +9,9 @@ import {
 } from "../tools/monitor.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.production.logs ─────────────────────────────────────
+// ── iris_production_logs ─────────────────────────────────────
 
-describe("iris.production.logs", () => {
+describe("iris_production_logs", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -112,9 +112,9 @@ describe("iris.production.logs", () => {
   });
 });
 
-// ── iris.production.queues ───────────────────────────────────
+// ── iris_production_queues ───────────────────────────────────
 
-describe("iris.production.queues", () => {
+describe("iris_production_queues", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -187,9 +187,9 @@ describe("iris.production.queues", () => {
   });
 });
 
-// ── iris.production.messages ─────────────────────────────────
+// ── iris_production_messages ─────────────────────────────────
 
-describe("iris.production.messages", () => {
+describe("iris_production_messages", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -296,9 +296,9 @@ describe("iris.production.messages", () => {
   });
 });
 
-// ── iris.production.adapters ────────────────────────────────
+// ── iris_production_adapters ────────────────────────────────
 
-describe("iris.production.adapters", () => {
+describe("iris_production_adapters", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

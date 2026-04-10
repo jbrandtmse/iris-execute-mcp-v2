@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.namespace.manage ───────────────────────────────────────
+// ── iris_namespace_manage ───────────────────────────────────────
 
 export const namespaceManageTool: ToolDefinition = {
-  name: "iris.namespace.manage",
+  name: "iris_namespace_manage",
   title: "Manage Namespace",
   description:
     "Create, modify, or delete an IRIS namespace. For 'create', codeDatabase and dataDatabase " +
@@ -99,10 +99,10 @@ export const namespaceManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.namespace.list ─────────────────────────────────────────
+// ── iris_namespace_list ─────────────────────────────────────────
 
 export const namespaceListTool: ToolDefinition = {
-  name: "iris.namespace.list",
+  name: "iris_namespace_list",
   title: "List Namespaces",
   description:
     "List all IRIS namespaces with their code and data database associations. " +

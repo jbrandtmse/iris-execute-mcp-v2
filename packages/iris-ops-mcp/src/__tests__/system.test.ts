@@ -12,9 +12,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.journal.info ─────────────────────────────────────
+// ── iris_journal_info ─────────────────────────────────────
 
-describe("iris.journal.info", () => {
+describe("iris_journal_info", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -102,9 +102,9 @@ describe("iris.journal.info", () => {
   });
 });
 
-// ── iris.mirror.status ────────────────────────────────────
+// ── iris_mirror_status ────────────────────────────────────
 
-describe("iris.mirror.status", () => {
+describe("iris_mirror_status", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -212,9 +212,9 @@ describe("iris.mirror.status", () => {
   });
 });
 
-// ── iris.audit.events ─────────────────────────────────────
+// ── iris_audit_events ─────────────────────────────────────
 
-describe("iris.audit.events", () => {
+describe("iris_audit_events", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

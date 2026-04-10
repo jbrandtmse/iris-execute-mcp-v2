@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.execute.command ────────────────────────────────────────
+// ── iris_execute_command ────────────────────────────────────────
 
 export const executeCommandTool: ToolDefinition = {
-  name: "iris.execute.command",
+  name: "iris_execute_command",
   title: "Execute Command",
   description:
     "Execute an ObjectScript command on IRIS with captured I/O output. " +
@@ -80,7 +80,7 @@ export const executeCommandTool: ToolDefinition = {
   },
 };
 
-// ── iris.execute.tests ─────────────────────────────────────────
+// ── iris_execute_tests ─────────────────────────────────────────
 
 /** Maximum time to wait for test results (ms). */
 const TEST_POLL_TIMEOUT = 120_000;
@@ -124,7 +124,7 @@ async function discoverPackageTests(
 }
 
 export const executeTestsTool: ToolDefinition = {
-  name: "iris.execute.tests",
+  name: "iris_execute_tests",
   title: "Execute Tests",
   description:
     "Run ObjectScript unit tests at package, class, or method level with structured results. " +
@@ -302,10 +302,10 @@ export const executeTestsTool: ToolDefinition = {
   },
 };
 
-// ── iris.execute.classmethod ────────────────────────────────────
+// ── iris_execute_classmethod ────────────────────────────────────
 
 export const executeClassMethodTool: ToolDefinition = {
-  name: "iris.execute.classmethod",
+  name: "iris_execute_classmethod",
   title: "Execute Class Method",
   description:
     "Invoke an ObjectScript class method by name with optional positional arguments. " +

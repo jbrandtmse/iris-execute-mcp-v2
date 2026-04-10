@@ -16,10 +16,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.database.check ─────────────────────────────────────
+// ── iris_database_check ─────────────────────────────────────
 
 export const databaseCheckTool: ToolDefinition = {
-  name: "iris.database.check",
+  name: "iris_database_check",
   title: "Database Check",
   description:
     "Returns IRIS database status for all databases or a specific database. " +
@@ -110,10 +110,10 @@ export const databaseCheckTool: ToolDefinition = {
   },
 };
 
-// ── iris.license.info ───────────────────────────────────────
+// ── iris_license_info ───────────────────────────────────────
 
 export const licenseInfoTool: ToolDefinition = {
-  name: "iris.license.info",
+  name: "iris_license_info",
   title: "License Info",
   description:
     "Returns IRIS license information including customer name, license capacity, " +
@@ -178,10 +178,10 @@ export const licenseInfoTool: ToolDefinition = {
   },
 };
 
-// ── iris.ecp.status ─────────────────────────────────────────
+// ── iris_ecp_status ─────────────────────────────────────────
 
 export const ecpStatusTool: ToolDefinition = {
-  name: "iris.ecp.status",
+  name: "iris_ecp_status",
   title: "ECP Status",
   description:
     "Returns ECP (Enterprise Cache Protocol) connection status. Reports whether " +

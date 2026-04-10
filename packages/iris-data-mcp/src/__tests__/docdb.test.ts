@@ -13,9 +13,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.docdb.manage ──────────────────────────────────────────
+// ── iris_docdb_manage ──────────────────────────────────────────
 
-describe("iris.docdb.manage", () => {
+describe("iris_docdb_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -165,9 +165,9 @@ describe("iris.docdb.manage", () => {
   });
 });
 
-// ── iris.docdb.document ────────────────────────────────────────
+// ── iris_docdb_document ────────────────────────────────────────
 
-describe("iris.docdb.document", () => {
+describe("iris_docdb_document", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -341,9 +341,9 @@ describe("iris.docdb.document", () => {
   });
 });
 
-// ── iris.docdb.find ────────────────────────────────────────────
+// ── iris_docdb_find ────────────────────────────────────────────
 
-describe("iris.docdb.find", () => {
+describe("iris_docdb_find", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -485,9 +485,9 @@ describe("iris.docdb.find", () => {
   });
 });
 
-// ── iris.docdb.property ────────────────────────────────────────
+// ── iris_docdb_property ────────────────────────────────────────
 
-describe("iris.docdb.property", () => {
+describe("iris_docdb_property", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

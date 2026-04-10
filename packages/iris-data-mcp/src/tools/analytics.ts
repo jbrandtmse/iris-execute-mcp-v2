@@ -17,10 +17,10 @@ import { extractResult, toStructured } from "./docdb.js";
 /** Base URL for the ExecuteMCPv2 custom REST API. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.analytics.mdx ────────────────────────────────────────
+// ── iris_analytics_mdx ────────────────────────────────────────
 
 export const analyticsMdxTool: ToolDefinition = {
-  name: "iris.analytics.mdx",
+  name: "iris_analytics_mdx",
   title: "Execute MDX Query",
   description:
     "Execute an MDX query against IRIS DeepSee and return structured " +
@@ -83,10 +83,10 @@ export const analyticsMdxTool: ToolDefinition = {
   },
 };
 
-// ── iris.analytics.cubes ──────────────────────────────────────
+// ── iris_analytics_cubes ──────────────────────────────────────
 
 export const analyticsCubesTool: ToolDefinition = {
-  name: "iris.analytics.cubes",
+  name: "iris_analytics_cubes",
   title: "Manage DeepSee Cubes",
   description:
     "List, build, or synchronize IRIS DeepSee cubes. " +

@@ -80,7 +80,7 @@ describe("tool-types", () => {
   describe("ToolDefinition", () => {
     it("should accept a complete tool definition", () => {
       const tool: ToolDefinition = {
-        name: "iris.doc.get",
+        name: "iris_doc_get",
         title: "Get Document",
         description: "Retrieve a document from IRIS by name.",
         inputSchema: z.object({
@@ -99,14 +99,14 @@ describe("tool-types", () => {
         }),
       };
 
-      expect(tool.name).toBe("iris.doc.get");
+      expect(tool.name).toBe("iris_doc_get");
       expect(tool.scope).toBe("NS");
       expect(tool.annotations.readOnlyHint).toBe(true);
     });
 
     it("should accept a SYS-scoped tool", () => {
       const tool: ToolDefinition = {
-        name: "iris.sys.info",
+        name: "iris_sys_info",
         title: "System Info",
         description: "Get IRIS system information.",
         inputSchema: z.object({}),
@@ -121,7 +121,7 @@ describe("tool-types", () => {
 
     it("should accept optional outputSchema as a Zod schema", () => {
       const tool: ToolDefinition = {
-        name: "iris.test",
+        name: "iris_test",
         title: "Test Tool",
         description: "A test tool.",
         inputSchema: z.object({ id: z.string() }),

@@ -7,9 +7,9 @@ import {
 } from "../tools/credential.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.credential.manage ──────────────────────────────────────
+// ── iris_credential_manage ──────────────────────────────────────
 
-describe("iris.credential.manage", () => {
+describe("iris_credential_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -19,7 +19,7 @@ describe("iris.credential.manage", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(credentialManageTool.name).toBe("iris.credential.manage");
+    expect(credentialManageTool.name).toBe("iris_credential_manage");
     expect(credentialManageTool.annotations?.destructiveHint).toBe(true);
     expect(credentialManageTool.annotations?.readOnlyHint).toBe(false);
     expect(credentialManageTool.scope).toBe("NS");
@@ -153,9 +153,9 @@ describe("iris.credential.manage", () => {
   });
 });
 
-// ── iris.credential.list ────────────────────────────────────────
+// ── iris_credential_list ────────────────────────────────────────
 
-describe("iris.credential.list", () => {
+describe("iris_credential_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -165,7 +165,7 @@ describe("iris.credential.list", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(credentialListTool.name).toBe("iris.credential.list");
+    expect(credentialListTool.name).toBe("iris_credential_list");
     expect(credentialListTool.annotations?.readOnlyHint).toBe(true);
     expect(credentialListTool.annotations?.destructiveHint).toBe(false);
     expect(credentialListTool.scope).toBe("NS");

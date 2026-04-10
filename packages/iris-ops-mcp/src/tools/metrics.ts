@@ -45,10 +45,10 @@ function formatPrometheusMetric(m: MetricEntry): string {
   return lines.join("\n");
 }
 
-// ── iris.metrics.system ───────────────────────────────────────
+// ── iris_metrics_system ───────────────────────────────────────
 
 export const metricsSystemTool: ToolDefinition = {
-  name: "iris.metrics.system",
+  name: "iris_metrics_system",
   title: "System Metrics",
   description:
     "Returns IRIS system metrics in Prometheus text exposition format. " +
@@ -120,10 +120,10 @@ export const metricsSystemTool: ToolDefinition = {
   },
 };
 
-// ── iris.metrics.alerts ───────────────────────────────────────
+// ── iris_metrics_alerts ───────────────────────────────────────
 
 export const metricsAlertsTool: ToolDefinition = {
-  name: "iris.metrics.alerts",
+  name: "iris_metrics_alerts",
   title: "System Alerts",
   description:
     "Returns active IRIS system alerts. Each alert includes severity, " +
@@ -195,10 +195,10 @@ export const metricsAlertsTool: ToolDefinition = {
   },
 };
 
-// ── iris.metrics.interop ──────────────────────────────────────
+// ── iris_metrics_interop ──────────────────────────────────────
 
 export const metricsInteropTool: ToolDefinition = {
-  name: "iris.metrics.interop",
+  name: "iris_metrics_interop",
   title: "Interoperability Metrics",
   description:
     "Returns interoperability volume and interface metrics including " +

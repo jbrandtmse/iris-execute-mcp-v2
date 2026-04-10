@@ -17,10 +17,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.production.logs ─────────────────────────────────────
+// ── iris_production_logs ─────────────────────────────────────
 
 export const productionLogsTool: ToolDefinition = {
-  name: "iris.production.logs",
+  name: "iris_production_logs",
   title: "Production Logs",
   description:
     "Query event log entries from an Interoperability production. Returns entries from " +
@@ -95,10 +95,10 @@ export const productionLogsTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.queues ───────────────────────────────────
+// ── iris_production_queues ───────────────────────────────────
 
 export const productionQueuesTool: ToolDefinition = {
-  name: "iris.production.queues",
+  name: "iris_production_queues",
   title: "Production Queues",
   description:
     "Return queue status for all production items including message queue count. " +
@@ -151,10 +151,10 @@ export const productionQueuesTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.messages ─────────────────────────────────
+// ── iris_production_messages ─────────────────────────────────
 
 export const productionMessagesTool: ToolDefinition = {
-  name: "iris.production.messages",
+  name: "iris_production_messages",
   title: "Production Messages",
   description:
     "Trace message flow through a production by session ID or header ID. " +
@@ -243,10 +243,10 @@ export const productionMessagesTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.adapters ────────────────────────────────
+// ── iris_production_adapters ────────────────────────────────
 
 export const productionAdaptersTool: ToolDefinition = {
-  name: "iris.production.adapters",
+  name: "iris_production_adapters",
   title: "Production Adapters",
   description:
     "List available Interoperability adapter types grouped by category (Inbound/Outbound). " +

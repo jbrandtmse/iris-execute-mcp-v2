@@ -4,9 +4,9 @@ import { IrisApiError } from "@iris-mcp/shared";
 import { namespaceManageTool, namespaceListTool } from "../tools/namespace.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.namespace.manage ───────────────────────────────────────
+// ── iris_namespace_manage ───────────────────────────────────────
 
-describe("iris.namespace.manage", () => {
+describe("iris_namespace_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -151,9 +151,9 @@ describe("iris.namespace.manage", () => {
   });
 });
 
-// ── iris.namespace.list ─────────────────────────────────────────
+// ── iris_namespace_list ─────────────────────────────────────────
 
-describe("iris.namespace.list", () => {
+describe("iris_namespace_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

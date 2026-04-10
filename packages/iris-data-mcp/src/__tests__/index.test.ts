@@ -26,13 +26,13 @@ describe("iris-data-mcp", () => {
 
     it("should export the expected tool names", () => {
       const names = tools.map((t) => t.name);
-      expect(names).toContain("iris.docdb.manage");
-      expect(names).toContain("iris.docdb.document");
-      expect(names).toContain("iris.docdb.find");
-      expect(names).toContain("iris.docdb.property");
-      expect(names).toContain("iris.analytics.mdx");
-      expect(names).toContain("iris.analytics.cubes");
-      expect(names).toContain("iris.rest.manage");
+      expect(names).toContain("iris_docdb_manage");
+      expect(names).toContain("iris_docdb_document");
+      expect(names).toContain("iris_docdb_find");
+      expect(names).toContain("iris_docdb_property");
+      expect(names).toContain("iris_analytics_mdx");
+      expect(names).toContain("iris_analytics_cubes");
+      expect(names).toContain("iris_rest_manage");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -86,13 +86,13 @@ describe("iris-data-mcp", () => {
       });
       const names = server.getToolNames();
       expect(names).toHaveLength(7);
-      expect(names).toContain("iris.docdb.manage");
-      expect(names).toContain("iris.docdb.document");
-      expect(names).toContain("iris.docdb.find");
-      expect(names).toContain("iris.docdb.property");
-      expect(names).toContain("iris.analytics.mdx");
-      expect(names).toContain("iris.analytics.cubes");
-      expect(names).toContain("iris.rest.manage");
+      expect(names).toContain("iris_docdb_manage");
+      expect(names).toContain("iris_docdb_document");
+      expect(names).toContain("iris_docdb_find");
+      expect(names).toContain("iris_docdb_property");
+      expect(names).toContain("iris_analytics_mdx");
+      expect(names).toContain("iris_analytics_cubes");
+      expect(names).toContain("iris_rest_manage");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

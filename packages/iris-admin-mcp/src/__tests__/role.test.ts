@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.role.manage ───────────────────────────────────────────
+// ── iris_role_manage ───────────────────────────────────────────
 
-describe("iris.role.manage", () => {
+describe("iris_role_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -162,9 +162,9 @@ describe("iris.role.manage", () => {
   });
 });
 
-// ── iris.role.list ─────────────────────────────────────────────
+// ── iris_role_list ─────────────────────────────────────────────
 
-describe("iris.role.list", () => {
+describe("iris_role_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

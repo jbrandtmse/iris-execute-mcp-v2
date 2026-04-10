@@ -91,10 +91,10 @@ interface CompilationResult {
   console?: string[];
 }
 
-// ── iris.doc.load ─────────────────────────────────────────────────────
+// ── iris_doc_load ─────────────────────────────────────────────────────
 
 export const docLoadTool: ToolDefinition = {
-  name: "iris.doc.load",
+  name: "iris_doc_load",
   title: "Bulk Load Documents",
   description:
     "Upload multiple ObjectScript files from a local directory into IRIS. " +

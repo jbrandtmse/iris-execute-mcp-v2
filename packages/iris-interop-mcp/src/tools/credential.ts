@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.credential.manage ──────────────────────────────────────
+// ── iris_credential_manage ──────────────────────────────────────
 
 export const credentialManageTool: ToolDefinition = {
-  name: "iris.credential.manage",
+  name: "iris_credential_manage",
   title: "Manage Credential",
   description:
     "Create, update, or delete an Ensemble credential. " +
@@ -94,10 +94,10 @@ export const credentialManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.credential.list ────────────────────────────────────────
+// ── iris_credential_list ────────────────────────────────────────
 
 export const credentialListTool: ToolDefinition = {
-  name: "iris.credential.list",
+  name: "iris_credential_list",
   title: "List Credentials",
   description:
     "List all stored Ensemble credentials with their IDs and usernames. " +

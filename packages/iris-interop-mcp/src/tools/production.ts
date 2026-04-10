@@ -17,15 +17,15 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.production.manage ────────────���────────────────────────
+// ── iris_production_manage ────────────���────────────────────────
 
 export const productionManageTool: ToolDefinition = {
-  name: "iris.production.manage",
+  name: "iris_production_manage",
   title: "Manage Production",
   description:
     "Create or delete an Interoperability production. For 'create', provides an empty " +
     "production class. For 'delete', the production must be stopped first. " +
-    "Use iris.production.control to start/stop productions.",
+    "Use iris_production_control to start/stop productions.",
   inputSchema: z.object({
     action: z
       .enum(["create", "delete"])
@@ -82,10 +82,10 @@ export const productionManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.control ────────────────────────────────────
+// ── iris_production_control ────────────────────────────────────
 
 export const productionControlTool: ToolDefinition = {
-  name: "iris.production.control",
+  name: "iris_production_control",
   title: "Control Production",
   description:
     "Start, stop, restart, update, or recover an Interoperability production. " +
@@ -171,10 +171,10 @@ export const productionControlTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.status ───────────���─────────────────────────
+// ── iris_production_status ───────────���─────────────────────────
 
 export const productionStatusTool: ToolDefinition = {
-  name: "iris.production.status",
+  name: "iris_production_status",
   title: "Production Status",
   description:
     "Get the current production status in a namespace. Returns production name, " +
@@ -237,10 +237,10 @@ export const productionStatusTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.summary ────────────────��───────────────────
+// ── iris_production_summary ────────────────��───────────────────
 
 export const productionSummaryTool: ToolDefinition = {
-  name: "iris.production.summary",
+  name: "iris_production_summary",
   title: "Production Summary",
   description:
     "Get a cross-namespace summary of all Interoperability productions. " +

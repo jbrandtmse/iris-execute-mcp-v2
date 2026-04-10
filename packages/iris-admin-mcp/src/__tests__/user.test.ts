@@ -13,9 +13,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.user.manage ───────────────────────────────────────────
+// ── iris_user_manage ───────────────────────────────────────────
 
-describe("iris.user.manage", () => {
+describe("iris_user_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -191,9 +191,9 @@ describe("iris.user.manage", () => {
   });
 });
 
-// ── iris.user.get ──────────────────────────────────────────────
+// ── iris_user_get ──────────────────────────────────────────────
 
-describe("iris.user.get", () => {
+describe("iris_user_get", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -348,9 +348,9 @@ describe("iris.user.get", () => {
   });
 });
 
-// ── iris.user.roles ────────────────────────────────────────────
+// ── iris_user_roles ────────────────────────────────────────────
 
-describe("iris.user.roles", () => {
+describe("iris_user_roles", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -482,9 +482,9 @@ describe("iris.user.roles", () => {
   });
 });
 
-// ── iris.user.password ─────────────────────────────────────────
+// ── iris_user_password ─────────────────────────────────────────
 
-describe("iris.user.password", () => {
+describe("iris_user_password", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

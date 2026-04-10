@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.permission.check ──────────────────────────────────────
+// ── iris_permission_check ──────────────────────────────────────
 
 export const permissionCheckTool: ToolDefinition = {
-  name: "iris.permission.check",
+  name: "iris_permission_check",
   title: "Check Permission",
   description:
     "Check whether an IRIS user or role has a specific permission on a resource. " +

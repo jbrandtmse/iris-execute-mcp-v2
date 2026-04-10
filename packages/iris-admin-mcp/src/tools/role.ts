@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.role.manage ───────────────────────────────────────────
+// ── iris_role_manage ───────────────────────────────────────────
 
 export const roleManageTool: ToolDefinition = {
-  name: "iris.role.manage",
+  name: "iris_role_manage",
   title: "Manage Role",
   description:
     "Create, modify, or delete an IRIS security role. For 'create', name is required. " +
@@ -97,10 +97,10 @@ export const roleManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.role.list ─────────────────────────────────────────────
+// ── iris_role_list ─────────────────────────────────────────────
 
 export const roleListTool: ToolDefinition = {
-  name: "iris.role.list",
+  name: "iris_role_list",
   title: "List Roles",
   description:
     "List all IRIS security roles with their description, resources, and granted roles.",

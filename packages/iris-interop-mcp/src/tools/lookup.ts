@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.lookup.manage ──────────────────────────────────────────
+// ── iris_lookup_manage ──────────────────────────────────────────
 
 export const lookupManageTool: ToolDefinition = {
-  name: "iris.lookup.manage",
+  name: "iris_lookup_manage",
   title: "Manage Lookup Table",
   description:
     "Get, set, or delete an entry in an Ensemble lookup table. " +
@@ -92,10 +92,10 @@ export const lookupManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.lookup.transfer ────────────────────────────────────────
+// ── iris_lookup_transfer ────────────────────────────────────────
 
 export const lookupTransferTool: ToolDefinition = {
-  name: "iris.lookup.transfer",
+  name: "iris_lookup_transfer",
   title: "Transfer Lookup Table",
   description:
     "Export or import an Ensemble lookup table in XML format. " +

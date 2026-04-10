@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.jobs.list ───────────────────────────────────────────
+// ── iris_jobs_list ───────────────────────────────────────────
 
 export const jobsListTool: ToolDefinition = {
-  name: "iris.jobs.list",
+  name: "iris_jobs_list",
   title: "List Jobs",
   description:
     "List all running IRIS jobs/processes. Each job includes process ID, " +
@@ -97,10 +97,10 @@ export const jobsListTool: ToolDefinition = {
   },
 };
 
-// ── iris.locks.list ──────────────────────────────────────────
+// ── iris_locks_list ──────────────────────────────────────────
 
 export const locksListTool: ToolDefinition = {
-  name: "iris.locks.list",
+  name: "iris_locks_list",
   title: "List Locks",
   description:
     "List all current IRIS system locks. Each lock includes lock name " +

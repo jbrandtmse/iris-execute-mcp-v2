@@ -12,9 +12,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.database.check ──────────────────────────────────
+// ── iris_database_check ──────────────────────────────────
 
-describe("iris.database.check", () => {
+describe("iris_database_check", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -197,9 +197,9 @@ describe("iris.database.check", () => {
   });
 });
 
-// ── iris.license.info ────────────────────────────────────
+// ── iris_license_info ────────────────────────────────────
 
-describe("iris.license.info", () => {
+describe("iris_license_info", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -309,9 +309,9 @@ describe("iris.license.info", () => {
   });
 });
 
-// ── iris.ecp.status ──────────────────────────────────────
+// ── iris_ecp_status ──────────────────────────────────────
 
-describe("iris.ecp.status", () => {
+describe("iris_ecp_status", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

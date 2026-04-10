@@ -4,9 +4,9 @@ import { IrisApiError } from "@iris-mcp/shared";
 import { databaseManageTool, databaseListTool } from "../tools/database.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.database.manage ────────────────────────────────────────
+// ── iris_database_manage ────────────────────────────────────────
 
-describe("iris.database.manage", () => {
+describe("iris_database_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -163,9 +163,9 @@ describe("iris.database.manage", () => {
   });
 });
 
-// ── iris.database.list ──────────────────────────────────────────
+// ── iris_database_list ──────────────────────────────────────────
 
-describe("iris.database.list", () => {
+describe("iris_database_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

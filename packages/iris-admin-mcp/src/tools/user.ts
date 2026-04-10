@@ -19,10 +19,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.user.manage ───────────────────────────────────────────
+// ── iris_user_manage ───────────────────────────────────────────
 
 export const userManageTool: ToolDefinition = {
-  name: "iris.user.manage",
+  name: "iris_user_manage",
   title: "Manage User",
   description:
     "Create, modify, or delete an IRIS user account. For 'create', name and password are " +
@@ -146,10 +146,10 @@ export const userManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.user.get ──────────────────────────────────────────────
+// ── iris_user_get ──────────────────────────────────────────────
 
 export const userGetTool: ToolDefinition = {
-  name: "iris.user.get",
+  name: "iris_user_get",
   title: "Get User",
   description:
     "Get an IRIS user account by name, or list all users when name is omitted. " +
@@ -225,10 +225,10 @@ export const userGetTool: ToolDefinition = {
   },
 };
 
-// ── iris.user.roles ────────────────────────────────────────────
+// ── iris_user_roles ────────────────────────────────────────────
 
 export const userRolesTool: ToolDefinition = {
-  name: "iris.user.roles",
+  name: "iris_user_roles",
   title: "Manage User Roles",
   description:
     "Add or remove a role from an IRIS user account. Returns the updated role list " +
@@ -287,10 +287,10 @@ export const userRolesTool: ToolDefinition = {
   },
 };
 
-// ── iris.user.password ─────────────────────────────────────────
+// ── iris_user_password ─────────────────────────────────────────
 
 export const userPasswordTool: ToolDefinition = {
-  name: "iris.user.password",
+  name: "iris_user_password",
   title: "Manage User Password",
   description:
     "Change a user's password or validate a candidate password against IRIS password rules. " +

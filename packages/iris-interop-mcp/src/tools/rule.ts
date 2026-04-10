@@ -14,10 +14,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.rule.list ─────────────────────────────────────────────
+// ── iris_rule_list ─────────────────────────────────────────────
 
 export const ruleListTool: ToolDefinition = {
-  name: "iris.rule.list",
+  name: "iris_rule_list",
   title: "List Business Rules",
   description:
     "List all business rule classes in the namespace. Returns non-abstract classes " +
@@ -70,10 +70,10 @@ export const ruleListTool: ToolDefinition = {
   },
 };
 
-// ── iris.rule.get ──────────────────────────────────────────────
+// ── iris_rule_get ──────────────────────────────────────────────
 
 export const ruleGetTool: ToolDefinition = {
-  name: "iris.rule.get",
+  name: "iris_rule_get",
   title: "Get Business Rule",
   description:
     "Get the full definition of a business rule class including conditions, actions, " +

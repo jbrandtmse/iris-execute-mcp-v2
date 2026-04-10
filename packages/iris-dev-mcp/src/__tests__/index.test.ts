@@ -22,26 +22,26 @@ describe("iris-dev-mcp", () => {
     it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, and execute tools", () => {
       expect(tools).toHaveLength(21);
       const names = tools.map((t) => t.name);
-      expect(names).toContain("iris.doc.get");
-      expect(names).toContain("iris.doc.put");
-      expect(names).toContain("iris.doc.delete");
-      expect(names).toContain("iris.doc.list");
-      expect(names).toContain("iris.doc.compile");
-      expect(names).toContain("iris.doc.index");
-      expect(names).toContain("iris.doc.search");
-      expect(names).toContain("iris.macro.info");
-      expect(names).toContain("iris.doc.convert");
-      expect(names).toContain("iris.doc.xml_export");
-      expect(names).toContain("iris.sql.execute");
-      expect(names).toContain("iris.server.info");
-      expect(names).toContain("iris.server.namespace");
-      expect(names).toContain("iris.global.get");
-      expect(names).toContain("iris.global.set");
-      expect(names).toContain("iris.global.kill");
-      expect(names).toContain("iris.global.list");
-      expect(names).toContain("iris.execute.command");
-      expect(names).toContain("iris.execute.classmethod");
-      expect(names).toContain("iris.doc.load");
+      expect(names).toContain("iris_doc_get");
+      expect(names).toContain("iris_doc_put");
+      expect(names).toContain("iris_doc_delete");
+      expect(names).toContain("iris_doc_list");
+      expect(names).toContain("iris_doc_compile");
+      expect(names).toContain("iris_doc_index");
+      expect(names).toContain("iris_doc_search");
+      expect(names).toContain("iris_macro_info");
+      expect(names).toContain("iris_doc_convert");
+      expect(names).toContain("iris_doc_xml_export");
+      expect(names).toContain("iris_sql_execute");
+      expect(names).toContain("iris_server_info");
+      expect(names).toContain("iris_server_namespace");
+      expect(names).toContain("iris_global_get");
+      expect(names).toContain("iris_global_set");
+      expect(names).toContain("iris_global_kill");
+      expect(names).toContain("iris_global_list");
+      expect(names).toContain("iris_execute_command");
+      expect(names).toContain("iris_execute_classmethod");
+      expect(names).toContain("iris_doc_load");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -72,27 +72,27 @@ describe("iris-dev-mcp", () => {
         tools,
       });
       expect(server.getToolNames()).toEqual([
-        "iris.doc.get",
-        "iris.doc.put",
-        "iris.doc.delete",
-        "iris.doc.list",
-        "iris.doc.compile",
-        "iris.doc.index",
-        "iris.doc.search",
-        "iris.macro.info",
-        "iris.doc.convert",
-        "iris.doc.xml_export",
-        "iris.sql.execute",
-        "iris.server.info",
-        "iris.server.namespace",
-        "iris.global.get",
-        "iris.global.set",
-        "iris.global.kill",
-        "iris.global.list",
-        "iris.execute.command",
-        "iris.execute.classmethod",
-        "iris.execute.tests",
-        "iris.doc.load",
+        "iris_doc_get",
+        "iris_doc_put",
+        "iris_doc_delete",
+        "iris_doc_list",
+        "iris_doc_compile",
+        "iris_doc_index",
+        "iris_doc_search",
+        "iris_macro_info",
+        "iris_doc_convert",
+        "iris_doc_xml_export",
+        "iris_sql_execute",
+        "iris_server_info",
+        "iris_server_namespace",
+        "iris_global_get",
+        "iris_global_set",
+        "iris_global_kill",
+        "iris_global_list",
+        "iris_execute_command",
+        "iris_execute_classmethod",
+        "iris_execute_tests",
+        "iris_doc_load",
       ]);
     });
 
@@ -105,15 +105,15 @@ describe("iris-dev-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return a tool definition for iris.doc.get", () => {
+    it("should return a tool definition for iris_doc_get", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
-      const tool = server.getTool("iris.doc.get");
+      const tool = server.getTool("iris_doc_get");
       expect(tool).toBeDefined();
-      expect(tool?.name).toBe("iris.doc.get");
+      expect(tool?.name).toBe("iris_doc_get");
     });
 
     it("should return undefined for unknown tool lookup", () => {

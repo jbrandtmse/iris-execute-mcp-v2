@@ -57,10 +57,10 @@ export function toStructured(value: unknown): Record<string, unknown> {
   return { value };
 }
 
-// ── iris.docdb.manage ──────────────────────────────────────────
+// ── iris_docdb_manage ──────────────────────────────────────────
 
 export const docdbManageTool: ToolDefinition = {
-  name: "iris.docdb.manage",
+  name: "iris_docdb_manage",
   title: "Manage Document Database",
   description:
     "Create, drop, or list IRIS document databases. " +
@@ -162,10 +162,10 @@ export const docdbManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.docdb.document ────────────────────────────────────────
+// ── iris_docdb_document ────────────────────────────────────────
 
 export const docdbDocumentTool: ToolDefinition = {
-  name: "iris.docdb.document",
+  name: "iris_docdb_document",
   title: "Manage Document",
   description:
     "Insert, get, update, or delete a document in an IRIS document database. " +
@@ -311,10 +311,10 @@ export const docdbDocumentTool: ToolDefinition = {
   },
 };
 
-// ── iris.docdb.find ────────────────────────────────────────────
+// ── iris_docdb_find ────────────────────────────────────────────
 
 export const docdbFindTool: ToolDefinition = {
-  name: "iris.docdb.find",
+  name: "iris_docdb_find",
   title: "Find Documents",
   description:
     "Query documents in an IRIS document database using filter criteria. " +
@@ -378,10 +378,10 @@ export const docdbFindTool: ToolDefinition = {
   },
 };
 
-// ── iris.docdb.property ────────────────────────────────────────
+// ── iris_docdb_property ────────────────────────────────────────
 
 export const docdbPropertyTool: ToolDefinition = {
-  name: "iris.docdb.property",
+  name: "iris_docdb_property",
   title: "Manage Document Property",
   description:
     "Create, drop, or index a property on an IRIS document database. " +

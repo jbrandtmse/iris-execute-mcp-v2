@@ -16,10 +16,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.journal.info ───────────────────────────────────────
+// ── iris_journal_info ───────────────────────────────────────
 
 export const journalInfoTool: ToolDefinition = {
-  name: "iris.journal.info",
+  name: "iris_journal_info",
   title: "Journal Info",
   description:
     "Returns IRIS journal file information including current journal file path, " +
@@ -81,10 +81,10 @@ export const journalInfoTool: ToolDefinition = {
   },
 };
 
-// ── iris.mirror.status ──────────────────────────────────────
+// ── iris_mirror_status ──────────────────────────────────────
 
 export const mirrorStatusTool: ToolDefinition = {
-  name: "iris.mirror.status",
+  name: "iris_mirror_status",
   title: "Mirror Status",
   description:
     "Returns IRIS mirror configuration, membership, and synchronization status. " +
@@ -150,10 +150,10 @@ export const mirrorStatusTool: ToolDefinition = {
   },
 };
 
-// ── iris.audit.events ───────────────────────────────────────
+// ── iris_audit_events ───────────────────────────────────────
 
 export const auditEventsTool: ToolDefinition = {
-  name: "iris.audit.events",
+  name: "iris_audit_events",
   title: "Audit Events",
   description:
     "Returns matching IRIS audit log events with optional filters. " +

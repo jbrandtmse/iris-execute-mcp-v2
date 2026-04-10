@@ -54,28 +54,28 @@ describe("iris-admin-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toContain("iris.namespace.manage");
-      expect(names).toContain("iris.namespace.list");
-      expect(names).toContain("iris.database.manage");
-      expect(names).toContain("iris.database.list");
-      expect(names).toContain("iris.mapping.manage");
-      expect(names).toContain("iris.mapping.list");
-      expect(names).toContain("iris.user.manage");
-      expect(names).toContain("iris.user.get");
-      expect(names).toContain("iris.user.roles");
-      expect(names).toContain("iris.user.password");
-      expect(names).toContain("iris.role.manage");
-      expect(names).toContain("iris.role.list");
-      expect(names).toContain("iris.resource.manage");
-      expect(names).toContain("iris.resource.list");
-      expect(names).toContain("iris.permission.check");
-      expect(names).toContain("iris.webapp.manage");
-      expect(names).toContain("iris.webapp.get");
-      expect(names).toContain("iris.webapp.list");
-      expect(names).toContain("iris.ssl.manage");
-      expect(names).toContain("iris.ssl.list");
-      expect(names).toContain("iris.oauth.manage");
-      expect(names).toContain("iris.oauth.list");
+      expect(names).toContain("iris_namespace_manage");
+      expect(names).toContain("iris_namespace_list");
+      expect(names).toContain("iris_database_manage");
+      expect(names).toContain("iris_database_list");
+      expect(names).toContain("iris_mapping_manage");
+      expect(names).toContain("iris_mapping_list");
+      expect(names).toContain("iris_user_manage");
+      expect(names).toContain("iris_user_get");
+      expect(names).toContain("iris_user_roles");
+      expect(names).toContain("iris_user_password");
+      expect(names).toContain("iris_role_manage");
+      expect(names).toContain("iris_role_list");
+      expect(names).toContain("iris_resource_manage");
+      expect(names).toContain("iris_resource_list");
+      expect(names).toContain("iris_permission_check");
+      expect(names).toContain("iris_webapp_manage");
+      expect(names).toContain("iris_webapp_get");
+      expect(names).toContain("iris_webapp_list");
+      expect(names).toContain("iris_ssl_manage");
+      expect(names).toContain("iris_ssl_list");
+      expect(names).toContain("iris_oauth_manage");
+      expect(names).toContain("iris_oauth_list");
     });
 
     it("should expose the underlying MCP SDK server", () => {
@@ -105,8 +105,8 @@ describe("iris-admin-mcp", () => {
         tools,
         needsCustomRest: true,
       });
-      expect(server.getTool("iris.namespace.manage")).toBeDefined();
-      expect(server.getTool("iris.database.list")).toBeDefined();
+      expect(server.getTool("iris_namespace_manage")).toBeDefined();
+      expect(server.getTool("iris_database_list")).toBeDefined();
     });
   });
 

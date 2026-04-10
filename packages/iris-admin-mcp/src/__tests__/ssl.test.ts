@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.ssl.manage ─────────────────────────────────────────────
+// ── iris_ssl_manage ─────────────────────────────────────────────
 
-describe("iris.ssl.manage", () => {
+describe("iris_ssl_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -208,9 +208,9 @@ describe("iris.ssl.manage", () => {
   });
 });
 
-// ── iris.ssl.list ──────────────────────────────────────────────
+// ── iris_ssl_list ──────────────────────────────────────────────
 
-describe("iris.ssl.list", () => {
+describe("iris_ssl_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

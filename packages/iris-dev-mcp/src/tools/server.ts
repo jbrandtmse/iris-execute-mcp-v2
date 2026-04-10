@@ -11,10 +11,10 @@
 import { type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 
-// ── iris.server.info ──────────────────────────────────────────────
+// ── iris_server_info ──────────────────────────────────────────────
 
 export const serverInfoTool: ToolDefinition = {
-  name: "iris.server.info",
+  name: "iris_server_info",
   title: "Server Info",
   description:
     "Retrieve IRIS server information including version, platform, and instance name. " +
@@ -41,10 +41,10 @@ export const serverInfoTool: ToolDefinition = {
   },
 };
 
-// ── iris.server.namespace ─────────────────────────────────────────
+// ── iris_server_namespace ─────────────────────────────────────────
 
 export const serverNamespaceTool: ToolDefinition = {
-  name: "iris.server.namespace",
+  name: "iris_server_namespace",
   title: "Namespace Info",
   description:
     "Retrieve details about an IRIS namespace, including associated databases and enabled features.",

@@ -7,9 +7,9 @@ import {
 } from "../tools/rule.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.rule.list ─────────────────────────────────────────────
+// ── iris_rule_list ─────────────────────────────────────────────
 
-describe("iris.rule.list", () => {
+describe("iris_rule_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -19,7 +19,7 @@ describe("iris.rule.list", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(ruleListTool.name).toBe("iris.rule.list");
+    expect(ruleListTool.name).toBe("iris_rule_list");
     expect(ruleListTool.annotations?.readOnlyHint).toBe(true);
     expect(ruleListTool.annotations?.destructiveHint).toBe(false);
     expect(ruleListTool.scope).toBe("NS");
@@ -86,9 +86,9 @@ describe("iris.rule.list", () => {
   });
 });
 
-// ── iris.rule.get ──────────────────────────────────────────────
+// ── iris_rule_get ──────────────────────────────────────────────
 
-describe("iris.rule.get", () => {
+describe("iris_rule_get", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -98,7 +98,7 @@ describe("iris.rule.get", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(ruleGetTool.name).toBe("iris.rule.get");
+    expect(ruleGetTool.name).toBe("iris_rule_get");
     expect(ruleGetTool.annotations?.readOnlyHint).toBe(true);
     expect(ruleGetTool.annotations?.destructiveHint).toBe(false);
     expect(ruleGetTool.scope).toBe("NS");

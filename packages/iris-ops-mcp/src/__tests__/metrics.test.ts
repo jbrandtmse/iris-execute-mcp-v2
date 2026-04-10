@@ -12,9 +12,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.metrics.system ─────────────────────────────────────
+// ── iris_metrics_system ─────────────────────────────────────
 
-describe("iris.metrics.system", () => {
+describe("iris_metrics_system", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -145,9 +145,9 @@ describe("iris.metrics.system", () => {
   });
 });
 
-// ── iris.metrics.alerts ─────────────────────────────────────
+// ── iris_metrics_alerts ─────────────────────────────────────
 
-describe("iris.metrics.alerts", () => {
+describe("iris_metrics_alerts", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -254,9 +254,9 @@ describe("iris.metrics.alerts", () => {
   });
 });
 
-// ── iris.metrics.interop ────────────────────────────────────
+// ── iris_metrics_interop ────────────────────────────────────
 
-describe("iris.metrics.interop", () => {
+describe("iris_metrics_interop", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

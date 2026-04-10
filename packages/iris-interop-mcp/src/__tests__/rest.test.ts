@@ -6,9 +6,9 @@ import {
 } from "../tools/rest.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.interop.rest ──────────────────────────────────────────
+// ── iris_interop_rest ──────────────────────────────────────────
 
-describe("iris.interop.rest", () => {
+describe("iris_interop_rest", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -18,7 +18,7 @@ describe("iris.interop.rest", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(interopRestTool.name).toBe("iris.interop.rest");
+    expect(interopRestTool.name).toBe("iris_interop_rest");
     expect(interopRestTool.annotations?.destructiveHint).toBe(true);
     expect(interopRestTool.annotations?.readOnlyHint).toBe(false);
     expect(interopRestTool.scope).toBe("NS");

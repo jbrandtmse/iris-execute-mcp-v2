@@ -16,10 +16,10 @@ import { extractResult, toStructured } from "./docdb.js";
 /** Base URL for the IRIS Management REST API. */
 const BASE_MGMNT_URL = "/api/mgmnt/v2";
 
-// ── iris.rest.manage ──────────────────────────────────────────
+// ── iris_rest_manage ──────────────────────────────────────────
 
 export const restManageTool: ToolDefinition = {
-  name: "iris.rest.manage",
+  name: "iris_rest_manage",
   title: "Manage REST API",
   description:
     "List, get details, or delete REST API dispatch classes on IRIS. " +

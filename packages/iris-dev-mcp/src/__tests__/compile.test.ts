@@ -3,9 +3,9 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { docCompileTool } from "../tools/compile.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.doc.compile ───────────────────────────────────────────────
+// ── iris_doc_compile ───────────────────────────────────────────────
 
-describe("iris.doc.compile", () => {
+describe("iris_doc_compile", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

@@ -12,9 +12,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.webapp.manage ─────────────────────────────────────────
+// ── iris_webapp_manage ─────────────────────────────────────────
 
-describe("iris.webapp.manage", () => {
+describe("iris_webapp_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -201,9 +201,9 @@ describe("iris.webapp.manage", () => {
   });
 });
 
-// ── iris.webapp.get ─────────────────────────────────────────────
+// ── iris_webapp_get ─────────────────────────────────────────────
 
-describe("iris.webapp.get", () => {
+describe("iris_webapp_get", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -296,9 +296,9 @@ describe("iris.webapp.get", () => {
   });
 });
 
-// ── iris.webapp.list ────────────────────────────────────────────
+// ── iris_webapp_list ────────────────────────────────────────────
 
-describe("iris.webapp.list", () => {
+describe("iris_webapp_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

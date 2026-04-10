@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.resource.manage ───────────────────────────────────────
+// ── iris_resource_manage ───────────────────────────────────────
 
 export const resourceManageTool: ToolDefinition = {
-  name: "iris.resource.manage",
+  name: "iris_resource_manage",
   title: "Manage Resource",
   description:
     "Create, modify, or delete an IRIS security resource. For 'create', name is required. " +
@@ -88,10 +88,10 @@ export const resourceManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.resource.list ─────────────────────────────────────────
+// ── iris_resource_list ─────────────────────────────────────────
 
 export const resourceListTool: ToolDefinition = {
-  name: "iris.resource.list",
+  name: "iris_resource_list",
   title: "List Resources",
   description:
     "List all IRIS security resources with their description, public permission, and type.",

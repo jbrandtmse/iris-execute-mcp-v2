@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-09"  # Story 9.0 created via /epic-cycle step 0.5 (Epic 8 deferred cleanup triage)
+last_updated: "2026-04-09"  # Story 9.1 done — 85 tools renamed iris.x.y -> iris_x_y; 993/993 tests pass
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -143,7 +143,7 @@ development_status:
   # Note: Planning artifacts (architecture.md, prd.md, epics.md) already updated by analyst — out of scope for dev stories
   epic-9: in-progress
   9-0-epic-8-deferred-cleanup: done
-  9-1-rename-tool-identifiers-in-source-and-tests: backlog
+  9-1-rename-tool-identifiers-in-source-and-tests: done
   9-2-documentation-changelog-and-regression-guard: backlog
   9-3-pre-publish-smoke-test-and-beta-user-notification: backlog
   epic-9-retrospective: optional

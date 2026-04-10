@@ -18,10 +18,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.oauth.manage ──────────────────────────────────────────
+// ── iris_oauth_manage ──────────────────────────────────────────
 
 export const oauthManageTool: ToolDefinition = {
-  name: "iris.oauth.manage",
+  name: "iris_oauth_manage",
   title: "Manage OAuth2 Configuration",
   description:
     "Create or delete OAuth2 server definitions and client registrations, " +
@@ -188,10 +188,10 @@ export const oauthManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.oauth.list ───────────────────────────────────────────
+// ── iris_oauth_list ───────────────────────────────────────────
 
 export const oauthListTool: ToolDefinition = {
-  name: "iris.oauth.list",
+  name: "iris_oauth_list",
   title: "List OAuth2 Configurations",
   description:
     "List all IRIS OAuth2 server definitions and registered client applications. " +

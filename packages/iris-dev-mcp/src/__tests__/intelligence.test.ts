@@ -3,9 +3,9 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { docIndexTool, docSearchTool, macroInfoTool } from "../tools/intelligence.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.doc.index ────────────────────────────────────────────────
+// ── iris_doc_index ────────────────────────────────────────────────
 
-describe("iris.doc.index", () => {
+describe("iris_doc_index", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -98,9 +98,9 @@ describe("iris.doc.index", () => {
   });
 });
 
-// ── iris.doc.search ───────────────────────────────────────────────
+// ── iris_doc_search ───────────────────────────────────────────────
 
-describe("iris.doc.search", () => {
+describe("iris_doc_search", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -207,9 +207,9 @@ describe("iris.doc.search", () => {
   });
 });
 
-// ── iris.macro.info ───────────────────────────────────────────────
+// ── iris_macro_info ───────────────────────────────────────────────
 
-describe("iris.macro.info", () => {
+describe("iris_macro_info", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

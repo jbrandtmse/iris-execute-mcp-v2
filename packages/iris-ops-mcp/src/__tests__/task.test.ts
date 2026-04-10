@@ -13,9 +13,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.task.manage ────────────────────────────────────────
+// ── iris_task_manage ────────────────────────────────────────
 
-describe("iris.task.manage", () => {
+describe("iris_task_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -199,9 +199,9 @@ describe("iris.task.manage", () => {
   });
 });
 
-// ── iris.task.list ──────────────────────────────────────────
+// ── iris_task_list ──────────────────────────────────────────
 
-describe("iris.task.list", () => {
+describe("iris_task_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -357,9 +357,9 @@ describe("iris.task.list", () => {
   });
 });
 
-// ── iris.task.run ───────────────────────────────────────────
+// ── iris_task_run ───────────────────────────────────────────
 
-describe("iris.task.run", () => {
+describe("iris_task_run", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -462,9 +462,9 @@ describe("iris.task.run", () => {
   });
 });
 
-// ── iris.task.history ───────────────────────────────────────
+// ── iris_task_history ───────────────────────────────────────
 
-describe("iris.task.history", () => {
+describe("iris_task_history", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

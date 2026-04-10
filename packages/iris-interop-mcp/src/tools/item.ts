@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.production.item ──────────────────────────────────────
+// ── iris_production_item ──────────────────────────────────────
 
 export const productionItemTool: ToolDefinition = {
-  name: "iris.production.item",
+  name: "iris_production_item",
   title: "Manage Production Item",
   description:
     "Enable, disable, get settings, or set settings for an individual Interoperability " +
@@ -90,10 +90,10 @@ export const productionItemTool: ToolDefinition = {
   },
 };
 
-// ── iris.production.autostart ─────────────────────────────────
+// ── iris_production_autostart ─────────────────────────────────
 
 export const productionAutostartTool: ToolDefinition = {
-  name: "iris.production.autostart",
+  name: "iris_production_autostart",
   title: "Manage Auto-Start",
   description:
     "Get or set the auto-start production configuration for a namespace. " +

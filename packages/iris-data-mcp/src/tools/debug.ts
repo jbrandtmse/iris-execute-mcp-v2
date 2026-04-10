@@ -1,8 +1,8 @@
 /**
  * Debug tools placeholder for future post-MVP implementation.
  *
- * FR106: iris.debug.session — Interactive ObjectScript debug sessions
- * FR107: iris.debug.terminal — IRIS terminal via WebSocket
+ * FR106: iris_debug_session — Interactive ObjectScript debug sessions
+ * FR107: iris_debug_terminal — IRIS terminal via WebSocket
  *
  * These tools are deferred to post-MVP and will require WebSocket
  * transport support (not available in current MCP stdio/HTTP transports).

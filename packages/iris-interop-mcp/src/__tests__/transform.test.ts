@@ -7,9 +7,9 @@ import {
 } from "../tools/transform.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.transform.list ────────────────────────────────────────
+// ── iris_transform_list ────────────────────────────────────────
 
-describe("iris.transform.list", () => {
+describe("iris_transform_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -19,7 +19,7 @@ describe("iris.transform.list", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(transformListTool.name).toBe("iris.transform.list");
+    expect(transformListTool.name).toBe("iris_transform_list");
     expect(transformListTool.annotations?.readOnlyHint).toBe(true);
     expect(transformListTool.annotations?.destructiveHint).toBe(false);
     expect(transformListTool.scope).toBe("NS");
@@ -86,9 +86,9 @@ describe("iris.transform.list", () => {
   });
 });
 
-// ── iris.transform.test ────────────────────────────────────────
+// ── iris_transform_test ────────────────────────────────────────
 
-describe("iris.transform.test", () => {
+describe("iris_transform_test", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -98,7 +98,7 @@ describe("iris.transform.test", () => {
   });
 
   it("should have correct tool metadata", () => {
-    expect(transformTestTool.name).toBe("iris.transform.test");
+    expect(transformTestTool.name).toBe("iris_transform_test");
     expect(transformTestTool.annotations?.readOnlyHint).toBe(false);
     expect(transformTestTool.annotations?.destructiveHint).toBe(false);
     expect(transformTestTool.scope).toBe("NS");

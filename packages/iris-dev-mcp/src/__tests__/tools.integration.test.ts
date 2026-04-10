@@ -119,7 +119,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
   // ── Document CRUD Tools ───────────────────────────────────────────
 
   describe("document CRUD tools", () => {
-    it("iris.doc.put creates a test class", async () => {
+    it("iris_doc_put creates a test class", async () => {
       const result = await docPutTool.handler(
         { name: TEST_CLASS_NAME, content: TEST_CLASS_CONTENT, ignoreConflict: true },
         ctx,
@@ -129,7 +129,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(result.content[0]?.text).toContain("saved successfully");
     });
 
-    it("iris.doc.get retrieves the created class", async () => {
+    it("iris_doc_get retrieves the created class", async () => {
       const result = await docGetTool.handler(
         { name: TEST_CLASS_NAME },
         ctx,
@@ -140,7 +140,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(text).toContain("Test.MCPIntegration.Temp");
     });
 
-    it("iris.doc.get with metadataOnly returns exists=true", async () => {
+    it("iris_doc_get with metadataOnly returns exists=true", async () => {
       const result = await docGetTool.handler(
         { name: TEST_CLASS_NAME, metadataOnly: true },
         ctx,
@@ -156,7 +156,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(structured.name).toBe(TEST_CLASS_NAME);
     });
 
-    it("iris.doc.list with category=CLS includes the test class", async () => {
+    it("iris_doc_list with category=CLS includes the test class", async () => {
       const result = await docListTool.handler(
         { category: "CLS" },
         ctx,
@@ -167,7 +167,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(text).toContain("Test.MCPIntegration.Temp");
     });
 
-    it("iris.doc.list with modifiedSince returns recently modified docs", async () => {
+    it("iris_doc_list with modifiedSince returns recently modified docs", async () => {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
       // The modified endpoint may not be available on all IRIS versions/API levels.
@@ -188,7 +188,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       }
     });
 
-    it("iris.doc.delete removes the test class", async () => {
+    it("iris_doc_delete removes the test class", async () => {
       const result = await docDeleteTool.handler(
         { name: TEST_CLASS_NAME },
         ctx,
@@ -198,7 +198,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(result.content[0]?.text).toContain("deleted");
     });
 
-    it("iris.doc.get with metadataOnly returns exists=false after deletion", async () => {
+    it("iris_doc_get with metadataOnly returns exists=false after deletion", async () => {
       const result = await docGetTool.handler(
         { name: TEST_CLASS_NAME, metadataOnly: true },
         ctx,
@@ -220,7 +220,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
   // ── Compile Tools ─────────────────────────────────────────────────
 
   describe("compile tools", () => {
-    it("iris.doc.compile compiles a valid class successfully", async () => {
+    it("iris_doc_compile compiles a valid class successfully", async () => {
       const result = await docCompileTool.handler(
         { doc: TEST_CLASS_NAME },
         ctx,
@@ -232,7 +232,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(result.content[0]?.text).toContain("Successfully compiled");
     });
 
-    it("iris.doc.compile returns errors for invalid code", async () => {
+    it("iris_doc_compile returns errors for invalid code", async () => {
       await docPutTool.handler(
         { name: INVALID_CLASS_NAME, content: INVALID_CLASS_CONTENT, ignoreConflict: true },
         ctx,
@@ -267,7 +267,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
   // ── Intelligence Tools ────────────────────────────────────────────
 
   describe("intelligence tools", () => {
-    it("iris.doc.index returns structure for %Library.String", async () => {
+    it("iris_doc_index returns structure for %Library.String", async () => {
       const result = await docIndexTool.handler(
         { name: "%Library.String.cls" },
         ctx,
@@ -279,7 +279,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
     });
 
     it.skipIf(API_VERSION < 2)(
-      "iris.doc.search finds a known string in documents",
+      "iris_doc_search finds a known string in documents",
       async () => {
         const result = await docSearchTool.handler(
           { query: "Extends %RegisteredObject", files: "*.cls", max: 5 },
@@ -292,7 +292,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
     );
 
     it.skipIf(API_VERSION < 2)(
-      "iris.macro.info returns definition for $$$OK macro",
+      "iris_macro_info returns definition for $$$OK macro",
       async () => {
         // The macro endpoint may return HTTP 400 on some IRIS versions when
         // the request body format is unexpected. Tolerate known API errors.
@@ -325,7 +325,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
   // ── Format / XML Tools ────────────────────────────────────────────
 
   describe("format and XML tools", () => {
-    it("iris.doc.convert converts a class between formats", async () => {
+    it("iris_doc_convert converts a class between formats", async () => {
       const xmlResult = await docConvertTool.handler(
         { name: TEST_CLASS_NAME, targetFormat: "xml" },
         ctx,
@@ -345,7 +345,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
     });
 
     it.skipIf(API_VERSION < 7)(
-      "iris.doc.xml_export exports a document to XML format",
+      "iris_doc_xml_export exports a document to XML format",
       async () => {
         const result = await docXmlExportTool.handler(
           { action: "export", docs: [TEST_CLASS_NAME] },
@@ -361,7 +361,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
   // ── SQL and Server Tools ──────────────────────────────────────────
 
   describe("SQL and server tools", () => {
-    it("iris.sql.execute runs a SELECT query and returns results", async () => {
+    it("iris_sql_execute runs a SELECT query and returns results", async () => {
       const result = await sqlExecuteTool.handler(
         { query: "SELECT 1+1 AS total" },
         ctx,
@@ -383,7 +383,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       }
     });
 
-    it("iris.sql.execute with invalid SQL returns error", async () => {
+    it("iris_sql_execute with invalid SQL returns error", async () => {
       const result = await sqlExecuteTool.handler(
         { query: "SELECT * FROM NonExistent.Table.ThatDoesNotExist12345" },
         ctx,
@@ -393,7 +393,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(result.content[0]?.text).toContain("SQL error");
     });
 
-    it("iris.server.info returns valid server information", async () => {
+    it("iris_server_info returns valid server information", async () => {
       const result = await serverInfoTool.handler({}, ctxNone);
 
       expect(result.isError).toBeUndefined();
@@ -401,7 +401,7 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(text.length).toBeGreaterThan(10);
     });
 
-    it("iris.server.namespace returns details for the configured namespace", async () => {
+    it("iris_server_namespace returns details for the configured namespace", async () => {
       // The namespace endpoint path depends on the Atelier API version and
       // may return 404 on some configurations. Verify it either succeeds or
       // fails with a known transport error.

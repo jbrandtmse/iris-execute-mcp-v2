@@ -16,10 +16,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.mapping.manage ────────────────────────────────────────
+// ── iris_mapping_manage ────────────────────────────────────────
 
 export const mappingManageTool: ToolDefinition = {
-  name: "iris.mapping.manage",
+  name: "iris_mapping_manage",
   title: "Manage Namespace Mapping",
   description:
     "Create or delete a global, routine, or package mapping between namespaces. " +
@@ -119,10 +119,10 @@ export const mappingManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.mapping.list ──────────────────────────────────────────
+// ── iris_mapping_list ──────────────────────────────────────────
 
 export const mappingListTool: ToolDefinition = {
-  name: "iris.mapping.list",
+  name: "iris_mapping_list",
   title: "List Namespace Mappings",
   description:
     "List all global, routine, or package mappings for a given namespace. " +

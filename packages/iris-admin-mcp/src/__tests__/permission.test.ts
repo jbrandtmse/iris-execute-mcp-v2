@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.permission.check ──────────────────────────────────────
+// ── iris_permission_check ──────────────────────────────────────
 
-describe("iris.permission.check", () => {
+describe("iris_permission_check", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

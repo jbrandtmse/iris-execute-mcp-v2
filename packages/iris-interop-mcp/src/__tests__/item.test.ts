@@ -7,9 +7,9 @@ import {
 } from "../tools/item.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.production.item ──────────────────────────────────────
+// ── iris_production_item ──────────────────────────────────────
 
-describe("iris.production.item", () => {
+describe("iris_production_item", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -209,13 +209,13 @@ describe("iris.production.item", () => {
   });
 
   it("should have correct tool name", () => {
-    expect(productionItemTool.name).toBe("iris.production.item");
+    expect(productionItemTool.name).toBe("iris_production_item");
   });
 });
 
-// ── iris.production.autostart ─────────────────────────────────
+// ── iris_production_autostart ─────────────────────────────────
 
-describe("iris.production.autostart", () => {
+describe("iris_production_autostart", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -395,6 +395,6 @@ describe("iris.production.autostart", () => {
   });
 
   it("should have correct tool name", () => {
-    expect(productionAutostartTool.name).toBe("iris.production.autostart");
+    expect(productionAutostartTool.name).toBe("iris_production_autostart");
   });
 });

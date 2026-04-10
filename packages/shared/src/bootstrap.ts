@@ -136,7 +136,7 @@ export async function configureWebApp(
 /**
  * Map the ExecuteMCPv2 package to %All namespace so compiled routines
  * (including I/O redirect mnemonic labels) are available in every namespace.
- * This enables cross-namespace `iris.execute.command` with I/O capture.
+ * This enables cross-namespace `iris_execute_command` with I/O capture.
  */
 export async function configurePackageMapping(
   http: IrisHttpClient,
@@ -246,7 +246,7 @@ export async function bootstrap(
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     result.errors.push(`Package mapping failed: ${msg}`);
-    // Non-fatal: cross-namespace iris.execute.command won't work but everything else will
+    // Non-fatal: cross-namespace iris_execute_command won't work but everything else will
   }
 
   return result;

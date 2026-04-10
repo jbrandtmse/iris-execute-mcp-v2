@@ -29,7 +29,7 @@ function makeGetDocTool(
   handlerFn?: ToolDefinition["handler"],
 ): ToolDefinition {
   return {
-    name: "iris.doc.get",
+    name: "iris_doc_get",
     title: "Get Document",
     description: "Retrieve a document by name.",
     inputSchema: z.object({
@@ -53,7 +53,7 @@ function makeGetDocTool(
 
 function makeSysInfoTool(): ToolDefinition {
   return {
-    name: "iris.sys.info",
+    name: "iris_sys_info",
     title: "System Info",
     description: "Get system information.",
     inputSchema: z.object({}),
@@ -105,8 +105,8 @@ describe("server-base", () => {
         makeServerOpts([makeGetDocTool(), makeSysInfoTool()]),
       );
       expect(server.toolCount).toBe(2);
-      expect(server.getToolNames()).toContain("iris.doc.get");
-      expect(server.getToolNames()).toContain("iris.sys.info");
+      expect(server.getToolNames()).toContain("iris_doc_get");
+      expect(server.getToolNames()).toContain("iris_sys_info");
     });
 
     it("should provide access to the underlying MCP SDK server", () => {
@@ -117,9 +117,9 @@ describe("server-base", () => {
     it("should retrieve a tool definition by name", () => {
       const tool = makeGetDocTool();
       const server = new McpServerBase(makeServerOpts([tool]));
-      const retrieved = server.getTool("iris.doc.get");
+      const retrieved = server.getTool("iris_doc_get");
       expect(retrieved).toBeDefined();
-      expect(retrieved?.name).toBe("iris.doc.get");
+      expect(retrieved?.name).toBe("iris_doc_get");
       expect(retrieved?.scope).toBe("NS");
     });
 
@@ -136,7 +136,7 @@ describe("server-base", () => {
 
       server.addTools([makeGetDocTool()]);
       expect(server.toolCount).toBe(1);
-      expect(server.getTool("iris.doc.get")).toBeDefined();
+      expect(server.getTool("iris_doc_get")).toBeDefined();
     });
 
     it("should add multiple tools at once", () => {
@@ -151,10 +151,10 @@ describe("server-base", () => {
       );
       expect(server.toolCount).toBe(2);
 
-      server.removeTools(["iris.doc.get"]);
+      server.removeTools(["iris_doc_get"]);
       expect(server.toolCount).toBe(1);
-      expect(server.getTool("iris.doc.get")).toBeUndefined();
-      expect(server.getTool("iris.sys.info")).toBeDefined();
+      expect(server.getTool("iris_doc_get")).toBeUndefined();
+      expect(server.getTool("iris_sys_info")).toBeDefined();
     });
 
     it("should handle removing non-existent tools gracefully", () => {
@@ -530,7 +530,7 @@ describe("server-base", () => {
         count: z.number(),
       });
       const tool: ToolDefinition = {
-        name: "iris.test.output",
+        name: "iris_test_output",
         title: "Test Output",
         description: "Test tool with output schema.",
         inputSchema: z.object({ query: z.string() }),
@@ -546,7 +546,7 @@ describe("server-base", () => {
       const server = new McpServerBase(makeServerOpts([tool]));
       expect(server.toolCount).toBe(1);
 
-      const registered = server.getTool("iris.test.output");
+      const registered = server.getTool("iris_test_output");
       expect(registered).toBeDefined();
       expect(registered?.outputSchema).toBeDefined();
       expect(registered?.outputSchema?.shape).toHaveProperty("result");
@@ -558,7 +558,7 @@ describe("server-base", () => {
       const server = new McpServerBase(makeServerOpts([tool]));
       expect(server.toolCount).toBe(1);
 
-      const registered = server.getTool("iris.doc.get");
+      const registered = server.getTool("iris_doc_get");
       expect(registered).toBeDefined();
       expect(registered?.outputSchema).toBeUndefined();
     });
@@ -568,7 +568,7 @@ describe("server-base", () => {
     it("should preserve all annotation hints on registered tools", () => {
       const tool = makeGetDocTool();
       const server = new McpServerBase(makeServerOpts([tool]));
-      const registered = server.getTool("iris.doc.get");
+      const registered = server.getTool("iris_doc_get");
       expect(registered?.annotations).toEqual({
         readOnlyHint: true,
         destructiveHint: false,
@@ -579,7 +579,7 @@ describe("server-base", () => {
 
     it("should handle empty annotations", () => {
       const tool: ToolDefinition = {
-        name: "iris.test",
+        name: "iris_test",
         title: "Test",
         description: "Test tool",
         inputSchema: z.object({}),
@@ -590,7 +590,7 @@ describe("server-base", () => {
         }),
       };
       const server = new McpServerBase(makeServerOpts([tool]));
-      const registered = server.getTool("iris.test");
+      const registered = server.getTool("iris_test");
       expect(registered?.annotations).toEqual({});
     });
   });

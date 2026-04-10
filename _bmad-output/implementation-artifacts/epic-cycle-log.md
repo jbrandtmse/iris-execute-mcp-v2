@@ -611,3 +611,23 @@
   - Task 5 (commit) left unchecked in dev story — epic-cycle lead handles commit/push after code review
 - **Regression baseline (for Story 9.1 to compare against):** `npx turbo build` 6/6 cached, `npx turbo test` **51 test files, 993 tests, 0 failures** across shared/dev/admin/interop/ops/data packages
 - **Review findings:** No HIGH/MEDIUM/LOW issues; append-only discipline verified, 11/11 triage coverage confirmed, publishing-checklist A2 link validated
+
+### Story 9.1: Rename Tool Identifiers in Source and Tests
+- **Status:** done
+- **Date:** 2026-04-09
+- **Scope:** Mechanical rename `iris.<domain>.<verb>` → `iris_<domain>_<verb>` across all 85 tool definitions and all test assertions/mocks/describes
+- **Files touched:** 85 files under `packages/`
+  - 36 tool definition files across `packages/iris-{admin,data,dev,interop,ops}-mcp/src/tools/`
+  - 47 test files across `packages/*/src/__tests__/` (unit + integration)
+  - 2 shared library files (`packages/shared/src/bootstrap.ts`, `packages/shared/src/tool-types.ts`) — JSDoc/comment consistency updates
+- **Key decisions:**
+  - One-shot Node script with `fs.readdirSync` recursion; no new dependencies added; script deleted after use
+  - Regex `iris\.([a-z_]+)\.([a-z_]+)` → `iris_$1_$2` — narrow pattern correctly excluded `iris-dev-mcp` (package names), `MyClass.cls` (test fixtures), `MyPackage.Transforms.HL7toSDA` (ObjectScript class names)
+  - 3 `iris.test` placeholder strings in shared test fixtures (single-dot, not real tool names) also renamed to `iris_test` during code review for consistency and to avoid tripping Story 9.2's future regression guard
+  - Zero out-of-scope files touched: no README.md, CHANGELOG.md, .cls, bootstrap-classes.ts, planning-artifacts, or docs/
+- **Rename stats:** 564 total string replacements (561 from one-shot Node script + 3 from manual consistency fixes during code review)
+- **Baseline match:** `turbo build` 6/6 successful; `turbo test` **exact baseline match — 51 test files / 993 tests / 0 failures** (shared 10/185, dev 10/200, admin 11/198, interop 9/161, ops 7/149, data 4/100)
+- **Review findings:**
+  - 1 HIGH auto-resolved: dev accidentally modified `sprint-status.yaml` with wrong value — reverted to HEAD
+  - 1 MEDIUM auto-resolved: `iris.test` placeholder renames (3 occurrences in shared tests) — applied for consistency
+  - 2 LOW informational: Doc-comment references to `iris_execute_command` / `iris_webapp_get` inside embedded ObjectScript class docstrings in `packages/shared/src/bootstrap-classes.ts` — deferred to Story 9.2 (covered by the gen:bootstrap verification task)

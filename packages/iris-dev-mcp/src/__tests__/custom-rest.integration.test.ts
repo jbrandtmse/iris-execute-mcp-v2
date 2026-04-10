@@ -127,7 +127,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
         expect(afterData.defined).toBe(false);
       });
 
-      it("iris.global.list returns at least one global", async () => {
+      it("iris_global_list returns at least one global", async () => {
         const result = await globalListTool.handler({}, ctx);
         expect(result.isError).toBeUndefined();
         const data = result.structuredContent as Record<string, unknown>;
@@ -140,7 +140,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
     // ── Execute tools ─────────────────────────────────────────────
 
     describe("execute tools", () => {
-      it("iris.execute.command with Write captures output", async () => {
+      it("iris_execute_command with Write captures output", async () => {
         const result = await executeCommandTool.handler(
           { command: 'Write "hello"' },
           ctx,
@@ -150,7 +150,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
         expect(text).toContain("hello");
       });
 
-      it("iris.execute.classmethod calls %SYSTEM.Version:GetVersion", async () => {
+      it("iris_execute_classmethod calls %SYSTEM.Version:GetVersion", async () => {
         const result = await executeClassMethodTool.handler(
           {
             className: "%SYSTEM.Version",
@@ -168,7 +168,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
     // ── Test execution tool ───────────────────────────────────────
 
     describe("test execution tool", () => {
-      it("iris.execute.tests runs ExecuteMCPv2.Tests.UtilsTest with structured results", async () => {
+      it("iris_execute_tests runs ExecuteMCPv2.Tests.UtilsTest with structured results", async () => {
         const result = await executeTestsTool.handler(
           {
             target: "ExecuteMCPv2.Tests.UtilsTest",

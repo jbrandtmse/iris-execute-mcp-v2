@@ -36,10 +36,10 @@ interface CompileResultContent {
   content?: CompilationDocResult[];
 }
 
-// ── iris.doc.compile ───────────────────────────────────────────────
+// ── iris_doc_compile ───────────────────────────────────────────────
 
 export const docCompileTool: ToolDefinition = {
-  name: "iris.doc.compile",
+  name: "iris_doc_compile",
   title: "Compile Document",
   description:
     "Compile one or more ObjectScript classes, routines, or include files. " +

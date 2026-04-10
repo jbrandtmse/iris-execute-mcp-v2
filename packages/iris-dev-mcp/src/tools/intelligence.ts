@@ -17,10 +17,10 @@ import {
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 
-// ── iris.doc.index ─────────────────────────────────────────────────
+// ── iris_doc_index ─────────────────────────────────────────────────
 
 export const docIndexTool: ToolDefinition = {
-  name: "iris.doc.index",
+  name: "iris_doc_index",
   title: "Document Index",
   description:
     "Retrieve the structure of an ObjectScript class, including its methods, properties, " +
@@ -63,10 +63,10 @@ export const docIndexTool: ToolDefinition = {
   },
 };
 
-// ── iris.doc.search ────────────────────────────────────────────────
+// ── iris_doc_search ────────────────────────────────────────────────
 
 export const docSearchTool: ToolDefinition = {
-  name: "iris.doc.search",
+  name: "iris_doc_search",
   title: "Search Documents",
   description:
     "Search across ObjectScript documents for text or regex patterns. " +
@@ -139,7 +139,7 @@ export const docSearchTool: ToolDefinition = {
       namespace?: string;
     };
 
-    requireMinVersion(ctx.atelierVersion, 2, "iris.doc.search");
+    requireMinVersion(ctx.atelierVersion, 2, "iris_doc_search");
 
     const ns = ctx.resolveNamespace(namespace);
 
@@ -173,10 +173,10 @@ export const docSearchTool: ToolDefinition = {
   },
 };
 
-// ── iris.macro.info ────────────────────────────────────────────────
+// ── iris_macro_info ────────────────────────────────────────────────
 
 export const macroInfoTool: ToolDefinition = {
-  name: "iris.macro.info",
+  name: "iris_macro_info",
   title: "Macro Info",
   description:
     "Look up a macro definition, including its expanded value and source location. " +
@@ -213,7 +213,7 @@ export const macroInfoTool: ToolDefinition = {
       namespace?: string;
     };
 
-    requireMinVersion(ctx.atelierVersion, 2, "iris.macro.info");
+    requireMinVersion(ctx.atelierVersion, 2, "iris_macro_info");
 
     const ns = ctx.resolveNamespace(namespace);
 

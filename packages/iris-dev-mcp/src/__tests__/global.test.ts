@@ -9,9 +9,9 @@ import {
 } from "../tools/global.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.global.get ──────────────────────────────────────────────
+// ── iris_global_get ──────────────────────────────────────────────
 
-describe("iris.global.get", () => {
+describe("iris_global_get", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -102,9 +102,9 @@ describe("iris.global.get", () => {
   });
 });
 
-// ── iris.global.set ──────────────────────────────────────────────
+// ── iris_global_set ──────────────────────────────────────────────
 
-describe("iris.global.set", () => {
+describe("iris_global_set", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -213,9 +213,9 @@ describe("iris.global.set", () => {
   });
 });
 
-// ── iris.global.kill ─────────────────────────────────────────────
+// ── iris_global_kill ─────────────────────────────────────────────
 
-describe("iris.global.kill", () => {
+describe("iris_global_kill", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -305,9 +305,9 @@ describe("iris.global.kill", () => {
   });
 });
 
-// ── iris.global.list ─────────────────────────────────────────────
+// ── iris_global_list ─────────────────────────────────────────────
 
-describe("iris.global.list", () => {
+describe("iris_global_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

@@ -9,9 +9,9 @@ import {
 } from "../tools/production.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.production.manage ────────────��────────────────────────
+// ── iris_production_manage ────────────��────────────────────────
 
-describe("iris.production.manage", () => {
+describe("iris_production_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -120,9 +120,9 @@ describe("iris.production.manage", () => {
   });
 });
 
-// ── iris.production.control ────────────────────────────────────
+// ── iris_production_control ────────────────────────────────────
 
-describe("iris.production.control", () => {
+describe("iris_production_control", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -276,9 +276,9 @@ describe("iris.production.control", () => {
   });
 });
 
-// ─��� iris.production.status ─────────────────────────────────────
+// ─��� iris_production_status ─────────────────────────────────────
 
-describe("iris.production.status", () => {
+describe("iris_production_status", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -359,9 +359,9 @@ describe("iris.production.status", () => {
   });
 });
 
-// ── iris.production.summary ────────────────────────────────────
+// ── iris_production_summary ────────────────────────────────────
 
-describe("iris.production.summary", () => {
+describe("iris_production_summary", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

@@ -18,10 +18,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.global.get ──────────────────────────────────────────────
+// ── iris_global_get ──────────────────────────────────────────────
 
 export const globalGetTool: ToolDefinition = {
-  name: "iris.global.get",
+  name: "iris_global_get",
   title: "Get Global",
   description:
     "Read the value of an IRIS global node. Returns the value and whether the node is defined. " +
@@ -88,10 +88,10 @@ export const globalGetTool: ToolDefinition = {
   },
 };
 
-// ── iris.global.set ──────────────────────────────────────────────
+// ── iris_global_set ──────────────────────────────────────────────
 
 export const globalSetTool: ToolDefinition = {
-  name: "iris.global.set",
+  name: "iris_global_set",
   title: "Set Global",
   description:
     "Set the value of an IRIS global node. The value is verified after writing " +
@@ -164,10 +164,10 @@ export const globalSetTool: ToolDefinition = {
   },
 };
 
-// ── iris.global.kill ─────────────────────────────────────────────
+// ── iris_global_kill ─────────────────────────────────────────────
 
 export const globalKillTool: ToolDefinition = {
-  name: "iris.global.kill",
+  name: "iris_global_kill",
   title: "Kill Global",
   description:
     "Delete an IRIS global node or entire subtree. Use with caution — " +
@@ -234,10 +234,10 @@ export const globalKillTool: ToolDefinition = {
   },
 };
 
-// ── iris.global.list ─────────────────────────────────────────────
+// ── iris_global_list ─────────────────────────────────────────────
 
 export const globalListTool: ToolDefinition = {
-  name: "iris.global.list",
+  name: "iris_global_list",
   title: "List Globals",
   description:
     "List globals in an IRIS namespace. Optionally filter by substring match on the global name. " +

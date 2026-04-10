@@ -14,10 +14,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.transform.list ────────────────────────────────────────
+// ── iris_transform_list ────────────────────────────────────────
 
 export const transformListTool: ToolDefinition = {
-  name: "iris.transform.list",
+  name: "iris_transform_list",
   title: "List Data Transformations",
   description:
     "List all data transformation (DTL) classes in the namespace. Returns non-abstract " +
@@ -71,10 +71,10 @@ export const transformListTool: ToolDefinition = {
   },
 };
 
-// ── iris.transform.test ────────────────────────────────────────
+// ── iris_transform_test ────────────────────────────────────────
 
 export const transformTestTool: ToolDefinition = {
-  name: "iris.transform.test",
+  name: "iris_transform_test",
   title: "Test Data Transformation",
   description:
     "Execute a data transformation against sample input and return the output. " +

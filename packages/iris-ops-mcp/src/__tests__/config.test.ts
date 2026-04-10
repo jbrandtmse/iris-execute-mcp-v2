@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.config.manage ─────────────────────────────────────
+// ── iris_config_manage ─────────────────────────────────────
 
-describe("iris.config.manage", () => {
+describe("iris_config_manage", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

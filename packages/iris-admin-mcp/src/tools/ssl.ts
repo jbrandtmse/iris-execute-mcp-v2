@@ -15,10 +15,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.ssl.manage ─────────────────────────────────────────────
+// ── iris_ssl_manage ─────────────────────────────────────────────
 
 export const sslManageTool: ToolDefinition = {
-  name: "iris.ssl.manage",
+  name: "iris_ssl_manage",
   title: "Manage SSL/TLS Configuration",
   description:
     "Create, modify, or delete an IRIS SSL/TLS configuration. For 'create', " +
@@ -156,10 +156,10 @@ export const sslManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.ssl.list ──────────────────────────────────────────────
+// ── iris_ssl_list ──────────────────────────────────────────────
 
 export const sslListTool: ToolDefinition = {
-  name: "iris.ssl.list",
+  name: "iris_ssl_list",
   title: "List SSL/TLS Configurations",
   description:
     "List all IRIS SSL/TLS configurations. Returns configuration name, " +

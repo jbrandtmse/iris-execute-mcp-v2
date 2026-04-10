@@ -8,9 +8,9 @@ import {
   envelope,
 } from "@iris-mcp/shared/test-helpers";
 
-// ── iris.analytics.mdx ────────────────────────────────────────
+// ── iris_analytics_mdx ────────────────────────────────────────
 
-describe("iris.analytics.mdx", () => {
+describe("iris_analytics_mdx", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -146,9 +146,9 @@ describe("iris.analytics.mdx", () => {
   });
 });
 
-// ── iris.analytics.cubes ──────────────────────────────────────
+// ── iris_analytics_cubes ──────────────────────────────────────
 
-describe("iris.analytics.cubes", () => {
+describe("iris_analytics_cubes", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

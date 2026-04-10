@@ -4,9 +4,9 @@ import { IrisApiError } from "@iris-mcp/shared";
 import { sqlExecuteTool } from "../tools/sql.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.sql.execute ──────────────────────────────────────────────
+// ── iris_sql_execute ──────────────────────────────────────────────
 
-describe("iris.sql.execute", () => {
+describe("iris_sql_execute", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

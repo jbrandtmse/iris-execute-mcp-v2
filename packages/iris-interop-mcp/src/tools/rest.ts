@@ -13,10 +13,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.interop.rest ──────────────────────────────────────────
+// ── iris_interop_rest ──────────────────────────────────────────
 
 export const interopRestTool: ToolDefinition = {
-  name: "iris.interop.rest",
+  name: "iris_interop_rest",
   title: "Manage REST Application",
   description:
     "Create, delete, or get a REST application. " +

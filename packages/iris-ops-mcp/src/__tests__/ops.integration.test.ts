@@ -99,9 +99,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     client?.destroy();
   });
 
-  // ── 1. System Metrics (iris.metrics.system) ───────────────────────
+  // ── 1. System Metrics (iris_metrics_system) ───────────────────────
 
-  describe("iris.metrics.system", () => {
+  describe("iris_metrics_system", () => {
     it("returns system metrics", async () => {
       const result = await metricsSystemTool.handler({}, ctx);
 
@@ -113,9 +113,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 2. System Alerts (iris.metrics.alerts) ────────────────────────
+  // ── 2. System Alerts (iris_metrics_alerts) ────────────────────────
 
-  describe("iris.metrics.alerts", () => {
+  describe("iris_metrics_alerts", () => {
     it("returns alerts state", async () => {
       const result = await metricsAlertsTool.handler({}, ctx);
 
@@ -124,9 +124,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 3. Interop Metrics (iris.metrics.interop) ─────────────────────
+  // ── 3. Interop Metrics (iris_metrics_interop) ─────────────────────
 
-  describe("iris.metrics.interop", () => {
+  describe("iris_metrics_interop", () => {
     it("returns interop metrics", async () => {
       const result = await metricsInteropTool.handler({}, ctx);
 
@@ -135,9 +135,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 4. Jobs List (iris.jobs.list) ─────────────────────────────────
+  // ── 4. Jobs List (iris_jobs_list) ─────────────────────────────────
 
-  describe("iris.jobs.list", () => {
+  describe("iris_jobs_list", () => {
     it("returns running jobs", async () => {
       const result = await jobsListTool.handler({}, ctx);
 
@@ -146,9 +146,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 5. Locks List (iris.locks.list) ───────────────────────────────
+  // ── 5. Locks List (iris_locks_list) ───────────────────────────────
 
-  describe("iris.locks.list", () => {
+  describe("iris_locks_list", () => {
     it("returns locks (possibly empty)", async () => {
       const result = await locksListTool.handler({}, ctx);
 
@@ -157,9 +157,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 6. Journal Info (iris.journal.info) ───────────────────────────
+  // ── 6. Journal Info (iris_journal_info) ───────────────────────────
 
-  describe("iris.journal.info", () => {
+  describe("iris_journal_info", () => {
     it("returns journal info", async () => {
       const result = await journalInfoTool.handler({}, ctx);
 
@@ -168,9 +168,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 7. Mirror Status (iris.mirror.status) ─────────────────────────
+  // ── 7. Mirror Status (iris_mirror_status) ─────────────────────────
 
-  describe("iris.mirror.status", () => {
+  describe("iris_mirror_status", () => {
     it("returns mirror status (expect not configured)", async () => {
       const result = await mirrorStatusTool.handler({}, ctx);
 
@@ -179,9 +179,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 8. Audit Events (iris.audit.events) ───────────────────────────
+  // ── 8. Audit Events (iris_audit_events) ───────────────────────────
 
-  describe("iris.audit.events", () => {
+  describe("iris_audit_events", () => {
     it("returns audit events for a recent time range", async () => {
       const result = await auditEventsTool.handler({ count: 10 }, ctx);
 
@@ -190,9 +190,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 9. Database Check (iris.database.check) ──────────────────────
+  // ── 9. Database Check (iris_database_check) ──────────────────────
 
-  describe("iris.database.check", () => {
+  describe("iris_database_check", () => {
     it("returns database status", async () => {
       const result = await databaseCheckTool.handler({}, ctx);
 
@@ -201,9 +201,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 10. License Info (iris.license.info) ──────────────────────────
+  // ── 10. License Info (iris_license_info) ──────────────────────────
 
-  describe("iris.license.info", () => {
+  describe("iris_license_info", () => {
     it("returns license details", async () => {
       const result = await licenseInfoTool.handler({}, ctx);
 
@@ -212,9 +212,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 11. ECP Status (iris.ecp.status) ──────────────────────────────
+  // ── 11. ECP Status (iris_ecp_status) ──────────────────────────────
 
-  describe("iris.ecp.status", () => {
+  describe("iris_ecp_status", () => {
     it("returns ECP status (expect not configured)", async () => {
       const result = await ecpStatusTool.handler({}, ctx);
 
@@ -223,9 +223,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
   });
 
-  // ── 12. Config Manage — get (iris.config.manage) ──────────────────
+  // ── 12. Config Manage — get (iris_config_manage) ──────────────────
 
-  describe("iris.config.manage", () => {
+  describe("iris_config_manage", () => {
     it("gets config section", async () => {
       const result = await configManageTool.handler(
         { action: "get", section: "config" },

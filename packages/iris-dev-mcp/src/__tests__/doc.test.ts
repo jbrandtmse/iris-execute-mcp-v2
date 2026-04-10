@@ -15,9 +15,9 @@ function headResponse(
   return { status, headers };
 }
 
-// ── iris.doc.get ────────────────────────────────────────────────────
+// ── iris_doc_get ────────────────────────────────────────────────────
 
-describe("iris.doc.get", () => {
+describe("iris_doc_get", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -180,9 +180,9 @@ describe("iris.doc.get", () => {
   });
 });
 
-// ── iris.doc.put ────────────────────────────────────────────────────
+// ── iris_doc_put ────────────────────────────────────────────────────
 
-describe("iris.doc.put", () => {
+describe("iris_doc_put", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -267,9 +267,9 @@ describe("iris.doc.put", () => {
   });
 });
 
-// ── iris.doc.delete ─────────────────────────────────────────────────
+// ── iris_doc_delete ─────────────────────────────────────────────────
 
-describe("iris.doc.delete", () => {
+describe("iris_doc_delete", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -345,9 +345,9 @@ describe("iris.doc.delete", () => {
   });
 });
 
-// ── iris.doc.list ───────────────────────────────────────────────────
+// ── iris_doc_list ───────────────────────────────────────────────────
 
-describe("iris.doc.list", () => {
+describe("iris_doc_list", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

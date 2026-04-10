@@ -71,9 +71,9 @@ describe("extractBaseDir", () => {
   });
 });
 
-// ── iris.doc.load tool ────────────────────────────────────────────────
+// ── iris_doc_load tool ────────────────────────────────────────────────
 
-describe("iris.doc.load", () => {
+describe("iris_doc_load", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 

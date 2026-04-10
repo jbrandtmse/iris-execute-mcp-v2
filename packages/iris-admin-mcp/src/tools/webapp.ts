@@ -20,10 +20,10 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
-// ── iris.webapp.manage ─────────────────────────────────────────
+// ── iris_webapp_manage ─────────────────────────────────────────
 
 export const webappManageTool: ToolDefinition = {
-  name: "iris.webapp.manage",
+  name: "iris_webapp_manage",
   title: "Manage Web Application",
   description:
     "Create, modify, or delete an IRIS CSP/REST web application. For 'create', " +
@@ -164,10 +164,10 @@ export const webappManageTool: ToolDefinition = {
   },
 };
 
-// ── iris.webapp.get ─────────────────────────────────────────────
+// ── iris_webapp_get ─────────────────────────────────────────────
 
 export const webappGetTool: ToolDefinition = {
-  name: "iris.webapp.get",
+  name: "iris_webapp_get",
   title: "Get Web Application",
   description:
     "Get an IRIS CSP/REST web application by name. Returns all web application " +
@@ -217,10 +217,10 @@ export const webappGetTool: ToolDefinition = {
   },
 };
 
-// ── iris.webapp.list ────────────────────────────────────────────
+// ── iris_webapp_list ────────────────────────────────────────────
 
 export const webappListTool: ToolDefinition = {
-  name: "iris.webapp.list",
+  name: "iris_webapp_list",
   title: "List Web Applications",
   description:
     "List all IRIS CSP/REST web applications. Optionally filter by namespace. " +

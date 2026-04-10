@@ -50,7 +50,7 @@ export type ToolScope = "NS" | "SYS" | "BOTH" | "NONE";
  * {@link McpServerBase} constructor.
  */
 export interface ToolDefinition {
-  /** Unique tool name, e.g. `"iris.doc.get"`. */
+  /** Unique tool name, e.g. `"iris_doc_get"`. */
   name: string;
   /** Human-readable title. */
   title: string;

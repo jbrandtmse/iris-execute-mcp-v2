@@ -3,9 +3,9 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { serverInfoTool, serverNamespaceTool } from "../tools/server.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
-// ── iris.server.info ──────────────────────────────────────────────
+// ── iris_server_info ──────────────────────────────────────────────
 
-describe("iris.server.info", () => {
+describe("iris_server_info", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
@@ -60,9 +60,9 @@ describe("iris.server.info", () => {
   });
 });
 
-// ── iris.server.namespace ─────────────────────────────────────────
+// ── iris_server_namespace ─────────────────────────────────────────
 
-describe("iris.server.namespace", () => {
+describe("iris_server_namespace", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   let ctx: ToolContext;
 
