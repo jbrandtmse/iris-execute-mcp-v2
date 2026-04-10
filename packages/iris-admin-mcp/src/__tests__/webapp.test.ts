@@ -274,6 +274,60 @@ describe("iris_webapp_get", () => {
     expect(result.content[0]?.text).toContain("/bad");
   });
 
+  // Regression: a missing webapp must return exists:false with HTTP 200,
+  // NOT a generic server error. A beta user reported that /csp/... paths
+  // were "failing" — in fact the tool was failing for any missing webapp
+  // regardless of prefix, because the server was surfacing IRIS error #869
+  // as a sanitized "IRIS reported errors" message with no "not found" signal.
+  // The server now checks Security.Applications.Exists() before calling Get,
+  // and returns {exists: false, name} for missing webapps.
+  it("should return exists:false (not an error) when webapp does not exist", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ exists: false, name: "/csp/does-not-exist" }),
+    );
+
+    const result = await webappGetTool.handler(
+      { name: "/csp/does-not-exist" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as { exists: boolean; name: string };
+    expect(structured.exists).toBe(false);
+    expect(structured.name).toBe("/csp/does-not-exist");
+  });
+
+  it("should return exists:true with all properties when webapp exists", async () => {
+    const appData = {
+      exists: true,
+      name: "/csp/healthshare/hssys/app/api",
+      namespace: "HSSYS",
+      dispatchClass: "HS.HC.SYS.RESTHandler",
+      description: "Web Application for REST API",
+      enabled: true,
+      authEnabled: 96,
+      isNameSpaceDefault: false,
+      cspZenEnabled: true,
+      recurse: true,
+      matchRoles: "",
+      resource: "",
+      cookiePath: "/csp/healthshare/hssys/app/api/",
+    };
+    mockHttp.post.mockResolvedValue(envelope(appData));
+
+    const result = await webappGetTool.handler(
+      { name: "/csp/healthshare/hssys/app/api" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as typeof appData;
+    expect(structured.exists).toBe(true);
+    expect(structured.name).toBe("/csp/healthshare/hssys/app/api");
+    expect(structured.namespace).toBe("HSSYS");
+    expect(structured.dispatchClass).toBe("HS.HC.SYS.RESTHandler");
+  });
+
   it("should propagate non-IrisApiError exceptions", async () => {
     mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
 

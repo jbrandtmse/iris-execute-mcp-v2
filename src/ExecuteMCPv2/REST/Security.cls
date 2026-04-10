@@ -940,11 +940,25 @@ ClassMethod WebAppGet(pName As %String) As %Status
         ; Switch to %SYS for Security operations
         Set $NAMESPACE = "%SYS"
 
+        ; Distinguish "not found" from other errors: check existence first
+        ; so callers can differentiate a missing webapp (normal) from a real
+        ; failure (abnormal). Returning {exists: false} mirrors the pattern
+        ; used by iris_doc_get metadataOnly for missing documents.
+        If '##class(Security.Applications).Exists(pName) {
+            Set $NAMESPACE = tOrigNS
+            Set tEntry = {}
+            Do tEntry.%Set("exists", 0, "boolean")
+            Do tEntry.%Set("name", pName)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
         Set tSC = ##class(Security.Applications).Get(pName, .tProps)
         Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
+        Do tEntry.%Set("exists", 1, "boolean")
         Do tEntry.%Set("name", $Get(tProps("Name")))
         Do tEntry.%Set("namespace", $Get(tProps("NameSpace")))
         Do tEntry.%Set("dispatchClass", $Get(tProps("DispatchClass")))
@@ -989,11 +1003,25 @@ ClassMethod WebAppGetByPost() As %Status
         ; Switch to %SYS for Security operations
         Set $NAMESPACE = "%SYS"
 
+        ; Distinguish "not found" from other errors: check existence first
+        ; so callers can differentiate a missing webapp (normal) from a real
+        ; failure (abnormal). Returning {exists: false} mirrors the pattern
+        ; used by iris_doc_get metadataOnly for missing documents.
+        If '##class(Security.Applications).Exists(tName) {
+            Set $NAMESPACE = tOrigNS
+            Set tEntry = {}
+            Do tEntry.%Set("exists", 0, "boolean")
+            Do tEntry.%Set("name", tName)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
         Set tSC = ##class(Security.Applications).Get(tName, .tProps)
         Set $NAMESPACE = tOrigNS
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
+        Do tEntry.%Set("exists", 1, "boolean")
         Do tEntry.%Set("name", $Get(tProps("Name")))
         Do tEntry.%Set("namespace", $Get(tProps("NameSpace")))
         Do tEntry.%Set("dispatchClass", $Get(tProps("DispatchClass")))

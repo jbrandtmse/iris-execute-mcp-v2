@@ -173,11 +173,16 @@ export const webappGetTool: ToolDefinition = {
     "Get an IRIS CSP/REST web application by name. Returns all web application " +
     "properties including namespace, dispatch class, authentication settings, " +
     "and enabled status. Uses POST to avoid URL-encoding issues with forward " +
-    "slashes in application paths.",
+    "slashes in application paths. Works identically for /csp/, /api/, /isc/, " +
+    "and any other prefix — arbitrary path depth is supported. When the " +
+    "webapp does not exist, returns `{exists: false, name}` with HTTP 200 " +
+    "(not an error), so callers can distinguish a missing webapp from a " +
+    "real failure. When the webapp exists, the response includes `exists: true` " +
+    "alongside all other properties.",
   inputSchema: z.object({
     name: z
       .string()
-      .describe("Web application path (e.g., '/csp/user', '/api/myapp')"),
+      .describe("Web application path (e.g., '/csp/user', '/api/myapp', '/csp/healthshare/hssys/app/api')"),
   }),
   annotations: {
     readOnlyHint: true,
