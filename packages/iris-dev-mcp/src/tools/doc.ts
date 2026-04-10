@@ -344,7 +344,15 @@ export const docListTool: ToolDefinition = {
     filter: z
       .string()
       .optional()
-      .describe("Substring filter on document names (e.g., 'MyApp' matches 'MyApp.Service.cls')"),
+      .describe(
+        "Case-insensitive plain substring filter on document names. Just pass the substring — " +
+        "no wildcards needed. Example: 'MyApp' matches every document whose name contains 'MyApp' " +
+        "(including 'MyApp.Service.cls', 'MyApp.Utils.cls', etc.). Applied server-side by the " +
+        "Atelier API as `Name LIKE '%<filter>%'`. Do NOT wrap the value in '*' or '?' — those " +
+        "characters are matched literally and will cause the filter to return zero results. " +
+        "SQL LIKE wildcards '%' (multi-char) and '_' (single-char) can be included inside the " +
+        "filter value if you need more control.",
+      ),
     generated: booleanParam
       .optional()
       .describe("Include generated documents (default: false)"),
