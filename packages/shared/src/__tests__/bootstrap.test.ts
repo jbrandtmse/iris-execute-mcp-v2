@@ -216,7 +216,51 @@ describe("bootstrap", () => {
       for (const putCall of putCalls) {
         const url = putCall[0] as string;
         expect(url).toContain("/api/atelier/v7/USER/doc/");
-        expect(url).toMatch(/\.cls$/);
+        expect(url).toMatch(/\.cls\?ignoreConflict=1$/);
+      }
+
+      http.destroy();
+    });
+
+    // Regression: Atelier's PUT /doc endpoint performs a timestamp-based
+    // concurrency check and returns HTTP 409 for existing documents whose
+    // server copy is considered newer than the incoming upload. The
+    // auto-upgrade path (tri-state probe stale path) ALWAYS lands on
+    // already-present documents, so every PUT must set ignoreConflict=1
+    // or the entire upgrade fails on the first class. The old binary
+    // probe hid this because it skipped deploy for existing installs.
+    it("should append ignoreConflict=1 to every PUT URL", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // CSRF preflight
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", {
+          status: 200,
+          headers: { "X-CSRF-Token": "test-csrf-token" },
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+        }),
+      );
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(
+          mockResponse(envelope({ result: [] })),
+        );
+      }
+
+      await deployClasses(http, config, 7);
+
+      const putCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        const opts = call[1] as { method: string };
+        return opts.method === "PUT";
+      });
+      expect(putCalls.length).toBe(BOOTSTRAP_CLASSES.size);
+      for (const putCall of putCalls) {
+        const url = putCall[0] as string;
+        expect(
+          url,
+          "Every deployClasses PUT must set ?ignoreConflict=1 to " +
+            "bypass Atelier's timestamp concurrency check on upgrade",
+        ).toContain("?ignoreConflict=1");
       }
 
       http.destroy();

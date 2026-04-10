@@ -145,6 +145,17 @@ export async function probeCustomRest(
  * Deploy all embedded ObjectScript classes to IRIS via the Atelier PUT /doc endpoint.
  *
  * Each class is sent as a separate PUT request with `{ enc: false, content: lines[] }`.
+ *
+ * The `?ignoreConflict=1` query parameter tells Atelier to force-overwrite
+ * existing documents regardless of their server-side timestamps. Without
+ * this flag, Atelier performs a concurrency check and returns HTTP 409 when
+ * the server copy is considered newer than the incoming upload — which is
+ * always the case on an auto-upgrade because the server has an older
+ * compiled class with an updated modification timestamp relative to the
+ * embedded content. The old binary probe ("is anything deployed?") hid
+ * this issue because it skipped deploy entirely for existing installs; the
+ * tri-state probe exposed it because stale upgrades always land on
+ * already-present documents.
  */
 export async function deployClasses(
   http: IrisHttpClient,
@@ -152,7 +163,9 @@ export async function deployClasses(
   version: number,
 ): Promise<void> {
   for (const [name, content] of BOOTSTRAP_CLASSES.entries()) {
-    const path = atelierPath(version, config.namespace, `doc/${name}`);
+    const path =
+      atelierPath(version, config.namespace, `doc/${name}`) +
+      "?ignoreConflict=1";
     await http.put(path, {
       enc: false,
       content: content.split("\n"),
