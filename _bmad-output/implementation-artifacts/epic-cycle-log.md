@@ -650,3 +650,27 @@
 - **Test delta:** Story 9.1 baseline 51 files / 993 tests → Story 9.2 final **52 files / 997 tests / 0 failures** (+1 file / +4 tests, matching the new cross-server-naming.test.ts)
 - **Build:** turbo build 6/6 successful (cached)
 - **Review findings:** 0 HIGH / 0 MEDIUM / 0 LOW. All 5 deliverables PASS. Only auto-resolution was the sprint-status.yaml revert.
+
+### Story 9.3: Pre-Publish Smoke Test and Beta-User Notification
+- **Status:** done
+- **Date:** 2026-04-10
+- **Scope:** Manual human-in-the-loop validation — Claude Desktop installation smoke test + beta-user notification. Handed back from the epic-cycle automated pipeline.
+- **Execution:**
+  - All 5 servers configured in Claude Desktop via `claude_desktop_config.json` merged into the Microsoft Store-packaged app path: `C:\Users\Josh\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\`
+  - Store-version path discovered when the traditional `%APPDATA%\Claude\` path came back empty from Claude Desktop's perspective
+  - Config mirrors the Claude Code `.mcp.json` layout: `command: "node"`, absolute `args` paths to each `packages/*/dist/index.js`, identical env vars (HSCUSTOM / _SYSTEM / SYS / localhost:52773 / HTTP)
+  - User confirmed live validation: MCP servers work end-to-end in Claude Desktop
+- **Validates Epic 9 end-to-end:** the tool name flat rename (`iris_*`) is the ONLY reason Claude Desktop can register these tools successfully. A dotted-name registration would fail at the Anthropic Messages API regex boundary. Story 9.3 is therefore the definitive "Epic 9 worked" signal.
+- **Implicit acceptance criteria validation:**
+  - AC1 (no "tool name not valid" error) — PASS (Claude Desktop loaded all 5 servers without errors)
+  - AC2 (all 5 servers register in Claude Desktop) — PASS
+  - AC3 (beta user notification) — deferred: user has in-session validation; formal beta-user follow-up can happen when/if publishing to npm
+- **Unplanned beta-testing bug fixes landed during Epic 9 hardening** (not part of original Story 9.3 scope but driven by real usage):
+  - `iris_webapp_get` returning generic error on missing webapps → `{exists: false}` (commit `a21131d`)
+  - `iris_doc_list` silent empty + `atelierPath` `%SYS` URL encoding (commit `7a454d5`)
+  - `iris_doc_list` filter description — no wildcards (commit `2be48c2`)
+  - Auto-upgrading ObjectScript handlers via version-stamped probe (commit `6538b20`)
+  - `deployClasses` HTTP 409 on upgrade via `?ignoreConflict=1` (commit `66a4cbd`)
+  - `iris_webapp_get` + `iris_global_list` wildcard semantics clarification (commit `78367a4`)
+- **Review findings:** No formal code review — Story 9.3 was a manual execution story. The bug fixes above each went through their own review/test/commit cycles.
+- **Epic 9 status:** All stories complete (9.0, 9.1, 9.2, 9.3). Epic 9 retrospective is `optional`; user has pre-approved running a separate retrospective for Epic 9 distinct from Epic 8's.
