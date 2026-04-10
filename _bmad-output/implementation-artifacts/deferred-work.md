@@ -87,3 +87,36 @@ This is the final feature epic; no further feature work is planned beyond Epic 8
 ## Deferred from: code review of 8-6-meta-package-iris-mcp-all (2026-04-07)
 
 - Missing `license` field in `packages/iris-mcp-all/package.json`. All packages in the monorepo may need license, repository, author, and keywords fields added before npm publish. Pre-existing publish-readiness concern applicable to all packages.
+
+---
+
+## Triaged via Story 9.0 (2026-04-09)
+
+Story 9.0 formally triaged all Epic 8 retrospective action items and unclosed `deferred-work.md` entries against Epic 9 (Tool Name Flattening) scope. Epic 9 is a narrowly scoped pre-publish compatibility fix, so most deferred items fall outside its boundary and are either resolved, retained as cosmetic follow-ups, or redirected to the publishing checklist. See `9-0-epic-8-deferred-cleanup.md` for the authoritative triage tables.
+
+### Resolved (no longer an open concern)
+
+- **Per-package README dead links (from 8.1 code review)** — Resolved by Story 8.2, which created the per-package READMEs that the root README was linking to. The dead-link condition no longer exists. No further action required.
+
+### Retained as cosmetic follow-ups (not tracked by any Epic 9 story)
+
+These items remain open and visible in this file for future contributors. They are explicitly NOT in Epic 9 scope and will not be addressed by Stories 9.1, 9.2, or 9.3. They may be picked up opportunistically during a future cleanup pass or left as-is indefinitely.
+
+- **Duplicate `getIntegrationConfig` helper (from 8.0 code review / Retro Post-Project Action #4)** — `packages/shared/src/__tests__/integration-helpers.ts` and `packages/shared/src/test-helpers/integration-config.ts` both produce the same config from env vars. Cosmetic consolidation only; both helpers are functionally correct.
+- **DRY env var docs across client-config guides (from 8.4 code review / Retro Post-Project Action #5)** — Env var table and shell export examples are duplicated across `claude-desktop.md`, `claude-code.md`, and `cursor.md`. Deliberate self-contained-doc design; could be consolidated into a shared include if maintenance burden grows.
+
+### Deferred to the publishing checklist (not Epic 9)
+
+These items are genuine pre-publish readiness requirements but belong to the npm publishing session that happens *after* Epic 9 unblocks Claude Desktop compatibility. They are tracked in the authoritative publishing checklist, not in Epic 9 stories.
+
+- **Missing `license`, `repository`, `author`, `keywords`, `engines`, `publishConfig` in `package.json` files (from 8.6 code review)** — Tracked in [`../planning-artifacts/research/publishing-checklist-npm-ipm.md`](../planning-artifacts/research/publishing-checklist-npm-ipm.md) item A2. To be addressed during the pre-publish session, not during Epic 9.
+
+### Dropped (post-Epic 9 publishing work, unrelated to rename)
+
+These retrospective action items are the publishing activity itself and live beyond Epic 9's boundary. They are not retained in `deferred-work.md` — they belong to the publishing checklist and post-project planning.
+
+- Retro Post-Project Action #1: npm publishing session (account, org, package.json fields, publish)
+- Retro Post-Project Action #2: Bootstrap drift check before every publish — already embedded as an AC in Story 9.2
+- Retro Post-Project Action #3: IPM publishing via Open Exchange
+- Retro Follow-Through: test production + integration tests for interopRest/ruleGet/transformTest — already formally deferred by Epic 8 retro as "too complex for cleanup"
+- Retro Follow-Through: MCP test harness — already formally deferred by Epic 8 retro as "post-project"

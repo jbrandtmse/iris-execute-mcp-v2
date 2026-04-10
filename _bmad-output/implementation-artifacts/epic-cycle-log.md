@@ -594,3 +594,20 @@
   - `_bmad-output/implementation-artifacts/deferred-work.md` — All items formally closed
 - **Key decisions:** Removed pastEnd as dead code (no consumers after 7 epics); extracted shared test config to DRY 3 integration test files; Zod .refine() works with ZodObject<any> in v4; ProductionSummary logging via WriteToConsoleLog
 - **Review findings:** No HIGH/MEDIUM issues; 1 LOW deferred (duplicate helper consolidation)
+
+## Epic 9: Tool Name Flattening for Anthropic API / Claude Desktop Compatibility
+
+### Story 9.0: Epic 8 Deferred Cleanup
+- **Status:** done
+- **Date:** 2026-04-09
+- **Scope:** Documentation-only triage. Zero source code, zero package READMEs, zero `.ts`/`.cls` files touched.
+- **Files touched:**
+  - `_bmad-output/implementation-artifacts/9-0-epic-8-deferred-cleanup.md` — New story file with full triage tables (7 retro items + 4 deferred-work entries, 11 items total)
+  - `_bmad-output/implementation-artifacts/deferred-work.md` — Appended Story 9.0 closure section (Resolved / Retained / Deferred-to-publishing / Dropped buckets); no existing entries altered
+- **Key decisions:**
+  - Triage tables authored by the analyst (Mary) on 2026-04-09 during `bmad-correct-course` are authoritative — dev agent only verified coverage, did not re-analyze
+  - All 11 items dropped, deferred, or pointed at the publishing checklist — zero items require action in Story 9.0 (it's a mandatory documentation artifact)
+  - Package.json `license`/`repository`/`author`/`keywords`/`engines`/`publishConfig` fields explicitly deferred to `research/publishing-checklist-npm-ipm.md` item A2 (belongs to the post-Epic-9 publishing session)
+  - Task 5 (commit) left unchecked in dev story — epic-cycle lead handles commit/push after code review
+- **Regression baseline (for Story 9.1 to compare against):** `npx turbo build` 6/6 cached, `npx turbo test` **51 test files, 993 tests, 0 failures** across shared/dev/admin/interop/ops/data packages
+- **Review findings:** No HIGH/MEDIUM/LOW issues; append-only discipline verified, 11/11 triage coverage confirmed, publishing-checklist A2 link validated
