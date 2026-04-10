@@ -240,14 +240,24 @@ export const globalListTool: ToolDefinition = {
   name: "iris_global_list",
   title: "List Globals",
   description:
-    "List globals in an IRIS namespace. Optionally filter by substring match on the global name. " +
+    "List globals in an IRIS namespace. Optionally filter by a plain substring " +
+    "match on the global name (see the `filter` parameter for the exact semantics). " +
     "Note: Pagination is client-side — all globals are fetched from the server per page request. " +
     "Large namespaces with thousands of globals may experience slower pagination.",
   inputSchema: z.object({
     filter: z
       .string()
       .optional()
-      .describe("Substring filter on global names (e.g., 'Temp' matches 'TempData', 'MyTemp')"),
+      .describe(
+        "Case-sensitive plain substring filter on global names. Just pass the " +
+        "substring — no wildcards needed. Example: 'Temp' matches every global " +
+        "whose name contains 'Temp' (including 'TempData', 'MyTemp', " +
+        "'IRIS.TempBuffer'). Applied server-side by ExecuteMCPv2.REST.Global " +
+        "using ObjectScript's `[` contains operator. Do NOT wrap the value in " +
+        "'*' or '?' — those characters are matched literally and will cause " +
+        "the filter to return zero results. Case matters: 'temp' does NOT " +
+        "match 'TempData'.",
+      ),
     cursor: z
       .string()
       .optional()

@@ -170,19 +170,32 @@ export const webappGetTool: ToolDefinition = {
   name: "iris_webapp_get",
   title: "Get Web Application",
   description:
-    "Get an IRIS CSP/REST web application by name. Returns all web application " +
-    "properties including namespace, dispatch class, authentication settings, " +
-    "and enabled status. Uses POST to avoid URL-encoding issues with forward " +
-    "slashes in application paths. Works identically for /csp/, /api/, /isc/, " +
-    "and any other prefix — arbitrary path depth is supported. When the " +
-    "webapp does not exist, returns `{exists: false, name}` with HTTP 200 " +
-    "(not an error), so callers can distinguish a missing webapp from a " +
-    "real failure. When the webapp exists, the response includes `exists: true` " +
+    "Look up a single IRIS CSP/REST web application by its EXACT name. " +
+    "This is an exact-match lookup, NOT a pattern search — the `name` " +
+    "argument must be the literal registered path. Do NOT append '*' or " +
+    "'/*' to 'expand' a prefix — those characters are matched literally " +
+    "and will return `{exists: false}`. To enumerate webapps under a " +
+    "prefix or in a namespace, use `iris_webapp_list` (optionally with " +
+    "its `namespace` filter) and scan the results. " +
+    "Uses POST to avoid URL-encoding issues with forward slashes in " +
+    "application paths, so it works identically for /csp/, /api/, /isc/, " +
+    "and any other prefix at arbitrary path depth. " +
+    "Returns all web application properties including namespace, dispatch " +
+    "class, authentication settings, and enabled status. When the webapp " +
+    "does not exist, returns `{exists: false, name}` with HTTP 200 (not " +
+    "an error), so callers can distinguish a missing webapp from a real " +
+    "failure. When the webapp exists, the response includes `exists: true` " +
     "alongside all other properties.",
   inputSchema: z.object({
     name: z
       .string()
-      .describe("Web application path (e.g., '/csp/user', '/api/myapp', '/csp/healthshare/hssys/app/api')"),
+      .describe(
+        "Exact literal webapp path — no wildcards. Examples: " +
+        "'/csp/user', '/api/myapp', '/csp/healthshare', " +
+        "'/csp/healthshare/hssys/app/api'. Passing '/csp/healthshare/*' " +
+        "or similar will match literally and return `{exists: false}`. " +
+        "Use `iris_webapp_list` to enumerate webapps instead.",
+      ),
   }),
   annotations: {
     readOnlyHint: true,
