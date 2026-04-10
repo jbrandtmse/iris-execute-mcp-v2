@@ -336,11 +336,22 @@ export const docListTool: ToolDefinition = {
     category: z
       .enum(["CLS", "RTN", "CSP", "OTH", "*"])
       .optional()
-      .describe("Document category filter (default: all)"),
+      .describe(
+        "Document category filter. CLS = ObjectScript classes (.cls). " +
+        "RTN = routines (.mac / .int / .inc / .bas / .mvi / .mvb — includes " +
+        "include files where macros are defined). CSP = CSP/ZEN pages and " +
+        "other web-facing files under /csp/. OTH = other Studio document " +
+        "types (e.g., BPL, DTL, custom studio document classes). * = all " +
+        "categories (default).",
+      ),
     type: z
       .string()
       .optional()
-      .describe("Document type filter within category (default: all)"),
+      .describe(
+        "Document type filter within category — the file extension without " +
+        "the dot (e.g., 'cls' for CLS, 'mac' or 'inc' for RTN). Default: all " +
+        "types within the chosen category.",
+      ),
     filter: z
       .string()
       .optional()
