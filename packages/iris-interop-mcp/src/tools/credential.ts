@@ -43,7 +43,7 @@ export const credentialManageTool: ToolDefinition = {
     namespace: z
       .string()
       .optional()
-      .describe("Target namespace (default: configured namespace)"),
+      .describe("Target namespace. Defaults to the server's configured namespace; pass an explicit value to query a different namespace per call without changing the connection default."),
   }),
   annotations: {
     destructiveHint: true,
@@ -106,7 +106,7 @@ export const credentialListTool: ToolDefinition = {
     namespace: z
       .string()
       .optional()
-      .describe("Target namespace (default: configured namespace)"),
+      .describe("Target namespace. Defaults to the server's configured namespace; pass an explicit value to query a different namespace per call without changing the connection default."),
   }),
   annotations: {
     readOnlyHint: true,

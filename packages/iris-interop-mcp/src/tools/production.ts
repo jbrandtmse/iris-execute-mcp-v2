@@ -36,7 +36,7 @@ export const productionManageTool: ToolDefinition = {
     namespace: z
       .string()
       .optional()
-      .describe("Target namespace where the production lives (default: configured namespace)"),
+      .describe("Target namespace where the production lives. Defaults to the server's configured namespace; pass an explicit value to manage a production in a different namespace per call without changing the connection default."),
   }),
   annotations: {
     destructiveHint: true,
@@ -111,7 +111,7 @@ export const productionControlTool: ToolDefinition = {
     namespace: z
       .string()
       .optional()
-      .describe("Target namespace (default: configured namespace)"),
+      .describe("Target namespace. Defaults to the server's configured namespace; pass an explicit value to query a different namespace per call without changing the connection default."),
   }).refine(
     (data) => {
       if (data.action === "start" || data.action === "restart") {
@@ -188,7 +188,7 @@ export const productionStatusTool: ToolDefinition = {
     namespace: z
       .string()
       .optional()
-      .describe("Target namespace (default: configured namespace)"),
+      .describe("Target namespace. Defaults to the server's configured namespace; pass an explicit value to query a different namespace per call without changing the connection default."),
   }),
   annotations: {
     readOnlyHint: true,
