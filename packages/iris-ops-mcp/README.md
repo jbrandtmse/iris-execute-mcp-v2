@@ -134,7 +134,7 @@ All servers use the same environment variables:
 | `iris_task_manage` | Create, modify, or delete a scheduled task | `action`, `id?`, `name?`, `taskClass?`, `namespace?`, `suspended?` | destructive |
 | `iris_task_list` | List all scheduled tasks with details | *(none)* | readOnly, idempotent |
 | `iris_task_run` | Trigger immediate task execution | `id` | -- |
-| `iris_task_history` | View task execution history | `taskId?` | readOnly, idempotent |
+| `iris_task_history` | View task execution history | `taskId?`, `maxRows?` | readOnly, idempotent |
 
 ### System Configuration Tools
 
@@ -494,9 +494,12 @@ iris_db_size_mb{db="IRISSYS"} 1024
 **Input:**
 ```json
 {
-  "taskId": 42
+  "taskId": 42,
+  "maxRows": 100
 }
 ```
+
+`maxRows` defaults to 100 and is capped at 1000 to keep responses bounded on busy systems.
 
 **Output:**
 ```json
@@ -513,9 +516,14 @@ iris_db_size_mb{db="IRISSYS"} 1024
       "taskId": "42"
     }
   ],
-  "count": 1
+  "count": 1,
+  "total": 1,
+  "maxRows": 100,
+  "truncated": false
 }
 ```
+
+`total` is the row count the query produced before capping; `truncated` is `true` when `total > count`.
 </details>
 
 <details>

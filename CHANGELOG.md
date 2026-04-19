@@ -2,6 +2,34 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-04-19]
+
+### Fixed — Manual MCP suite retest uncovered six defects
+
+An end-to-end manual test pass exercised every tool in the five MCP servers against a live IRIS instance. Six defects were found and fixed; each is covered by unit tests and a live-server retest.
+
+- **`IrisApiError` now surfaces `status.errors[]` detail** ([`packages/shared/src/errors.ts`](packages/shared/src/errors.ts)). Previously every tool that hit an Atelier error path returned a generic `"IRIS reported errors for POST /api/… Review the error details and correct the request."` message, with the actual `%Status` text stashed on `error.errors[]` but never formatted into `error.message`. The constructor now appends a `Details: …` suffix built from `error`/`message`/`summary` fields of each entry, so every tool that catches `IrisApiError` and surfaces `error.message` gets the real IRIS error for free. Verified end-to-end across the admin, data, and interop servers during retest — the DocDB 403 failures, for example, now say `Details: ERROR #800: Logins for Service %Service_DocDB are disabled` instead of a bare 403.
+- **`iris_doc_load` no longer mangles doc names for literal file paths** ([`packages/iris-dev-mcp/src/tools/load.ts`](packages/iris-dev-mcp/src/tools/load.ts)). `extractBaseDir()` walks pattern segments until a glob metacharacter is found; when the pattern contained no metacharacter (a plain file path), it used to return the entire path — causing the filename itself to leak into the mapped IRIS document name (`c:.git.iris-execute-mcp-v2.MyClass.cls`). It now returns the parent directory for literal paths so a single-file upload produces a clean doc name (`MyClass.cls`). Test added in [`packages/iris-dev-mcp/src/__tests__/load.test.ts`](packages/iris-dev-mcp/src/__tests__/load.test.ts).
+- **`iris_doc_search` now honours its documented case-insensitive default** ([`packages/iris-dev-mcp/src/tools/intelligence.ts`](packages/iris-dev-mcp/src/tools/intelligence.ts)). The tool documents `case: false` as the default, but the flag was only sent to the Atelier `action/search` endpoint when set explicitly — and the server's default turns out to be case-sensitive. The client now always sends `case`, `regex`, `word`, and `wild` explicitly so the tool's documented defaults are what IRIS sees. Retest confirmed `"classmethod"` and `"ClassMethod"` now return the same 16 matches by default; `case: true` narrows to 4.
+- **`iris_task_history` is paginated** ([`src/ExecuteMCPv2/REST/Task.cls`](src/ExecuteMCPv2/REST/Task.cls), [`packages/iris-ops-mcp/src/tools/task.ts`](packages/iris-ops-mcp/src/tools/task.ts)). The endpoint returned every row `%SYS.Task.History:TaskHistoryDetail` produced — on the retest system that was 1,357 rows and 263 KB, which blew past the MCP token cap. The server now accepts an optional `maxRows` query parameter (default 100, capped at 1000), the tool exposes a matching `maxRows` input field, and the response carries new `total`, `maxRows`, and `truncated` fields so callers can tell when they've hit the cap.
+- **`iris_transform_test` returns real output data for non-`%JSON.Adaptor` targets** ([`src/ExecuteMCPv2/REST/Interop.cls`](src/ExecuteMCPv2/REST/Interop.cls)). When a transform's target class didn't extend `%JSON.Adaptor`, the serializer stored the literal string `"Object does not support JSON serialization"` in `output.data` — looking suspiciously like a legitimate transform result. The handler now tries `%JSONExportToString` first and, on failure, falls back to reflecting public non-calculated non-relationship properties via `%Dictionary.CompiledProperty`. The response always carries a `serialization` field (`"json-adaptor"`, `"property-reflection"`, or `"scalar"`) so callers can distinguish modes; fallback mode also carries `propertyCount` and a `note` explaining the best-effort dump. Retest confirmed the DTL `Ens.SSH.InteractiveAuth.DTL` now returns real property values (`Responses`, `UseCredentialsPasswordAt`, `UseSFTPPassphraseCredentialsPasswordAt`) instead of the sentinel string.
+
+### ObjectScript class changes
+
+Two of the six fixes above required changes to the embedded `ExecuteMCPv2.*` classes:
+
+- [`src/ExecuteMCPv2/REST/Task.cls`](src/ExecuteMCPv2/REST/Task.cls) — `TaskHistory()` now caps rows and emits `total`/`maxRows`/`truncated`.
+- [`src/ExecuteMCPv2/REST/Interop.cls`](src/ExecuteMCPv2/REST/Interop.cls) — `TransformTest()` serializer overhauled per above.
+
+The auto-upgrading bootstrap (see the 2026-04-10 entry below) picks these up without manual intervention — the class-content hash changed, so on next MCP server restart every existing install automatically redeploys and recompiles the handler classes. No operator action required.
+
+### Known upstream defects surfaced (not fixed in this pass)
+
+Now that `IrisApiError.message` carries real detail, two pre-existing defects became visible during retest. Both are tracked separately and not addressed here:
+
+- `iris_resource_manage` / `iris_role_manage` with a `description` argument crash `Security.Resources.Create` / `Security.Roles.Create` with `<UNDEFINED>Create *Description`. Create without `description` still works. Root cause lives in how the REST handler passes properties into `Security.*.Create`.
+- `iris_task_history` with a `taskId` argument does not filter — the returned rows still span all task IDs. The cap works correctly; only the filter is ineffective.
+
 ## [Pre-release — 2026-04-10]
 
 ### Added — Auto-upgrading ObjectScript handlers

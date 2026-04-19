@@ -50,22 +50,33 @@ export function filePathToDocName(filePath: string, baseDir: string): string {
  * Extract the base directory from a glob pattern.
  *
  * Walks the pattern segments until a glob metacharacter is found,
- * and returns the directory prefix up to that point.
+ * and returns the directory prefix up to that point. If the pattern
+ * contains no glob metacharacter (i.e. it is a literal file path),
+ * returns the parent directory so the filename itself does not leak
+ * into the mapped IRIS document name.
  *
  * @example
  *   extractBaseDir("c:/projects/src/**\/*.cls")
  *   // => "c:/projects/src"
+ *   extractBaseDir("c:/projects/src/MyPkg/MyClass.cls")
+ *   // => "c:/projects/src/MyPkg"
  */
 export function extractBaseDir(globPattern: string): string {
   const normalised = globPattern.replace(/\\/g, "/");
   const segments = normalised.split("/");
   const dirParts: string[] = [];
+  let hitGlob = false;
 
   for (const seg of segments) {
     if (seg.includes("*") || seg.includes("?") || seg.includes("{") || seg.includes("[")) {
+      hitGlob = true;
       break;
     }
     dirParts.push(seg);
+  }
+
+  if (!hitGlob && dirParts.length > 0) {
+    dirParts.pop();
   }
 
   return dirParts.join("/");

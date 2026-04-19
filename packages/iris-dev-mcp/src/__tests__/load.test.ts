@@ -58,8 +58,14 @@ describe("extractBaseDir", () => {
     expect(extractBaseDir("c:\\projects\\src\\**\\*.cls")).toBe("c:/projects/src");
   });
 
-  it("should return the full path if no metacharacters", () => {
-    expect(extractBaseDir("c:/projects/src/file.cls")).toBe("c:/projects/src/file.cls");
+  it("should return the parent directory when the pattern has no metacharacters", () => {
+    expect(extractBaseDir("c:/projects/src/file.cls")).toBe("c:/projects/src");
+  });
+
+  it("should return the parent directory for a nested literal path", () => {
+    expect(extractBaseDir("c:/projects/src/MyPkg/Sub/MyClass.cls")).toBe(
+      "c:/projects/src/MyPkg/Sub",
+    );
   });
 
   it("should handle question mark metacharacter", () => {

@@ -262,13 +262,17 @@ ClassMethod TaskRun() As %Status
 /// Return task execution history.
 /// <p>Queries <code>%SYS.Task.History:TaskHistoryDetail</code> named query.
 /// When a <code>taskId</code> query parameter is provided, filters history
-/// to that specific task.</p>
+/// to that specific task. Results are capped by <code>maxRows</code>
+/// (default 100, max 1000) to keep responses bounded on busy systems.</p>
 ClassMethod TaskHistory() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
     Try {
         Set tTaskId = $Get(%request.Data("taskId",1))
+        Set tMaxRows = +$Get(%request.Data("maxRows",1))
+        If tMaxRows <= 0 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
 
         Set $NAMESPACE = "%SYS"
         Set tResult = {}
@@ -288,22 +292,31 @@ ClassMethod TaskHistory() As %Status
             Quit
         }
 
+        Set tTotal = 0
+        Set tReturned = 0
         While tRS.Next() {
-            Set tEntry = {}
-            Do tEntry.%Set("taskName", tRS.Get("Task Name"))
-            Do tEntry.%Set("lastStart", tRS.Get("Last Start"))
-            Do tEntry.%Set("completed", tRS.Get("Completed"))
-            Do tEntry.%Set("status", tRS.Get("Status"))
-            Do tEntry.%Set("result", tRS.Get("Result"))
-            Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
-            Do tEntry.%Set("username", tRS.Get("Username"))
-            Do tEntry.%Set("taskId", tRS.Get("Task"))
-            Do tHistory.%Push(tEntry)
+            Set tTotal = tTotal + 1
+            If tReturned < tMaxRows {
+                Set tEntry = {}
+                Do tEntry.%Set("taskName", tRS.Get("Task Name"))
+                Do tEntry.%Set("lastStart", tRS.Get("Last Start"))
+                Do tEntry.%Set("completed", tRS.Get("Completed"))
+                Do tEntry.%Set("status", tRS.Get("Status"))
+                Do tEntry.%Set("result", tRS.Get("Result"))
+                Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
+                Do tEntry.%Set("username", tRS.Get("Username"))
+                Do tEntry.%Set("taskId", tRS.Get("Task"))
+                Do tHistory.%Push(tEntry)
+                Set tReturned = tReturned + 1
+            }
         }
         Do tRS.Close()
 
         Do tResult.%Set("history", tHistory)
         Do tResult.%Set("count", tHistory.%Size(), "number")
+        Do tResult.%Set("total", tTotal, "number")
+        Do tResult.%Set("maxRows", tMaxRows, "number")
+        Do tResult.%Set("truncated", (tTotal > tReturned), "boolean")
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }

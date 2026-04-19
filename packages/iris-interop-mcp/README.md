@@ -528,12 +528,40 @@ All servers use the same environment variables:
 }
 ```
 
-**Output:**
+**Output (target extends `%JSON.Adaptor`):**
 ```json
 {
+  "className": "MyApp.Transforms.InputToCanonical",
+  "sourceClass": "MyApp.Messages.InputMessage",
   "output": {
-    "Name": "John Smith",
-    "DateOfBirth": "1990-01-15"
+    "className": "MyApp.Messages.CanonicalMessage",
+    "serialization": "json-adaptor",
+    "data": {
+      "Name": "John Smith",
+      "DateOfBirth": "1990-01-15"
+    }
+  }
+}
+```
+
+**Output (target does not extend `%JSON.Adaptor` — e.g., most `Ens.*` internal classes):**
+
+The response falls back to a best-effort reflection over the target's public non-calculated non-relationship properties. `data` is a real object of property values (object-valued properties are rendered as `[object <ClassName>]` placeholders), and a `note` explains the caveat. Use the `serialization` field to branch on which mode was used.
+
+```json
+{
+  "className": "Ens.SSH.InteractiveAuth.DTL",
+  "sourceClass": "Ens.SSH.InteractiveAuth.Challenge",
+  "output": {
+    "className": "Ens.SSH.InteractiveAuth.Response",
+    "serialization": "property-reflection",
+    "data": {
+      "Responses": "[object %Collection.ArrayOfDT]",
+      "UseCredentialsPasswordAt": 1,
+      "UseSFTPPassphraseCredentialsPasswordAt": 0
+    },
+    "propertyCount": 3,
+    "note": "Target class does not extend %JSON.Adaptor; values shown are a best-effort property dump (objects and streams are represented as placeholders)."
   }
 }
 ```

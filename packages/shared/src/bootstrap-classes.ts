@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "8421e86fed0f";
+export const BOOTSTRAP_VERSION = "ec1115a4e191";
 
 export interface BootstrapClass {
   name: string;
@@ -233,7 +233,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "8421e86fed0f";
+Parameter BOOTSTRAPVERSION = "ec1115a4e191";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -4778,25 +4778,65 @@ ClassMethod TransformTest() As %Status
             Quit
         }
 
-        ; Serialize output to JSON
+        ; Serialize output to JSON.
+        ; First try native %JSON.Adaptor export (works for Ens.Request/Ens.Response
+        ; subclasses that opt in); if that fails, fall back to reflecting public
+        ; properties via %Dictionary.CompiledProperty so the caller sees real
+        ; values instead of a sentinel error string.
         Set tOutputJSON = {}
         If $IsObject(tOutput) {
-            Do tOutputJSON.%Set("className", $ClassName(tOutput))
-            ; Try to serialize properties using JSON export to string
+            Set tOutputClass = $ClassName(tOutput)
+            Do tOutputJSON.%Set("className", tOutputClass)
+            Set tSerialized = 0
+
             Try {
                 Set tSC2 = tOutput.%JSONExportToString(.tJSONStr)
-                If $$$ISOK(tSC2) && (tJSONStr '= "") {
-                    Set tParsed = ##class(%DynamicObject).%FromJSON(tJSONStr)
-                    Do tOutputJSON.%Set("data", tParsed)
+                If $$$ISOK(tSC2) && ($Get(tJSONStr) '= "") {
+                    Do tOutputJSON.%Set("data", ##class(%DynamicObject).%FromJSON(tJSONStr))
+                    Do tOutputJSON.%Set("serialization", "json-adaptor")
+                    Set tSerialized = 1
                 }
+            } Catch jsonEx {
+                ; Object does not extend %JSON.Adaptor — fall through to fallback
             }
-            Catch jsonEx {
-                ; Object may not support JSON export, return class name only
-                Do tOutputJSON.%Set("data", "Object does not support JSON serialization")
+
+            If 'tSerialized {
+                Set tData = {}
+                Set tPropCount = 0
+                Try {
+                    Set tPropRS = ##class(%SQL.Statement).%ExecDirect(,
+                        "SELECT Name FROM %Dictionary.CompiledProperty WHERE parent = ? AND Private = 0 AND Calculated = 0 AND Relationship = 0",
+                        tOutputClass)
+                    If $IsObject($Get(tPropRS)) && (tPropRS.%SQLCODE = 0) {
+                        While tPropRS.%Next() {
+                            Set tPropName = tPropRS.%Get("Name")
+                            If tPropName = "" Continue
+                            If $Extract(tPropName) = "%" Continue
+                            Try {
+                                Set tPropVal = $Property(tOutput, tPropName)
+                                If $IsObject(tPropVal) {
+                                    Do tData.%Set(tPropName, "[object "_$ClassName(tPropVal)_"]")
+                                } Else {
+                                    Do tData.%Set(tPropName, tPropVal)
+                                }
+                                Set tPropCount = tPropCount + 1
+                            } Catch {
+                                ; Skip unreadable properties
+                            }
+                        }
+                    }
+                } Catch reflEx {
+                    ; If reflection itself errors, we still return className only
+                }
+                Do tOutputJSON.%Set("data", tData)
+                Do tOutputJSON.%Set("propertyCount", tPropCount, "number")
+                Do tOutputJSON.%Set("serialization", "property-reflection")
+                Do tOutputJSON.%Set("note", "Target class does not extend %JSON.Adaptor; values shown are a best-effort property dump (objects and streams are represented as placeholders).")
             }
         }
         Else {
             Do tOutputJSON.%Set("data", $Get(tOutput))
+            Do tOutputJSON.%Set("serialization", "scalar")
         }
 
         Set tResult = {}
@@ -6054,13 +6094,17 @@ ClassMethod TaskRun() As %Status
 /// Return task execution history.
 /// <p>Queries <code>%SYS.Task.History:TaskHistoryDetail</code> named query.
 /// When a <code>taskId</code> query parameter is provided, filters history
-/// to that specific task.</p>
+/// to that specific task. Results are capped by <code>maxRows</code>
+/// (default 100, max 1000) to keep responses bounded on busy systems.</p>
 ClassMethod TaskHistory() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
     Try {
         Set tTaskId = $Get(%request.Data("taskId",1))
+        Set tMaxRows = +$Get(%request.Data("maxRows",1))
+        If tMaxRows <= 0 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
 
         Set $NAMESPACE = "%SYS"
         Set tResult = {}
@@ -6080,22 +6124,31 @@ ClassMethod TaskHistory() As %Status
             Quit
         }
 
+        Set tTotal = 0
+        Set tReturned = 0
         While tRS.Next() {
-            Set tEntry = {}
-            Do tEntry.%Set("taskName", tRS.Get("Task Name"))
-            Do tEntry.%Set("lastStart", tRS.Get("Last Start"))
-            Do tEntry.%Set("completed", tRS.Get("Completed"))
-            Do tEntry.%Set("status", tRS.Get("Status"))
-            Do tEntry.%Set("result", tRS.Get("Result"))
-            Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
-            Do tEntry.%Set("username", tRS.Get("Username"))
-            Do tEntry.%Set("taskId", tRS.Get("Task"))
-            Do tHistory.%Push(tEntry)
+            Set tTotal = tTotal + 1
+            If tReturned < tMaxRows {
+                Set tEntry = {}
+                Do tEntry.%Set("taskName", tRS.Get("Task Name"))
+                Do tEntry.%Set("lastStart", tRS.Get("Last Start"))
+                Do tEntry.%Set("completed", tRS.Get("Completed"))
+                Do tEntry.%Set("status", tRS.Get("Status"))
+                Do tEntry.%Set("result", tRS.Get("Result"))
+                Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
+                Do tEntry.%Set("username", tRS.Get("Username"))
+                Do tEntry.%Set("taskId", tRS.Get("Task"))
+                Do tHistory.%Push(tEntry)
+                Set tReturned = tReturned + 1
+            }
         }
         Do tRS.Close()
 
         Do tResult.%Set("history", tHistory)
         Do tResult.%Set("count", tHistory.%Size(), "number")
+        Do tResult.%Set("total", tTotal, "number")
+        Do tResult.%Set("maxRows", tMaxRows, "number")
+        Do tResult.%Set("truncated", (tTotal > tReturned), "boolean")
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)
     }

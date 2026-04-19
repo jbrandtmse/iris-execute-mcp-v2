@@ -284,12 +284,17 @@ export const taskHistoryTool: ToolDefinition = {
   description:
     "View execution history for IRIS scheduled tasks. " +
     "Optionally filter by task ID. Each entry includes task name, start time, " +
-    "completion time, status, result, namespace, and username.",
+    "completion time, status, result, namespace, and username. " +
+    "Results are capped by maxRows (default 100, max 1000).",
   inputSchema: z.object({
     taskId: z
       .union([z.string(), z.number()])
       .optional()
       .describe("Task ID to filter history (omit for all tasks)"),
+    maxRows: z
+      .number()
+      .optional()
+      .describe("Maximum rows to return (default: 100, max: 1000)"),
   }),
   annotations: {
     readOnlyHint: true,
@@ -299,12 +304,16 @@ export const taskHistoryTool: ToolDefinition = {
   },
   scope: "NONE",
   handler: async (args, ctx) => {
-    const { taskId } = args as { taskId?: string | number };
+    const { taskId, maxRows } = args as {
+      taskId?: string | number;
+      maxRows?: number;
+    };
 
-    let path = `${BASE_URL}/task/history`;
-    if (taskId !== undefined) {
-      path += `?taskId=${encodeURIComponent(String(taskId))}`;
-    }
+    const params = new URLSearchParams();
+    if (taskId !== undefined) params.set("taskId", String(taskId));
+    if (maxRows !== undefined) params.set("maxRows", String(maxRows));
+    const qs = params.toString();
+    const path = `${BASE_URL}/task/history${qs ? `?${qs}` : ""}`;
 
     try {
       const response = await ctx.http.get(path);
@@ -320,10 +329,17 @@ export const taskHistoryTool: ToolDefinition = {
           taskId: string;
         }>;
         count: number;
+        total?: number;
+        maxRows?: number;
+        truncated?: boolean;
       };
 
       const lines: string[] = [];
-      lines.push(`Task History (${result.count} entries):`);
+      const header =
+        result.truncated && typeof result.total === "number"
+          ? `Task History (${result.count} of ${result.total} entries, maxRows=${result.maxRows}):`
+          : `Task History (${result.count} entries):`;
+      lines.push(header);
       if (Array.isArray(result.history) && result.history.length > 0) {
         for (const entry of result.history) {
           lines.push("");

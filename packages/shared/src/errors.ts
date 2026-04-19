@@ -47,12 +47,41 @@ export class IrisApiError extends Error {
     const summary =
       message ??
       `IRIS returned HTTP ${statusCode}. Check the request parameters and try again.`;
-    super(summary);
+    const detail = formatIrisErrors(errors);
+    super(detail ? `${summary} ${detail}` : summary);
     this.name = "IrisApiError";
     this.statusCode = statusCode;
     this.errors = errors;
     this.originalUrl = originalUrl;
   }
+}
+
+/**
+ * Format the Atelier `status.errors[]` array into a human-readable string.
+ *
+ * Surfaces the actual IRIS error text (e.g., "ERROR #834: Resource 'X' already exists")
+ * so callers see the real cause instead of a generic "IRIS reported errors" message.
+ * Returns an empty string when no useful detail is available.
+ */
+function formatIrisErrors(errors: unknown[]): string {
+  if (!Array.isArray(errors) || errors.length === 0) return "";
+  const parts: string[] = [];
+  for (const e of errors) {
+    if (typeof e === "string" && e.trim()) {
+      parts.push(e.trim());
+      continue;
+    }
+    if (e && typeof e === "object") {
+      const obj = e as Record<string, unknown>;
+      const text =
+        (typeof obj.error === "string" && obj.error) ||
+        (typeof obj.message === "string" && obj.message) ||
+        (typeof obj.summary === "string" && obj.summary);
+      if (text) parts.push(String(text).trim());
+    }
+  }
+  if (parts.length === 0) return "";
+  return `Details: ${parts.join(" | ")}`;
 }
 
 /**

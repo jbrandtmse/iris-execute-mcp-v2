@@ -1450,25 +1450,65 @@ ClassMethod TransformTest() As %Status
             Quit
         }
 
-        ; Serialize output to JSON
+        ; Serialize output to JSON.
+        ; First try native %JSON.Adaptor export (works for Ens.Request/Ens.Response
+        ; subclasses that opt in); if that fails, fall back to reflecting public
+        ; properties via %Dictionary.CompiledProperty so the caller sees real
+        ; values instead of a sentinel error string.
         Set tOutputJSON = {}
         If $IsObject(tOutput) {
-            Do tOutputJSON.%Set("className", $ClassName(tOutput))
-            ; Try to serialize properties using JSON export to string
+            Set tOutputClass = $ClassName(tOutput)
+            Do tOutputJSON.%Set("className", tOutputClass)
+            Set tSerialized = 0
+
             Try {
                 Set tSC2 = tOutput.%JSONExportToString(.tJSONStr)
-                If $$$ISOK(tSC2) && (tJSONStr '= "") {
-                    Set tParsed = ##class(%DynamicObject).%FromJSON(tJSONStr)
-                    Do tOutputJSON.%Set("data", tParsed)
+                If $$$ISOK(tSC2) && ($Get(tJSONStr) '= "") {
+                    Do tOutputJSON.%Set("data", ##class(%DynamicObject).%FromJSON(tJSONStr))
+                    Do tOutputJSON.%Set("serialization", "json-adaptor")
+                    Set tSerialized = 1
                 }
+            } Catch jsonEx {
+                ; Object does not extend %JSON.Adaptor — fall through to fallback
             }
-            Catch jsonEx {
-                ; Object may not support JSON export, return class name only
-                Do tOutputJSON.%Set("data", "Object does not support JSON serialization")
+
+            If 'tSerialized {
+                Set tData = {}
+                Set tPropCount = 0
+                Try {
+                    Set tPropRS = ##class(%SQL.Statement).%ExecDirect(,
+                        "SELECT Name FROM %Dictionary.CompiledProperty WHERE parent = ? AND Private = 0 AND Calculated = 0 AND Relationship = 0",
+                        tOutputClass)
+                    If $IsObject($Get(tPropRS)) && (tPropRS.%SQLCODE = 0) {
+                        While tPropRS.%Next() {
+                            Set tPropName = tPropRS.%Get("Name")
+                            If tPropName = "" Continue
+                            If $Extract(tPropName) = "%" Continue
+                            Try {
+                                Set tPropVal = $Property(tOutput, tPropName)
+                                If $IsObject(tPropVal) {
+                                    Do tData.%Set(tPropName, "[object "_$ClassName(tPropVal)_"]")
+                                } Else {
+                                    Do tData.%Set(tPropName, tPropVal)
+                                }
+                                Set tPropCount = tPropCount + 1
+                            } Catch {
+                                ; Skip unreadable properties
+                            }
+                        }
+                    }
+                } Catch reflEx {
+                    ; If reflection itself errors, we still return className only
+                }
+                Do tOutputJSON.%Set("data", tData)
+                Do tOutputJSON.%Set("propertyCount", tPropCount, "number")
+                Do tOutputJSON.%Set("serialization", "property-reflection")
+                Do tOutputJSON.%Set("note", "Target class does not extend %JSON.Adaptor; values shown are a best-effort property dump (objects and streams are represented as placeholders).")
             }
         }
         Else {
             Do tOutputJSON.%Set("data", $Get(tOutput))
+            Do tOutputJSON.%Set("serialization", "scalar")
         }
 
         Set tResult = {}

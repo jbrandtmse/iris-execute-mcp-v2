@@ -144,13 +144,17 @@ export const docSearchTool: ToolDefinition = {
     const ns = ctx.resolveNamespace(namespace);
 
     // Atelier actionSearch is a GET with query params (v2+)
-    // Boolean flags must be sent as numeric 1/0
+    // Boolean flags must be sent as numeric 1/0.
+    // Always send case/regex/word/wild explicitly so the tool's documented
+    // defaults (all false) are what IRIS sees — empirically the server does
+    // not honour the documented case-insensitive default when the param is
+    // omitted on this endpoint.
     const params = new URLSearchParams();
     params.set("query", query);
-    if (regex !== undefined) params.set("regex", regex ? "1" : "0");
-    if (word !== undefined) params.set("word", word ? "1" : "0");
-    if (caseSensitive !== undefined) params.set("case", caseSensitive ? "1" : "0");
-    if (wild !== undefined) params.set("wild", wild ? "1" : "0");
+    params.set("regex", regex ? "1" : "0");
+    params.set("word", word ? "1" : "0");
+    params.set("case", caseSensitive ? "1" : "0");
+    params.set("wild", wild ? "1" : "0");
     if (files !== undefined) params.set("files", files);
     if (sys !== undefined) params.set("sys", sys ? "1" : "0");
     if (gen !== undefined) params.set("gen", gen ? "1" : "0");
