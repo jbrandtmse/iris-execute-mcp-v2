@@ -21,6 +21,7 @@ import {
 } from "./intelligence.js";
 import { docConvertTool, docXmlExportTool } from "./format.js";
 import { docLoadTool } from "./load.js";
+import { docExportTool } from "./export.js";
 import { packageListTool } from "./packages.js";
 import { sqlExecuteTool } from "./sql.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
@@ -59,5 +60,6 @@ export const tools: ToolDefinition[] = [
   executeClassMethodTool,
   executeTestsTool,
   docLoadTool,
+  docExportTool,
   packageListTool,
 ];

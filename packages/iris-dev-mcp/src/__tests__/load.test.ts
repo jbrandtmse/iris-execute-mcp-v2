@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
-import { docLoadTool, filePathToDocName, extractBaseDir } from "../tools/load.js";
+import { docLoadTool, filePathToDocName, extractBaseDir, docNameToFilePath } from "../tools/load.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── Mock node:fs ──────────────────────────────────────────────────────
@@ -74,6 +74,101 @@ describe("extractBaseDir", () => {
 
   it("should handle brace expansion metacharacter", () => {
     expect(extractBaseDir("c:/src/{a,b}.cls")).toBe("c:/src");
+  });
+});
+
+describe("docNameToFilePath", () => {
+  it("maps a dotted IRIS class name to a nested file path under baseDir", () => {
+    expect(
+      docNameToFilePath("EnsLib.HTTP.GenericService.cls", "C:/dev/exp"),
+    ).toBe("C:/dev/exp/EnsLib/HTTP/GenericService.cls");
+  });
+
+  it("handles .mac extension", () => {
+    expect(docNameToFilePath("MyApp.Utils.Helper.mac", "C:/dev/exp")).toBe(
+      "C:/dev/exp/MyApp/Utils/Helper.mac",
+    );
+  });
+
+  it("handles .inc extension", () => {
+    expect(docNameToFilePath("My.Include.inc", "C:/dev/exp")).toBe(
+      "C:/dev/exp/My/Include.inc",
+    );
+  });
+
+  it("uses short paths to truncate directory segments to 8 chars", () => {
+    expect(
+      docNameToFilePath(
+        "ReallyLongPackageNameHere.AnotherLongOne.Foo.cls",
+        "C:/dev/exp",
+        { useShortPaths: true },
+      ),
+    ).toBe("C:/dev/exp/ReallyLo/AnotherL/Foo.cls");
+  });
+
+  it("useShortPaths leaves short segments unchanged and never shortens filename", () => {
+    // MyApp (<=8 chars) and Utils (<=8 chars) unchanged. Filename "Utils" is last-before-ext.
+    expect(
+      docNameToFilePath("MyApp.Utils.cls", "C:/dev/exp", { useShortPaths: true }),
+    ).toBe("C:/dev/exp/MyApp/Utils.cls");
+  });
+
+  it("useShortPaths does not shorten the last (filename) segment even when long", () => {
+    // First two segments shortened, filename kept intact.
+    expect(
+      docNameToFilePath(
+        "ReallyLongPackageNameHere.VeryLongFilenameSegment.cls",
+        "C:/dev/exp",
+        { useShortPaths: true },
+      ),
+    ).toBe("C:/dev/exp/ReallyLo/VeryLongFilenameSegment.cls");
+  });
+
+  it("useShortPaths: false is a no-op", () => {
+    expect(
+      docNameToFilePath(
+        "ReallyLongPackageNameHere.AnotherLongOne.Foo.cls",
+        "C:/dev/exp",
+      ),
+    ).toBe("C:/dev/exp/ReallyLongPackageNameHere/AnotherLongOne/Foo.cls");
+  });
+
+  it("handles CSP paths by stripping leading slash and preserving forward slashes", () => {
+    expect(docNameToFilePath("/csp/user/menu.csp", "C:/dev/exp")).toBe(
+      "C:/dev/exp/csp/user/menu.csp",
+    );
+  });
+
+  it("handles slash-style paths that do not start with a leading slash", () => {
+    expect(docNameToFilePath("csp/user/menu.csp", "C:/dev/exp")).toBe(
+      "C:/dev/exp/csp/user/menu.csp",
+    );
+  });
+
+  it("returns baseDir joined with the name as-is when there is no extension", () => {
+    expect(docNameToFilePath("NoExtension", "C:/dev/exp")).toBe(
+      "C:/dev/exp/NoExtension",
+    );
+  });
+
+  it("handles a top-level class name (one segment)", () => {
+    expect(docNameToFilePath("Foo.cls", "C:/dev/exp")).toBe(
+      "C:/dev/exp/Foo.cls",
+    );
+  });
+
+  it("handles baseDir with trailing slash", () => {
+    expect(docNameToFilePath("MyPkg.Thing.cls", "C:/dev/exp/")).toBe(
+      "C:/dev/exp/MyPkg/Thing.cls",
+    );
+  });
+
+  it("round-trips with filePathToDocName for dotted class names", () => {
+    const docName = "MyPkg.Sub.MyClass.cls";
+    const baseDir = "c:/projects/src";
+    const localPath = docNameToFilePath(docName, baseDir);
+    expect(localPath).toBe("c:/projects/src/MyPkg/Sub/MyClass.cls");
+    expect(filePathToDocName(localPath, baseDir)).toBe(docName);
   });
 });
 

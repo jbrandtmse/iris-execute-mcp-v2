@@ -16,6 +16,24 @@ import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
+//
+// Path/doc-name mapping helpers used by both iris_doc_load (upload) and
+// iris_doc_export (download). Both sides agree on the same conventions:
+//
+//   • Dotted ObjectScript names  →  path segments joined by "/"
+//       "MyPkg.Sub.MyClass.cls"  ↔  "<baseDir>/MyPkg/Sub/MyClass.cls"
+//
+//   • CSP-style slashy names (leading "/" optional) → literal directories
+//       "/csp/user/menu.csp"     ↔  "<baseDir>/csp/user/menu.csp"
+//
+//   • useShortPaths (Windows workaround for MAX_PATH):
+//       package segments are truncated to their first 8 characters; the
+//       final filename (last segment before the extension) is preserved
+//       verbatim so re-upload can recover the full doc name with the
+//       help of the manifest's shortPathMap.
+
+/** Extension regex matching the known Atelier doc extensions. */
+const DOC_EXTENSION_RE = /\.(cls|mac|int|inc|bas|mvi|mvb|csp|csr)$/i;
 
 /**
  * Convert a filesystem path to an IRIS document name.
@@ -33,7 +51,7 @@ export function filePathToDocName(filePath: string, baseDir: string): string {
   const normBase = baseDir.replace(/\\/g, "/").replace(/\/+$/, "");
 
   // Strip the base directory prefix
-  let relative = normFile.startsWith(normBase + "/")
+  const relative = normFile.startsWith(normBase + "/")
     ? normFile.slice(normBase.length + 1)
     : normFile;
 
@@ -80,6 +98,74 @@ export function extractBaseDir(globPattern: string): string {
   }
 
   return dirParts.join("/");
+}
+
+/**
+ * Convert an IRIS document name to a local filesystem path under `baseDir`.
+ *
+ * Inverse of {@link filePathToDocName}. Splits the document name on dots to
+ * build directory segments and preserves the known Atelier file extension.
+ *
+ * - Dotted names (`"EnsLib.HTTP.GenericService.cls"`) become `<baseDir>/EnsLib/HTTP/GenericService.cls`.
+ * - Slash-style names (`"/csp/user/menu.csp"`) have a leading slash stripped
+ *   and are joined to `baseDir` directly; forward slashes are preserved
+ *   as directory separators (not split further on `.`).
+ * - Names without a known extension are joined verbatim to `baseDir`.
+ *
+ * The returned path uses forward slashes so it can be consumed by
+ * `path.resolve()` / `fs.promises.mkdir()` on any platform.
+ *
+ * When `opts.useShortPaths` is true (Windows MAX_PATH workaround), each
+ * package (directory) segment is truncated to its first 8 characters.
+ * The final filename segment (last before the extension) is NOT shortened
+ * so the on-disk file is still human-readable.
+ *
+ * @example
+ *   docNameToFilePath("EnsLib.HTTP.GenericService.cls", "C:/dev/exp")
+ *   // => "C:/dev/exp/EnsLib/HTTP/GenericService.cls"
+ *
+ *   docNameToFilePath("ReallyLongPkg.Foo.cls", "C:/dev/exp", { useShortPaths: true })
+ *   // => "C:/dev/exp/ReallyLo/Foo.cls"
+ *
+ *   docNameToFilePath("/csp/user/menu.csp", "C:/dev/exp")
+ *   // => "C:/dev/exp/csp/user/menu.csp"
+ */
+export function docNameToFilePath(
+  docName: string,
+  baseDir: string,
+  opts?: { useShortPaths?: boolean },
+): string {
+  const normBase = baseDir.replace(/\\/g, "/").replace(/\/+$/, "");
+
+  // Slash-style doc names (CSP pages, filesystem-style): treat slashes as
+  // already-directory separators. Strip any leading slash so we don't
+  // accidentally create an absolute path and join as-is.
+  if (docName.includes("/")) {
+    const trimmed = docName.replace(/^\/+/, "");
+    return `${normBase}/${trimmed}`;
+  }
+
+  // Split extension from stem
+  const extMatch = docName.match(DOC_EXTENSION_RE);
+  if (!extMatch) {
+    // Unknown/missing extension — treat as a single leaf with no mapping
+    return `${normBase}/${docName}`;
+  }
+  const ext = extMatch[0];
+  const stem = docName.slice(0, docName.length - ext.length);
+
+  // stem is a dotted name ("Foo.Bar.Baz"); split on "." to get segments.
+  const segments = stem.split(".");
+
+  // Optional short-path truncation for Windows MAX_PATH.
+  // Directory segments shortened to 8 chars; filename (last segment) preserved.
+  if (opts?.useShortPaths && segments.length > 0) {
+    const last = segments[segments.length - 1] as string;
+    const dirSegs = segments.slice(0, -1).map((s) => (s.length > 8 ? s.slice(0, 8) : s));
+    return `${normBase}/${[...dirSegs, last].join("/")}${ext}`;
+  }
+
+  return `${normBase}/${segments.join("/")}${ext}`;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────
