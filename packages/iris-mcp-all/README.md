@@ -22,13 +22,13 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 21 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 23 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export |
 | [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 22 | Namespace, database, user, role, resource, web-app, SSL/TLS, and OAuth2 management |
 | [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 19 | Ensemble/Health Connect production lifecycle, credentials, lookups, rules, transforms |
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 16 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **85 tools** across 5 servers.
+> **87 tools** across 5 servers.
 
 ---
 

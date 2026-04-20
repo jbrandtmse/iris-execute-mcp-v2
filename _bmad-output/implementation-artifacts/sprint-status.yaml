@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-20"  # Story 10.2 → done (code review passed, 3 patches applied); Epic 10 added via bmad-correct-course (sprint-change-proposal-2026-04-20.md); user requested skip of Story 10.0
+last_updated: "2026-04-20"  # Story 10.3 → review (docs rollup complete, 267/267 tests pass); Story 10.2 → done (code review passed, 3 patches applied); Epic 10 added via bmad-correct-course (sprint-change-proposal-2026-04-20.md); user requested skip of Story 10.0
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -154,5 +154,5 @@ development_status:
   epic-10: in-progress
   10-1-iris-package-list: done
   10-2-iris-doc-export: done
-  10-3-documentation-rollup: backlog
+  10-3-documentation-rollup: done
   epic-10-retrospective: optional

@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, globals management, code execution, and unit testing via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -112,6 +112,13 @@ Add to your Cursor MCP settings:
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
 | `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | idempotent |
+
+### Package Browsing Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_package_list` | Roll up namespace documents into packages at a chosen depth | `depth?`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?` | readOnly, idempotent |
 
 ### Compilation Tools
 
@@ -267,6 +274,127 @@ Add to your Cursor MCP settings:
   }
 }
 ```
+</details>
+
+<details>
+<summary><strong>iris_doc_export</strong> -- Bulk download documents to a local directory</summary>
+
+**Input (happy path — export a namespace subtree):**
+```json
+{
+  "destinationDir": "C:/dev/iris-export",
+  "prefix": "MyApp",
+  "category": "CLS",
+  "namespace": "USER"
+}
+```
+
+**Output:**
+```json
+{
+  "destinationDir": "C:/dev/iris-export",
+  "namespace": "USER",
+  "filtersApplied": {
+    "prefix": "MyApp",
+    "category": "CLS",
+    "type": "*",
+    "generated": "false",
+    "system": "false"
+  },
+  "total": 5,
+  "exported": 5,
+  "skipped": 0,
+  "skippedItems": [],
+  "manifest": "C:/dev/iris-export/manifest.json",
+  "durationMs": 412
+}
+```
+
+Files are written to `C:/dev/iris-export/MyApp/Service.cls`, `C:/dev/iris-export/MyApp/Utils.cls`, etc. Dots in dotted class names become subdirectories; CSP paths keep their forward slashes.
+
+**Input (Windows long-path — needs `useShortPaths`):**
+```json
+{
+  "destinationDir": "C:/dev/iris-export",
+  "prefix": "EnsLib.HL7",
+  "namespace": "USER"
+}
+```
+
+**Output with skippedItems:**
+```json
+{
+  "destinationDir": "C:/dev/iris-export",
+  "namespace": "USER",
+  "filtersApplied": { "prefix": "EnsLib.HL7", "category": "*", "type": "*", "generated": "false", "system": "false" },
+  "total": 42,
+  "exported": 40,
+  "skipped": 2,
+  "skippedItems": [
+    {
+      "docName": "EnsLib.HL7.MessageRouter.VeryLongClassNameThatExceedsMaxPath.cls",
+      "reason": "ENAMETOOLONG: local path exceeds 260 characters on Windows",
+      "hint": "Rerun with useShortPaths: true, or enable Windows long-path support in the registry (LongPathsEnabled)."
+    },
+    {
+      "docName": "EnsLib.HL7.MessageRouter.AnotherVeryLongClassName.cls",
+      "reason": "ENAMETOOLONG: local path exceeds 260 characters on Windows",
+      "hint": "Rerun with useShortPaths: true, or enable Windows long-path support in the registry (LongPathsEnabled)."
+    }
+  ],
+  "manifest": "C:/dev/iris-export/manifest.json",
+  "durationMs": 3821
+}
+```
+
+**Excerpt of `manifest.json`:**
+```json
+{
+  "namespace": "USER",
+  "exportedAt": "2026-04-20T15:30:00.000Z",
+  "filtersApplied": { "prefix": "EnsLib.HL7", "category": "*", "type": "*", "generated": "false", "system": "false" },
+  "files": [
+    { "docName": "EnsLib.HL7.Adapter.TCPInboundAdapter.cls", "localPath": "EnsLib/HL7/Adapter/TCPInboundAdapter.cls", "bytes": 2847 },
+    { "docName": "EnsLib.HL7.Service.Standard.cls", "localPath": "EnsLib/HL7/Service/Standard.cls", "bytes": 5219 }
+  ],
+  "skipped": [
+    {
+      "docName": "EnsLib.HL7.MessageRouter.VeryLongClassNameThatExceedsMaxPath.cls",
+      "reason": "ENAMETOOLONG: local path exceeds 260 characters on Windows",
+      "hint": "Rerun with useShortPaths: true, or enable Windows long-path support in the registry (LongPathsEnabled)."
+    }
+  ],
+  "shortPathMap": null
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_package_list</strong> -- Roll up documents into packages</summary>
+
+**Input:**
+```json
+{
+  "prefix": "MyApp",
+  "depth": 2,
+  "namespace": "USER"
+}
+```
+
+**Output:**
+```json
+{
+  "packages": [
+    { "name": "MyApp.Services", "count": 12 },
+    { "name": "MyApp.Utils", "count": 4 },
+    { "name": "MyApp.Tests", "count": 8 }
+  ],
+  "count": 3,
+  "totalDocs": 24
+}
+```
+
+For a structural overview at package granularity, use `iris_package_list`. For individual document names, use `iris_doc_list`. To pull many documents at once, see `iris_doc_export`.
 </details>
 
 <details>
@@ -608,7 +736,7 @@ Add to your Cursor MCP settings:
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 21 tools in this package accept the `namespace` parameter** except:
+**All 23 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.

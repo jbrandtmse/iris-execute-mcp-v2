@@ -2,6 +2,19 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-04-20]
+
+### Added — Epic 10: Namespace Browsing and Bulk Export Tools (iris-dev-mcp)
+
+Two new `@iris-mcp/dev` tools let AI clients survey a namespace at package granularity and pull code to disk in bulk, without paging every document or dropping to raw SQL.
+
+- **`iris_package_list`** ([`packages/iris-dev-mcp/src/tools/packages.ts`](packages/iris-dev-mcp/src/tools/packages.ts)) — Walks the Atelier `docnames` endpoint and aggregates client-side into package rollups at a configurable depth. Same filter surface as `iris_doc_list` (category, type, generated, `modifiedSince`), plus a `prefix` narrow, a `system` tri-state (`true | false | only`), and a 1000-row cap. Returns `{ packages[], count, totalDocs, truncated?, limit? }`. Use `iris_package_list` for a structural overview; use `iris_doc_list` for individual document names.
+- **`iris_doc_export`** ([`packages/iris-dev-mcp/src/tools/export.ts`](packages/iris-dev-mcp/src/tools/export.ts)) — The inverse of `iris_doc_load`. Walks Atelier `docnames` with the same filter surface plus `generated` as a tri-state (`true | false | both`), then downloads each matching document via `GET /doc/{name}` with 4-way bounded concurrency. Dots-as-directories mapping: `EnsLib.HTTP.GenericService.cls` → `<destinationDir>/EnsLib/HTTP/GenericService.cls`. CSP paths with forward slashes are preserved. Writes a `manifest.json` recording every exported file and every skipped item with a reason and remediation hint. Resilient by default: per-file failures are collected into `skippedItems` rather than aborting; Windows long paths can be worked around with `useShortPaths: true` (short-path collisions are guarded via a shared-path reservation map to prevent silent overwrite); `continueDownloadOnTimeout: true` detaches the download loop from the MCP request's `AbortSignal` so client timeouts don't abandon the on-disk state. Inverse round-trip with `iris_doc_load` + `overwrite: ifDifferent` skips unchanged files for fast re-sync.
+
+Both tools are TypeScript-only — no new `ExecuteMCPv2.*` classes, no `BOOTSTRAP_VERSION` change. **Upgrade path for existing installs**: `git pull && pnpm install && pnpm turbo run build` plus an MCP server restart. No ObjectScript redeploy.
+
+Tool count in `@iris-mcp/dev`: 21 → 23. Suite total: 85 → 87.
+
 ## [Pre-release — 2026-04-19]
 
 ### Fixed — Manual MCP suite retest uncovered six defects

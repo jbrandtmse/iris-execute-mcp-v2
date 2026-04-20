@@ -52,7 +52,8 @@ export const docGetTool: ToolDefinition = {
   title: "Get Document",
   description:
     "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
-    "Use metadataOnly to check existence and get the last-modified timestamp without downloading content.",
+    "Use metadataOnly to check existence and get the last-modified timestamp without downloading content. " +
+    "To pull many documents at once, see `iris_doc_export`.",
   inputSchema: z.object({
     name: z
       .string()
@@ -331,7 +332,8 @@ export const docListTool: ToolDefinition = {
   description:
     "List ObjectScript documents in a namespace with optional category and type filters. " +
     "WARNING: Without a filter, this returns ALL documents including system classes — use the filter parameter or category to limit results. " +
-    "Use modifiedSince to find documents changed after a given timestamp.",
+    "Use modifiedSince to find documents changed after a given timestamp. " +
+    "For a structural overview at package granularity, see `iris_package_list`. To pull many documents at once, see `iris_doc_export`.",
   inputSchema: z.object({
     category: z
       .enum(["CLS", "RTN", "CSP", "OTH", "*"])
