@@ -15,6 +15,10 @@ Both tools are TypeScript-only — no new `ExecuteMCPv2.*` classes, no `BOOTSTRA
 
 Tool count in `@iris-mcp/dev`: 21 → 23. Suite total: 85 → 87.
 
+### Fixed
+
+- **`iris_doc_export` response-envelope cap** — surfaced during a post-merge stress test of the `%SYS` namespace (2,174 CSP static-asset 404s produced a 560 KB response that exceeded the MCP token cap). Response now caps `skippedItems[]` at 50 entries and signals with `skippedItemsTruncated: true`; the full list stays in the authoritative on-disk `manifest.json`.
+
 ## [Pre-release — 2026-04-19]
 
 ### Fixed — Manual MCP suite retest uncovered six defects

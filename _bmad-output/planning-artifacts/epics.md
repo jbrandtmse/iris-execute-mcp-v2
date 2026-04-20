@@ -2275,6 +2275,7 @@ So that the first npm publish ships a suite that is verified to work on the plat
 - 10.1 `iris_package_list` — package listing with depth + prefix
 - 10.2 `iris_doc_export` — bulk download to disk
 - 10.3 Documentation rollup (README suite + per-package + tool_support.md + CHANGELOG)
+- 10.4 `iris_doc_export` response-envelope cap (post-merge bug-fix)
 
 **Out of scope (deferred)**:
 - Round-trip diffing (download → local edit → upload) — handled separately by existing `iris_doc_load` + editor tools.
@@ -2439,3 +2440,54 @@ So that the first npm publish ships a suite that is verified to work on the plat
 - This story lands as the final commit of Epic 10, after 10.1 and 10.2 are merged.
 - No code change; pure docs. Lands in one commit.
 - PR description should link to Stories 10.1 and 10.2 so the doc delta is reviewable against the tool implementations.
+
+### Story 10.4: `iris_doc_export` response-envelope cap (post-merge bug-fix)
+
+**As an** AI client calling `iris_doc_export` against a namespace with many per-file failures,
+**I want** the response envelope to stay under the MCP token cap,
+**so that** I can read the exporter's return value even when `skippedItems` is large (e.g., a `%SYS` export where the 2,174 CSP static-asset 404s blow past 560 KB).
+
+**Trigger**: Discovered 2026-04-20 during a post-Epic-10 stress test — exporting all of `%SYS` produced a 559,724-character response that exceeded the MCP token cap. The caller could not read the result; the on-disk manifest was still correct and authoritative. Same defect class as the `iris_task_history` pagination fix landed in the 2026-04-19 bug-fix pass. See [sprint-change-proposal-2026-04-20-story-10-4.md](sprint-change-proposal-2026-04-20-story-10-4.md) for the full trigger analysis.
+
+**Acceptance Criteria**:
+
+- **AC 10.4.1** — Response envelope's `skippedItems[]` is capped at **50 entries** (chosen to stay well under the MCP token cap even for long doc-name + reason strings).
+- **AC 10.4.2** — When the cap is hit, the response gains a `skippedItemsTruncated: true` field and the first `content[0].text` line prefixes the summary with "`N skipped items; showing first 50. Full list in manifest.json`". When the cap is not hit, `skippedItemsTruncated` is absent (not `false`) — matches existing `truncated` pattern from `iris_package_list` AC 10.1.7.
+- **AC 10.4.3** — `manifest.json` stays **uncapped**. The manifest is the authoritative record of what was exported and what was skipped; capping the manifest would defeat its purpose. Verified via a test case.
+- **AC 10.4.4** — The `iris_doc_export` tool `description` field (zod schema) gains one sentence flagging the CSP static-asset asymmetry: *"Note: some namespaces include CSP static assets (e.g., `/csp/.../*.css`) in docnames but return 404 on fetch — pass `category: \"CLS\"` or `\"RTN\"` to exclude them."* This keeps the tool self-documenting for AI clients that don't read the README.
+- **AC 10.4.5** — Unit tests in `packages/iris-dev-mcp/src/__tests__/export.test.ts` cover:
+  - **Large skipped list (>50 items)** — response includes first 50 + `skippedItemsTruncated: true`; manifest is NOT truncated (contains all items).
+  - **Small skipped list (≤50 items)** — response includes all items; `skippedItemsTruncated` is absent.
+  - Both tests use injected per-file failures (same mock pattern as existing `ignoreErrors` tests in the file).
+- **AC 10.4.6** — CHANGELOG.md gets a short entry appended to the existing `## [Pre-release — 2026-04-20]` section (NOT a new date block — this landed the same day as the Epic 10 rollup): under a new `### Fixed` subheading inside the 2026-04-20 entry, one bullet pointing at the response-cap fix.
+- **AC 10.4.7** — Build + tests + lint green. `pnpm turbo run build --filter=@iris-mcp/dev`, `pnpm turbo run test --filter=@iris-mcp/dev` (target: **269/269** = 267 baseline + 2 new), `pnpm turbo run lint --filter=@iris-mcp/dev`.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Cap `skippedItems[]` in response
+  - [ ] In `packages/iris-dev-mcp/src/tools/export.ts`, after the worker pool finishes and before the response is assembled, compute `skippedItemsTruncated = allSkipped.length > RESPONSE_SKIPPED_CAP` (new `const RESPONSE_SKIPPED_CAP = 50;` at module top).
+  - [ ] Response uses `allSkipped.slice(0, RESPONSE_SKIPPED_CAP)`; manifest still uses `allSkipped` (the full array).
+  - [ ] Add `skippedItemsTruncated: true` to the response ONLY when the cap is hit. Omit the field otherwise (don't set `false`).
+  - [ ] Update the `text` content line: if truncated, prefix with `N skipped items; showing first 50. Full list in manifest.json`.
+
+- [ ] **Task 2**: Tool description update (AC 10.4.4)
+  - [ ] Append the CSP-asymmetry sentence to the tool's zod `description` string.
+  - [ ] Keep it to one sentence — AI clients read this inline; don't bloat it.
+
+- [ ] **Task 3**: Unit tests (AC 10.4.5)
+  - [ ] Add two `it` cases in `export.test.ts`. Mock `IrisHttpClient` to return 60 failed GETs, assert response has 50 items + `skippedItemsTruncated: true`; assert `manifest.skipped.length === 60`.
+  - [ ] Mirror test for 10 failed GETs: response has 10 items, NO `skippedItemsTruncated` field.
+
+- [ ] **Task 4**: CHANGELOG (AC 10.4.6)
+  - [ ] Append a `### Fixed` subheading inside the existing 2026-04-20 section (the Added section stays above it). One bullet.
+
+- [ ] **Task 5**: Build + validate (AC 10.4.7)
+
+**Implementation Notes**:
+- Same pattern as the `iris_task_history` fix from 2026-04-19: server-side cap, `truncated` signal, authoritative full list lives elsewhere (there: `total` vs `count`; here: `manifest.json` vs inline `skippedItems`).
+- No changes to `docs/` or per-package READMEs — the README's CSP-asymmetry note was landed manually during the bug-discovery session (not part of this story's commit). The CHANGELOG entry can reference it.
+- No `BOOTSTRAP_VERSION` change.
+
+**Out of scope**:
+- Capping `files[]` in the response — this is the happy-path list; if someone exports 10k files successfully they still want to see counts (not individual entries). `files[]` is already fine because the response doesn't include per-file paths by default; only counts. (Verify this assumption during implementation — if `files[]` is in the response envelope, also cap it at 50 and note `filesTruncated`.)
+- Configurable cap value — 50 is a sensible default; adding a `responseMaxSkipped` parameter is speculative and can be added later if demand shows up.

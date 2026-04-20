@@ -18,6 +18,7 @@ interface ExportResult {
   exported: number;
   skipped: number;
   skippedItems: Array<{ docName: string; reason: string; hint?: string }>;
+  skippedItemsTruncated?: true;
   manifest?: string;
   durationMs: number;
   partial?: boolean;
@@ -181,6 +182,61 @@ describe("iris_doc_export", () => {
     expect(sc.skippedItems[0]?.docName).toBe("MyApp.Bad.cls");
     expect(sc.skippedItems[0]?.reason).toContain("fetch failed");
     expect(result.isError).toBeUndefined();
+  });
+
+  // ── 3b. Response envelope caps skippedItems[] at 50 (AC 10.4.1, 10.4.2, 10.4.3) ──
+
+  it("caps skippedItems at 50 in the response but keeps all in the manifest when >50 items are skipped", async () => {
+    // Build 60 failing fetches so the response-envelope cap kicks in but
+    // the on-disk manifest stays authoritative.
+    const docs = Array.from({ length: 60 }, (_, i) => ({
+      name: `MyApp.Bad${String(i).padStart(3, "0")}.cls`,
+      fail: "404 Not Found",
+    }));
+    installMockHttp(mockHttp, docs);
+
+    const result = await docExportTool.handler({ destinationDir: tmp }, ctx);
+    const sc = result.structuredContent as ExportResult;
+
+    // Counters are uncapped — the `skipped` total reflects all 60 failures.
+    expect(sc.total).toBe(60);
+    expect(sc.exported).toBe(0);
+    expect(sc.skipped).toBe(60);
+
+    // The response array is capped at 50 and signals truncation.
+    expect(sc.skippedItems.length).toBe(50);
+    expect(sc.skippedItemsTruncated).toBe(true);
+
+    // Summary text prefixes with the cap-aware phrasing.
+    const firstText = result.content[0]?.text as string;
+    expect(firstText.startsWith("60 skipped items; showing first 50.")).toBe(true);
+    expect(firstText).toContain("manifest.json");
+
+    // On-disk manifest is authoritative and uncapped.
+    const manifestPath = path.join(tmp, "manifest.json");
+    const manifest = JSON.parse(await fsp.readFile(manifestPath, "utf-8")) as Manifest;
+    expect(manifest.skipped.length).toBe(60);
+
+    // No per-doc error returns isError (ignoreErrors defaults to true).
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("omits skippedItemsTruncated when skipped list fits within cap", async () => {
+    // 10 failures — well under the 50-entry cap.
+    const docs = Array.from({ length: 10 }, (_, i) => ({
+      name: `MyApp.Bad${String(i).padStart(3, "0")}.cls`,
+      fail: "404 Not Found",
+    }));
+    installMockHttp(mockHttp, docs);
+
+    const result = await docExportTool.handler({ destinationDir: tmp }, ctx);
+    const sc = result.structuredContent as ExportResult;
+
+    expect(sc.skipped).toBe(10);
+    expect(sc.skippedItems.length).toBe(10);
+    // The field must be absent (not `false`) when no truncation occurred —
+    // matches the `truncated?: true` pattern in iris_package_list.
+    expect("skippedItemsTruncated" in sc).toBe(false);
   });
 
   // ── 4. ignoreErrors: false aborts on first error ─────────────────

@@ -367,6 +367,8 @@ Files are written to `C:/dev/iris-export/MyApp/Service.cls`, `C:/dev/iris-export
   "shortPathMap": null
 }
 ```
+
+> **Note on CSP static assets in system namespaces.** The Atelier API lists static web files (CSS, JS, images under `/csp/…/*.css`, `*.js`, etc.) in `docnames` but returns HTTP 404 for those paths on `GET /doc/{name}` — they're served by the CSP Gateway, not stored in an Atelier-accessible store. A full export of a namespace like `%SYS` (or any namespace mapping IRIS system CSP routes) will therefore produce a large `skippedItems` list — on a stock IRIS 2025.1 `%SYS` namespace, ~2,174 of 6,131 docnames fall into this bucket. This is an **IRIS-side asymmetry, not a tool defect**. To avoid the noise when you only want code, pass **`category: "CLS"`** (classes) or **`category: "RTN"`** (routines + include files) — these restrict `docnames` to categories whose documents are reliably retrievable.
 </details>
 
 <details>

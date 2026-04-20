@@ -57,6 +57,20 @@ const PROGRESS_EMIT_INTERVAL_FILES = 50;
 /** Progress throttling: emit at most every N milliseconds. */
 const PROGRESS_EMIT_INTERVAL_MS = 2000;
 
+/**
+ * Cap on the number of `skippedItems[]` entries emitted in the response
+ * envelope. When more entries than this are skipped, the response carries
+ * only the first {@link RESPONSE_SKIPPED_CAP} entries and a
+ * `skippedItemsTruncated: true` signal. The on-disk `manifest.json` is
+ * authoritative and stays uncapped.
+ *
+ * Rationale: an unfiltered `%SYS` export can skip 2,000+ items (each CSP
+ * static-asset 404 surfaces as a skip), producing a 500+ KB response
+ * envelope that exceeds the MCP token cap. The manifest on disk still
+ * carries the full list for forensic use.
+ */
+const RESPONSE_SKIPPED_CAP = 50;
+
 // ── Types ─────────────────────────────────────────────────────────────
 
 interface SkippedItem {
@@ -91,6 +105,13 @@ interface ExportResult {
   exported: number;
   skipped: number;
   skippedItems: SkippedItem[];
+  /**
+   * Present (and always `true`) when `skippedItems[]` was capped at
+   * {@link RESPONSE_SKIPPED_CAP} in the response envelope. Absent when
+   * the skipped list fit within the cap. The on-disk `manifest.json`
+   * always carries the full list.
+   */
+  skippedItemsTruncated?: true;
   manifest?: string;
   durationMs: number;
   partial?: boolean;
@@ -205,7 +226,9 @@ export const docExportTool: ToolDefinition = {
     "and every skipped item with a reason. Supports prefix/category/type filters, " +
     "system/generated tri-states, modifiedSince incremental exports, overwrite policies " +
     "(never/ifDifferent/always), Windows long-path workaround via useShortPaths, " +
-    "bounded concurrency, and cancellation tolerance. Inverse of iris_doc_load.",
+    "bounded concurrency, and cancellation tolerance. Inverse of iris_doc_load. " +
+    "Note: some namespaces include CSP static assets (e.g., /csp/.../*.css) in docnames " +
+    "but return 404 on fetch — pass category: \"CLS\" or \"RTN\" to exclude them.",
   inputSchema: z.object({
     destinationDir: z
       .string()
@@ -653,6 +676,7 @@ export const docExportTool: ToolDefinition = {
     // ── Hard error (ignoreErrors: false path) ─────────────────────
     if (hardError) {
       const durationMs = Date.now() - startedAt;
+      const isPartialSkippedTruncated = skippedItems.length > RESPONSE_SKIPPED_CAP;
       const partialResult: ExportResult = {
         destinationDir: rootAbs,
         namespace: ns,
@@ -660,7 +684,10 @@ export const docExportTool: ToolDefinition = {
         total,
         exported: exportedCount,
         skipped: skippedItems.length,
-        skippedItems,
+        skippedItems: isPartialSkippedTruncated
+          ? skippedItems.slice(0, RESPONSE_SKIPPED_CAP)
+          : skippedItems,
+        ...(isPartialSkippedTruncated ? { skippedItemsTruncated: true } : {}),
         durationMs,
         partial: true,
       };
@@ -714,6 +741,7 @@ export const docExportTool: ToolDefinition = {
     }
 
     const durationMs = Date.now() - startedAt;
+    const isSkippedTruncated = skippedItems.length > RESPONSE_SKIPPED_CAP;
     const result: ExportResult = {
       destinationDir: rootAbs,
       namespace: ns,
@@ -721,15 +749,24 @@ export const docExportTool: ToolDefinition = {
       total,
       exported: exportedCount,
       skipped: skippedItems.length,
-      skippedItems,
+      skippedItems: isSkippedTruncated
+        ? skippedItems.slice(0, RESPONSE_SKIPPED_CAP)
+        : skippedItems,
+      ...(isSkippedTruncated ? { skippedItemsTruncated: true } : {}),
       ...(manifestPath ? { manifest: manifestPath } : {}),
       durationMs,
       ...(aborted ? { partial: true, aborted: true } : {}),
     };
 
+    const skipSuffix = isSkippedTruncated
+      ? `${skippedItems.length} skipped items; showing first ${RESPONSE_SKIPPED_CAP}. Full list in manifest.json. `
+      : "";
     const summary =
+      skipSuffix +
       `Exported ${exportedCount}/${total} document(s) from namespace '${ns}' to '${rootAbs}'` +
-      (skippedItems.length > 0 ? ` (${skippedItems.length} skipped)` : "") +
+      (skippedItems.length > 0 && !isSkippedTruncated
+        ? ` (${skippedItems.length} skipped)`
+        : "") +
       (aborted ? " — aborted before completion" : "") +
       ".";
 
