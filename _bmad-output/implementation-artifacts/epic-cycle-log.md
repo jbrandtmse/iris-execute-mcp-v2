@@ -700,3 +700,31 @@ Added 2026-04-20 via `bmad-correct-course`. Trigger: live session uncovered two 
   - LOW deferred — digit-prefixed package rows (e.g., `"2"`) are technically-correct rollup of class names starting with digits; users can filter with `category: "CLS"`.
   - Dismissed — empty-string `prefix` short-circuit (benign), `stripDocExtension(".cls")` edge case (pathological, never in practice), unencoded `type` param (consistent with `doc.ts` sibling, no regression).
 - **Final verification:** 230/230 `@iris-mcp/dev` tests pass, build green, lint clean on touched files.
+
+### Story 10.2: `iris_doc_export` — Bulk Download of Documents to Local Files
+
+- **Commit:** `6732b21`
+- **Files created:** `packages/iris-dev-mcp/src/tools/export.ts` (~560 LOC tool with 4-way concurrency pool, manifest writer, path-traversal safety, long-path handling, short-path collision guard), `packages/iris-dev-mcp/src/__tests__/export.test.ts` (24 unit tests — the code reviewer added one more during the MEDIUM fix).
+- **Files modified:** `packages/iris-dev-mcp/src/tools/load.ts` (added `docNameToFilePath` inverse helper + shared `DOC_EXTENSION_RE`, fixed pre-existing `let`→`const` lint issue), `packages/iris-dev-mcp/src/__tests__/load.test.ts` (11 new helper tests including round-trip), `packages/iris-dev-mcp/src/tools/index.ts` (22→23 tools), `packages/iris-dev-mcp/src/__tests__/index.test.ts` (count + toContain/toEqual lists updated — clean this time, no backfill needed since Story 10.1 CR fixed the omission).
+- **Key design decisions:**
+  - `docNameToFilePath` colocated with `filePathToDocName` in `load.ts` for symmetry. `useShortPaths` truncates only directory segments (last segment = filename, preserved verbatim).
+  - Concurrency via shared `cursor` counter + 4 workers driven by `Promise.allSettled` — simple, correct, no external deps.
+  - `overwrite: ifDifferent` byte-compared via `Buffer.equals()`. Unchanged files still counted as `exported` (story-permitted simplification noted as LOW).
+  - Progress emitter probed defensively via `unknown` cast. `ToolContext` doesn't declare `sendProgress` today → silent no-op, ready for future wiring.
+  - Cancellation detachment: `continueDownloadOnTimeout: true` (default) spawns an internal `AbortController`; the worker pool ignores `ctx.signal` entirely. When `false`, workers check `externalSignal.aborted` between iterations.
+  - Tests use real `os.tmpdir()` + `crypto.randomBytes(8)` per story guidance — real disk I/O catches mkdir/rename/byte-compare bugs that mocks miss.
+- **Dev-session complications resolved:** TS2379 `exactOptionalPropertyTypes` for optional `serverTs` (fixed with conditional spread); Windows `path.join` normalization ate `..` in the path-traversal test (fixed by using raw-string path); pre-existing `let relative` lint warning in `load.ts` (fixed as a bonus).
+- **Live verification (4/4 calls, user restarted `iris-dev-mcp` to pick up the new tool):**
+  1. `USER` + `prefix:ExecuteMCPv2` (CLS) → **19/19 exported** in 2.88s; dots-as-directories structure correct (`ExecuteMCPv2/REST/Analytics.cls`, `ExecuteMCPv2/Tests/*.cls`); manifest shape matches AC 10.2.5.
+  2. `OPTIRAG` + `prefix:IRISCouch` (no match) → `total: 0`, no manifest written (AC 10.2.7 — empty is not an error).
+  3. `OPTIRAG` + `prefix:%DocDB` + `system:"only"` → **3/3 exported cross-namespace**; `%DocDB/*.cls` structure preserved; cross-namespace switching and tri-state system flag both verified end-to-end through the TypeScript HTTP client.
+  4. Re-run of call 1 with `overwrite:ifDifferent` → **file mtimes confirmed unchanged** (byte-compare skip works end-to-end).
+- **Review findings (1 MEDIUM + 2 LOW auto-resolved, 2 LOW deferred, 4 dismissed):**
+  - **MEDIUM patched** — short-path collision data-loss surface: with `useShortPaths: true` on Windows, two distinct long package prefixes could truncate to the same 8-char stub and silently overwrite; also CSP-vs-dotted name overlap (`/csp/foo/bar.cls` vs `csp.foo.bar.cls`) hits the same hazard platform-independently. Fixed via a shared `reservedPaths: Map<string, string>` claimed in the sync gap between `path.resolve` and `fsp.writeFile` (Node's event loop makes the get/set atomic relative to other workers). Collision victims are pushed to `skippedItems` with a descriptive reason and useShortPaths-off hint. New collision test brought suite to 267 (+1 from 266 baseline).
+  - **LOW patched** — `manifest.partial` flag: when `ignoreErrors: false` aborts mid-batch, the in-memory result carried `partial: true` but the persisted `manifest.json` didn't, so a caller reading the file alone couldn't tell. Fixed by extending `Manifest` + `writeManifest(opts)` to carry `partial?: boolean`; the hardError path now writes it.
+  - **LOW patched** — `continueDownloadOnTimeout` JSDoc overclaim: reworded to clarify the tool only refuses to propagate the external signal into its own polling, not the HTTP layer's cancellation.
+  - **LOW deferred** — `.manifest.json.tmp` leak if `fsp.rename` itself fails (rare, recoverable — next run cleans up or user can manually delete).
+  - **LOW deferred** — exotic `docNameToFilePath` edge cases (`.cls`, `Foo..cls`, `.LeadingDot.cls`) — Atelier never emits these and `path.resolve` normalizes downstream.
+  - **Dismissed** — intentional `""` baseDir slash-strip pattern (documented), defensive `as string` cast on `last` (harmless), prefix-excluding-CSP behavior (documented in tool description), path-traversal raw-string in the test (dev agent already flagged it in Debug Log).
+- **Final verification:** 267/267 `@iris-mcp/dev` tests pass (230 after Story 10.1 → 266 after dev → 267 after CR), build green, lint clean on all 6 Story 10.2-touched files.
+- **Round-trip design:** `docNameToFilePath` is the clean inverse of `filePathToDocName`. Together with `iris_doc_load`'s upload path, a developer can now export → edit on disk → re-upload with `overwrite: ifDifferent` skipping unchanged files — exactly the round-trip workflow called out in the Sprint Change Proposal's success criteria.
