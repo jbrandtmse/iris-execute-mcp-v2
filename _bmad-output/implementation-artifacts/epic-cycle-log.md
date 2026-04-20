@@ -674,3 +674,29 @@
   - `iris_webapp_get` + `iris_global_list` wildcard semantics clarification (commit `78367a4`)
 - **Review findings:** No formal code review — Story 9.3 was a manual execution story. The bug fixes above each went through their own review/test/commit cycles.
 - **Epic 9 status:** All stories complete (9.0, 9.1, 9.2, 9.3). Epic 9 retrospective is `optional`; user has pre-approved running a separate retrospective for Epic 9 distinct from Epic 8's.
+
+## Epic 10: Namespace Browsing and Bulk Export Tools (iris-dev-mcp)
+
+Added 2026-04-20 via `bmad-correct-course`. Trigger: live session uncovered two capability gaps — no package-level namespace browsing (required raw SQL against `%Dictionary.ClassDefinition`) and no bulk document export (inverse of `iris_doc_load` missing). Sprint Change Proposal: [sprint-change-proposal-2026-04-20.md](../planning-artifacts/sprint-change-proposal-2026-04-20.md). Scope: **Minor** — pure TypeScript additions to `@iris-mcp/dev`, no `BOOTSTRAP_VERSION` bump, no ObjectScript redeploy on existing installs. User explicitly skipped Story 10.0 (Epic 9 deferred cleanup) at epic-cycle kickoff.
+
+### Story 10.1: `iris_package_list` — Package Listing with Depth + Prefix
+
+- **Commit:** `a863798`
+- **Files created:** `packages/iris-dev-mcp/src/tools/packages.ts` (tool + `stripDocExtension`/`rollupPackage`/`NON_CLASS_BUCKET` helpers), `packages/iris-dev-mcp/src/__tests__/packages.test.ts` (22 unit tests).
+- **Files modified:** `packages/iris-dev-mcp/src/tools/index.ts` (21→22 tools), `packages/iris-dev-mcp/src/__tests__/index.test.ts` (count assertions + missing `iris_execute_tests` `.toContain` backfilled), planning artifacts (`epics.md` Epic 10 header + Stories 10.1–10.3, `prd.md` FR108/FR109), and sprint-change-proposal-2026-04-20.md (new).
+- **Key design decisions:**
+  - `system` as `z.enum(["true","false","only"])` rather than boolean+string union — cleaner schema without `booleanParam` coercion conflicts for the "only" third state.
+  - Helpers exported from `packages.ts` for direct unit testing (Story 3.9 pattern). No premature shared abstraction; Story 10.2 can extract if needed.
+  - Prefix filter applied client-side per project memory (Atelier's `filter` query is SQL LIKE substring, not glob).
+  - Reused `extractAtelierContentArray` from `doc.ts` instead of duplicating.
+  - Tool description explicitly contrasts with `iris_doc_list` to help AI-client routing (AC 10.1.6).
+- **Live verification:** 3/3 MCP-server calls succeeded after user restarted `iris-dev-mcp`. USER default returned 68 user packages / 1,908 docs (EnsLib 1114, Ens 411, EnsPortal 225, ExecuteMCPv2 19). USER with `prefix: "EnsLib", depth: 2` returned 55 sub-packages (EnsLib.InteropTools 234, EnsLib.UDDI 177, EnsLib.EDI 147). OPTIRAG cross-namespace with `system: "only"` returned 257 system packages / 3,772 docs (all `%*`). Cross-namespace switching, prefix filter, depth rollup, and `system` tri-state all verified end-to-end through the TypeScript HTTP client.
+- **Live-verification finding:** CSP paths like `/csp/user/menu.csp` and a doc name starting with a digit produced a stray `"2"` package row. Surfaced to code review.
+- **Review findings (3 MEDIUM auto-resolved, 2 LOW deferred, 3 dismissed):**
+  - MEDIUM patched — `rollupPackage()` now buckets forward-slash-containing names under a synthetic `(csp)` row instead of splitting them on `.` (2 new tests, total 228→230).
+  - MEDIUM patched — added missing `iris_execute_tests` `.toContain` assertion in `index.test.ts` (pre-existing oversight that Story 10.1 inherited while touching that block).
+  - MEDIUM patched — added a comment clarifying that `totalDocs` is the post-filter pre-rollup count (equal to the sum of every `docCount`).
+  - LOW deferred — `generated` flag ignored on `/modified/{ts}` branch (pre-existing inconsistency with `iris_doc_list`; out of 10.1 scope).
+  - LOW deferred — digit-prefixed package rows (e.g., `"2"`) are technically-correct rollup of class names starting with digits; users can filter with `category: "CLS"`.
+  - Dismissed — empty-string `prefix` short-circuit (benign), `stripDocExtension(".cls")` edge case (pathological, never in practice), unencoded `type` param (consistent with `doc.ts` sibling, no regression).
+- **Final verification:** 230/230 `@iris-mcp/dev` tests pass, build green, lint clean on touched files.
