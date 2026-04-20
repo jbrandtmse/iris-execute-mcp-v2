@@ -120,3 +120,10 @@ These retrospective action items are the publishing activity itself and live bey
 - Retro Post-Project Action #3: IPM publishing via Open Exchange
 - Retro Follow-Through: test production + integration tests for interopRest/ruleGet/transformTest — already formally deferred by Epic 8 retro as "too complex for cleanup"
 - Retro Follow-Through: MCP test harness — already formally deferred by Epic 8 retro as "post-project"
+
+---
+
+## Deferred from: code review of 10-1-iris-package-list (2026-04-20)
+
+- **`generated` query parameter ignored on the `/modified/{ts}` Atelier branch** — Both `iris_package_list` and the sibling `iris_doc_list` pass `generated` to `/docnames/{cat}/{type}` but not to `/modified/{ts}`. Atelier's `/modified/` endpoint accepts a `generated` query param, so a caller with `modifiedSince: X, generated: true` expecting generated docs gets only non-generated ones. Pre-existing inconsistency inherited from `doc.ts`; out of scope for 10.1. Fix would apply to both tools together.
+- **Digit-prefixed "package" rows (e.g., a `"2"` row with 13 docs observed on USER)** — Documents with class-name stems that start with digits (typically compiled/generated artifacts like `2.SomeName.cls`) roll up under a numeric top-level package name. The rollup is technically correct — these really are dotted names — but the output looks odd. Callers can filter via `category: "CLS"` if undesired. Not worth synthetic bucketing (too speculative about intent). Leaving as observed behavior; documented in the CSP-bucketing comment on `rollupPackage`.

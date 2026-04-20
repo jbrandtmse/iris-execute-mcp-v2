@@ -606,6 +606,11 @@ Each server is configured independently in the client's MCP configuration with i
 
 FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MVP. They require WebSocket transport support not included in the initial MCP server implementation. See Post-MVP Features in Product Scope for details.
 
+### Namespace Browsing and Bulk Export (Epic 10 Addition — 2026-04-20)
+
+- FR108: Developer can list the packages in a namespace at a configurable depth (1 = top-level, N = N-segment rollup), optionally narrowed to a prefix, with the same filter surface as `iris_doc_list` (category, type, generated, system inclusion, modifiedSince). System packages (`%*`) are excluded by default; `system` is tri-state (`false | true | only`) so developers can inspect IRIS internals, user code, or both.
+- FR109: Developer can bulk-download documents from a namespace to a local directory, filtered by prefix, category, type, generated state, system inclusion, and modifiedSince. The export is resilient: per-document failures (long paths, disk-full, encoding) are collected into a skipped-items list rather than aborting the batch by default, a `useShortPaths` option maps long path segments to shorten the output for Windows MAX_PATH limits, and a manifest JSON records what was exported so runs can be audited and resumed. Progress is emitted via MCP `notifications/progress` and, by default, the download continues to completion on disk even if the MCP client cancels or times out.
+
 ## Non-Functional Requirements
 
 ### Performance
