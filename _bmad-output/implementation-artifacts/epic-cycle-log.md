@@ -728,3 +728,24 @@ Added 2026-04-20 via `bmad-correct-course`. Trigger: live session uncovered two 
   - **Dismissed** — intentional `""` baseDir slash-strip pattern (documented), defensive `as string` cast on `last` (harmless), prefix-excluding-CSP behavior (documented in tool description), path-traversal raw-string in the test (dev agent already flagged it in Debug Log).
 - **Final verification:** 267/267 `@iris-mcp/dev` tests pass (230 after Story 10.1 → 266 after dev → 267 after CR), build green, lint clean on all 6 Story 10.2-touched files.
 - **Round-trip design:** `docNameToFilePath` is the clean inverse of `filePathToDocName`. Together with `iris_doc_load`'s upload path, a developer can now export → edit on disk → re-upload with `overwrite: ifDifferent` skipping unchanged files — exactly the round-trip workflow called out in the Sprint Change Proposal's success criteria.
+
+### Story 10.3: Documentation Rollup — README Suite + Per-Package + tool_support.md + CHANGELOG
+
+- **Commit:** `89477ce`
+- **Files modified:**
+  - `README.md` (suite) — `@iris-mcp/dev` tool count 21→23, `85 tools`→`87 tools` summary, extended domain description, ASCII architecture diagram per-server count.
+  - `packages/iris-dev-mcp/README.md` — tagline, new Document Tools row for `iris_doc_export`, new Package Browsing Tools section with `iris_package_list`, three new `<details>` example blocks (happy-path export, skippedItems+manifest excerpt, `iris_package_list`), namespace-scoping callout `All 23 tools`.
+  - `packages/iris-mcp-all/README.md` — dev row 21→23 + extended description, `85 tools`→`87 tools`.
+  - `tool_support.md` — heading count (23), two new Atelier rows, Mix line `15→17`, Suite-wide rollup (`17|6|0|23` dev row, Total `17|65|5|87`), Dependency Implications prose recalculated (`17 of 23`, `65 of 87`, `75%`, `87-tool total`).
+  - `CHANGELOG.md` — new `## [Pre-release — 2026-04-20]` section inserted BEFORE the 2026-04-19 entry; Added-type block describing both tools, upgrade path, and tool-count delta.
+  - `packages/iris-dev-mcp/src/tools/doc.ts` — discoverability sentences appended to `docGetTool.description` and `docListTool.description` pointing AI clients at the more targeted tool for bulk use cases.
+  - `docs/migration-v1-v2.md` — discovered during cross-reference grep audit; `85 tools`→`87 tools` (2x) and dev row `21`→`23` with extended description.
+- **Key judgment call (validated in review):** deliberately did NOT update `docs/tool-annotation-audit.md` (2026-04-07 dated snapshot) or CHANGELOG's 2026-04-09 entry (`All 85 tools … were renamed`). Both are dated point-in-time records — retroactively editing them would falsify historical claims. The story's `_bmad-output/implementation-artifacts/*` exclusion was extended to all dated historical snapshots. Reviewer validated the reasoning.
+- **Other dev decisions:** suite README's ASCII architecture diagram (`│(21)`→`│(23)`) updated for internal consistency even though the story didn't call it out; `<details>` example ordering mirrors table ordering; the `iris_doc_export` block uses `"Input (happy path — …)"` sub-headers to disambiguate its two-example structure (natural extension of the established pattern).
+- **Review findings (1 LOW auto-resolved, 3 INFO acknowledged):**
+  - **LOW patched** — CHANGELOG link-label style drift: the two new file links in the 2026-04-20 entry used plain `[packages/…](…)` while the surrounding 2026-04-19 entry uses backticks around the path label (`` [`packages/…`](…) ``). Fixed to match.
+  - **INFO** — CHANGELOG position/structure: 2026-04-20 entry correctly placed BEFORE 2026-04-19, 2026-04-19 entry fully intact, matches the Added-type template.
+  - **INFO** — Count consistency across all user-facing docs confirmed. Remaining `85`/`21` instances are confined to `_bmad-output/**`, `docs/tool-annotation-audit.md` (dated), and CHANGELOG's 2026-04-09 entry — all explicitly dated point-in-time records.
+  - **INFO** — `doc.ts` description edits reference correct flat-underscore tool names with backticks and terminal periods; sole description-substring assertion in `packages.test.ts:402` was unaffected.
+- **Final verification:** 267/267 `@iris-mcp/dev` tests pass (unchanged from 10.2), build green, lint clean on touched files. Pre-existing lint errors on `main` (unused `vi` imports in 5 test files + one `data` unused) confirmed unchanged — not this story's problem per AC 10.3.7.
+- **No deferred items.** Story 10.3 is the final story of Epic 10.
