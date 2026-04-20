@@ -749,3 +749,38 @@ Added 2026-04-20 via `bmad-correct-course`. Trigger: live session uncovered two 
   - **INFO** — `doc.ts` description edits reference correct flat-underscore tool names with backticks and terminal periods; sole description-substring assertion in `packages.test.ts:402` was unaffected.
 - **Final verification:** 267/267 `@iris-mcp/dev` tests pass (unchanged from 10.2), build green, lint clean on touched files. Pre-existing lint errors on `main` (unused `vi` imports in 5 test files + one `data` unused) confirmed unchanged — not this story's problem per AC 10.3.7.
 - **No deferred items.** Story 10.3 is the final story of Epic 10.
+
+### Story 10.4: `iris_doc_export` response-envelope cap (post-merge bug-fix)
+
+Added 2026-04-20 via `/bmad-correct-course` after a post-Epic-10 stress test uncovered a real token-cap overrun. Not part of the original Epic 10 scope; Epic 10 reopened (`done` → `in-progress`) for this one story, then re-closed.
+
+- **Commits:** `ad92f26` fix (Story 10.4 code + docs + planning artifacts + sprint change proposal). Epic-cycle log entry landed with the Story 10.3 block above; this block is the Story 10.4 addendum.
+- **Trigger:** Exporting all of `%SYS` produced a **559,724-character response** (2,174 skipped CSP static assets inline) that exceeded the MCP token cap. Manifest was correct on disk, but the response itself was unreadable. Same defect class as the `iris_task_history` pagination fix from 2026-04-19.
+- **Sprint Change Proposal:** [sprint-change-proposal-2026-04-20-story-10-4.md](../planning-artifacts/sprint-change-proposal-2026-04-20-story-10-4.md) — Minor scope, direct adjustment, single story.
+- **Files modified:**
+  - `packages/iris-dev-mcp/src/tools/export.ts` — `RESPONSE_SKIPPED_CAP = 50` constant, `ExportResult.skippedItemsTruncated?: true` (literal type), cap applied in BOTH the happy-path response assembly AND the `hardError`/`partial: true` branch, summary text prefix `"N skipped items; showing first 50. Full list in manifest.json."`, CSP-asymmetry sentence appended to zod `description`.
+  - `packages/iris-dev-mcp/src/__tests__/export.test.ts` — 2 new tests (capped at 50 + manifest uncapped verification; absent-not-false for small lists).
+  - `CHANGELOG.md` — `### Fixed` subsection inside the existing 2026-04-20 entry (same-day fix, not a new date block).
+  - `packages/iris-dev-mcp/README.md` — CSP-asymmetry note (landed during bug-discovery session, committed atomically with Story 10.4 for traceability).
+  - `.gitignore` — added `irissys/` to match the existing `irislib/` pattern.
+  - `_bmad-output/planning-artifacts/epics.md` — Epic 10 Stories list updated (10.4 added); Story 10.4 block appended.
+  - `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story 10.4 lifecycle + Epic 10 → `done`.
+- **Key design decisions:**
+  - Field absent (not `false`) when the list fits — conditional-spread idiom `...(isTruncated ? { skippedItemsTruncated: true } : {})` matches the `iris_package_list` `truncated?: true` pattern from Story 10.1. Test explicitly asserts `"skippedItemsTruncated" in sc === false`.
+  - Manifest stays uncapped — `writeManifest()` receives the full `skippedItems` array, not the slice. Verified by a test injecting 60 failures: `response.skippedItems.length === 50` AND `manifest.skipped.length === 60`.
+  - Cap value 50 chosen because 50 items ≈ 13 KB (vs 560 KB observed for 2,174 items on `%SYS`) — well under the MCP token budget. Future story can make it configurable if demand shows up.
+  - Summary text replaces the old `(N skipped)` parenthetical when truncated (avoids duplicated `(50 skipped)... 2174 skipped items; showing first 50...`).
+- **Live verification** (after user restarted `iris-dev-mcp` to pick up the rebuild): re-ran the exact `%SYS` export that triggered this story. Response now came through cleanly with `total: 6288, exported: 4114, skipped: 2174, skippedItems.length: 50, skippedItemsTruncated: true, durationMs: 16337`. Manifest on disk: `files: 4114, skipped: 2174, partial: absent` — full list preserved. Response fit well under the MCP token cap.
+- **Review findings (0 HIGH, 0 MEDIUM, 0 LOW):** Clean approve. Reviewer confirmed all 9 focus-area checks pass (both response paths capped, field-absent pattern correct, manifest uncapped, literal `true` type, summary text prefix, backward compat, CHANGELOG placement, CSP-asymmetry sentence one-liner, scope discipline). No review-fix edits needed. No deferred items.
+- **Final verification:** 269/269 `@iris-mcp/dev` tests pass (267 after Story 10.3 → 269 after dev's 2 new tests). Build green, lint clean on touched files.
+
+### Epic 10 Summary
+
+Four stories, four merge commits (plus four chore/log commits). Net delta:
+- **Added**: 2 new tools (`iris_package_list`, `iris_doc_export`) in `@iris-mcp/dev`. Tool count 21 → 23. Suite total 85 → 87.
+- **Fixed**: 1 post-merge bug (response-envelope cap on `iris_doc_export`).
+- **Tests**: 228 → 269 (30 new export tests + 22 new package tests + 11 new helper tests in load.test.ts).
+- **Code review findings across the epic**: 5 MEDIUM + 4 LOW auto-resolved in-line; 4 LOW deferred to `deferred-work.md`; 7 dismissed as noise. Zero HIGH, zero regressions.
+- **Live-verified end-to-end** against a real IRIS instance: small-batch exports, cross-namespace, CSP-path handling, `useShortPaths`, overwrite:ifDifferent byte-compare, HSCUSTOM 13,277-doc export (82s), %SYS stress test before and after the cap fix.
+- **No `BOOTSTRAP_VERSION` change** — TypeScript-only across all four stories. Existing installs upgrade via `pnpm install && pnpm turbo run build + MCP server restart`. No ObjectScript redeploy required.
+- **Epic 10 status:** `done`. Retrospective is `optional` per the standard pattern.
