@@ -56,6 +56,32 @@ describe("iris_resource_manage", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it("creates resource with description without error", async () => {
+    // Regression test for Story 10.5: ObjectScript handler used to pass a byref
+    // array to Security.Resources.Create, which takes positional scalars. The
+    // create call now extracts description/publicPermission explicitly.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", name: "MCPTestStory105" }),
+    );
+
+    const result = await resourceManageTool.handler(
+      {
+        action: "create",
+        name: "MCPTestStory105",
+        description: "test description",
+      },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      action: string;
+      name: string;
+    };
+    expect(structured.action).toBe("created");
+    expect(structured.name).toBe("MCPTestStory105");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should send POST for modify with only provided fields", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "modified", name: "ExistingRes" }),

@@ -2276,6 +2276,8 @@ So that the first npm publish ships a suite that is verified to work on the plat
 - 10.2 `iris_doc_export` — bulk download to disk
 - 10.3 Documentation rollup (README suite + per-package + tool_support.md + CHANGELOG)
 - 10.4 `iris_doc_export` response-envelope cap (post-merge bug-fix)
+- 10.5 ObjectScript handler bug fixes (post-retro cleanup) — taskId filter, resource/role description
+- 10.6 TypeScript + docs cleanup (post-retro polish) — generated flag on /modified/, README CSP symmetry
 
 **Out of scope (deferred)**:
 - Round-trip diffing (download → local edit → upload) — handled separately by existing `iris_doc_load` + editor tools.
@@ -2491,3 +2493,106 @@ So that the first npm publish ships a suite that is verified to work on the plat
 **Out of scope**:
 - Capping `files[]` in the response — this is the happy-path list; if someone exports 10k files successfully they still want to see counts (not individual entries). `files[]` is already fine because the response doesn't include per-file paths by default; only counts. (Verify this assumption during implementation — if `files[]` is in the response envelope, also cap it at 50 and note `filesTruncated`.)
 - Configurable cap value — 50 is a sensible default; adding a `responseMaxSkipped` parameter is speculative and can be added later if demand shows up.
+
+### Story 10.5: ObjectScript handler bug fixes (post-retro cleanup)
+
+**As a** developer using `iris_task_history`, `iris_resource_manage`, or `iris_role_manage`,
+**I want** the documented input parameters to actually work,
+**so that** I can filter task history by task ID and create resources/roles with descriptions, instead of silently getting unfiltered results or hitting `<UNDEFINED>` errors.
+
+**Trigger**: Two pre-Epic-10 defects in our `ExecuteMCPv2.REST.*` handlers, surfaced during the 2026-04-19 manual retest pass and documented in [docs/known-bugs-2026-04-20.md](../../docs/known-bugs-2026-04-20.md). Epic 10 retro Action Items #1 and #2. See [sprint-change-proposal-2026-04-20-stories-10-5-and-10-6.md](sprint-change-proposal-2026-04-20-stories-10-5-and-10-6.md) for the full trigger analysis.
+
+**Acceptance Criteria**:
+
+- **AC 10.5.1** — `iris_task_history` with `taskId: <id>` filters to that task only. The `TaskHistory()` classmethod in [src/ExecuteMCPv2/REST/Task.cls](../../src/ExecuteMCPv2/REST/Task.cls) selects `%SYS.Task.History:TaskHistoryForTask(Task)` named query (line 148 of `%SYS.Task.History.cls`) when `tTaskId` is set, and the existing `TaskHistoryDetail(NULL)` query when `tTaskId` is empty. Existing pagination/cap behavior unchanged.
+- **AC 10.5.2** — Field-name extraction in `TaskHistory()` works against BOTH named queries (the ROWSPECs differ in column order but both expose the field names the handler reads via `tRS.Get("Task Name")`, `tRS.Get("Task")`, etc.). Verify by inspection of `%SYS.Task.History.cls` ROWSPECs at lines 148 and 170.
+- **AC 10.5.3** — `iris_resource_manage create` with a `description` argument succeeds. The `ResourceManage()` classmethod in [src/ExecuteMCPv2/REST/Security.cls](../../src/ExecuteMCPv2/REST/Security.cls) calls `Security.Resources.Create(tName, tDescription, tPublicPermission)` with positional scalars (extracted via `$Get(tProps("Description"))` etc.), NOT `Create(tName, .tProps)` with a byref array. The byref-array call pattern is correct for `Modify` and `Get` (which take `ByRef Properties`), but `Create` takes `Description As %String` as positional arg #2.
+- **AC 10.5.4** — `iris_role_manage create` with a `description` argument succeeds. Same fix pattern as AC 10.5.3 applied to `RoleManage()` calling `Security.Roles.Create()` — verify the exact positional argument order in `%SYS:Security.Roles.cls` before fixing (likely `Name, Description, Resources, GrantedRoles` per IRIS conventions, but confirm from the actual class signature).
+- **AC 10.5.5** — Unit tests added:
+  - In [packages/iris-ops-mcp/src/__tests__/task.test.ts](../../packages/iris-ops-mcp/src/__tests__/task.test.ts): assert handler URL/payload includes the `taskId` query param when set, and confirm the handler's invocation pattern picks the filtered query path. Mock the underlying SQL response shape.
+  - In [packages/iris-admin-mcp/src/__tests__/resource.test.ts](../../packages/iris-admin-mcp/src/__tests__/resource.test.ts) and [packages/iris-admin-mcp/src/__tests__/role.test.ts](../../packages/iris-admin-mcp/src/__tests__/role.test.ts): assert `create` with `description` resolves successfully against the mocked IRIS response. (The bug is at the IRIS API call layer; the mock at the HTTP layer doesn't directly simulate it, but the new tests document expected behavior and will catch regressions if anyone reverts the byref pattern.)
+- **AC 10.5.6** — Live verification (post-bootstrap-upgrade): re-run the reproductions in [docs/known-bugs-2026-04-20.md](../../docs/known-bugs-2026-04-20.md). `iris_task_history({ taskId: <real-id>, maxRows: 10 })` returns only rows for that task (use a known task from `iris_task_list`). `iris_resource_manage({ action: "create", name: "MCPTestStory105", description: "test" })` succeeds. Same for `iris_role_manage`. Clean up created assets after verification.
+- **AC 10.5.7** — `BOOTSTRAP_VERSION` bumps to a new hash; existing installs auto-upgrade via the version-stamped probe on next MCP server restart. The upgrade redeploys + recompiles all 13 handler classes per the standard auto-upgrade flow.
+- **AC 10.5.8** — CHANGELOG.md gets two new bullets appended to the existing `## [Pre-release — 2026-04-20]` `### Fixed` section. Each bullet references the relevant `src/ExecuteMCPv2/REST/*.cls` file and the issue. Suggested wording:
+  - "**`iris_task_history` taskId filter now actually filters** ([src/ExecuteMCPv2/REST/Task.cls](src/ExecuteMCPv2/REST/Task.cls)) — handler was using the unparameterized `%SYS.Task.History:TaskHistoryDetail` named query and silently passing `tTaskId` to it, which IRIS ignored. Now selects `TaskHistoryForTask(Task)` when filtering."
+  - "**`iris_resource_manage` and `iris_role_manage` `create` with `description` no longer crash** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — handlers were passing a byref array where `Security.Resources.Create` and `Security.Roles.Create` expect positional scalars. Now extracts `Description` (and `PublicPermission`/`Resources`/`GrantedRoles` as appropriate) from the props array and passes positionally."
+- **AC 10.5.9** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint` (no new warnings on touched files). Target test count growth: ~3 new tests across `task.test.ts`, `resource.test.ts`, `role.test.ts`.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `TaskHistory()` in `src/ExecuteMCPv2/REST/Task.cls` (AC 10.5.1, 10.5.2)
+  - [ ] Replace the unconditional `Set tRS = ##class(%ResultSet).%New("%SYS.Task.History:TaskHistoryDetail")` with a conditional that picks `TaskHistoryForTask` when `tTaskId '= ""`.
+  - [ ] Verify ROWSPEC field names by reading `%SYS.Task.History.cls` lines 148 and 170 (both exposed in the local export at `irissys/%SYS/Task/History.cls` from the Story 10.2 stress-test export). Both queries provide `Task Name`, `Last Start`, `Completed`, `Status`, `Result`, `NameSpace`, `Task`, `Username` — confirm via inspection.
+- [ ] **Task 2**: Fix `ResourceManage()` in `src/ExecuteMCPv2/REST/Security.cls` (AC 10.5.3)
+  - [ ] In the `create` branch (around line 660), change `Set tSC = ##class(Security.Resources).Create(tName, .tProps)` to extract scalars first: `Set tDescription = $Get(tProps("Description"))`, `Set tPublicPermission = $Get(tProps("PublicPermission"))`, then `Set tSC = ##class(Security.Resources).Create(tName, tDescription, tPublicPermission)`.
+  - [ ] Leave `Modify` branch alone — it's already correct (Modify takes `ByRef Properties` per `%SYS:Security.Resources.cls`).
+- [ ] **Task 3**: Fix `RoleManage()` in `src/ExecuteMCPv2/REST/Security.cls` (AC 10.5.4)
+  - [ ] First, read `%SYS:Security.Roles.cls` `Create` signature to confirm positional argument order (the local export at `irissys/%SYS/Security/Roles.cls` has it).
+  - [ ] In the `create` branch, change `Set tSC = ##class(Security.Roles).Create(tName, .tProps)` to extract scalars and call positionally per the confirmed signature.
+- [ ] **Task 4**: Unit tests (AC 10.5.5)
+  - [ ] Add `it("includes taskId param in URL when set")` to `packages/iris-ops-mcp/src/__tests__/task.test.ts`.
+  - [ ] Add `it("creates resource with description without error")` to `packages/iris-admin-mcp/src/__tests__/resource.test.ts`.
+  - [ ] Add `it("creates role with description without error")` to `packages/iris-admin-mcp/src/__tests__/role.test.ts`.
+- [ ] **Task 5**: Deploy + bootstrap version bump (AC 10.5.7)
+  - [ ] Run `npm run gen:bootstrap` after the .cls changes — verifies BOOTSTRAP_VERSION hash changes.
+  - [ ] Run `pnpm turbo run build` — picks up the new `bootstrap-classes.ts`.
+- [ ] **Task 6**: Live verification (AC 10.5.6)
+  - [ ] Deploy via `iris_doc_load src/ExecuteMCPv2/REST/Tas*.cls` + `iris_doc_load src/ExecuteMCPv2/REST/Sec*.cls`, then compile via `iris_doc_compile`.
+  - [ ] Reproduce the bugs per [docs/known-bugs-2026-04-20.md](../../docs/known-bugs-2026-04-20.md) — both should now resolve cleanly.
+  - [ ] Clean up `MCPTestStory105` resource/role.
+- [ ] **Task 7**: CHANGELOG (AC 10.5.8)
+  - [ ] Two new bullets in the existing 2026-04-20 `### Fixed` section.
+- [ ] **Task 8**: Build + validate (AC 10.5.9)
+
+**Implementation Notes**:
+- Same `BOOTSTRAP_VERSION`-bump auto-upgrade pattern as Story 10.4. Existing installs pick up the fix on next MCP server restart.
+- Both bugs were detected via the 2026-04-19 retest pass that landed the `IrisApiError.message` enrichment. Without that earlier fix, these would still be hidden behind generic "IRIS reported errors" messages.
+
+**Out of scope**:
+- Item 3 (`generated` flag on `/modified/`) and Item 7 (README symmetry) → Story 10.6.
+- Other deferred items from the Epic 10 retro: #4 (digit-prefixed package rows), #5 (.manifest.json.tmp leak), #8 (iris_doc_search synthetic-corpus test), #10 (ctx.ensureNamespacePrereq helper) — all COSMETIC or deliberately deferred per retro recommendation.
+
+### Story 10.6: TypeScript + docs cleanup (post-retro polish)
+
+**As a** developer using `iris_doc_list` or `iris_package_list` with `modifiedSince` and a `generated` filter,
+**I want** the `generated` flag to actually be honored on the `/modified/{ts}` Atelier branch,
+**so that** I get the same filtering behavior whether I'm asking "all docs" or "docs modified since X".
+
+**As a** developer using `iris_package_list` against system namespaces,
+**I want** the README to flag the CSP static-asset asymmetry the same way it flags it for `iris_doc_export`,
+**so that** I know to pass `category: "CLS"` to avoid the noise.
+
+**Trigger**: Epic 10 retro Action Items #3 and #7. Item #3 was originally surfaced as a deferred LOW from the Story 10.1 code review (in [_bmad-output/implementation-artifacts/deferred-work.md](../../_bmad-output/implementation-artifacts/deferred-work.md)) — the inconsistency was inherited from `iris_doc_list`. Item #7 is the README symmetry follow-up from Story 10.4's CSP-asymmetry note.
+
+**Acceptance Criteria**:
+
+- **AC 10.6.1** — In [packages/iris-dev-mcp/src/tools/packages.ts](../../packages/iris-dev-mcp/src/tools/packages.ts) and [packages/iris-dev-mcp/src/tools/doc.ts](../../packages/iris-dev-mcp/src/tools/doc.ts), the `/modified/{ts}` URL gets `generated=1` or `generated=0` as a query param when the user-provided value is set. Both tools' handlers should set this on BOTH the `/docnames/` branch (already correct in both) AND the `/modified/{ts}` branch (currently missing in both). When `generated` is undefined, do NOT add the param (preserves Atelier's default behavior on both branches).
+- **AC 10.6.2** — Unit tests in [packages/iris-dev-mcp/src/__tests__/packages.test.ts](../../packages/iris-dev-mcp/src/__tests__/packages.test.ts) and [packages/iris-dev-mcp/src/__tests__/doc.test.ts](../../packages/iris-dev-mcp/src/__tests__/doc.test.ts) — add tests that assert when `modifiedSince` AND `generated` are both set, the constructed URL contains BOTH the `/modified/<encoded-ts>` path AND the `generated=1` (or `0`) query param. Also assert when `generated` is omitted, the param is absent.
+- **AC 10.6.3** — In [packages/iris-dev-mcp/README.md](../../packages/iris-dev-mcp/README.md), the `iris_package_list` `<details>` example block (or its surrounding context) gains a CSP-asymmetry note mirroring the existing one on `iris_doc_export`. Suggested wording:
+  > **Note on CSP static assets in system namespaces.** Atelier lists static web files (CSS, JS, images under `/csp/.../`) in `docnames` but they don't behave like normal classes in the rollup — `iris_package_list` buckets them under a synthetic `(csp)` package row to avoid polluting the class-package view. To exclude CSP entirely, pass `category: "CLS"` (classes only) or `category: "RTN"` (routines + include files only).
+- **AC 10.6.4** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint`. Target test count growth: ~4 new tests in `packages.test.ts` and `doc.test.ts` (2 each: `generated=true` + `generated=false`, with `modifiedSince`).
+- **AC 10.6.5** — TypeScript-only change. **No `BOOTSTRAP_VERSION` bump.** Existing installs upgrade via `pnpm install && pnpm turbo run build` + MCP server restart.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `iris_doc_list` `/modified/` branch (AC 10.6.1)
+  - [ ] In `packages/iris-dev-mcp/src/tools/doc.ts` `docListTool` handler, find the `if (modifiedSince) {…}` block (around line 407). Currently it builds `path = atelierPath(…, "modified/{ts}")` without query params.
+  - [ ] After path construction, build `URLSearchParams` and add `generated=1/0` if `generated !== undefined`. Append as `?` query string if the params have any entries.
+  - [ ] Mirror the pattern from the `/docnames/` branch (around line 421) which already does this correctly.
+- [ ] **Task 2**: Fix `iris_package_list` `/modified/` branch (AC 10.6.1)
+  - [ ] Same fix in `packages/iris-dev-mcp/src/tools/packages.ts` — locate the `modifiedSince` branch (mirror the pattern in `doc.ts`).
+- [ ] **Task 3**: Unit tests (AC 10.6.2)
+  - [ ] Add 2 tests in `packages/iris-dev-mcp/src/__tests__/doc.test.ts`: `it("propagates generated=1 to /modified/ branch")` and `it("propagates generated=0 to /modified/ branch")`. Also confirm the omit case via the existing `modifiedSince` test (assert URL does NOT contain `generated=`).
+  - [ ] Same 2 tests in `packages.test.ts`.
+- [ ] **Task 4**: README CSP-symmetry note (AC 10.6.3)
+  - [ ] Find the `iris_package_list` `<details>` example block in `packages/iris-dev-mcp/README.md`. Append the CSP note as a `> **Note**` blockquote inside the `<details>` block, after the example output.
+  - [ ] Cross-reference with the existing CSP note on `iris_doc_export` for tone and content consistency.
+- [ ] **Task 5**: Build + validate (AC 10.6.4)
+
+**Implementation Notes**:
+- TypeScript-only; no `BOOTSTRAP_VERSION` change. The `iris_doc_list` fix is technically a separate bug (pre-existing, deferred from Story 10.1 code review) but is symmetric and trivial to fix at the same time as `iris_package_list`. Doing both in one shot avoids a future stand-alone story for the same one-line fix in `doc.ts`.
+- No CHANGELOG entry strictly required — both items are minor symmetry fixes, not user-facing functional changes worth a separate `### Fixed` bullet. Optional one-line bullet OK at dev agent's discretion: "minor symmetry fixes to `iris_doc_list` and `iris_package_list` `generated` flag handling on the `/modified/` branch + README note for `iris_package_list` CSP behavior".
+- README CSP note targets the `<details>` example block to keep the note discoverable next to working code.
+
+**Out of scope**:
+- Items 4, 5, 6, 8, 9, 10 from Epic 10 retro action items — all deferred per retro recommendation, none touch this story's surface.

@@ -278,12 +278,13 @@ ClassMethod TaskHistory() As %Status
         Set tResult = {}
         Set tHistory = []
 
-        Set tRS = ##class(%ResultSet).%New("%SYS.Task.History:TaskHistoryDetail")
         If tTaskId '= "" {
-            Set tSC2 = tRS.Execute(tTaskId)
+            Set tRS = ##class(%ResultSet).%New("%SYS.Task.History:TaskHistoryForTask")
+            Set tSC2 = tRS.Execute(+tTaskId)
         }
         Else {
-            Set tSC2 = tRS.Execute("")
+            Set tRS = ##class(%ResultSet).%New("%SYS.Task.History:TaskHistoryDetail")
+            Set tSC2 = tRS.Execute()
         }
         If $$$ISERR(tSC2) {
             Set $NAMESPACE = tOrigNS

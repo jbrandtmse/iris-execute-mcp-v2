@@ -62,6 +62,38 @@ describe("iris_user_manage", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it("creates user with full profile fields without error", async () => {
+    // Regression test for Story 10.5: ObjectScript handler used to pass a byref
+    // array to Security.Users.Create, which takes positional scalars (Username,
+    // UserRoles, Password, FullName, NameSpace, Routine, ExpirationDate,
+    // ChangePassword, Enabled, Comment, ...). The create call now extracts
+    // each property explicitly and passes positionally.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", name: "mcptestuser" }),
+    );
+
+    const result = await userManageTool.handler(
+      {
+        action: "create",
+        name: "mcptestuser",
+        password: "SecurePass123!",
+        fullName: "MCP Test User",
+        roles: "%Developer",
+        namespace: "USER",
+        comment: "Regression fixture for 10.5",
+      },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      action: string;
+      name: string;
+    };
+    expect(structured.action).toBe("created");
+    expect(structured.name).toBe("mcptestuser");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should send POST for modify with only provided fields", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "modified", name: "existinguser" }),

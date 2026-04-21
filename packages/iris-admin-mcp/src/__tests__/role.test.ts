@@ -55,6 +55,32 @@ describe("iris_role_manage", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it("creates role with description without error", async () => {
+    // Regression test for Story 10.5: ObjectScript handler used to pass a byref
+    // array to Security.Roles.Create, which takes positional scalars. The
+    // create call now extracts description/resources/grantedRoles explicitly.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", name: "MCPTestStory105Role" }),
+    );
+
+    const result = await roleManageTool.handler(
+      {
+        action: "create",
+        name: "MCPTestStory105Role",
+        description: "test description",
+      },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      action: string;
+      name: string;
+    };
+    expect(structured.action).toBe("created");
+    expect(structured.name).toBe("MCPTestStory105Role");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should send POST for modify with only provided fields", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "modified", name: "ExistingRole" }),

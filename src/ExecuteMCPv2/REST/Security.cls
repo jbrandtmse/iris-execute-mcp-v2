@@ -163,17 +163,29 @@ ClassMethod UserManage() As %Status
                 Quit
             }
 
-            Set tProps("Password") = tPassword
-            If tBody.%Get("fullName") '= "" Set tProps("FullName") = tBody.%Get("fullName")
-            If tBody.%Get("roles") '= "" Set tProps("Roles") = tBody.%Get("roles")
-            If tBody.%IsDefined("enabled") Set tProps("Enabled") = +tBody.%Get("enabled")
-            If tBody.%Get("namespace") '= "" Set tProps("Namespace") = tBody.%Get("namespace")
-            If tBody.%Get("routine") '= "" Set tProps("Routine") = tBody.%Get("routine")
-            If tBody.%Get("comment") '= "" Set tProps("Comment") = tBody.%Get("comment")
-            If tBody.%Get("expirationDate") '= "" Set tProps("ExpirationDate") = tBody.%Get("expirationDate")
-            If tBody.%IsDefined("changePasswordOnNextLogin") Set tProps("ChangePassword") = +tBody.%Get("changePasswordOnNextLogin")
+            ; Security.Users.Create takes positional scalars:
+            ; (Username, UserRoles, Password, FullName, NameSpace, Routine, ExpirationDate,
+            ;  ChangePassword, Enabled, Comment, Flags = 1, PhoneNumber, PhoneProvider,
+            ;  ByRef Attributes, AccountNeverExpires, PasswordNeverExpires, ...)
+            Set tUserRoles = ""
+            Set tFullName = ""
+            Set tUserNamespace = ""
+            Set tRoutine = ""
+            Set tExpirationDate = ""
+            Set tChangePassword = 0
+            ; Match IRIS Security.Users.Create default when Enabled is not in Properties: enabled = 1
+            Set tEnabled = 1
+            Set tComment = ""
+            If tBody.%Get("roles") '= "" Set tUserRoles = tBody.%Get("roles")
+            If tBody.%Get("fullName") '= "" Set tFullName = tBody.%Get("fullName")
+            If tBody.%Get("namespace") '= "" Set tUserNamespace = tBody.%Get("namespace")
+            If tBody.%Get("routine") '= "" Set tRoutine = tBody.%Get("routine")
+            If tBody.%Get("expirationDate") '= "" Set tExpirationDate = tBody.%Get("expirationDate")
+            If tBody.%IsDefined("changePasswordOnNextLogin") Set tChangePassword = +tBody.%Get("changePasswordOnNextLogin")
+            If tBody.%IsDefined("enabled") Set tEnabled = +tBody.%Get("enabled")
+            If tBody.%Get("comment") '= "" Set tComment = tBody.%Get("comment")
 
-            Set tSC = ##class(Security.Users).Create(tName, .tProps)
+            Set tSC = ##class(Security.Users).Create(tName, tUserRoles, tPassword, tFullName, tUserNamespace, tRoutine, tExpirationDate, tChangePassword, tEnabled, tComment)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
@@ -530,11 +542,15 @@ ClassMethod RoleManage() As %Status
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
-            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
-            If tBody.%IsDefined("resources") Set tProps("Resources") = tBody.%Get("resources")
-            If tBody.%IsDefined("grantedRoles") Set tProps("GrantedRoles") = tBody.%Get("grantedRoles")
+            ; Security.Roles.Create takes positional scalars: (Name, Description, Resources, GrantedRoles, EscalationOnly = 0)
+            Set tDescription = ""
+            Set tResources = ""
+            Set tGrantedRoles = ""
+            If tBody.%IsDefined("description") Set tDescription = tBody.%Get("description")
+            If tBody.%IsDefined("resources") Set tResources = tBody.%Get("resources")
+            If tBody.%IsDefined("grantedRoles") Set tGrantedRoles = tBody.%Get("grantedRoles")
 
-            Set tSC = ##class(Security.Roles).Create(tName, .tProps)
+            Set tSC = ##class(Security.Roles).Create(tName, tDescription, tResources, tGrantedRoles)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
@@ -659,10 +675,14 @@ ClassMethod ResourceManage() As %Status
         Set $NAMESPACE = "%SYS"
 
         If tAction = "create" {
-            If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
-            If tBody.%IsDefined("publicPermission") Set tProps("PublicPermission") = tBody.%Get("publicPermission")
+            ; Security.Resources.Create takes positional scalars: (Name, Description, PublicPermission, Type)
+            ; Type is "Internal use only" per IRIS docs and is omitted.
+            Set tDescription = ""
+            Set tPublicPermission = ""
+            If tBody.%IsDefined("description") Set tDescription = tBody.%Get("description")
+            If tBody.%IsDefined("publicPermission") Set tPublicPermission = tBody.%Get("publicPermission")
 
-            Set tSC = ##class(Security.Resources).Create(tName, .tProps)
+            Set tSC = ##class(Security.Resources).Create(tName, tDescription, tPublicPermission)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 

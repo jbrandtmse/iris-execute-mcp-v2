@@ -509,6 +509,22 @@ describe("iris_task_history", () => {
     expect(result.structuredContent).toEqual(historyData);
   });
 
+  it("propagates taskId query param to URL when set", async () => {
+    // Regression test for Story 10.5: ObjectScript handler was using the
+    // unparameterized %SYS.Task.History:TaskHistoryDetail named query and
+    // silently passing taskId to it. The URL contract is the testable
+    // boundary from the TypeScript layer — this asserts the taskId value
+    // actually reaches the server.
+    mockHttp.get.mockResolvedValue(envelope({ history: [], count: 0 }));
+
+    await taskHistoryTool.handler({ taskId: 42 }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toBe(
+      "/api/executemcp/v2/task/history?taskId=42",
+    );
+  });
+
   it("should pass taskId query parameter when specified", async () => {
     const historyData = {
       history: [
