@@ -784,3 +784,24 @@ Four stories, four merge commits (plus four chore/log commits). Net delta:
 - **Live-verified end-to-end** against a real IRIS instance: small-batch exports, cross-namespace, CSP-path handling, `useShortPaths`, overwrite:ifDifferent byte-compare, HSCUSTOM 13,277-doc export (82s), %SYS stress test before and after the cap fix.
 - **No `BOOTSTRAP_VERSION` change** — TypeScript-only across all four stories. Existing installs upgrade via `pnpm install && pnpm turbo run build + MCP server restart`. No ObjectScript redeploy required.
 - **Epic 10 status:** `done`. Retrospective is `optional` per the standard pattern.
+
+### Story 10.5: ObjectScript Handler Bug Fixes (post-Epic 10 retro)
+- **Status:** done
+- **Commit:** 8295e58
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Task.cls` — `TaskHistory()` switches between `%SYS.Task.History:TaskHistoryForTask(Task)` (filtered) and `:TaskHistoryDetail` (unfiltered)
+  - `src/ExecuteMCPv2/REST/Security.cls` — `ResourceManage`/`RoleManage`/`UserManage` create branches refactored to positional scalars; Users defaults Enabled=1 / ChangePassword=0
+  - `packages/shared/src/bootstrap-classes.ts` — regenerated; `BOOTSTRAP_VERSION` 5ffd4dee0649 → 2689f7f657e4
+  - 4 new regression tests: `task.test.ts` (taskId URL propagation), `resource.test.ts`, `role.test.ts`, `user.test.ts` (description create no longer crashes)
+  - `CHANGELOG.md` — 2 Fixed bullets under Pre-release 2026-04-20
+  - `docs/known-bugs-2026-04-20.md` — detailed bug reports (created earlier in session)
+  - `_bmad-output/planning-artifacts/sprint-change-proposal-2026-04-20-stories-10-5-and-10-6.md` — Sprint Change Proposal
+  - `_bmad-output/planning-artifacts/epics.md` — Story 10.5 + 10.6 added to Epic 10
+- **Key design decisions:**
+  - Bug #1 root cause: `%SYS.Task.History:TaskHistoryDetail` named query takes ZERO parameters — passing `taskId` was silently ignored. Required switching to `TaskHistoryForTask(Task)` for the filtered branch.
+  - Bug #2 root cause: `Security.Resources/Roles/Users.Create` ClassMethods take positional scalars; `Security.Applications.Create` and `*.Modify` take ByRef Properties. Mixed conventions in IRIS; not a uniform pattern.
+  - **Scope expansion via AC 10.5.5 audit**: Story spec was Resources + Roles only, but live audit confirmed Users.Create has identical positional signature → fix expanded to include Users + new regression test. Applications.Create stays ByRef (correctly unchanged).
+  - **Code review HIGH catch**: Initial dev fix defaulted `tEnabled = ""` which `Security.Users.Create` coerces to `0` → users created disabled by default. Reviewer caught via live MCP test (`iris_user_get` returned `enabled: false` for a freshly created user without explicit `enabled: true`). Fixed by defaulting `tEnabled = 1` and `tChangePassword = 0` to preserve pre-fix behavior. Re-verified with `review105test3`.
+  - **Live verification at lead AND review layers**: Lead spot-checked all 3 reproductions before code review (task history filter returns 5 entries for taskId 1000; resource + role create with description succeed). Reviewer additionally exercised the Users path which surfaced the regression.
+- **Review findings (1 HIGH auto-resolved, 0 MEDIUM, 0 LOW):** The HIGH was the Users-disabled-by-default regression introduced by the positional refactor — fixed in-line, regenerated bootstrap (version 81b78d308910 → 2689f7f657e4), redeployed + recompiled live, retested. No deferred items.
+- **Final verification:** 1076/1076 tests pass (+4 new). Build green. Lint clean on touched files (pre-existing baseline errors in unrelated test files). All 3 retro-item reproductions resolved live.
