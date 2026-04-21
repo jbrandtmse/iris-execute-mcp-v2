@@ -384,6 +384,9 @@ describe("bootstrap", () => {
       expect(result.compiled).toBe(true);
       expect(result.configured).toBe(true);
       expect(result.mapped).toBe(true);
+      // ^UnitTestRoot was set on a prior install; current path skips the
+      // re-check to keep the probe fast. Marked as ensured for callers.
+      expect(result.unitTestRootEnsured).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
@@ -436,6 +439,13 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [] })),
       );
 
+      // EnsureUnitTestRoot: SQL POST returning the resulting global value
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] }),
+        ),
+      );
+
       const result = await bootstrap(http, config, 7);
 
       expect(result.probeStatus).toBe("missing");
@@ -444,6 +454,8 @@ describe("bootstrap", () => {
       expect(result.compiled).toBe(true);
       expect(result.configured).toBe(true);
       expect(result.mapped).toBe(true);
+      expect(result.unitTestRootEnsured).toBe(true);
+      expect(result.unitTestRoot).toBe("/iris/mgr/");
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
@@ -480,6 +492,13 @@ describe("bootstrap", () => {
       // on stale upgrades. If the implementation mistakenly calls them,
       // the next fetchMock call will be undefined and the test will fail.
 
+      // EnsureUnitTestRoot: runs on stale upgrades too (independent step)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] }),
+        ),
+      );
+
       const result = await bootstrap(http, config, 7);
 
       expect(result.probeStatus).toBe("stale");
@@ -490,12 +509,14 @@ describe("bootstrap", () => {
       // already ran successfully in the past.
       expect(result.configured).toBe(true);
       expect(result.mapped).toBe(true);
+      expect(result.unitTestRootEnsured).toBe(true);
+      expect(result.unitTestRoot).toBe("/iris/mgr/");
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // Verify the fetch call count: 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile = 16
+      // Verify the fetch call count: 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 EnsureUnitTestRoot = 17
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1;
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -555,6 +576,13 @@ describe("bootstrap", () => {
       // Package mapping: POST response (still attempted after configure failure)
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [] })),
+      );
+
+      // EnsureUnitTestRoot: still attempted after configure failure (independent step)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] }),
+        ),
       );
 
       const result = await bootstrap(http, config, 7);

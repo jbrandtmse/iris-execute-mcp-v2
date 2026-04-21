@@ -51,6 +51,10 @@ export interface BootstrapResult {
   configured: boolean;
   /** Whether package mapping to %All was created. */
   mapped: boolean;
+  /** Whether ^UnitTestRoot was ensured in the configured namespace. */
+  unitTestRootEnsured: boolean;
+  /** The resulting ^UnitTestRoot value in the configured namespace, if ensured. */
+  unitTestRoot?: string;
   /** Errors encountered during bootstrap steps. */
   errors: string[];
   /** Manual instructions when configure step fails. */
@@ -204,6 +208,44 @@ export async function configureWebApp(
 }
 
 /**
+ * Ensure `^UnitTestRoot` is defined in the target namespace.
+ *
+ * `%UnitTest.Manager.RunTest` (used by the Atelier `/work` endpoint with
+ * `request: "unittest"`) requires this global to exist and be non-empty,
+ * even when the `/noload` qualifier is set. When undefined it errors at an
+ * internal "Finding directories" step and writes a partial result that
+ * crashes `%Api.Atelier.v8::UnitTestResultToJSON` with a cryptic
+ * `<SUBSCRIPT>` error.
+ *
+ * Calls `ExecuteMCPv2.Setup_EnsureUnitTestRoot()` via the Atelier SQL
+ * endpoint against the supplied namespace. The classmethod is idempotent —
+ * it sets `^UnitTestRoot = $System.Util.ManagerDirectory()` only when the
+ * global is undefined or empty. Returns the resulting value.
+ *
+ * Used by both the bootstrap flow (one-time setup of the configured
+ * namespace) and the `iris_execute_tests` handler (per-call coverage of
+ * whatever target namespace the tool was invoked against).
+ */
+export async function ensureUnitTestRoot(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+): Promise<string> {
+  const path = atelierPath(version, namespace, "action/query");
+  const body = {
+    query: "SELECT ExecuteMCPv2.Setup_EnsureUnitTestRoot() AS UnitTestRoot",
+  };
+  const response = await http.post(path, body);
+  const content = (response.result as { content?: Record<string, unknown>[] })
+    ?.content;
+  if (Array.isArray(content) && content.length > 0) {
+    const row = content[0] as Record<string, unknown>;
+    return String(row["UnitTestRoot"] ?? "");
+  }
+  return "";
+}
+
+/**
  * Map the ExecuteMCPv2 package to %All namespace so compiled routines
  * (including I/O redirect mnemonic labels) are available in every namespace.
  * This enables cross-namespace `iris_execute_command` with I/O capture.
@@ -246,6 +288,7 @@ export async function bootstrap(
     compiled: false,
     configured: false,
     mapped: false,
+    unitTestRootEnsured: false,
     errors: [],
   };
 
@@ -268,6 +311,7 @@ export async function bootstrap(
     result.compiled = true;
     result.configured = true;
     result.mapped = true;
+    result.unitTestRootEnsured = true;
     logger.info(
       `Bootstrap: REST service is current (version ${BOOTSTRAP_VERSION}), skipping deploy`,
     );
@@ -319,6 +363,23 @@ export async function bootstrap(
   if (probe.status === "stale") {
     result.configured = true;
     result.mapped = true;
+    // Ensure ^UnitTestRoot independently — own try/catch so a failure here
+    // does not mask the successful class upgrade.
+    try {
+      result.unitTestRoot = await ensureUnitTestRoot(
+        http,
+        config.namespace,
+        version,
+      );
+      result.unitTestRootEnsured = true;
+      logger.info(
+        `Bootstrap: ^UnitTestRoot ensured in '${config.namespace}' (value: ${result.unitTestRoot})`,
+      );
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      result.errors.push(`EnsureUnitTestRoot failed: ${msg}`);
+      // Non-fatal: iris_execute_tests will re-try per-call in the target namespace
+    }
     logger.info(
       "Bootstrap: upgrade complete — webapp registration and package mapping already exist, skipped",
     );
@@ -350,6 +411,27 @@ export async function bootstrap(
     const msg = error instanceof Error ? error.message : String(error);
     result.errors.push(`Package mapping failed: ${msg}`);
     // Non-fatal: cross-namespace iris_execute_command won't work but everything else will
+  }
+
+  // Step 6: Ensure ^UnitTestRoot in the configured namespace. Independent from
+  // all prior steps — own try/catch so a failure here does not mask earlier
+  // successes. iris_execute_tests will ensure the global per-call in whatever
+  // target namespace it was invoked against, so this bootstrap step only
+  // covers the common case of tests against the configured namespace.
+  try {
+    result.unitTestRoot = await ensureUnitTestRoot(
+      http,
+      config.namespace,
+      version,
+    );
+    result.unitTestRootEnsured = true;
+    logger.info(
+      `Bootstrap: ^UnitTestRoot ensured in '${config.namespace}' (value: ${result.unitTestRoot})`,
+    );
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    result.errors.push(`EnsureUnitTestRoot failed: ${msg}`);
+    // Non-fatal: iris_execute_tests will re-try per-call in the target namespace
   }
 
   return result;

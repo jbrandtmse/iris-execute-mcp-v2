@@ -419,8 +419,12 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
-    // First post was SQL discovery, second was queue
-    expect(mockHttp.post).toHaveBeenCalledTimes(2);
+    // First post = SQL package discovery; second = ensureUnitTestRoot SQL;
+    // third = /work queue. The ensureUnitTestRoot call is wrapped in its
+    // own try/catch in the handler — if the mock envelope doesn't carry a
+    // UnitTestRoot row, the function returns "" silently and the flow
+    // continues to the /work POST.
+    expect(mockHttp.post).toHaveBeenCalledTimes(3);
 
     const structured = result.structuredContent as { total: number; passed: number };
     expect(structured.total).toBe(2);

@@ -9,7 +9,12 @@
  * `/api/executemcp/v2/classmethod`, NOT the Atelier API.
  */
 
-import { IrisApiError, atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  IrisApiError,
+  atelierPath,
+  ensureUnitTestRoot,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
@@ -183,6 +188,23 @@ export const executeTestsTool: ToolDefinition = {
         const testEntry: { class: string; methods?: string[] } = { class: className! };
         if (methodName) testEntry.methods = [methodName];
         tests = [testEntry];
+      }
+
+      // Ensure ^UnitTestRoot is defined in the target namespace. The
+      // Atelier /work unittest endpoint silently crashes the response
+      // serializer (%Api.Atelier.v8::UnitTestResultToJSON) with a
+      // <SUBSCRIPT> error when ^UnitTestRoot is undefined, even with the
+      // /noload qualifier. The bootstrap only ensures this in the
+      // configured namespace; this per-call ensure covers any target
+      // namespace the tool is invoked against. Wrapped in its own try/catch
+      // so an ensure failure (e.g., Setup class not deployed in target ns)
+      // does not block the test attempt — the user may have set the global
+      // manually already.
+      try {
+        await ensureUnitTestRoot(ctx.http, ns, ctx.atelierVersion);
+      } catch {
+        // Fall through — the subsequent /work call will surface any real
+        // missing-global error in its response if the global is still unset.
       }
 
       // Queue the async unittest request via Atelier work endpoint

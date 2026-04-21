@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "ec1115a4e191";
+export const BOOTSTRAP_VERSION = "5ffd4dee0649";
 
 export interface BootstrapClass {
   name: string;
@@ -233,7 +233,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "ec1115a4e191";
+Parameter BOOTSTRAPVERSION = "5ffd4dee0649";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -383,6 +383,35 @@ ClassMethod IsConfigured() As %Boolean [ SqlProc ]
         Set tResult = 0
     }
     Quit tResult
+}
+
+/// Ensure <code>^UnitTestRoot</code> is defined in the current namespace.
+/// <p>InterSystems <class>%UnitTest.Manager</class>.RunTest requires this global
+/// to be defined and non-empty. The Atelier <code>/work</code> endpoint with
+/// <code>request: "unittest"</code> (which the <code>iris_execute_tests</code> tool
+/// uses) sets the <code>/noload</code> qualifier internally, which means the
+/// path value does not need to point to a real directory — but the global must
+/// still exist. When undefined, RunTest fails at an internal "Finding
+/// directories" step and writes a partial result that crashes the response
+/// serializer (<code>%Api.Atelier.v8::UnitTestResultToJSON</code>) with a
+/// cryptic <code>&lt;SUBSCRIPT&gt;</code> error.</p>
+/// <p>This method is idempotent — it sets <code>^UnitTestRoot</code> only when
+/// undefined or empty. The chosen value is <code>$System.Util.ManagerDirectory()</code>,
+/// which is always a real directory on the IRIS install and therefore safe even
+/// if a future IRIS version starts validating the path.</p>
+/// <p>The bootstrap calls this method via the Atelier SQL endpoint after the
+/// REST classes are deployed and the web application is configured. It is wrapped
+/// in its own try/catch on the client side so a failure here (e.g., insufficient
+/// privileges) does not abort the rest of the bootstrap.</p>
+/// <p>Returns the current value of <code>^UnitTestRoot</code> after the
+/// idempotent set, so the caller can verify the global was successfully
+/// populated.</p>
+ClassMethod EnsureUnitTestRoot() As %String [ SqlProc ]
+{
+    If $Get(^UnitTestRoot) = "" {
+        Set ^UnitTestRoot = $System.Util.ManagerDirectory()
+    }
+    Quit ^UnitTestRoot
 }
 
 /// Return the bootstrap version stamp baked into this class at embed time.

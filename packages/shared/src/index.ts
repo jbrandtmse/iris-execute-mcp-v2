@@ -39,6 +39,8 @@ export {
   deployClasses,
   compileClasses,
   configureWebApp,
+  configurePackageMapping,
+  ensureUnitTestRoot,
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
 export type { BootstrapResult } from "./bootstrap.js";
