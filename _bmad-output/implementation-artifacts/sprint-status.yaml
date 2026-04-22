@@ -165,7 +165,7 @@ development_status:
   # 16 bugs identified in the 2026-04-21 comprehensive test pass. Pre-publish quality gate.
   # Single BOOTSTRAP_VERSION bump at end of Story 11.3 covers all ObjectScript edits (11.1–11.3).
   # Inline CHANGELOG + README updates per story — no standalone docs rollup (zero new tools).
-  epic-11: in-progress
+  epic-11: done
   11-1-objectscript-error-envelope-and-sanitization: done
   11-2-security-handler-completeness: done
   11-3-db-metrics-config-accuracy-and-bootstrap-bump: done
