@@ -203,7 +203,7 @@ Do NOT strip `<ERROR>` bracket-style tokens like `<UNDEFINED>` — those don't h
 
 **Rule:** If the system-class call returns a non-OK `%Status`, propagate its text via `##class(ExecuteMCPv2.Utils).SanitizeError(tSC)` instead of wrapping in a generic `"Failed to X for Y"` string. The IRIS error text usually contains the real reason (policy violation, missing argument, nonexistent target) that the client needs to fix their request.
 
-Exception: if the `%Status` text could embed a sensitive value (e.g., a password) that the client submitted, apply field-specific redaction BEFORE propagating — but don't drop the diagnostic signal entirely. For password-field specifically, see [Rule #14](#14-password-redaction-gate-on-length).
+Exception: if the `%Status` text could embed a sensitive value (e.g., a password) that the client submitted, apply field-specific redaction BEFORE propagating — but don't drop the diagnostic signal entirely. Handle short-substring corruption (a single-letter password replacing every occurrence of that letter) with a minimum-length gate on the `$Replace` call.
 
 **Why:** Epic 11 Bug #12 (commit `fabddc0`): `iris_user_password action:"change"` for a non-existent user returned a generic `"Failed to change password for user 'NoSuchUser'"` instead of the actual IRIS error `"User NoSuchUser does not exist"`. Fix: pass the `%Status` from `Security.Users.Modify()` through `SanitizeError` directly.
 
@@ -292,29 +292,7 @@ The Arabic `خطأ` prefix on IRIS error text does NOT mean the instance locale 
 
 ---
 
-## 14. Password redaction — gate on length
-
-**Context:** Any handler that echoes IRIS-returned error text to the client after a password operation.
-
-**Rule:** If the error text could embed the candidate password (`$Replace(text, password, "***")`), gate the redaction on `$Length(password) >= 8`. Short candidates (e.g., a single letter `"a"`) will match unrelated occurrences of that letter in the error text and corrupt the message.
-
-```objectscript
-; Before:
-Set tMsg = $Replace(tMsg, tPassword, "***")  ; BUG: "a" corrupts every a in tMsg
-
-; After:
-If $Length(tPassword) >= 8 {
-    Set tMsg = $Replace(tMsg, tPassword, "***")
-}
-```
-
-`>= 8` matches the existing partial-match threshold for passwords (minimum IRIS password length per default policy). Short candidates are invalid anyway — their rejection text doesn't need password redaction because the IRIS validation message template doesn't embed the candidate.
-
-**Why:** Epic 11 Bug #8 (commit `b3be8a4`): `iris_user_password action:"validate"` with candidate `"a"` returned `"P***ssword does not m***tch length or p***ttern requirements"` — every `a` in the IRIS error text became `***`.
-
----
-
-## 15. Prefer live IRIS probe over web research for IRIS-specific APIs
+## 14. Prefer live IRIS probe over web research for IRIS-specific APIs
 
 **Context:** Implementing a handler that needs to call an uncommon IRIS system class method, and the exact API is uncertain.
 
@@ -331,5 +309,7 @@ This is almost always faster than iterating on search queries when the API is IR
 
 ---
 
-## Rules captured: 15
+## Rules captured: 14
 ## Epics contributing: 11 (retro 2026-04-21)
+
+**Audit note (2026-04-21):** Rule #14 ("Password redaction — gate on length") was initially codified, then removed during the retro's self-audit. The retro's own Murat-triage had flagged Bug #8 as narrow ("not a general pattern — fix is in code, no rule needed"), but it was codified anyway. Removal enforces Rule #1's "narrow one-off fixes do NOT become rules" principle. The fix remains in the code and the retro bug log.
