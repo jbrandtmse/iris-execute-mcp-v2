@@ -892,3 +892,28 @@ Single `BOOTSTRAP_VERSION` bump at end of Story 11.3 covers all Epic 11 ObjectSc
   - **Live verification at both dev AND lead layers**: dev exercised all 6 bugs against HSCUSTOM during implementation; lead independently re-ran 5 of them against USER + HSCUSTOM via the MCP tools (Bug #6 skipped at lead layer because TS Zod side lands in Story 11.4; server-side already dev-verified).
 - **Code review (CLEAN — 0 HIGH, 0 MEDIUM, 0 deferred):** 9 raw findings from three-layer review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) — all dismissed as either documented intent, verified-safe edge cases, or acceptable tradeoffs. Notable: the `$Piece` exact-equality loop for `%All` detection was specifically validated against the false-positive `%AllCustom` scenario. `BOOTSTRAP_VERSION` unchanged at `2689f7f657e4` confirmed via git diff on `packages/shared/src/bootstrap-classes.ts`. All 13 ACs (AC 11.2.1 through AC 11.2.13) pass.
 - **Final verification:** `pnpm turbo run build` → clean across 6 packages. `pnpm turbo run test` → admin suite 204 → 210 (+6 tests), full suite green. `pnpm turbo run lint` → no new warnings on touched files. No `^ClineDebug` in committed code. `^ClineDebug*` debug globals killed on IRIS post-investigation.
+
+### Story 11.3: DB / metrics / config accuracy + BOOTSTRAP_VERSION bump + live verification
+- **Status:** done
+- **Commit:** 524d170
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Config.cls` — `DatabaseList()` opens `SYS.Database` per row for Size/MaxSize/ExpansionSize (same pattern as `Monitor:DatabaseCheck`)
+  - `src/ExecuteMCPv2/REST/Monitor.cls` — `SystemMetrics()` uses `SYS.Stats.Global.Sample()` (sum RefLocal+RefPrivate+RefRemote) and `SYS.Stats.Routine.Sample().RtnCommands` for instance-wide counters
+  - `src/ExecuteMCPv2/REST/SystemConfig.cls` — locale branch exposes `current` via `%SYS.NLS.Locale.%New().Name` with `^%SYS("LOCALE","CURRENT")` global-read fallback
+  - `packages/shared/src/bootstrap-classes.ts` — BOOTSTRAP_VERSION `2689f7f657e4` → `3fb0590b5d16` (single Epic 11 bump covering Stories 11.1 + 11.2 + 11.3 ObjectScript changes)
+  - `packages/iris-admin-mcp/src/__tests__/database.test.ts` — +1 test (iris_database_list returns real sizes)
+  - `packages/iris-ops-mcp/src/__tests__/metrics.test.ts` — +1 test (iris_metrics_system forwards system-wide counters)
+  - `packages/iris-ops-mcp/src/__tests__/config.test.ts` — +1 test (iris_config_manage get locale includes current)
+  - `packages/iris-admin-mcp/README.md` — `iris_database_list` section notes sizes from SYS.Database
+  - `packages/iris-ops-mcp/README.md` — `iris_metrics_system` counter source clarified; `iris_config_manage` locale `current` field documented
+  - `tool_support.md` — fields-returned notes for 3 affected tools
+  - `CHANGELOG.md` — 4 new `### Fixed` bullets in the `## [Pre-release — 2026-04-21]` block
+- **Key design decisions:**
+  - **Bug #9 API research**: Perplexity returned irrelevant results for IRIS-specific counter APIs. Dev pivoted to direct IRIS exploration via `iris_doc_list SYS.Stats%` + `iris_doc_get SYS.Stats.Global.cls` / `SYS.Stats.Routine.cls`. Both classes extend `SYS.WSMon.wsResource` and expose `Sample()` → returns a read-only object with field-specific counters. The sum `RefLocal + RefPrivate + RefRemote` matches mgstat GloRefs formula; `RtnCommands` is the instance-wide routine command total. Cross-checked via two consecutive calls ~5s apart: globals delta ≈ 250k-675k, routines delta ≈ 15k-29k — realistic rates matching mgstat throughput.
+  - **Bug #15 locale surprise**: Story hypothesized current locale was `araw` (Arabic-Windows) based on the `خطأ` error prefix seen in Epic 11 test sessions. Actual value returned by `%SYS.NLS.Locale.%New().Name` is `enuw` (English-Windows). The Arabic prefix comes from NLS *message translation tables*, not the active locale — the two are independently configurable. Fix is robust against any locale code (uses `%Get` accessor, not a fixed string).
+  - **Bug #2 fix pattern**: mirrored `Monitor:DatabaseCheck` lines 634–643 which already correctly joins `SYS.Database` to `Config.Databases`. Surgical edit to `DatabaseList()` only touches the three size fields; other fields (directory, mountRequired, readOnly, etc.) continue to come from `Config.Databases.Get()` unchanged.
+  - **Single BOOTSTRAP_VERSION bump**: Stories 11.1 and 11.2 deliberately deferred their bootstrap bumps to this story per the epic plan. One `npm run gen:bootstrap` run covered all Epic 11 ObjectScript changes. New hash is deterministic — re-running `gen:bootstrap` produces zero diff, confirming no staleness.
+  - **Live verification gate**: Story 11.3 was the end-to-end gate for Epic 11. All 12 ObjectScript bugs from Stories 11.1, 11.2, 11.3 passed live verification on HSCUSTOM (dev layer) AND USER (lead layer), cross-namespace. Metrics counter monotonicity was proven via two consecutive calls.
+- **Code review (CLEAN — 0 HIGH, 0 MEDIUM, 2 LOW deferred):** The two LOW findings are pre-existing `%ResultSet.Close()` not-called-on-exception-path issues in `Config.cls:DatabaseList()` and `SystemConfig.cls` locale branch — NOT introduced by this story. Logged to deferred-work.md for a future hardening pass. All 10 ACs pass.
+- **Final verification:** `pnpm turbo run build` → clean across 6 packages. `pnpm turbo run test` → admin 210 → 211, ops 150 → 152 (+3 tests), full suite 12/12 green. `pnpm turbo run lint` → no new warnings on touched files. No `^ClineDebug` in committed code. Temporary probe class `ExecuteMCPv2.Temp.Probe11` was loaded to HSCUSTOM for Bug #9 research and deleted after use (verified absent via `iris_doc_list filter=Probe`).
+
