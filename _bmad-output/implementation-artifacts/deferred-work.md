@@ -143,3 +143,38 @@ These retrospective action items are the publishing activity itself and live bey
 - **Missing ObjectScript unit test for `SanitizeError` prefix-strip (Bug #11)** (`src/ExecuteMCPv2/Tests/UtilsTest.cls`) — Story 11.1 adds the `"ERROR #N: "` / `"خطأ #N: "` strip to `Utils.SanitizeError` but no unit test exercises the strip itself. `TestSanitizeErrorStripsDetails` still passes (it only checks caret-reference removal), so a future regression of the prefix-strip would not be caught by the existing test suite. AC 11.1.5 explicitly scoped tests to +2 TypeScript tests, and AC 11.1.6 defers end-to-end validation to Story 11.3, so adding a `TestSanitizeErrorStripsLeadingErrorPrefix` test is out of Story 11.1's scope. LOW–MEDIUM severity. Recommend adding as part of Story 11.3 or a follow-up test-hardening story: assert that `GetErrorText(SanitizeError($$$ERROR($$$GeneralError, "ERROR #5001: Foo")))` contains exactly one `#5001` prefix.
 - **Prefix-strip only handles English `ERROR` and Arabic `خطأ`; other locales still double-wrap** (`src/ExecuteMCPv2/Utils.cls:141`) — IRIS ships `ERREUR` (French), `FEHLER` (German), and other localized prefixes from `$System.Status.GetErrorText`. The current two-entry `For tPrefix = "ERROR #", "خطأ #"` list will miss those locales and produce `ERROR #5001: ERREUR #5001: ...` chains on locale-mixed environments. AC 11.1.2 and the sprint-change-proposal explicitly name only these two variants, so this is in-scope as-specified but fragile for multi-locale installs. LOW severity. If more locales matter, generalize to a regex-style scan over a configured prefix list or use `$System.Status.DecomposeStatus` to get the code + message fields directly instead of string-parsing `GetErrorText` output.
 - **`Use tInitIO` without mnemonic clause leaves mnemonic routine bound after restore** (`src/ExecuteMCPv2/REST/Command.cls:75,96`) — Line 55 binds the redirect mnemonic via `Use tInitIO::("^"_$ZNAME)`, and the restore uses bare `Use tInitIO` (no mnemonic clause). In IRIS, `Use device` without a third colon-clause does NOT unbind the previously-set mnemonic routine — it stays bound on the device even after `ReDirectIO(0)`. Since the redirect flag is disabled, writes go to the default output, so there is no observable bug today. Latent concern only: if any code further up the stack later re-enables redirect on this device without first rebinding a mnemonic, the stale `^ExecuteMCPv2.REST.Command.1` would be used. LOW severity. A belt-and-braces fix would be `Use tInitIO::("")` or `Use tInitIO:::$Select(tOldMnemonic="":"", 1:"^"_tOldMnemonic)` to explicitly clear/restore the mnemonic. Deferred because the live verification in AC 11.1.4 confirms the current restore is sufficient for the Atelier request lifecycle.
+
+---
+
+## Triaged via Story 12.0 (2026-04-22)
+
+Story 12.0 formally triaged all Epic 11 retrospective action items and all unclosed `deferred-work.md` entries against Epic 12 scope. See `12-0-epic-11-deferred-cleanup.md` for the authoritative triage tables. Summary of decisions:
+
+### Resolved by Story 12.0
+
+- **Missing ObjectScript unit test for `SanitizeError` prefix-strip** (`src/ExecuteMCPv2/Tests/UtilsTest.cls`) — **RESOLVED in Story 12.0**. Two new test methods added: `TestSanitizeErrorStripsLeadingErrorPrefix` and `TestSanitizeErrorStripsArabicPrefix`. Both verify that calling `SanitizeError` is idempotent — repeated calls do not accumulate additional `#N:` prefix nesting. This closes the coverage gap flagged by the Epic 11 code review (CR 11.1) and codified in Rule #8. 19/19 tests pass.
+
+### Dropped (already resolved, no further action needed)
+
+- **Retro action item: Build publishing checklist (npm account, package.json fields)** — Already captured in `publishing-checklist-npm-ipm.md` and the `user_npm_publish_experience` memory. No Story 12.0 action needed.
+- **Retro action item: Grep for stale `protocols:` references in mocks/tests** — Completed during Epic 11 Story 11.4 code review. One instance found and fixed at that time. No further action.
+
+### Retained as open deferred items (not addressed in Story 12.0 or Epic 12)
+
+The following items remain open. They are NOT in Epic 12 scope and will be re-triaged after Epic 12's retrospective:
+
+**Epic 11 retrospective action items deferred:**
+- Retro action #1: Run pre-publish smoke test (Story 9.3 rerun) — deferred to pre-publish session.
+- Retro action #3: Update `/bmad-retrospective` skill to enforce Rules codification step — low urgency; Rule #1 is self-enforcing without formal skill update.
+- Retro action #6: Generalize locale prefix-strip for non-English/Arabic (FR, DE, etc.) — low priority; scoped out pending future hardening pass.
+
+**Code-review deferred items retained from prior epics:**
+- CR 10.1: `generated` query param ignored on `/modified/{ts}` Atelier branch — pre-existing inconsistency; not Epic 12 scope.
+- CR 10.1: Digit-prefixed "package" rows (e.g., `"2"`) — documented behavior with workaround; not worth synthetic bucketing.
+- CR 10.2: `.manifest.json.tmp` cleanup on rename failure — LOW severity; next run overwrites.
+- CR 10.2: Weird doc-name edge cases in `docNameToFilePath` — LOW severity; Atelier not observed to emit such names.
+- CR 11.3: `%ResultSet.Close()` not called on exception path — `Config.cls DatabaseList()` — LOW; same pattern throughout file; defer to future Config-handler hardening pass.
+- CR 11.3: `%ResultSet.Close()` not called on exception path — `SystemConfig.cls locale branch` — LOW; same shape as above.
+- CR 11.1: Prefix-strip only handles English + Arabic; other locales double-wrap — LOW for this project (HSCUSTOM is `enuw` + mixed message tables).
+- CR 11.1: `Use tInitIO` without mnemonic clause — stale mnemonic binding — latent concern only; live Epic 11 verification confirmed current restore is sufficient.
+- Epic 8.x CR/retro legacy: Duplicate `getIntegrationConfig` helpers, DRY env-var docs, missing package.json fields — cosmetic/publishing-checklist items unchanged from Story 9.0 closure.

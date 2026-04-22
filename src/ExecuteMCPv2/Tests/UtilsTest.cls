@@ -160,4 +160,45 @@ Method TestSanitizeErrorStripsDetails() As %Status
     Quit $$$OK
 }
 
+/// Test SanitizeError does not accumulate English ERROR prefix nesting (Rule #8 / Bug #11 regression guard).
+/// <p>When SanitizeError receives a status whose embedded message already begins with "ERROR #N: "
+/// (a double-wrap scenario), the prefix-strip logic prevents further nesting. This test verifies
+/// idempotency: calling SanitizeError a second time does not add another #N: level.
+/// The IRIS instance on this project renders its own outer prefix in Arabic ("خطأ"), so the
+/// assertion targets prefix count stability rather than an absolute count of 1.</p>
+Method TestSanitizeErrorStripsLeadingErrorPrefix() As %Status
+{
+    ; Construct a status whose user message already embeds "ERROR #5001: Foo"
+    ; GetErrorText of this input shows two #5001 occurrences (outer IRIS prefix + inner embedded)
+    Set tInput = $$$ERROR($$$GeneralError, "ERROR #5001: Foo")
+    ; First sanitize pass: strips one leading prefix from the extracted text
+    Set tOnce = ##class(ExecuteMCPv2.Utils).SanitizeError(tInput)
+    ; Second sanitize pass: must NOT add another level (idempotency)
+    Set tTwice = ##class(ExecuteMCPv2.Utils).SanitizeError(tOnce)
+    Set tCountOnce = $Length($System.Status.GetErrorText(tOnce), "#5001") - 1
+    Set tCountTwice = $Length($System.Status.GetErrorText(tTwice), "#5001") - 1
+    ; The prefix count must not grow on repeated calls — that is the Bug #11 regression guard
+    Do $$$AssertTrue(tCountTwice = tCountOnce, "SanitizeError prefix count must be stable on repeated calls (once="_tCountOnce_", twice="_tCountTwice_")")
+    ; The result must still be an error status (not $$$OK)
+    Do $$$AssertStatusNotOK(tOnce, "Sanitized status should still be an error")
+    Quit $$$OK
+}
+
+/// Test SanitizeError does not accumulate Arabic prefix nesting (Rule #8 / Bug #11 — locale variant).
+/// <p>Same idempotency contract as TestSanitizeErrorStripsLeadingErrorPrefix but for the
+/// Arabic "خطأ #N: " prefix variant, which is the locale IRIS renders on this project's instance.</p>
+Method TestSanitizeErrorStripsArabicPrefix() As %Status
+{
+    ; Arabic chars for "خطأ": $Char(1582,1591,1571)
+    Set tArabicPrefix = $Char(1582,1591,1571)
+    Set tInput = $$$ERROR($$$GeneralError, tArabicPrefix_" #5001: Bar")
+    Set tOnce = ##class(ExecuteMCPv2.Utils).SanitizeError(tInput)
+    Set tTwice = ##class(ExecuteMCPv2.Utils).SanitizeError(tOnce)
+    Set tCountOnce = $Length($System.Status.GetErrorText(tOnce), "#5001") - 1
+    Set tCountTwice = $Length($System.Status.GetErrorText(tTwice), "#5001") - 1
+    Do $$$AssertTrue(tCountTwice = tCountOnce, "Arabic prefix count must be stable on repeated SanitizeError calls (once="_tCountOnce_", twice="_tCountTwice_")")
+    Do $$$AssertStatusNotOK(tOnce, "Sanitized Arabic-prefix status should still be an error")
+    Quit $$$OK
+}
+
 }
