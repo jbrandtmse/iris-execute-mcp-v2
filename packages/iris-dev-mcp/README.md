@@ -397,6 +397,8 @@ Files are written to `C:/dev/iris-export/MyApp/Service.cls`, `C:/dev/iris-export
 ```
 
 For a structural overview at package granularity, use `iris_package_list`. For individual document names, use `iris_doc_list`. To pull many documents at once, see `iris_doc_export`.
+
+> **Note on CSP static assets in system namespaces.** Because `iris_package_list` aggregates the same Atelier `docnames` feed that `iris_doc_export` walks, it inherits the same system-namespace asymmetry: static web files (CSS, JS, images under `/csp/…/*.css`, `*.js`, etc.) appear in `docnames` even though they are not stored in an Atelier-retrievable form. On a stock IRIS 2025.1 `%SYS` namespace the `csp` package row will look inflated (~2,174 of 6,131 docs) for this reason. This is an **IRIS-side asymmetry, not a tool defect**. To get a clean code-only rollup, pass **`category: "CLS"`** (classes) or **`category: "RTN"`** (routines + include files) — the same workaround documented for `iris_doc_export`.
 </details>
 
 <details>

@@ -407,7 +407,11 @@ export const docListTool: ToolDefinition = {
 
     // ── Modified-since mode: use /modified/{timestamp} endpoint ───
     if (modifiedSince) {
-      const path = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
+      const base = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
+      const params = new URLSearchParams();
+      if (generated !== undefined) params.set("generated", String(generated ? 1 : 0));
+      const queryString = params.toString();
+      const path = queryString ? `${base}?${queryString}` : base;
       const response = await ctx.http.get(path);
       const allDocs: unknown[] = extractAtelierContentArray(response.result);
       const { page, nextCursor } = ctx.paginate(allDocs, cursor);

@@ -237,6 +237,36 @@ describe("iris_package_list", () => {
     expect(sc.totalDocs).toBe(3);
   });
 
+  it("includes generated=1 when both modifiedSince and generated:true are set", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [] }));
+
+    await packageListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z", generated: true },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain(
+      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
+    );
+    expect(calledPath).toContain("generated=1");
+  });
+
+  it("omits generated query param on /modified/ branch when generated is undefined", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [] }));
+
+    await packageListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z" },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain(
+      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
+    );
+    expect(calledPath).not.toContain("generated=");
+  });
+
   it("returns empty packages/count/totalDocs for an empty namespace", async () => {
     mockHttp.get.mockResolvedValue(envelope({ content: [] }));
 

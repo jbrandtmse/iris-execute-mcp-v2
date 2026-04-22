@@ -448,6 +448,36 @@ describe("iris_doc_list", () => {
     );
   });
 
+  it("includes generated=0 on /modified/ branch when modifiedSince and generated:false are both set", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z", generated: false },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain(
+      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
+    );
+    expect(calledPath).toContain("generated=0");
+  });
+
+  it("omits generated query param on /modified/ branch when generated is undefined", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docListTool.handler(
+      { modifiedSince: "2026-04-05T00:00:00Z" },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain(
+      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
+    );
+    expect(calledPath).not.toContain("generated=");
+  });
+
   it("should pass generated=0 when generated is false", async () => {
     mockHttp.get.mockResolvedValue(envelope([]));
 

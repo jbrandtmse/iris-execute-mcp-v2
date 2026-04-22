@@ -194,11 +194,17 @@ export const packageListTool: ToolDefinition = {
     // ── Build the Atelier request path ────────────────────────────
     let fullPath: string;
     if (modifiedSince) {
-      fullPath = atelierPath(
+      const base = atelierPath(
         ctx.atelierVersion,
         ns,
         `modified/${encodeURIComponent(modifiedSince)}`,
       );
+      const params = new URLSearchParams();
+      if (generated !== undefined) {
+        params.set("generated", String(generated ? 1 : 0));
+      }
+      const queryString = params.toString();
+      fullPath = queryString ? `${base}?${queryString}` : base;
     } else {
       const cat = category ?? "*";
       const typ = type ?? "*";
