@@ -957,3 +957,15 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **Epic 11 status:** All 4 stories `done`. Retrospective `optional` (lead-owned gate before Epic 11 closes).
 
 
+
+## Story 12.0: Epic 11 Deferred Cleanup (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/Tests/UtilsTest.cls` (+2 test methods), `_bmad-output/implementation-artifacts/deferred-work.md` (closure section appended), `_bmad-output/implementation-artifacts/12-0-epic-11-deferred-cleanup.md` (new story file with full triage).
+- **Key design decisions**:
+  - **Idempotency assertion over exact-count-one**: original spec asked for "exactly one `#5001` in final text" but instance's NLS message tables render the IRIS-generated outer prefix in Arabic even when locale is `enuw`. Dev adapted to idempotency (two consecutive `SanitizeError` calls don't grow the count) — precisely guards Bug #11's accumulating-prefix shape regardless of locale rendering.
+  - **Two test methods, not one**: separate `TestSanitizeErrorStripsLeadingErrorPrefix` (English) and `TestSanitizeErrorStripsArabicPrefix` (Arabic variant) — clearer failure isolation than one combined method.
+- **Code review**: 0 HIGH, 0 MEDIUM, 0 LOW, 1 INFO dismissed (idempotency vacuous-pass edge case — guarded by the existing `TestSanitizeErrorStripsDetails` content-loss test).
+- **Issues auto-resolved**: none (zero actionable findings).
+- **Live verification**: 19/19 `ExecuteMCPv2.Tests.UtilsTest` pass on HSCUSTOM post-deploy (17 pre-existing + 2 new). Step 2.5 N/A (test class, not REST handler).
+- **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16` (test classes are not in the bootstrap set).
+- **Commit**: `6e37a1d` — `feat(story-12.0): Epic 11 deferred cleanup — SanitizeError prefix-strip test + triage closure`.

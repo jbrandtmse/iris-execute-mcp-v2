@@ -178,3 +178,7 @@ The following items remain open. They are NOT in Epic 12 scope and will be re-tr
 - CR 11.1: Prefix-strip only handles English + Arabic; other locales double-wrap — LOW for this project (HSCUSTOM is `enuw` + mixed message tables).
 - CR 11.1: `Use tInitIO` without mnemonic clause — stale mnemonic binding — latent concern only; live Epic 11 verification confirmed current restore is sufficient.
 - Epic 8.x CR/retro legacy: Duplicate `getIntegrationConfig` helpers, DRY env-var docs, missing package.json fields — cosmetic/publishing-checklist items unchanged from Story 9.0 closure.
+
+## Deferred from: code review of 12-1-password-change-fix-and-policy-surface (2026-04-22)
+
+- **No test for `changePasswordOnNextLogin: false → 0` path** (`packages/iris-admin-mcp/src/__tests__/user.test.ts`) — The `false → 0` conversion is the symmetric counterpart to the tested `true → 1` path (handler: `changePasswordOnNextLogin ? 1 : 0`). LOW severity. The logic is trivial and the handler code is correct; adding a `changePasswordOnNextLogin: false` test case would fully close the branch. Could be added in a future test-hardening pass or alongside Story 12.4's live-verification tests.

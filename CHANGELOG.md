@@ -2,6 +2,17 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-04-22]
+
+### Fixed
+
+- **`iris_user_password action:"change"` now actually changes the password** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — handler was setting the `ChangePassword` boolean (force-change-on-next-login flag) instead of the `Password` property. Every change attempt failed with 'not a valid boolean'. BUG-1.
+
+### Added
+
+- **`iris_user_password action:"change"` accepts `changePasswordOnNextLogin`** ([packages/iris-admin-mcp/src/tools/user.ts](packages/iris-admin-mcp/src/tools/user.ts)) — optional boolean. When true, forces the user to change their password on next login in the same `Security.Users.Modify()` call as the password change.
+- **`iris_user_password action:"validate"` returns the active password policy** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — response includes `policy:{minLength, pattern}` so callers can see what rules are being enforced. FEAT-4.
+
 ## [Pre-release — 2026-04-21]
 
 ### Fixed

@@ -763,6 +763,89 @@ describe("iris_user_password", () => {
     expect(responseText).not.toContain("LeakyPassword123!");
   });
 
+  it("sends password (not changePasswordOnNextLogin) on change action", async () => {
+    // Story 12.1 AC 12.1.1 regression guard: before the fix, the handler set
+    // tProps("ChangePassword") = tPassword which caused "not a valid boolean" errors.
+    // After the fix, tProps("Password") = tPassword. This test asserts the TS layer
+    // sends a body with the 'password' key and that the response contains action:"changed".
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "changed", username: "TestUser", success: true }),
+    );
+
+    const result = await userPasswordTool.handler(
+      { action: "change", username: "TestUser", password: "NewPwd123!" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/user/password",
+      expect.objectContaining({ password: "NewPwd123!" }),
+    );
+    // changePasswordOnNextLogin must NOT appear in the body when not provided by caller
+    const callBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(callBody).not.toHaveProperty("changePasswordOnNextLogin");
+
+    const structured = result.structuredContent as { action: string; success: boolean };
+    expect(structured.action).toBe("changed");
+    expect(structured.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("forwards changePasswordOnNextLogin when provided", async () => {
+    // Story 12.1 AC 12.1.2: when changePasswordOnNextLogin is true, the TS layer
+    // must pass it through as integer 1 so the ObjectScript handler can set
+    // tProps("ChangePassword") = 1 in the same Security.Users.Modify() call.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "changed", username: "TestUser", success: true }),
+    );
+
+    await userPasswordTool.handler(
+      {
+        action: "change",
+        username: "TestUser",
+        password: "NewPwd123!",
+        changePasswordOnNextLogin: true,
+      },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/user/password",
+      expect.objectContaining({
+        password: "NewPwd123!",
+        changePasswordOnNextLogin: 1,
+      }),
+    );
+  });
+
+  it("surfaces password policy in validate response", async () => {
+    // Story 12.1 AC 12.1.3: validate response includes policy block so callers
+    // can see what rules are being enforced without a round-trip to a config tool.
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        action: "validate",
+        valid: true,
+        policy: { minLength: 8, pattern: "8.128ANP" },
+      }),
+    );
+
+    const result = await userPasswordTool.handler(
+      { action: "validate", password: "StrongPass123!" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      action: string;
+      valid: boolean;
+      policy: { minLength: number; pattern: string };
+    };
+    expect(structured.valid).toBe(true);
+    expect(structured.policy).toBeDefined();
+    expect(structured.policy.minLength).toBe(8);
+    expect(structured.policy.pattern).toBe("8.128ANP");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("iris_user_password change propagates IRIS error text", async () => {
     // Story 11.2 Bug #12: the ObjectScript change branch used to wrap
     // the real %Status from Security.Users.Modify() with a generic

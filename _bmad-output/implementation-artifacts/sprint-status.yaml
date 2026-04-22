@@ -180,7 +180,7 @@ development_status:
   # FEAT-2 rest_manage scope rename is a breaking change (pre-release). Adds one new tool (iris_alerts_manage in Story 12.6) and one new FR to prd.md.
   epic-12: in-progress
   12-0-epic-11-deferred-cleanup: done
-  12-1-password-change-fix-and-policy-surface: backlog
+  12-1-password-change-fix-and-policy-surface: done
   12-2-production-control-dynamicobject-audit: backlog
   12-3-production-create: backlog
   12-4-database-modify-docdb-and-bootstrap-bump: backlog

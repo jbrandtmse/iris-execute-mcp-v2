@@ -294,7 +294,11 @@ export const userPasswordTool: ToolDefinition = {
   title: "Manage User Password",
   description:
     "Change a user's password or validate a candidate password against IRIS password rules. " +
-    "For 'change', username and password are required. For 'validate', only password is needed. " +
+    "For 'change', username and password are required. Optional changePasswordOnNextLogin boolean " +
+    "forces the user to change their password at next login (sets the ChangePassword flag alongside " +
+    "the new password in the same Security.Users.Modify() call). " +
+    "For 'validate', only password is needed; the response includes the active password policy " +
+    "(policy.minLength and policy.pattern) so callers can see what rules are being enforced. " +
     "Passwords are never included in responses.",
   inputSchema: z.object({
     action: z
@@ -307,6 +311,14 @@ export const userPasswordTool: ToolDefinition = {
     password: z
       .string()
       .describe("New password to set or candidate password to validate"),
+    changePasswordOnNextLogin: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, force the user to change their password on next login " +
+          "(sets Security.Users.ChangePassword flag alongside the new password). " +
+          "Only valid for 'change' action. Default: leave existing flag unchanged.",
+      ),
   }),
   annotations: {
     destructiveHint: true,
@@ -316,14 +328,17 @@ export const userPasswordTool: ToolDefinition = {
   },
   scope: "SYS",
   handler: async (args, ctx) => {
-    const { action, username, password } = args as {
+    const { action, username, password, changePasswordOnNextLogin } = args as {
       action: string;
       username?: string;
       password: string;
+      changePasswordOnNextLogin?: boolean;
     };
 
-    const body: Record<string, string> = { action, password };
+    const body: Record<string, unknown> = { action, password };
     if (username) body.username = username;
+    if (changePasswordOnNextLogin !== undefined)
+      body.changePasswordOnNextLogin = changePasswordOnNextLogin ? 1 : 0;
 
     const path = `${BASE_URL}/security/user/password`;
 

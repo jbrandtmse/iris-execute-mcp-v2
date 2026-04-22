@@ -124,7 +124,7 @@ All servers use the same environment variables:
 | `iris_user_manage` | Create, modify, or delete a user account | `action`, `name`, `password?`, `fullName?`, `roles?`, `enabled?`, `namespace?` | destructive |
 | `iris_user_get` | Get a user or list all users | `name?`, `cursor?` | readOnly, idempotent |
 | `iris_user_roles` | Add or remove a role from a user | `action`, `username`, `role` | destructive |
-| `iris_user_password` | Change or validate a password | `action`, `username?`, `password` | destructive |
+| `iris_user_password` | Change or validate a password | `action`, `username?`, `password`, `changePasswordOnNextLogin?` | destructive |
 | `iris_permission_check` | Check user/role permissions on a resource | `target`, `resource`, `permission` | readOnly, idempotent |
 
 ### Role & Resource Tools
@@ -404,9 +404,9 @@ or inaccessible databases fall back to `0` without raising an error.
 </details>
 
 <details>
-<summary><strong>iris_user_password</strong> -- Change password</summary>
+<summary><strong>iris_user_password</strong> -- Change or validate password</summary>
 
-**Input:**
+**Change password (basic):**
 ```json
 {
   "action": "change",
@@ -415,7 +415,19 @@ or inaccessible databases fall back to `0` without raising an error.
 }
 ```
 
-**Output:**
+**Change password with force-change-on-next-login flag:**
+```json
+{
+  "action": "change",
+  "username": "AppUser",
+  "password": "NewSecureP@ss456",
+  "changePasswordOnNextLogin": true
+}
+```
+
+The optional `changePasswordOnNextLogin` boolean (default: leave existing flag unchanged) sets the `Security.Users.ChangePassword` flag in the same `Security.Users.Modify()` call as the password change. When `true`, IRIS will require the user to set a new password on their next login.
+
+**Change password output:**
 ```json
 {
   "action": "changed",
@@ -423,6 +435,29 @@ or inaccessible databases fall back to `0` without raising an error.
   "success": true
 }
 ```
+
+**Validate password:**
+```json
+{
+  "action": "validate",
+  "password": "candidate123"
+}
+```
+
+**Validate output (includes active password policy):**
+```json
+{
+  "action": "validate",
+  "valid": false,
+  "message": "Password does not match length or pattern requirements",
+  "policy": {
+    "minLength": 3,
+    "pattern": "3.128ANP"
+  }
+}
+```
+
+The `policy` block reflects the active IRIS system password policy (`Security.System.PasswordPattern`). `minLength` is extracted from the leading quantifier of the pattern string. When no policy is configured, `pattern` is `null` and a `comment` field explains the absence.
 
 > **Note:** When `Security.Users.Modify()` fails (policy violation,
 > missing user, permission error, etc.), the underlying IRIS error

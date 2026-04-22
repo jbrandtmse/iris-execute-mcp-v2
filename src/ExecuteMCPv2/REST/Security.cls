@@ -371,8 +371,12 @@ ClassMethod UserRoles() As %Status
 /// <p>Reads a JSON body with <code>action</code> (change|validate),
 /// <code>username</code> (required for change), and <code>password</code>.
 /// For change, uses <method>Security.Users.Modify</method> with the
-/// <code>ChangePassword</code> property. For validate, calls
-/// <code>$SYSTEM.Security.ValidatePassword()</code>.</p>
+/// <code>Password</code> property (the write-only password setter).
+/// Optional <code>changePasswordOnNextLogin</code> boolean sets the
+/// <code>ChangePassword</code> flag (force-change-on-next-login) alongside
+/// the new password in the same Modify call. For validate, calls
+/// <code>$SYSTEM.Security.ValidatePassword()</code> and returns the active
+/// password policy from <code>Security.System.Get()</code>.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER echoed in responses
 /// or error messages. Only success/failure status is returned.</p>
 ClassMethod UserPassword() As %Status
@@ -416,14 +420,22 @@ ClassMethod UserPassword() As %Status
             ; Switch to %SYS for Security operations
             Set $NAMESPACE = "%SYS"
 
-            ; Use ChangePassword property to change password
-            Set tProps("ChangePassword") = tPassword
+            ; Password is the write-only setter for the actual password value.
+            ; ChangePassword is a boolean flag (force-change-on-next-login) — NOT the password setter.
+            ; Bug #1 (Story 12.1): original code set tProps("ChangePassword") = tPassword which triggered
+            ; "Datatype value 'X' is not a valid boolean" on every password change attempt.
+            Set tProps("Password") = tPassword
+            ; If caller explicitly provides changePasswordOnNextLogin, set the force-change flag
+            ; in the same Modify() call. Default (omitted) leaves the existing flag untouched.
+            If tBody.%IsDefined("changePasswordOnNextLogin") {
+                Set tProps("ChangePassword") = +tBody.%Get("changePasswordOnNextLogin")
+            }
             Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) {
                 ; Bug #12 — propagate the real IRIS error text (sanitized)
                 ; so callers see policy violations, missing-user errors,
-                ; etc. Security.Users.Modify() with tProps("ChangePassword")
+                ; etc. Security.Users.Modify() with tProps("Password")
                 ; does NOT embed the password in its %Status text, so the
                 ; generic wrap that used to be here removed diagnostic
                 ; signal for no security gain.
@@ -437,10 +449,69 @@ ClassMethod UserPassword() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "validate" {
+            ; Read active password policy from Security.System (in %SYS).
+            ; PasswordPattern is an ObjectScript match-pattern string (e.g. "3.128ANP")
+            ; where the leading N.M quantifier encodes the min-length (N) and max-length (M).
+            ; Policy fields are system-level — they do NOT leak the candidate password.
+            Set tPolicyMinLength = 0
+            Set tPolicyPattern = ""
+            Set tPolicyComment = ""
+            Set $NAMESPACE = "%SYS"
+            Kill tSysProps
+            Set tSysGetSC = ##class(Security.System).Get("SYSTEM", .tSysProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISOK(tSysGetSC) {
+                Set tRawPattern = $Get(tSysProps("PasswordPattern"))
+                ; "No rules" sentinel values: empty string, or a very loose "1." pattern (1+ chars, any type).
+                ; Any other pattern (including the IRIS install default "3.128ANP") IS a real policy and is parsed.
+                ; Extract min-length from leading quantifier: N.M or N at start of pattern.
+                If tRawPattern = "" {
+                    Set tPolicyComment = "No password policy configured on this instance"
+                } ElseIf $Extract(tRawPattern, 1, 2) = "1." && ($Length(tRawPattern) <= 4) {
+                    ; Matches very loose patterns like "1." which means "1 or more of any type" — effectively no rules
+                    Set tPolicyComment = "No password policy configured on this instance"
+                } Else {
+                    ; Parse leading quantifier N.M or N from the pattern string
+                    Set tPolicyPattern = tRawPattern
+                    Set tDotPos = $Find(tRawPattern, ".")
+                    If tDotPos > 1 {
+                        ; N.M form — min-length is the part before the dot
+                        Set tMinPart = $Extract(tRawPattern, 1, tDotPos - 2)
+                        If tMinPart ? 1.N {
+                            Set tPolicyMinLength = +tMinPart
+                        }
+                    } Else {
+                        ; N form — exact length
+                        Set tSingleNum = ""
+                        For tCI = 1:1:$Length(tRawPattern) {
+                            Set tChar = $Extract(tRawPattern, tCI)
+                            If tChar ? 1N { Set tSingleNum = tSingleNum _ tChar }
+                            Else { Quit }
+                        }
+                        If tSingleNum '= "" { Set tPolicyMinLength = +tSingleNum }
+                    }
+                }
+            } Else {
+                Set tPolicyComment = "Could not read password policy"
+            }
+
             ; Validate password against system password rules
             Set $NAMESPACE = "%SYS"
             Set tSC = $SYSTEM.Security.ValidatePassword(tPassword)
             Set $NAMESPACE = tOrigNS
+
+            ; Build policy sub-object (system-level only — never includes candidate password)
+            ; When pattern is empty (no rules), set the JSON "pattern" key to JSON null.
+            Set tPolicyObj = {"minLength": (tPolicyMinLength)}
+            If tPolicyPattern = "" {
+                Do tPolicyObj.%Set("pattern", "", "null")
+            } Else {
+                Do tPolicyObj.%Set("pattern", tPolicyPattern)
+            }
+            If tPolicyComment '= "" {
+                Do tPolicyObj.%Set("comment", tPolicyComment)
+            }
+
             If $$$ISOK(tSC) {
                 Set tResult = {"action": "validate", "valid": true}
             }
@@ -467,6 +538,8 @@ ClassMethod UserPassword() As %Status
                 Set tResult = {"action": "validate", "valid": false, "message": (tMsg)}
                 Set tSC = $$$OK
             }
+            ; Attach active password policy (safe — system-level, no candidate password)
+            Do tResult.%Set("policy", tPolicyObj)
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }
