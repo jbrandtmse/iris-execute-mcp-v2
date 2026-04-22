@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError } from "@iris-mcp/shared";
+import type { ToolContext, PaginateResult } from "@iris-mcp/shared";
+import { IrisApiError, encodeCursor, decodeCursor } from "@iris-mcp/shared";
 import {
   ruleListTool,
   ruleGetTool,
@@ -83,6 +83,95 @@ describe("iris_rule_list", () => {
     await expect(
       ruleListTool.handler({}, ctx),
     ).rejects.toThrow("Timeout");
+  });
+
+  // FEAT-3: prefix/filter/pagination
+
+  it("FEAT-3: should filter by prefix (client-side)", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({
+        rules: [
+          { name: "MyPackage.Rules.RoutingRule" },
+          { name: "MyPackage.Rules.ValidationRule" },
+          { name: "OtherPackage.Rules.SomeRule" },
+        ],
+        count: 3,
+      }),
+    );
+
+    const result = await ruleListTool.handler(
+      { prefix: "MyPackage.Rules" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      rules: Array<{ name: string }>;
+      count: number;
+      total: number;
+    };
+    expect(structured.rules).toHaveLength(2);
+    expect(structured.total).toBe(2);
+    expect(structured.rules.every((r) => r.name.startsWith("MyPackage.Rules"))).toBe(true);
+  });
+
+  it("FEAT-3: should filter by substring (case-insensitive, client-side)", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({
+        rules: [
+          { name: "MyPackage.Rules.RoutingRule" },
+          { name: "MyPackage.Rules.routingvalidation" },
+          { name: "MyPackage.Rules.ValidationRule" },
+        ],
+        count: 3,
+      }),
+    );
+
+    const result = await ruleListTool.handler(
+      { filter: "routing" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      rules: Array<{ name: string }>;
+      count: number;
+    };
+    // Both "RoutingRule" and "routingvalidation" should match (case-insensitive)
+    expect(structured.rules).toHaveLength(2);
+    expect(structured.rules.some((r) => r.name.includes("RoutingRule"))).toBe(true);
+    expect(structured.rules.some((r) => r.name.includes("routingvalidation"))).toBe(true);
+  });
+
+  it("FEAT-3: should return nextCursor for pagination", async () => {
+    const rules = Array.from({ length: 5 }, (_, i) => ({ name: `Pkg.Rule${i}` }));
+    mockHttp.get.mockResolvedValue(
+      envelope({ rules, count: 5 }),
+    );
+
+    // Use a paginating context that respects pageSize
+    const paginatingCtx: ToolContext = {
+      ...ctx,
+      paginate<T>(items: T[], cursor?: string, pageSize?: number): PaginateResult<T> {
+        const offset = decodeCursor(cursor);
+        const size = pageSize ?? 100;
+        const page = items.slice(offset, offset + size);
+        const nextOffset = offset + size;
+        const nextCursor = nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
+        return { page, nextCursor };
+      },
+    };
+
+    const result = await ruleListTool.handler(
+      { pageSize: 2 },
+      paginatingCtx,
+    );
+
+    const structured = result.structuredContent as {
+      rules: Array<{ name: string }>;
+      count: number;
+      nextCursor?: string;
+    };
+    expect(structured.rules).toHaveLength(2);
+    expect(structured.nextCursor).toBeDefined();
   });
 });
 

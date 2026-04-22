@@ -65,12 +65,10 @@ describe("iris_rest_manage", () => {
     expect(calledPath).not.toContain("/api/executemcp/v2");
   });
 
-  // Bug #13: scope:"all" routes to the ExecuteMCPv2 webapp endpoint (Path A),
-  // filters for entries with a non-empty dispatchClass, and normalizes the
-  // shape so callers get {name, dispatchClass, namespace, swaggerSpec: null}.
-  it("scope:'all' routes to ExecuteMCPv2 webapp endpoint and filters by dispatchClass (Bug #13)", async () => {
+  // FEAT-2: scope:"legacy" (was scope:"all" before Story 12.5 — BREAKING)
+  // routes to ExecuteMCPv2 webapp endpoint, filters for non-empty dispatchClass.
+  it("FEAT-2: scope:'legacy' routes to ExecuteMCPv2 webapp endpoint and filters by dispatchClass", async () => {
     const webapps = [
-      // Hand-written %CSP.REST dispatch class — the one %REST.API.GetAllRESTApps misses.
       {
         name: "/api/executemcp/v2",
         dispatchClass: "ExecuteMCPv2.REST.Dispatch",
@@ -82,7 +80,6 @@ describe("iris_rest_manage", () => {
         dispatchClass: "",
         namespace: "USER",
       },
-      // Another dispatch class — keep it.
       {
         name: "/api/other",
         dispatchClass: "Other.REST",
@@ -92,7 +89,7 @@ describe("iris_rest_manage", () => {
     mockHttp.get.mockResolvedValue(envelope(webapps));
 
     const result = await restManageTool.handler(
-      { action: "list", scope: "all", namespace: "HSCUSTOM" },
+      { action: "list", scope: "legacy", namespace: "HSCUSTOM" },
       ctx,
     );
 
@@ -106,7 +103,79 @@ describe("iris_rest_manage", () => {
       count: number;
     };
     expect(structured.count).toBe(2);
-    // ExecuteMCPv2.REST.Dispatch (the Bug #13 exemplar) must be present.
+    expect(structured.items[0]).toEqual({
+      name: "/api/executemcp/v2",
+      dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+      namespace: "HSCUSTOM",
+      swaggerSpec: null,
+    });
+    expect(structured.items.some((x) => x.name === "/csp/user")).toBe(false);
+  });
+
+  // FEAT-2: scope:"all" is the NEW union of spec-first + legacy
+  it("FEAT-2: scope:'all' returns union of spec-first and legacy apps", async () => {
+    const specFirstApps = [
+      { name: "/api/spec-app", dispatchClass: "SpecApp.Disp", swaggerSpec: "/swagger/spec-app" },
+    ];
+    const legacyWebapps = [
+      { name: "/api/executemcp/v2", dispatchClass: "ExecuteMCPv2.REST.Dispatch", namespace: "HSCUSTOM" },
+      { name: "/csp/user", dispatchClass: "", namespace: "USER" }, // filtered out
+    ];
+
+    // scope:"all" makes two calls: mgmnt API for spec-first, executemcp for legacy
+    mockHttp.get
+      .mockResolvedValueOnce(envelope(specFirstApps))   // spec-first call
+      .mockResolvedValueOnce(envelope(legacyWebapps));   // legacy call
+
+    const result = await restManageTool.handler(
+      { action: "list", scope: "all", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as { items: Array<Record<string, unknown>>; count: number };
+    // spec-first app + 1 legacy (filtered) = 2 total
+    expect(structured.count).toBe(2);
+    const names = structured.items.map((x) => x.name);
+    expect(names).toContain("/api/spec-app");
+    expect(names).toContain("/api/executemcp/v2");
+    expect(names).not.toContain("/csp/user");
+  });
+
+  // Bug #13 backward compat: scope:"all" (old behavior = now scope:"legacy")
+  it("scope:'all' routes to ExecuteMCPv2 webapp endpoint and filters by dispatchClass (Bug #13 backward compat via scope:legacy)", async () => {
+    const webapps = [
+      {
+        name: "/api/executemcp/v2",
+        dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+        namespace: "HSCUSTOM",
+      },
+      {
+        name: "/csp/user",
+        dispatchClass: "",
+        namespace: "USER",
+      },
+      {
+        name: "/api/other",
+        dispatchClass: "Other.REST",
+        namespace: "HSCUSTOM",
+      },
+    ];
+    // The old test used scope:"all". Now scope:"all" is the union — two calls.
+    // Test the old behavior via scope:"legacy".
+    mockHttp.get.mockResolvedValue(envelope(webapps));
+
+    const result = await restManageTool.handler(
+      { action: "list", scope: "legacy", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as {
+      items: Array<Record<string, unknown>>;
+      count: number;
+    };
+    expect(structured.count).toBe(2);
     expect(structured.items[0]).toEqual({
       name: "/api/executemcp/v2",
       dispatchClass: "ExecuteMCPv2.REST.Dispatch",
@@ -119,10 +188,7 @@ describe("iris_rest_manage", () => {
       namespace: "HSCUSTOM",
       swaggerSpec: null,
     });
-    // Plain CSP webapp with empty dispatchClass must be filtered out.
-    expect(
-      structured.items.some((x) => x.name === "/csp/user"),
-    ).toBe(false);
+    expect(structured.items.some((x) => x.name === "/csp/user")).toBe(false);
   });
 
   it("should list REST applications with custom namespace", async () => {
@@ -153,7 +219,7 @@ describe("iris_rest_manage", () => {
 
   // ── get action ────────────────────────────────────────────
 
-  it("should get REST application details via GET", async () => {
+  it("should get REST application details via GET (fullSpec:true returns full blob)", async () => {
     const appDetails = {
       name: "/api/myapp",
       dispatchClass: "MyApp.REST",
@@ -165,7 +231,7 @@ describe("iris_rest_manage", () => {
     mockHttp.get.mockResolvedValue(envelope(appDetails));
 
     const result = await restManageTool.handler(
-      { action: "get", application: "/api/myapp" },
+      { action: "get", application: "/api/myapp", fullSpec: true },
       ctx,
     );
 
@@ -184,6 +250,103 @@ describe("iris_rest_manage", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("'application' is required");
+  });
+
+  // FEAT-6: fullSpec:false (default) returns summary instead of full blob
+  it("FEAT-6: get with fullSpec:false (default) returns swagger summary", async () => {
+    const fullAppDetails = {
+      name: "/api/myapp",
+      dispatchClass: "MyApp.REST",
+      namespace: "USER",
+      swaggerSpec: {
+        basePath: "/api/myapp",
+        info: {
+          title: "My App API",
+          version: "1.0",
+          description: "My application REST API",
+        },
+        paths: {
+          "/items": { get: {}, post: {} },
+          "/items/{id}": { get: {}, put: {}, delete: {} },
+        },
+        definitions: {
+          Item: { type: "object" },
+          Error: { type: "object" },
+        },
+      },
+    };
+    mockHttp.get.mockResolvedValue(envelope(fullAppDetails));
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/myapp", fullSpec: false },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured.name).toBe("/api/myapp");
+    expect(structured.dispatchClass).toBe("MyApp.REST");
+    // Summary mode: swaggerSpec should be a summary object, NOT the full blob
+    const swagger = structured.swaggerSpec as Record<string, unknown>;
+    expect(swagger).toHaveProperty("basePath", "/api/myapp");
+    expect(swagger).toHaveProperty("pathCount", 2);
+    expect(swagger).toHaveProperty("definitionCount", 2);
+    expect(swagger).toHaveProperty("title", "My App API");
+    expect(swagger).toHaveProperty("version", "1.0");
+    expect(swagger).toHaveProperty("description", "My application REST API");
+    // Full paths/definitions should NOT be present
+    expect(swagger).not.toHaveProperty("paths");
+    expect(swagger).not.toHaveProperty("definitions");
+  });
+
+  it("FEAT-6: get with fullSpec:true returns full swagger blob", async () => {
+    const fullAppDetails = {
+      name: "/api/myapp",
+      dispatchClass: "MyApp.REST",
+      namespace: "USER",
+      swaggerSpec: {
+        basePath: "/api/myapp",
+        paths: { "/items": { get: {} } },
+        definitions: { Item: {} },
+      },
+    };
+    mockHttp.get.mockResolvedValue(envelope(fullAppDetails));
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/myapp", fullSpec: true },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    // Full spec mode: should return the complete structure
+    expect(structured).toEqual(fullAppDetails);
+  });
+
+  it("FEAT-6: get with no fullSpec param (default false) returns summary", async () => {
+    const fullAppDetails = {
+      name: "/api/myapp",
+      dispatchClass: "MyApp.REST",
+      namespace: "USER",
+      swaggerSpec: {
+        basePath: "/api/myapp",
+        info: { title: "T", version: "1.0", description: "D" },
+        paths: { "/a": {}, "/b": {} },
+        definitions: {},
+      },
+    };
+    mockHttp.get.mockResolvedValue(envelope(fullAppDetails));
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/myapp" }, // no fullSpec — defaults to false
+      ctx,
+    );
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    const swagger = structured.swaggerSpec as Record<string, unknown>;
+    // Default (no fullSpec arg) => summary mode
+    expect(swagger).toHaveProperty("pathCount", 2);
+    expect(swagger).not.toHaveProperty("paths");
   });
 
   // ── delete action ─────────────────────────────────────────

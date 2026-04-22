@@ -280,10 +280,16 @@ export class IrisHttpClient {
       isRetry,
     );
 
-    // Parse response body
+    // Parse response body.
+    // FEAT-9/BUG-8: always decode the response body as UTF-8 to correctly render
+    // non-ASCII characters (e.g. Arabic خطأ error prefixes from IRIS NLS tables).
+    // response.text() uses the Content-Type charset, defaulting to UTF-8 per spec,
+    // which is correct for all IRIS API responses.
+    let rawText: string;
     let envelope: AtelierEnvelope<T>;
     try {
-      envelope = (await response.json()) as AtelierEnvelope<T>;
+      rawText = await response.text();
+      envelope = JSON.parse(rawText) as AtelierEnvelope<T>;
     } catch {
       // IRIS may return non-JSON responses (e.g., HTML error pages)
       if (!response.ok) {

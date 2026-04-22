@@ -73,9 +73,13 @@ function formatIrisErrors(errors: unknown[]): string {
     }
     if (e && typeof e === "object") {
       const obj = e as Record<string, unknown>;
+      // IRIS error objects may use "error", "message", "summary", or "msg" fields.
+      // All are checked to surface the human-readable error text (including
+      // non-ASCII text such as Arabic خطأ prefixes from IRIS NLS tables).
       const text =
         (typeof obj.error === "string" && obj.error) ||
         (typeof obj.message === "string" && obj.message) ||
+        (typeof obj.msg === "string" && obj.msg) ||
         (typeof obj.summary === "string" && obj.summary);
       if (text) parts.push(String(text).trim());
     }

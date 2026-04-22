@@ -144,14 +144,26 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_rule_list` | List all business rule classes | `namespace?` | readOnly, idempotent |
+| `iris_rule_list` | List all business rule classes | `prefix?`, `filter?`, `cursor?`, `pageSize?`, `namespace?` | readOnly, idempotent |
 | `iris_rule_get` | Get full rule definition with conditions and actions | `name`, `namespace?` | readOnly, idempotent |
+
+**`iris_rule_list` filtering and pagination:**
+
+- `prefix` — only include rules whose name starts with this string (e.g., `"MyPackage.Rules"`).
+- `filter` — case-insensitive substring match (e.g., `"routing"` matches `"MyApp.Rules.RoutingRule"` and `"myapp.rules.routingvalidation"`).
+- `cursor` / `pageSize` — paginate large result sets; `nextCursor` is returned when more pages exist.
 
 ### Data Transformation Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_transform_list` | List all DTL transform classes | `namespace?` | readOnly, idempotent |
+| `iris_transform_list` | List all DTL transform classes | `prefix?`, `filter?`, `cursor?`, `pageSize?`, `namespace?` | readOnly, idempotent |
+
+**`iris_transform_list` filtering and pagination:**
+
+- `prefix` — only include transforms whose name starts with this string (e.g., `"MyPackage.Transforms"`).
+- `filter` — case-insensitive substring match (e.g., `"hl7"` matches `"HL7toSDA"` and `"hl7convert"`).
+- `cursor` / `pageSize` — paginate large result sets; `nextCursor` is returned when more pages exist.
 | `iris_transform_test` | Execute a transformation against sample input | `className`, `sourceClass`, `sourceData?`, `namespace?` | idempotent |
 
 ### REST API Tools

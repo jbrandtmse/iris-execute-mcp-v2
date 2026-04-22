@@ -335,15 +335,75 @@ describe("iris_global_list", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it("should pass filter when provided", async () => {
+  it("should NOT send filter to server when caseSensitive:false (default) to avoid case-sensitive pre-exclusion", async () => {
     mockHttp.get.mockResolvedValue(
-      envelope({ globals: ["CacheTemp"], count: 1, filter: "Cache" }),
+      envelope({ globals: ["CacheTemp"], count: 1 }),
     );
 
     await globalListTool.handler({ filter: "Cache" }, ctx);
 
     const url = mockHttp.get.mock.calls[0]?.[0] as string;
+    // caseSensitive defaults to false — filter must NOT be sent to the server
+    // (server filter is case-sensitive and would drop case-variant entries)
+    expect(url).not.toContain("filter=");
+  });
+
+  it("should send filter to server when caseSensitive:true (reduces server payload)", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals: ["CacheTemp"], count: 1 }),
+    );
+
+    await globalListTool.handler({ filter: "Cache", caseSensitive: true }, ctx);
+
+    const url = mockHttp.get.mock.calls[0]?.[0] as string;
+    // caseSensitive:true — safe to send to server (matches are exact substring)
     expect(url).toContain("filter=Cache");
+  });
+
+  // FEAT-8: case-insensitive filter
+
+  it("FEAT-8: filter is case-insensitive by default", async () => {
+    // Server returns mixed-case globals (server filter is case-sensitive)
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals: ["TempData", "tempdata", "TEMPDATA", "OtherGlobal"], count: 4 }),
+    );
+
+    const result = await globalListTool.handler({ filter: "temp" }, ctx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number };
+    // All three variations should match the lowercase "temp" filter
+    expect(structured.globals).toContain("TempData");
+    expect(structured.globals).toContain("tempdata");
+    expect(structured.globals).toContain("TEMPDATA");
+    expect(structured.globals).not.toContain("OtherGlobal");
+    expect(structured.count).toBe(3);
+  });
+
+  it("FEAT-8: caseSensitive:true restores case-sensitive behavior", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals: ["TempData", "tempdata", "TEMPDATA"], count: 3 }),
+    );
+
+    const result = await globalListTool.handler({ filter: "Temp", caseSensitive: true }, ctx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number };
+    // Only "TempData" starts with capital "Temp"
+    expect(structured.globals).toContain("TempData");
+    expect(structured.globals).not.toContain("tempdata");
+    expect(structured.globals).not.toContain("TEMPDATA");
+    expect(structured.count).toBe(1);
+  });
+
+  it("FEAT-8: caseSensitive:false (explicit) matches case-insensitively", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ globals: ["Cache", "CACHE", "cache", "Other"], count: 4 }),
+    );
+
+    const result = await globalListTool.handler({ filter: "CACHE", caseSensitive: false }, ctx);
+
+    const structured = result.structuredContent as { globals: string[]; count: number };
+    expect(structured.globals).toHaveLength(3);
+    expect(structured.globals).not.toContain("Other");
   });
 
   it("should forward namespace override", async () => {

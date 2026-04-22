@@ -196,7 +196,7 @@ were silently returning stale or per-process data.
 | 4 | `iris_docdb_property` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/prop/{db}/{prop}` |
 | 5 | `iris_analytics_mdx` | 🟥 ExecuteMCPv2 | `/analytics/mdx` |
 | 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
-| 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (default) · `/security/webapp` (when `scope: "all"`) |
+| 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (spec-first) · `/security/webapp` (legacy/all) |
 
 **Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
 
@@ -210,13 +210,27 @@ were silently returning stale or per-process data.
   for cross-checking via `$ZDATETIME` or debugging. Malformed or missing
   horolog values yield `lastBuildTime: ""` without throwing.
 - **`iris_rest_manage` list** row: `name, dispatchClass, namespace,
-  swaggerSpec`. Added 2026-04-21 (Story 11.4): a new `scope` parameter
+  swaggerSpec`. Added 2026-04-21 (Story 11.4): a `scope` parameter
   controls the backend. `scope: "spec-first"` (default) routes to the
   Management API and matches the SMP REST listing — returns only
   OpenAPI-spec-first dispatch classes (those with a `.spec` companion).
-  `scope: "all"` routes to the ExecuteMCPv2 webapp endpoint and includes
-  hand-written `%CSP.REST` subclasses (for example,
-  `ExecuteMCPv2.REST.Dispatch`), with `swaggerSpec: null` for those.
+  Updated 2026-04-22 (Story 12.5, FEAT-2 **BREAKING pre-release**):
+  `scope: "legacy"` (renamed from the old `scope: "all"`) routes to
+  the ExecuteMCPv2 webapp endpoint and includes hand-written `%CSP.REST`
+  subclasses (e.g., `ExecuteMCPv2.REST.Dispatch`) with `swaggerSpec: null`.
+  New `scope: "all"` returns the deduplicated union of spec-first + legacy.
+- **`iris_rest_manage` get** — `fullSpec` parameter (Story 12.5, FEAT-6):
+  by default (`fullSpec: false`) the tool returns a compact swagger summary
+  `{title, version, description, basePath, pathCount, definitionCount}`
+  instead of the full OpenAPI spec object (which can be 50 KB+). Pass
+  `fullSpec: true` to receive the complete spec.
+- **`iris_rule_list` / `iris_transform_list`** — filter/pagination (Story
+  12.5, FEAT-3): both tools now accept `prefix` (startsWith), `filter`
+  (case-insensitive substring), `cursor`, and `pageSize`. Filtering and
+  pagination are applied client-side; the server still returns the full list.
+- **`iris_global_list` filter** (Story 12.5, FEAT-8): the `filter`
+  parameter is now case-insensitive by default (matches `iris_doc_list`
+  semantics). Pass `caseSensitive: true` to restore the legacy behavior.
 - **`iris_doc_search` wire request**: the documented default `files`
   pattern (`*.cls,*.mac,*.int,*.inc`) is now reliably sent on every call.
   Before Story 11.4, the param was silently dropped when the caller

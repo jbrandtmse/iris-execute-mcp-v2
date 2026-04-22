@@ -161,7 +161,7 @@ Add to your Cursor MCP settings:
 | `iris_global_get` | Read a global node value | `global`, `subscripts?`, `namespace?` | readOnly, idempotent |
 | `iris_global_set` | Set a global node value (verified) | `global`, `value`, `subscripts?`, `namespace?` | idempotent |
 | `iris_global_kill` | Delete a global node or subtree | `global`, `subscripts?`, `namespace?` | destructive, idempotent |
-| `iris_global_list` | List globals with optional filter | `filter?`, `cursor?`, `namespace?` | readOnly, idempotent |
+| `iris_global_list` | List globals with optional filter | `filter?`, `caseSensitive?`, `cursor?`, `namespace?` | readOnly, idempotent |
 
 ### Execution Tools
 
@@ -665,10 +665,10 @@ files. Pass an explicit `files` value to narrow the search.
 <details>
 <summary><strong>iris_global_list</strong> -- List globals</summary>
 
-**Input:**
+**Input (case-insensitive filter — default):**
 ```json
 {
-  "filter": "My"
+  "filter": "my"
 }
 ```
 
@@ -679,6 +679,10 @@ files. Pass an explicit `files` value to narrow the search.
   "count": 3
 }
 ```
+
+The `filter` is applied client-side as a **case-insensitive** substring match by default, matching `iris_doc_list` semantics. A filter of `"my"` matches `"MyData"`, `"MYAPP"`, and `"mytemp"`.
+
+Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) behavior.
 </details>
 
 <details>

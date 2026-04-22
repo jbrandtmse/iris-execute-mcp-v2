@@ -241,22 +241,28 @@ export const globalListTool: ToolDefinition = {
   title: "List Globals",
   description:
     "List globals in an IRIS namespace. Optionally filter by a plain substring " +
-    "match on the global name (see the `filter` parameter for the exact semantics). " +
-    "Note: Pagination is client-side — all globals are fetched from the server per page request. " +
-    "Large namespaces with thousands of globals may experience slower pagination.",
+    "match on the global name. Filter is case-insensitive by default (matches " +
+    "`iris_doc_list` semantics); use caseSensitive:true for the prior behavior. " +
+    "Filtering is client-side — all globals are fetched from the server, then " +
+    "filtered locally. Large namespaces with thousands of globals may experience " +
+    "slower responses when a filter is applied.",
   inputSchema: z.object({
     filter: z
       .string()
       .optional()
       .describe(
-        "Case-sensitive plain substring filter on global names. Just pass the " +
-        "substring — no wildcards needed. Example: 'Temp' matches every global " +
-        "whose name contains 'Temp' (including 'TempData', 'MyTemp', " +
-        "'IRIS.TempBuffer'). Applied server-side by ExecuteMCPv2.REST.Global " +
-        "using ObjectScript's `[` contains operator. Do NOT wrap the value in " +
-        "'*' or '?' — those characters are matched literally and will cause " +
-        "the filter to return zero results. Case matters: 'temp' does NOT " +
-        "match 'TempData'.",
+        "Case-insensitive plain substring filter on global names (default behavior). " +
+        "Just pass the substring — no wildcards needed. Example: 'temp' matches " +
+        "'TempData', 'MyTemp', 'IRIS.TempBuffer', and 'temp'. " +
+        "Set caseSensitive:true to restore the former case-sensitive behavior.",
+      ),
+    caseSensitive: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "When true, the filter match is case-sensitive (legacy behavior). " +
+        "Default is false (case-insensitive, matching iris_doc_list semantics).",
       ),
     cursor: z
       .string()
@@ -275,8 +281,9 @@ export const globalListTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { filter, cursor, namespace } = args as {
+    const { filter, caseSensitive, cursor, namespace } = args as {
       filter?: string;
+      caseSensitive?: boolean;
       cursor?: string;
       namespace?: string;
     };
@@ -285,19 +292,44 @@ export const globalListTool: ToolDefinition = {
 
     const params = new URLSearchParams();
     params.set("namespace", ns);
-    if (filter) params.set("filter", filter);
+    // FEAT-8: filter is applied client-side (case-insensitive by default).
+    // When caseSensitive:false (default), do NOT send the filter to the server —
+    // the server filter is case-sensitive and would pre-exclude case variants
+    // (e.g., searching "temp" with a case-sensitive server drops "TempData" before
+    // the client can include it in the case-insensitive match). We accept the full
+    // list and apply the filter purely client-side in that case.
+    // When caseSensitive:true, sending the filter to the server is safe and reduces
+    // payload on large namespaces.
+    if (filter && (caseSensitive ?? false)) params.set("filter", filter);
 
     const path = `${BASE_URL}/global/list?${params.toString()}`;
 
     try {
       const response = await ctx.http.get(path);
       const rawResult = response.result as { globals?: string[]; count?: number; filter?: string };
-      const allGlobals: string[] = rawResult.globals ?? [];
+      let allGlobals: string[] = rawResult.globals ?? [];
+
+      // FEAT-8: client-side filter applied after server response.
+      // When caseSensitive:true, perform exact substring match (legacy behavior).
+      // When caseSensitive:false (default), lowercase both sides for case-insensitive match.
+      // We always apply client-side to ensure consistent semantics regardless of
+      // server-side filter behavior (server filter may differ in edge cases).
+      if (filter) {
+        if (caseSensitive ?? false) {
+          // Case-sensitive: exact substring match
+          allGlobals = allGlobals.filter((g) => g.includes(filter));
+        } else {
+          // Case-insensitive (default): lowercase both sides
+          const lowerFilter = filter.toLowerCase();
+          allGlobals = allGlobals.filter((g) => g.toLowerCase().includes(lowerFilter));
+        }
+      }
+
       const { page, nextCursor } = ctx.paginate(allGlobals, cursor);
       const result = {
         globals: page,
         count: page.length,
-        ...(rawResult.filter ? { filter: rawResult.filter } : {}),
+        ...(filter ? { filter } : {}),
         ...(nextCursor ? { nextCursor } : {}),
       };
       return {

@@ -1030,3 +1030,23 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **`BOOTSTRAP_VERSION`**: bumped `3fb0590b5d16` → `b0aa936ac17f`.
 - **Tests**: 1117 total pass (admin 216, data 115, dev 276, shared 193, interop 165, ops 152, + ObjectScript UtilsTest 19).
 - **Commit**: pending (will land as `feat(story-12.4)`).
+
+## Story 12.5: TypeScript tool surface cleanup (2026-04-22)
+
+- **Files touched (6 features + 2 bugs across 5 packages)**:
+  - FEAT-1: `packages/iris-admin-mcp/src/tools/oauth.ts` + test — customizationNamespace/customizationRoles params + supportedScopes split.
+  - FEAT-2 (BREAKING): `packages/iris-data-mcp/src/tools/rest.ts` + test — scope enum renamed to `spec-first|legacy|all` with union semantics for `all`.
+  - FEAT-3: `packages/iris-interop-mcp/src/tools/transform.ts`, `rule.ts` + tests — prefix/filter/cursor/pageSize client-side.
+  - FEAT-6: same rest.ts as FEAT-2 — `fullSpec: boolean` param; summary default.
+  - FEAT-8: `packages/iris-dev-mcp/src/tools/global.ts` + test — client-side case-insensitive filter with `caseSensitive` override.
+  - FEAT-9/BUG-8 (also closes BUG-7): `packages/shared/src/http-client.ts`, `errors.ts` + test — response.text() + JSON.parse() for explicit UTF-8 decode.
+  - Per-package READMEs (admin, data, dev, interop), `tool_support.md`, `CHANGELOG.md`.
+- **Key design decisions**:
+  - **FEAT-8 client-side-only**: avoided a second BOOTSTRAP_VERSION bump this epic. Server filter is only sent when `caseSensitive:true` (CR patch — previously server filter was always sent, silently pre-excluding case variants before the client pass).
+  - **FEAT-2 BREAKING**: no compat shim. New `all` unions via client-side dedup; `legacy` is the old `all`.
+  - **FEAT-9/BUG-8**: `response.json()` replaced with `response.text() + JSON.parse()` for explicit UTF-8. Same fix closes BUG-7 (metrics_alerts Ø®Ø·Ø£ mojibake).
+- **Code review**: 0 HIGH, 2 MEDIUM auto-fixed (FEAT-8 server-filter-pre-exclude bug; CHANGELOG missing `### Fixed` entries for FEAT-8 and FEAT-9/BUG-8), 2 LOW deferred (oauth supportedScopes Zod description; rest.ts scope:"all" dedup-key pathological case).
+- **Tests**: 1117 → 1137 (+20 TS tests, +1 follow-up from CR patch → dev package 279 → 280).
+- **`BOOTSTRAP_VERSION`**: unchanged at `b0aa936ac17f`.
+- **Live verification**: not required per AC scope; smoke tests in unit tests cover each feature. Full-system live verify deferred to manual reload + re-test (the user reloaded once during Story 12.4; Story 12.5's features need another reload to be observable via MCP).
+- **Commit**: pending (will land as `feat(story-12.5)`).

@@ -97,6 +97,20 @@ export const oauthManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Token signing algorithm (server create, e.g., 'RS256')"),
+    customizationNamespace: z
+      .string()
+      .optional()
+      .describe(
+        "Namespace containing customization classes for the server (server create). " +
+          "Required by IRIS OAuth2.Server.Configuration — defaults to empty string if omitted.",
+      ),
+    customizationRoles: z
+      .string()
+      .optional()
+      .describe(
+        "Comma-separated roles granted to customization classes (server create). " +
+          "Required by IRIS OAuth2.Server.Configuration — defaults to empty string if omitted.",
+      ),
   }),
   annotations: {
     destructiveHint: true,
@@ -122,6 +136,8 @@ export const oauthManageTool: ToolDefinition = {
       authorizationCodeInterval,
       refreshTokenInterval,
       signingAlgorithm,
+      customizationNamespace,
+      customizationRoles,
     } = args as {
       action: string;
       entity?: string;
@@ -138,6 +154,8 @@ export const oauthManageTool: ToolDefinition = {
       authorizationCodeInterval?: number;
       refreshTokenInterval?: number;
       signingAlgorithm?: string;
+      customizationNamespace?: string;
+      customizationRoles?: string;
     };
 
     const body: Record<string, unknown> = { action };
@@ -150,7 +168,13 @@ export const oauthManageTool: ToolDefinition = {
     if (grantTypes !== undefined) body.grantTypes = grantTypes;
     if (clientType !== undefined) body.clientType = clientType;
     if (description !== undefined) body.description = description;
-    if (supportedScopes !== undefined) body.supportedScopes = supportedScopes;
+    // FEAT-1: split supportedScopes string into a JSON array by whitespace or comma
+    // so IRIS receives a proper collection for OAuth2.Server.Configuration
+    if (supportedScopes !== undefined) {
+      body.supportedScopes = supportedScopes
+        .split(/[\s,]+/)
+        .filter((s) => s.length > 0);
+    }
     if (accessTokenInterval !== undefined)
       body.accessTokenInterval = accessTokenInterval;
     if (authorizationCodeInterval !== undefined)
@@ -159,6 +183,18 @@ export const oauthManageTool: ToolDefinition = {
       body.refreshTokenInterval = refreshTokenInterval;
     if (signingAlgorithm !== undefined)
       body.signingAlgorithm = signingAlgorithm;
+    // FEAT-1: forward customizationNamespace and customizationRoles
+    // (required by OAuth2.Server.Configuration; send empty string when not provided
+    //  for create so IRIS does not error with "Property required")
+    if (action === "create" && entity === "server") {
+      body.customizationNamespace = customizationNamespace ?? "";
+      body.customizationRoles = customizationRoles ?? "";
+    } else {
+      if (customizationNamespace !== undefined)
+        body.customizationNamespace = customizationNamespace;
+      if (customizationRoles !== undefined)
+        body.customizationRoles = customizationRoles;
+    }
 
     const path = `${BASE_URL}/security/oauth`;
 

@@ -48,7 +48,8 @@ describe("iris_oauth_manage", () => {
         action: "create",
         entity: "server",
         issuerURL: "https://auth.example.com",
-        supportedScopes: "openid profile email",
+        // FEAT-1: supportedScopes is split into an array before sending to IRIS
+        supportedScopes: ["openid", "profile", "email"],
         accessTokenInterval: 3600,
         signingAlgorithm: "RS256",
       }),
@@ -92,13 +93,97 @@ describe("iris_oauth_manage", () => {
         entity: "server",
         issuerURL: "https://auth.example.com",
         description: "My OAuth2 server",
-        supportedScopes: "openid profile",
         accessTokenInterval: 3600,
         authorizationCodeInterval: 300,
         refreshTokenInterval: 86400,
         signingAlgorithm: "RS256",
       }),
     );
+  });
+
+  // ── FEAT-1: supportedScopes splitting ──
+
+  it("FEAT-1: should split whitespace-delimited supportedScopes into an array", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", entity: "server", issuerEndpoint: "https://auth.example.com" }),
+    );
+
+    await oauthManageTool.handler(
+      {
+        action: "create",
+        entity: "server",
+        issuerURL: "https://auth.example.com",
+        supportedScopes: "openid profile email",
+      },
+      ctx,
+    );
+
+    const callBody = mockHttp.post.mock.calls[0]![1] as Record<string, unknown>;
+    expect(Array.isArray(callBody.supportedScopes)).toBe(true);
+    expect(callBody.supportedScopes).toEqual(["openid", "profile", "email"]);
+  });
+
+  it("FEAT-1: should split comma-delimited supportedScopes into an array", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", entity: "server" }),
+    );
+
+    await oauthManageTool.handler(
+      {
+        action: "create",
+        entity: "server",
+        issuerURL: "https://auth.example.com",
+        supportedScopes: "openid,profile,email",
+      },
+      ctx,
+    );
+
+    const callBody = mockHttp.post.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callBody.supportedScopes).toEqual(["openid", "profile", "email"]);
+  });
+
+  it("FEAT-1: should forward customizationNamespace and customizationRoles for server create", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", entity: "server" }),
+    );
+
+    await oauthManageTool.handler(
+      {
+        action: "create",
+        entity: "server",
+        issuerURL: "https://auth.example.com",
+        customizationNamespace: "MYNAMESPACE",
+        customizationRoles: "%DB_USER",
+      },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/oauth",
+      expect.objectContaining({
+        customizationNamespace: "MYNAMESPACE",
+        customizationRoles: "%DB_USER",
+      }),
+    );
+  });
+
+  it("FEAT-1: should default customizationNamespace and customizationRoles to empty string when omitted for server create", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", entity: "server" }),
+    );
+
+    await oauthManageTool.handler(
+      {
+        action: "create",
+        entity: "server",
+        issuerURL: "https://auth.example.com",
+      },
+      ctx,
+    );
+
+    const callBody = mockHttp.post.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callBody.customizationNamespace).toBe("");
+    expect(callBody.customizationRoles).toBe("");
   });
 
   // ── Client create ──

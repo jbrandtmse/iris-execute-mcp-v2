@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError } from "@iris-mcp/shared";
+import type { ToolContext, PaginateResult } from "@iris-mcp/shared";
+import { IrisApiError, encodeCursor, decodeCursor } from "@iris-mcp/shared";
 import {
   transformListTool,
   transformTestTool,
@@ -83,6 +83,95 @@ describe("iris_transform_list", () => {
     await expect(
       transformListTool.handler({}, ctx),
     ).rejects.toThrow("Timeout");
+  });
+
+  // FEAT-3: prefix/filter/pagination
+
+  it("FEAT-3: should filter by prefix (client-side)", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({
+        transforms: [
+          { name: "MyPackage.Transforms.HL7toSDA" },
+          { name: "MyPackage.Transforms.SDAtoFHIR" },
+          { name: "OtherPackage.Transforms.XtoY" },
+        ],
+        count: 3,
+      }),
+    );
+
+    const result = await transformListTool.handler(
+      { prefix: "MyPackage.Transforms" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      transforms: Array<{ name: string }>;
+      count: number;
+      total: number;
+    };
+    expect(structured.transforms).toHaveLength(2);
+    expect(structured.total).toBe(2);
+    expect(structured.transforms.every((t) => t.name.startsWith("MyPackage.Transforms"))).toBe(true);
+  });
+
+  it("FEAT-3: should filter by substring (case-insensitive, client-side)", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({
+        transforms: [
+          { name: "MyPackage.Transforms.HL7toSDA" },
+          { name: "MyPackage.Transforms.hl7convert" },
+          { name: "MyPackage.Transforms.SDAtoCDA" },
+        ],
+        count: 3,
+      }),
+    );
+
+    const result = await transformListTool.handler(
+      { filter: "hl7" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      transforms: Array<{ name: string }>;
+      count: number;
+    };
+    // Both "HL7toSDA" and "hl7convert" should match (case-insensitive)
+    expect(structured.transforms).toHaveLength(2);
+    expect(structured.transforms.some((t) => t.name.includes("HL7toSDA"))).toBe(true);
+    expect(structured.transforms.some((t) => t.name.includes("hl7convert"))).toBe(true);
+  });
+
+  it("FEAT-3: should return nextCursor for pagination", async () => {
+    const transforms = Array.from({ length: 5 }, (_, i) => ({ name: `Pkg.Transform${i}` }));
+    mockHttp.get.mockResolvedValue(
+      envelope({ transforms, count: 5 }),
+    );
+
+    // Use a paginating context that respects pageSize
+    const paginatingCtx: ToolContext = {
+      ...ctx,
+      paginate<T>(items: T[], cursor?: string, pageSize?: number): PaginateResult<T> {
+        const offset = decodeCursor(cursor);
+        const size = pageSize ?? 100;
+        const page = items.slice(offset, offset + size);
+        const nextOffset = offset + size;
+        const nextCursor = nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
+        return { page, nextCursor };
+      },
+    };
+
+    const result = await transformListTool.handler(
+      { pageSize: 2 },
+      paginatingCtx,
+    );
+
+    const structured = result.structuredContent as {
+      transforms: Array<{ name: string }>;
+      count: number;
+      nextCursor?: string;
+    };
+    expect(structured.transforms).toHaveLength(2);
+    expect(structured.nextCursor).toBeDefined();
   });
 });
 

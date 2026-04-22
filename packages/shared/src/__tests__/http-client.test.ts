@@ -994,4 +994,93 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
   });
+
+  // ── UTF-8 decode (FEAT-9/BUG-8) ────────────────────────────────
+
+  describe("UTF-8 decode — non-ASCII error text (FEAT-9/BUG-8)", () => {
+    it("should round-trip non-ASCII Arabic error text from a mocked error response", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Simulate IRIS returning an error envelope with Arabic خطأ prefix
+      // (as produced by IRIS NLS error tables when Arabic message table is loaded)
+      const arabicErrorText = "خطأ #5001: Failed to execute command";
+      const errorEnvelope = {
+        status: {
+          errors: [{ code: 5001, msg: arabicErrorText }],
+          summary: arabicErrorText,
+        },
+        console: [],
+        result: {},
+      };
+
+      // Encode the body as UTF-8 bytes (as a real IRIS server would send it)
+      const utf8Body = JSON.stringify(errorEnvelope);
+      const bodyBytes = Buffer.from(utf8Body, "utf8");
+
+      // Build a Response with the correct Content-Type header
+      const resp = new Response(bodyBytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Set-Cookie": "CSPSESSIONID=s1; path=/",
+        },
+      });
+      // Patch getSetCookie for test environment compatibility
+      const origGetSetCookie = resp.headers.getSetCookie?.bind(resp.headers);
+      resp.headers.getSetCookie = () => {
+        const real = origGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=s1; path=/"];
+      };
+
+      fetchMock.mockResolvedValueOnce(resp);
+
+      // The Arabic error text should be preserved in the thrown IrisApiError
+      try {
+        await client.get("/api/execute");
+        // Should not reach here — error envelope causes IrisApiError
+      } catch (err) {
+        expect(err).toBeInstanceOf(IrisApiError);
+        const apiErr = err as IrisApiError;
+        // Arabic characters must be preserved, not mangled to ??? or Ø®Ø·Ø£
+        expect(apiErr.message).toContain("خطأ");
+        expect(apiErr.message).not.toContain("???");
+        expect(apiErr.message).not.toContain("Ø®Ø·Ø£");
+      }
+
+      client.destroy();
+    });
+
+    it("should correctly parse JSON that contains multi-byte Unicode characters", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      // Simulate a successful response containing Unicode text
+      const unicodeResult = {
+        message: "Success — données récupérées avec succès (日本語テスト)",
+        arabic: "نجاح",
+      };
+      const successEnvelope = atelierResponse(unicodeResult);
+      const utf8Body = JSON.stringify(successEnvelope);
+      const bodyBytes = Buffer.from(utf8Body, "utf8");
+
+      const resp = new Response(bodyBytes, {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+      const origGetSetCookie = resp.headers.getSetCookie?.bind(resp.headers);
+      resp.headers.getSetCookie = () => {
+        const real = origGetSetCookie?.() ?? [];
+        return [...real, "CSPSESSIONID=s1; path=/"];
+      };
+      fetchMock.mockResolvedValueOnce(resp);
+
+      const result = await client.get<typeof unicodeResult>("/api/data");
+      expect(result.result.message).toContain("données");
+      expect(result.result.message).toContain("日本語テスト");
+      expect(result.result.arabic).toBe("نجاح");
+
+      client.destroy();
+    });
+  });
 });

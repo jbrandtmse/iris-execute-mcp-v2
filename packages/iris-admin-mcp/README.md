@@ -155,8 +155,14 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_oauth_manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `name?`, `serverName?`, `clientName?` | destructive |
+| `iris_oauth_manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `name?`, `serverName?`, `clientName?`, `supportedScopes?`, `customizationNamespace?`, `customizationRoles?` | destructive |
 | `iris_oauth_list` | List all OAuth2 server definitions and clients | `cursor?` | readOnly, idempotent |
+
+**OAuth2 server creation notes:**
+
+- `supportedScopes` — accepts a space- or comma-separated string (e.g., `"openid profile email"` or `"openid,profile,email"`). The tool splits the string into an array before sending to IRIS.
+- `customizationNamespace` — IRIS namespace containing OAuth2 customization classes (required by IRIS; defaults to `""` when omitted).
+- `customizationRoles` — roles granted to the customization code (required by IRIS; defaults to `""` when omitted).
 
 ---
 

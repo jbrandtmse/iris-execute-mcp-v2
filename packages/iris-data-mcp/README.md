@@ -127,7 +127,34 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_rest_manage` | List, get details, or delete REST applications | `action`, `scope?`, `application?`, `namespace?` | destructive |
+| `iris_rest_manage` | List, get details, or delete REST applications | `action`, `scope?`, `application?`, `fullSpec?`, `namespace?` | destructive |
+
+**`iris_rest_manage` scope values:**
+
+| `scope` | Returns |
+|---------|---------|
+| `"spec-first"` *(default)* | OpenAPI/spec-first apps only (via IRIS Management API) |
+| `"legacy"` | Hand-written `%CSP.REST` subclasses only |
+| `"all"` | Union of spec-first + legacy (deduplicated by name) |
+
+> **Breaking change (pre-release):** The former `scope:"all"` (legacy-only) has been renamed `scope:"legacy"`. The new `scope:"all"` returns the full union of both types.
+
+**`iris_rest_manage` get action — `fullSpec` parameter:**
+
+When `action:"get"`, the `swaggerSpec` field can be a large JSON document (50 KB+). By default (`fullSpec:false`) the tool returns a compact summary:
+
+```json
+{
+  "title": "My REST API",
+  "version": "1.0",
+  "description": "...",
+  "basePath": "/api/myapp",
+  "pathCount": 12,
+  "definitionCount": 5
+}
+```
+
+Pass `fullSpec:true` to receive the complete OpenAPI spec object.
 
 ---
 
@@ -412,16 +439,16 @@ OpenAPI-spec-first dispatch classes (the ones with a `.spec` companion).
 Hand-written `%CSP.REST` subclasses (for example, `ExecuteMCPv2.REST.Dispatch`)
 are excluded by design of the IRIS Management API.
 
-**Input (include hand-written `%CSP.REST` subclasses):**
+**Input (hand-written `%CSP.REST` subclasses only):**
 ```json
 {
   "action": "list",
-  "scope": "all",
+  "scope": "legacy",
   "namespace": "HSCUSTOM"
 }
 ```
 
-**Output (`scope: "all"`):**
+**Output (`scope: "legacy"`):**
 ```json
 {
   "items": [
@@ -436,9 +463,23 @@ are excluded by design of the IRIS Management API.
 }
 ```
 
-`scope: "all"` uses the ExecuteMCPv2 webapp endpoint and filters entries
+`scope: "legacy"` uses the ExecuteMCPv2 webapp endpoint and filters entries
 with a non-empty `dispatchClass`. Hand-written dispatch classes have no
 companion spec class, so `swaggerSpec` is `null` for them.
+
+**Input (all REST applications — spec-first + hand-written):**
+```json
+{
+  "action": "list",
+  "scope": "all",
+  "namespace": "HSCUSTOM"
+}
+```
+
+`scope: "all"` fetches both spec-first (via IRIS Management API) and legacy
+(via ExecuteMCPv2 webapp endpoint) in parallel and returns the deduplicated union.
+
+> **Note:** The former `scope:"all"` (pre-v0.5) only returned hand-written classes. That behavior is now `scope:"legacy"`. Update any existing calls accordingly.
 </details>
 
 <details>
