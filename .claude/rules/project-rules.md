@@ -309,7 +309,105 @@ This is almost always faster than iterating on search queries when the API is IR
 
 ---
 
-## Rules captured: 14
-## Epics contributing: 11 (retro 2026-04-21)
+---
 
-**Audit note (2026-04-21):** Rule #14 ("Password redaction — gate on length") was initially codified, then removed during the retro's self-audit. The retro's own Murat-triage had flagged Bug #8 as narrow ("not a general pattern — fix is in code, no rule needed"), but it was codified anyway. Removal enforces Rule #1's "narrow one-off fixes do NOT become rules" principle. The fix remains in the code and the retro bug log.
+## 15. Don't wrap method calls in `$Get()`
+
+**Context:** Reading a field from a `%DynamicObject` (or any object returned from a method call) in ObjectScript.
+
+**Rule:** Never pass a method-call expression to `$Get()`. `$Get(expr, default)` expects `expr` to be a simple variable reference (local, global, or multi-dimensional array node). When `expr` is a method call like `tBody.%Get("timeout")`, the parser collapses `tBody` to the variable-name position and tries multi-dim access on the receiver. For `%DynamicObject` instances this raises `<INVALID CLASS>Class '%Library.DynamicObject' does not support MultiDimensional operations`. For plain locals it can produce subtle wrong-value bugs.
+
+Use one of these corrected patterns instead:
+
+```objectscript
+; Preferred (explicit presence check):
+Set tTimeout = 120
+If tBody.%IsDefined("timeout") Set tTimeout = +tBody.%Get("timeout")
+
+; Simpler (coercion-friendly — %Get returns "" for missing keys; +"" = 0):
+Set tTimeout = +tBody.%Get("timeout")
+If tTimeout = 0 Set tTimeout = 120
+```
+
+**Why:** Epic 12 Story 12.2 / BUG-3 (commit `9ed3023`): `iris_production_control` failed with `<INVALID CLASS>` on every one of its five actions (`start`, `stop`, `restart`, `update`, `recover`) because `Interop.cls:145,147` wrapped `tBody.%Get(…)` calls in `$Get(…, default)`. Two-line fix unblocked all five actions. A prophylactic audit across the full `src/ExecuteMCPv2/` tree confirmed only these two lines had the anti-pattern — easy to miss in review without a rule.
+
+**How to apply:**
+- During code review: grep for `\$Get\([a-zA-Z_]+\.%Get\(` or `\$Get\([a-zA-Z_]+\.[A-Z]` — any hit is suspect.
+- During dev: use `%IsDefined` + `%Get` + default literal pattern for `%DynamicObject` field reads. Never reach for `$Get()` with a method call inside it.
+
+---
+
+## 16. Verify story-spec "X exists" claims via live probe before trusting
+
+**Context:** A story spec says an IRIS class method (or property, or behavior) exists and instructs the dev not to touch it, OR claims a specific API shape that guides the implementation.
+
+**Rule:** Before trusting a story-spec claim about IRIS API shape ("method X exists, don't touch it", "property Y is available", "method Z takes these parameters"), verify empirically via live probe — read the actual class source in `irislib/` / `irissys/`, or call the method/property from a disposable `ExecuteMCPv2.Temp.*` probe class. Specs can be wrong about IRIS API shape because the author may have read outdated docs, extrapolated from partial evidence, or relied on superficially-similar IRIS class patterns. If the spec's claim is empirically wrong, widen the story scope to fix the underlying method AND flag the spec error in dev notes so the retrospective can learn from it.
+
+**Why:** Epic 12 had this pattern twice:
+- **Story 12.3** (commit `13f45d5`): spec said "`Ens.Config.Production.Delete(tName)` exists and should continue to work — don't touch the delete branch". Dev discovered mid-implementation that `Delete()` does NOT exist on `Ens.Config.Production`. Had to widen scope to fix the delete branch (use `%Dictionary.ClassDefinition.%DeleteId()` and let `Ens.Projection.Production.RemoveProjection()` handle cleanup) in addition to the originally-scoped create fix.
+- **Story 12.6** (commit `a373316`): spec proposed three actions (`clear` / `clearAll` / `acknowledge`), with implementation note "consider scope-down to just `acknowledge` (which is additive/safe)". Pre-dev research against `irislib/%SYSTEM/Monitor.cls` + `%Monitor/Manager.cls` revealed that `acknowledge` is NOT a safe native-IRIS operation — system Monitor alerts have no native acknowledgement API. Scope was correctly narrowed to a single `reset` action mapped to `$SYSTEM.Monitor.Clear()`. If the research had happened pre-spec instead of pre-dev, the spec would've been right from the start.
+
+**How to apply:**
+- During story creation: when writing a spec that references a specific IRIS class method by name, open the class in `irislib/` / `irissys/` and verify the method exists with the claimed signature. Especially important for methods named `Create()`, `Delete()`, `Get()`, `Modify()` — these are idiomatic method names that *sometimes* exist on IRIS classes but often don't.
+- During dev: when a spec says "don't touch X", verify X works before trusting the claim. If X fails with `<METHOD DOES NOT EXIST>` or similar, the spec is wrong — widen scope to fix it AND record the discovery for the retro.
+- During retro: when scope-widening happened due to a wrong spec, ensure the retro triage surfaces it as a process signal (not a dev complaint).
+
+---
+
+## 17. `iris_doc_load` requires a glob-prefixed path
+
+**Context:** Deploying an ObjectScript `.cls` file to IRIS via the `iris_doc_load` MCP tool.
+
+**Rule:** Always pass a glob-prefixed path to `iris_doc_load`, even when deploying a single file. Use the form `c:/path/to/src/**/FileName.cls` or at minimum `c:/path/to/src/**/*.cls`. Do NOT pass a bare file path like `c:/path/to/src/ExecuteMCPv2/REST/Security.cls` — the tool's path-to-classname mapping uses the directory prefix BEFORE the first glob metacharacter as the base, so a bare path collapses the class name to the file stem only (`Security.cls` → class `User.Security`, not `ExecuteMCPv2.REST.Security`).
+
+Correct examples:
+```
+# Single file:
+iris_doc_load path="c:/git/iris-execute-mcp-v2/src/**/Security.cls" compile=true namespace=HSCUSTOM
+
+# All ObjectScript in a tree:
+iris_doc_load path="c:/git/iris-execute-mcp-v2/src/ExecuteMCPv2/**/*.cls" compile=true namespace=HSCUSTOM
+
+# WRONG — produces wrong class name:
+iris_doc_load path="c:/git/iris-execute-mcp-v2/src/ExecuteMCPv2/REST/Security.cls"
+```
+
+**Why:** Epic 12 Story 12.1 (commit `cc810a0`): lead's first post-CR redeploy hit `Class 'User.Security' does not exist` because the bare path was mapped to the file stem. The same pattern was re-learned in Stories 12.2, 12.3, and 12.4 before being codified. Three-time lesson = rule.
+
+**How to apply:**
+- Deploy scripts, CI pipelines, dev instructions: all use the glob-prefixed form.
+- If writing a new story's dev notes, include the exact command template per the examples above.
+
+---
+
+## 18. Auto-generated files are output-only
+
+**Context:** Any file produced by a script (e.g., `pnpm run gen:bootstrap` produces `packages/shared/src/bootstrap-classes.ts`).
+
+**Rule:** Never hand-edit auto-generated files. If a fix is needed in content that ends up in a generated file, edit the SOURCE that the generator reads (the ObjectScript `.cls`, the Zod schema, whatever), then re-run the generator to regenerate the output. Manual edits to generated files do not survive the next regeneration.
+
+This applies to:
+- `packages/shared/src/bootstrap-classes.ts` — produced by `scripts/gen-bootstrap.mjs` from `src/ExecuteMCPv2/**/*.cls`.
+- Any future `*.generated.ts`, `*.d.ts` from codegen tools, `openapi.json` from spec-gen, etc.
+
+The generator script should ideally include a header comment like `// DO NOT EDIT — auto-generated by <script>. Regenerate via: <command>.` If a generated file doesn't have such a header, add one when touching it.
+
+**Why:** Epic 12 Story 12.6 code review (commit `a373316`): CR auto-fixed a MEDIUM finding (ISO 8601 T-separator in `Monitor.cls:AlertsManage`) correctly in the `.cls` source file, then ALSO manually applied the fix to the embedded copy in `bootstrap-classes.ts`. The manual edit produced a bootstrap hash (`f77518a0e09d`) that didn't survive the next `pnpm run gen:bootstrap` run, which produced a *third* hash (`974bbeab53a1`) because the regenerator re-read `Monitor.cls` from disk and encoded the actually-current content. Lead had to update CHANGELOG + story references to the real hash. Minor — caught within one regenerate cycle — but if a future CR edits a generated file AND the regenerate step is skipped, the generated file silently drifts from its source.
+
+**How to apply:**
+- Code review: if a finding needs a fix in generated content, edit the source and regenerate. Never edit the generated file directly.
+- `.gitignore` vs checked-in generated files: some projects check in generated files for bootstrap / package-manager reasons (as with `bootstrap-classes.ts`). Checked-in ≠ editable. The header comment is the signal.
+- If a regenerate step is needed as part of the fix, record it in the CR's file list for the lead to run.
+
+---
+
+## Rules captured: 18
+## Epics contributing: 12 (retros 2026-04-21, 2026-04-22)
+
+**Audit note (2026-04-21):** Rule #14 ("Password redaction — gate on length") was initially codified during Epic 11 retro, then removed during the retro's self-audit. The retro's own Murat-triage had flagged Bug #8 as narrow ("not a general pattern — fix is in code, no rule needed"), but it was codified anyway. Removal enforces Rule #1's "narrow one-off fixes do NOT become rules" principle. The fix remains in the code and the retro bug log.
+
+**Audit note (2026-04-22):** Epic 12 retro triaged 6 rule candidates; 4 passed the general-pattern-shape bar (Rules #15, #16, #17, #18) and 2 were skipped:
+- "Property-name vs property-type distinction" (BUG-1 `ChangePassword` boolean vs `Password` setter) — narrow one-property pair; Rule #2 ("read IRIS class source") already covers prevention.
+- "One consolidated bootstrap bump per epic" — process-shape, better tracked in epic-cycle-log conventions than as a rule.
+
+These decisions enforce Rule #1's general-pattern-shape requirement.
