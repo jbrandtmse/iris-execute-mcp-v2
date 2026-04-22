@@ -805,3 +805,34 @@ Four stories, four merge commits (plus four chore/log commits). Net delta:
   - **Live verification at lead AND review layers**: Lead spot-checked all 3 reproductions before code review (task history filter returns 5 entries for taskId 1000; resource + role create with description succeed). Reviewer additionally exercised the Users path which surfaced the regression.
 - **Review findings (1 HIGH auto-resolved, 0 MEDIUM, 0 LOW):** The HIGH was the Users-disabled-by-default regression introduced by the positional refactor — fixed in-line, regenerated bootstrap (version 81b78d308910 → 2689f7f657e4), redeployed + recompiled live, retested. No deferred items.
 - **Final verification:** 1076/1076 tests pass (+4 new). Build green. Lint clean on touched files (pre-existing baseline errors in unrelated test files). All 3 retro-item reproductions resolved live.
+
+### Story 10.6: TypeScript + docs cleanup (post-Epic 10 retro)
+- **Status:** done
+- **Commit:** 1b7b874
+- **Files touched:**
+  - `packages/iris-dev-mcp/src/tools/packages.ts` — `/modified/{ts}` branch builds URL via `URLSearchParams` and conditionally appends `generated=1`/`generated=0`
+  - `packages/iris-dev-mcp/src/tools/doc.ts` — symmetric fix in `docListTool.handler`
+  - `packages/iris-dev-mcp/src/__tests__/packages.test.ts` — 2 new tests (modified+generated:true → URL has both; modified+undefined → no `generated=` param)
+  - `packages/iris-dev-mcp/src/__tests__/doc.test.ts` — 2 new tests (modified+generated:false → URL has `generated=0`; modified+undefined → no `generated=` param)
+  - `packages/iris-dev-mcp/README.md` — CSP-asymmetry note added under `iris_package_list` `<details>` block, mirroring the existing `iris_doc_export` note
+  - `CHANGELOG.md` — consolidated `### Fixed` bullet under `## [Pre-release — 2026-04-20]` covering both the `/modified/` URL fix and the README CSP-asymmetry symmetry
+- **Key design decisions:**
+  - **Symmetric fix, not refactor.** Sprint Change Proposal explicitly scoped this as a "minor symmetry fix" not a refactor — did NOT extract a shared URL builder helper. Each file's `/modified/` branch now mirrors its own `/docnames/` branch convention (packages.ts uses braced `if`, doc.ts uses single-line — matched per-file existing style).
+  - **`String(generated ? 1 : 0)` wire format** — matches the existing `/docnames/` branch and `iris_doc_export`'s tri-state branch. No new conventions.
+  - **Did NOT touch `iris_doc_export`** — its `/modified/` already handles `generated` via the `generated !== "both"` tri-state check; out of scope.
+  - **Optional CHANGELOG opt-in** — the silently-dropped param is a real user-visible defect; consolidated bullet covers both the URL fix and README CSP-asymmetry symmetry under one entry to avoid bullet-spam.
+  - **Red-green-refactor for tests** — wrote tests first, confirmed the 2 "generated=N" cases failed pre-fix (the 2 "omits" cases trivially passed), then implemented.
+- **Code review (CLEAN):** 0 HIGH, 0 MEDIUM, 0 actionable LOW. Reviewer triaged 3 LOW-noise items: dismissed stylistic asymmetry between files (each correctly mirrors its own existing convention), deferred code duplication (explicitly out of scope per SCP), deferred falsy empty-string `modifiedSince` (pre-existing, not introduced here). No deferred-work.md additions, no review fixes needed. All 8 ACs (10.6.1 through 10.6.8) verified.
+- **Final verification:** `pnpm turbo run test --filter=@iris-mcp/dev` → 273/273 pass (+4 new). `pnpm turbo run build --filter=@iris-mcp/dev` → green. Lint baseline-clean (7 pre-existing errors on untouched files; 0 new on touched files). Full-suite test → all 12 packages green.
+
+### Epic 10 Wrap (Final)
+
+Six stories, six merge commits (plus log/chore commits). Net delta vs. Epic 9 baseline:
+- **Added**: 2 new tools (`iris_package_list`, `iris_doc_export`) in `@iris-mcp/dev`. Tool count 21 → 23. Suite total 85 → 87.
+- **Fixed**: 4 post-merge bugs across two follow-up stories (10.5 ObjectScript handler bugs: `iris_task_history` taskId filter, `Security.Resources/Roles/Users.Create` description-create crash; 10.6 TypeScript bugs: `iris_doc_list`/`iris_package_list` `generated` param dropped on `/modified/` branch).
+- **README symmetry**: CSP static-asset asymmetry note now present on both `iris_doc_export` (Story 10.4) and `iris_package_list` (Story 10.6).
+- **Tests**: 228 → 273 (+45 across Epic 10).
+- **Code review**: 1 HIGH auto-resolved (Story 10.5 Users-disabled-by-default regression introduced by the positional refactor), 5 MEDIUM + 4 LOW auto-resolved across the epic, 4 LOW deferred to `deferred-work.md`, 7 dismissed as noise. Zero net regressions to main.
+- **Live-verified end-to-end** at multiple checkpoints: small-batch + cross-namespace + CSP exports (10.2), %SYS stress test before+after cap fix (10.4), HSCUSTOM 13K-doc export (10.4 testing), all 3 Story 10.5 reproductions (taskId filter, resource+description, role+description, user+description), Users-disabled regression catch+repair (10.5 review).
+- **`BOOTSTRAP_VERSION` bumps**: 1 (Story 10.5 only — `5ffd4dee0649` → `2689f7f657e4`). Stories 10.1, 10.2, 10.3, 10.4, 10.6 were all TypeScript-only.
+- **Epic 10 status:** `done`. All 4 retrospective action items (#1, #2, #3, #7) addressed. Items #4, #5, #6 (process improvements) remain optional follow-ups outside the story pipeline. Retrospective stays `done`.
