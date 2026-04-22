@@ -42,15 +42,30 @@ ClassMethod UserList() As %Status
         }
 
         While tRS.Next() {
+            ; Security.Users:List ROWSPEC is Name, Enabled, Roles,
+            ; LastLoginTime, Flags — it does NOT expose FullName,
+            ; Namespace, Comment, ExpirationDate, or ChangePassword.
+            ; Backfill via per-row Security.Users.Get() to return
+            ; the full set the schema advertises. Bug #4.
+            Set tName = tRS.Get("Name")
+            Set tGetSC = ##class(Security.Users).Get(tName, .tProps)
             Set tEntry = {}
-            Do tEntry.%Set("name", tRS.Get("Name"))
-            Do tEntry.%Set("fullName", tRS.Get("FullName"))
-            Do tEntry.%Set("enabled", tRS.Get("Enabled"), "boolean")
-            Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
-            Do tEntry.%Set("roles", tRS.Get("Roles"))
-            Do tEntry.%Set("comment", tRS.Get("Comment"))
-            Do tEntry.%Set("expirationDate", tRS.Get("ExpirationDate"))
-            Do tEntry.%Set("changePasswordOnNextLogin", tRS.Get("ChangePassword"), "boolean")
+            Do tEntry.%Set("name", tName)
+            If $$$ISOK(tGetSC) {
+                Do tEntry.%Set("fullName", $Get(tProps("FullName")))
+                Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+                Do tEntry.%Set("namespace", $Get(tProps("Namespace")))
+                Do tEntry.%Set("roles", $Get(tProps("Roles")))
+                Do tEntry.%Set("comment", $Get(tProps("Comment")))
+                Do tEntry.%Set("expirationDate", $Get(tProps("ExpirationDate")))
+                Do tEntry.%Set("changePasswordOnNextLogin", +$Get(tProps("ChangePassword")), "boolean")
+            }
+            Else {
+                ; Fall back to ROWSPEC-exposed fields only so a single
+                ; unreadable user does not drop the entire list.
+                Do tEntry.%Set("enabled", +tRS.Get("Enabled"), "boolean")
+                Do tEntry.%Set("roles", tRS.Get("Roles"))
+            }
             ; CRITICAL: Never include password values
             Do tResult.%Push(tEntry)
         }
@@ -88,7 +103,10 @@ ClassMethod UserGet(pName As %String) As %Status
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
-        Do tEntry.%Set("name", $Get(tProps("Name")))
+        ; Security.Users.Get uses the pName argument as the lookup key
+        ; and does NOT populate tProps("Name") — echo the input directly
+        ; (authoritative because the lookup succeeded). Bug #5.
+        Do tEntry.%Set("name", pName)
         Do tEntry.%Set("fullName", $Get(tProps("FullName")))
         Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
         Do tEntry.%Set("namespace", $Get(tProps("Namespace")))
@@ -403,8 +421,12 @@ ClassMethod UserPassword() As %Status
             Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) {
-                ; CRITICAL: Sanitize error — do NOT include password in error message
-                Set tSC = $$$ERROR($$$GeneralError, "Failed to change password for user '"_tUsername_"'")
+                ; Bug #12 — propagate the real IRIS error text (sanitized)
+                ; so callers see policy violations, missing-user errors,
+                ; etc. Security.Users.Modify() with tProps("ChangePassword")
+                ; does NOT embed the password in its %Status text, so the
+                ; generic wrap that used to be here removed diagnostic
+                ; signal for no security gain.
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -471,8 +493,10 @@ ClassMethod RoleList() As %Status
 
         Set tResult = []
 
-        ; Use SQL to enumerate all roles
-        Set tRS = ##class(%ResultSet).%New("Security.Roles:List")
+        ; Use SQL to enumerate all roles.
+        ; Use ListAll (ROWSPEC: Name, Description, GrantedRoles, Resources,
+        ; EscalationOnly) instead of List (no Resources column). Bug #3.
+        Set tRS = ##class(%ResultSet).%New("Security.Roles:ListAll")
         Set tSC = tRS.Execute("*")
         If $$$ISERR(tSC) {
             Set $NAMESPACE = tOrigNS
@@ -817,8 +841,41 @@ ClassMethod PermissionCheck() As %Status
             Set tGrantedResources = $Get(tRoleProps("Resources"))
         }
 
+        ; Bug #10 — %All super-role short-circuit. %All is special-cased by
+        ; the IRIS security subsystem: Security.Roles.Get("%All", .tProps)
+        ; returns empty Resources even though the role grants everything.
+        ; Any handler walking the resources list must special-case it —
+        ; otherwise %All holders (including _SYSTEM) test as granted:false
+        ; on every resource. Verified empirically 2026-04-21.
+        Set tIsSuperUser = 0
+        If tTarget = "%All" {
+            Set tIsSuperUser = 1
+        }
+        ElseIf tIsUser {
+            Set tRolesList = $Get(tUserRoles)
+            For tI = 1:1:$Length(tRolesList, ",") {
+                If $Piece(tRolesList, ",", tI) = "%All" {
+                    Set tIsSuperUser = 1
+                    Quit
+                }
+            }
+        }
+
         ; Done with %SYS — restore namespace for response rendering
         Set $NAMESPACE = tOrigNS
+
+        If tIsSuperUser {
+            Set tResult = {}
+            Do tResult.%Set("target", tTarget)
+            Do tResult.%Set("targetType", tTargetType)
+            Do tResult.%Set("resource", tResource)
+            Do tResult.%Set("permission", tPermission)
+            Do tResult.%Set("granted", 1, "boolean")
+            Do tResult.%Set("grantedPermission", "RWU")
+            Do tResult.%Set("reason", "target holds %All super-role")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
 
         ; Parse the resources string to check if the requested permission is granted
         ; Resources format: "ResName:RWU,ResName2:R"
@@ -1191,7 +1248,11 @@ ClassMethod SSLList() As %Status
 
         ; Use SQL to enumerate all SSL/TLS configurations
         Set tStatement = ##class(%SQL.Statement).%New()
-        Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, Protocols, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
+        ; Security.SSLConfigs.Protocols is Deprecated; the real TLS
+        ; version fields are TLSMinVersion and TLSMaxVersion
+        ; (VALUELIST: 2=SSLv3, 4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3).
+        ; Bug #6 — pre-release BREAKING change.
+        Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, TLSMinVersion, TLSMaxVersion, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
         If $$$ISERR(tSC) {
             Set $NAMESPACE = tOrigNS
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -1217,7 +1278,8 @@ ClassMethod SSLList() As %Status
             Do tEntry.%Set("caFile", tRS.%Get("CAFile"))
             Do tEntry.%Set("caPath", tRS.%Get("CAPath"))
             Do tEntry.%Set("cipherList", tRS.%Get("CipherList"))
-            Do tEntry.%Set("protocols", +tRS.%Get("Protocols"), "number")
+            Do tEntry.%Set("tlsMinVersion", +tRS.%Get("TLSMinVersion"), "number")
+            Do tEntry.%Set("tlsMaxVersion", +tRS.%Get("TLSMaxVersion"), "number")
             Do tEntry.%Set("verifyPeer", +tRS.%Get("VerifyPeer"), "number")
             Do tEntry.%Set("verifyDepth", +tRS.%Get("VerifyDepth"), "number")
             Do tEntry.%Set("type", +tRS.%Get("Type"), "number")
@@ -1286,7 +1348,12 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
             If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
             If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
-            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            ; Bug #6 (pre-release BREAKING): schema changed from the
+            ; Deprecated Protocols bitmask to tlsMinVersion/tlsMaxVersion.
+            ; Values are %Integer codes: 2=SSLv3, 4=TLS1.0, 8=TLS1.1,
+            ; 16=TLS1.2, 32=TLS1.3 (enforced by Security.Datatype.TLSVersion).
+            If tBody.%IsDefined("tlsMinVersion") Set tProps("TLSMinVersion") = +tBody.%Get("tlsMinVersion")
+            If tBody.%IsDefined("tlsMaxVersion") Set tProps("TLSMaxVersion") = +tBody.%Get("tlsMaxVersion")
             If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
             If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
             If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")
@@ -1308,7 +1375,12 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
             If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
             If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
-            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            ; Bug #6 (pre-release BREAKING): schema changed from the
+            ; Deprecated Protocols bitmask to tlsMinVersion/tlsMaxVersion.
+            ; Values are %Integer codes: 2=SSLv3, 4=TLS1.0, 8=TLS1.1,
+            ; 16=TLS1.2, 32=TLS1.3 (enforced by Security.Datatype.TLSVersion).
+            If tBody.%IsDefined("tlsMinVersion") Set tProps("TLSMinVersion") = +tBody.%Get("tlsMinVersion")
+            If tBody.%IsDefined("tlsMaxVersion") Set tProps("TLSMaxVersion") = +tBody.%Get("tlsMaxVersion")
             If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
             If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
             If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")

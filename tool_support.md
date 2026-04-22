@@ -73,6 +73,37 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 **Mix:** 0 Atelier · 22 ExecuteMCPv2 · 0 other — **fully custom**. Atelier has no security or namespace management endpoints, which is why every one of these needs ObjectScript handlers.
 
+### Fields returned — Security list/read tools
+
+Added 2026-04-21 (Story 11.2) after a handler-completeness fix batch
+corrected several list/get tools that used to advertise fields via
+their Zod schemas but silently dropped them server-side.
+
+- **`iris_role_list`** row: `name, description, resources, grantedRoles`.
+  Handler uses `Security.Roles:ListAll` (wider ROWSPEC than `:List`).
+  `resources` is a comma-separated list of `resource:permission` pairs,
+  e.g. `%DB_USER:RW,%Ens_Code:R`. The `%All` super-role always returns
+  `resources: ""` — IRIS special-cases it.
+- **`iris_user_get`** row: `name, fullName, enabled, namespace, roles,
+  comment, expirationDate, changePasswordOnNextLogin`. List mode
+  backfills these via per-row `Security.Users.Get()` because
+  `Security.Users:List` only ships `Name, Enabled, Roles, LastLoginTime,
+  Flags`. Single-user mode echoes the `name` argument (IRIS uses it as
+  a lookup key and does not return it as a property).
+- **`iris_ssl_list`** row: `name, description, certFile, keyFile, caFile,
+  caPath, cipherList, tlsMinVersion, tlsMaxVersion, verifyPeer,
+  verifyDepth, type, enabled`. ⚠️ **Pre-release breaking change**: the
+  former `protocols` bitmask was replaced with separate
+  `tlsMinVersion` and `tlsMaxVersion` integer fields. See the
+  `iris_ssl_manage` README section for the TLS version value mapping
+  (`2=SSLv3, 4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3`).
+- **`iris_permission_check`** response: `target, targetType, resource,
+  permission, granted, grantedPermission?`. A new `reason` field is
+  emitted only on the `%All` short-circuit path (when the target IS
+  the `%All` role or when a user's role list contains `%All`). Value
+  is always `"target holds %All super-role"`. The `reason` field is
+  omitted on the regular path.
+
 ---
 
 ## `@iris-mcp/interop` — Interoperability (19)

@@ -286,4 +286,36 @@ describe("iris_role_list", () => {
     const shape = roleListTool.inputSchema.shape as Record<string, unknown>;
     expect(shape).toHaveProperty("cursor");
   });
+
+  it("iris_role_list returns resources for every role", async () => {
+    // Story 11.2 Bug #3: handler switched from Security.Roles:List (no
+    // Resources column in ROWSPEC) to Security.Roles:ListAll so the
+    // resources field is populated for every non-special role.
+    const roleData = [
+      {
+        name: "%EnsRole_Administrator",
+        description: "Interop Administrator",
+        resources: "%Ens_Code:R,%Ens_Jobs:W",
+        grantedRoles: "%Developer",
+      },
+      {
+        name: "%Developer",
+        description: "Developer role",
+        resources: "%DB_USER:RW,%Development:U",
+        grantedRoles: "",
+      },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(roleData));
+
+    const result = await roleListTool.handler({}, ctx);
+
+    const structured = result.structuredContent as {
+      roles: typeof roleData;
+      count: number;
+    };
+    expect(structured.roles).toHaveLength(2);
+    expect(structured.roles[0]?.resources).toBe("%Ens_Code:R,%Ens_Jobs:W");
+    expect(structured.roles[1]?.resources).toBe("%DB_USER:RW,%Development:U");
+    expect(result.isError).toBeUndefined();
+  });
 });

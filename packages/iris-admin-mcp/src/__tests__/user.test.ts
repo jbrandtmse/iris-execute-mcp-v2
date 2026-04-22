@@ -378,6 +378,50 @@ describe("iris_user_get", () => {
     expect(responseText).not.toContain("password");
     expect(responseText).not.toContain("Password");
   });
+
+  it("iris_user_get list mode preserves enabled, fullName, and comment", async () => {
+    // Story 11.2 Bug #4: the Security.Users:List ROWSPEC does not
+    // expose FullName, Namespace, Comment, ExpirationDate, or
+    // ChangePassword — only Name, Enabled, Roles, LastLoginTime, Flags.
+    // The handler now backfills via per-row Security.Users.Get() so
+    // these fields carry real values in list mode.
+    const userList = [
+      {
+        name: "Admin",
+        enabled: true,
+        fullName: "Administrator",
+        comment: "Built-in admin",
+      },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(userList));
+
+    const result = await userGetTool.handler({}, ctx);
+
+    const structured = result.structuredContent as {
+      users: typeof userList;
+      count: number;
+    };
+    expect(structured.users).toHaveLength(1);
+    expect(structured.users[0]?.enabled).toBe(true);
+    expect(structured.users[0]?.fullName).toBe("Administrator");
+    expect(structured.users[0]?.comment).toBe("Built-in admin");
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("iris_user_get single-user mode returns name field", async () => {
+    // Story 11.2 Bug #5: Security.Users.Get(name, .tProps) uses name
+    // as the lookup key and does NOT populate tProps("Name"). The
+    // handler now echoes the pName argument so single-user responses
+    // always carry the name field.
+    const userData = { name: "Admin", fullName: "Administrator" };
+    mockHttp.get.mockResolvedValue(envelope(userData));
+
+    const result = await userGetTool.handler({ name: "Admin" }, ctx);
+
+    const structured = result.structuredContent as typeof userData;
+    expect(structured.name).toBe("Admin");
+    expect(result.isError).toBeUndefined();
+  });
 });
 
 // ── iris_user_roles ────────────────────────────────────────────
@@ -717,5 +761,42 @@ describe("iris_user_password", () => {
     expect(result.isError).toBe(true);
     const responseText = result.content[0]?.text ?? "";
     expect(responseText).not.toContain("LeakyPassword123!");
+  });
+
+  it("iris_user_password change propagates IRIS error text", async () => {
+    // Story 11.2 Bug #12: the ObjectScript change branch used to wrap
+    // the real %Status from Security.Users.Modify() with a generic
+    // "Failed to change password for user 'X'" message, discarding
+    // policy-violation details, missing-user errors, etc. The fix is
+    // to pass the sanitized original %Status through directly. The
+    // IrisApiError.message surfaces the server's error text via
+    // shared/src/errors.ts's Details: suffix, so the tool-side
+    // responseText must contain the real reason.
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [{ error: "ERROR #5001: Password does not meet complexity requirements" }],
+        "/api/executemcp/v2/security/user/password",
+        "Password does not meet complexity requirements",
+      ),
+    );
+
+    const result = await userPasswordTool.handler(
+      {
+        action: "change",
+        username: "someuser",
+        password: "SomePolicyFailingPassword!",
+      },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const responseText = result.content[0]?.text ?? "";
+    expect(responseText).toContain("Password does not meet complexity requirements");
+    // Verify the generic wrap is gone — the old handler always surfaced
+    // "Failed to change password" as the entire error.
+    expect(responseText).not.toBe("Failed to change password");
+    // Password itself must never leak
+    expect(responseText).not.toContain("SomePolicyFailingPassword!");
   });
 });

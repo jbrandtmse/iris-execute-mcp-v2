@@ -148,7 +148,7 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_ssl_manage` | Create, modify, or delete SSL/TLS config | `action`, `name`, `certFile?`, `keyFile?`, `caFile?`, `protocols?`, `verifyPeer?`, `type?` | destructive |
+| `iris_ssl_manage` | Create, modify, or delete SSL/TLS config | `action`, `name`, `certFile?`, `keyFile?`, `caFile?`, `tlsMinVersion?`, `tlsMaxVersion?`, `verifyPeer?`, `type?` | destructive |
 | `iris_ssl_list` | List all SSL/TLS configurations | `cursor?` | readOnly, idempotent |
 
 ### OAuth2 Tools
@@ -321,23 +321,60 @@ All servers use the same environment variables:
 <details>
 <summary><strong>iris_user_get</strong> -- Get user details</summary>
 
-**Input:**
+**Input (single user):**
 ```json
 {
   "name": "_SYSTEM"
 }
 ```
 
-**Output:**
+**Output (single user):**
 ```json
 {
   "name": "_SYSTEM",
-  "fullName": "System Manager",
+  "fullName": "SQL System Manager",
+  "enabled": true,
+  "namespace": "",
   "roles": "%All",
-  "enabled": 1,
-  "namespace": "%SYS"
+  "comment": "",
+  "expirationDate": "",
+  "changePasswordOnNextLogin": false
 }
 ```
+
+> **Note:** Single-user lookups echo the `name` argument back in the
+> response (`Security.Users.Get` in IRIS uses `name` as a lookup key
+> and does not populate it in the returned property array).
+
+**Input (list mode):** omit `name`:
+```json
+{}
+```
+
+**Output (list mode):**
+```json
+{
+  "users": [
+    {
+      "name": "Admin",
+      "enabled": true,
+      "fullName": "Administrator",
+      "namespace": "",
+      "roles": "%Developer,%Manager",
+      "comment": "Built-in admin",
+      "expirationDate": "",
+      "changePasswordOnNextLogin": false
+    }
+  ],
+  "count": 1
+}
+```
+
+> **Note:** The IRIS `Security.Users:List` ROWSPEC only exposes
+> `Name, Enabled, Roles, LastLoginTime, Flags`. List mode backfills
+> `fullName`, `namespace`, `comment`, `expirationDate`, and
+> `changePasswordOnNextLogin` via per-row `Security.Users.Get()` so
+> responses carry the full set the schema advertises.
 </details>
 
 <details>
@@ -376,11 +413,18 @@ All servers use the same environment variables:
 **Output:**
 ```json
 {
-  "action": "change",
+  "action": "changed",
   "username": "AppUser",
-  "status": "changed"
+  "success": true
 }
 ```
+
+> **Note:** When `Security.Users.Modify()` fails (policy violation,
+> missing user, permission error, etc.), the underlying IRIS error
+> text is propagated via the `Details:` suffix of the tool's error
+> response. Examples: `User NonExistent does not exist`,
+> `Password does not meet complexity requirements`. The password
+> value itself is never embedded in IRIS error text for this path.
 </details>
 
 <details>
@@ -395,16 +439,38 @@ All servers use the same environment variables:
 }
 ```
 
-**Output:**
+**Output (target holds %All super-role — short-circuit path):**
 ```json
 {
   "target": "_SYSTEM",
+  "targetType": "user",
   "resource": "%DB_USER",
-  "requested": "RW",
+  "permission": "RW",
   "granted": true,
-  "grantedPermission": "RWU"
+  "grantedPermission": "RWU",
+  "reason": "target holds %All super-role"
 }
 ```
+
+**Output (regular path — explicit resource:permission pair match):**
+```json
+{
+  "target": "Admin",
+  "targetType": "user",
+  "resource": "%DB_USER",
+  "permission": "RW",
+  "granted": true,
+  "grantedPermission": "RW"
+}
+```
+
+> **Note:** The `%All` role is special-cased by the IRIS security
+> subsystem — `Security.Roles.Get("%All", .tProps)` returns empty
+> `Resources` even though the role grants everything. The handler
+> short-circuits to `granted: true` with `grantedPermission: "RWU"`
+> and emits an extra `reason` field when the target IS the `%All`
+> role OR when a user target's role list contains `%All`. The
+> `reason` field is omitted on the regular path.
 </details>
 
 <details>
@@ -442,12 +508,20 @@ All servers use the same environment variables:
 ```json
 {
   "roles": [
-    { "name": "%All", "description": "All privileges", "resources": "", "grantedRoles": "" },
-    { "name": "%Developer", "description": "Developer role", "resources": "%Development:U", "grantedRoles": "" }
+    { "name": "%All", "description": "The Super-User Role", "resources": "", "grantedRoles": "" },
+    { "name": "%Developer", "description": "A Role owned by all Developers", "resources": "%DB_USER:RW,%Development:U,%Service_SQL:U", "grantedRoles": "" },
+    { "name": "%EnsRole_Administrator", "description": "Interoperability Administrator", "resources": "%Ens_Code:R,%Ens_Jobs:W,%Ens_ProductionConfig:W", "grantedRoles": "%DB_ENSLIB,%EnsRole_Operator" }
   ],
-  "count": 2
+  "count": 3
 }
 ```
+
+> **Note:** `resources` is a comma-separated list of
+> `resource:permission` pairs (e.g., `%DB_USER:RW,%Ens_Code:R`).
+> The `%All` super-role always returns `resources: ""` because
+> IRIS special-cases it — its grant coverage is not stored as
+> explicit pairs. Use `iris_permission_check` to test effective
+> permissions for a `%All`-holder.
 </details>
 
 <details>
@@ -563,11 +637,30 @@ All servers use the same environment variables:
 <details>
 <summary><strong>iris_ssl_manage</strong> -- Create SSL config</summary>
 
+> **⚠️ Breaking (pre-release):** the `protocols` bitmask was removed
+> in favor of separate `tlsMinVersion` and `tlsMaxVersion` integer
+> fields, which reflect the real IRIS properties
+> (`Security.SSLConfigs.TLSMinVersion` / `TLSMaxVersion`). The
+> deprecated `Protocols` property it replaced was never actually
+> wired up through the handler, so removing it is a clean break
+> with no data-loss risk. Clients that wrote `protocols: 24` now
+> write `tlsMinVersion: 8, tlsMaxVersion: 16` (or
+> `tlsMinVersion: 16, tlsMaxVersion: 32` for TLS 1.2 through TLS 1.3
+> explicitly). See Story 11.2 in `_bmad-output`. Zod-schema changes
+> ship in Story 11.4.
+>
+> **TLS version value mapping** (IRIS
+> `Security.Datatype.TLSVersion` VALUELIST):
+> `2 = SSLv3`, `4 = TLS 1.0`, `8 = TLS 1.1`, `16 = TLS 1.2`,
+> `32 = TLS 1.3`.
+
 **Input:**
 ```json
 {
   "action": "create",
-  "name": "MySSLClient",
+  "name": "MyTLS",
+  "tlsMinVersion": 16,
+  "tlsMaxVersion": 32,
   "type": 0,
   "verifyPeer": 1
 }
@@ -576,9 +669,8 @@ All servers use the same environment variables:
 **Output:**
 ```json
 {
-  "action": "create",
-  "name": "MySSLClient",
-  "status": "created"
+  "action": "created",
+  "name": "MyTLS"
 }
 ```
 </details>
@@ -595,11 +687,29 @@ All servers use the same environment variables:
 ```json
 {
   "sslConfigs": [
-    { "name": "MySSLClient", "type": 0, "enabled": 1, "verifyPeer": 1 }
+    {
+      "name": "BFC_SSL",
+      "description": "",
+      "certFile": "",
+      "keyFile": "",
+      "caFile": "",
+      "caPath": "",
+      "cipherList": "ALL:!aNULL:!eNULL:!EXP:!SSLv2",
+      "tlsMinVersion": 16,
+      "tlsMaxVersion": 32,
+      "verifyPeer": 0,
+      "verifyDepth": 9,
+      "type": 0,
+      "enabled": true
+    }
   ],
   "count": 1
 }
 ```
+
+> **⚠️ Breaking (pre-release):** `protocols` was replaced by
+> `tlsMinVersion` + `tlsMaxVersion` — see the `iris_ssl_manage`
+> note above for the TLS version value mapping.
 </details>
 
 <details>

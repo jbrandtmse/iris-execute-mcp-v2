@@ -183,4 +183,68 @@ describe("iris_permission_check", () => {
   it("should have scope SYS", () => {
     expect(permissionCheckTool.scope).toBe("SYS");
   });
+
+  it("iris_permission_check returns granted:true for %All-holding target", async () => {
+    // Story 11.2 Bug #10: %All is special-cased by the IRIS security
+    // subsystem; Security.Roles.Get("%All", .tProps) returns empty
+    // Resources. The handler now short-circuits to granted:true with
+    // grantedPermission:"RWU" and a reason:"target holds %All
+    // super-role" when the target IS the %All role or when a user
+    // target's Roles list contains %All. This test locks the
+    // response-mapping for both the _SYSTEM (user-with-%All) and %All
+    // (role-itself) paths.
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        target: "_SYSTEM",
+        targetType: "user",
+        resource: "%DB_USER",
+        permission: "RW",
+        granted: true,
+        grantedPermission: "RWU",
+        reason: "target holds %All super-role",
+      }),
+    );
+
+    const userResult = await permissionCheckTool.handler(
+      { target: "_SYSTEM", resource: "%DB_USER", permission: "RW" },
+      ctx,
+    );
+
+    const userStructured = userResult.structuredContent as {
+      granted: boolean;
+      grantedPermission: string;
+      reason: string;
+    };
+    expect(userStructured.granted).toBe(true);
+    expect(userStructured.grantedPermission).toBe("RWU");
+    expect(userStructured.reason).toBe("target holds %All super-role");
+    expect(userResult.isError).toBeUndefined();
+
+    // Mirror for the %All role itself
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        target: "%All",
+        targetType: "role",
+        resource: "%DB_USER",
+        permission: "RW",
+        granted: true,
+        grantedPermission: "RWU",
+        reason: "target holds %All super-role",
+      }),
+    );
+
+    const roleResult = await permissionCheckTool.handler(
+      { target: "%All", resource: "%DB_USER", permission: "RW" },
+      ctx,
+    );
+
+    const roleStructured = roleResult.structuredContent as {
+      targetType: string;
+      granted: boolean;
+      reason: string;
+    };
+    expect(roleStructured.targetType).toBe("role");
+    expect(roleStructured.granted).toBe(true);
+    expect(roleStructured.reason).toBe("target holds %All super-role");
+  });
 });

@@ -323,4 +323,44 @@ describe("iris_ssl_list", () => {
     const shape = sslListTool.inputSchema.shape as Record<string, unknown>;
     expect(shape).toHaveProperty("cursor");
   });
+
+  it("iris_ssl_list returns tlsMinVersion and tlsMaxVersion (not protocols)", async () => {
+    // Story 11.2 Bug #6 (pre-release BREAKING): the server-side handler
+    // replaced the Deprecated Protocols bitmask with separate
+    // TLSMinVersion and TLSMaxVersion %Integer fields. This test
+    // asserts the tool passes the new fields through. Zod schema
+    // changes land in Story 11.4; this test locks the response-mapping
+    // layer. Value mapping: 2=SSLv3, 4=TLS1.0, 8=TLS1.1, 16=TLS1.2,
+    // 32=TLS1.3 (Security.Datatype.TLSVersion).
+    const configData = [
+      {
+        name: "BFC_SSL",
+        description: "",
+        certFile: "",
+        keyFile: "",
+        caFile: "",
+        caPath: "",
+        cipherList: "ALL:!aNULL:!eNULL:!EXP:!SSLv2",
+        tlsMinVersion: 16,
+        tlsMaxVersion: 32,
+        verifyPeer: 0,
+        verifyDepth: 9,
+        type: 0,
+        enabled: true,
+      },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(configData));
+
+    const result = await sslListTool.handler({}, ctx);
+
+    const structured = result.structuredContent as {
+      sslConfigs: Array<Record<string, unknown>>;
+      count: number;
+    };
+    expect(structured.sslConfigs).toHaveLength(1);
+    expect(structured.sslConfigs[0]?.tlsMinVersion).toBe(16);
+    expect(structured.sslConfigs[0]?.tlsMaxVersion).toBe(32);
+    expect(structured.sslConfigs[0]?.protocols).toBeUndefined();
+    expect(result.isError).toBeUndefined();
+  });
 });
