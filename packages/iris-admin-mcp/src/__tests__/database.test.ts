@@ -269,4 +269,38 @@ describe("iris_database_list", () => {
     const shape = databaseListTool.inputSchema.shape as Record<string, unknown>;
     expect(shape).toHaveProperty("cursor");
   });
+
+  it("iris_database_list returns real sizes", async () => {
+    // Locks the response-shape contract for Bug #2: the server-side handler
+    // now opens SYS.Database per row for Size/MaxSize/ExpansionSize instead
+    // of reading non-existent props off Config.Databases. The tool layer
+    // must forward those numeric values through unchanged.
+    const dbData = [
+      {
+        name: "USER",
+        directory: "C:\\InterSystems\\IRISHealth\\mgr\\user\\",
+        size: 11,
+        maxSize: 0,
+        expansionSize: 0,
+        globalJournalState: 0,
+        mountRequired: false,
+        mountAtStartup: false,
+        readOnly: false,
+        resource: "",
+      },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(dbData));
+
+    const result = await databaseListTool.handler({}, ctx);
+
+    const structured = result.structuredContent as {
+      databases: Array<{ name: string; size: number; maxSize: number; expansionSize: number }>;
+      count: number;
+    };
+    expect(structured.databases[0]?.size).toBe(11);
+    expect(structured.databases[0]?.maxSize).toBe(0);
+    expect(structured.databases[0]?.expansionSize).toBe(0);
+    expect(structured.databases[0]?.name).toBe("USER");
+    expect(result.isError).toBeUndefined();
+  });
 });

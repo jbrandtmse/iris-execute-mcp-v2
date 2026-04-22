@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "2689f7f657e4";
+export const BOOTSTRAP_VERSION = "3fb0590b5d16";
 
 export interface BootstrapClass {
   name: string;
@@ -170,6 +170,21 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
     If $ZStrip(tSafe, "<>W") = "" {
         Set tSafe = "An internal error occurred"
     }
+    ; Strip a single leading "ERROR #N: " or localized equivalent (e.g. Arabic "خطأ #N: ")
+    ; so the final $$$ERROR wrap does not produce a doubly-prefixed chain (Bug #11).
+    For tPrefix = "ERROR #", "خطأ #" {
+        If $Extract(tSafe, 1, $Length(tPrefix)) = tPrefix {
+            Set tRest = $Extract(tSafe, $Length(tPrefix) + 1, *)
+            Set tColon = $Find(tRest, ": ")
+            If tColon > 0 {
+                Set tCodeChunk = $Extract(tRest, 1, tColon - 3)
+                If tCodeChunk ? 1.N {
+                    Set tSafe = $Extract(tRest, tColon, *)
+                    Quit
+                }
+            }
+        }
+    }
     Quit $$$ERROR($$$GeneralError, tSafe)
 }
 
@@ -233,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "2689f7f657e4";
+Parameter BOOTSTRAPVERSION = "3fb0590b5d16";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -737,6 +752,7 @@ ClassMethod Execute() As %Status
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
     Set tRedirected = 0
+    Set tCmdErrored = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -776,39 +792,40 @@ ClassMethod Execute() As %Status
         Try {
             XECUTE tCommand
         } Catch exCmd {
-            ; Restore I/O before handling error
-            Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-            If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
-            Set tRedirected = 0
-
-            Set $NAMESPACE = tOrigNS
-            Set tSC = exCmd.AsStatus()
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-            Set tSC = $$$OK
-            Quit
+            ; Flag the error so the success render below is skipped. The I/O
+            ; restore + RenderResponseBody run AFTER the catch so a single
+            ; response is emitted and the redirect is guaranteed to be off
+            ; before the JSON envelope is written (Bug #1).
+            Set tCmdErrored = 1
+            Set tCmdStatus = exCmd.AsStatus()
         }
 
-        ; Restore I/O
-        Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-        If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
+        ; Fully restore the original I/O state. Unconditionally disable redirect
+        ; first so subsequent writes (RenderResponseBody) reach the HTTP response
+        ; stream rather than the %ExecuteMCPOutput capture buffer.
+        Do ##class(%Library.Device).ReDirectIO(0)
+        Use tInitIO
         Set tRedirected = 0
 
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS
 
-        Set tOutput = $Get(%ExecuteMCPOutput, "")
-        Kill %ExecuteMCPOutput
-        Set tResult = {}
-        Do tResult.%Set("output", tOutput)
-        Do ..RenderResponseBody($$$OK, , tResult)
+        If tCmdErrored {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+            Kill %ExecuteMCPOutput
+        } Else {
+            Set tOutput = $Get(%ExecuteMCPOutput, "")
+            Kill %ExecuteMCPOutput
+            Set tResult = {}
+            Do tResult.%Set("output", tOutput)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
     } Catch ex {
-        ; Ensure redirection is restored on unexpected error
+        ; Ensure redirection is restored on unexpected error before rendering.
         Try {
             If tRedirected {
-                If $Get(tInitIO) '= "" {
-                    Use tInitIO::($Select($Get(tOldMnemonic)=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-                }
                 Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
             }
         } Catch {}
         Set $NAMESPACE = tOrigNS
@@ -1456,10 +1473,25 @@ ClassMethod DatabaseList() As %Status
             Set tEntry = {}
             Do tEntry.%Set("name", tName)
             If $$$ISOK(tSC2) {
-                Do tEntry.%Set("directory", $Get(tProps("Directory")))
-                Do tEntry.%Set("size", $Get(tProps("Size")), "number")
-                Do tEntry.%Set("maxSize", $Get(tProps("MaxSize")), "number")
-                Do tEntry.%Set("expansionSize", $Get(tProps("ExpansionSize")), "number")
+                Set tDir = $Get(tProps("Directory"))
+                Do tEntry.%Set("directory", tDir)
+                ; Size, MaxSize, and ExpansionSize live on SYS.Database (runtime
+                ; state) — Config.Databases.Get() only returns configuration and
+                ; has no Size/MaxSize/ExpansionSize properties. Open SYS.Database
+                ; per row the same way Monitor:DatabaseCheck does.
+                Set tSizeMB = 0, tMaxMB = 0, tExpMB = 0
+                Try {
+                    Set tDBObj = ##class(SYS.Database).%OpenId(tDir)
+                    If $IsObject(tDBObj) {
+                        Set tSizeMB = +tDBObj.Size
+                        Set tMaxMB = +tDBObj.MaxSize
+                        Set tExpMB = +tDBObj.ExpansionSize
+                    }
+                }
+                Catch { }
+                Do tEntry.%Set("size", tSizeMB, "number")
+                Do tEntry.%Set("maxSize", tMaxMB, "number")
+                Do tEntry.%Set("expansionSize", tExpMB, "number")
                 Do tEntry.%Set("globalJournalState", $Get(tProps("GlobalJournalState")), "number")
                 Do tEntry.%Set("mountRequired", $Get(tProps("MountRequired")), "boolean")
                 Do tEntry.%Set("mountAtStartup", $Get(tProps("MountAtStartup")), "boolean")
@@ -1793,15 +1825,30 @@ ClassMethod UserList() As %Status
         }
 
         While tRS.Next() {
+            ; Security.Users:List ROWSPEC is Name, Enabled, Roles,
+            ; LastLoginTime, Flags — it does NOT expose FullName,
+            ; Namespace, Comment, ExpirationDate, or ChangePassword.
+            ; Backfill via per-row Security.Users.Get() to return
+            ; the full set the schema advertises. Bug #4.
+            Set tName = tRS.Get("Name")
+            Set tGetSC = ##class(Security.Users).Get(tName, .tProps)
             Set tEntry = {}
-            Do tEntry.%Set("name", tRS.Get("Name"))
-            Do tEntry.%Set("fullName", tRS.Get("FullName"))
-            Do tEntry.%Set("enabled", tRS.Get("Enabled"), "boolean")
-            Do tEntry.%Set("namespace", tRS.Get("NameSpace"))
-            Do tEntry.%Set("roles", tRS.Get("Roles"))
-            Do tEntry.%Set("comment", tRS.Get("Comment"))
-            Do tEntry.%Set("expirationDate", tRS.Get("ExpirationDate"))
-            Do tEntry.%Set("changePasswordOnNextLogin", tRS.Get("ChangePassword"), "boolean")
+            Do tEntry.%Set("name", tName)
+            If $$$ISOK(tGetSC) {
+                Do tEntry.%Set("fullName", $Get(tProps("FullName")))
+                Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+                Do tEntry.%Set("namespace", $Get(tProps("Namespace")))
+                Do tEntry.%Set("roles", $Get(tProps("Roles")))
+                Do tEntry.%Set("comment", $Get(tProps("Comment")))
+                Do tEntry.%Set("expirationDate", $Get(tProps("ExpirationDate")))
+                Do tEntry.%Set("changePasswordOnNextLogin", +$Get(tProps("ChangePassword")), "boolean")
+            }
+            Else {
+                ; Fall back to ROWSPEC-exposed fields only so a single
+                ; unreadable user does not drop the entire list.
+                Do tEntry.%Set("enabled", +tRS.Get("Enabled"), "boolean")
+                Do tEntry.%Set("roles", tRS.Get("Roles"))
+            }
             ; CRITICAL: Never include password values
             Do tResult.%Push(tEntry)
         }
@@ -1839,7 +1886,10 @@ ClassMethod UserGet(pName As %String) As %Status
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         Set tEntry = {}
-        Do tEntry.%Set("name", $Get(tProps("Name")))
+        ; Security.Users.Get uses the pName argument as the lookup key
+        ; and does NOT populate tProps("Name") — echo the input directly
+        ; (authoritative because the lookup succeeded). Bug #5.
+        Do tEntry.%Set("name", pName)
         Do tEntry.%Set("fullName", $Get(tProps("FullName")))
         Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
         Do tEntry.%Set("namespace", $Get(tProps("Namespace")))
@@ -2154,8 +2204,12 @@ ClassMethod UserPassword() As %Status
             Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) {
-                ; CRITICAL: Sanitize error — do NOT include password in error message
-                Set tSC = $$$ERROR($$$GeneralError, "Failed to change password for user '"_tUsername_"'")
+                ; Bug #12 — propagate the real IRIS error text (sanitized)
+                ; so callers see policy violations, missing-user errors,
+                ; etc. Security.Users.Modify() with tProps("ChangePassword")
+                ; does NOT embed the password in its %Status text, so the
+                ; generic wrap that used to be here removed diagnostic
+                ; signal for no security gain.
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -2178,10 +2232,13 @@ ClassMethod UserPassword() As %Status
                 ; Use a generic message to avoid any risk of password leakage
                 ; through IRIS-reformatted or truncated error text
                 Set tMsg = $System.Status.GetErrorText(tSC)
-                ; Strip the password using regex-style replacement that handles
-                ; IRIS reformatting (spaces, truncation, case changes)
-                ; First do exact match, then strip any remaining fragments >= 3 chars
-                Set tMsg = $Replace(tMsg, tPassword, "***")
+                ; Strip the password only when it is long enough to make unconditional
+                ; $Replace safe. Short candidates (e.g. "a") would otherwise corrupt
+                ; the generic IRIS validation message — which never embeds the
+                ; candidate password in the first place (Bug #8).
+                If $Length(tPassword) >= 8 {
+                    Set tMsg = $Replace(tMsg, tPassword, "***")
+                }
                 If $Length(tPassword) >= 3 {
                     ; Also strip partial matches (IRIS may truncate or reformat)
                     Set tPwdLen = $Length(tPassword)
@@ -2219,8 +2276,10 @@ ClassMethod RoleList() As %Status
 
         Set tResult = []
 
-        ; Use SQL to enumerate all roles
-        Set tRS = ##class(%ResultSet).%New("Security.Roles:List")
+        ; Use SQL to enumerate all roles.
+        ; Use ListAll (ROWSPEC: Name, Description, GrantedRoles, Resources,
+        ; EscalationOnly) instead of List (no Resources column). Bug #3.
+        Set tRS = ##class(%ResultSet).%New("Security.Roles:ListAll")
         Set tSC = tRS.Execute("*")
         If $$$ISERR(tSC) {
             Set $NAMESPACE = tOrigNS
@@ -2565,8 +2624,41 @@ ClassMethod PermissionCheck() As %Status
             Set tGrantedResources = $Get(tRoleProps("Resources"))
         }
 
+        ; Bug #10 — %All super-role short-circuit. %All is special-cased by
+        ; the IRIS security subsystem: Security.Roles.Get("%All", .tProps)
+        ; returns empty Resources even though the role grants everything.
+        ; Any handler walking the resources list must special-case it —
+        ; otherwise %All holders (including _SYSTEM) test as granted:false
+        ; on every resource. Verified empirically 2026-04-21.
+        Set tIsSuperUser = 0
+        If tTarget = "%All" {
+            Set tIsSuperUser = 1
+        }
+        ElseIf tIsUser {
+            Set tRolesList = $Get(tUserRoles)
+            For tI = 1:1:$Length(tRolesList, ",") {
+                If $Piece(tRolesList, ",", tI) = "%All" {
+                    Set tIsSuperUser = 1
+                    Quit
+                }
+            }
+        }
+
         ; Done with %SYS — restore namespace for response rendering
         Set $NAMESPACE = tOrigNS
+
+        If tIsSuperUser {
+            Set tResult = {}
+            Do tResult.%Set("target", tTarget)
+            Do tResult.%Set("targetType", tTargetType)
+            Do tResult.%Set("resource", tResource)
+            Do tResult.%Set("permission", tPermission)
+            Do tResult.%Set("granted", 1, "boolean")
+            Do tResult.%Set("grantedPermission", "RWU")
+            Do tResult.%Set("reason", "target holds %All super-role")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
 
         ; Parse the resources string to check if the requested permission is granted
         ; Resources format: "ResName:RWU,ResName2:R"
@@ -2939,7 +3031,11 @@ ClassMethod SSLList() As %Status
 
         ; Use SQL to enumerate all SSL/TLS configurations
         Set tStatement = ##class(%SQL.Statement).%New()
-        Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, Protocols, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
+        ; Security.SSLConfigs.Protocols is Deprecated; the real TLS
+        ; version fields are TLSMinVersion and TLSMaxVersion
+        ; (VALUELIST: 2=SSLv3, 4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3).
+        ; Bug #6 — pre-release BREAKING change.
+        Set tSC = tStatement.%Prepare("SELECT Name, Description, CertificateFile, PrivateKeyFile, CAFile, CAPath, CipherList, TLSMinVersion, TLSMaxVersion, VerifyPeer, VerifyDepth, Type, Enabled FROM Security.SSLConfigs")
         If $$$ISERR(tSC) {
             Set $NAMESPACE = tOrigNS
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -2965,7 +3061,8 @@ ClassMethod SSLList() As %Status
             Do tEntry.%Set("caFile", tRS.%Get("CAFile"))
             Do tEntry.%Set("caPath", tRS.%Get("CAPath"))
             Do tEntry.%Set("cipherList", tRS.%Get("CipherList"))
-            Do tEntry.%Set("protocols", +tRS.%Get("Protocols"), "number")
+            Do tEntry.%Set("tlsMinVersion", +tRS.%Get("TLSMinVersion"), "number")
+            Do tEntry.%Set("tlsMaxVersion", +tRS.%Get("TLSMaxVersion"), "number")
             Do tEntry.%Set("verifyPeer", +tRS.%Get("VerifyPeer"), "number")
             Do tEntry.%Set("verifyDepth", +tRS.%Get("VerifyDepth"), "number")
             Do tEntry.%Set("type", +tRS.%Get("Type"), "number")
@@ -3034,7 +3131,12 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
             If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
             If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
-            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            ; Bug #6 (pre-release BREAKING): schema changed from the
+            ; Deprecated Protocols bitmask to tlsMinVersion/tlsMaxVersion.
+            ; Values are %Integer codes: 2=SSLv3, 4=TLS1.0, 8=TLS1.1,
+            ; 16=TLS1.2, 32=TLS1.3 (enforced by Security.Datatype.TLSVersion).
+            If tBody.%IsDefined("tlsMinVersion") Set tProps("TLSMinVersion") = +tBody.%Get("tlsMinVersion")
+            If tBody.%IsDefined("tlsMaxVersion") Set tProps("TLSMaxVersion") = +tBody.%Get("tlsMaxVersion")
             If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
             If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
             If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")
@@ -3056,7 +3158,12 @@ ClassMethod SSLManage() As %Status
             If tBody.%IsDefined("caFile") Set tProps("CAFile") = tBody.%Get("caFile")
             If tBody.%IsDefined("caPath") Set tProps("CAPath") = tBody.%Get("caPath")
             If tBody.%IsDefined("cipherList") Set tProps("CipherList") = tBody.%Get("cipherList")
-            If tBody.%IsDefined("protocols") Set tProps("Protocols") = +tBody.%Get("protocols")
+            ; Bug #6 (pre-release BREAKING): schema changed from the
+            ; Deprecated Protocols bitmask to tlsMinVersion/tlsMaxVersion.
+            ; Values are %Integer codes: 2=SSLv3, 4=TLS1.0, 8=TLS1.1,
+            ; 16=TLS1.2, 32=TLS1.3 (enforced by Security.Datatype.TLSVersion).
+            If tBody.%IsDefined("tlsMinVersion") Set tProps("TLSMinVersion") = +tBody.%Get("tlsMinVersion")
+            If tBody.%IsDefined("tlsMaxVersion") Set tProps("TLSMaxVersion") = +tBody.%Get("tlsMaxVersion")
             If tBody.%IsDefined("verifyPeer") Set tProps("VerifyPeer") = +tBody.%Get("verifyPeer")
             If tBody.%IsDefined("verifyDepth") Set tProps("VerifyDepth") = +tBody.%Get("verifyDepth")
             If tBody.%IsDefined("type") Set tProps("Type") = +tBody.%Get("type")
@@ -5172,22 +5279,39 @@ ClassMethod SystemMetrics() As %Status
         Do tMetric.%Set("value", tProcessCount, "number")
         Do tMetrics.%Push(tMetric)
 
-        ; -- Global references via $ZU(190,0) --
+        ; -- Global references via SYS.Stats.Global.Sample() (instance-wide) --
+        ; $ZU(190,0) and $ZU(190,1) return PER-PROCESS counters — the REST
+        ; handler's own. SYS.Stats.Global.Sample() / SYS.Stats.Routine.Sample()
+        ; expose instance-wide counters driven by the same underlying metrics
+        ; that power the Management Portal System Dashboard.
         Set tGlobalRefs = 0
-        Try { Set tGlobalRefs = $ZU(190,0) } Catch { }
+        Try {
+            Set tGRef = ##class(SYS.Stats.Global).Sample()
+            If $IsObject(tGRef) {
+                ; Total global references = local + private + remote
+                Set tGlobalRefs = (+tGRef.RefLocal) + (+tGRef.RefPrivate) + (+tGRef.RefRemote)
+            }
+        }
+        Catch { }
         Set tMetric = {}
         Do tMetric.%Set("name", "iris_global_references_total")
-        Do tMetric.%Set("help", "Total global references since startup")
+        Do tMetric.%Set("help", "Total global references since startup (instance-wide, from SYS.Stats.Global)")
         Do tMetric.%Set("type", "counter")
         Do tMetric.%Set("value", +tGlobalRefs, "number")
         Do tMetrics.%Push(tMetric)
 
-        ; -- Routine commands via $ZU(190,1) --
+        ; -- Routine commands via SYS.Stats.Routine.Sample() (instance-wide) --
         Set tRoutineCmds = 0
-        Try { Set tRoutineCmds = $ZU(190,1) } Catch { }
+        Try {
+            Set tRRef = ##class(SYS.Stats.Routine).Sample()
+            If $IsObject(tRRef) {
+                Set tRoutineCmds = +tRRef.RtnCommands
+            }
+        }
+        Catch { }
         Set tMetric = {}
         Do tMetric.%Set("name", "iris_routine_commands_total")
-        Do tMetric.%Set("help", "Total routine commands since startup")
+        Do tMetric.%Set("help", "Total routine commands since startup (instance-wide, from SYS.Stats.Routine)")
         Do tMetric.%Set("type", "counter")
         Do tMetric.%Set("value", +tRoutineCmds, "number")
         Do tMetrics.%Push(tMetric)
@@ -6388,6 +6512,21 @@ ClassMethod GetConfig(pSection As %String, Output pSC As %Status) As %DynamicObj
         }
         ElseIf pSection = "locale" {
             Set tLocale = {}
+            ; Resolve the currently-active locale. %SYS.NLS.Locale.%New()
+            ; defaults to the current locale (via $$$LOCALENAME), so Name
+            ; holds the active code (e.g. "enuw"). Fall back to the documented
+            ; %SYS("LOCALE","CURRENT") global if the class read fails.
+            Set tCurrentLocale = ""
+            Try {
+                Set tLocObj = ##class(%SYS.NLS.Locale).%New()
+                If $IsObject(tLocObj) {
+                    Set tCurrentLocale = tLocObj.Name
+                }
+            }
+            Catch { }
+            If tCurrentLocale = "" {
+                Set tCurrentLocale = $Get(^|"^^"_$ZU(12)|%SYS("LOCALE","CURRENT"), "enuw")
+            }
             ; List available locales via Config.NLS.Locales:List
             Set tLocales = []
             Set tRS = ##class(%ResultSet).%New("Config.NLS.Locales:List")
@@ -6400,6 +6539,7 @@ ClassMethod GetConfig(pSection As %String, Output pSC As %Status) As %DynamicObj
                 }
                 Do tRS.Close()
             }
+            Do tLocale.%Set("current", tCurrentLocale)
             Do tLocale.%Set("availableLocales", tLocales)
             Do tLocale.%Set("localeCount", tLocales.%Size(), "number")
             Do tResult.%Set("properties", tLocale)

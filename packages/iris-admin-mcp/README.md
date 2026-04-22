@@ -240,11 +240,16 @@ All servers use the same environment variables:
 ```json
 {
   "databases": [
-    { "name": "USER", "directory": "C:\\InterSystems\\IRIS\\mgr\\user", "size": 100, "maxSize": 0, "mountAtStartup": true }
+    { "name": "USER", "directory": "C:\\InterSystems\\IRIS\\mgr\\user", "size": 11, "maxSize": 0, "expansionSize": 0, "mountAtStartup": true }
   ],
   "count": 1
 }
 ```
+
+The `size`, `maxSize`, and `expansionSize` fields (all in MB) are populated
+from `SYS.Database` (runtime state) rather than `Config.Databases` (static
+configuration), since the latter does not carry those properties. Unmounted
+or inaccessible databases fall back to `0` without raising an error.
 </details>
 
 <details>

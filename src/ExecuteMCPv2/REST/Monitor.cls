@@ -39,22 +39,39 @@ ClassMethod SystemMetrics() As %Status
         Do tMetric.%Set("value", tProcessCount, "number")
         Do tMetrics.%Push(tMetric)
 
-        ; -- Global references via $ZU(190,0) --
+        ; -- Global references via SYS.Stats.Global.Sample() (instance-wide) --
+        ; $ZU(190,0) and $ZU(190,1) return PER-PROCESS counters — the REST
+        ; handler's own. SYS.Stats.Global.Sample() / SYS.Stats.Routine.Sample()
+        ; expose instance-wide counters driven by the same underlying metrics
+        ; that power the Management Portal System Dashboard.
         Set tGlobalRefs = 0
-        Try { Set tGlobalRefs = $ZU(190,0) } Catch { }
+        Try {
+            Set tGRef = ##class(SYS.Stats.Global).Sample()
+            If $IsObject(tGRef) {
+                ; Total global references = local + private + remote
+                Set tGlobalRefs = (+tGRef.RefLocal) + (+tGRef.RefPrivate) + (+tGRef.RefRemote)
+            }
+        }
+        Catch { }
         Set tMetric = {}
         Do tMetric.%Set("name", "iris_global_references_total")
-        Do tMetric.%Set("help", "Total global references since startup")
+        Do tMetric.%Set("help", "Total global references since startup (instance-wide, from SYS.Stats.Global)")
         Do tMetric.%Set("type", "counter")
         Do tMetric.%Set("value", +tGlobalRefs, "number")
         Do tMetrics.%Push(tMetric)
 
-        ; -- Routine commands via $ZU(190,1) --
+        ; -- Routine commands via SYS.Stats.Routine.Sample() (instance-wide) --
         Set tRoutineCmds = 0
-        Try { Set tRoutineCmds = $ZU(190,1) } Catch { }
+        Try {
+            Set tRRef = ##class(SYS.Stats.Routine).Sample()
+            If $IsObject(tRRef) {
+                Set tRoutineCmds = +tRRef.RtnCommands
+            }
+        }
+        Catch { }
         Set tMetric = {}
         Do tMetric.%Set("name", "iris_routine_commands_total")
-        Do tMetric.%Set("help", "Total routine commands since startup")
+        Do tMetric.%Set("help", "Total routine commands since startup (instance-wide, from SYS.Stats.Routine)")
         Do tMetric.%Set("type", "counter")
         Do tMetric.%Set("value", +tRoutineCmds, "number")
         Do tMetrics.%Push(tMetric)

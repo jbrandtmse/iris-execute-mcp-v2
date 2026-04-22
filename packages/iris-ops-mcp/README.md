@@ -159,14 +159,24 @@ All servers use the same environment variables:
 # HELP iris_process_count Number of IRIS processes
 # TYPE iris_process_count gauge
 iris_process_count 42
-# HELP iris_global_refs_total Total global references
-# TYPE iris_global_refs_total counter
-iris_global_refs_total 1234567
+# HELP iris_global_references_total Total global references since startup (instance-wide, from SYS.Stats.Global)
+# TYPE iris_global_references_total counter
+iris_global_references_total 1640566217
+# HELP iris_routine_commands_total Total routine commands since startup (instance-wide, from SYS.Stats.Routine)
+# TYPE iris_routine_commands_total counter
+iris_routine_commands_total 5083780047
 # HELP iris_db_size_mb Database size in megabytes
 # TYPE iris_db_size_mb gauge
-iris_db_size_mb{db="USER"} 256
-iris_db_size_mb{db="IRISSYS"} 1024
+iris_db_size_mb{db="USER"} 11
+iris_db_size_mb{db="IRISSYS"} 80
 ```
+
+`iris_global_references_total` and `iris_routine_commands_total` are
+**instance-wide** counters sampled from `SYS.Stats.Global` (sum of
+`RefLocal + RefPrivate + RefRemote`) and `SYS.Stats.Routine.RtnCommands`
+respectively. These are the same counters that power the Management
+Portal System Dashboard, and both increase monotonically across all
+processes on the instance — not per-process snapshots.
 </details>
 
 <details>
@@ -546,6 +556,21 @@ iris_db_size_mb{db="IRISSYS"} 1024
     "routines": 256,
     "locksiz": 16777216,
     "MaxServerConn": 1
+  }
+}
+```
+
+When `section` is `"locale"`, `properties` includes a `current` field with
+the active IRIS locale code (resolved via `%SYS.NLS.Locale.%New().Name`)
+alongside the existing `availableLocales` enumeration and `localeCount`:
+
+```json
+{
+  "section": "locale",
+  "properties": {
+    "current": "enuw",
+    "availableLocales": ["enuw", "araw", "deuw", "fraw", ...],
+    "localeCount": 36
   }
 }
 ```

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: "2026-04-21"  # Story 11.2 → review (6 Security.cls bug fixes; +6 unit tests; 210/210 admin tests pass; BOOTSTRAP_VERSION unchanged per epic-11 plan). Story 11.1 → ready-for-dev (epic-11 → in-progress); created by /bmad-create-story during Epic 11 kickoff. Epic 11 added via bmad-correct-course (sprint-change-proposal-2026-04-21.md) — 16-bug post-publish fix batch across 4 stories (11.1 OS error envelope; 11.2 Security handler completeness w/ SSL pre-release break; 11.3 DB/metrics/config + BOOTSTRAP_VERSION bump + live verify; 11.4 TS tool fixes). Previous 2026-04-20: Story 10.5 → done (code review auto-resolved HIGH: enabled-default regression in Security.Users.Create positional fix; live-verified); Story 10.4 → review (response-envelope cap fix, 269/269 tests pass); Story 10.3 → review (docs rollup complete, 267/267 tests pass); Story 10.2 → done (code review passed, 3 patches applied); Epic 10 added via bmad-correct-course (sprint-change-proposal-2026-04-20.md); user requested skip of Story 10.0
+last_updated: "2026-04-21"  # Story 11.3 → review (3 ObjectScript handler fixes: Config.DatabaseList SYS.Database per-row open; Monitor.SystemMetrics SYS.Stats.Global/Routine instance-wide counters; SystemConfig locale branch current field; BOOTSTRAP_VERSION 2689f7f657e4 → 3fb0590b5d16; +3 TS unit tests; all 12 Epic 11 bugs pass live verification on HSCUSTOM). Story 11.2 → review (6 Security.cls bug fixes; +6 unit tests; 210/210 admin tests pass; BOOTSTRAP_VERSION unchanged per epic-11 plan). Story 11.1 → ready-for-dev (epic-11 → in-progress); created by /bmad-create-story during Epic 11 kickoff. Epic 11 added via bmad-correct-course (sprint-change-proposal-2026-04-21.md) — 16-bug post-publish fix batch across 4 stories (11.1 OS error envelope; 11.2 Security handler completeness w/ SSL pre-release break; 11.3 DB/metrics/config + BOOTSTRAP_VERSION bump + live verify; 11.4 TS tool fixes). Previous 2026-04-20: Story 10.5 → done (code review auto-resolved HIGH: enabled-default regression in Security.Users.Create positional fix; live-verified); Story 10.4 → review (response-envelope cap fix, 269/269 tests pass); Story 10.3 → review (docs rollup complete, 267/267 tests pass); Story 10.2 → done (code review passed, 3 patches applied); Epic 10 added via bmad-correct-course (sprint-change-proposal-2026-04-20.md); user requested skip of Story 10.0
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -168,6 +168,6 @@ development_status:
   epic-11: in-progress
   11-1-objectscript-error-envelope-and-sanitization: done
   11-2-security-handler-completeness: done
-  11-3-db-metrics-config-accuracy-and-bootstrap-bump: backlog
+  11-3-db-metrics-config-accuracy-and-bootstrap-bump: done
   11-4-typescript-tool-fixes: backlog
   epic-11-retrospective: optional

@@ -143,6 +143,50 @@ describe("iris_metrics_system", () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0]?.text).toBeDefined();
   });
+
+  it("iris_metrics_system forwards system-wide counter values", async () => {
+    // Locks the response-shape contract for Bug #9: the server-side handler
+    // moved from per-process $ZU(190,N) to instance-wide
+    // SYS.Stats.Global.Sample() / SYS.Stats.Routine.Sample(). The tool layer
+    // must forward the resulting counter values unchanged — values in the
+    // millions-to-billions range after 33+ hours of uptime.
+    const systemData = {
+      metrics: [
+        {
+          name: "iris_global_references_total",
+          help:
+            "Total global references since startup (instance-wide, from SYS.Stats.Global)",
+          type: "counter",
+          value: 15234567,
+        },
+        {
+          name: "iris_routine_commands_total",
+          help:
+            "Total routine commands since startup (instance-wide, from SYS.Stats.Routine)",
+          type: "counter",
+          value: 8912345,
+        },
+      ],
+      databases: [],
+    };
+    mockHttp.get.mockResolvedValue(envelope(systemData));
+
+    const result = await metricsSystemTool.handler({}, ctx);
+
+    const structured = result.structuredContent as {
+      metrics: Array<{ name: string; value: number }>;
+      databases: unknown[];
+    };
+    const globalRefs = structured.metrics.find(
+      (m) => m.name === "iris_global_references_total",
+    );
+    const rtnCmds = structured.metrics.find(
+      (m) => m.name === "iris_routine_commands_total",
+    );
+    expect(globalRefs?.value).toBe(15234567);
+    expect(rtnCmds?.value).toBe(8912345);
+    expect(result.isError).toBeUndefined();
+  });
 });
 
 // ── iris_metrics_alerts ─────────────────────────────────────

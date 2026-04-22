@@ -172,6 +172,21 @@ ClassMethod GetConfig(pSection As %String, Output pSC As %Status) As %DynamicObj
         }
         ElseIf pSection = "locale" {
             Set tLocale = {}
+            ; Resolve the currently-active locale. %SYS.NLS.Locale.%New()
+            ; defaults to the current locale (via $$$LOCALENAME), so Name
+            ; holds the active code (e.g. "enuw"). Fall back to the documented
+            ; %SYS("LOCALE","CURRENT") global if the class read fails.
+            Set tCurrentLocale = ""
+            Try {
+                Set tLocObj = ##class(%SYS.NLS.Locale).%New()
+                If $IsObject(tLocObj) {
+                    Set tCurrentLocale = tLocObj.Name
+                }
+            }
+            Catch { }
+            If tCurrentLocale = "" {
+                Set tCurrentLocale = $Get(^|"^^"_$ZU(12)|%SYS("LOCALE","CURRENT"), "enuw")
+            }
             ; List available locales via Config.NLS.Locales:List
             Set tLocales = []
             Set tRS = ##class(%ResultSet).%New("Config.NLS.Locales:List")
@@ -184,6 +199,7 @@ ClassMethod GetConfig(pSection As %String, Output pSC As %Status) As %DynamicObj
                 }
                 Do tRS.Close()
             }
+            Do tLocale.%Set("current", tCurrentLocale)
             Do tLocale.%Set("availableLocales", tLocales)
             Do tLocale.%Set("localeCount", tLocales.%Size(), "number")
             Do tResult.%Set("properties", tLocale)

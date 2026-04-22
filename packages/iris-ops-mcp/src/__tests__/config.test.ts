@@ -125,6 +125,41 @@ describe("iris_config_manage", () => {
       expect(result.structuredContent).toEqual(localeData);
     });
 
+    it("iris_config_manage get locale includes current", async () => {
+      // Locks the response-shape contract for Bug #15: the server-side
+      // handler now exposes the active locale code via properties.current
+      // (resolved from %SYS.NLS.Locale.%New().Name, e.g. "enuw"). The tool
+      // layer must forward it through unchanged alongside the existing
+      // availableLocales[] and localeCount enumeration.
+      const localeData = {
+        section: "locale",
+        properties: {
+          current: "araw",
+          availableLocales: ["enuw", "araw"],
+          localeCount: 2,
+        },
+      };
+      mockHttp.post.mockResolvedValue(envelope(localeData));
+
+      const result = await configManageTool.handler(
+        { action: "get", section: "locale" },
+        ctx,
+      );
+
+      const structured = result.structuredContent as {
+        section: string;
+        properties: {
+          current: string;
+          availableLocales: string[];
+          localeCount: number;
+        };
+      };
+      expect(structured.properties.current).toBe("araw");
+      expect(structured.properties.availableLocales).toContain("enuw");
+      expect(structured.properties.localeCount).toBe(2);
+      expect(result.isError).toBeUndefined();
+    });
+
     it("should format get response for display", async () => {
       const configData = {
         section: "config",

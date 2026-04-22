@@ -183,10 +183,25 @@ ClassMethod DatabaseList() As %Status
             Set tEntry = {}
             Do tEntry.%Set("name", tName)
             If $$$ISOK(tSC2) {
-                Do tEntry.%Set("directory", $Get(tProps("Directory")))
-                Do tEntry.%Set("size", $Get(tProps("Size")), "number")
-                Do tEntry.%Set("maxSize", $Get(tProps("MaxSize")), "number")
-                Do tEntry.%Set("expansionSize", $Get(tProps("ExpansionSize")), "number")
+                Set tDir = $Get(tProps("Directory"))
+                Do tEntry.%Set("directory", tDir)
+                ; Size, MaxSize, and ExpansionSize live on SYS.Database (runtime
+                ; state) — Config.Databases.Get() only returns configuration and
+                ; has no Size/MaxSize/ExpansionSize properties. Open SYS.Database
+                ; per row the same way Monitor:DatabaseCheck does.
+                Set tSizeMB = 0, tMaxMB = 0, tExpMB = 0
+                Try {
+                    Set tDBObj = ##class(SYS.Database).%OpenId(tDir)
+                    If $IsObject(tDBObj) {
+                        Set tSizeMB = +tDBObj.Size
+                        Set tMaxMB = +tDBObj.MaxSize
+                        Set tExpMB = +tDBObj.ExpansionSize
+                    }
+                }
+                Catch { }
+                Do tEntry.%Set("size", tSizeMB, "number")
+                Do tEntry.%Set("maxSize", tMaxMB, "number")
+                Do tEntry.%Set("expansionSize", tExpMB, "number")
                 Do tEntry.%Set("globalJournalState", $Get(tProps("GlobalJournalState")), "number")
                 Do tEntry.%Set("mountRequired", $Get(tProps("MountRequired")), "boolean")
                 Do tEntry.%Set("mountAtStartup", $Get(tProps("MountAtStartup")), "boolean")

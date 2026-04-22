@@ -103,6 +103,13 @@ their Zod schemas but silently dropped them server-side.
   the `%All` role or when a user's role list contains `%All`). Value
   is always `"target holds %All super-role"`. The `reason` field is
   omitted on the regular path.
+- **`iris_database_list`** row: `name, directory, size, maxSize,
+  expansionSize, globalJournalState, mountRequired, mountAtStartup,
+  readOnly, resource`. Added 2026-04-21 (Story 11.3) — the three size
+  fields (all MB) are now sourced from `SYS.Database` (runtime state)
+  rather than `Config.Databases` (static configuration, which does not
+  carry them). Unmounted databases fall back to `0` per field without
+  erroring the whole list.
 
 ---
 
@@ -158,6 +165,24 @@ their Zod schemas but silently dropped them server-side.
 **Mix:** 0 Atelier · 16 ExecuteMCPv2 · 0 other — **fully custom**.
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
+
+### Fields returned — Monitoring + config tools
+
+Added 2026-04-21 (Story 11.3) after accuracy fixes to three tools that
+were silently returning stale or per-process data.
+
+- **`iris_metrics_system`** metrics: the two counters
+  `iris_global_references_total` and `iris_routine_commands_total`
+  are **instance-wide** values sampled from `SYS.Stats.Global`
+  (sum of `RefLocal + RefPrivate + RefRemote`) and
+  `SYS.Stats.Routine.RtnCommands` respectively — NOT per-process
+  `$ZU(190,N)` snapshots. Values are monotonically increasing and
+  match the Management Portal System Dashboard.
+- **`iris_config_manage`** `get` `locale` response `properties`:
+  `current, availableLocales, localeCount`. The `current` field
+  (new in Story 11.3) reports the IRIS instance locale code
+  (e.g. `"enuw"`) via `%SYS.NLS.Locale.%New().Name`, with a
+  direct-global fallback to `^%SYS("LOCALE","CURRENT")`.
 
 ---
 
