@@ -127,7 +127,7 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_rest_manage` | List, get details, or delete REST applications | `action`, `application?`, `namespace?` | destructive |
+| `iris_rest_manage` | List, get details, or delete REST applications | `action`, `scope?`, `application?`, `namespace?` | destructive |
 
 ---
 
@@ -330,11 +330,23 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 ```json
 {
   "cubes": [
-    { "name": "Sales", "sourceClass": "MyApp.Fact.Sales", "lastBuild": "2026-04-06 22:00:00", "recordCount": 50000 }
+    {
+      "name": "Sales",
+      "sourceClass": "MyApp.Fact.Sales",
+      "factCount": 50000,
+      "lastBuildTime": "2026-04-06T22:00:00.000Z",
+      "lastBuildTimeRaw": "67300,79200.000"
+    }
   ],
   "count": 1
 }
 ```
+
+Each cube entry carries both a human-readable ISO 8601 `lastBuildTime` and
+the original `$HOROLOG` string under `lastBuildTimeRaw`, so clients can
+cross-check against `$ZDATETIME` or round-trip the raw value when needed.
+Malformed or missing horolog values yield `lastBuildTime: ""` without
+throwing; the raw value is still preserved when it is a string.
 </details>
 
 <details>
@@ -360,25 +372,62 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 </details>
 
 <details>
-<summary><strong>iris_rest_manage</strong> -- List REST applications</summary>
+<summary><strong>iris_rest_manage</strong> -- List REST applications (spec-first by default)</summary>
 
-**Input:**
+**Input (default — spec-first apps only):**
 ```json
 {
   "action": "list"
 }
 ```
 
-**Output:**
+**Output (spec-first):**
 ```json
 {
   "items": [
-    { "name": "/api/myapp", "dispatchClass": "MyApp.REST.Dispatch" },
-    { "name": "/api/executemcp/v2", "dispatchClass": "ExecuteMCPv2.REST.Dispatch" }
+    {
+      "name": "HS.FHIRServer.Management.REST.v1",
+      "dispatchClass": "HS.FHIRServer.Management.REST.v1.disp",
+      "swaggerSpec": "/api/mgmnt/v2/HSCUSTOM/HS.FHIRServer.Management.REST.v1"
+    }
   ],
-  "count": 2
+  "count": 1
 }
 ```
+
+The default `scope: "spec-first"` matches the SMP REST listing and routes
+to IRIS's built-in Management API (`/api/mgmnt/v2/{ns}/`), which returns only
+OpenAPI-spec-first dispatch classes (the ones with a `.spec` companion).
+Hand-written `%CSP.REST` subclasses (for example, `ExecuteMCPv2.REST.Dispatch`)
+are excluded by design of the IRIS Management API.
+
+**Input (include hand-written `%CSP.REST` subclasses):**
+```json
+{
+  "action": "list",
+  "scope": "all",
+  "namespace": "HSCUSTOM"
+}
+```
+
+**Output (`scope: "all"`):**
+```json
+{
+  "items": [
+    {
+      "name": "/api/executemcp/v2",
+      "dispatchClass": "ExecuteMCPv2.REST.Dispatch",
+      "namespace": "HSCUSTOM",
+      "swaggerSpec": null
+    }
+  ],
+  "count": 1
+}
+```
+
+`scope: "all"` uses the ExecuteMCPv2 webapp endpoint and filters entries
+with a non-empty `dispatchClass`. Hand-written dispatch classes have no
+companion spec class, so `swaggerSpec` is `null` for them.
 </details>
 
 <details>

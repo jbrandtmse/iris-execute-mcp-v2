@@ -48,6 +48,83 @@ describe("iris_rest_manage", () => {
     expect(result.structuredContent).toEqual({ items: apps, count: 2 });
   });
 
+  // Bug #13: scope:"spec-first" (default) must still route to the Mgmnt API
+  // at /api/mgmnt/v2/{ns}/ — this preserves current behavior so AI clients
+  // and scripts depending on the pre-Story-11.4 response shape continue to
+  // work unchanged.
+  it("scope:'spec-first' (default) hits Mgmnt API /api/mgmnt/v2/{ns}/ (Bug #13)", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await restManageTool.handler(
+      { action: "list", scope: "spec-first", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toMatch(/^\/api\/mgmnt\/v2\//);
+    expect(calledPath).not.toContain("/api/executemcp/v2");
+  });
+
+  // Bug #13: scope:"all" routes to the ExecuteMCPv2 webapp endpoint (Path A),
+  // filters for entries with a non-empty dispatchClass, and normalizes the
+  // shape so callers get {name, dispatchClass, namespace, swaggerSpec: null}.
+  it("scope:'all' routes to ExecuteMCPv2 webapp endpoint and filters by dispatchClass (Bug #13)", async () => {
+    const webapps = [
+      // Hand-written %CSP.REST dispatch class — the one %REST.API.GetAllRESTApps misses.
+      {
+        name: "/api/executemcp/v2",
+        dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+        namespace: "HSCUSTOM",
+      },
+      // Plain CSP webapp — no dispatch class. Must be filtered out.
+      {
+        name: "/csp/user",
+        dispatchClass: "",
+        namespace: "USER",
+      },
+      // Another dispatch class — keep it.
+      {
+        name: "/api/other",
+        dispatchClass: "Other.REST",
+        namespace: "HSCUSTOM",
+      },
+    ];
+    mockHttp.get.mockResolvedValue(envelope(webapps));
+
+    const result = await restManageTool.handler(
+      { action: "list", scope: "all", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toMatch(/^\/api\/executemcp\/v2\/security\/webapp/);
+    expect(calledPath).toContain("namespace=HSCUSTOM");
+    expect(result.isError).toBeUndefined();
+
+    const structured = result.structuredContent as {
+      items: Array<Record<string, unknown>>;
+      count: number;
+    };
+    expect(structured.count).toBe(2);
+    // ExecuteMCPv2.REST.Dispatch (the Bug #13 exemplar) must be present.
+    expect(structured.items[0]).toEqual({
+      name: "/api/executemcp/v2",
+      dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+      namespace: "HSCUSTOM",
+      swaggerSpec: null,
+    });
+    expect(structured.items[1]).toEqual({
+      name: "/api/other",
+      dispatchClass: "Other.REST",
+      namespace: "HSCUSTOM",
+      swaggerSpec: null,
+    });
+    // Plain CSP webapp with empty dispatchClass must be filtered out.
+    expect(
+      structured.items.some((x) => x.name === "/csp/user"),
+    ).toBe(false);
+  });
+
   it("should list REST applications with custom namespace", async () => {
     const apps = [{ name: "/api/test", dispatchClass: "Test.REST" }];
     mockHttp.get.mockResolvedValue(envelope(apps));

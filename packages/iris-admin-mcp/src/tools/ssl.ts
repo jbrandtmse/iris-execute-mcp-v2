@@ -56,10 +56,14 @@ export const sslManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Allowed cipher list for TLS connections"),
-    protocols: z
+    tlsMinVersion: z
       .number()
       .optional()
-      .describe("Enabled TLS protocols bitmask (e.g., 24 for TLS 1.2+1.3)"),
+      .describe("Minimum TLS version bit (4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3)"),
+    tlsMaxVersion: z
+      .number()
+      .optional()
+      .describe("Maximum TLS version bit (4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3)"),
     verifyPeer: z
       .number()
       .optional()
@@ -94,7 +98,8 @@ export const sslManageTool: ToolDefinition = {
       caFile,
       caPath,
       cipherList,
-      protocols,
+      tlsMinVersion,
+      tlsMaxVersion,
       verifyPeer,
       verifyDepth,
       type,
@@ -108,7 +113,8 @@ export const sslManageTool: ToolDefinition = {
       caFile?: string;
       caPath?: string;
       cipherList?: string;
-      protocols?: number;
+      tlsMinVersion?: number;
+      tlsMaxVersion?: number;
       verifyPeer?: number;
       verifyDepth?: number;
       type?: number;
@@ -122,7 +128,12 @@ export const sslManageTool: ToolDefinition = {
     if (caFile !== undefined) body.caFile = caFile;
     if (caPath !== undefined) body.caPath = caPath;
     if (cipherList !== undefined) body.cipherList = cipherList;
-    if (protocols !== undefined) body.protocols = protocols;
+    // Bug #6 (pre-release BREAKING, paired with Story 11.2 server-side break):
+    // the deprecated `protocols` bitmask is replaced with separate
+    // `tlsMinVersion` + `tlsMaxVersion` %Integer fields. Server rejects
+    // `protocols` now — no compatibility shim.
+    if (tlsMinVersion !== undefined) body.tlsMinVersion = tlsMinVersion;
+    if (tlsMaxVersion !== undefined) body.tlsMaxVersion = tlsMaxVersion;
     if (verifyPeer !== undefined) body.verifyPeer = verifyPeer;
     if (verifyDepth !== undefined) body.verifyDepth = verifyDepth;
     if (type !== undefined) body.type = type;
@@ -163,8 +174,9 @@ export const sslListTool: ToolDefinition = {
   title: "List SSL/TLS Configurations",
   description:
     "List all IRIS SSL/TLS configurations. Returns configuration name, " +
-    "description, certificate paths, enabled protocols, verification " +
-    "settings, type (client/server), and enabled status.",
+    "description, certificate paths, TLS min/max version bits " +
+    "(tlsMinVersion, tlsMaxVersion; 4=TLS1.0, 8=TLS1.1, 16=TLS1.2, 32=TLS1.3), " +
+    "verification settings, type (client/server), and enabled status.",
   inputSchema: z.object({
     cursor: z
       .string()

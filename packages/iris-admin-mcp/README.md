@@ -651,8 +651,10 @@ or inaccessible databases fall back to `0` without raising an error.
 > with no data-loss risk. Clients that wrote `protocols: 24` now
 > write `tlsMinVersion: 8, tlsMaxVersion: 16` (or
 > `tlsMinVersion: 16, tlsMaxVersion: 32` for TLS 1.2 through TLS 1.3
-> explicitly). See Story 11.2 in `_bmad-output`. Zod-schema changes
-> ship in Story 11.4.
+> explicitly). See Story 11.2 in `_bmad-output`. The TypeScript Zod
+> schema now uses these same field names (`tlsMinVersion` /
+> `tlsMaxVersion`) per Story 11.4 — writes are validated client-side
+> and passed through verbatim on the wire.
 >
 > **TLS version value mapping** (IRIS
 > `Security.Datatype.TLSVersion` VALUELIST):

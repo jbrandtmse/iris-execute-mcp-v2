@@ -127,6 +127,32 @@ describe("iris_doc_search", () => {
     expect(result.structuredContent).toEqual({ matches: searchResult });
   });
 
+  it("passes default files pattern to Atelier when caller omits files (Bug #7)", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docSearchTool.handler({ query: "test" }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    // The default pattern is URL-encoded when placed in the querystring:
+    // * -> %2A, , -> %2C, . -> .
+    expect(calledPath).toContain(
+      "files=" + encodeURIComponent("*.cls,*.mac,*.int,*.inc"),
+    );
+  });
+
+  it("respects caller-provided files pattern (Bug #7)", async () => {
+    mockHttp.get.mockResolvedValue(envelope([]));
+
+    await docSearchTool.handler({ query: "test", files: "*.cls" }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("files=" + encodeURIComponent("*.cls"));
+    // And the combined default pattern must NOT leak in.
+    expect(calledPath).not.toContain(
+      "files=" + encodeURIComponent("*.cls,*.mac,*.int,*.inc"),
+    );
+  });
+
   it("should pass regex option as query parameter", async () => {
     mockHttp.get.mockResolvedValue(envelope([]));
 

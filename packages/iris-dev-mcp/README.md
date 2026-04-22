@@ -108,7 +108,7 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
-| `iris_doc_put` | Create or update a document on IRIS | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
 | `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
@@ -197,7 +197,12 @@ Add to your Cursor MCP settings:
 </details>
 
 <details>
-<summary><strong>iris_doc_put</strong> -- Create or update a document</summary>
+<summary><strong>iris_doc_put</strong> -- Debug/scratch: write a document directly to IRIS</summary>
+
+**Debug/scratch tool** — for production code, use `iris_doc_load` to ensure source
+control and review. This tool writes content directly to IRIS without creating a
+file on disk, and is intended for one-off inspection, quick reproductions, or
+throwaway test classes only.
 
 **Input:**
 ```json
@@ -456,6 +461,12 @@ For a structural overview at package granularity, use `iris_package_list`. For i
   "files": "*.cls"
 }
 ```
+
+When `files` is omitted, the tool sends the documented default pattern
+`*.cls,*.mac,*.int,*.inc` on every call — previously the param was silently
+dropped when the caller omitted it, which let the Atelier server's narrower
+default kick in and returned empty results for matches that lived in `.cls`
+files. Pass an explicit `files` value to narrow the search.
 
 **Output:**
 ```json

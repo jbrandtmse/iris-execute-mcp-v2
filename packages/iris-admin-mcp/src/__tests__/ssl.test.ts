@@ -119,7 +119,10 @@ describe("iris_ssl_manage", () => {
         caFile: "/certs/ca.crt",
         caPath: "/certs/ca/",
         cipherList: "TLS_AES_256_GCM_SHA384",
-        protocols: 24,
+        // Story 11.4 Bug #6 (TS surface): protocols bitmask replaced by
+        // tlsMinVersion + tlsMaxVersion (TLS 1.2 through TLS 1.3 here).
+        tlsMinVersion: 16,
+        tlsMaxVersion: 32,
         verifyPeer: 1,
         verifyDepth: 9,
         type: 1,
@@ -139,12 +142,19 @@ describe("iris_ssl_manage", () => {
         caFile: "/certs/ca.crt",
         caPath: "/certs/ca/",
         cipherList: "TLS_AES_256_GCM_SHA384",
-        protocols: 24,
+        tlsMinVersion: 16,
+        tlsMaxVersion: 32,
         verifyPeer: 1,
         verifyDepth: 9,
         type: 1,
         enabled: 1,
       }),
+    );
+    // Pre-release BREAKING: the old `protocols` body field must not be
+    // sent — server-side no longer accepts it.
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.not.objectContaining({ protocols: expect.anything() }),
     );
   });
 
@@ -220,6 +230,9 @@ describe("iris_ssl_list", () => {
   });
 
   it("should return list of SSL configurations with count", async () => {
+    // Story 11.4 Bug #6 (TS): server no longer emits `protocols`. Fixture
+    // uses the post-Story-11.2 shape (`tlsMinVersion` / `tlsMaxVersion`) to
+    // stay honest with the current wire format.
     const configData = [
       {
         name: "DefaultSSL",
@@ -229,7 +242,8 @@ describe("iris_ssl_list", () => {
         caFile: "",
         caPath: "",
         cipherList: "",
-        protocols: 24,
+        tlsMinVersion: 16,
+        tlsMaxVersion: 32,
         verifyPeer: 0,
         verifyDepth: 9,
         type: 0,
@@ -243,7 +257,8 @@ describe("iris_ssl_list", () => {
         caFile: "/certs/ca.crt",
         caPath: "",
         cipherList: "",
-        protocols: 24,
+        tlsMinVersion: 16,
+        tlsMaxVersion: 32,
         verifyPeer: 1,
         verifyDepth: 9,
         type: 0,

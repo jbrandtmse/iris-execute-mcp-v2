@@ -166,10 +166,9 @@ export const docPutTool: ToolDefinition = {
   name: "iris_doc_put",
   title: "Put Document",
   description:
-    "Create or update an ObjectScript class, routine, CSP page, or include file on IRIS. " +
-    "IMPORTANT: This tool uploads content directly to IRIS without creating a file on disk. " +
-    "For production code, always create or edit the .cls file on disk first, then use iris_doc_load to deploy. " +
-    "Only use iris_doc_put for temporary debugging or one-off operations where source control is not needed.",
+    "**Debug/scratch tool** — for production code, use iris_doc_load to ensure source control and review. " +
+    "This tool writes content directly to IRIS without creating a file on disk, and is intended for one-off " +
+    "inspection, quick reproductions, or throwaway test classes only.",
   inputSchema: z.object({
     name: z
       .string()

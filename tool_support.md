@@ -196,9 +196,32 @@ were silently returning stale or per-process data.
 | 4 | `iris_docdb_property` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/prop/{db}/{prop}` |
 | 5 | `iris_analytics_mdx` | 🟥 ExecuteMCPv2 | `/analytics/mdx` |
 | 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
-| 7 | `iris_rest_manage` | 🟩 **Management API** | `/api/mgmnt/v2/{ns}` |
+| 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (default) · `/security/webapp` (when `scope: "all"`) |
 
 **Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
+
+### Fields returned — Data & Analytics tools
+
+- **`iris_analytics_cubes` list** row: `name, sourceClass, factCount,
+  lastBuildTime, lastBuildTimeRaw`. The analytics endpoint emits the build
+  timestamp as raw `$HOROLOG` (`days,seconds.frac`). Added 2026-04-21
+  (Story 11.4): the TypeScript layer converts the value to ISO 8601 UTC in
+  `lastBuildTime` and preserves the original string in `lastBuildTimeRaw`
+  for cross-checking via `$ZDATETIME` or debugging. Malformed or missing
+  horolog values yield `lastBuildTime: ""` without throwing.
+- **`iris_rest_manage` list** row: `name, dispatchClass, namespace,
+  swaggerSpec`. Added 2026-04-21 (Story 11.4): a new `scope` parameter
+  controls the backend. `scope: "spec-first"` (default) routes to the
+  Management API and matches the SMP REST listing — returns only
+  OpenAPI-spec-first dispatch classes (those with a `.spec` companion).
+  `scope: "all"` routes to the ExecuteMCPv2 webapp endpoint and includes
+  hand-written `%CSP.REST` subclasses (for example,
+  `ExecuteMCPv2.REST.Dispatch`), with `swaggerSpec: null` for those.
+- **`iris_doc_search` wire request**: the documented default `files`
+  pattern (`*.cls,*.mac,*.int,*.inc`) is now reliably sent on every call.
+  Before Story 11.4, the param was silently dropped when the caller
+  omitted `files`, which let the Atelier server's narrower default kick
+  in and returned empty results for matches that lived in `.cls` files.
 
 > **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 87-tool total.
 

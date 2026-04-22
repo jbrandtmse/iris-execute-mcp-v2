@@ -155,7 +155,12 @@ export const docSearchTool: ToolDefinition = {
     params.set("word", word ? "1" : "0");
     params.set("case", caseSensitive ? "1" : "0");
     params.set("wild", wild ? "1" : "0");
-    if (files !== undefined) params.set("files", files);
+    // Bug #7: always send the tool's documented default so the wire request
+    // matches what the Zod description promises. Previously the param was
+    // only sent when the caller provided it, so the Atelier server's own
+    // (narrower) default kicked in and `iris_doc_search({query: "X"})`
+    // returned no matches even when "X" existed in `.cls` files.
+    params.set("files", files ?? "*.cls,*.mac,*.int,*.inc");
     if (sys !== undefined) params.set("sys", sys ? "1" : "0");
     if (gen !== undefined) params.set("gen", gen ? "1" : "0");
     if (max !== undefined) params.set("max", String(max));
