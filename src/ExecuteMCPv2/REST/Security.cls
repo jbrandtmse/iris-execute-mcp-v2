@@ -427,10 +427,13 @@ ClassMethod UserPassword() As %Status
                 ; Use a generic message to avoid any risk of password leakage
                 ; through IRIS-reformatted or truncated error text
                 Set tMsg = $System.Status.GetErrorText(tSC)
-                ; Strip the password using regex-style replacement that handles
-                ; IRIS reformatting (spaces, truncation, case changes)
-                ; First do exact match, then strip any remaining fragments >= 3 chars
-                Set tMsg = $Replace(tMsg, tPassword, "***")
+                ; Strip the password only when it is long enough to make unconditional
+                ; $Replace safe. Short candidates (e.g. "a") would otherwise corrupt
+                ; the generic IRIS validation message — which never embeds the
+                ; candidate password in the first place (Bug #8).
+                If $Length(tPassword) >= 8 {
+                    Set tMsg = $Replace(tMsg, tPassword, "***")
+                }
                 If $Length(tPassword) >= 3 {
                     ; Also strip partial matches (IRIS may truncate or reformat)
                     Set tPwdLen = $Length(tPassword)

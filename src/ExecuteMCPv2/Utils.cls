@@ -136,6 +136,21 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
     If $ZStrip(tSafe, "<>W") = "" {
         Set tSafe = "An internal error occurred"
     }
+    ; Strip a single leading "ERROR #N: " or localized equivalent (e.g. Arabic "خطأ #N: ")
+    ; so the final $$$ERROR wrap does not produce a doubly-prefixed chain (Bug #11).
+    For tPrefix = "ERROR #", "خطأ #" {
+        If $Extract(tSafe, 1, $Length(tPrefix)) = tPrefix {
+            Set tRest = $Extract(tSafe, $Length(tPrefix) + 1, *)
+            Set tColon = $Find(tRest, ": ")
+            If tColon > 0 {
+                Set tCodeChunk = $Extract(tRest, 1, tColon - 3)
+                If tCodeChunk ? 1.N {
+                    Set tSafe = $Extract(tRest, tColon, *)
+                    Quit
+                }
+            }
+        }
+    }
     Quit $$$ERROR($$$GeneralError, tSafe)
 }
 

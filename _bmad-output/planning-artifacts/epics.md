@@ -2596,3 +2596,284 @@ So that the first npm publish ships a suite that is verified to work on the plat
 
 **Out of scope**:
 - Items 4, 5, 6, 8, 9, 10 from Epic 10 retro action items — all deferred per retro recommendation, none touch this story's surface.
+
+## Epic 11: Post-Publish Bug Fix Batch (IRIS MCP Server Suite)
+
+**Goal**: Fix the 16 defects identified in the 2026-04-21 comprehensive test pass before first npm publish.
+
+**Scope**: Correctness fixes across `src/ExecuteMCPv2/REST/*.cls` handlers and `packages/*/src/tools/*.ts` files. One `BOOTSTRAP_VERSION` bump at end of Story 11.3 covers all ObjectScript edits from Stories 11.1–11.3 in a single auto-upgrade. Inline CHANGELOG + README updates per story — no standalone documentation rollup story because Epic 11 adds zero new tools.
+
+**Bugs addressed**: See [sprint-change-proposal-2026-04-21.md](sprint-change-proposal-2026-04-21.md) for full bug list. 16 bugs across `iris-dev-mcp`, `iris-admin-mcp`, `iris-data-mcp`, `iris-ops-mcp` (server-side in `ExecuteMCPv2.REST.*` for most; TypeScript tool logic for the rest).
+
+**Stories**:
+- 11.1 ObjectScript error envelope & sanitization — Bugs #1, #8, #11
+- 11.2 Security handler completeness — Bugs #3, #4, #5, #6 (server side), #10, #12. **Breaking (pre-release)**: SSL `protocols` field replaced by `tlsMinVersion` / `tlsMaxVersion`.
+- 11.3 Database / metrics / config accuracy + `BOOTSTRAP_VERSION` bump + live verification — Bugs #2, #9, #15
+- 11.4 TypeScript tool fixes (non-bootstrap) — Bugs #6 (TS surface), #7, #13, #14, #16
+
+**Out of scope (deferred)**:
+- Arabic `خطأ` error-text prefix (IRIS server-side locale `araw` issue; tool-level fix is cosmetic and not worth complicating `Utils.SanitizeError`).
+- All Epic 10 retro deferred items (digit-prefixed package rows, `.manifest.json.tmp` leak, synthetic-corpus tests for `iris_doc_search`, `ctx.ensureNamespacePrereq` helper) — unchanged from Epic 10.
+
+### Story 11.1: ObjectScript error envelope & sanitization
+
+**As an** AI client or developer calling `iris_execute_command` or any handler that may propagate an error,
+**I want** error responses to be structured JSON with a clear single-wrapped status message,
+**so that** I can read the actual error text and react to it instead of hitting an opaque "non-JSON response" crash or a doubly-wrapped `خطأ #5001: خطأ #5001:` chain.
+
+**Trigger**: 2026-04-21 comprehensive test pass. See [sprint-change-proposal-2026-04-21.md](sprint-change-proposal-2026-04-21.md) Bugs #1, #8, #11.
+
+**Acceptance Criteria**:
+
+- **AC 11.1.1** — `iris_execute_command` with any runtime error (bad syntax like `Write "unterminated`, runtime exception like `Set x=1/0`, `<CLASS DOES NOT EXIST>` from `Do ##class(Bad.NonExistent).Method()`) returns a structured JSON error envelope with `isError: true` and a human-readable error text — NOT "IRIS returned a non-JSON response for POST /api/executemcp/v2/command." The `Execute()` classmethod in [src/ExecuteMCPv2/REST/Command.cls](../../src/ExecuteMCPv2/REST/Command.cls) wraps the command-execution body in the same try/catch + `RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(…))` pattern already used in `Command:ClassMethod()` (for `iris_execute_classmethod`) — the structure is already proven; the defect is that `Execute()` doesn't follow it.
+- **AC 11.1.2** — The `SanitizeError()` classmethod in [src/ExecuteMCPv2/Utils.cls](../../src/ExecuteMCPv2/Utils.cls) no longer produces doubly-wrapped error codes. Before: `خطأ #5001: خطأ #5001: Failed to change password for user 'X'`. After: `خطأ #5001: Failed to change password for user 'X'` (single-wrapped). Fix: before prepending a status prefix, strip a leading `^(ERROR|خطأ)\s+#\d+:\s*` from the existing error text so the prefix is only added once.
+- **AC 11.1.3** — `iris_user_password action:"validate"` with any candidate password no longer over-redacts the error message. Before: candidate `a` → `"P***ssword does not m***tch length or p***ttern requirements"`. After: candidate `a` → `"Password does not match length or pattern requirements"` (original message intact). Fix: the `SanitizePasswordError()` (or whatever helper is doing the replacement in [src/ExecuteMCPv2/REST/Security.cls](../../src/ExecuteMCPv2/REST/Security.cls) `UserPassword` classmethod) must not do a blind `$Replace()` of the candidate password substring in the *IRIS-returned* error text. Acceptable: redact the candidate password only if it appears in a request-echo field (which we don't return anyway). Simpler acceptable fix: skip the redaction entirely for validate-mode error messages — the client already knows what they sent.
+- **AC 11.1.4** — Unit tests added:
+  - `packages/iris-dev-mcp/src/__tests__/execute.test.ts` — assert that when the mocked `/api/executemcp/v2/command` endpoint returns a `5xx` with a JSON error body, the tool returns a structured error content block with the status text (exercises the shape; exercises the envelope, not the in-IRIS try/catch).
+  - `packages/iris-admin-mcp/src/__tests__/user.test.ts` — `iris_user_password validate` with a single-letter password returns an error message that contains the literal string `"Password does not match"` (proves no `***` substitution).
+- **AC 11.1.5** — **Live verification** (post-bootstrap-upgrade in Story 11.3): re-run Bug #1's reproductions — each command listed in the bug report produces a structured JSON error, not a "non-JSON response" crash. Reproductions to verify: `iris_execute_command({command: "Write \"unterminated"})`, `iris_execute_command({command: "Set x = 1/0"})`, `iris_execute_command({command: "Do ##class(Bad.NonExistent).Method()"})`. Same pass for Bug #11 (single-wrapped error code) and Bug #8 (no over-redaction).
+- **AC 11.1.6** — CHANGELOG.md gets three new bullets appended to a new `## [Pre-release — 2026-04-21]` block, under `### Fixed`. Each bullet references the affected source file and the bug number from the Sprint Change Proposal:
+  - "**`iris_execute_command` no longer crashes with "non-JSON response" on runtime errors** ([src/ExecuteMCPv2/REST/Command.cls](src/ExecuteMCPv2/REST/Command.cls)) — the Execute handler now wraps its body in the same try/catch + `SanitizeError` envelope as the rest of the REST handlers. Bug #1."
+  - "**`Utils.SanitizeError` no longer double-wraps error codes** ([src/ExecuteMCPv2/Utils.cls](src/ExecuteMCPv2/Utils.cls)) — `خطأ #5001: خطأ #5001: …` chains collapse to a single prefix. Bug #11."
+  - "**`iris_user_password` validate error message no longer over-redacts** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — candidate-password substring substitution removed from validate-mode error text. Bug #8."
+- **AC 11.1.7** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint`. Target test count growth: ~2 new tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `Execute()` error envelope in `src/ExecuteMCPv2/REST/Command.cls` (AC 11.1.1)
+  - [ ] Read the current `Execute()` method and compare to `ClassMethod()` in the same file — mirror the try/catch + `RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))` pattern.
+  - [ ] Keep the namespace-switch / namespace-restore logic intact. Restore namespace on the error path as the first line of the catch block (per `.claude/rules/iris-objectscript-basics.md` guidance).
+- [ ] **Task 2**: Fix `SanitizeError()` double-wrapping in `src/ExecuteMCPv2/Utils.cls` (AC 11.1.2)
+  - [ ] Before prepending the `خطأ #<code>: ` prefix, check whether the inner text already matches `^(ERROR|خطأ)\s+#\d+:\s*` via `$Locate` / `$Match` or equivalent. If it does, don't re-prefix. Use `$Replace` to strip ONE leading occurrence only, to avoid infinite-prefix strip.
+  - [ ] Unit-test coverage: add an ObjectScript `%UnitTest` test (or a TS-side mock test) that passes in a pre-prefixed error and asserts the output is not double-prefixed.
+- [ ] **Task 3**: Fix `UserPassword` validate-mode redaction in `src/ExecuteMCPv2/REST/Security.cls` (AC 11.1.3)
+  - [ ] Locate the redaction call site (grep for `$Replace` or `$Piece` near the `UserPassword` / `validate` branch). Delete the redaction step for validate-mode error messages, OR guard it with `If tAction="validate" Continue` equivalent.
+  - [ ] Confirm that the change mode `action:"change"` redaction (if present) is still intact — that one has a different threat model (we're logging the failure, not echoing the password, but belt-and-braces is fine for change mode).
+- [ ] **Task 4**: Unit tests (AC 11.1.4)
+  - [ ] Add `it("returns structured error envelope on 500 response")` to `packages/iris-dev-mcp/src/__tests__/execute.test.ts`. Mock `IrisHttpClient` to return a 500 with a JSON body; assert the tool returns `isError: true` and a `text` content block containing the error message.
+  - [ ] Add `it("does not redact candidate password in validate error text")` to `packages/iris-admin-mcp/src/__tests__/user.test.ts`. Mock the validate response to return `Password does not match length or pattern requirements`; assert response text does NOT contain `***`.
+- [ ] **Task 5**: CHANGELOG (AC 11.1.6)
+  - [ ] Create new `## [Pre-release — 2026-04-21]` block at the top of the changelog (above the 2026-04-20 block). `### Fixed` subheading with the three bullets from AC 11.1.6.
+- [ ] **Task 6**: Build + validate (AC 11.1.7)
+- [ ] **Task 7**: Live verification deferred to Story 11.3 (AC 11.1.5) — Story 11.3 handles the `BOOTSTRAP_VERSION` bump for all three ObjectScript stories and runs live verification for the full set at once.
+
+**Implementation Notes**:
+- Order within the story is Command.cls first (most visible bug), Utils.cls second (affects all handlers downstream), Security.cls third (narrower scope).
+- The Arabic `خطأ` text comes from the IRIS server's locale (`araw`). It's NOT an MCP tool bug. Do not try to force-translate to English in `SanitizeError` — this would mask locale issues and break users who *want* localized error text. Just stop doubling the prefix.
+- Redaction-removal for validate mode is the safer default. If a later security review wants redaction back, it should be a positive opt-in with a clear threat model, not a reflexive `$Replace`.
+
+**Out of scope**:
+- Live verification of the fixes — deferred to Story 11.3 where the bootstrap bump lands.
+- Error-text normalization / English-forcing — cosmetic, deferred.
+
+### Story 11.2: Security handler completeness (role / user / SSL / permission_check / password-change)
+
+**As an** administrator inspecting IRIS security via MCP tools,
+**I want** the list and get responses to actually contain the fields their Zod schemas advertise (resources, enabled, fullName, comment, name, TLS versions) and `permission_check` to correctly evaluate `%All` membership,
+**so that** I can trust the tool output for real operations instead of cross-checking every field against `Security.Users.Get()` by hand.
+
+**Trigger**: 2026-04-21 comprehensive test pass. See [sprint-change-proposal-2026-04-21.md](sprint-change-proposal-2026-04-21.md) Bugs #3, #4, #5, #6 (server side), #10, #12.
+
+**Acceptance Criteria**:
+
+- **AC 11.2.1** — `iris_role_list` returns the actual `Resources` for every role. Root cause: `RoleList()` in [src/ExecuteMCPv2/REST/Security.cls](../../src/ExecuteMCPv2/REST/Security.cls) uses the `Security.Roles:List` query, whose ROWSPEC (confirmed in [irissys/Security/Roles.cls](../../irissys/Security/Roles.cls) line 380) is `Name, Description, GrantedRoles, CanBeEdited, EscalationOnly` — **no `Resources` column**. Fix: switch to the `Security.Roles:ListAll` query (ROWSPEC at line 420: `Name, Description, GrantedRoles, Resources, EscalationOnly`). Update the handler to read the `Resources` column from the result set and surface it in the response.
+- **AC 11.2.2** — `iris_user_get` list mode (no `name` arg) returns correct `enabled`, `fullName`, and `comment` for every user. Root cause: `UserList()` uses `Security.Users:List` ([irissys/Security/Users.cls](../../irissys/Security/Users.cls) line 798) whose ROWSPEC is `Name, Enabled, Roles, LastLoginTime, Flags` — `Enabled` IS in the ROWSPEC but the handler is dropping it; `FullName` and `Comment` are NOT in the query so the handler must backfill via `Security.Users.Get(name, .props)` per row. Acceptable perf: users count is small (~10 typical); per-row `Get` is fine. If the user count could be large in the future, consider using a `%ResultSet` with `ListAll` named query — confirm whether one exists.
+- **AC 11.2.3** — `iris_user_get` single-user mode (with `name` arg) includes the `name` field in the response. Fix: at the top of `UserGet()` in [src/ExecuteMCPv2/REST/Security.cls](../../src/ExecuteMCPv2/REST/Security.cls), set `tResp.%Set("name", pName)` before any early-return paths.
+- **AC 11.2.4** — **Breaking (pre-release)**: SSL `protocols` field replaced by `tlsMinVersion` and `tlsMaxVersion`. The underlying `Security.SSLConfigs` object has no `Protocols` property — it has `TLSMinVersion` (4=TLSv1.0, 8=TLSv1.1, 16=TLSv1.2, 32=TLSv1.3) and `TLSMaxVersion`. The fake `protocols` bitmask was never connected. Fix on the ObjectScript side: `SSLList()` and `SSLManage()` in [src/ExecuteMCPv2/REST/Security.cls](../../src/ExecuteMCPv2/REST/Security.cls) stop reading/writing `Protocols` and use `TLSMinVersion` / `TLSMaxVersion` exclusively (call `Security.SSLConfigs.Get(name, .props)` per row to retrieve them, since the `List` query ROWSPEC doesn't include them either — ROWSPEC at [irissys/Security/SSLConfigs.cls](../../irissys/Security/SSLConfigs.cls) line 459 is `Name, Description, Enabled, Type, EnabledInternal, TypeInternal`). The Zod schema break happens in Story 11.4.
+- **AC 11.2.5** — `iris_permission_check` correctly evaluates `%All` membership. `_SYSTEM` (holder of `%All`) on `%DB_USER:RW` must return `granted: true`; the `%All` role itself on any resource must return `granted: true`. Root cause (tentative — confirm via Perplexity or direct IRIS doc): the current handler likely uses `$System.Security.Check(resource, permission)` which evaluates the *current session*, not the named target. Fix: use the correct API. Options to evaluate during implementation (research via Perplexity MCP if uncertain):
+  1. `Security.Users.CheckUserPermission(name, resource, permission)` — if it exists.
+  2. Short-circuit: if the target's effective roles include `%All`, return `granted: true` unconditionally.
+  3. Manually walk the target's role list and OR in each role's resource:permission pairs (using `Security.Roles.Get(role, .props)` and parsing `props("Resources")`).
+- **AC 11.2.6** — `iris_user_password action:"change"` failure surfaces the underlying `%Status` error text instead of a generic `Failed to change password for user 'X'`. Root cause: handler calls `Security.Users.ChangePassword()` and discards the `%Status`. Fix: capture the status and feed it through `##class(ExecuteMCPv2.Utils).SanitizeError(tSC)` on the error path.
+- **AC 11.2.7** — Unit tests added to `packages/iris-admin-mcp/src/__tests__/`:
+  - `role.test.ts` — `iris_role_list` mock returns a `Resources` column; assert the tool output contains the resources string for each row.
+  - `user.test.ts` — `iris_user_get` list mode mock returns rows with `Enabled=1, FullName="…"`; assert the tool output preserves them. Single-get mode test asserts `name` field is populated from the input argument.
+  - `ssl.test.ts` — `iris_ssl_list` mock returns `TLSMinVersion=8, TLSMaxVersion=16`; assert the tool output contains `tlsMinVersion: 8, tlsMaxVersion: 16` (NOT a `protocols` field). `iris_ssl_manage create` with `tlsMinVersion` / `tlsMaxVersion` args passes them on the wire.
+  - `permission.test.ts` — `iris_permission_check` with target `_SYSTEM` and the mocked `%All` membership returns `granted: true`. Mirror for target `%All` directly.
+  - `user.test.ts` (change mode) — `iris_user_password change` failure propagates the non-generic error text.
+- **AC 11.2.8** — **Live verification** (post-bootstrap-upgrade in Story 11.3): re-run Bugs #3, #4, #5, #6, #10, #12 reproductions from the 2026-04-21 test session. Each should now return correct values. Clean up any test assets afterwards.
+- **AC 11.2.9** — `packages/iris-admin-mcp/README.md` response-shape section updated for `iris_role_list`, `iris_user_get`, `iris_ssl_list`, `iris_permission_check`. The SSL section carries a clearly marked "**Breaking (pre-release)**" callout explaining the `protocols` → `tlsMinVersion` / `tlsMaxVersion` migration. `tool_support.md` updated with the new "fields returned" notes for each tool.
+- **AC 11.2.10** — CHANGELOG.md gets these bullets appended to the `## [Pre-release — 2026-04-21]` block created in Story 11.1:
+  - `### Fixed`:
+    - "**`iris_role_list` now returns each role's resources** — handler switched from `Security.Roles:List` (no Resources column) to `Security.Roles:ListAll`. Bug #3."
+    - "**`iris_user_get` list mode now returns correct enabled / fullName / comment** — handler backfills these via per-row `Security.Users.Get()` since the `Security.Users:List` query ROWSPEC doesn't include FullName or Comment. Bug #4."
+    - "**`iris_user_get` single-user mode now returns the `name` field** — handler was dropping it. Bug #5."
+    - "**`iris_permission_check` correctly evaluates `%All` role membership** — was returning `granted: false` for `_SYSTEM` and the `%All` role on any resource. Bug #10."
+    - "**`iris_user_password` change failures now propagate IRIS error text** — was swallowing the `%Status`. Bug #12."
+  - `### Changed` (**Breaking, pre-release**):
+    - "**`iris_ssl_manage` / `iris_ssl_list` schema: `protocols` → `tlsMinVersion` + `tlsMaxVersion`** — the previous `protocols` bitmask was disconnected from the underlying `Security.SSLConfigs` shape (Bug #6). Clients that wrote `protocols: 24` now write `tlsMinVersion: 8, tlsMaxVersion: 16` (or `16/32` for TLS 1.2+1.3 explicitly). See [packages/iris-admin-mcp/README.md](packages/iris-admin-mcp/README.md) for the full mapping."
+- **AC 11.2.11** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint`. Target test count growth: ~6–8 new tests across `role.test.ts`, `user.test.ts`, `ssl.test.ts`, `permission.test.ts`.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `RoleList()` — switch to `ListAll` query (AC 11.2.1)
+  - [ ] Read `src/ExecuteMCPv2/REST/Security.cls` `RoleList()` method; find the `%ResultSet` instantiation with `"Security.Roles:List"`.
+  - [ ] Change to `"Security.Roles:ListAll"`. Confirm ROWSPEC column order in `irissys/Security/Roles.cls` line 420: `Name, Description, GrantedRoles, Resources, EscalationOnly`.
+  - [ ] Update the field-name extraction in the while-loop to read `tRS.Get("Resources")` and surface it as `resources` in the response object.
+- [ ] **Task 2**: Fix `UserList()` — backfill enabled/fullName/comment (AC 11.2.2)
+  - [ ] Read `UserList()` method. The existing handler iterates the List query result set and builds a response array.
+  - [ ] Inside the loop, after reading `tName` and `tEnabled` from the query, call `##class(Security.Users).Get(tName, .tProps)` to get a full property array, extract `FullName` / `Comment` from `tProps` and attach to the response row.
+  - [ ] Coerce `Enabled` string value to boolean: `Set tEnabled = +tEnabled`.
+- [ ] **Task 3**: Fix `UserGet()` — return name in single-user mode (AC 11.2.3)
+  - [ ] Near the top of `UserGet()`, set `Do tResp.%Set("name", pName)` before any early-return or error-path branches.
+- [ ] **Task 4**: Fix `SSLList()` and `SSLManage()` (AC 11.2.4) — breaking
+  - [ ] `SSLList()`: inside the list loop, call `##class(Security.SSLConfigs).Get(tName, .tProps)` per row and surface `tProps("TLSMinVersion")` / `tProps("TLSMaxVersion")` as `tlsMinVersion` / `tlsMaxVersion` in the response. Drop `protocols` entirely.
+  - [ ] `SSLManage() action:"create"`: accept `tlsMinVersion` / `tlsMaxVersion` from the request body and pass them to `Security.SSLConfigs.Create()` (confirm signature — likely takes `ByRef Properties` and we put them in the array). Drop `protocols` handling.
+  - [ ] `SSLManage() action:"modify"`: same — accept the new fields, pass via `Modify()`.
+- [ ] **Task 5**: Fix `PermissionCheck()` (AC 11.2.5)
+  - [ ] Research (Perplexity MCP): "InterSystems IRIS check whether named user has permission on resource (not current session)". Confirm the right API.
+  - [ ] Implement the chosen fix. Default to the short-circuit approach (`%All` → granted) plus the role-walk approach if no single-call API exists.
+- [ ] **Task 6**: Fix `UserPassword() action:"change"` error propagation (AC 11.2.6)
+  - [ ] Capture the `%Status` from `Security.Users.ChangePassword()`; on `$$$ISERR(tSC)`, pass through `##class(ExecuteMCPv2.Utils).SanitizeError(tSC)` instead of the generic string.
+- [ ] **Task 7**: Unit tests (AC 11.2.7) — 6 new tests minimum.
+- [ ] **Task 8**: README + tool_support.md updates (AC 11.2.9)
+  - [ ] `packages/iris-admin-mcp/README.md`: update the response-shape tables for the affected tools. Add a **Breaking (pre-release)** callout near the SSL section.
+  - [ ] `tool_support.md`: update the "fields returned" notes for roles / users / ssl / permission_check.
+- [ ] **Task 9**: CHANGELOG (AC 11.2.10) — 5 `### Fixed` bullets + 1 `### Changed` (breaking) bullet inside the Story-11.1-created 2026-04-21 block.
+- [ ] **Task 10**: Build + validate (AC 11.2.11)
+- [ ] **Task 11**: Live verification deferred to Story 11.3.
+
+**Implementation Notes**:
+- Story 11.2 is the longest of the epic (6 bugs in one file). All are localized — expect < 200 LOC of ObjectScript change total.
+- Confirm Security.SSLConfigs TLS version constants (8=1.1, 16=1.2, 32=1.3) against `irissys/Security/SSLConfigs.cls` before documenting in the README. These are the standard IRIS bit values but worth confirming via Perplexity or source inspection.
+- The SSL break is intentional and pre-release — document clearly in both README and CHANGELOG. Post-first-publish breaks would need a deprecation cycle.
+- For Bug #10 (permission check), the short-circuit path (`%All` → granted) is cheap and correct. The role-walk fallback should match how `Security.Users.EffectivePermissions()` behaves if that API exists in this IRIS version.
+
+**Out of scope**:
+- Bootstrap version bump + live verification — Story 11.3.
+- TypeScript-side SSL Zod schema rename — Story 11.4 (paired with this story's server-side change).
+
+### Story 11.3: Database / metrics / config accuracy + BOOTSTRAP_VERSION bump + live verification
+
+**As an** operator inspecting IRIS system state via MCP tools,
+**I want** database sizes to be real, metrics counters to match the IRIS portal, and `config_manage get locale` to tell me which locale is currently active,
+**so that** I can rely on the ops tools instead of cross-checking against `iris_database_check` / `iris_metrics_system / databases[]` / SMP.
+
+**Trigger**: 2026-04-21 comprehensive test pass. See [sprint-change-proposal-2026-04-21.md](sprint-change-proposal-2026-04-21.md) Bugs #2, #9, #15.
+
+**Acceptance Criteria**:
+
+- **AC 11.3.1** — `iris_database_list` reports real `size`, `maxSize`, and `expansionSize` for every database. Verified USER = 11 MB via direct `SYS.Database.%OpenId()` probe; same value is already returned by `iris_database_check` and `iris_metrics_system / databases[]`. Root cause: `DatabaseList()` in [src/ExecuteMCPv2/REST/Config.cls](../../src/ExecuteMCPv2/REST/Config.cls) reads only from `Config.Databases` — the Config-level class does not carry size. Fix: per database, after `Config.Databases.Get(name, .props)`, also `##class(SYS.Database).%OpenId(directory)` and pull `Size`, `MaxSize`, `ExpansionSize` off the returned object. Same pattern as `DatabaseCheck()` in [src/ExecuteMCPv2/REST/Monitor.cls](../../src/ExecuteMCPv2/REST/Monitor.cls) already uses.
+- **AC 11.3.2** — `iris_metrics_system` returns accurate `iris_global_references_total` and `iris_routine_commands_total` counters. Verified wrong: values 2 and 0 respectively after 33 hours uptime. Root cause: wrong source. Research via Perplexity MCP — the correct source is almost certainly `%Monitor.System.*` tables, `$SYSTEM.Monitor` helper, or `SYS.Monitor.*` helpers. Candidates to evaluate:
+  1. `^$ZMETRIC` global (if directly queryable).
+  2. `%Monitor.System.Globals` / `%Monitor.System.Routines` SQL tables.
+  3. `$SYSTEM.Monitor.Sample()` API.
+  4. `SYS.Stats.Globals()` / `SYS.Stats.Routines()` class methods.
+  Implementation must cross-check values against the live IRIS Management Portal's monitor view before merging.
+- **AC 11.3.3** — `iris_config_manage get locale` includes the *current* locale name in the response, not just the list of available ones. Fix: in the `locale` branch of `ConfigManage()` in [src/ExecuteMCPv2/REST/SystemConfig.cls](../../src/ExecuteMCPv2/REST/SystemConfig.cls), add `Do tResp.%Set("current", ##class(%SYS.NLS.Locale).GetLanguage())` (or the equivalent API — research via Perplexity if needed; on this instance the current locale is `araw` per the Arabic error text).
+- **AC 11.3.4** — `BOOTSTRAP_VERSION` bumps to a new hash after all Story 11.1 + 11.2 + 11.3 ObjectScript changes are in place. `npm run gen:bootstrap` regenerates `bootstrap-classes.ts` covering the updated `Command.cls`, `Utils.cls`, `Security.cls`, `Config.cls`, `Monitor.cls`, and `SystemConfig.cls` content. Existing installs auto-upgrade on next MCP server restart (standard pattern per Stories 10.4, 10.5).
+- **AC 11.3.5** — **Live verification** of all ObjectScript fixes in Epic 11 (AC 11.1.5, 11.2.8, and AC 11.3.1–3): after the bootstrap bump deploys, re-run the reproductions for Bugs #1, #2, #3, #4, #5, #6, #8, #9, #10, #11, #12, #15 on a running IRIS instance. Document each as resolved in the story file. Clean up any test assets created during verification.
+- **AC 11.3.6** — Unit tests added:
+  - `packages/iris-admin-mcp/src/__tests__/database.test.ts` — `iris_database_list` mock returns `Size: 11, MaxSize: 0, ExpansionSize: 0`; assert tool output contains those values.
+  - `packages/iris-ops-mcp/src/__tests__/metrics.test.ts` — `iris_metrics_system` mock returns non-zero counters; assert tool output preserves them. (The IRIS-side fix is validated by live verification; the TS test validates the wire-to-response mapping, not the IRIS source.)
+  - `packages/iris-ops-mcp/src/__tests__/config.test.ts` — `iris_config_manage get locale` mock includes `current: "enuw"`; assert tool output contains `current`.
+- **AC 11.3.7** — Documentation updates:
+  - `packages/iris-admin-mcp/README.md`: `iris_database_list` response-shape section notes that sizes are now populated.
+  - `packages/iris-ops-mcp/README.md`: `iris_metrics_system` section clarifies which counters are reliable (and ideally cites the source — `$SYSTEM.Monitor`, etc., once confirmed). `iris_config_manage` section mentions `current` field in the `locale` response.
+  - `tool_support.md`: update fields-returned notes for the three tools.
+- **AC 11.3.8** — CHANGELOG.md entries appended to the `## [Pre-release — 2026-04-21]` block under `### Fixed`:
+  - "**`iris_database_list` now returns real `size`, `maxSize`, and `expansionSize`** ([src/ExecuteMCPv2/REST/Config.cls](src/ExecuteMCPv2/REST/Config.cls)) — handler now joins `SYS.Database` per row. Bug #2."
+  - "**`iris_metrics_system` counters fixed** ([src/ExecuteMCPv2/REST/Monitor.cls](src/ExecuteMCPv2/REST/Monitor.cls)) — `iris_global_references_total` and `iris_routine_commands_total` now pull from the correct `$SYSTEM.Monitor` / `%Monitor.System.*` source. Bug #9."
+  - "**`iris_config_manage get locale` includes `current`** ([src/ExecuteMCPv2/REST/SystemConfig.cls](src/ExecuteMCPv2/REST/SystemConfig.cls)) — response now reports which locale is actually in use, not just which are available. Bug #15."
+  - "**`BOOTSTRAP_VERSION` bumped** — existing installs auto-upgrade on next MCP server restart; covers all Epic 11 ObjectScript changes (Stories 11.1, 11.2, 11.3)."
+- **AC 11.3.9** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint`. Target test count growth: ~3 new tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `DatabaseList()` in `src/ExecuteMCPv2/REST/Config.cls` (AC 11.3.1)
+  - [ ] Inside the list loop, after reading the Config.Databases row, `Set db = ##class(SYS.Database).%OpenId(tDirectory)` and surface `db.Size`, `db.MaxSize`, `db.ExpansionSize` in the response. Handle `$IsObject(db)=0` (unmounted) gracefully — leave sizes as 0 in that case.
+- [ ] **Task 2**: Fix `SystemMetrics()` in `src/ExecuteMCPv2/REST/Monitor.cls` (AC 11.3.2)
+  - [ ] **Research**: Use Perplexity MCP to confirm the correct IRIS API for global-ref / routine-command counters. Questions: "In IRIS 2025.1, what is the recommended API to get total global references and total routine commands since startup? Is it `SYS.Stats.Globals`, `$SYSTEM.Monitor`, `%Monitor.System.*` SQL tables, or `^$ZMETRIC`?"
+  - [ ] Implement using the confirmed API. Cross-check a live call against the SMP monitor view before merging.
+- [ ] **Task 3**: Fix `ConfigManage() section:"locale"` in `src/ExecuteMCPv2/REST/SystemConfig.cls` (AC 11.3.3)
+  - [ ] Add `Do tResp.%Set("current", …)` using `%SYS.NLS.Locale` or equivalent. Research if uncertain.
+- [ ] **Task 4**: Regenerate bootstrap + build (AC 11.3.4)
+  - [ ] `npm run gen:bootstrap` — verify the `BOOTSTRAP_VERSION` hash changes.
+  - [ ] `pnpm turbo run build` — picks up the new `bootstrap-classes.ts`.
+- [ ] **Task 5**: Deploy + live verify (AC 11.3.5)
+  - [ ] Deploy via `iris_doc_load src/ExecuteMCPv2/**/*.cls`, compile via `iris_doc_compile`.
+  - [ ] Restart the MCP server (or reconnect the client) to trigger the bootstrap probe — confirm new hash takes.
+  - [ ] Run through every bug reproduction from Stories 11.1, 11.2, 11.3 (12 bugs total). Document pass/fail per bug in the story file. Clean up test assets.
+- [ ] **Task 6**: Unit tests (AC 11.3.6) — 3 new tests.
+- [ ] **Task 7**: README + tool_support.md updates (AC 11.3.7)
+- [ ] **Task 8**: CHANGELOG (AC 11.3.8) — 4 new bullets.
+- [ ] **Task 9**: Build + validate (AC 11.3.9)
+
+**Implementation Notes**:
+- Bug #9 is the most uncertain in the epic — the "correct" source for total global refs / routine commands in IRIS 2025.1 isn't something I've independently confirmed. Research first via Perplexity; do NOT guess.
+- The bootstrap bump is the last ObjectScript-side action; after this runs, the Epic 11 server-side changes are live. Time the live verification immediately after deploy so any issue is caught while the diff is fresh.
+- `Config.Databases` lives in `%SYS` — the handler already does the namespace switch per the project's `namespace-switching-in-rest-handlers` rule. Don't add new switches; reuse the existing save/restore pattern.
+
+**Out of scope**:
+- TypeScript tool fixes — Story 11.4.
+- Any ObjectScript changes beyond the three files touched here.
+
+### Story 11.4: TypeScript tool fixes (non-bootstrap)
+
+**As an** MCP client or developer using `iris_doc_search`, `iris_rest_manage`, `iris_analytics_cubes`, `iris_ssl_*`, or `iris_doc_put`,
+**I want** the tool schemas and response handling to be correct and honest,
+**so that** search returns matches with its documented defaults, REST listing includes hand-written dispatch classes when I ask for them, analytics timestamps are human-readable, SSL schemas match the server shape, and `iris_doc_put` is clearly labelled as a debug/scratch tool.
+
+**Trigger**: 2026-04-21 comprehensive test pass. See [sprint-change-proposal-2026-04-21.md](sprint-change-proposal-2026-04-21.md) Bugs #6 (TS surface), #7, #13, #14, #16.
+
+**Acceptance Criteria**:
+
+- **AC 11.4.1** — `iris_doc_search` default `files` pattern takes effect when the caller omits the argument. Before: `iris_doc_search({query: "MyMarker"})` returned `{matches: []}` even when the marker existed in a `.cls` file. After: same call returns matches without requiring `files: "*.cls"` explicitly. Fix in [packages/iris-dev-mcp/src/tools/search.ts](../../packages/iris-dev-mcp/src/tools/search.ts): when `files` is undefined in the handler input, explicitly pass `'*.cls,*.mac,*.int,*.inc'` on the Atelier request — don't rely solely on the Zod default description.
+- **AC 11.4.2** — `iris_rest_manage` `action:"list"` gains a `scope` parameter: `"spec-first"` (default, current behavior — calls `%REST.API.GetAllRESTApps` / `GetRESTApps`) or `"all"` (new — calls `%REST.API.GetAllWebRESTApps` / `GetWebRESTApps`, which includes hand-written `%CSP.REST` subclasses without `.spec` companion classes). Verified requirement: in HSCUSTOM, `ExecuteMCPv2.REST.Dispatch` is registered to `/api/executemcp/v2` but is omitted from the current default list output. Research the IRIS API path: the Mgmnt v2 swagger API may have a `scope=all` query param — check via Perplexity MCP or by reading `irislib/%SYS/%Api.Mgmnt.v2.impl.cls`. If the Mgmnt API doesn't support `scope=all`, add a small new ExecuteMCPv2 handler (e.g., `Security.cls` → `RestList()` extended, or a new method in the same file) that wraps `%REST.API.GetAllWebRESTApps` directly.
+  - Note: if the new `scope=all` path requires a new ObjectScript handler, this story picks up a small ObjectScript dependency and needs to be sequenced AFTER Story 11.3's bootstrap bump (or bumped separately). Flag this during implementation — if the Mgmnt API alone suffices, 11.4 stays TypeScript-only.
+- **AC 11.4.3** — `iris_analytics_cubes lastBuildTime` returned in ISO 8601 format. Before: raw `$HOROLOG` string like `"67360,85964.1540167"`. After: ISO string like `"2026-03-15T23:53:24.154Z"`. Fix in [packages/iris-data-mcp/src/tools/analytics.ts](../../packages/iris-data-mcp/src/tools/analytics.ts): extract a `horologToIso(s: string): string` helper (small — days+seconds math: days since 1841-01-01 in JS → Date). Apply during envelope mapping. Preserve the raw value in a separate `lastBuildTimeRaw` field so debugging is still possible.
+- **AC 11.4.4** — **Breaking (pre-release)**: `iris_ssl_manage` / `iris_ssl_list` Zod schemas replace `protocols: number` with `tlsMinVersion: number` and `tlsMaxVersion: number` (paired with Story 11.2's server-side fix). Descriptions document the IRIS TLS-version bitmask values (8=TLSv1.1, 16=TLSv1.2, 32=TLSv1.3 — confirm values against `irissys/Security/SSLConfigs.cls`). The `protocols` field is removed — no compatibility shim (pre-release). Fix in [packages/iris-admin-mcp/src/tools/ssl.ts](../../packages/iris-admin-mcp/src/tools/ssl.ts).
+- **AC 11.4.5** — `iris_doc_put` tool description clarified as debug/scratch only. Before: description contains a warning against production use but is easy to miss. After: description leads with "**Debug/scratch tool** — for production code, use `iris_doc_load`. This tool writes content directly to IRIS without creating a file on disk, and is intended for one-off inspection, quick reproductions, or throwaway test classes only." Fix in [packages/iris-dev-mcp/src/tools/doc.ts](../../packages/iris-dev-mcp/src/tools/doc.ts) — update the Zod `description` string on `iris_doc_put`.
+- **AC 11.4.6** — Unit tests added:
+  - `packages/iris-dev-mcp/src/__tests__/search.test.ts` — `it("passes default files pattern to Atelier when omitted")` — mock the HTTP client and assert the constructed URL query contains `files=%2A.cls%2C%2A.mac%2C%2A.int%2C%2A.inc` (or equivalent). Also an `it("respects user-provided files")` if not already covered.
+  - `packages/iris-data-mcp/src/__tests__/rest.test.ts` — `it("scope:all routes to the web-apps endpoint")` — mock and assert the tool calls the new path / parameter. `it("scope:'spec-first' preserves existing behavior")` — assert unchanged behavior.
+  - `packages/iris-data-mcp/src/__tests__/analytics.test.ts` — `it("converts lastBuildTime from horolog to ISO")` — mock cube-list response with a known horolog string; assert tool output `lastBuildTime` is the expected ISO string and `lastBuildTimeRaw` is the horolog.
+  - `packages/iris-admin-mcp/src/__tests__/ssl.test.ts` — already covered by Story 11.2 AC 11.2.7. No new TS-only tests needed unless the break introduces a new code path.
+- **AC 11.4.7** — Documentation updates:
+  - `packages/iris-dev-mcp/README.md` — `iris_doc_search` section updated (default files pattern works without explicit arg); `iris_doc_put` description rewrite mirrors the Zod description.
+  - `packages/iris-data-mcp/README.md` — `iris_rest_manage` gains a `scope` parameter section; `iris_analytics_cubes` timestamp section shows ISO and `lastBuildTimeRaw`.
+  - `packages/iris-admin-mcp/README.md` — SSL section updated with the new Zod schema (paired with Story 11.2's README changes; coordinate to avoid conflict).
+  - Top-level `README.md` — status callout mentioning Epic 11 bug-fix batch. No tool count change.
+  - `tool_support.md` — no row additions; just field/behavior notes for the changed tools.
+- **AC 11.4.8** — CHANGELOG.md entries appended to the `## [Pre-release — 2026-04-21]` block:
+  - `### Fixed`:
+    - "**`iris_doc_search` default `files` pattern now takes effect** ([packages/iris-dev-mcp/src/tools/search.ts](packages/iris-dev-mcp/src/tools/search.ts)) — previously callers who omitted `files` got empty results despite the schema default. Bug #7."
+    - "**`iris_analytics_cubes lastBuildTime` now returned as ISO 8601** ([packages/iris-data-mcp/src/tools/analytics.ts](packages/iris-data-mcp/src/tools/analytics.ts)) — raw `$HOROLOG` value preserved in a new `lastBuildTimeRaw` field. Bug #14."
+  - `### Added`:
+    - "**`iris_rest_manage` gains a `scope` parameter** — `'spec-first'` (default) preserves existing behavior; `'all'` lists hand-written `%CSP.REST` dispatch classes too (e.g., `ExecuteMCPv2.REST.Dispatch`). Bug #13."
+  - `### Changed`:
+    - "**`iris_doc_put` description rewritten as debug/scratch tool** — production code should use `iris_doc_load` to ensure source-control round-trip. Bug #16."
+  - The SSL Zod schema break is already documented in Story 11.2's `### Changed` bullet — no duplication.
+- **AC 11.4.9** — Build + tests + lint green: `pnpm turbo run build`, `pnpm turbo run test`, `pnpm turbo run lint`. Target test count growth: ~4–5 new tests across `search.test.ts`, `rest.test.ts`, `analytics.test.ts`.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix `iris_doc_search` default files pattern (AC 11.4.1)
+  - [ ] In `packages/iris-dev-mcp/src/tools/search.ts` handler, check the input for `files`. If undefined, set `const filesToUse = files ?? '*.cls,*.mac,*.int,*.inc';` and pass to the Atelier URL builder. Confirm the downstream builder URL-encodes correctly.
+- [ ] **Task 2**: Fix `iris_rest_manage` scope parameter (AC 11.4.2)
+  - [ ] Research: read `irislib/%SYS/%Api.Mgmnt.v2.impl.cls` + `irislib/%SYS/%REST.API.cls` + perhaps `irislib/%SYS/%REST.API.spec.cls`. Determine whether the Mgmnt API has a `scope=all` option or similar.
+  - [ ] If yes: add `scope` to the Zod schema; pass through to the Atelier URL.
+  - [ ] If no: add a new ObjectScript handler method that wraps `%REST.API.GetAllWebRESTApps`. Bump BOOTSTRAP_VERSION accordingly. (Flag this during implementation — if a bump is needed, coordinate with dev re: merging this story's ObjectScript change into Story 11.3's bundle or accepting a second bump.)
+- [ ] **Task 3**: Fix `iris_analytics_cubes` timestamp (AC 11.4.3)
+  - [ ] Write `horologToIso(s: string): string` helper. Days = `parseInt(s.split(",")[0])`; seconds = `parseFloat(s.split(",")[1])`. Epoch = `Date.UTC(1840, 11, 31)` (Dec 31, 1840 midnight UTC — IRIS day 0 is 1840-12-31, day 1 is 1841-01-01; confirm via a round-trip test against a known horolog value).
+  - [ ] Apply in the analytics response mapping. Add `lastBuildTimeRaw` to preserve the original.
+- [ ] **Task 4**: Fix SSL Zod schemas (AC 11.4.4)
+  - [ ] In `packages/iris-admin-mcp/src/tools/ssl.ts`, replace `protocols` in the `iris_ssl_list` and `iris_ssl_manage` schemas with `tlsMinVersion` and `tlsMaxVersion`. Document bit values in the description string.
+  - [ ] Update the response-mapping code to read these fields from the handler response.
+- [ ] **Task 5**: Rewrite `iris_doc_put` description (AC 11.4.5)
+  - [ ] Update the Zod `description` string to lead with "**Debug/scratch tool** — for production code, use `iris_doc_load`."
+- [ ] **Task 6**: Unit tests (AC 11.4.6) — 4–5 new tests.
+- [ ] **Task 7**: README + tool_support.md updates (AC 11.4.7)
+  - [ ] Coordinate with Story 11.2's `packages/iris-admin-mcp/README.md` changes — both stories touch the SSL section; either merge them in one commit or sequence 11.4 after 11.2's README merge.
+- [ ] **Task 8**: CHANGELOG (AC 11.4.8) — 2 `### Fixed` + 1 `### Added` + 1 `### Changed` bullets in the same 2026-04-21 block.
+- [ ] **Task 9**: Build + validate (AC 11.4.9)
+
+**Implementation Notes**:
+- Story 11.4 is the only TypeScript-only story (unless Bug #13 forces a new ObjectScript handler — see AC 11.4.2 note).
+- Bug #13's fix is the only one in Epic 11 with meaningful implementation uncertainty. Research first.
+- The `horologToIso` helper is small but subtle — IRIS day 0 vs day 1 off-by-one is a classic trap. Write the test against a known horolog pair (e.g., use `$ZDATETIME` output on the IRIS server as the oracle for at least one value).
+- SSL Zod schema break and server-side break are paired — merge Story 11.2 and Story 11.4 SSL changes in lockstep if possible, since partial state (TS sends `protocols`, server expects `tlsMinVersion`) would break the tool.
+
+**Out of scope**:
+- Any ObjectScript handler changes beyond the Bug #13 potential new method — those already landed in Stories 11.1–11.3.
+- Arabic error-text normalization (deferred from Story 11.1).

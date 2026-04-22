@@ -606,6 +606,38 @@ describe("iris_user_password", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it("does not redact short candidate password in validate error text", async () => {
+    // Regression test for Story 11.1 Bug #8: short candidates like "a" used to
+    // cause the ObjectScript UserPassword validate branch to unconditionally
+    // $Replace every occurrence of "a" in the IRIS error text with "***",
+    // corrupting the generic "Password does not match length or pattern
+    // requirements" message. The fix gates $Replace on $Length(tPassword) >= 8.
+    // This tool-side test asserts the tool forwards `message` unchanged.
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        action: "validate",
+        valid: false,
+        message: "Password does not match length or pattern requirements",
+      }),
+    );
+
+    const result = await userPasswordTool.handler(
+      { action: "validate", password: "a" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      valid: boolean;
+      message: string;
+    };
+    expect(structured.valid).toBe(false);
+    expect(structured.message).toBe(
+      "Password does not match length or pattern requirements",
+    );
+    expect(structured.message).not.toContain("***");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should NOT include password in response content", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "changed", username: "testuser", success: true }),

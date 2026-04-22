@@ -20,6 +20,7 @@ ClassMethod Execute() As %Status
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
     Set tRedirected = 0
+    Set tCmdErrored = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -59,39 +60,40 @@ ClassMethod Execute() As %Status
         Try {
             XECUTE tCommand
         } Catch exCmd {
-            ; Restore I/O before handling error
-            Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-            If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
-            Set tRedirected = 0
-
-            Set $NAMESPACE = tOrigNS
-            Set tSC = exCmd.AsStatus()
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-            Set tSC = $$$OK
-            Quit
+            ; Flag the error so the success render below is skipped. The I/O
+            ; restore + RenderResponseBody run AFTER the catch so a single
+            ; response is emitted and the redirect is guaranteed to be off
+            ; before the JSON envelope is written (Bug #1).
+            Set tCmdErrored = 1
+            Set tCmdStatus = exCmd.AsStatus()
         }
 
-        ; Restore I/O
-        Use tInitIO::($Select(tOldMnemonic=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-        If tWasRedirected '= tRedirected Do ##class(%Library.Device).ReDirectIO(tWasRedirected)
+        ; Fully restore the original I/O state. Unconditionally disable redirect
+        ; first so subsequent writes (RenderResponseBody) reach the HTTP response
+        ; stream rather than the %ExecuteMCPOutput capture buffer.
+        Do ##class(%Library.Device).ReDirectIO(0)
+        Use tInitIO
         Set tRedirected = 0
 
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS
 
-        Set tOutput = $Get(%ExecuteMCPOutput, "")
-        Kill %ExecuteMCPOutput
-        Set tResult = {}
-        Do tResult.%Set("output", tOutput)
-        Do ..RenderResponseBody($$$OK, , tResult)
+        If tCmdErrored {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+            Kill %ExecuteMCPOutput
+        } Else {
+            Set tOutput = $Get(%ExecuteMCPOutput, "")
+            Kill %ExecuteMCPOutput
+            Set tResult = {}
+            Do tResult.%Set("output", tOutput)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
     } Catch ex {
-        ; Ensure redirection is restored on unexpected error
+        ; Ensure redirection is restored on unexpected error before rendering.
         Try {
             If tRedirected {
-                If $Get(tInitIO) '= "" {
-                    Use tInitIO::($Select($Get(tOldMnemonic)=""||(tOldMnemonic="%X364"):"", 1:"^"_tOldMnemonic))
-                }
                 Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
             }
         } Catch {}
         Set $NAMESPACE = tOrigNS

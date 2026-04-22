@@ -97,6 +97,40 @@ describe("iris_execute_command", () => {
     expect(result.content[0]?.text).toContain("Error executing command");
   });
 
+  it("returns structured error envelope when server returns JSON error", async () => {
+    // Regression test for Story 11.1 Bug #1: prior to the fix, a runtime
+    // ObjectScript error (e.g. <DIVIDE>) caused the REST handler to leave
+    // I/O redirect enabled, so the JSON error response was captured into
+    // %ExecuteMCPOutput and the client saw "non-JSON response". Now the
+    // server emits a proper Atelier error envelope — this test validates
+    // the tool-side shape with that envelope mocked.
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [
+          {
+            code: 5001,
+            domain: "%ObjectErrors",
+            error:
+              "ERROR #5001: ObjectScript error: <DIVIDE>Execute+39^ExecuteMCPv2.REST.Command.1",
+            id: "GeneralError",
+          },
+        ],
+        "/api/executemcp/v2/command",
+        "ObjectScript error: <DIVIDE>",
+      ),
+    );
+
+    const result = await executeCommandTool.handler(
+      { command: "Set x = 1/0" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Error executing command");
+    expect(result.content[0]?.text).toContain("<DIVIDE>");
+  });
+
   it("should propagate non-IrisApiError exceptions", async () => {
     mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
 

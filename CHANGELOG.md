@@ -2,6 +2,14 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-04-21]
+
+### Fixed
+
+- **`iris_execute_command` no longer crashes with "non-JSON response" on runtime errors** ([src/ExecuteMCPv2/REST/Command.cls](src/ExecuteMCPv2/REST/Command.cls)) — the Execute handler's catch blocks now fully restore I/O redirect state before calling RenderResponseBody, so the JSON error envelope reaches the HTTP response instead of the captured-output buffer. Bug #1.
+- **`Utils.SanitizeError` no longer double-wraps error codes** ([src/ExecuteMCPv2/Utils.cls](src/ExecuteMCPv2/Utils.cls)) — a leading `ERROR #N: ` or `خطأ #N: ` prefix is stripped before the final `$$$ERROR` wrap, so chains collapse to a single prefix. Bug #11.
+- **`iris_user_password` validate error message no longer over-redacts short candidates** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — the unconditional `$Replace` of the candidate password in the IRIS validation text is now gated on `$Length(tPassword) >= 8`, matching the existing partial-match loop threshold. Bug #8.
+
 ## [Pre-release — 2026-04-20]
 
 ### Added — Epic 10: Namespace Browsing and Bulk Export Tools (iris-dev-mcp)
