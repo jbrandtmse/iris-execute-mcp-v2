@@ -969,3 +969,16 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **Live verification**: 19/19 `ExecuteMCPv2.Tests.UtilsTest` pass on HSCUSTOM post-deploy (17 pre-existing + 2 new). Step 2.5 N/A (test class, not REST handler).
 - **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16` (test classes are not in the bootstrap set).
 - **Commit**: `6e37a1d` — `feat(story-12.0): Epic 11 deferred cleanup — SanitizeError prefix-strip test + triage closure`.
+
+## Story 12.1: Password change fix + validate policy surface (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/REST/Security.cls` (property-name fix + changePasswordOnNextLogin handling + policy read), `packages/iris-admin-mcp/src/tools/user.ts` (new optional param), `packages/iris-admin-mcp/src/__tests__/user.test.ts` (+3 tests), `packages/iris-admin-mcp/README.md`, `CHANGELOG.md` (new 2026-04-22 Pre-release block), story file.
+- **Key design decisions**:
+  - **Password vs ChangePassword property** (BUG-1): `ChangePassword` is a boolean flag, not the password setter. One-line fix: `tProps("Password") = tPassword`. Doc comment also updated to match.
+  - **changePasswordOnNextLogin semantics**: param is optional; when omitted, the handler does NOT set `tProps("ChangePassword")` at all, preserving the user's existing flag. Only when explicitly provided does it override.
+  - **Policy parsing**: reads `Security.System.Get("SYSTEM", .tSysProps).PasswordPattern` (e.g. `"3.128ANP"`), parses the leading `N.M` quantifier for min-length. Empty patterns and the very-loose `1.*` shape return `{minLength:0, pattern:null, comment:"No password policy configured"}` — any other pattern (including the IRIS install default `3.128ANP`) is reported verbatim.
+- **Code review**: 0 HIGH, 1 MEDIUM auto-fixed (misleading comment in Security.cls claiming `3.128ANP` was a "no rules" sentinel — it's actually the IRIS install default and IS a real policy), 1 LOW auto-fixed (README param-summary table row for `changePasswordOnNextLogin`), 1 LOW deferred (`changePasswordOnNextLogin:false → 0` symmetric test).
+- **Live verification**: validate branch cross-checked live via `iris_user_password action:"validate" password:"abc"` on HSCUSTOM → `{valid:true, policy:{minLength:3, pattern:"3.128ANP"}}`. Full change-path roundtrip (create TESTMCP_PwdUser → change → idempotence → delete) is deferred to Story 12.4's live verification AC.
+- **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16`. Story 12.4 bumps once for all Epic 12 ObjectScript edits.
+- **Admin tests**: 211 → 214 (+3 as targeted). All 11 admin test files pass.
+- **Commit**: `cc810a0` — `feat(story-12.1): password change fix + validate policy surface (BUG-1, FEAT-4)`.
