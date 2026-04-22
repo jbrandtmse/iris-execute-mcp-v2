@@ -1,5 +1,5 @@
 # generated: 2026-04-05
-# last_updated: 2026-04-21
+# last_updated: 2026-04-22
 # project: iris-execute-mcp-v2
 # project_key: NOKEY
 # tracking_system: file-system
@@ -171,3 +171,18 @@ development_status:
   11-3-db-metrics-config-accuracy-and-bootstrap-bump: done
   11-4-typescript-tool-fixes: done
   epic-11-retrospective: done
+
+  # Epic 12: Post-Epic-11 Bug Fix Batch & Feature Gap Closure
+  # Added 2026-04-22 via bmad-correct-course. See sprint-change-proposal-2026-04-22.md.
+  # 8 bugs + 9 feature gaps identified in the 2026-04-22 comprehensive test pass. Last pre-publish quality gate.
+  # 3 HIGH-severity bugs: iris_user_password change (regression from Epic 11 Bug #12), iris_production_manage create, iris_production_control stop/start/restart/update/recover.
+  # Single BOOTSTRAP_VERSION bump at end of Story 12.4 covers ObjectScript edits (12.1–12.4). Second bump may be needed for 12.6 (alerts) if it adds a new handler method — flag during implementation.
+  # FEAT-2 rest_manage scope rename is a breaking change (pre-release). Adds one new tool (iris_alerts_manage in Story 12.6) and one new FR to prd.md.
+  epic-12: backlog
+  12-1-password-change-fix-and-policy-surface: backlog
+  12-2-production-control-dynamicobject-audit: backlog
+  12-3-production-create: backlog
+  12-4-database-modify-docdb-and-bootstrap-bump: backlog
+  12-5-typescript-tool-surface-cleanup: backlog
+  12-6-alerts-manage-new-tool: backlog
+  epic-12-retrospective: optional

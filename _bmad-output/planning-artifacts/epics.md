@@ -2877,3 +2877,290 @@ So that the first npm publish ships a suite that is verified to work on the plat
 **Out of scope**:
 - Any ObjectScript handler changes beyond the Bug #13 potential new method — those already landed in Stories 11.1–11.3.
 - Arabic error-text normalization (deferred from Story 11.1).
+
+## Epic 12: Post-Epic-11 Bug Fix Batch & Feature Gap Closure
+
+**Goal**: Fix the 8 bugs + 9 feature gaps identified in the 2026-04-22 comprehensive test pass, plus add one new tool (`iris_alerts_manage`). Last quality gate before first npm publish.
+
+**Scope**: Correctness fixes and surface completeness across `src/ExecuteMCPv2/REST/*.cls` handlers and `packages/*/src/tools/*.ts` files. Single `BOOTSTRAP_VERSION` bump at end of Story 12.4 covers all ObjectScript edits from Stories 12.1–12.4 (or 12.6 if the alerts handler is new). Inline CHANGELOG + README + tool_support.md updates per story — no standalone documentation rollup.
+
+**Bugs and gaps addressed**: See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) for full list. 8 bugs + 9 feature gaps; 3 HIGH severity (password change broken, production create broken, production control broken).
+
+**Stories**:
+- 12.1 Password change fix + validate response policy surface — BUG-1, FEAT-4
+- 12.2 Production control DynamicObject audit — BUG-3 (affects start/stop/restart/update/recover)
+- 12.3 Production create — BUG-2
+- 12.4 Database modify Config/SYS split + DocDB type + find filter + DB-delete docs + **BOOTSTRAP_VERSION bump + live verification** — BUG-4, BUG-5, BUG-6, FEAT-5
+- 12.5 TypeScript tool surface cleanup — FEAT-1 (OAuth fields), FEAT-2 (rest_manage scope rename — **breaking, pre-release**), FEAT-3 (transform/rule filter), FEAT-6 (swagger summary), FEAT-8 (global-list case), FEAT-9/BUG-8 (UTF-8 decode audit), BUG-7 (if TS-side)
+- 12.6 `iris_alerts_manage` new tool — FEAT-7
+
+**Out of scope (deferred)**:
+- Arabic `خطأ` error-text prefix (unchanged from Epic 11 — still cosmetic).
+- Deeper refactor of the redirect-I/O charset path — only fix if BUG-8 traces to the ObjectScript side rather than TS decode.
+- Any changes to Epic 11-era handlers beyond the specific methods these stories touch.
+
+### Story 12.1: Password change fix + validate response policy surface
+
+**As an** admin calling `iris_user_password action:"change"`,
+**I want** the new password to actually be applied to the user's account,
+**so that** password rotation works end-to-end and doesn't silently fail with a confusing "not a valid boolean" error.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) BUG-1, FEAT-4.
+
+**Acceptance Criteria**:
+
+- **AC 12.1.1** — `iris_user_password action:"change"` with any existing user and any valid-policy password succeeds. Before: `{Datatype value 'NewPassword' is not a valid boolean > Datatype validation failed on property 'Security.Users:ChangePassword'}`. After: `{action:"changed", username:"<name>"}`. Fix at [src/ExecuteMCPv2/REST/Security.cls:420](../../src/ExecuteMCPv2/REST/Security.cls#L420): change `Set tProps("ChangePassword") = tPassword` to `Set tProps("Password") = tPassword`. The `ChangePassword` property of `Security.Users` is a **boolean** ("force change on next login"), not the password value — verify by reading [irissys/Security/Users.cls](../../irissys/Security/Users.cls) property definitions.
+- **AC 12.1.2** — Add `changePasswordOnNextLogin` optional boolean parameter to `iris_user_password action:"change"` so callers can set the "force change" flag alongside the new password. Both get passed in the same `Security.Users.Modify()` call (`tProps("Password")` + `tProps("ChangePassword")`). Default: false.
+- **AC 12.1.3** — `iris_user_password action:"validate"` response includes the active password policy. Before: `{action:"validate", valid:true}` regardless of rules. After: `{action:"validate", valid:true, policy:{minLength:N, pattern:"..."}}` where policy fields come from `Security.System.Get()` (or `$SYSTEM.Security.Users.GetPasswordRules()` if present). If no policy is configured, return `policy:{minLength:0, pattern:null}` with a comment field explaining that the instance has no rules. Fix in `Security.cls:UserPassword()` — validate branch.
+- **AC 12.1.4** — Unit tests added:
+  - `packages/iris-admin-mcp/src/__tests__/user.test.ts` — `it("sends Password property, not ChangePassword, on change")` — mock the HTTP client and assert the request body's `password` field is passed through. Assert response contains `{action:"changed"}`.
+  - Same file — `it("forwards changePasswordOnNextLogin when provided")`.
+  - Same file — `it("surfaces password policy in validate response")`.
+- **AC 12.1.5** — **Live verification** (post-bootstrap-upgrade in Story 12.4): create `TESTMCP_PwdUser`, call `iris_user_password action:"change"` with a new password, then authenticate as that user via `iris_server_info` equivalent (or re-run the change twice to confirm idempotence). Delete TESTMCP_PwdUser after.
+- **AC 12.1.6** — CHANGELOG.md entries appended to a new `## [Pre-release — 2026-04-22]` block, under `### Fixed`:
+  - "**`iris_user_password action:\"change\"` now actually changes the password** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — handler was setting the `ChangePassword` boolean (force-change flag) instead of the `Password` property. Every password-change attempt failed with 'not a valid boolean'. BUG-1."
+  - `### Added`: "**`iris_user_password action:\"validate\"` now returns the active password policy** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — callers can see min-length / pattern alongside `valid:true|false`. FEAT-4."
+- **AC 12.1.7** — Build + tests + lint green. Target: +3 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix property-name bug (AC 12.1.1) — one-line change + unit test that would have caught this.
+- [ ] **Task 2**: Add `changePasswordOnNextLogin` to change-action branch (AC 12.1.2).
+- [ ] **Task 3**: Surface password policy in validate response (AC 12.1.3). Research source: `irissys/%SYS/Security/System.cls` PasswordRules property or `$SYSTEM.Security.Users.PasswordValidate()` signature.
+- [ ] **Task 4**: Unit tests (AC 12.1.4).
+- [ ] **Task 5**: CHANGELOG + README updates (AC 12.1.6).
+- [ ] **Task 6**: Build + validate (AC 12.1.7).
+- [ ] **Task 7**: Live verification deferred to Story 12.4 (AC 12.1.5) — same pattern as Epic 11.
+
+**Implementation Notes**:
+- This is a one-line ObjectScript fix but it's HIGH severity (fully broken tool). Live-verify with a real password change, not just a unit test. Epic 11's Bug #12 fix touched the same method but didn't exercise the change path — Epic 12 must.
+- The `ChangePassword` vs `Password` distinction deserves a rule entry after Epic 12 retro (Rule #15 candidate: "Read the property type, not just the name — `ChangePassword` is a boolean, not a password").
+
+**Out of scope**:
+- Any other `Security.Users` property-shape bugs outside the password surface (none identified in the test pass).
+
+### Story 12.2: Production control DynamicObject audit
+
+**As an** interop operator calling `iris_production_control`,
+**I want** `stop`, `start`, `restart`, `update`, and `recover` to work,
+**so that** I can control production lifecycle without hitting `<INVALID CLASS>` errors.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) BUG-3.
+
+**Acceptance Criteria**:
+
+- **AC 12.2.1** — `iris_production_control action:"stop"` (with a stopped-already or running production) returns a clean response. Before: `<INVALID CLASS>ProductionControl *Class '%Library.DynamicObject' does not support MultiDimensional operations`. After: success envelope or a meaningful error (e.g., "no production running"). Fix in [src/ExecuteMCPv2/REST/Interop.cls](../../src/ExecuteMCPv2/REST/Interop.cls) `ProductionControl()` method: audit every `tBody("key")` pattern and replace with `tBody.%Get("key")` (or equivalent safe accessor on `%Library.DynamicObject`). Per `.claude/rules/iris-objectscript-basics.md` guidance on DynamicObject access.
+- **AC 12.2.2** — Same fix applied to all five control actions: `start`, `stop`, `restart`, `update`, `recover`. Verify each action's code path.
+- **AC 12.2.3** — Full audit of `Interop.cls` for the same DynamicObject pattern elsewhere in the class. Any other method using `tBody("key")` gets the same fix. Record the full list of fixed methods in the commit message.
+- **AC 12.2.4** — Unit tests added:
+  - `packages/iris-interop-mcp/src/__tests__/production.test.ts` — `it("stop action returns success envelope")` (mock), `it("start requires name parameter")` (validation path), `it("restart action works end-to-end")` (mock).
+- **AC 12.2.5** — **Live verification**: trigger `iris_production_control action:"stop"` on HSCUSTOM (no production running — expect clean error), then create a test production (after Story 12.3 merges), start it, stop it, restart it, verify each works.
+- **AC 12.2.6** — CHANGELOG.md `### Fixed`:
+  - "**`iris_production_control` no longer fails with `<INVALID CLASS>`** ([src/ExecuteMCPv2/REST/Interop.cls](src/ExecuteMCPv2/REST/Interop.cls)) — DynamicObject multidimensional access replaced with `%Get()` in all five control actions (`start`, `stop`, `restart`, `update`, `recover`) and elsewhere in the class. BUG-3."
+- **AC 12.2.7** — Build + tests + lint green. Target: +3 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Read full `Interop.cls` and grep for `tBody(` pattern — list every occurrence.
+- [ ] **Task 2**: For each occurrence, replace with `tBody.%Get(...)` or `tBody.%IsDefined(...)` as appropriate. Add probe class to confirm the shape before committing.
+- [ ] **Task 3**: Unit tests (AC 12.2.4).
+- [ ] **Task 4**: CHANGELOG + README updates.
+- [ ] **Task 5**: Build + validate.
+- [ ] **Task 6**: Live verification deferred to Story 12.4.
+
+**Implementation Notes**:
+- The error message "Class '%Library.DynamicObject' does not support MultiDimensional operations" is a classic bug signature. Same pattern probably exists elsewhere in the codebase — consider a grep across all `src/ExecuteMCPv2/REST/*.cls` for `tBody(` as a prophylactic audit, not just Interop.cls. Track findings but keep the story scoped.
+
+**Out of scope**:
+- Fixing similar patterns in other `.cls` files (if found, defer to the retro or spin out a separate cleanup story).
+
+### Story 12.3: Production create
+
+**As an** interop administrator calling `iris_production_manage action:"create"`,
+**I want** the tool to actually create a new production class,
+**so that** I can bootstrap interop work through MCP without resorting to the Management Portal.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) BUG-2.
+
+**Acceptance Criteria**:
+
+- **AC 12.3.1** — `iris_production_manage action:"create"` with a new production name (e.g., `TESTMCP.Prod`) succeeds and produces a compilable empty production class. Before: `<METHOD DOES NOT EXIST>ProductionManage *Create,Ens.Config.Production`. After: `{action:"created", name:"TESTMCP.Prod"}` and the class exists and compiles.
+- **AC 12.3.2** — The production shows up in `iris_production_summary` after creation.
+- **AC 12.3.3** — `iris_production_manage action:"delete"` on the same production succeeds (already working — regression check only).
+- **AC 12.3.4** — Implementation approach: research first. Read [irissys/Ens/Config/Production.cls](../../irissys/Ens/Config/Production.cls) + Mgmnt Portal's production-new flow. Two candidate approaches:
+  - **(a)** Class generation: write a minimal `.cls` source that extends `Ens.Production`, upload via Atelier, compile. Use an XData block with `<Production Name="..."/>`.
+  - **(b)** Direct `Ens.Config.Production.%New(name).%Save()` if supported.
+  - Pick the simpler approach that actually works against IRIS 2025.1. Document the choice in an implementation note.
+- **AC 12.3.5** — Unit tests:
+  - `packages/iris-interop-mcp/src/__tests__/production.test.ts` — `it("create returns created action with name")` (mock the happy path).
+- **AC 12.3.6** — **Live verification**: create `TESTMCP.Prod`, verify via `iris_production_summary` + `iris_doc_get TESTMCP.Prod.cls`, then delete. Confirm cleanup.
+- **AC 12.3.7** — CHANGELOG.md `### Fixed`:
+  - "**`iris_production_manage action:\"create\"` now creates productions** ([src/ExecuteMCPv2/REST/Interop.cls](src/ExecuteMCPv2/REST/Interop.cls)) — handler was calling a non-existent `Create` method on `Ens.Config.Production`. Now uses {approach (a) or (b) — filled in at implementation}. BUG-2."
+- **AC 12.3.8** — Build + tests + lint green. Target: +1–2 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Research. Read `irissys/Ens/Config/Production.cls`; check Management Portal behavior via `iris_doc_search` for "production-new"; use Perplexity if needed.
+- [ ] **Task 2**: Prototype chosen approach in a temporary `ExecuteMCPv2.Temp.ProductionProbe` class. Verify it produces a valid, compilable production.
+- [ ] **Task 3**: Implement in `Interop.cls ProductionManage()` create branch. Delete the probe class.
+- [ ] **Task 4**: Unit test.
+- [ ] **Task 5**: CHANGELOG + README.
+- [ ] **Task 6**: Build + validate.
+- [ ] **Task 7**: Live verification deferred to Story 12.4.
+
+**Implementation Notes**:
+- Per Rule #14, prefer live-probe over Perplexity for IRIS-specific API shapes. Use `iris_doc_list Ens.Config%` + `iris_doc_get Ens.Config.Production.cls` to read the actual class first.
+- The `Ens.Config.Production:%OnNew` and related bootstrap methods may need specific arguments. Test a roundtrip before committing to the approach.
+
+**Out of scope**:
+- Adding config items to the production via this tool — that's `iris_production_item`'s job (which already works for existing productions).
+- Auto-compiling the generated production — leave that to the caller via `iris_doc_compile`.
+
+### Story 12.4: Database modify Config/SYS split + DocDB + BOOTSTRAP bump + live verification
+
+**As an** admin calling `iris_database_manage action:"modify"` or a data engineer using DocDB tools,
+**I want** resizing databases to work, typed DocDB properties to stay typed, and DocDB find filters to actually filter,
+**so that** the data-layer tools are usable for real workloads.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) BUG-4, BUG-5, BUG-6, FEAT-5.
+
+**Acceptance Criteria**:
+
+- **AC 12.4.1** — `iris_database_manage action:"modify"` accepting `maxSize` and/or `expansionSize` succeeds. Before: `<PROPERTY DOES NOT EXIST>Modify *MaxSize,Config.Databases`. After: the database's max-size is actually updated and `iris_database_list` reflects the change. Fix in [src/ExecuteMCPv2/REST/Config.cls](../../src/ExecuteMCPv2/REST/Config.cls) `DatabaseManage()` method: when `modify` receives runtime fields (`maxSize`, `expansionSize`, possibly `size`), open `##class(SYS.Database).%OpenId(directory)`, set those properties, `%Save()`. Configuration fields (`globalJournalState`, `readOnly`, `resource`, `mountRequired`, `mountAtStartup`) continue to route through `Config.Databases.Modify()`. Per Rule #3 (Config vs SYS class separation).
+- **AC 12.4.2** — `iris_docdb_property action:"create"` with `type:"%Integer"` actually stores the property with `%Integer` type (verifiable via `iris_docdb_property` list or round-trip via `$System.Status.GetErrorText` on a type-mismatch insert). Fix in [packages/iris-data-mcp/src/tools/docdb.ts](../../packages/iris-data-mcp/src/tools/docdb.ts): inspect the Atelier DocDB `POST /api/docdb/v1/{namespace}/prop/{database}/{property}` body shape. If the type field is in the wrong position (path vs body vs query), correct it. Research via `iris_doc_list %DocDB%` + `iris_doc_get %API.DocDB.cls`.
+- **AC 12.4.3** — `iris_docdb_find` filter is applied. Before: `{age:{$gt:26}}` returns all documents. After: only documents with `age > 26` are returned. Translate the MongoDB-style filter syntax to IRIS DocDB's `%Find()` / `%ExecuteAll()` SQL-WHERE equivalent. Supported operators: `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte`. Combine multiple fields with AND.
+- **AC 12.4.4** — `iris_database_manage action:"delete"` description updated with a note: "Deletion removes the database from the IRIS configuration but does not cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against it. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure." Fix in [packages/iris-admin-mcp/src/tools/database.ts](../../packages/iris-admin-mcp/src/tools/database.ts) Zod description for the `delete` action. FEAT-5.
+- **AC 12.4.5** — **`BOOTSTRAP_VERSION` bump at end of Story 12.4**. Run `pnpm run gen:bootstrap` and commit the updated `packages/shared/src/bootstrap-classes.ts`. The new hash covers all ObjectScript edits from Stories 12.1–12.4 (Security.cls, Interop.cls [×2 stories], Config.cls).
+- **AC 12.4.6** — **Live verification pass** (after BOOTSTRAP_VERSION applied to HSCUSTOM):
+  - **BUG-1**: `iris_user_password action:"change"` on TESTMCP_PwdUser (create → change → validate-with-new-password → delete) succeeds end-to-end.
+  - **BUG-2**: `iris_production_manage action:"create"` on TESTMCP.Prod succeeds; shows up in `iris_production_summary`; delete cleans up.
+  - **BUG-3**: `iris_production_control action:"stop"` with no production running returns a clean JSON response; `restart` after creating+starting a production works.
+  - **BUG-4**: `iris_database_manage action:"modify"` with `maxSize:20` on TESTMCPDB (recreate the test DB) succeeds; `iris_database_list` shows updated value.
+  - **BUG-5**: `iris_docdb_property create {type:"%Integer"}` returns `%Integer` in the list.
+  - **BUG-6**: DocDB find with `$gt` returns filtered set, not full set.
+  - **Epic 11 regression check**: re-run the 16 Epic 11 verification matrix items — none broken by Epic 12 changes.
+- **AC 12.4.7** — Unit tests:
+  - `packages/iris-admin-mcp/src/__tests__/database.test.ts` — `it("modify with maxSize routes to SYS.Database path")` (mock), `it("modify with readOnly routes to Config.Databases path")` (mock).
+  - `packages/iris-data-mcp/src/__tests__/docdb.test.ts` — `it("property create forwards type parameter")`, `it("find translates $gt to WHERE clause")` (mock), `it("find combines multiple fields with AND")`.
+- **AC 12.4.8** — CHANGELOG.md `### Fixed`:
+  - "**`iris_database_manage action:\"modify\"` now accepts `maxSize` and `expansionSize`** ([src/ExecuteMCPv2/REST/Config.cls](src/ExecuteMCPv2/REST/Config.cls)) — runtime fields now route through `SYS.Database`; configuration fields continue to route through `Config.Databases`. BUG-4."
+  - "**`iris_docdb_property create` now preserves the requested type** ([packages/iris-data-mcp/src/tools/docdb.ts](packages/iris-data-mcp/src/tools/docdb.ts)) — `%Integer`, `%Date`, etc. no longer silently coerced to `%Library.String`. BUG-5."
+  - "**`iris_docdb_find` filter is now applied** ([packages/iris-data-mcp/src/tools/docdb.ts](packages/iris-data-mcp/src/tools/docdb.ts)) — `$eq`/`$ne`/`$lt`/`$lte`/`$gt`/`$gte` operators translate to DocDB WHERE clauses. Multiple fields combine with AND. BUG-6."
+  - `### Changed`: "**`iris_database_manage action:\"delete\"` description** clarifies post-delete background-alert behavior. FEAT-5."
+- **AC 12.4.9** — Build + tests + lint green. Target: +5 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Fix database modify Config/SYS split (AC 12.4.1).
+- [ ] **Task 2**: Fix DocDB property type forwarding (AC 12.4.2). Research Atelier DocDB endpoint first.
+- [ ] **Task 3**: Fix DocDB find filter translation (AC 12.4.3). Define the operator table, implement the translator.
+- [ ] **Task 4**: Update database delete description (AC 12.4.4).
+- [ ] **Task 5**: Run `pnpm run gen:bootstrap`; commit updated `bootstrap-classes.ts` (AC 12.4.5).
+- [ ] **Task 6**: Live verification pass (AC 12.4.6) — the big one.
+- [ ] **Task 7**: Unit tests (AC 12.4.7).
+- [ ] **Task 8**: CHANGELOG + README updates (AC 12.4.8).
+- [ ] **Task 9**: Build + validate (AC 12.4.9).
+
+**Implementation Notes**:
+- Story 12.4 is the bootstrap gatekeeper for Epic 12. Order stories 12.1, 12.2, 12.3 before 12.4. Story 12.5 (TS-only) and 12.6 (new handler) come AFTER 12.4's bootstrap bump — 12.6 may require a second bump if the alerts handler lands in a new method; flag during implementation.
+- The Config vs SYS split is a candidate new rule after Epic 12 retro — Rule candidate: "when a handler's parameter names match SYS.X runtime properties, route them through SYS.X, not Config.X."
+
+**Out of scope**:
+- Supporting `$or`, `$and`, `$not`, `$in` DocDB operators — scope to the 6 comparison operators for this story. Add nested logical operators in a future enhancement.
+- Fixing DocDB `index` action (AC 12.4.2 sibling bug from the test pass) — leave to 12.5's feature-gap pass or a separate story.
+
+### Story 12.5: TypeScript tool surface cleanup
+
+**As an** MCP client caller,
+**I want** tools to expose the parameters they actually support, reject nonsense defaults, and return consistent filter semantics across servers,
+**so that** the suite feels like a single coherent API.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) FEAT-1, FEAT-2, FEAT-3, FEAT-6, FEAT-8, FEAT-9, BUG-7, BUG-8.
+
+**Acceptance Criteria**:
+
+- **AC 12.5.1 (FEAT-1)** — `iris_oauth_manage action:"create" entity:"server"` accepts `customizationNamespace` and `customizationRoles` parameters; `supportedScopes` accepts a space- or comma-separated string and gets split into a JSON array on the wire. Before: create server fails with "required property" errors. After: a minimum-viable OAuth server definition is created successfully. Fix in [packages/iris-admin-mcp/src/tools/oauth.ts](../../packages/iris-admin-mcp/src/tools/oauth.ts).
+- **AC 12.5.2 (FEAT-2 — BREAKING, pre-release)** — `iris_rest_manage action:"list"` `scope` values renamed: `"spec-first"` | `"legacy"` | `"all"` (new values). Current values removed. Semantics:
+  - `"spec-first"` (default): same as before — only OpenAPI-spec-first apps (via `%REST.API.GetAllRESTApps`).
+  - `"legacy"`: only hand-written `%CSP.REST` dispatch classes (via the ExecuteMCPv2 webapp endpoint).
+  - `"all"`: union of both — `"spec-first"` items plus `"legacy"` items.
+  - Tool description explicitly documents the semantics. Fix in [packages/iris-data-mcp/src/tools/rest.ts](../../packages/iris-data-mcp/src/tools/rest.ts).
+- **AC 12.5.3 (FEAT-3)** — `iris_transform_list` and `iris_rule_list` gain `prefix` (client-side dotted-prefix match like `iris_doc_list`) and `filter` (plain-substring match, applied server-side if the IRIS query supports it, else client-side). Mirror the field semantics of `iris_doc_list`. Also add cursor-based pagination (`cursor` + `nextCursor`) if the underlying class count is large — HealthShare installs can have 622+ transforms. Fix in [packages/iris-interop-mcp/src/tools/transforms.ts](../../packages/iris-interop-mcp/src/tools/transforms.ts) and [packages/iris-interop-mcp/src/tools/rules.ts](../../packages/iris-interop-mcp/src/tools/rules.ts).
+- **AC 12.5.4 (FEAT-6)** — `iris_rest_manage action:"get"` gains a `fullSpec: boolean = false` parameter. When `fullSpec:false` (default): returns `{name, dispatchClass, namespace, swaggerSpec: {basePath, pathCount, definitionCount, description, title, version}}`. When `fullSpec:true`: returns the full swagger blob as today. Tool description explains the choice. Fix in [packages/iris-data-mcp/src/tools/rest.ts](../../packages/iris-data-mcp/src/tools/rest.ts).
+- **AC 12.5.5 (FEAT-8)** — `iris_global_list` `filter` is case-insensitive by default, matching `iris_doc_list` semantics. If the current server-side filter uses ObjectScript's `[` contains operator, wrap both sides in `$ZCONVERT("L")`. Add an optional `caseSensitive:boolean = false` parameter for callers who want the old behavior. Fix in [packages/iris-dev-mcp/src/tools/globals.ts](../../packages/iris-dev-mcp/src/tools/globals.ts) AND [src/ExecuteMCPv2/REST/Global.cls](../../src/ExecuteMCPv2/REST/Global.cls). **This touches ObjectScript — if the change lands in 12.5 rather than 12.4, requires a second bootstrap bump; flag during implementation.** Alternative: implement filter entirely client-side (receive the full list, filter in TS) — loses server-side efficiency but avoids the bump.
+- **AC 12.5.6 (FEAT-9 / BUG-8)** — Audit the shared HTTP client's response-body decode path for UTF-8 vs Latin-1. The specific failure: `iris_execute_command` error path renders `خطأ` as `???`, while sibling tools render it correctly. The fix: decode bytes as UTF-8 where they aren't already, OR identify the ObjectScript-side I/O redirect charset quirk and fix it there. Add a unit test that confirms non-ASCII bytes round-trip through a mocked error response.
+  - If BUG-7 (`iris_metrics_alerts` mojibake) traces to the same TS-side decode bug, this AC also covers it. If it traces to ObjectScript console-log reader, spin out a follow-up.
+- **AC 12.5.7** — Unit tests added:
+  - `packages/iris-admin-mcp/src/__tests__/oauth.test.ts` — FEAT-1 (supportedScopes split, customization params).
+  - `packages/iris-data-mcp/src/__tests__/rest.test.ts` — FEAT-2 (three scope values), FEAT-6 (summary vs fullSpec).
+  - `packages/iris-interop-mcp/src/__tests__/transforms.test.ts` + `rules.test.ts` — FEAT-3 (prefix/filter/pagination).
+  - `packages/iris-dev-mcp/src/__tests__/globals.test.ts` — FEAT-8 (case-insensitive filter).
+  - Charset decode test — location depends on where the audit fix lands.
+- **AC 12.5.8** — CHANGELOG.md:
+  - `### Added`: FEAT-1, FEAT-3, FEAT-6 bullets.
+  - `### Changed` (BREAKING, pre-release): FEAT-2 scope-value rename.
+  - `### Fixed`: FEAT-8, FEAT-9/BUG-8.
+- **AC 12.5.9** — Build + tests + lint green. Target: +8 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: FEAT-1 OAuth server create surface (Zod schema + wire translation).
+- [ ] **Task 2**: FEAT-2 `rest_manage scope` rename. Breaking change — update all READMEs and CHANGELOG to flag prominently.
+- [ ] **Task 3**: FEAT-3 `transform_list` + `rule_list` prefix/filter/pagination.
+- [ ] **Task 4**: FEAT-6 `rest_manage get fullSpec` mode.
+- [ ] **Task 5**: FEAT-8 global-list case-insensitive filter. Decide server-side vs client-side; if server-side, coordinate with Story 12.4 bootstrap bump.
+- [ ] **Task 6**: FEAT-9/BUG-8 UTF-8 decode audit.
+- [ ] **Task 7**: Unit tests (AC 12.5.7).
+- [ ] **Task 8**: CHANGELOG + README updates per feature.
+- [ ] **Task 9**: Build + validate.
+
+**Implementation Notes**:
+- Story 12.5 is TypeScript-only *except* for the FEAT-8 case-insensitive filter question. Prefer the client-side implementation to keep Story 12.5 bootstrap-free. If server-side performance is a concern (large namespaces), bump BOOTSTRAP_VERSION a second time — both are acceptable.
+- FEAT-2's breaking change is the second pre-release SSL-class break (first was Epic 11). Make sure the combined migration guide covers both.
+
+**Out of scope**:
+- Any tool not in the bullet list above.
+- Additional DocDB operators beyond AC 12.4.3's six comparisons.
+
+### Story 12.6: `iris_alerts_manage` new tool
+
+**As an** operator watching IRIS alerts via `iris_metrics_alerts`,
+**I want** a counterpart tool that clears or acknowledges alerts,
+**so that** I can respond to and dismiss alerts without resorting to the Management Portal or terminal commands.
+
+**Trigger**: 2026-04-22 comprehensive test pass. See [sprint-change-proposal-2026-04-22.md](sprint-change-proposal-2026-04-22.md) FEAT-7.
+
+**Acceptance Criteria**:
+
+- **AC 12.6.1** — New tool `iris_alerts_manage` in `packages/iris-ops-mcp/src/tools/alerts.ts` (or equivalent), registered in the server's tools list. Actions: `clear` (clear a specific alert by index), `clearAll` (clear all active alerts), `acknowledge` (mark alert as acknowledged without removing).
+- **AC 12.6.2** — Handler method `AlertsManage()` in `src/ExecuteMCPv2/REST/Monitor.cls` (extending the existing alerts-related code in that class — or a new `Alerts.cls` if cleaner). Research first: `^IRIS.Msg("Errors")` global shape + `$SYSTEM.Event.Clear()` API. Determine whether clear means removing from the console log or from an active-alerts list.
+- **AC 12.6.3** — Tool annotations: `readOnlyHint:false`, `destructiveHint:true` (clearing alerts is destructive), `idempotentHint:true`, `openWorldHint:false`.
+- **AC 12.6.4** — PRD addition: a new FR in the Operations & Monitoring section (`prd.md`) capturing the alerts-manage capability. Number depends on current PRD state — use the next available FR number.
+- **AC 12.6.5** — Unit tests:
+  - `packages/iris-ops-mcp/src/__tests__/alerts.test.ts` — `it("clear requires index parameter")`, `it("clearAll clears all active alerts")`, `it("acknowledge returns acknowledgedAt timestamp")`.
+- **AC 12.6.6** — **Live verification**: trigger an alert via `iris_execute_command` calling `$SYSTEM.Event.Alert("TESTMCP alert")` in a probe class, verify via `iris_metrics_alerts`, call `iris_alerts_manage action:"clear" index:<n>`, verify via `iris_metrics_alerts` that the alert is gone. Clean up probe class. If Story 12.6 adds a new handler method, run `gen:bootstrap` and verify the second BOOTSTRAP_VERSION bump auto-upgrades the class cleanly.
+- **AC 12.6.7** — Documentation:
+  - `tool_support.md`: add `iris_alerts_manage` row.
+  - `packages/iris-ops-mcp/README.md`: new tool entry.
+  - `prd.md`: new FR line.
+  - `CHANGELOG.md` `### Added`: "**New tool `iris_alerts_manage`** ([packages/iris-ops-mcp/src/tools/alerts.ts](packages/iris-ops-mcp/src/tools/alerts.ts)) — clear, clearAll, or acknowledge active IRIS alerts. Counterpart to `iris_metrics_alerts`. FEAT-7."
+- **AC 12.6.8** — Build + tests + lint green. Target: +3 new TS tests.
+
+**Tasks / Subtasks**:
+
+- [ ] **Task 1**: Research IRIS alert-clearing API. Read `irislib/%SYS/%SYSTEM.Event.cls`; use Perplexity or live-probe as needed.
+- [ ] **Task 2**: Design handler method signature. Clear by index? By message match? Both? Decide and document.
+- [ ] **Task 3**: Implement ObjectScript handler in `Monitor.cls` or new `Alerts.cls`.
+- [ ] **Task 4**: Implement TS tool with Zod schema.
+- [ ] **Task 5**: Unit tests.
+- [ ] **Task 6**: Live verification (with BOOTSTRAP bump if new handler method).
+- [ ] **Task 7**: PRD / tool_support.md / README / CHANGELOG updates.
+- [ ] **Task 8**: Build + validate.
+
+**Implementation Notes**:
+- Story 12.6 is the only Epic 12 story that adds a new tool. If the IRIS API for clearing alerts is tricky or non-idempotent, consider scope-down to just `acknowledge` (which is additive/safe) and defer `clear`/`clearAll` to a follow-up.
+- This story's bootstrap interaction is ambiguous until implementation: if it adds a new ObjectScript method, a second bootstrap bump is needed (12.4 did one; 12.6 may need another). Either accept the double-bump or squeeze 12.6's handler changes into 12.4's ObjectScript commit.
+
+**Out of scope**:
+- Alert filtering/query capabilities beyond the current `iris_metrics_alerts` surface — this story is just the CRUD counterpart.
+- Audit-log integration for alert-clear actions (future work).
