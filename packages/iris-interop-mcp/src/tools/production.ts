@@ -32,6 +32,7 @@ export const productionManageTool: ToolDefinition = {
       .describe("Action to perform: 'create' a new production or 'delete' an existing one"),
     name: z
       .string()
+      .min(1, "Production name must not be empty")
       .describe("Fully qualified production class name (e.g., 'MyApp.Production')"),
     namespace: z
       .string()

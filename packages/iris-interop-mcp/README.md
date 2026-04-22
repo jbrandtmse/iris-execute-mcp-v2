@@ -167,6 +167,8 @@ All servers use the same environment variables:
 <details>
 <summary><strong>iris_production_manage</strong> -- Create a production</summary>
 
+`create` produces an **empty production** (no config items). The new production class extends `Ens.Production` with a minimal `XData ProductionDefinition` block. To add services, processes, or operations use `iris_production_item` afterward, or edit the class directly.
+
 **Input:**
 ```json
 {
@@ -179,9 +181,8 @@ All servers use the same environment variables:
 **Output:**
 ```json
 {
-  "action": "create",
-  "name": "MyApp.Production",
-  "status": "created"
+  "action": "created",
+  "name": "MyApp.Production"
 }
 ```
 </details>

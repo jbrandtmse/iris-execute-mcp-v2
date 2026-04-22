@@ -118,6 +118,44 @@ describe("iris_production_manage", () => {
   it("should have scope NS", () => {
     expect(productionManageTool.scope).toBe("NS");
   });
+
+  // AC 12.3.6 — create action returns created envelope with name
+  it("create action returns created envelope with name", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", name: "TESTMCP.Prod" }),
+    );
+
+    const result = await productionManageTool.handler(
+      { action: "create", name: "TESTMCP.Prod", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/interop/production",
+      expect.objectContaining({
+        action: "create",
+        name: "TESTMCP.Prod",
+        namespace: "HSCUSTOM",
+      }),
+    );
+
+    const structured = result.structuredContent as { action: string; name: string };
+    expect(structured.action).toBe("created");
+    expect(structured.name).toBe("TESTMCP.Prod");
+    expect(result.isError).toBeUndefined();
+  });
+
+  // AC 12.3.6 — create action rejects empty name at Zod layer
+  it("create action rejects empty name at Zod layer", () => {
+    const result = productionManageTool.inputSchema.safeParse({
+      action: "create",
+      name: "",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain("empty");
+    }
+  });
 });
 
 // ── iris_production_control ────────────────────────────────────

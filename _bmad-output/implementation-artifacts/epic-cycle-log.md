@@ -995,3 +995,17 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16`. Story 12.4 bumps.
 - **Interop tests**: 161 → 163 (+2).
 - **Commit**: pending (will land as `feat(story-12.2)`).
+
+## Story 12.3: Production create (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/REST/Interop.cls` (create branch rewritten, delete branch fixed, ProductionSummary fallback added), `packages/iris-interop-mcp/src/tools/production.ts` (name field `.min(1)`), `packages/iris-interop-mcp/src/__tests__/production.test.ts` (+2 tests), `packages/iris-interop-mcp/README.md` (updated example), `CHANGELOG.md` (BUG-2 entry).
+- **Key design decisions**:
+  - **Research-first approach paid off**: the story spec's Context section specified the exact 4-step `%Dictionary.ClassDefinition` + `XData ProductionDefinition` + `%Save()` + `$System.OBJ.Compile("k-d")` sequence, verified against `irislib/EnsPortal/Dialog/ProductionWizard.cls:181-189` pre-story. Dev applied it cleanly.
+  - **Story Gotcha #4 was wrong**: the spec claimed `Ens.Config.Production.Delete()` exists; it does not. Dev correctly discovered this and fixed the delete branch. Code review further simplified from two-step (`Ens.Config.Production.%DeleteId()` + `%Dictionary.ClassDefinition.%DeleteId()`) to single-step (class-definition-only delete, projection handles cleanup).
+  - **ProductionSummary fallback**: newly-created, never-started productions are invisible to `Ens.Director.GetProductionStatus`. Dev added an `^Ens.Config.ProductionD` global enumerator as a fallback so AC 12.3.3 passes. State hardcoded to 2 (Stopped) for these — acceptable sentinel.
+- **Code review**: 0 HIGH, 1 MEDIUM auto-fixed (delete order simplification), 3 LOW deferred (summary stateCode 2 hardcoded; redundant create test; delete running-check only guards state=1).
+- **Live verification**: full create → doc_get → summary → delete → 404 roundtrip passed twice on HSCUSTOM (once pre-CR, once post-CR-fix redeploy). TESTMCP.Prod and TESTMCP.ProdCRfix both cleaned up.
+- **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16`. Story 12.4 bumps.
+- **Interop tests**: 163 → 165 (+2).
+- **Rule candidate for Epic 12 retro**: "Before trusting a story spec's 'method exists / don't touch X' claims, the dev should verify via live probe — specs can be wrong about IRIS API shape."
+- **Commit**: pending (will land as `feat(story-12.3)`).

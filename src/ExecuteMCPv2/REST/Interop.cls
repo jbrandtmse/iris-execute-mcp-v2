@@ -63,9 +63,30 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(Ens.Config.Production).Create(tName)
+            ; Create production class via %Dictionary.ClassDefinition + XData + compile
+            ; (same approach as EnsPortal.Dialog.ProductionWizard lines 181-189)
+            Set tCreateSC = $$$OK
+            Try {
+                Set tClsDef = ##class(%Dictionary.ClassDefinition).%New()
+                Set tClsDef.Name = tName
+                Set tClsDef.Super = "Ens.Production"
+                Set tClsDef.ClassVersion = 25
+
+                Set tXData = ##class(%Dictionary.XDataDefinition).%New()
+                Set tXData.Name = "ProductionDefinition"
+                Do tXData.Data.WriteLine("<Production Name="""_tName_"""/>")
+                Do tClsDef.XDatas.Insert(tXData)
+
+                Set tCreateSC = tClsDef.%Save()
+                If $$$ISOK(tCreateSC) {
+                    Set tCreateSC = $System.OBJ.Compile(tName, "k-d")
+                }
+            }
+            Catch exCreate {
+                Set tCreateSC = exCreate.AsStatus()
+            }
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tCreateSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCreateSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "created", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
@@ -90,9 +111,14 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(Ens.Config.Production).Delete(tName)
+            ; Delete the class definition first — Ens.Projection.Production.RemoveProjection()
+            ; fires automatically and handles the Ens.Config.Production record cleanup.
+            ; Deleting in the reverse order (config first, then class) is fragile: if the
+            ; Ens.Config.Production record is absent (orphaned class, external creation), the
+            ; first %DeleteId fails and the class definition is never removed.
+            Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
@@ -877,8 +903,8 @@ ClassMethod ProductionSummary() As %Status
             Try {
                 Set $NAMESPACE = tNS
                 Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+                Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                 If $$$ISOK(tSC2) && (tProdName '= "") {
-                    Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                     Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
                     Set tEntry = {}
                     Do tEntry.%Set("namespace", tNS)
@@ -886,6 +912,20 @@ ClassMethod ProductionSummary() As %Status
                     Do tEntry.%Set("state", tStateStr)
                     Do tEntry.%Set("stateCode", tState, "number")
                     Do tResult.%Push(tEntry)
+                } ElseIf $$$ISOK(tSC2) && (tProdName = "") {
+                    ; No active/recent production — fall back to Ens.Config.ProductionD
+                    ; to include registered-but-never-started productions
+                    Set tRegKey = ""
+                    For {
+                        Set tRegKey = $Order(^Ens.Config.ProductionD(tRegKey))
+                        Quit:tRegKey=""
+                        Set tEntry = {}
+                        Do tEntry.%Set("namespace", tNS)
+                        Do tEntry.%Set("name", tRegKey)
+                        Do tEntry.%Set("state", "Stopped")
+                        Do tEntry.%Set("stateCode", 2, "number")
+                        Do tResult.%Push(tEntry)
+                    }
                 }
             }
             Catch innerEx {
