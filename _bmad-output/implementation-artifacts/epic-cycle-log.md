@@ -870,3 +870,25 @@ Single `BOOTSTRAP_VERSION` bump at end of Story 11.3 covers all Epic 11 ObjectSc
   - LOW deferred #3: `Use tInitIO` without mnemonic clause leaves the mnemonic routine bound on the device. Inert because `ReDirectIO(0)` disables the redirect flag; latent concern only.
   - Dismissed: 2 items (non-numeric-code-after-# theoretical; no OS unit test for Execute covered by live verification).
 - **Final verification:** `pnpm turbo run test` → 12/12 packages green, +2 new tests (`iris-dev-mcp` 273 → 274, `iris-admin-mcp` 203 → 204). `pnpm turbo run build` → clean. Lint clean on touched files. No `^ClineDebug` in committed code. `^ClineDebug` killed on IRIS post-investigation.
+
+### Story 11.2: Security handler completeness (6 bugs + pre-release SSL break)
+- **Status:** done
+- **Commit:** fabddc0
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Security.cls` — 6 bug fixes (RoleList, UserList, UserGet, SSLList, SSLManage, PermissionCheck, UserPassword change branch)
+  - `packages/iris-admin-mcp/src/__tests__/role.test.ts` — +1 test (resources populated)
+  - `packages/iris-admin-mcp/src/__tests__/user.test.ts` — +3 tests (list enabled/fullName/comment; single-user name; password-change error propagation)
+  - `packages/iris-admin-mcp/src/__tests__/ssl.test.ts` — +1 test (tlsMinVersion/tlsMaxVersion returned, protocols absent)
+  - `packages/iris-admin-mcp/src/__tests__/permission.test.ts` — new file, +1 test (_SYSTEM + %All granted with reason)
+  - `packages/iris-admin-mcp/README.md` — 5 response-shape sections updated + ⚠️ Breaking (pre-release) callout on SSL
+  - `tool_support.md` — new "Fields returned — Security list/read tools" subsection
+  - `CHANGELOG.md` — 5 `### Fixed` + 1 `### Changed` (BREAKING, pre-release) bullets appended to existing 2026-04-21 block
+- **Key design decisions:**
+  - **Bug #3 fix**: switch from `Security.Roles:List` (ROWSPEC `Name, Description, GrantedRoles, CanBeEdited, EscalationOnly` — no Resources) to `Security.Roles:ListAll` (ROWSPEC `Name, Description, GrantedRoles, Resources, EscalationOnly`). Existing handler line that calls `tRS.Get("Resources")` just starts returning real data. No row-extraction code changes needed.
+  - **Bug #4 fix**: `Security.Users:List` ROWSPEC doesn't include FullName / Comment / ExpirationDate / ChangePassword / Namespace. Restructured the list loop to read only `Name` from the query, then call `Security.Users.Get(name, .tProps)` per row to backfill the missing fields. Fallback branch preserves `Enabled` and `Roles` from the list ROWSPEC if Get fails. Per-row perf tradeoff documented in story — typical user count is <20.
+  - **Bug #10 root cause confirmed empirically**: `Security.Roles.Get("%All", .tProps)` returns empty `Resources` because `%All` is special-cased by the IRIS security subsystem (verified via direct IRIS probe after Perplexity returned irrelevant results for the API question). Fix: short-circuit added BEFORE the resource-string walk, using **exact `$Piece` equality loop** (`$Piece(tUserRoles, ",", I) = "%All"`) — NOT substring match — to avoid false positives on hypothetical names like `%AllCustom`. Emits new `reason: "target holds %All super-role"` field only on short-circuit path.
+  - **Bug #6 pre-release BREAK committed cleanly** — no compatibility shim for `protocols`. The old field was wired to the `[Deprecated]` property and never took effect, so removing it silently drops an already-broken input. Server-side is live; Zod schema break paired in Story 11.4 within the same epic.
+  - **Bug #12 fix** is a 4-line replacement: remove the generic `$$$ERROR($$$GeneralError, "Failed to change password for user 'X'")` wrap and propagate `SanitizeError(tSC)` directly. Story 11.1's double-wrap fix in `Utils.SanitizeError` makes the propagation produce clean single-prefixed output (verified live: `change` to non-existent user now returns `"User NoSuchUser does not exist"` with a single `#5001` prefix instead of the previous two).
+  - **Live verification at both dev AND lead layers**: dev exercised all 6 bugs against HSCUSTOM during implementation; lead independently re-ran 5 of them against USER + HSCUSTOM via the MCP tools (Bug #6 skipped at lead layer because TS Zod side lands in Story 11.4; server-side already dev-verified).
+- **Code review (CLEAN — 0 HIGH, 0 MEDIUM, 0 deferred):** 9 raw findings from three-layer review (Blind Hunter, Edge Case Hunter, Acceptance Auditor) — all dismissed as either documented intent, verified-safe edge cases, or acceptable tradeoffs. Notable: the `$Piece` exact-equality loop for `%All` detection was specifically validated against the false-positive `%AllCustom` scenario. `BOOTSTRAP_VERSION` unchanged at `2689f7f657e4` confirmed via git diff on `packages/shared/src/bootstrap-classes.ts`. All 13 ACs (AC 11.2.1 through AC 11.2.13) pass.
+- **Final verification:** `pnpm turbo run build` → clean across 6 packages. `pnpm turbo run test` → admin suite 204 → 210 (+6 tests), full suite green. `pnpm turbo run lint` → no new warnings on touched files. No `^ClineDebug` in committed code. `^ClineDebug*` debug globals killed on IRIS post-investigation.
