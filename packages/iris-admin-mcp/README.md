@@ -206,26 +206,43 @@ All servers use the same environment variables:
 </details>
 
 <details>
-<summary><strong>iris_database_manage</strong> -- Create a database</summary>
+<summary><strong>iris_database_manage</strong> -- Create, modify, or delete a database</summary>
 
-**Input:**
+**Input (create):**
 ```json
 {
   "action": "create",
   "name": "MYAPP-DATA",
   "directory": "C:\\InterSystems\\IRIS\\mgr\\myapp-data",
-  "size": 100
+  "size": 100,
+  "maxSize": 1000,
+  "expansionSize": 50
+}
+```
+
+**Input (modify):**
+```json
+{
+  "action": "modify",
+  "name": "MYAPP-DATA",
+  "maxSize": 2000,
+  "expansionSize": 100
 }
 ```
 
 **Output:**
 ```json
 {
-  "action": "create",
-  "name": "MYAPP-DATA",
-  "status": "created"
+  "action": "created",
+  "name": "MYAPP-DATA"
 }
 ```
+
+**Config/SYS routing:** Database properties split across two IRIS classes.
+- **Configuration props** (route to `Config.Databases`): `directory`, `resource`, `mountRequired`, `mountAtStartup`, `readOnly`, `globalJournalState`.
+- **Runtime props** (route to `SYS.Database`): `size`, `maxSize`, `expansionSize`. These control the physical database file and are not accessible via `Config.Databases`. `create` uses `SYS.Database.CreateDatabase()` to create the physical file, then `Config.Databases.Create()` for CPF registration. `modify` routes runtime props through `SYS.Database.%OpenId(directory).%Save()`.
+
+**Delete caveat:** `action:"delete"` removes the database from the IRIS configuration (CPF) but does NOT cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against the deleted directory. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure.
 </details>
 
 <details>

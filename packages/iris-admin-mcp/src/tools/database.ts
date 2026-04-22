@@ -22,7 +22,11 @@ export const databaseManageTool: ToolDefinition = {
   title: "Manage Database",
   description:
     "Create, modify, or delete an IRIS database. For 'create', directory is required. " +
-    "For 'modify', only provided fields are updated. For 'delete', only the name is needed.",
+    "For 'modify', only provided fields are updated. For 'delete', only the name is needed. " +
+    "Note: Deletion removes the database from the IRIS configuration but does NOT cancel " +
+    "pending background work (e.g., extent-index rebuilds) that may have been scheduled " +
+    "against the deleted directory. The IRIS console may log alerts for such operations " +
+    "post-delete; these are informational and do not indicate tool failure.",
   inputSchema: z.object({
     action: z
       .enum(["create", "modify", "delete"])

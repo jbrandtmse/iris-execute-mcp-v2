@@ -1009,3 +1009,24 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **Interop tests**: 163 → 165 (+2).
 - **Rule candidate for Epic 12 retro**: "Before trusting a story spec's 'method exists / don't touch X' claims, the dev should verify via live probe — specs can be wrong about IRIS API shape."
 - **Commit**: pending (will land as `feat(story-12.3)`).
+
+## Story 12.4: Database modify Config/SYS split + DocDB + BOOTSTRAP bump + live verification (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/REST/Config.cls` (BuildDatabaseConfigProps + BuildDatabaseRuntimeProps + ApplyRuntimeProps helpers, create/modify branches split), `packages/iris-data-mcp/src/tools/docdb.ts` (BUG-5 type URL-encoding fix + BUG-6 buildDocDbRestriction translator), `packages/iris-admin-mcp/src/tools/database.ts` (FEAT-5 description), `packages/iris-admin-mcp/src/__tests__/database.test.ts` (+tests), `packages/iris-data-mcp/src/__tests__/docdb.test.ts` (+tests), admin & data READMEs, `CHANGELOG.md`, `packages/shared/src/bootstrap-classes.ts` (auto-regenerated), story file.
+- **Key design decisions**:
+  - **BUG-4 Config/SYS split**: runtime props (`Size`, `MaxSize`, `ExpansionSize`) route through `SYS.Database.%OpenId(dir).%Save()`; config props through `Config.Databases`. Create branch uses `SYS.Database.CreateDatabase()` for physical DB creation + `Config.Databases.Create()` for CPF registration.
+  - **BUG-5 URL encoding fix**: `encodeURIComponent("%Integer")` produces `%25Integer` which IRIS CSP interprets as class `%Library.25Integer` (class-lookup failure). Replaced with split/join encoding that preserves the `%` prefix.
+  - **BUG-6 filter translator**: MongoDB-style `{field:{$op:val}}` → DocDB `{restriction: [[field, value, operator]]}` shape verified against `%Api.DocDB.v1.cls:httpPostFind`.
+  - **BOOTSTRAP_VERSION bump**: `3fb0590b5d16` → `b0aa936ac17f`. Auto-generated via `gen:bootstrap`. Covers all Epic 12 ObjectScript edits (Security.cls from 12.1, Interop.cls from 12.2/12.3, Config.cls from 12.4).
+- **Code review**: 0 HIGH, 0 MEDIUM, 2 LOW deferred (buildDocDbRestriction JSDoc console.warn discrepancy; Config.cls create no-rollback on partial failure). 1 dismissed.
+- **Live verification** (post-server-reload):
+  - **BUG-1** ✓ — Password change + validate policy surface confirmed.
+  - **BUG-2** ✓ — Production create + delete + summary roundtrip confirmed.
+  - **BUG-3** ✓ — Production control all 5 actions confirmed.
+  - **BUG-4** ✓ — Database modify with maxSize/expansionSize confirmed on TESTMCP_DB.
+  - **BUG-5** ✓ — `iris_docdb_property create type:"%Integer"` returns `Type: "%Library.Integer"` (was `%Library.String`).
+  - **BUG-6** ⚠ PARTIAL — Filter translation correct (empty `{}` returns all; non-existent field returns clean IRIS error `ERROR #25541`; declared-property filter reaches server). BUT queries return empty: SQL probe shows the typed `age` column is `0` even though `%Doc` JSON has the value. Upstream DocDB property-extraction/indexing issue — NOT a filter-translator bug. Deferred to Epic 13 per detailed deferred-work.md entry.
+  - **Epic 11 regression check** ✓ — all 16 prior bugs still fixed.
+- **`BOOTSTRAP_VERSION`**: bumped `3fb0590b5d16` → `b0aa936ac17f`.
+- **Tests**: 1117 total pass (admin 216, data 115, dev 276, shared 193, interop 165, ops 152, + ObjectScript UtilsTest 19).
+- **Commit**: pending (will land as `feat(story-12.4)`).

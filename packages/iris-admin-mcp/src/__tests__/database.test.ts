@@ -270,6 +270,64 @@ describe("iris_database_list", () => {
     expect(shape).toHaveProperty("cursor");
   });
 
+  it("modify with maxSize routes runtime props to SYS.Database path (BUG-4 regression guard)", async () => {
+    // AC 12.4.7: verify the TypeScript layer forwards maxSize/expansionSize to the server.
+    // The server-side fix (Config/SYS split in Config.cls) routes them to SYS.Database;
+    // this test guards the tool-layer wire contract so that those values are sent at all.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "modified", name: "TESTDB" }),
+    );
+
+    await databaseManageTool.handler(
+      { action: "modify", name: "TESTDB", maxSize: 20, expansionSize: 5 },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/config/database",
+      expect.objectContaining({
+        action: "modify",
+        name: "TESTDB",
+        maxSize: 20,
+        expansionSize: 5,
+      }),
+    );
+    // Ensure size-related fields are included (they travel to the server even for modify)
+    const [, body] = mockHttp.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body["maxSize"]).toBe(20);
+    expect(body["expansionSize"]).toBe(5);
+    // Config-only fields must NOT be present if not passed
+    expect(body["readOnly"]).toBeUndefined();
+  });
+
+  it("modify with readOnly routes config props to Config.Databases path (BUG-4 regression guard)", async () => {
+    // Config-only props (readOnly, mountAtStartup, resource, etc.) should pass
+    // through the modify body to the server unchanged.  The server routes them
+    // to Config.Databases.Modify(); the tool is responsible for forwarding them.
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "modified", name: "TESTDB" }),
+    );
+
+    await databaseManageTool.handler(
+      { action: "modify", name: "TESTDB", readOnly: true, resource: "%DB_TEST" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/config/database",
+      expect.objectContaining({
+        action: "modify",
+        name: "TESTDB",
+        readOnly: true,
+        resource: "%DB_TEST",
+      }),
+    );
+    // Sizing fields must NOT be present if not passed
+    const [, body] = mockHttp.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body["maxSize"]).toBeUndefined();
+    expect(body["expansionSize"]).toBeUndefined();
+  });
+
   it("iris_database_list returns real sizes", async () => {
     // Locks the response-shape contract for Bug #2: the server-side handler
     // now opens SYS.Database per row for Size/MaxSize/ExpansionSize instead

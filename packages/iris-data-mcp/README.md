@@ -245,6 +245,13 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
   "count": 1
 }
 ```
+
+**Filter translation:** MongoDB-style operators are translated to IRIS DocDB restriction predicates.
+Supported: `$eq` (=), `$ne` (!=), `$lt` (<), `$lte` (<=), `$gt` (>), `$gte` (>=).
+Multiple fields are combined with AND. Example: `{"age": {"$gt": 26}, "active": true}` translates to
+`[["age", 26, ">"], ["active", true, "="]]` and is sent as `{restriction: [...]}` in the request body.
+Properties must be defined on the database (via `iris_docdb_property`) and the property type must match the
+comparison operator for filtering to work correctly (e.g., use `%Integer` for numeric `$gt`/`$lt` comparisons).
 </details>
 
 <details>
@@ -255,19 +262,23 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 {
   "action": "create",
   "database": "Customers",
-  "property": "email",
-  "type": "%String"
+  "property": "age",
+  "type": "%Integer"
 }
 ```
 
 **Output:**
 ```json
 {
-  "property": "email",
-  "type": "%String",
-  "status": "created"
+  "Name": "age",
+  "Type": "%Library.Integer"
 }
 ```
+
+**Type encoding note:** The IRIS DocDB API reads `type` from a URL query parameter, not the JSON body.
+IRIS type names begin with `%` (e.g. `%Integer`, `%String`). The tool encodes these correctly using
+split/join encoding that preserves the `%` prefix as a literal `%` in the URL — standard `encodeURIComponent`
+would convert `%Integer` to `%25Integer`, causing IRIS to look for class `%Library.25Integer`.
 </details>
 
 <details>

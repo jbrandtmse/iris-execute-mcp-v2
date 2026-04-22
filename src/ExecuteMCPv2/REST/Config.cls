@@ -224,22 +224,65 @@ ClassMethod DatabaseList() As %Status
     Quit $$$OK
 }
 
-/// Build the tProps array for database create/modify from a JSON body.
-/// <p>Reads standard database properties from the JSON body and
-/// populates the <var>pProps</var> array suitable for passing to
+/// Build the configuration-layer props array for database create/modify.
+/// <p>Reads only <b>Config.Databases</b> properties from the JSON body and
+/// populates the <var>pConfigProps</var> array suitable for passing to
 /// <method>Config.Databases.Create</method> or
 /// <method>Config.Databases.Modify</method>.</p>
-ClassMethod BuildDatabaseProps(pBody As %DynamicObject, Output pProps) [ Private ]
+/// <p>Runtime sizing properties (<code>Size</code>, <code>MaxSize</code>,
+/// <code>ExpansionSize</code>) live on <class>SYS.Database</class>, not
+/// <class>Config.Databases</class>. Call
+/// <method>BuildDatabaseRuntimeProps</method> to collect those
+/// separately and route them via <code>SYS.Database.%OpenId().%Save()</code>.</p>
+ClassMethod BuildDatabaseConfigProps(pBody As %DynamicObject, Output pConfigProps) [ Private ]
 {
-    If pBody.%Get("directory") '= "" Set pProps("Directory") = pBody.%Get("directory")
-    If pBody.%Get("size") '= "" Set pProps("Size") = +pBody.%Get("size")
-    If pBody.%Get("maxSize") '= "" Set pProps("MaxSize") = +pBody.%Get("maxSize")
-    If pBody.%Get("expansionSize") '= "" Set pProps("ExpansionSize") = +pBody.%Get("expansionSize")
-    If pBody.%Get("globalJournalState") '= "" Set pProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
-    If pBody.%Get("mountRequired") '= "" Set pProps("MountRequired") = +pBody.%Get("mountRequired")
-    If pBody.%Get("mountAtStartup") '= "" Set pProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
-    If pBody.%Get("readOnly") '= "" Set pProps("ReadOnly") = +pBody.%Get("readOnly")
-    If pBody.%Get("resource") '= "" Set pProps("Resource") = pBody.%Get("resource")
+    If pBody.%Get("directory") '= "" Set pConfigProps("Directory") = pBody.%Get("directory")
+    If pBody.%Get("globalJournalState") '= "" Set pConfigProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
+    If pBody.%Get("mountRequired") '= "" Set pConfigProps("MountRequired") = +pBody.%Get("mountRequired")
+    If pBody.%Get("mountAtStartup") '= "" Set pConfigProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
+    If pBody.%Get("readOnly") '= "" Set pConfigProps("ReadOnly") = +pBody.%Get("readOnly")
+    If pBody.%Get("resource") '= "" Set pConfigProps("Resource") = pBody.%Get("resource")
+}
+
+/// Build the runtime-layer props array for database create/modify.
+/// <p>Reads <b>SYS.Database</b> sizing properties from the JSON body
+/// and populates the <var>pRuntimeProps</var> array.  These must be
+/// applied via <code>##class(SYS.Database).%OpenId(directory)</code>
+/// followed by <code>%Save()</code>, <em>not</em> via
+/// <method>Config.Databases.Modify</method> (which does not have
+/// <code>Size</code>, <code>MaxSize</code>, or
+/// <code>ExpansionSize</code> properties — see Rule #3).</p>
+ClassMethod BuildDatabaseRuntimeProps(pBody As %DynamicObject, Output pRuntimeProps) [ Private ]
+{
+    If pBody.%Get("size") '= "" Set pRuntimeProps("Size") = +pBody.%Get("size")
+    If pBody.%Get("maxSize") '= "" Set pRuntimeProps("MaxSize") = +pBody.%Get("maxSize")
+    If pBody.%Get("expansionSize") '= "" Set pRuntimeProps("ExpansionSize") = +pBody.%Get("expansionSize")
+}
+
+/// Apply runtime sizing props to a SYS.Database instance opened by directory.
+/// <p>Helper for both <code>create</code> and <code>modify</code> branches.
+/// Opens the database by <var>pDirectory</var>, sets any sizing props present
+/// in the <var>pRuntimeProps</var> array, and saves.  Failures are propagated
+/// as a <code>%Status</code> return value.</p>
+ClassMethod ApplyRuntimeProps(pDirectory As %String, ByRef pRuntimeProps) As %Status [ Private ]
+{
+    Set tSC = $$$OK
+    Try {
+        If '$Data(pRuntimeProps) Quit
+        Set tDBObj = ##class(SYS.Database).%OpenId(pDirectory)
+        If '$IsObject(tDBObj) {
+            Set tSC = $$$ERROR($$$GeneralError, "SYS.Database not found for directory: "_pDirectory)
+            Quit
+        }
+        If $Data(pRuntimeProps("Size")) Set tDBObj.Size = pRuntimeProps("Size")
+        If $Data(pRuntimeProps("MaxSize")) Set tDBObj.MaxSize = pRuntimeProps("MaxSize")
+        If $Data(pRuntimeProps("ExpansionSize")) Set tDBObj.ExpansionSize = pRuntimeProps("ExpansionSize")
+        Set tSC = tDBObj.%Save()
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Create, modify, or delete a database.
@@ -294,23 +337,99 @@ ClassMethod DatabaseManage() As %Status
                 Quit
             }
 
-            Set tProps("Directory") = tDir
-            Do ..BuildDatabaseProps(tBody, .tProps)
+            ; Note: Config.Databases does NOT create the physical database file —
+            ; it only writes to the CPF configuration. To create the actual IRIS.DAT,
+            ; we use SYS.Database.CreateDatabase(), which also accepts Size, MaxSize,
+            ; and ExpansionSize directly. Then we register the name->directory mapping
+            ; in Config.Databases with config-only props (mount, readOnly, etc.).
 
-            Set tSC = ##class(Config.Databases).Create(tName, .tProps)
+            ; Build runtime props first to get Size/MaxSize/ExpansionSize
+            Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
+            Set tSize = $Get(tRuntimeProps("Size"), 1)
+            Set tMaxSize = $Get(tRuntimeProps("MaxSize"), 0)
+            Set tExpSize = $Get(tRuntimeProps("ExpansionSize"), 0)
+
+            ; Create directory if it does not exist
+            If '##class(%Library.File).DirectoryExists(tDir) {
+                If '##class(%Library.File).CreateDirectoryChain(tDir) {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Failed to create directory: "_tDir)
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
+            ; Create the physical database file (IRIS.DAT) via SYS.Database
+            Set tSC = ##class(SYS.Database).CreateDatabase(tDir, tSize, , , , , , , , tMaxSize, tExpSize)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Register the database name in Config (CPF) with config-only props
+            Set tConfigProps("Directory") = tDir
+            Do ..BuildDatabaseConfigProps(tBody, .tConfigProps)
+
+            Set tSC = ##class(Config.Databases).Create(tName, .tConfigProps)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
             Set tResult = {"action": "created", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "modify" {
-            Do ..BuildDatabaseProps(tBody, .tProps)
+            ; Build config props — only Config.Databases properties
+            Do ..BuildDatabaseConfigProps(tBody, .tConfigProps)
 
-            Set tSC = ##class(Config.Databases).Modify(tName, .tProps)
+            ; Only call Config.Databases.Modify if we have config props to update
+            If $Data(tConfigProps) {
+                Set tSC = ##class(Config.Databases).Modify(tName, .tConfigProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
+            ; Apply runtime sizing props (Size, MaxSize, ExpansionSize) via SYS.Database
+            Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
+            If $Data(tRuntimeProps) {
+                ; Look up the directory from Config layer (SYS.Database is keyed by dir)
+                Kill tCfgLookup
+                Set tSC = ##class(Config.Databases).Get(tName, .tCfgLookup)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+                Set tDir = $Get(tCfgLookup("Directory"))
+                If tDir = "" {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Could not determine directory for database '"_tName_"'")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+                Set tSC = ..ApplyRuntimeProps(tDir, .tRuntimeProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
             Set tResult = {"action": "modified", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }

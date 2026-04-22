@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "3fb0590b5d16";
+export const BOOTSTRAP_VERSION = "b0aa936ac17f";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "3fb0590b5d16";
+Parameter BOOTSTRAPVERSION = "b0aa936ac17f";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1514,22 +1514,65 @@ ClassMethod DatabaseList() As %Status
     Quit $$$OK
 }
 
-/// Build the tProps array for database create/modify from a JSON body.
-/// <p>Reads standard database properties from the JSON body and
-/// populates the <var>pProps</var> array suitable for passing to
+/// Build the configuration-layer props array for database create/modify.
+/// <p>Reads only <b>Config.Databases</b> properties from the JSON body and
+/// populates the <var>pConfigProps</var> array suitable for passing to
 /// <method>Config.Databases.Create</method> or
 /// <method>Config.Databases.Modify</method>.</p>
-ClassMethod BuildDatabaseProps(pBody As %DynamicObject, Output pProps) [ Private ]
+/// <p>Runtime sizing properties (<code>Size</code>, <code>MaxSize</code>,
+/// <code>ExpansionSize</code>) live on <class>SYS.Database</class>, not
+/// <class>Config.Databases</class>. Call
+/// <method>BuildDatabaseRuntimeProps</method> to collect those
+/// separately and route them via <code>SYS.Database.%OpenId().%Save()</code>.</p>
+ClassMethod BuildDatabaseConfigProps(pBody As %DynamicObject, Output pConfigProps) [ Private ]
 {
-    If pBody.%Get("directory") '= "" Set pProps("Directory") = pBody.%Get("directory")
-    If pBody.%Get("size") '= "" Set pProps("Size") = +pBody.%Get("size")
-    If pBody.%Get("maxSize") '= "" Set pProps("MaxSize") = +pBody.%Get("maxSize")
-    If pBody.%Get("expansionSize") '= "" Set pProps("ExpansionSize") = +pBody.%Get("expansionSize")
-    If pBody.%Get("globalJournalState") '= "" Set pProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
-    If pBody.%Get("mountRequired") '= "" Set pProps("MountRequired") = +pBody.%Get("mountRequired")
-    If pBody.%Get("mountAtStartup") '= "" Set pProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
-    If pBody.%Get("readOnly") '= "" Set pProps("ReadOnly") = +pBody.%Get("readOnly")
-    If pBody.%Get("resource") '= "" Set pProps("Resource") = pBody.%Get("resource")
+    If pBody.%Get("directory") '= "" Set pConfigProps("Directory") = pBody.%Get("directory")
+    If pBody.%Get("globalJournalState") '= "" Set pConfigProps("GlobalJournalState") = +pBody.%Get("globalJournalState")
+    If pBody.%Get("mountRequired") '= "" Set pConfigProps("MountRequired") = +pBody.%Get("mountRequired")
+    If pBody.%Get("mountAtStartup") '= "" Set pConfigProps("MountAtStartup") = +pBody.%Get("mountAtStartup")
+    If pBody.%Get("readOnly") '= "" Set pConfigProps("ReadOnly") = +pBody.%Get("readOnly")
+    If pBody.%Get("resource") '= "" Set pConfigProps("Resource") = pBody.%Get("resource")
+}
+
+/// Build the runtime-layer props array for database create/modify.
+/// <p>Reads <b>SYS.Database</b> sizing properties from the JSON body
+/// and populates the <var>pRuntimeProps</var> array.  These must be
+/// applied via <code>##class(SYS.Database).%OpenId(directory)</code>
+/// followed by <code>%Save()</code>, <em>not</em> via
+/// <method>Config.Databases.Modify</method> (which does not have
+/// <code>Size</code>, <code>MaxSize</code>, or
+/// <code>ExpansionSize</code> properties — see Rule #3).</p>
+ClassMethod BuildDatabaseRuntimeProps(pBody As %DynamicObject, Output pRuntimeProps) [ Private ]
+{
+    If pBody.%Get("size") '= "" Set pRuntimeProps("Size") = +pBody.%Get("size")
+    If pBody.%Get("maxSize") '= "" Set pRuntimeProps("MaxSize") = +pBody.%Get("maxSize")
+    If pBody.%Get("expansionSize") '= "" Set pRuntimeProps("ExpansionSize") = +pBody.%Get("expansionSize")
+}
+
+/// Apply runtime sizing props to a SYS.Database instance opened by directory.
+/// <p>Helper for both <code>create</code> and <code>modify</code> branches.
+/// Opens the database by <var>pDirectory</var>, sets any sizing props present
+/// in the <var>pRuntimeProps</var> array, and saves.  Failures are propagated
+/// as a <code>%Status</code> return value.</p>
+ClassMethod ApplyRuntimeProps(pDirectory As %String, ByRef pRuntimeProps) As %Status [ Private ]
+{
+    Set tSC = $$$OK
+    Try {
+        If '$Data(pRuntimeProps) Quit
+        Set tDBObj = ##class(SYS.Database).%OpenId(pDirectory)
+        If '$IsObject(tDBObj) {
+            Set tSC = $$$ERROR($$$GeneralError, "SYS.Database not found for directory: "_pDirectory)
+            Quit
+        }
+        If $Data(pRuntimeProps("Size")) Set tDBObj.Size = pRuntimeProps("Size")
+        If $Data(pRuntimeProps("MaxSize")) Set tDBObj.MaxSize = pRuntimeProps("MaxSize")
+        If $Data(pRuntimeProps("ExpansionSize")) Set tDBObj.ExpansionSize = pRuntimeProps("ExpansionSize")
+        Set tSC = tDBObj.%Save()
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Create, modify, or delete a database.
@@ -1584,23 +1627,99 @@ ClassMethod DatabaseManage() As %Status
                 Quit
             }
 
-            Set tProps("Directory") = tDir
-            Do ..BuildDatabaseProps(tBody, .tProps)
+            ; Note: Config.Databases does NOT create the physical database file —
+            ; it only writes to the CPF configuration. To create the actual IRIS.DAT,
+            ; we use SYS.Database.CreateDatabase(), which also accepts Size, MaxSize,
+            ; and ExpansionSize directly. Then we register the name->directory mapping
+            ; in Config.Databases with config-only props (mount, readOnly, etc.).
 
-            Set tSC = ##class(Config.Databases).Create(tName, .tProps)
+            ; Build runtime props first to get Size/MaxSize/ExpansionSize
+            Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
+            Set tSize = $Get(tRuntimeProps("Size"), 1)
+            Set tMaxSize = $Get(tRuntimeProps("MaxSize"), 0)
+            Set tExpSize = $Get(tRuntimeProps("ExpansionSize"), 0)
+
+            ; Create directory if it does not exist
+            If '##class(%Library.File).DirectoryExists(tDir) {
+                If '##class(%Library.File).CreateDirectoryChain(tDir) {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Failed to create directory: "_tDir)
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
+            ; Create the physical database file (IRIS.DAT) via SYS.Database
+            Set tSC = ##class(SYS.Database).CreateDatabase(tDir, tSize, , , , , , , , tMaxSize, tExpSize)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Register the database name in Config (CPF) with config-only props
+            Set tConfigProps("Directory") = tDir
+            Do ..BuildDatabaseConfigProps(tBody, .tConfigProps)
+
+            Set tSC = ##class(Config.Databases).Create(tName, .tConfigProps)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
             Set tResult = {"action": "created", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "modify" {
-            Do ..BuildDatabaseProps(tBody, .tProps)
+            ; Build config props — only Config.Databases properties
+            Do ..BuildDatabaseConfigProps(tBody, .tConfigProps)
 
-            Set tSC = ##class(Config.Databases).Modify(tName, .tProps)
+            ; Only call Config.Databases.Modify if we have config props to update
+            If $Data(tConfigProps) {
+                Set tSC = ##class(Config.Databases).Modify(tName, .tConfigProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
+            ; Apply runtime sizing props (Size, MaxSize, ExpansionSize) via SYS.Database
+            Do ..BuildDatabaseRuntimeProps(tBody, .tRuntimeProps)
+            If $Data(tRuntimeProps) {
+                ; Look up the directory from Config layer (SYS.Database is keyed by dir)
+                Kill tCfgLookup
+                Set tSC = ##class(Config.Databases).Get(tName, .tCfgLookup)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+                Set tDir = $Get(tCfgLookup("Directory"))
+                If tDir = "" {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Could not determine directory for database '"_tName_"'")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+                Set tSC = ..ApplyRuntimeProps(tDir, .tRuntimeProps)
+                If $$$ISERR(tSC) {
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
             Set tResult = {"action": "modified", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
@@ -2154,8 +2273,12 @@ ClassMethod UserRoles() As %Status
 /// <p>Reads a JSON body with <code>action</code> (change|validate),
 /// <code>username</code> (required for change), and <code>password</code>.
 /// For change, uses <method>Security.Users.Modify</method> with the
-/// <code>ChangePassword</code> property. For validate, calls
-/// <code>$SYSTEM.Security.ValidatePassword()</code>.</p>
+/// <code>Password</code> property (the write-only password setter).
+/// Optional <code>changePasswordOnNextLogin</code> boolean sets the
+/// <code>ChangePassword</code> flag (force-change-on-next-login) alongside
+/// the new password in the same Modify call. For validate, calls
+/// <code>$SYSTEM.Security.ValidatePassword()</code> and returns the active
+/// password policy from <code>Security.System.Get()</code>.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER echoed in responses
 /// or error messages. Only success/failure status is returned.</p>
 ClassMethod UserPassword() As %Status
@@ -2199,14 +2322,22 @@ ClassMethod UserPassword() As %Status
             ; Switch to %SYS for Security operations
             Set $NAMESPACE = "%SYS"
 
-            ; Use ChangePassword property to change password
-            Set tProps("ChangePassword") = tPassword
+            ; Password is the write-only setter for the actual password value.
+            ; ChangePassword is a boolean flag (force-change-on-next-login) — NOT the password setter.
+            ; Bug #1 (Story 12.1): original code set tProps("ChangePassword") = tPassword which triggered
+            ; "Datatype value 'X' is not a valid boolean" on every password change attempt.
+            Set tProps("Password") = tPassword
+            ; If caller explicitly provides changePasswordOnNextLogin, set the force-change flag
+            ; in the same Modify() call. Default (omitted) leaves the existing flag untouched.
+            If tBody.%IsDefined("changePasswordOnNextLogin") {
+                Set tProps("ChangePassword") = +tBody.%Get("changePasswordOnNextLogin")
+            }
             Set tSC = ##class(Security.Users).Modify(tUsername, .tProps)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) {
                 ; Bug #12 — propagate the real IRIS error text (sanitized)
                 ; so callers see policy violations, missing-user errors,
-                ; etc. Security.Users.Modify() with tProps("ChangePassword")
+                ; etc. Security.Users.Modify() with tProps("Password")
                 ; does NOT embed the password in its %Status text, so the
                 ; generic wrap that used to be here removed diagnostic
                 ; signal for no security gain.
@@ -2220,10 +2351,69 @@ ClassMethod UserPassword() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "validate" {
+            ; Read active password policy from Security.System (in %SYS).
+            ; PasswordPattern is an ObjectScript match-pattern string (e.g. "3.128ANP")
+            ; where the leading N.M quantifier encodes the min-length (N) and max-length (M).
+            ; Policy fields are system-level — they do NOT leak the candidate password.
+            Set tPolicyMinLength = 0
+            Set tPolicyPattern = ""
+            Set tPolicyComment = ""
+            Set $NAMESPACE = "%SYS"
+            Kill tSysProps
+            Set tSysGetSC = ##class(Security.System).Get("SYSTEM", .tSysProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISOK(tSysGetSC) {
+                Set tRawPattern = $Get(tSysProps("PasswordPattern"))
+                ; "No rules" sentinel values: empty string, or a very loose "1." pattern (1+ chars, any type).
+                ; Any other pattern (including the IRIS install default "3.128ANP") IS a real policy and is parsed.
+                ; Extract min-length from leading quantifier: N.M or N at start of pattern.
+                If tRawPattern = "" {
+                    Set tPolicyComment = "No password policy configured on this instance"
+                } ElseIf $Extract(tRawPattern, 1, 2) = "1." && ($Length(tRawPattern) <= 4) {
+                    ; Matches very loose patterns like "1." which means "1 or more of any type" — effectively no rules
+                    Set tPolicyComment = "No password policy configured on this instance"
+                } Else {
+                    ; Parse leading quantifier N.M or N from the pattern string
+                    Set tPolicyPattern = tRawPattern
+                    Set tDotPos = $Find(tRawPattern, ".")
+                    If tDotPos > 1 {
+                        ; N.M form — min-length is the part before the dot
+                        Set tMinPart = $Extract(tRawPattern, 1, tDotPos - 2)
+                        If tMinPart ? 1.N {
+                            Set tPolicyMinLength = +tMinPart
+                        }
+                    } Else {
+                        ; N form — exact length
+                        Set tSingleNum = ""
+                        For tCI = 1:1:$Length(tRawPattern) {
+                            Set tChar = $Extract(tRawPattern, tCI)
+                            If tChar ? 1N { Set tSingleNum = tSingleNum _ tChar }
+                            Else { Quit }
+                        }
+                        If tSingleNum '= "" { Set tPolicyMinLength = +tSingleNum }
+                    }
+                }
+            } Else {
+                Set tPolicyComment = "Could not read password policy"
+            }
+
             ; Validate password against system password rules
             Set $NAMESPACE = "%SYS"
             Set tSC = $SYSTEM.Security.ValidatePassword(tPassword)
             Set $NAMESPACE = tOrigNS
+
+            ; Build policy sub-object (system-level only — never includes candidate password)
+            ; When pattern is empty (no rules), set the JSON "pattern" key to JSON null.
+            Set tPolicyObj = {"minLength": (tPolicyMinLength)}
+            If tPolicyPattern = "" {
+                Do tPolicyObj.%Set("pattern", "", "null")
+            } Else {
+                Do tPolicyObj.%Set("pattern", tPolicyPattern)
+            }
+            If tPolicyComment '= "" {
+                Do tPolicyObj.%Set("comment", tPolicyComment)
+            }
+
             If $$$ISOK(tSC) {
                 Set tResult = {"action": "validate", "valid": true}
             }
@@ -2250,6 +2440,8 @@ ClassMethod UserPassword() As %Status
                 Set tResult = {"action": "validate", "valid": false, "message": (tMsg)}
                 Set tSC = $$$OK
             }
+            ; Attach active password policy (safe — system-level, no candidate password)
+            Do tResult.%Set("policy", tPolicyObj)
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }
@@ -3547,9 +3739,30 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(Ens.Config.Production).Create(tName)
+            ; Create production class via %Dictionary.ClassDefinition + XData + compile
+            ; (same approach as EnsPortal.Dialog.ProductionWizard lines 181-189)
+            Set tCreateSC = $$$OK
+            Try {
+                Set tClsDef = ##class(%Dictionary.ClassDefinition).%New()
+                Set tClsDef.Name = tName
+                Set tClsDef.Super = "Ens.Production"
+                Set tClsDef.ClassVersion = 25
+
+                Set tXData = ##class(%Dictionary.XDataDefinition).%New()
+                Set tXData.Name = "ProductionDefinition"
+                Do tXData.Data.WriteLine("<Production Name="""_tName_"""/>")
+                Do tClsDef.XDatas.Insert(tXData)
+
+                Set tCreateSC = tClsDef.%Save()
+                If $$$ISOK(tCreateSC) {
+                    Set tCreateSC = $System.OBJ.Compile(tName, "k-d")
+                }
+            }
+            Catch exCreate {
+                Set tCreateSC = exCreate.AsStatus()
+            }
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tCreateSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCreateSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "created", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
@@ -3574,9 +3787,14 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(Ens.Config.Production).Delete(tName)
+            ; Delete the class definition first — Ens.Projection.Production.RemoveProjection()
+            ; fires automatically and handles the Ens.Config.Production record cleanup.
+            ; Deleting in the reverse order (config first, then class) is fragile: if the
+            ; Ens.Config.Production record is absent (orphaned class, external creation), the
+            ; first %DeleteId fails and the class definition is never removed.
+            Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
             Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "deleted", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
@@ -3626,9 +3844,11 @@ ClassMethod ProductionControl() As %Status
         }
 
         Set tNamespace = tBody.%Get("namespace")
-        Set tTimeout = +$Get(tBody.%Get("timeout"), 120)
+        ; Use direct %Get() with conditional default — $Get() cannot wrap a method call
+        ; (triggers multidim access on %DynamicObject, raising <INVALID CLASS>). BUG-3.
+        Set tTimeout = +tBody.%Get("timeout")
         If tTimeout = 0 Set tTimeout = 120
-        Set tForce = +$Get(tBody.%Get("force"), 0)
+        Set tForce = +tBody.%Get("force")
 
         ; Switch to target namespace for Ens.Director operations
         If tNamespace '= "" {
@@ -4359,8 +4579,8 @@ ClassMethod ProductionSummary() As %Status
             Try {
                 Set $NAMESPACE = tNS
                 Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+                Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                 If $$$ISOK(tSC2) && (tProdName '= "") {
-                    Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                     Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
                     Set tEntry = {}
                     Do tEntry.%Set("namespace", tNS)
@@ -4368,6 +4588,20 @@ ClassMethod ProductionSummary() As %Status
                     Do tEntry.%Set("state", tStateStr)
                     Do tEntry.%Set("stateCode", tState, "number")
                     Do tResult.%Push(tEntry)
+                } ElseIf $$$ISOK(tSC2) && (tProdName = "") {
+                    ; No active/recent production — fall back to Ens.Config.ProductionD
+                    ; to include registered-but-never-started productions
+                    Set tRegKey = ""
+                    For {
+                        Set tRegKey = $Order(^Ens.Config.ProductionD(tRegKey))
+                        Quit:tRegKey=""
+                        Set tEntry = {}
+                        Do tEntry.%Set("namespace", tNS)
+                        Do tEntry.%Set("name", tRegKey)
+                        Do tEntry.%Set("state", "Stopped")
+                        Do tEntry.%Set("stateCode", 2, "number")
+                        Do tResult.%Push(tEntry)
+                    }
                 }
             }
             Catch innerEx {

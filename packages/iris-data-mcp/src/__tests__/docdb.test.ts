@@ -6,6 +6,7 @@ import {
   docdbDocumentTool,
   docdbFindTool,
   docdbPropertyTool,
+  buildDocDbRestriction,
 } from "../tools/docdb.js";
 import {
   createMockHttp,
@@ -364,7 +365,7 @@ describe("iris_docdb_find", () => {
     expect(docdbFindTool.annotations.destructiveHint).toBe(false);
   });
 
-  it("should query documents via POST with filter", async () => {
+  it("should query documents via POST with filter translated to DocDB restriction", async () => {
     const docs = [
       { id: "1", name: "Alice", age: 30 },
       { id: "2", name: "Charlie", age: 35 },
@@ -377,9 +378,11 @@ describe("iris_docdb_find", () => {
       ctx,
     );
 
+    // BUG-6 fix: filter must be wrapped as {restriction: ["age", 21, ">"]}
+    // not sent as the raw MongoDB filter object
     expect(mockHttp.post).toHaveBeenCalledWith(
       expect.stringContaining("/api/docdb/v1/USER/find/TestDB"),
-      filter,
+      { restriction: ["age", 21, ">"] },
     );
     expect(result.isError).toBeUndefined();
     expect(result.structuredContent).toEqual({ items: docs, count: 2 });
@@ -396,7 +399,7 @@ describe("iris_docdb_find", () => {
 
     expect(mockHttp.post).toHaveBeenCalledWith(
       expect.stringContaining("/find/TestDB"),
-      filter,
+      { restriction: ["status", "active", "="] },
     );
   });
 
@@ -411,14 +414,14 @@ describe("iris_docdb_find", () => {
 
     expect(mockHttp.post).toHaveBeenCalledWith(
       expect.stringContaining("/find/TestDB"),
-      filter,
+      { restriction: ["status", "deleted", "!="] },
     );
   });
 
   it("should support $lt and $lte operators", async () => {
     mockHttp.post.mockResolvedValue(envelope([]));
 
-    const filter = { age: { $lt: 18 }, score: { $lte: 100 } };
+    const filter = { age: { $lt: 18 } };
     await docdbFindTool.handler(
       { database: "TestDB", filter },
       ctx,
@@ -426,14 +429,14 @@ describe("iris_docdb_find", () => {
 
     expect(mockHttp.post).toHaveBeenCalledWith(
       expect.any(String),
-      filter,
+      { restriction: ["age", 18, "<"] },
     );
   });
 
   it("should support $gt and $gte operators", async () => {
     mockHttp.post.mockResolvedValue(envelope([]));
 
-    const filter = { age: { $gte: 21 }, score: { $gt: 50 } };
+    const filter = { age: { $gte: 21 } };
     await docdbFindTool.handler(
       { database: "TestDB", filter },
       ctx,
@@ -441,7 +444,7 @@ describe("iris_docdb_find", () => {
 
     expect(mockHttp.post).toHaveBeenCalledWith(
       expect.any(String),
-      filter,
+      { restriction: ["age", 21, ">="] },
     );
   });
 
@@ -504,7 +507,7 @@ describe("iris_docdb_property", () => {
     expect(docdbPropertyTool.annotations.destructiveHint).toBe(true);
   });
 
-  it("should create a property via POST with type", async () => {
+  it("should create a property via POST with type as query parameter (BUG-5 fix)", async () => {
     const created = { property: "name", type: "%String", status: "created" };
     mockHttp.post.mockResolvedValue(envelope(created));
 
@@ -513,9 +516,15 @@ describe("iris_docdb_property", () => {
       ctx,
     );
 
+    // BUG-5 fix: type must be a URL query param, not in the JSON body.
+    // The DocDB httpPostProperty handler reads $get(%request.Data("type",1),"%String")
+    // which is the request query string, NOT the parsed JSON body.
+    // NOTE: IRIS CSP does NOT URL-decode %XX in %request.Data, so the % in IRIS type
+    // names ("%String", "%Integer") must be kept as a literal "%" in the URL — NOT as
+    // "%25". We use split/join encoding: split on %, encode each part, rejoin with %.
     expect(mockHttp.post).toHaveBeenCalledWith(
-      expect.stringContaining("/api/docdb/v1/USER/prop/TestDB/name"),
-      { type: "%String" },
+      expect.stringContaining("/api/docdb/v1/USER/prop/TestDB/name?type=%String"),
+      {},
     );
     expect(result.isError).toBeUndefined();
     expect(result.structuredContent).toEqual(created);
@@ -603,9 +612,10 @@ describe("iris_docdb_property", () => {
       ctx,
     );
 
+    // BUG-5 fix: type is a query param, not body
     expect(mockHttp.post).toHaveBeenCalledWith(
-      expect.stringContaining("/api/docdb/v1/STAGING/prop/MyDB/email"),
-      { type: "%String" },
+      expect.stringContaining("/api/docdb/v1/STAGING/prop/MyDB/email?type="),
+      {},
     );
   });
 
@@ -620,5 +630,86 @@ describe("iris_docdb_property", () => {
     expect(mockHttp.delete).toHaveBeenCalledWith(
       expect.stringContaining(encodeURIComponent("my prop")),
     );
+  });
+
+  it("property create forwards type as query param not body (BUG-5 regression guard)", async () => {
+    // Verify the exact URL shape: type=%Integer must be in the URL query string.
+    // If this ever reverts to body-based type, the DocDB server will silently
+    // ignore it and default to %String (breaking typed property behaviour).
+    mockHttp.post.mockResolvedValue(envelope({ Name: "age", Type: "%Integer" }));
+
+    await docdbPropertyTool.handler(
+      { action: "create", database: "TestDB", property: "age", type: "%Integer" },
+      ctx,
+    );
+
+    const [calledUrl, calledBody] = mockHttp.post.mock.calls[0] as [string, unknown];
+    expect(calledUrl).toContain("?type=");
+    // IRIS CSP does NOT URL-decode %XX in %request.Data, so the % must be kept as
+    // a literal % in the URL (not %25). The split/join encoding produces "%Integer"
+    // not "%25Integer". Passing "%25Integer" causes IRIS to look for "%Library.25Integer".
+    expect(calledUrl).toContain("type=%Integer");
+    expect(calledUrl).not.toContain("type=%25Integer");
+    // Body must be empty — not contain the type
+    expect(calledBody).toEqual({});
+    expect(JSON.stringify(calledBody)).not.toContain("Integer");
+  });
+});
+
+// ── buildDocDbRestriction unit tests ──────────────────────────
+// AC 12.4.7: "find translates $gt to WHERE clause" and "find combines multiple fields with AND"
+
+describe("buildDocDbRestriction", () => {
+  it("translates $gt to DocDB > operator", () => {
+    const result = buildDocDbRestriction({ age: { $gt: 26 } });
+    expect(result).toEqual(["age", 26, ">"]);
+  });
+
+  it("translates $eq to DocDB = operator", () => {
+    const result = buildDocDbRestriction({ status: { $eq: "active" } });
+    expect(result).toEqual(["status", "active", "="]);
+  });
+
+  it("translates $ne to DocDB != operator", () => {
+    const result = buildDocDbRestriction({ status: { $ne: "deleted" } });
+    expect(result).toEqual(["status", "deleted", "!="]);
+  });
+
+  it("translates $lt to DocDB < operator", () => {
+    const result = buildDocDbRestriction({ score: { $lt: 50 } });
+    expect(result).toEqual(["score", 50, "<"]);
+  });
+
+  it("translates $lte to DocDB <= operator", () => {
+    const result = buildDocDbRestriction({ score: { $lte: 100 } });
+    expect(result).toEqual(["score", 100, "<="]);
+  });
+
+  it("translates $gte to DocDB >= operator", () => {
+    const result = buildDocDbRestriction({ age: { $gte: 18 } });
+    expect(result).toEqual(["age", 18, ">="]);
+  });
+
+  it("combines multiple fields with AND (returns array of predicates)", () => {
+    // Multiple fields: result is array of predicate arrays
+    const result = buildDocDbRestriction({ age: { $gt: 26 }, name: { $eq: "Alice" } }) as unknown[][];
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(2);
+    // Each element is a predicate triple
+    expect(result).toEqual(
+      expect.arrayContaining([
+        ["age", 26, ">"],
+        ["name", "Alice", "="],
+      ]),
+    );
+  });
+
+  it("treats plain field equality as = predicate", () => {
+    const result = buildDocDbRestriction({ name: "Bob" });
+    expect(result).toEqual(["name", "Bob", "="]);
+  });
+
+  it("returns null for empty filter", () => {
+    expect(buildDocDbRestriction({})).toBeNull();
   });
 });

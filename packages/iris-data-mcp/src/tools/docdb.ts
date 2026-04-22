@@ -10,6 +10,32 @@
  * All tools call the IRIS built-in DocDB REST API at
  * `/api/docdb/v1/{namespace}/...`. No custom ObjectScript handler
  * is required.
+ *
+ * ## DocDB API contract notes (from reading %Api.DocDB.v1.cls and %DocDB.Database.cls)
+ *
+ * ### Property create (BUG-5 fix)
+ * `POST /api/docdb/v1/{ns}/prop/{db}/{prop}` reads `type` from
+ * `%request.Data("type",1)` — i.e., a **URL query parameter**, not the
+ * JSON body.  Sending `{type: "..."}` in the body is silently ignored and
+ * the server defaults to `%String`.  Fix: append `?type=<encoded>` to the
+ * URL and send an empty body `{}`.
+ *
+ * ENCODING: IRIS type names start with `%` (e.g. `%Integer`).
+ * `encodeURIComponent` turns `%` into `%25`, but the IRIS CSP layer does
+ * NOT URL-decode `%XX` sequences in `%request.Data` — it reads `%25Integer`
+ * literally, causing lookup failure for class `%Library.25Integer`.
+ * Fix: split on `%`, encode each segment, rejoin with `%`.
+ * This keeps the type `%` prefix as a literal `%` while encoding any other
+ * special characters in the type name. Verified via direct HTTP probe.
+ *
+ * ### Find / filter (BUG-6 fix)
+ * `POST /api/docdb/v1/{ns}/find/{db}` reads `requestBody.restriction`,
+ * `.projection`, and `.options` from the JSON body.  `restriction` is
+ * either a single DocDB predicate array `[field, value, operator]` or an
+ * array of such arrays (combined with AND).  The MongoDB-style filter
+ * `{field: {$gt: value}}` must be translated to `["field", value, ">"]`.
+ * Supported operators: $eq → =, $ne → !=, $lt → <, $lte → <=, $gt → >,
+ * $gte → >=.  Multiple field/op pairs are combined as an array of predicates.
  */
 
 import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
@@ -17,6 +43,74 @@ import { z } from "zod";
 
 /** Base URL for the IRIS DocDB REST API. */
 const BASE_DOCDB_URL = "/api/docdb/v1";
+
+/**
+ * Map from MongoDB-style comparison operator to IRIS DocDB SQL operator.
+ * Source: %DocDB.Database.generatePredicate() — the supported set is
+ * =, !=, <, >, <=, >=, <>, %STARTSWITH, NULL, NOT NULL, IN.
+ */
+const MONGO_OP_MAP: Record<string, string> = {
+  $eq: "=",
+  $ne: "!=",
+  $lt: "<",
+  $lte: "<=",
+  $gt: ">",
+  $gte: ">=",
+};
+
+/**
+ * Translate a MongoDB-style filter object to a DocDB restriction value.
+ *
+ * The DocDB `%FindDocuments()` method accepts a `restriction` argument that
+ * is either:
+ * - A single predicate array: `[field, value, operator]`
+ * - An array of predicate arrays for AND-combination: `[[f1,v1,op1],[f2,v2,op2]]`
+ *
+ * This function converts:
+ * ```json
+ * { "age": { "$gt": 26 }, "name": { "$eq": "Alice" } }
+ * ```
+ * to:
+ * ```json
+ * [["age", 26, ">"], ["name", "Alice", "="]]
+ * ```
+ * A single predicate is returned as a flat `[field, value, operator]` array
+ * (not nested) per the DocDB API contract.
+ *
+ * Unsupported operators are skipped with a console warning.
+ *
+ * @param filter - The MongoDB-style filter object.
+ * @returns The DocDB restriction value, or `null` if no predicates could be built.
+ */
+export function buildDocDbRestriction(
+  filter: Record<string, unknown>,
+): unknown[] | null {
+  const predicates: [string, unknown, string][] = [];
+
+  for (const [field, condition] of Object.entries(filter)) {
+    if (
+      condition !== null &&
+      typeof condition === "object" &&
+      !Array.isArray(condition)
+    ) {
+      const condObj = condition as Record<string, unknown>;
+      for (const [mongoOp, value] of Object.entries(condObj)) {
+        const docdbOp = MONGO_OP_MAP[mongoOp];
+        if (docdbOp !== undefined) {
+          predicates.push([field, value, docdbOp]);
+        }
+        // Unknown operators are silently skipped — the caller will get all docs
+      }
+    } else {
+      // Plain equality: { field: value }
+      predicates.push([field, condition, "="]);
+    }
+  }
+
+  if (predicates.length === 0) return null;
+  if (predicates.length === 1) return predicates[0]!;
+  return predicates;
+}
 
 /**
  * Extract the usable result from a DocDB API response.
@@ -349,9 +443,19 @@ export const docdbFindTool: ToolDefinition = {
     const ns = ctx.resolveNamespace(namespace);
 
     try {
+      // Translate MongoDB-style filter to DocDB restriction format.
+      // The DocDB /find/ endpoint reads requestBody.restriction (not a flat filter).
+      // restriction is a predicate array [field, value, operator] or an array of
+      // such arrays for AND-combination (from %DocDB.Database.%FindDocuments docs).
+      const restriction = buildDocDbRestriction(filter);
+      const findBody: Record<string, unknown> = {};
+      if (restriction !== null) {
+        findBody.restriction = restriction;
+      }
+
       const response = await ctx.http.post(
         `${BASE_DOCDB_URL}/${encodeURIComponent(ns)}/find/${encodeURIComponent(database)}`,
-        filter,
+        findBody,
       );
 
       const result = extractResult(response);
@@ -437,7 +541,24 @@ export const docdbPropertyTool: ToolDefinition = {
             isError: true,
           };
         }
-        response = await ctx.http.post(propPath, { type });
+        // The DocDB httpPostProperty handler reads `type` from %request.Data("type",1),
+        // which is a URL query parameter — NOT from the JSON body.  Sending the type
+        // in the body is silently ignored and the server defaults to %String.  Fix:
+        // append ?type=<encoded> to the URL and send an empty body (BUG-5).
+        //
+        // ENCODING NOTE: IRIS type names begin with "%" (e.g. "%Integer", "%Library.String").
+        // encodeURIComponent("%Integer") → "%25Integer", but the IRIS CSP layer does NOT
+        // URL-decode %XX sequences in %request.Data query param values — it reads "%25Integer"
+        // literally, causing class lookup for "%Library.25Integer" to fail.
+        // Fix: split on "%" and encode each segment individually, then rejoin with bare "%".
+        // This keeps IRIS type % prefixes as literal "%" while still encoding any other
+        // special characters that might appear in a type name.
+        // Verified via %Net.HttpRequest probe: "?type=%Integer" → StoredType: %Library.Integer.
+        const encodedType = type
+          .split("%")
+          .map((part) => encodeURIComponent(part))
+          .join("%");
+        response = await ctx.http.post(`${propPath}?type=${encodedType}`, {});
       } else if (action === "drop") {
         response = await ctx.http.delete(propPath);
       } else {
