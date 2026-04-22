@@ -165,6 +165,17 @@ describe("iris_production_control", () => {
     );
   });
 
+  // AC 12.2.4 — stop action returns success envelope (structuredContent shape)
+  it("stop action returns success envelope", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ action: "stopped" }));
+
+    const result = await productionControlTool.handler({ action: "stop" }, ctx);
+
+    const structured = result.structuredContent as { action: string };
+    expect(structured.action).toBe("stopped");
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should send POST for restart with name", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "restarted", name: "MyApp.Production" }),
@@ -178,6 +189,28 @@ describe("iris_production_control", () => {
     expect(mockHttp.post).toHaveBeenCalledWith(
       "/api/executemcp/v2/interop/production/control",
       expect.objectContaining({ action: "restart", name: "MyApp.Production" }),
+    );
+  });
+
+  // AC 12.2.4 — restart action forwards name + timeout + force
+  it("restart action forwards name + timeout + force", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "restarted", name: "MyApp.Production" }),
+    );
+
+    await productionControlTool.handler(
+      { action: "restart", name: "MyApp.Production", timeout: 90, force: true },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/interop/production/control",
+      expect.objectContaining({
+        action: "restart",
+        name: "MyApp.Production",
+        timeout: 90,
+        force: true,
+      }),
     );
   });
 

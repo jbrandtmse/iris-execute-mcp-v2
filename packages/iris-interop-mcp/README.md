@@ -189,6 +189,8 @@ All servers use the same environment variables:
 <details>
 <summary><strong>iris_production_control</strong> -- Start a production</summary>
 
+All five actions (`start`, `stop`, `restart`, `update`, `recover`) are verified to work. `start` and `restart` require `name`; `stop`, `update`, and `recover` do not.
+
 **Input:**
 ```json
 {

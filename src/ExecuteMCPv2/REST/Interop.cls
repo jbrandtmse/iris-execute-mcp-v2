@@ -142,9 +142,11 @@ ClassMethod ProductionControl() As %Status
         }
 
         Set tNamespace = tBody.%Get("namespace")
-        Set tTimeout = +$Get(tBody.%Get("timeout"), 120)
+        ; Use direct %Get() with conditional default — $Get() cannot wrap a method call
+        ; (triggers multidim access on %DynamicObject, raising <INVALID CLASS>). BUG-3.
+        Set tTimeout = +tBody.%Get("timeout")
         If tTimeout = 0 Set tTimeout = 120
-        Set tForce = +$Get(tBody.%Get("force"), 0)
+        Set tForce = +tBody.%Get("force")
 
         ; Switch to target namespace for Ens.Director operations
         If tNamespace '= "" {

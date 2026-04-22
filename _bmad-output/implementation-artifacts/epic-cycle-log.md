@@ -982,3 +982,16 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16`. Story 12.4 bumps once for all Epic 12 ObjectScript edits.
 - **Admin tests**: 211 → 214 (+3 as targeted). All 11 admin test files pass.
 - **Commit**: `cc810a0` — `feat(story-12.1): password change fix + validate policy surface (BUG-1, FEAT-4)`.
+
+## Story 12.2: Production control DynamicObject audit (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/REST/Interop.cls` (2-line fix at 145/147), `packages/iris-interop-mcp/src/__tests__/production.test.ts` (+2 new tests), `packages/iris-interop-mcp/README.md` (per-action note), `CHANGELOG.md` (BUG-3 entry appended to 2026-04-22 block), story file.
+- **Key design decisions**:
+  - **Root cause**: `$Get(tBody.%Get("timeout"), 120)` — `$Get()` cannot wrap a method-call expression; triggers multidim access on the `%DynamicObject` receiver, raising `<INVALID CLASS>`. Replaced with `+tBody.%Get(…)` + conditional default.
+  - **Prophylactic audit confirmed**: only 2 occurrences of the anti-pattern across the entire `src/ExecuteMCPv2/` tree, both in `ProductionControl()`. No other handler affected.
+  - **Rule candidate**: "Don't wrap method calls in `$Get()` — it's a simple-variable-reference function." Add to post-Epic-12 retro.
+- **Code review**: 0 HIGH, 0 MEDIUM, 3 LOW/INFO deferred (pre-existing `tTimeout=0` override shadow case; CHANGELOG ordering cosmetic; test count +2 vs +3-4 target — coverage complete via 2 pre-existing tests that cover the target paths).
+- **Live verification**: `iris_production_control action:"stop" namespace:"HSCUSTOM"` → `{action:"stopped"}` (was `<INVALID CLASS>`). Full 5-action roundtrip against a running production is Story 12.4's job.
+- **`BOOTSTRAP_VERSION`**: unchanged at `3fb0590b5d16`. Story 12.4 bumps.
+- **Interop tests**: 161 → 163 (+2).
+- **Commit**: pending (will land as `feat(story-12.2)`).

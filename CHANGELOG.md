@@ -6,6 +6,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 
 ### Fixed
 
+- **`iris_production_control` no longer fails with `<INVALID CLASS>`** ([src/ExecuteMCPv2/REST/Interop.cls](src/ExecuteMCPv2/REST/Interop.cls)) — replaced `$Get(tBody.%Get(…))` anti-pattern with direct `tBody.%Get(…)` + default. `$Get()` with a method-call argument triggers a multidimensional-variable access on the `%DynamicObject` that fails under the new strict evaluator. All five control actions (`start`, `stop`, `restart`, `update`, `recover`) unblocked by the same fix. BUG-3.
 - **`iris_user_password action:"change"` now actually changes the password** ([src/ExecuteMCPv2/REST/Security.cls](src/ExecuteMCPv2/REST/Security.cls)) — handler was setting the `ChangePassword` boolean (force-change-on-next-login flag) instead of the `Password` property. Every change attempt failed with 'not a valid boolean'. BUG-1.
 
 ### Added
