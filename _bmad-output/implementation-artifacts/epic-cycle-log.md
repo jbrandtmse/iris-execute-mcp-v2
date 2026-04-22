@@ -917,3 +917,43 @@ Single `BOOTSTRAP_VERSION` bump at end of Story 11.3 covers all Epic 11 ObjectSc
 - **Code review (CLEAN — 0 HIGH, 0 MEDIUM, 2 LOW deferred):** The two LOW findings are pre-existing `%ResultSet.Close()` not-called-on-exception-path issues in `Config.cls:DatabaseList()` and `SystemConfig.cls` locale branch — NOT introduced by this story. Logged to deferred-work.md for a future hardening pass. All 10 ACs pass.
 - **Final verification:** `pnpm turbo run build` → clean across 6 packages. `pnpm turbo run test` → admin 210 → 211, ops 150 → 152 (+3 tests), full suite 12/12 green. `pnpm turbo run lint` → no new warnings on touched files. No `^ClineDebug` in committed code. Temporary probe class `ExecuteMCPv2.Temp.Probe11` was loaded to HSCUSTOM for Bug #9 research and deleted after use (verified absent via `iris_doc_list filter=Probe`).
 
+### Story 11.4: TypeScript tool fixes (non-bootstrap)
+- **Status:** done
+- **Commit:** 938c5b2
+- **Files touched:**
+  - `packages/iris-dev-mcp/src/tools/intelligence.ts` — Bug #7: `params.set("files", files ?? "*.cls,*.mac,*.int,*.inc")` unconditionally sends the documented default
+  - `packages/iris-dev-mcp/src/tools/doc.ts` — Bug #16: `iris_doc_put` description leads with **Debug/scratch tool**
+  - `packages/iris-data-mcp/src/tools/rest.ts` — Bug #13: new `scope: "spec-first" | "all"` Zod param; scope:"all" routes to `/api/executemcp/v2/security/webapp` and filters for non-empty dispatchClass (Path A — no new ObjectScript handler needed)
+  - `packages/iris-data-mcp/src/tools/analytics.ts` — Bug #14: new `horologToIso` helper; `lastBuildTime` returned as ISO 8601; raw horolog preserved in new `lastBuildTimeRaw` field
+  - `packages/iris-admin-mcp/src/tools/ssl.ts` — Bug #6 TS surface: Zod `protocols` removed, `tlsMinVersion` + `tlsMaxVersion` added (paired with Story 11.2 server-side break)
+  - `packages/iris-dev-mcp/src/__tests__/intelligence.test.ts` — +2 tests (default files; caller-provided files)
+  - `packages/iris-data-mcp/src/__tests__/rest.test.ts` — +2 tests (spec-first default; all scope)
+  - `packages/iris-data-mcp/src/__tests__/analytics.test.ts` — +3 tests (horolog→ISO; malformed handling; round-trip) + 1 fixture update
+  - `packages/iris-admin-mcp/src/__tests__/ssl.test.ts` — 1 existing test fixture updated during CR to remove stale `protocols` reference
+  - `packages/iris-dev-mcp/README.md`, `packages/iris-data-mcp/README.md`, `packages/iris-admin-mcp/README.md` — per-package sections updated
+  - `tool_support.md` — fields-returned notes for the 4 affected tools
+  - `CHANGELOG.md` — 4 new bullets in existing 2026-04-21 block (2 Fixed, 1 Added scope, 1 Changed doc_put description)
+- **Key design decisions:**
+  - **Bug #13 Path A chosen over Path B**: the existing `/api/executemcp/v2/security/webapp` endpoint (proven by Story 11.2 live verification) already returns every web application with populated `dispatchClass` for REST apps and empty for plain CSP apps. Filtering client-side for non-empty `dispatchClass` and normalizing to `{name, dispatchClass, namespace, swaggerSpec: null}` produced the target shape in ~25 lines of TypeScript with zero server changes. Path B (new ObjectScript handler wrapping `%REST.API.GetAllWebRESTApps` + second bootstrap bump) was unnecessary.
+  - **Bug #14 `horologToIso` locally owned**: the helper is small (≈12 lines) and has exactly one caller. Resisted the YAGNI urge to extract to `@iris-mcp/shared`. Cross-verified against IRIS `$ZDATETIME` round-trip: `67360,85964.1540167` → `2025-06-04T23:52:44.154Z` matches IRIS output `2025-06-04 23:52:44.154`. Handles all edge cases (empty, null, undefined, non-string, malformed, extra-comma) without throwing.
+  - **Bug #6 TS-side break committed cleanly** — no compatibility shim. Pairs with Story 11.2's server-side break. `protocols` field fully removed from Zod schema, destructure, and body-build. Pre-release.
+  - **TS-only verification limitation**: the running MCP server process uses the pre-11.4 compiled code until restart. Dev confirmed baseline bugs still reproduce in running server + unit tests prove fix correctness in new compiled code — the standard TypeScript-only verification pattern (same as Story 10.6). Full live verification happens at next client reconnect.
+- **Code review (CLEAN — 0 HIGH, 0 MEDIUM, 1 LOW auto-resolved, 0 deferred):** reviewer auto-resolved a pre-existing `ssl.test.ts` fixture drift (stale `protocols: 24` in two mock rows) by updating to `tlsMinVersion: 16, tlsMaxVersion: 32` with inline comment. Zero items deferred. 11/11 ACs pass.
+- **Final verification:** `pnpm turbo run build` → clean. `pnpm turbo run test` → dev 274 → 276, data 100 → 105, admin 211 (1 fixture update), full suite 12/12 green. `pnpm turbo run lint` → no new warnings on touched files. No `^ClineDebug`, no debug prints. `BOOTSTRAP_VERSION` unchanged at `3fb0590b5d16` (Path A).
+
+### Epic 11 Wrap (Final)
+
+Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10 baseline:
+
+- **Fixed**: 16 post-publish bugs identified in the 2026-04-21 comprehensive MCP test pass, across 4 of the 5 server packages (`iris-dev-mcp`, `iris-admin-mcp`, `iris-data-mcp`, `iris-ops-mcp`; `iris-interop-mcp` was bug-free). Breakdown: 3 bugs in error envelope/sanitization (Story 11.1), 6 bugs in Security.cls field completeness + `%All` permission semantics + password-change error propagation (Story 11.2), 3 bugs in database/metrics/config accuracy (Story 11.3), 5 TypeScript tool-surface bugs (Story 11.4). All 12 ObjectScript bugs live-verified on HSCUSTOM + USER by both dev and lead layers. TS-only bugs verified at the unit-test layer + baseline-reproduces in running server.
+- **Changed (pre-release breaking)**: 1 schema break — `iris_ssl_manage` / `iris_ssl_list` `protocols` field replaced by `tlsMinVersion` + `tlsMaxVersion` (Story 11.2 server, Story 11.4 Zod). Clean break — no compatibility shim. Accepted because the old `protocols` never wired through to the underlying `Security.SSLConfigs` shape (it was a deprecated IRIS property) — removing a never-working field is not a real break to any working client.
+- **Added**: 1 optional parameter — `iris_rest_manage scope: "spec-first" | "all"` (Story 11.4). Default preserves existing behavior; `"all"` surfaces hand-written `%CSP.REST` dispatch classes.
+- **No new tools.** Suite tool count unchanged at 87 (Epic 10 baseline).
+- **Tests**: 261 → 279 (+18 across Epic 11). Breakdown: 11.1 +2, 11.2 +6, 11.3 +3, 11.4 +7.
+- **Code review**: 0 HIGH, 0 MEDIUM, 1 LOW auto-resolved across the epic (Story 11.4 ssl.test.ts fixture drift), 5 LOW deferred to `deferred-work.md` (3 from 11.1 — locale prefix coverage, mnemonic stale binding, missing OS unit test for SanitizeError; 2 from 11.3 — ResultSet.Close on exception paths). Zero net regressions to main.
+- **Live-verified end-to-end**: all 12 Epic 11 ObjectScript bugs across Stories 11.1, 11.2, 11.3 exercised post-bootstrap-bump on HSCUSTOM (dev) + USER (lead), cross-namespace. Story 11.4 TS-only bugs unit-tested + baseline-in-running-server verified.
+- **`BOOTSTRAP_VERSION` bumps**: 1 (Story 11.3 only — `2689f7f657e4` → `3fb0590b5d16`). Covers all Story 11.1, 11.2, 11.3 ObjectScript edits in one auto-upgrade. Stories 11.1, 11.2, 11.4 are all `BOOTSTRAP_VERSION`-neutral.
+- **Pre-publish gate** (Story 9.3 smoke test + publishing checklist): still pending per memory — should re-run before first npm publish.
+- **Epic 11 status:** All 4 stories `done`. Retrospective `optional` (lead-owned gate before Epic 11 closes).
+
+
