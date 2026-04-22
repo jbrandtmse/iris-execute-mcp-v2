@@ -836,3 +836,37 @@ Six stories, six merge commits (plus log/chore commits). Net delta vs. Epic 9 ba
 - **Live-verified end-to-end** at multiple checkpoints: small-batch + cross-namespace + CSP exports (10.2), %SYS stress test before+after cap fix (10.4), HSCUSTOM 13K-doc export (10.4 testing), all 3 Story 10.5 reproductions (taskId filter, resource+description, role+description, user+description), Users-disabled regression catch+repair (10.5 review).
 - **`BOOTSTRAP_VERSION` bumps**: 1 (Story 10.5 only — `5ffd4dee0649` → `2689f7f657e4`). Stories 10.1, 10.2, 10.3, 10.4, 10.6 were all TypeScript-only.
 - **Epic 10 status:** `done`. All 4 retrospective action items (#1, #2, #3, #7) addressed. Items #4, #5, #6 (process improvements) remain optional follow-ups outside the story pipeline. Retrospective stays `done`.
+
+## Epic 11: Post-Publish Bug Fix Batch (IRIS MCP Server Suite)
+
+Added 2026-04-21 via `/bmad-correct-course` in response to 16 defects surfaced by the 2026-04-21 comprehensive MCP test pass. Sprint change proposal: [_bmad-output/planning-artifacts/sprint-change-proposal-2026-04-21.md](../planning-artifacts/sprint-change-proposal-2026-04-21.md). Story 11.0 (Epic 10 deferred cleanup) explicitly skipped by user direction during epic-cycle kickoff.
+
+Single `BOOTSTRAP_VERSION` bump at end of Story 11.3 covers all Epic 11 ObjectScript edits (Stories 11.1, 11.2, 11.3) in one auto-upgrade. Inline CHANGELOG + README updates per story — no standalone docs rollup story since Epic 11 adds zero new tools.
+
+### Story 11.1: ObjectScript error envelope & sanitization
+- **Status:** done
+- **Commit:** b3be8a4
+- **Files touched:**
+  - `src/ExecuteMCPv2/REST/Command.cls` — `Execute()` restructured with `tCmdErrored` flag + post-catch single dispatch to guarantee exactly one `RenderResponseBody` per request
+  - `src/ExecuteMCPv2/Utils.cls` — `SanitizeError()` strips a single leading `ERROR #N: ` / `خطأ #N: ` prefix before the final `$$$ERROR` wrap
+  - `src/ExecuteMCPv2/REST/Security.cls` — `UserPassword()` validate branch gates unconditional `$Replace(tMsg, tPassword, "***")` on `$Length(tPassword) >= 8`
+  - `packages/iris-dev-mcp/src/__tests__/execute.test.ts` — +1 test: `returns structured error envelope when server returns JSON error`
+  - `packages/iris-admin-mcp/src/__tests__/user.test.ts` — +1 test: `does not redact short candidate password in validate error text`
+  - `CHANGELOG.md` — new `## [Pre-release — 2026-04-21]` block with three `### Fixed` bullets
+  - `_bmad-output/planning-artifacts/epics.md` — Epic 11 section (added via bmad-correct-course)
+  - `_bmad-output/planning-artifacts/sprint-change-proposal-2026-04-21.md` — Epic 11 SCP (added via bmad-correct-course)
+  - `_bmad-output/implementation-artifacts/11-1-objectscript-error-envelope-and-sanitization.md` — Story 11.1 spec + Dev Agent Record
+  - `_bmad-output/implementation-artifacts/sprint-status.yaml` — epic-11 → in-progress, story 11.1 → done
+  - `_bmad-output/implementation-artifacts/deferred-work.md` — 3 LOW findings from review (OS unit test for SanitizeError strip, non-English locale prefix coverage, `Use tInitIO` mnemonic stale binding)
+- **Key design decisions:**
+  - **Bug #1 had TWO layered defects, not one.** Dev investigation with `^ClineDebug` tracing (per Task 3) surfaced: (1) I/O redirect never disabled before `RenderResponseBody` — JSON error went to `%ExecuteMCPOutput` capture buffer; (2) argumentless `Quit` inside `Catch exCmd { ... Quit }` exits only the catch body, not the outer Try — control fell through to the success-path `RenderResponseBody($$$OK, , tResult)` which clobbered the error envelope. First fix attempt (disable redirect inside catch, keep the Quit) surfaced defect #2 as `{"output":""}` responses. Restructured to a `tCmdErrored` flag + post-catch dispatch for guaranteed single render.
+  - **Bug #11 fix (SanitizeError)**: iterates both `"ERROR #"` (English) and `"خطأ #"` (Arabic — IRIS on this instance runs `araw` locale) prefixes, uses `$Find`/`$Extract` + numeric-only `1.N` check on the code chunk, `Quit`s after a single strip. Does NOT pull in a regex library (ObjectScript-idiomatic).
+  - **Bug #8 fix (password over-redaction)**: gated the unconditional `$Replace` at `$Length(tPassword) >= 8` to match the existing partial-match loop's behavior for short passwords. Layered defenses preserved: loop still redacts fragments `>= 3` chars for passwords `>= 8` chars.
+  - **No `BOOTSTRAP_VERSION` bump.** Epic 11 bundles all ObjectScript changes into Story 11.3's single bump.
+  - **Live verification at both dev AND lead layers**: Dev tested all 5 reproductions on HSCUSTOM; Lead independently verified via MCP tools on USER namespace (cross-namespace check). Both confirmed Bug #1 (3 error cases + 1 success case) and Bug #8 (`validate password="a"` returns intact `"Password does not match length or pattern requirements"`) pre-commit.
+- **Review findings (0 HIGH, 0 MEDIUM, 3 LOW deferred):**
+  - LOW deferred #1: Missing OS unit test at `src/ExecuteMCPv2/Tests/UtilsTest.cls::TestSanitizeErrorStripsLeadingErrorPrefix` — reviewer scope-bounded (AC 11.1.5 explicitly scoped to +2 TS tests; story anti-pattern says don't modify other .cls files).
+  - LOW deferred #2: Prefix-strip only handles English + Arabic; other IRIS locales (`ERREUR` French, `FEHLER` German, etc.) will still double-wrap. Future: extend the prefix list or switch to `$System.Status.DecomposeStatus`.
+  - LOW deferred #3: `Use tInitIO` without mnemonic clause leaves the mnemonic routine bound on the device. Inert because `ReDirectIO(0)` disables the redirect flag; latent concern only.
+  - Dismissed: 2 items (non-numeric-code-after-# theoretical; no OS unit test for Execute covered by live verification).
+- **Final verification:** `pnpm turbo run test` → 12/12 packages green, +2 new tests (`iris-dev-mcp` 273 → 274, `iris-admin-mcp` 203 → 204). `pnpm turbo run build` → clean. Lint clean on touched files. No `^ClineDebug` in committed code. `^ClineDebug` killed on IRIS post-investigation.
