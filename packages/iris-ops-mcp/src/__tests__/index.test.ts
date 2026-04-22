@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 16 tools", () => {
+    it("should create a server instance with 17 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(16);
+      expect(server.toolCount).toBe(17);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -66,7 +66,7 @@ describe("iris-ops-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names array with 16 entries", () => {
+    it("should return tool names array with 17 entries", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -74,10 +74,11 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(16);
+      expect(names).toHaveLength(17);
       expect(names).toContain("iris_metrics_system");
       expect(names).toContain("iris_metrics_alerts");
       expect(names).toContain("iris_metrics_interop");
+      expect(names).toContain("iris_alerts_manage");
       expect(names).toContain("iris_jobs_list");
       expect(names).toContain("iris_locks_list");
       expect(names).toContain("iris_journal_info");

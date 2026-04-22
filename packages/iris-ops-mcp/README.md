@@ -1,6 +1,6 @@
 # @iris-mcp/ops
 
-**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, journals, mirrors, audit events, database integrity, licensing, ECP, task scheduling, and system configuration via the Model Context Protocol.
+**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, journals, mirrors, audit events, database integrity, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -108,6 +108,7 @@ All servers use the same environment variables:
 | `iris_metrics_system` | System metrics in Prometheus format | *(none)* | readOnly, idempotent |
 | `iris_metrics_alerts` | Active system alerts with severity | *(none)* | readOnly, idempotent |
 | `iris_metrics_interop` | Interoperability volume and interface metrics | `namespace?` | readOnly, idempotent |
+| `iris_alerts_manage` | Manage system alert state (reset counter) | `action` | destructive, idempotent |
 
 ### Process & Lock Tools
 
@@ -224,6 +225,29 @@ processes on the instance — not per-process snapshots.
     }
   ],
   "count": 1
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_alerts_manage</strong> -- Reset alert counter</summary>
+
+Single supported action: **reset** — calls `$SYSTEM.Monitor.Clear()` in `%SYS` to clear the in-memory alert counter and system state. Counterpart to `iris_metrics_alerts`.
+
+> **Scope-down note (Epic 12):** Only `reset` is supported. Actions `clear` (per-alert by index) and `acknowledge` are NOT available — IRIS has no native API for either. Both are deferred to Epic 13 if demand materialises. `reset` does NOT truncate `alerts.log`; historical entries remain on disk for audit.
+
+**Input:**
+```json
+{
+  "action": "reset"
+}
+```
+
+**Output:**
+```json
+{
+  "action": "reset",
+  "clearedAt": "2026-04-22T10:50:00Z"
 }
 ```
 </details>
@@ -587,7 +611,7 @@ Most operations tools are **system-level** and do not require a namespace parame
 - `iris_task_manage` -- specify the execution namespace for a new task
 
 **Tools that do NOT accept `namespace`** (system-wide scope):
-- `iris_metrics_system`, `iris_metrics_alerts`
+- `iris_metrics_system`, `iris_metrics_alerts`, `iris_alerts_manage`
 - `iris_jobs_list`, `iris_locks_list`
 - `iris_journal_info`, `iris_mirror_status`, `iris_audit_events`
 - `iris_database_check`, `iris_license_info`, `iris_ecp_status`

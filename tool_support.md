@@ -141,28 +141,29 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/ops` — Operations & Monitoring (16)
+## `@iris-mcp/ops` — Operations & Monitoring (17)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
 | 1 | `iris_metrics_system` | 🟥 ExecuteMCPv2 | `/monitor/system` |
 | 2 | `iris_metrics_alerts` | 🟥 ExecuteMCPv2 | `/monitor/alerts` |
 | 3 | `iris_metrics_interop` | 🟥 ExecuteMCPv2 | `/monitor/interop` |
-| 4 | `iris_jobs_list` | 🟥 ExecuteMCPv2 | `/monitor/jobs` |
-| 5 | `iris_locks_list` | 🟥 ExecuteMCPv2 | `/monitor/locks` |
-| 6 | `iris_journal_info` | 🟥 ExecuteMCPv2 | `/monitor/journal` |
-| 7 | `iris_mirror_status` | 🟥 ExecuteMCPv2 | `/monitor/mirror` |
-| 8 | `iris_audit_events` | 🟥 ExecuteMCPv2 | `/monitor/audit` |
-| 9 | `iris_database_check` | 🟥 ExecuteMCPv2 | `/monitor/database` |
-| 10 | `iris_license_info` | 🟥 ExecuteMCPv2 | `/monitor/license` |
-| 11 | `iris_ecp_status` | 🟥 ExecuteMCPv2 | `/monitor/ecp` |
-| 12 | `iris_task_manage` | 🟥 ExecuteMCPv2 | `/task/manage` |
-| 13 | `iris_task_list` | 🟥 ExecuteMCPv2 | `/task/list` |
-| 14 | `iris_task_run` | 🟥 ExecuteMCPv2 | `/task/run` |
-| 15 | `iris_task_history` | 🟥 ExecuteMCPv2 | `/task/history` |
-| 16 | `iris_config_manage` | 🟥 ExecuteMCPv2 | `/system/config` |
+| 4 | `iris_alerts_manage` | 🟥 ExecuteMCPv2 | `/monitor/alerts/manage` |
+| 5 | `iris_jobs_list` | 🟥 ExecuteMCPv2 | `/monitor/jobs` |
+| 6 | `iris_locks_list` | 🟥 ExecuteMCPv2 | `/monitor/locks` |
+| 7 | `iris_journal_info` | 🟥 ExecuteMCPv2 | `/monitor/journal` |
+| 8 | `iris_mirror_status` | 🟥 ExecuteMCPv2 | `/monitor/mirror` |
+| 9 | `iris_audit_events` | 🟥 ExecuteMCPv2 | `/monitor/audit` |
+| 10 | `iris_database_check` | 🟥 ExecuteMCPv2 | `/monitor/database` |
+| 11 | `iris_license_info` | 🟥 ExecuteMCPv2 | `/monitor/license` |
+| 12 | `iris_ecp_status` | 🟥 ExecuteMCPv2 | `/monitor/ecp` |
+| 13 | `iris_task_manage` | 🟥 ExecuteMCPv2 | `/task/manage` |
+| 14 | `iris_task_list` | 🟥 ExecuteMCPv2 | `/task/list` |
+| 15 | `iris_task_run` | 🟥 ExecuteMCPv2 | `/task/run` |
+| 16 | `iris_task_history` | 🟥 ExecuteMCPv2 | `/task/history` |
+| 17 | `iris_config_manage` | 🟥 ExecuteMCPv2 | `/system/config` |
 
-**Mix:** 0 Atelier · 16 ExecuteMCPv2 · 0 other — **fully custom**.
+**Mix:** 0 Atelier · 17 ExecuteMCPv2 · 0 other — **fully custom**.
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
 

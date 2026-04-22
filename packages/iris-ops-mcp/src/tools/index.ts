@@ -12,6 +12,7 @@ import {
   metricsAlertsTool,
   metricsInteropTool,
 } from "./metrics.js";
+import { alertsManageTool } from "./alerts.js";
 import { jobsListTool, locksListTool } from "./jobs.js";
 import {
   journalInfoTool,
@@ -36,6 +37,7 @@ export const tools: ToolDefinition[] = [
   metricsSystemTool,
   metricsAlertsTool,
   metricsInteropTool,
+  alertsManageTool,
   jobsListTool,
   locksListTool,
   journalInfoTool,

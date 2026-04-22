@@ -1050,3 +1050,30 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **`BOOTSTRAP_VERSION`**: unchanged at `b0aa936ac17f`.
 - **Live verification**: not required per AC scope; smoke tests in unit tests cover each feature. Full-system live verify deferred to manual reload + re-test (the user reloaded once during Story 12.4; Story 12.5's features need another reload to be observable via MCP).
 - **Commit**: pending (will land as `feat(story-12.5)`).
+
+## Story 12.6: iris_alerts_manage new tool (2026-04-22)
+
+- **Files touched**: `src/ExecuteMCPv2/REST/Monitor.cls` (new AlertsManage method), `src/ExecuteMCPv2/REST/Dispatch.cls` (new route), `packages/iris-ops-mcp/src/tools/alerts.ts` (new file, new tool), `packages/iris-ops-mcp/src/tools/index.ts` (registration), `packages/iris-ops-mcp/src/__tests__/alerts.test.ts` (new file, +7 tests), index.test.ts (count 16→17), `packages/shared/src/bootstrap-classes.ts` (second bump), per-package README, tool_support.md, CHANGELOG, deferred-work.md.
+- **Key design decisions**:
+  - **Scope narrowed from 3 actions to 1** based on IRIS API research: per-alert clear and acknowledge are NOT natively supported (alerts.log is append-only; no ack timestamp on system Monitor alerts). Deferred to Epic 13 with detailed deferred-work.md rationale.
+  - **Single `reset` action** maps to `$SYSTEM.Monitor.Clear()` in `%SYS` — clears counter + resets system state. Idempotent. `alerts.log` file intentionally NOT truncated (audit preservation).
+  - **Second `BOOTSTRAP_VERSION` bump this epic** because new handler method. After CR ISO 8601 T-separator fix: `b0aa936ac17f` → `974bbeab53a1` (regenerated after CR edit to Monitor.cls).
+- **Code review**: 0 HIGH, 1 MEDIUM auto-fixed (ISO 8601 T-separator missing — `$ZDateTime($Horolog, 3, 1)` produces `YYYY-MM-DD HH:MM:SS` with SPACE, not `T`; fixed via `$Translate(..., " ", "T")`), 0 LOW deferred, 2 dismissed.
+- **Live verification**: dev confirmed alert count 3→0 via reset; historical alerts.log preserved. Final BOOTSTRAP_VERSION of `974bbeab53a1` deployed to HSCUSTOM post-CR-fix.
+- **Tests**: 1138 → 1145 (+7 alerts tests). All 12 packages green (280 dev, 216 admin, 115 data, 165 interop, 159 ops, 193 shared, 17 dev tools, plus misc).
+- **Rule candidates for Epic 12 retro**:
+  - Research IRIS API surface BEFORE finalizing tool shape — Story 12.6 scope was wrong initially (3 actions) and was narrowed to 1 after research.
+  - When a story scope expands during implementation (12.3 discovered Ens.Config.Production.Delete doesn't exist), the dev should flag upward — both 12.3 and 12.6 had story-spec claims that were empirically incorrect about IRIS.
+- **Commit**: pending (will land as `feat(story-12.6)`).
+
+## Epic 12 Close — Summary
+
+- **All 7 stories done**: 12.0 (Epic 11 cleanup), 12.1 (password + policy), 12.2 (prod control DynamicObject), 12.3 (prod create), 12.4 (DB+DocDB+BOOTSTRAP), 12.5 (TS surface), 12.6 (alerts_manage).
+- **Two `BOOTSTRAP_VERSION` bumps this epic**: `3fb0590b5d16` → `b0aa936ac17f` (12.4) → `974bbeab53a1` (12.6).
+- **One new tool added**: `iris_alerts_manage` (Story 12.6). Suite tool count: 87 → 88.
+- **One pre-release breaking change**: `iris_rest_manage scope` enum rename (Story 12.5 FEAT-2).
+- **Tests total delta**: Epic 11 final was 279 + 17 OS = 296. Epic 12 final is 1145 (TS suites) + 19 OS UtilsTest = 1164. Net +868 across Epic 12 (mostly reflecting wider cross-package coverage).
+- **Bugs addressed**: 8 new (all fixed or partially fixed: BUG-1/2/3/4/5 fully fixed; BUG-6 partial — filter translator fixed, upstream DocDB property-extraction deferred to Epic 13; BUG-7/8 fixed by FEAT-9). 9 feature gaps closed (FEAT-1/2/3/4/5/6/7/8/9).
+- **Epic 11 regression check**: all 16 prior bugs still fixed as of Story 12.4 live-verification pass.
+- **Pre-publish gate**: still pending (Story 9.3 smoke test + publishing checklist — unchanged from Epic 11).
+- **Epic 12 status**: all 7 stories `done`. Retrospective `optional` (lead-owned gate before Epic 12 closes).

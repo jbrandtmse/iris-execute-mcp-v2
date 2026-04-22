@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "b0aa936ac17f";
+export const BOOTSTRAP_VERSION = "974bbeab53a1";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "b0aa936ac17f";
+Parameter BOOTSTRAPVERSION = "974bbeab53a1";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -6195,6 +6195,77 @@ ClassMethod LicenseInfo() As %Status
     Quit $$$OK
 }
 
+/// Reset the system alert counter and state via <code>$SYSTEM.Monitor.Clear()</code>.
+/// <p>Accepts a JSON body with a single field: <code>action</code> (must be "reset").</p>
+/// <p>The "reset" action calls <code>$SYSTEM.Monitor.Clear()</code> in the <b>%SYS</b>
+/// namespace, which clears the in-memory alert counter and resets the system monitor
+/// state. The <code>alerts.log</code> file is <b>NOT</b> truncated — historical entries
+/// remain on disk for audit. <code>iris_metrics_alerts</code> will re-populate active
+/// alerts on the next poll if conditions persist.</p>
+/// <p>Note: Per-alert <code>clear</code> by index and <code>acknowledge</code> are not
+/// supported — IRIS exposes no native API for either. Deferred to Epic 13 if needed.</p>
+ClassMethod AlertsManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate 'action' field before namespace switch
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Only "reset" is supported
+        If tAction '= "reset" {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: reset. Note: 'clear' (per-alert by index) and 'acknowledge' are not available — IRIS has no native API for either.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for $SYSTEM.Monitor.Clear()
+        Set $NAMESPACE = "%SYS"
+
+        ; Clear the alert counter and system monitor state
+        Do $SYSTEM.Monitor.Clear()
+
+        ; Restore namespace before building response
+        Set $NAMESPACE = tOrigNS
+
+        ; Build response with ISO 8601 timestamp: replace space separator with "T"
+        ; $ZDateTime($Horolog, 3, 1) => "YYYY-MM-DD HH:MM:SS"; $Translate adds "T"
+        Set tTimestamp = $Translate($ZDateTime($Horolog, 3, 1), " ", "T")_"Z"
+        Set tResult = {}
+        Do tResult.%Set("action", "reset")
+        Do tResult.%Set("clearedAt", tTimestamp)
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return ECP (Enterprise Cache Protocol) connection status in JSON format.
 /// <p>Checks whether ECP is configured on this instance. Returns connection
 /// health when configured, or a graceful "not configured" status when ECP
@@ -7230,6 +7301,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 6: Operations and Monitoring -->
   <Route Url="/monitor/system" Method="GET" Call="ExecuteMCPv2.REST.Monitor:SystemMetrics" />
   <Route Url="/monitor/alerts" Method="GET" Call="ExecuteMCPv2.REST.Monitor:SystemAlerts" />
+  <Route Url="/monitor/alerts/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:AlertsManage" />
   <Route Url="/monitor/interop" Method="GET" Call="ExecuteMCPv2.REST.Monitor:InteropMetrics" />
   <Route Url="/monitor/jobs" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JobsList" />
   <Route Url="/monitor/locks" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LocksList" />
