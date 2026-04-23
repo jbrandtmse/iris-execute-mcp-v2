@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__iris-dev-mcp__iris_server_info",
+      "mcp__iris-dev-mcp__iris_doc_list",
+      "mcp__iris-dev-mcp__iris_sql_execute",
+      "mcp__mcp-server-iris__execute_sql",
+      "Bash(curl -s -u \"_SYSTEM:SYS\" -X POST \"http://localhost:52773/api/atelier/v8/HSCUSTOM/action/query\" -H \"Content-Type: application/json\" -d '{\"query\": \"SELECT 1 AS TestCol, '\\\\''Hello'\\\\'' AS Greeting\"}')",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -u \"_SYSTEM:SYS\" -X POST \"http://localhost:52773/api/atelier/v8/HSCUSTOM/action/query\" -H \"Content-Type: application/json\" -d '{\"query\": \"SELECT 1 AS TestCol\"}')",
+      "Bash(IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_NAMESPACE=HSCUSTOM timeout 5 node packages/iris-dev-mcp/dist/index.js)",
+      "mcp__iris-dev-mcp__iris_execute_tests",
+      "mcp__iris-dev-mcp__iris_doc_put",
+      "mcp__iris-dev-mcp__iris_execute_command",
+      "mcp__iris-execute-mcp__execute_classmethod",
+      "mcp__iris-dev-mcp__iris_doc_compile",
+      "mcp__iris-dev-mcp__iris_doc_load",
+      "Bash(pnpm --filter @iris-mcp/dev test)",
+      "Bash(pnpm build:*)",
+      "mcp__iris-dev-mcp__iris_execute_classmethod",
+      "mcp__iris-admin-mcp__iris_namespace_list",
+      "mcp__iris-admin-mcp__iris_database_list",
+      "mcp__iris-admin-mcp__iris_role_list",
+      "mcp__iris-data-mcp__iris_rest_manage",
+      "mcp__iris-admin-mcp__iris_webapp_get",
+      "mcp__iris-interop-mcp__iris_production_messages",
+      "mcp__iris-dev-mcp__iris_doc_get"
+    ]
+  }
+}

@@ -2,6 +2,6 @@
     "objectscript.conn": {
         "server": "local",
         "ns": "HSCUSTOM",
-        "active": false
+        "active": true
     }
 }
