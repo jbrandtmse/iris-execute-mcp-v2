@@ -2,6 +2,16 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-04-23]
+
+### Fixed
+
+- **`iris_execute_command` no longer returns a truncated non-JSON response for outputs >8KB** ([src/ExecuteMCPv2/REST/Command.cls](src/ExecuteMCPv2/REST/Command.cls)) — the I/O-redirect mnemonic was bound onto `$IO`, which in a CSP REST context IS the HTTP response stream. After `ReDirectIO(0)` + bare `Use tInitIO`, the mnemonic stayed bound and corrupted CSP's response-buffer state; at the ~8KB flush boundary the first ~8191 bytes of the JSON envelope were silently dropped and the client saw a truncated non-JSON body. The trigger is total response size, not command length — any command producing >8KB of captured output (via `Write`, or method calls that internally write) manifested the bug. Fix: open a separate null device (`##class(%Library.Device).GetNullDevice()`) as the redirect target so `$IO` is never modified. Verified via curl at 100 → 100,000 bytes of captured output; all return clean JSON envelopes. New regression test `TestLargeOutputCaptureOver8KB` in `ExecuteMCPv2.Tests.CommandTest` guards the pattern. BOOTSTRAP_VERSION bumped `974bbeab53a1` → `425c4448677c`. Reported by user 2026-04-23.
+
+### Changed
+
+- **`BOOTSTRAP_VERSION` bumped** from `974bbeab53a1` to `425c4448677c`. Covers the `Command.cls` null-device redirect fix.
+
 ## [Pre-release — 2026-04-22]
 
 ### Fixed

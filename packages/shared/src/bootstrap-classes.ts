@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "974bbeab53a1";
+export const BOOTSTRAP_VERSION = "425c4448677c";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "974bbeab53a1";
+Parameter BOOTSTRAPVERSION = "425c4448677c";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -779,12 +779,17 @@ ClassMethod Execute() As %Status
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
-        ; Set up I/O redirect to capture Write output
+        ; Set up I/O redirect to capture Write output via a SEPARATE null device.
+        ; Binding the mnemonic on $IO (the HTTP response stream) leaves device
+        ; parameters altered even after ReDirectIO(0) + bare \`Use tInitIO\`, which
+        ; causes CSP's response-body flush to silently drop the first ~8KB of the
+        ; JSON envelope when it exceeds the buffer boundary. By doing the redirect
+        ; on a throw-away null device, the HTTP response stream stays pristine.
         Set %ExecuteMCPOutput = ""
         Set tInitIO = $IO
-        Set tWasRedirected = ##class(%Library.Device).ReDirectIO()
-        Set tOldMnemonic = ##class(%Library.Device).GetMnemonicRoutine()
-        Use tInitIO::("^"_$ZNAME)
+        Set tNull = ##class(%Library.Device).GetNullDevice()
+        Open tNull:::1
+        Use tNull::("^"_$ZNAME)
         Set tRedirected = 1
         Do ##class(%Library.Device).ReDirectIO(1)
 
@@ -800,11 +805,13 @@ ClassMethod Execute() As %Status
             Set tCmdStatus = exCmd.AsStatus()
         }
 
-        ; Fully restore the original I/O state. Unconditionally disable redirect
-        ; first so subsequent writes (RenderResponseBody) reach the HTTP response
-        ; stream rather than the %ExecuteMCPOutput capture buffer.
+        ; Restore the original I/O state. Disable redirect, switch back to the
+        ; original HTTP response stream ($IO), and close the scratch null device.
+        ; Since the mnemonic was bound on tNull (not tInitIO), $IO is untouched
+        ; and CSP's response buffer flush path is clean.
         Do ##class(%Library.Device).ReDirectIO(0)
         Use tInitIO
+        Close tNull
         Set tRedirected = 0
 
         ; Restore namespace before rendering response
@@ -822,10 +829,13 @@ ClassMethod Execute() As %Status
         }
     } Catch ex {
         ; Ensure redirection is restored on unexpected error before rendering.
+        ; Switch back to the untouched HTTP response stream; close the null
+        ; device if it was opened. Any errors during cleanup are swallowed.
         Try {
             If tRedirected {
                 Do ##class(%Library.Device).ReDirectIO(0)
                 If $Get(tInitIO) '= "" { Use tInitIO }
+                If $Get(tNull) '= "" { Close tNull }
             }
         } Catch {}
         Set $NAMESPACE = tOrigNS

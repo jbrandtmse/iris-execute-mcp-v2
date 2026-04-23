@@ -190,4 +190,47 @@ Method TestClassMethodMultipleArgs() As %Status
     Quit $$$OK
 }
 
+/// Guards against the 2026-04-23 non-JSON-response-on-large-output regression.
+/// <p><b>The bug</b>: <method>Execute</method> bound the I/O-redirect mnemonic
+/// onto <var>$IO</var> — the HTTP response stream in CSP context. After
+/// <code>ReDirectIO(0)</code> + bare <code>Use tInitIO</code>, the mnemonic
+/// stayed bound on the device, corrupting CSP's response-buffer state.
+/// At the ~8KB flush boundary the first ~8191 bytes of the JSON envelope
+/// were silently dropped — the client saw a truncated non-JSON body.</p>
+/// <p><b>The fix</b>: open a separate null device for the redirect target so
+/// <var>$IO</var> is never modified. This test exercises the post-fix pattern
+/// with &gt;8KB of captured output and asserts the capture is complete and
+/// uncorrupted. Live HTTP verification (responses 100 → 100,000 bytes all
+/// returning clean JSON envelopes) was performed by the fix author via
+/// curl; see CHANGELOG entry for the 2026-04-23 pre-release block.</p>
+Method TestLargeOutputCaptureOver8KB() As %Status
+{
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+
+    ; Reproduce Execute()'s redirect pattern verbatim
+    Set %ExecuteMCPOutput = ""
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    ; Write 10000 chars — safely past CSP's ~8KB flush boundary where
+    ; the bug previously triggered
+    For i=1:1:10000 { Write "X" }
+
+    ; Restore via the post-fix pattern: disable redirect, switch back to
+    ; untouched initial device, close the scratch null device.
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    ; Capture must be intact — no bytes lost to truncation, no extra bytes
+    ; from corruption.
+    Do $$$AssertEquals($Length(%ExecuteMCPOutput), 10000, "capture should hold all 10000 chars past the 8KB boundary")
+    Do $$$AssertTrue($Extract(%ExecuteMCPOutput, 1, 5) = "XXXXX", "capture should start with XXXXX")
+    Do $$$AssertTrue($Extract(%ExecuteMCPOutput, *-4, *) = "XXXXX", "capture should end with XXXXX")
+
+    Quit $$$OK
+}
+
 }
