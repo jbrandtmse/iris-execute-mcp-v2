@@ -133,6 +133,7 @@ Add to your Cursor MCP settings:
 | `iris_doc_index` | Get class structure (methods, properties, superclasses) | `name`, `namespace?` | readOnly, idempotent |
 | `iris_doc_search` | Search across code with regex/wildcard options | `query`, `regex?`, `word?`, `case?`, `wild?`, `files?`, `sys?`, `gen?`, `max?`, `namespace?` | readOnly, idempotent |
 | `iris_macro_info` | Look up macro definitions and source locations | `name`, `document?`, `includes?`, `namespace?` | readOnly, idempotent |
+| `iris_routine_intermediate` | Fetch the compiled-intermediate routine (.1.int) for a class by its bare name — macro-expanded form IRIS executes at runtime | `name`, `namespace?`, `format?` | readOnly, idempotent |
 
 ### Format and Export Tools
 
@@ -501,6 +502,35 @@ files. Pass an explicit `files` value to narrow the search.
 </details>
 
 <details>
+<summary><strong>iris_routine_intermediate</strong> -- Fetch the macro-expanded compiled-intermediate routine</summary>
+
+Returns the `.1.int` routine (or `.int` for `.mac`/`.int` sources) IRIS generates during compilation — the fully macro-expanded form IRIS actually executes at runtime. Useful when you need to see what `$$$` macros expand to (e.g., what `$$$OK` or `$$$ThrowOnError` resolves to in a specific class's context), or to inspect compiled output without running code.
+
+Pass the **bare class/routine name** (no `.cls` extension). The tool auto-resolves by trying candidate document paths in order: `<name>.1.int`, `<name>.int`, `<name>.mac`. The first 2xx response wins; `candidatesTried` reports which paths were attempted. If all candidates return 404 the tool returns a `compile-first` hint.
+
+**Input:**
+```json
+{
+  "name": "ExecuteMCPv2.REST.Command",
+  "namespace": "HSCUSTOM"
+}
+```
+
+**Output:**
+```json
+{
+  "name": "ExecuteMCPv2.REST.Command",
+  "resolvedDoc": "ExecuteMCPv2.REST.Command.1.int",
+  "namespace": "HSCUSTOM",
+  "content": "ROUTINE ExecuteMCPv2.REST.Command.1 [Type=INT]\n%File ; ExecuteMCPv2.REST.Command.1 ;(CLS)\nzExecute() public {\n New %sc\n Set %sc=$$$OK\n ...\n}\nzRedirects() public {\n ...\n}",
+  "candidatesTried": ["ExecuteMCPv2.REST.Command.1.int"]
+}
+```
+
+The `content` string contains the routine body as IRIS compiled it (newline-joined), including the ROUTINE header, methodimpl declarations, and macro-expanded ObjectScript.
+</details>
+
+<details>
 <summary><strong>iris_doc_convert</strong> -- Convert document format</summary>
 
 **Input:**
@@ -755,7 +785,7 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 23 tools in this package accept the `namespace` parameter** except:
+**All 24 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.

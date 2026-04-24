@@ -1097,4 +1097,32 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
   3. `.cls` suffix stripping — `iris_routine_intermediate({ name: "ExecuteMCPv2.REST.Command.cls", namespace: "HSCUSTOM" })` returned identical output to #1 (suffix stripped correctly in live conditions, matching unit-test expectation).
 - **Tests**: 280 → **293** dev-mcp tests (+13, exceeded target of +9). Full suite **1158 passing** (up from 1145, +13).
 - **Bootstrap drift check**: hash unchanged at `425c4448677c` (AC stated `974bbeab53a1` was outdated — main had drifted to `425c4448677c` via commit `c2b5bec` prior to Story 13.1; the AC's *intent* of "no drift from TS-only changes" is satisfied).
-- **Commit**: pending (will land as `feat(story-13.1)`).
+- **Commit**: `2f24b66` — `feat(story-13.1): new tool iris_routine_intermediate closes gap vs external objectscript-routine-mcp`.
+
+## Story 13.2: Documentation rollup (2026-04-23)
+
+- **Files touched**: `README.md` (suite — dev row 23→24 + description append + suite total 87→88 + ASCII diagram `(23)`→`(24)`), `packages/iris-dev-mcp/README.md` (new catalog row under Code Intelligence Tools + new `<details>` example block using `ExecuteMCPv2.REST.Command` in HSCUSTOM + "All 23 tools"→"All 24 tools" callout), `packages/iris-mcp-all/README.md` (meta-package dev row + suite total), `tool_support.md` (heading `(23)`→`(24)`, new row #24, Mix `17 Atelier`→`18 Atelier`, rollup dev + Total rows updated, 3 prose tweaks to dependency-implications), `CHANGELOG.md` (new `### Added` section in the existing 2026-04-23 entry with verbatim AC text), `docs/migration-v1-v2.md` (2 tool-count references + dev row).
+- **Key design decisions**:
+  - **Zero code changes** — pure docs story, verified via `git status` showing only .md files touched.
+  - **Example block uses live-verified target** — `ExecuteMCPv2.REST.Command` in HSCUSTOM, matching the Story 13.1 live-verification example.
+  - **CHANGELOG `### Added` placed first within the 2026-04-23 block** — Added → Fixed → Changed order per project convention (e.g., 2026-04-20 block).
+  - **Pre-existing `@iris-mcp/ops` count drift (17 heading vs 16 rollup) intentionally left untouched** — dev flagged + CR deferred to `deferred-work.md`. Pre-existing from Epic 12 Story 12.6 (`iris_alerts_manage` addition, commit `a373316`). Story 13.2's AC specified the suite-total transition `87 → 88` which follows the rollup's convention; fixing the drift would require a separate rollup-reconciliation commit.
+- **Code review**: 0 HIGH, 1 MEDIUM auto-fixed (example output shape in per-package README was wrong — had `content` as array of strings and invented non-existent `format` and `ts` fields; CR rewrote against actual return shape from `routine.ts:104-110` and test fixtures), 1 LOW deferred (ops-heading drift as above), 0 INFO.
+- **Live verification**: not applicable — pure docs, no new MCP tools, no ObjectScript. Pipeline Step 2.5 skip condition met.
+- **Tests**: 1158 passing (unchanged from Story 13.1 baseline). Build green. Zero new lint errors.
+- **Bootstrap drift check**: hash unchanged at `425c4448677c`.
+- **Epic 13 close**: `sprint-status.yaml` now shows `epic-13: done`, both stories `done`, retrospective `optional`.
+- **Commit**: pending (will land as `docs(story-13.2)`).
+
+## Epic 13 Close — Summary
+
+- **Both stories done**: 13.1 (tool implementation `2f24b66`), 13.2 (docs rollup `<pending>`).
+- **No `BOOTSTRAP_VERSION` bump** — pure TypeScript / pure docs across the whole epic.
+- **One new tool added**: `iris_routine_intermediate` (Story 13.1). Suite tool count: 87 → 88.
+- **Tests total delta**: Epic 12 final was 1145 TS + 19 OS = 1164. Epic 13 final is 1158 TS (+13) + 19 OS = 1177. Net +13 all in Story 13.1's new routine.test.ts.
+- **Capability gap closed**: no suite tool previously resolved class name → macro-expanded compiled intermediate. `iris_routine_intermediate` closes that gap vs. the external `intersystems-objectscript-routine-mcp` npm package, identified in the 2026-04-23 competitive analysis.
+- **Story 13.0 skipped per user direction** — Epic 12 deferred items (per-alert `clear`, `acknowledge`, BUG-6 DocDB property-extraction) remain in `deferred-work.md`.
+- **Deferred items from Epic 13 code reviews** (1 new, logged in `deferred-work.md`):
+  1. Pre-existing `@iris-mcp/ops` count drift — `tool_support.md` shows 17 in per-section heading/Mix but 16 in Suite-wide rollup and in suite/meta READMEs. Recommended fix path: bump ops rollup 16→17 + suite total 88→89 + meta-package READMEs + any other references. Not scoped to Epic 13.
+- **Epic 13 status**: both stories `done`. Retrospective `optional` (lead-owned gate before Epic 13 closes).
+- **Pre-publish gate**: still pending (Story 9.3 smoke test + publishing checklist — carryover from Epic 11 and Epic 12 retros, Epic 12 Retro A4 MCP-reload note still pending).
