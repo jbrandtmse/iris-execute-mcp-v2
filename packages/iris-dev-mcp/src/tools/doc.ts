@@ -53,7 +53,8 @@ export const docGetTool: ToolDefinition = {
   description:
     "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
     "Use metadataOnly to check existence and get the last-modified timestamp without downloading content. " +
-    "To pull many documents at once, see `iris_doc_export`.",
+    "To pull many documents at once, see `iris_doc_export`. " +
+    "To fetch the macro-expanded compiled intermediate of a class by its bare name, see `iris_routine_intermediate`.",
   inputSchema: z.object({
     name: z
       .string()

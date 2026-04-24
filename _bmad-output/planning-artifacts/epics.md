@@ -3164,3 +3164,125 @@ So that the first npm publish ships a suite that is verified to work on the plat
 **Out of scope**:
 - Alert filtering/query capabilities beyond the current `iris_metrics_alerts` surface — this story is just the CRUD counterpart.
 - Audit-log integration for alert-clear actions (future work).
+
+---
+
+## Epic 13: Post-Epic-12 Tooling Enhancements — Macro-Expanded Routine Lookup
+
+**Goal**: Close the capability gap between the IRIS MCP Server Suite and the external `intersystems-objectscript-routine-mcp` server by adding a dedicated tool that resolves a class name to its compiled-intermediate routine — the macro-expanded form that IRIS actually executes and that error traces reference.
+
+**Scope**: One new tool in `@iris-mcp/dev` plus documentation rollup. Pure TypeScript, Atelier-only — no `ExecuteMCPv2.*` classes, so `BOOTSTRAP_VERSION` is unchanged and existing installs upgrade via `pnpm install && pnpm turbo run build` plus an MCP server restart.
+
+**Functional Requirements (new)**:
+- **FR110** (macro-expanded routine lookup): Developer can retrieve the compiled-intermediate routine (`.1.int` or `.int`) corresponding to a class, given only the class name — without needing to know IRIS's generation-numbering or extension conventions. The tool resolves the class name to a candidate list (`.1.int` → `.int`) and returns the content of the first candidate that exists. Fails fast on auth or network errors; returns a structured "not compiled" hint on all-candidates-404.
+
+**Stories**:
+- 13.1 `iris_routine_intermediate` — class-to-compiled-intermediate routine lookup
+- 13.2 Documentation rollup (README suite + per-package + tool_support.md + CHANGELOG + tool-description cross-refs)
+
+**Out of scope (deferred)**:
+- Per-alert `clear` by index and alert `acknowledge` (carried forward from Epic 12 `deferred-work.md`) — not absorbed; those remain deferred pending demand.
+- Fetching `.mac` (pre-expansion source routine) by class name — `iris_doc_get` handles this via exact name today; add to Epic 13 only if demand materializes.
+- Iterating generation numbers beyond `.1.int` (e.g., `.2.int`) — IRIS rarely emits `.N.int` for N > 1 in normal compilation; defer to future hardening pass.
+
+### Story 13.1: `iris_routine_intermediate` — Class-to-Compiled-Intermediate Routine Lookup
+
+**As an** AI client or developer debugging an IRIS class that uses `$$$macros`,
+**I want** to fetch the compiled-intermediate routine (`.1.int`) for a class by its bare name,
+**so that** I can see what the macros expand to at runtime — the form IRIS actually executes and that error traces reference — without needing to know IRIS's generation-numbering or extension conventions.
+
+**Acceptance Criteria**:
+
+- **AC 13.1.1** — Tool registered as `iris_routine_intermediate` in `@iris-mcp/dev`. Flat underscore name per Epic 9 convention. Annotations: `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`. `scope: "NS"`.
+- **AC 13.1.2** — Input schema:
+  - `name` (string, **required**) — class name, with or without the `.cls` suffix (e.g., `"Ens.Director"`, `"Ens.Director.cls"`, `"MyApp.Service"`). Leading `.` or `..` segments rejected by `validateDocName()` (same path-traversal guard used by `iris_doc_get`).
+  - `namespace` (string, optional) — per-call namespace override. Defaults to configured namespace.
+  - `format` (enum `"udl" | "xml"`, optional, default `"udl"`) — Atelier document format for the returned content. Matches `iris_doc_get`'s `format` param.
+- **AC 13.1.3** — Resolution algorithm (mirrors external tool's [buildRoutineDocCandidates](../../sources/intersystems-objectscript-mcp/src/index.ts#L104)):
+  1. Strip `.cls` suffix if present.
+  2. Build candidate list in order: `<Name>.1.int`, `<Name>.int`.
+  3. For each candidate, call `GET /api/atelier/v{N}/{ns}/doc/{candidate}` via the shared `IrisHttpClient`:
+     - **Success (200)**: return the candidate's content immediately; record which candidate was resolved.
+     - **404**: continue to next candidate.
+     - **401/403**: fail fast with auth error — do not continue candidate loop.
+     - **5xx transient**: one retry per candidate (aligned with existing `iris_doc_get` retry behavior, if any; otherwise single attempt).
+     - **Network misconfig** (`ECONNREFUSED`, `ETIMEDOUT`, etc.): fail fast with connection-hint message.
+  4. If all candidates 404: return a structured "not compiled" error suggesting the caller compile the class via `iris_doc_compile` first.
+- **AC 13.1.4** — Output shape on success:
+  ```json
+  {
+    "name": "Ens.Director",
+    "resolvedDoc": "Ens.Director.1.int",
+    "namespace": "%SYS",
+    "content": "...lines joined by \\n...",
+    "candidatesTried": ["Ens.Director.1.int"]
+  }
+  ```
+  On all-candidates-404:
+  ```json
+  {
+    "name": "Ens.Director",
+    "namespace": "%SYS",
+    "candidatesTried": ["Ens.Director.1.int", "Ens.Director.int"],
+    "hint": "No compiled intermediate routine found. The class may not be compiled in this namespace — try iris_doc_compile first."
+  }
+  ```
+  Returned with `isError: true` in the all-404 case, matching the pattern from `iris_doc_get`.
+- **AC 13.1.5** — Implementation location: new `packages/iris-dev-mcp/src/tools/routine.ts`. Register in `packages/iris-dev-mcp/src/tools/index.ts`. Reuses `validateDocName()` and the shared `IrisHttpClient` — no new transport code.
+- **AC 13.1.6** — Tool description explicitly contrasts with `iris_doc_get` and `iris_macro_info` so LLMs pick the right tool. Required phrasing:
+  > Given a class name, fetch the compiled-intermediate routine — the macro-expanded form IRIS actually executes at runtime. Auto-resolves the class name to the `.1.int` / `.int` candidate IRIS emits during compilation; use `iris_doc_get` when you need a specific doc by exact name with extension. Use `iris_macro_info` when you need individual macro definitions and source locations rather than the expanded routine body.
+- **AC 13.1.7** — Cross-reference back-links added:
+  - `iris_doc_get` description gets one sentence: "To fetch the macro-expanded compiled intermediate of a class by its bare name, see `iris_routine_intermediate`."
+  - `iris_macro_info` description gets one sentence: "For the fully-expanded routine body as IRIS compiles it, see `iris_routine_intermediate`."
+- **AC 13.1.8** — Unit tests in new `packages/iris-dev-mcp/src/__tests__/routine.test.ts`:
+  - Happy path: `.1.int` resolves on first try; response shape correct.
+  - Fallback path: `.1.int` returns 404, `.int` succeeds; `candidatesTried` reflects both.
+  - All-404 path: both candidates 404; returns `isError: true` with hint.
+  - Auth-failure path: 401 on first candidate; fails fast without trying next.
+  - Network-misconfig path: connection-refused error surfaces hint.
+  - Namespace override: explicit `namespace` arg overrides configured default.
+  - `.cls` suffix stripping: `"Pkg.Class.cls"` and `"Pkg.Class"` produce identical candidate lists.
+  - Path traversal rejected: `"../Secret"` returns validation error without making an HTTP call.
+- **AC 13.1.9** — No `BOOTSTRAP_VERSION` change. No ObjectScript changes. Verified by test harness: `bootstrap-classes.ts` hash unchanged.
+- **AC 13.1.10** — Build + tests + lint green. Target test count growth: +8 dev-mcp tests. Overall: 1145 + 8 = 1153 (approximately, depending on intervening changes).
+
+**Implementation Notes**:
+- The external tool's candidate logic is straightforward — port the algorithm (not the code) to match the suite's existing `ToolDefinition` / `IrisHttpClient` idioms.
+- The response body from Atelier `/doc/` is `{result: {name, cat, content: [lines]}}`. The `content` array joins with `\n` for the tool's output `content` field. Preserve `cat` and other metadata only if it informs the caller (likely drop to keep the response compact — the key payload is the content string and which candidate resolved).
+- Do NOT reuse the external tool's `axios` stack; use the suite's shared `IrisHttpClient` so auth, timeouts, and error handling are unified.
+- The `.mac` extension is intentionally **not** in the candidate list. `.mac` is source routine (pre-expansion), not compiled intermediate — a user wanting source routine should use `iris_doc_get` with the explicit `.mac` name. Document this distinction in the tool description's "see also" paragraph.
+
+### Story 13.2: Documentation Rollup — README Suite + Per-Package + tool_support.md + CHANGELOG + Cross-Refs
+
+**As a** user evaluating or upgrading the IRIS MCP Server Suite,
+**I want** `iris_routine_intermediate` documented consistently across the suite and per-package READMEs, the API catalog, the changelog, and related tool descriptions,
+**so that** I can discover, choose, and use it the same way I would any pre-existing tool — and so that existing `@iris-mcp/dev` installs know what the upgrade brings.
+
+**Acceptance Criteria**:
+
+- **AC 13.2.1** — [README.md](../../README.md) (suite-level):
+  - Update the `@iris-mcp/dev` row of the Servers table so the tool count reflects the new total (`23` → `24`).
+  - Update the bullet description of `@iris-mcp/dev` to mention "macro-expanded routine lookup" alongside the existing capabilities.
+  - No other changes — the suite README stays high-level.
+- **AC 13.2.2** — [packages/iris-dev-mcp/README.md](../../packages/iris-dev-mcp/README.md):
+  - Add `iris_routine_intermediate` to the tool catalog table in the same column format as existing rows.
+  - Add one `<details>` example block in the "Tool Examples" section showing a realistic input (e.g., `Ens.Director`) + expected output including the `resolvedDoc` field.
+  - Update any "Tools: N" count callouts in the package README to the new number.
+- **AC 13.2.3** — [tool_support.md](../../tool_support.md):
+  - Add one row to the `@iris-mcp/dev` table: `iris_routine_intermediate` → 🟦 Atelier → `GET /api/atelier/v{N}/{ns}/doc/{name}` (candidate fallback).
+  - Update the per-table "**Mix:**" line: `17 Atelier · 6 ExecuteMCPv2 · 0 other` → `18 Atelier · 6 ExecuteMCPv2 · 0 other`.
+  - Update the `@iris-mcp/dev` heading count: `(23)` → `(24)`.
+  - Update the "Suite-wide rollup" section totals: `Atelier 17` → `Atelier 18`, `Total 87` → `Total 88`, and the dev-row total `23` → `24`.
+- **AC 13.2.4** — [CHANGELOG.md](../../CHANGELOG.md):
+  - New `## [Pre-release — 2026-04-23]` entry with an `### Added` section.
+  - Entry: "**New tool `iris_routine_intermediate`** ([packages/iris-dev-mcp/src/tools/routine.ts](packages/iris-dev-mcp/src/tools/routine.ts)) — fetches the compiled-intermediate routine (`.1.int` / `.int`) corresponding to a class name, for LLMs that need to see macro-expanded code. Closes capability gap vs. external `intersystems-objectscript-routine-mcp`. FR110 / Epic 13."
+  - Call out that the change is TypeScript-only — no `BOOTSTRAP_VERSION` bump, no ObjectScript redeploy on existing installs.
+- **AC 13.2.5** — Cross-reference linking in existing tool descriptions (already listed in AC 13.1.7 but verified as part of docs rollup):
+  - `iris_doc_get` description: one-sentence pointer added.
+  - `iris_macro_info` description: one-sentence pointer added.
+- **AC 13.2.6** — Cross-reference check: grep the repo for any document listing tool counts per package (beyond the three files in AC 13.2.1–13.2.3) and update as found. Known candidates: [`_bmad-output/planning-artifacts/prd.md`](../_bmad-output/planning-artifacts/prd.md) (FR numbering), [`packages/iris-mcp-all/README.md`](../../packages/iris-mcp-all/README.md). Do NOT update [`_bmad-output/implementation-artifacts/*`](../_bmad-output/implementation-artifacts/) — those are historical sprint logs.
+
+**Implementation Notes**:
+- This story lands as the final commit of Epic 13, after 13.1 is merged.
+- No code change; pure docs. Lands in one commit.
+- PR description should link to Story 13.1 so the doc delta is reviewable against the tool implementation.

@@ -1077,3 +1077,24 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **Epic 11 regression check**: all 16 prior bugs still fixed as of Story 12.4 live-verification pass.
 - **Pre-publish gate**: still pending (Story 9.3 smoke test + publishing checklist — unchanged from Epic 11).
 - **Epic 12 status**: all 7 stories `done`. Retrospective `optional` (lead-owned gate before Epic 12 closes).
+
+## Story 13.1: iris_routine_intermediate (2026-04-23)
+
+- **Files touched**: `packages/iris-dev-mcp/src/tools/routine.ts` (new, ~170 lines), `packages/iris-dev-mcp/src/__tests__/routine.test.ts` (new, 13 tests), `packages/iris-dev-mcp/src/tools/index.ts` (register), `packages/iris-dev-mcp/src/tools/doc.ts` (one-sentence cross-ref on `iris_doc_get`), `packages/iris-dev-mcp/src/tools/intelligence.ts` (one-sentence cross-ref on `iris_macro_info`), `packages/iris-dev-mcp/src/__tests__/index.test.ts` (tool count 23→24, name asserted).
+- **Epic 13 planning artifacts bundled in this commit**: `_bmad-output/planning-artifacts/sprint-change-proposal-2026-04-23.md` (new), `_bmad-output/planning-artifacts/epics.md` (Epic 13 header + stories 13.1/13.2 appended), `_bmad-output/planning-artifacts/prd.md` (FR110 added under "Macro-Expanded Routine Lookup" subsection), `_bmad-output/implementation-artifacts/sprint-status.yaml` (epic-13 block + 13.1 → done + 13.2 → backlog), `_bmad-output/implementation-artifacts/13-1-iris-routine-intermediate.md` (story file).
+- **Trigger**: 2026-04-23 competitive analysis of the newly-discovered external `intersystems-objectscript-routine-mcp` server (`sources/intersystems-objectscript-mcp/`). Identified one concrete capability gap — no suite tool resolves a class name to the macro-expanded compiled intermediate (`.1.int`). See `sprint-change-proposal-2026-04-23.md` for full analysis.
+- **Key design decisions**:
+  - **Option B chosen over A/C** — dedicated tool `iris_routine_intermediate` rather than an opt-in `resolveCompiled` flag on `iris_doc_get`. Reasoning: LLM discoverability (one tool-choice hop vs. three), pattern precedent (`iris_package_list` sibling to `iris_doc_list`), clean contract on `iris_doc_get` preserved, isolated iteration surface for future candidate enhancements.
+  - **Candidate order `.1.int` → `.int`** (not `.mac`) ported from external tool's `buildRoutineDocCandidates()` — `.mac` intentionally excluded because it's pre-expansion source, not compiled intermediate. Callers wanting source can use `iris_doc_get` with an explicit `.mac` name.
+  - **Auth fail-fast on 401/403** — matches external tool's behavior; no point exhausting candidate loop when auth will fail on both.
+  - **Shared `IrisHttpClient` reused** — NOT external tool's axios stack. Auth/timeout/retry/error handling stays unified with the rest of dev-mcp.
+  - **`.cls` suffix stripped case-insensitively** before candidate generation — `"Pkg.Class"`, `"Pkg.Class.cls"`, and `"Pkg.Class.CLS"` all produce the same candidate list.
+  - **Story 13.0 skipped per user direction** — Epic 12 deferred items (per-alert `clear`, `acknowledge`, BUG-6 DocDB property-extraction) remain in `deferred-work.md`; Epic 13 scope is narrowly focused on the competitive-analysis gap.
+- **Code review**: 0 HIGH, 0 MEDIUM, 1 LOW auto-patched (`.min(1)` added to the `name` zod validator to reject empty strings that were leaking as nonsensical `[".1.int", ".int"]` candidates), 3 INFO dismissed (400 handling, format default wire pattern, `.int`/`.mac`/`.inc` input detection — all intentional divergences from external reference).
+- **Live verification**: 3/3 scenarios passed end-to-end through the actual MCP server after user reload:
+  1. Happy path — `iris_routine_intermediate({ name: "ExecuteMCPv2.REST.Command", namespace: "HSCUSTOM" })` returned `resolvedDoc: "ExecuteMCPv2.REST.Command.1.int"` with full macro-expanded routine body (ROUTINE header, methodimpl declarations, etc.).
+  2. All-404 path — `iris_routine_intermediate({ name: "NonExistent.ClassFoo", namespace: "%SYS" })` returned `isError: true` with both candidates in `candidatesTried` and the compile-first hint string.
+  3. `.cls` suffix stripping — `iris_routine_intermediate({ name: "ExecuteMCPv2.REST.Command.cls", namespace: "HSCUSTOM" })` returned identical output to #1 (suffix stripped correctly in live conditions, matching unit-test expectation).
+- **Tests**: 280 → **293** dev-mcp tests (+13, exceeded target of +9). Full suite **1158 passing** (up from 1145, +13).
+- **Bootstrap drift check**: hash unchanged at `425c4448677c` (AC stated `974bbeab53a1` was outdated — main had drifted to `425c4448677c` via commit `c2b5bec` prior to Story 13.1; the AC's *intent* of "no drift from TS-only changes" is satisfied).
+- **Commit**: pending (will land as `feat(story-13.1)`).

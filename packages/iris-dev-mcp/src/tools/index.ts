@@ -23,6 +23,7 @@ import { docConvertTool, docXmlExportTool } from "./format.js";
 import { docLoadTool } from "./load.js";
 import { docExportTool } from "./export.js";
 import { packageListTool } from "./packages.js";
+import { routineIntermediateTool } from "./routine.js";
 import { sqlExecuteTool } from "./sql.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
 import {
@@ -62,4 +63,5 @@ export const tools: ToolDefinition[] = [
   docLoadTool,
   docExportTool,
   packageListTool,
+  routineIntermediateTool,
 ];

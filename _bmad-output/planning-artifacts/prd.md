@@ -611,6 +611,10 @@ FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MV
 - FR108: Developer can list the packages in a namespace at a configurable depth (1 = top-level, N = N-segment rollup), optionally narrowed to a prefix, with the same filter surface as `iris_doc_list` (category, type, generated, system inclusion, modifiedSince). System packages (`%*`) are excluded by default; `system` is tri-state (`false | true | only`) so developers can inspect IRIS internals, user code, or both.
 - FR109: Developer can bulk-download documents from a namespace to a local directory, filtered by prefix, category, type, generated state, system inclusion, and modifiedSince. The export is resilient: per-document failures (long paths, disk-full, encoding) are collected into a skipped-items list rather than aborting the batch by default, a `useShortPaths` option maps long path segments to shorten the output for Windows MAX_PATH limits, and a manifest JSON records what was exported so runs can be audited and resumed. Progress is emitted via MCP `notifications/progress` and, by default, the download continues to completion on disk even if the MCP client cancels or times out.
 
+### Macro-Expanded Routine Lookup (Epic 13 Addition — 2026-04-23)
+
+- FR110: Developer can retrieve the compiled-intermediate routine for a class by its bare name, without needing to know IRIS's generation-numbering or extension conventions. The tool resolves the class name to a candidate list (`.1.int`, `.int`) and returns the content of the first candidate that exists, reporting which candidate resolved. On all-candidates-404, returns a structured hint suggesting compilation. Fails fast on authentication or network errors (does not exhaust the candidate list on auth failure). Surfaces the macro-expanded form IRIS actually executes at runtime — distinct from `iris_macro_info` which returns individual macro definitions and source locations, and from `iris_doc_get` which requires a fully-qualified doc name with extension.
+
 ## Non-Functional Requirements
 
 ### Performance

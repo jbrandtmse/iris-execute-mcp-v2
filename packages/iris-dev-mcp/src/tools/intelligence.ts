@@ -189,7 +189,8 @@ export const macroInfoTool: ToolDefinition = {
   title: "Macro Info",
   description:
     "Look up a macro definition, including its expanded value and source location. " +
-    "Requires a document context and optionally a list of include files to resolve the macro.",
+    "Requires a document context and optionally a list of include files to resolve the macro. " +
+    "For the fully-expanded routine body as IRIS compiles it, see `iris_routine_intermediate`.",
   inputSchema: z.object({
     name: z
       .string()
