@@ -1124,5 +1124,5 @@ Four stories, four merge commits (plus log/chore commits). Net delta vs. Epic 10
 - **Story 13.0 skipped per user direction** — Epic 12 deferred items (per-alert `clear`, `acknowledge`, BUG-6 DocDB property-extraction) remain in `deferred-work.md`.
 - **Deferred items from Epic 13 code reviews** (1 new, logged in `deferred-work.md`):
   1. Pre-existing `@iris-mcp/ops` count drift — `tool_support.md` shows 17 in per-section heading/Mix but 16 in Suite-wide rollup and in suite/meta READMEs. Recommended fix path: bump ops rollup 16→17 + suite total 88→89 + meta-package READMEs + any other references. Not scoped to Epic 13.
-- **Epic 13 status**: both stories `done`. Retrospective `optional` (lead-owned gate before Epic 13 closes).
+- **Epic 13 status**: both stories `done`. Retrospective **skipped** per user direction (2026-04-23) — `epic-13-retrospective: optional` stays in sprint-status.yaml for future reference. Clean run; no rules candidates urgent enough to block the skip decision.
 - **Pre-publish gate**: still pending (Story 9.3 smoke test + publishing checklist — carryover from Epic 11 and Epic 12 retros, Epic 12 Retro A4 MCP-reload note still pending).
