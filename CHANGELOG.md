@@ -2,6 +2,12 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-05-02]
+
+### Changed
+
+- **`iris_doc_export` description warns about workspace file watchers** ([packages/iris-dev-mcp/src/tools/export.ts](packages/iris-dev-mcp/src/tools/export.ts)) — appended a portable, host-agnostic warning to the tool description: if a workspace file watcher is syncing changes to the same IRIS server (e.g., an IDE extension with auto-sync enabled), the watcher must be paused before bulk export and restored after, otherwise concurrent watcher writes cause double-writes, PUT floods to the server, and on-disk corruption. The warning instructs the model to ask the user when uncertain how to pause the watcher or whether one is active. Complements existing user-instruction-level guidance in `~/.claude/CLAUDE.md` for Claude Code; the description text makes the same precondition portable across other MCP hosts (Cursor, Cline, custom agents) where CLAUDE.md is not loaded. Description-only change — no behavior change, no bootstrap bump.
+
 ## [Pre-release — 2026-04-23]
 
 ### Added

@@ -228,7 +228,14 @@ export const docExportTool: ToolDefinition = {
     "(never/ifDifferent/always), Windows long-path workaround via useShortPaths, " +
     "bounded concurrency, and cancellation tolerance. Inverse of iris_doc_load. " +
     "Note: some namespaces include CSP static assets (e.g., /csp/.../*.css) in docnames " +
-    "but return 404 on fetch — pass category: \"CLS\" or \"RTN\" to exclude them.",
+    "but return 404 on fetch — pass category: \"CLS\" or \"RTN\" to exclude them. " +
+    "IMPORTANT: if your workspace has a file watcher syncing changes to the same IRIS " +
+    "server (e.g., an IDE extension with auto-sync enabled), pause the watcher before " +
+    "this call and restore it after — concurrent watcher writes during a bulk export " +
+    "cause double-writes, PUT floods to the server, and on-disk corruption. Your host " +
+    "instructions typically describe how to pause the watcher. If you don't know how " +
+    "to pause it, or are unsure whether a watcher is active in this environment, ASK " +
+    "THE USER before proceeding.",
   inputSchema: z.object({
     destinationDir: z
       .string()
