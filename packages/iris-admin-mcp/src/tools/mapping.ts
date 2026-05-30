@@ -24,7 +24,13 @@ export const mappingManageTool: ToolDefinition = {
   description:
     "Create or delete a global, routine, or package mapping between namespaces. " +
     "For 'create', database is required. For global mappings, optional collation, " +
-    "lockDatabase, and subscript parameters are supported. Modification is done by delete + create.",
+    "lockDatabase, and subscript parameters are supported. " +
+    "When 'subscript' is supplied, a subscript-level mapping is created for that node " +
+    "(e.g. name='%SYS' + subscript='(\"HealthShare\")' maps %SYS(\"HealthShare\") only, " +
+    "leaving the base %SYS mapping intact); the returned 'name' echoes the full mapped " +
+    "node (e.g. %SYS(\"HealthShare\")). Creating a BASE mapping (no subscript) for a " +
+    "%-prefixed system global is refused unless force=true, since it shadows the global's " +
+    "system default. Modification is done by delete + create.",
   inputSchema: z.object({
     action: z
       .enum(["create", "delete"])
@@ -55,7 +61,19 @@ export const mappingManageTool: ToolDefinition = {
     subscript: z
       .string()
       .optional()
-      .describe("Subscript range for subscript-level mappings (global mappings only)"),
+      .describe(
+        "Subscript node/range for a subscript-level mapping (global mappings only), " +
+          "e.g. '(\"HealthShare\")' or '(1):(100)'. It is appended to 'name' to form the " +
+          "mapped global (name='%SYS' + subscript='(\"HealthShare\")' -> %SYS(\"HealthShare\")). " +
+          "Omit for a base-global mapping.",
+      ),
+    force: z
+      .boolean()
+      .optional()
+      .describe(
+        "Override the safety guard that refuses to create a base mapping (no subscript) " +
+          "for a %-prefixed system global. Required to deliberately remap a base %-global.",
+      ),
   }),
   annotations: {
     destructiveHint: true,
@@ -74,6 +92,7 @@ export const mappingManageTool: ToolDefinition = {
       collation,
       lockDatabase,
       subscript,
+      force,
     } = args as {
       action: string;
       type: string;
@@ -83,13 +102,15 @@ export const mappingManageTool: ToolDefinition = {
       collation?: string;
       lockDatabase?: string;
       subscript?: string;
+      force?: boolean;
     };
 
-    const body: Record<string, string> = { action, namespace, name };
+    const body: Record<string, unknown> = { action, namespace, name };
     if (database) body.database = database;
     if (collation) body.collation = collation;
     if (lockDatabase) body.lockDatabase = lockDatabase;
     if (subscript) body.subscript = subscript;
+    if (force !== undefined) body.force = force;
 
     const path = `${BASE_URL}/config/mapping/${type}`;
 

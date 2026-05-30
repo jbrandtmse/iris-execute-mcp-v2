@@ -164,6 +164,82 @@ describe("iris_mapping_manage", () => {
     );
   });
 
+  it("should forward force=true in body when provided", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", type: "global", namespace: "USER", name: "%SYS" }),
+    );
+
+    await mappingManageTool.handler(
+      {
+        action: "create",
+        type: "global",
+        namespace: "USER",
+        name: "%SYS",
+        database: "HSSYS",
+        force: true,
+      },
+      ctx,
+    );
+
+    const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(calledBody.force).toBe(true);
+  });
+
+  it("should not include force in body when omitted", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "created", type: "global", namespace: "USER", name: "MyGlobal" }),
+    );
+
+    await mappingManageTool.handler(
+      {
+        action: "create",
+        type: "global",
+        namespace: "USER",
+        name: "MyGlobal",
+        database: "TESTDB",
+      },
+      ctx,
+    );
+
+    const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(calledBody).not.toHaveProperty("force");
+  });
+
+  it("should forward subscript so the server can build a subscript-level mapping", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        action: "created",
+        type: "global",
+        namespace: "USER",
+        name: '%SYS("HealthShare")',
+      }),
+    );
+
+    const result = await mappingManageTool.handler(
+      {
+        action: "create",
+        type: "global",
+        namespace: "USER",
+        name: "%SYS",
+        database: "HSSYS",
+        subscript: '("HealthShare")',
+      },
+      ctx,
+    );
+
+    const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(calledBody.name).toBe("%SYS");
+    expect(calledBody.subscript).toBe('("HealthShare")');
+    // Server echoes the full mapped node name in its response.
+    const structured = result.structuredContent as { name: string };
+    expect(structured.name).toBe('%SYS("HealthShare")');
+  });
+
+  it("should accept force param in schema", () => {
+    const shape = mappingManageTool.inputSchema.shape as Record<string, unknown>;
+    expect(shape).toHaveProperty("force");
+  });
+
   it("should not include undefined optional params in body", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "created", type: "routine", namespace: "USER", name: "Simple" }),

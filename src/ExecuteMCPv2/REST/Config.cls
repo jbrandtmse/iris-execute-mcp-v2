@@ -514,6 +514,51 @@ ClassMethod MappingList(pType As %String) As %Status
     Quit $$$OK
 }
 
+/// Compose the effective mapping name for a global/routine/package mapping.
+/// <p>For global mappings, a non-empty <var>pSubscript</var> is validated via
+/// <method>Config.MapGlobals.IsValidSubscript</method> and appended to
+/// <var>pName</var> to form the mapped global node (e.g. <code>%SYS</code> +
+/// <code>("HealthShare")</code> &rarr; <code>%SYS("HealthShare")</code>). The
+/// subscript MUST be encoded into the name because <class>Config.MapGlobals</class>
+/// has no <code>Subscript</code> property — passing it as a separate property
+/// silently mis-maps the base global (see
+/// <code>docs/known-bugs-2026-05-29-mapping-subscript.md</code>).</p>
+/// <p>Routine and package mappings have no subscript concept; the name is
+/// returned unchanged. Must be called from the <code>%SYS</code> namespace
+/// (uses the <class>Config.MapGlobals</class> validator).</p>
+ClassMethod BuildMappingName(pType As %String, pName As %String, pSubscript As %String = "", pCollation As %Integer = 5, Output pEffName As %String) As %Status [ Internal ]
+{
+    Set tSC = $$$OK
+    Set pEffName = pName
+    Try {
+        If pType '= "global" Quit
+        If pSubscript = "" Quit
+        Set tValid = ##class(Config.MapGlobals).IsValidSubscript(pSubscript, pCollation)
+        If $$$ISERR(tValid) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid subscript '"_pSubscript_"' for global mapping: "_$System.Status.GetErrorText(tValid))
+            Quit
+        }
+        Set pEffName = pName_pSubscript
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Returns 1 if creating <var>pEffName</var> would be a guarded base mapping:
+/// a base (no-subscript) global mapping for a <code>%</code>-prefixed system
+/// global without <var>pForce</var>. Such a create silently shadows the
+/// global's system default (e.g. remapping base <code>%SYS</code>) and is the
+/// high-severity failure mode in
+/// <code>docs/known-bugs-2026-05-29-mapping-subscript.md</code>. Subscript-level
+/// <code>%</code>-mappings (where <var>pEffName</var> differs from
+/// <var>pName</var>) are safe and not guarded.
+ClassMethod IsGuardedBaseMapping(pType As %String, pName As %String, pEffName As %String, pForce As %Boolean = 0) As %Boolean [ Internal ]
+{
+    Quit ((pType = "global") && (pEffName = pName) && ($Extract(pName) = "%") && 'pForce)
+}
+
 /// Create or delete a global, routine, or package mapping.
 ClassMethod MappingManage(pType As %String) As %Status
 {
@@ -573,27 +618,73 @@ ClassMethod MappingManage(pType As %String) As %Status
                 Set tSC = $$$OK
                 Quit
             }
+            Set tForce = +tBody.%Get("force")
+            Set tColl = 5
+            If tBody.%Get("collation") ? 1.N Set tColl = +tBody.%Get("collation")
+
+            ; Compose the effective mapping name. For subscript-level global
+            ; mappings the subscript MUST be encoded into the global name —
+            ; Config.MapGlobals has NO Subscript property; a SLM mapping is keyed
+            ; on the full name e.g. %SYS("HealthShare") (see docs/known-bugs-
+            ; 2026-05-29-mapping-subscript.md). BuildMappingName validates the
+            ; subscript and composes the name (routine/package types ignore it).
+            Set tSC = ..BuildMappingName(pType, tName, tBody.%Get("subscript"), tColl, .tEffName)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Safety guard: refuse to create a *base* mapping (no subscript) for a
+            ; %-prefixed system global unless force=true. Silently remapping a
+            ; base %-global (e.g. %SYS) shadows its system default and corrupts
+            ; system access far downstream. Subscript-level %-mappings are safe.
+            If ..IsGuardedBaseMapping(pType, tName, tEffName, tForce) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Refusing to create a base mapping for system global '"_tName_"' without force=true: remapping a base %-global shadows its system default. Supply a subscript for a subscript-level mapping, or set force=true to override.")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
 
             Set tProps("Database") = tDatabase
             If pType = "global" {
                 If tBody.%Get("collation") '= "" Set tProps("Collation") = tBody.%Get("collation")
                 If tBody.%Get("lockDatabase") '= "" Set tProps("LockDatabase") = tBody.%Get("lockDatabase")
-                If tBody.%Get("subscript") '= "" Set tProps("Subscript") = tBody.%Get("subscript")
+                ; NOTE: subscript is encoded into tEffName above — Config.MapGlobals
+                ; has no Subscript property, so never pass it as a prop.
             }
 
-            Set tSC = $ClassMethod(tClassName, "Create", tNamespace, tName, .tProps)
+            Set tSC = $ClassMethod(tClassName, "Create", tNamespace, tEffName, .tProps)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            Set tResult = {"action": "created", "type": (pType), "namespace": (tNamespace), "name": (tName)}
+            Set tResult = {"action": "created", "type": (pType), "namespace": (tNamespace), "name": (tEffName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "delete" {
-            Set tSC = $ClassMethod(tClassName, "Delete", tNamespace, tName)
+            ; Compose effective name with subscript for global SLM deletes,
+            ; mirroring create. Without this the base mapping is deleted instead
+            ; of the subscript node (docs/known-bugs-2026-05-29-mapping-subscript.md).
+            ; Parse collation the SAME way create does so a subscript that is
+            ; valid under a non-standard collation at create time validates the
+            ; same way at delete time (otherwise a range mapping created under a
+            ; non-default collation could be undeletable via this tool).
+            Set tColl = 5
+            If tBody.%Get("collation") ? 1.N Set tColl = +tBody.%Get("collation")
+            Set tSC = ..BuildMappingName(pType, tName, tBody.%Get("subscript"), tColl, .tEffName)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tSC = $ClassMethod(tClassName, "Delete", tNamespace, tEffName)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            Set tResult = {"action": "deleted", "type": (pType), "namespace": (tNamespace), "name": (tName)}
+            Set tResult = {"action": "deleted", "type": (pType), "namespace": (tNamespace), "name": (tEffName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }

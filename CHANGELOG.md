@@ -2,6 +2,16 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-05-29]
+
+### Fixed
+
+- **`iris_mapping_manage` now honors `subscript` for global mappings (create & delete)** ([src/ExecuteMCPv2/REST/Config.cls](src/ExecuteMCPv2/REST/Config.cls), [packages/iris-admin-mcp/src/tools/mapping.ts](packages/iris-admin-mcp/src/tools/mapping.ts)) — the handler previously passed the subscript as a `Subscript` property to `Config.MapGlobals`, which has **no such property**, so the subscript was silently dropped and the operation hit the **base** global instead of the subscript node. A request to map `%SYS("HealthShare") -> HSSYS` instead remapped base `%SYS -> HSSYS`, silently shadowing the system default (e.g. `^%SYS(...)` NLS tables), surfacing later as unrelated-looking failures like `#5911 'Character Set UTF-8 not installed'`. The delete path had the same defect (deleted the base instead of the node). Fix: a new `BuildMappingName` helper validates the subscript via `Config.MapGlobals.IsValidSubscript` and **encodes it into the global name** (`%SYS("HealthShare")`) — which is how `Config.MapGlobals` keys a subscript-level mapping — for both create and delete; the response `name` now echoes the full mapped node. Added a safety guard (`IsGuardedBaseMapping`): creating a **base** mapping (no subscript) for a `%`-prefixed system global is refused unless the new `force: true` parameter is passed. New regression tests in `ExecuteMCPv2.Tests.MappingTest` (9 fast deterministic methods) and `ExecuteMCPv2.Tests.MappingRoundTripTest` (a live CPF round-trip asserting that a subscript create/delete operates on the node and leaves the base mapping intact), plus 4 new `mapping.test.ts` cases; verified end-to-end against the live REST endpoint. A follow-up code review also threaded the caller's collation through the delete path so a range mapping created under a non-default collation can be deleted via the tool. Reported by FHIR Bridge dev (CPPCON-381); see [docs/known-bugs-2026-05-29-mapping-subscript.md](docs/known-bugs-2026-05-29-mapping-subscript.md). BOOTSTRAP_VERSION bumped `425c4448677c` → `8f0cf75be984`.
+
+### Changed
+
+- **`BOOTSTRAP_VERSION` bumped** from `425c4448677c` to `8f0cf75be984`. Covers the `Config.cls` mapping-subscript fix and the follow-up code-review patch (delete-path collation threading).
+
 ## [Pre-release — 2026-05-02]
 
 ### Changed

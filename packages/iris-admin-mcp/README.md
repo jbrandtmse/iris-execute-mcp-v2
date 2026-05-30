@@ -114,7 +114,7 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_mapping_manage` | Create or delete global/routine/package mappings | `action`, `type`, `namespace`, `name`, `database?`, `collation?`, `lockDatabase?`, `subscript?` | destructive |
+| `iris_mapping_manage` | Create or delete global/routine/package mappings | `action`, `type`, `namespace`, `name`, `database?`, `collation?`, `lockDatabase?`, `subscript?`, `force?` | destructive |
 | `iris_mapping_list` | List mappings for a namespace by type | `namespace`, `type`, `cursor?` | readOnly, idempotent |
 
 ### User & Security Tools
@@ -292,12 +292,36 @@ or inaccessible databases fall back to `0` without raising an error.
 **Output:**
 ```json
 {
-  "action": "create",
+  "action": "created",
   "type": "global",
-  "name": "MyGlobal",
-  "status": "created"
+  "namespace": "USER",
+  "name": "MyGlobal"
 }
 ```
+
+**Subscript-level (SLM) mappings.** Supply `subscript` to map a single
+subscript node or range, leaving the base global mapping untouched. The
+subscript is appended to `name` to form the mapped global, and the returned
+`name` echoes that full node:
+
+```json
+{
+  "action": "create", "type": "global", "namespace": "FHIRBRIDGE",
+  "name": "%SYS", "subscript": "(\"HealthShare\")", "database": "HSSYS"
+}
+```
+→ creates `%SYS("HealthShare") -> HSSYS` and returns `"name": "%SYS(\"HealthShare\")"`;
+the base `%SYS` mapping keeps its default. `subscript` accepts a single node
+(`("HealthShare")`) or a range (`(1):(100)`) and is validated server-side.
+Delete a subscript node the same way — pass the same `subscript` so only that
+node is removed.
+
+> **⚠️ `%`-prefixed system globals.** Creating a **base** mapping (no
+> `subscript`) for a `%`-prefixed global such as `%SYS` is **refused** unless
+> `force: true` is passed, because remapping a base `%`-global silently shadows
+> its system default and can corrupt system-config access. To map a node under
+> a system global, pass a `subscript` (no `force` needed). Pass `force: true`
+> only to deliberately remap the base global itself.
 </details>
 
 <details>
