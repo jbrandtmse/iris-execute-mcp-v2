@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/all",
-  "version": "0.0.0",
+  "version": "0.0.2",
   "description": "Meta-package that installs all five IRIS MCP server packages",
   "type": "module",
   "dependencies": {

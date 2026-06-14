@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/shared",
-  "version": "0.0.0",
+  "version": "0.0.2",
   "description": "Shared utilities and types for IRIS MCP servers",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/interop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "IRIS Interoperability Management MCP Server",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
