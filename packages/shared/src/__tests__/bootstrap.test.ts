@@ -8,6 +8,7 @@ import type { IrisConnectionConfig } from "../config.js";
 import type { AtelierEnvelope } from "../http-client.js";
 import {
   probeCustomRest,
+  isConfigured,
   deployClasses,
   compileClasses,
   configureWebApp,
@@ -101,12 +102,72 @@ describe("bootstrap", () => {
   // ── probeCustomRest ─────────────────────────────────────────────
 
   describe("probeCustomRest", () => {
-    it("should return {status: 'current'} when deployed version matches BOOTSTRAP_VERSION", async () => {
+    it("should return {status: 'current'} when version matches AND web app is registered", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
+      // Probe SQL (version) — CSRF preflight + matching version
       setupCsrfThenRequest(
         envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // IsConfigured SQL — CSRF already cached, just the response (web app present)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 1 }] })),
+      );
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: "current" });
+
+      http.destroy();
+    });
+
+    // Regression for the reported bug: a matching class version does NOT
+    // imply the privileged web-app registration completed. When the version
+    // matches but IsConfigured() reports the web app is absent (e.g. %SYS
+    // refreshed while the code DB persisted across a container migration),
+    // the probe must report "unconfigured" so bootstrap re-runs the
+    // privileged steps instead of skipping forever.
+    it("should return {status: 'unconfigured'} when version matches but web app is absent", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe SQL (version) — matching version
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // IsConfigured SQL — web app NOT present (0)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 0 }] })),
+      );
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: "unconfigured" });
+
+      http.destroy();
+    });
+
+    // Defensive: IsConfigured() cannot be missing on a version-matched
+    // deployment, so a thrown SQL error is an indeterminate result, not
+    // proof the web app is absent. Preserve the fast "current" skip path
+    // rather than re-attempting privileged steps every launch.
+    it("should fall back to {status: 'current'} when version matches but IsConfigured query throws", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe SQL (version) — matching version
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // IsConfigured SQL — fails with 403 (Atelier-level error → throws)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          {
+            status: { errors: [{ error: "SQL failure" }], summary: "Error" },
+            console: [],
+            result: null,
+          },
+          { status: 403 },
+        ),
       );
 
       const result = await probeCustomRest(http, config, 7);
@@ -173,6 +234,100 @@ describe("bootstrap", () => {
 
       const result = await probeCustomRest(http, config, 7);
       expect(result).toEqual({ status: "missing" });
+
+      http.destroy();
+    });
+  });
+
+  // ── isConfigured ────────────────────────────────────────────────
+
+  describe("isConfigured", () => {
+    it("should return true when IsConfigured() reports the web app exists (1)", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Configured: 1 }] }));
+
+      const result = await isConfigured(http, config, 7);
+      expect(result).toBe(true);
+
+      // Verify it calls the IsConfigured SqlProc via action/query
+      const postCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        const opts = call[1] as { method: string };
+        return opts.method === "POST";
+      });
+      expect(postCalls.length).toBe(1);
+      const url = postCalls[0]![0] as string;
+      expect(url).toContain("/api/atelier/v7/USER/action/query");
+      const body = JSON.parse(postCalls[0]![1].body as string) as {
+        query: string;
+      };
+      expect(body.query).toContain("ExecuteMCPv2.Setup_IsConfigured");
+
+      http.destroy();
+    });
+
+    it("should return false when IsConfigured() reports the web app is absent (0)", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Configured: 0 }] }));
+
+      const result = await isConfigured(http, config, 7);
+      expect(result).toBe(false);
+
+      http.destroy();
+    });
+
+    it("should tolerate string/boolean encodings of the boolean result", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Configured: "1" }] }));
+
+      const result = await isConfigured(http, config, 7);
+      expect(result).toBe(true);
+
+      http.destroy();
+    });
+
+    it("should return false when the query returns no rows", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [] }));
+
+      const result = await isConfigured(http, config, 7);
+      expect(result).toBe(false);
+
+      http.destroy();
+    });
+
+    it("should throw when the IsConfigured SQL call fails", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // CSRF preflight
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", {
+          status: 200,
+          headers: { "X-CSRF-Token": "test-csrf-token" },
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+        }),
+      );
+      // SQL fails with an Atelier-level error
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          {
+            status: { errors: [{ error: "SQL failure" }], summary: "Error" },
+            console: [],
+            result: null,
+          },
+          { status: 403 },
+        ),
+      );
+
+      await expect(isConfigured(http, config, 7)).rejects.toThrow();
 
       http.destroy();
     });
@@ -367,13 +522,17 @@ describe("bootstrap", () => {
   // ── bootstrap (full orchestration) ──────────────────────────────
 
   describe("bootstrap (full orchestration)", () => {
-    it("should skip everything when probe is current (hash match)", async () => {
+    it("should skip everything when probe is current (hash match + web app present)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
       // Probe: CSRF + SQL returning matching version
       setupCsrfThenRequest(
         envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // Probe: IsConfigured SQL — web app present
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 1 }] })),
       );
 
       const result = await bootstrap(http, config, 7);
@@ -389,6 +548,127 @@ describe("bootstrap", () => {
       expect(result.unitTestRootEnsured).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
+
+      // No deploy / compile on the current path: only 1 CSRF + 2 probe SQLs.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      http.destroy();
+    });
+
+    // Regression for the reported bug: version-stamped classes present but
+    // the /api/executemcp/v2 web app absent (e.g. %SYS refreshed across a
+    // container migration while the code DB persisted). Bootstrap must NOT
+    // skip — it must self-heal by RECOMPILING (no redeploy — source matches)
+    // and re-running the privileged steps (configure + mapping + ^UnitTestRoot).
+    // The recompile is required because the migration that lost the web app
+    // can also leave stale/version-incompatible compiled objects (verified
+    // live: dispatch 500s with <NULL VALUE> until recompiled).
+    it("should self-heal (recompile + configure, no redeploy) when probe is unconfigured", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe: CSRF + SQL returning matching version
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // Probe: IsConfigured SQL — web app ABSENT
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 0 }] })),
+      );
+
+      // Recompile: POST action/compile response (NO deploy PUTs — source is current)
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      // Configure: POST response
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      // Package mapping: POST response
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      // EnsureUnitTestRoot: POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
+      );
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unconfigured");
+      expect(result.probeFound).toBe(true);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(true);
+      expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
+      expect(result.unitTestRootEnsured).toBe(true);
+      expect(result.unitTestRoot).toBe("/iris/mgr/");
+      expect(result.errors).toHaveLength(0);
+      expect(result.manualInstructions).toBeUndefined();
+
+      // Verify NO deploy PUTs (source is current) but recompile DID happen.
+      const putCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        const opts = call[1] as { method: string };
+        return opts.method === "PUT";
+      });
+      expect(putCalls.length).toBe(0);
+      const compileCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        const url = call[0] as string;
+        return url.includes("action/compile");
+      });
+      expect(compileCalls.length).toBe(1);
+
+      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + compile + configure + mapping + ensureRoot = 7
+      expect(fetchMock).toHaveBeenCalledTimes(7);
+
+      http.destroy();
+    });
+
+    // AC #2: if the connecting user lacks %Admin_Manage, the unconfigured
+    // self-heal attempt reports configured=false with manual instructions
+    // (rather than silently reporting "current"). A later launch by a
+    // privileged user re-probes "unconfigured" and self-heals.
+    it("should report configured=false + manualInstructions when unconfigured and Configure fails", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe: CSRF + SQL returning matching version
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }),
+      );
+      // Probe: IsConfigured SQL — web app ABSENT
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 0 }] })),
+      );
+
+      // Recompile: POST action/compile response (runs before Configure on unconfigured)
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      // Configure: fails with 403 (no %Admin_Manage)
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          {
+            status: {
+              errors: [{ error: "Privilege violation" }],
+              summary: "Error",
+            },
+            console: [],
+            result: null,
+          },
+          { status: 403 },
+        ),
+      );
+      // Package mapping: still attempted after configure failure
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      // EnsureUnitTestRoot: still attempted
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
+      );
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unconfigured");
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(true);
+      expect(result.configured).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain("Configure failed");
+      expect(result.manualInstructions).toBeDefined();
+      expect(result.manualInstructions).toContain("Terminal");
+      expect(result.manualInstructions).toContain("USER");
 
       http.destroy();
     });
@@ -467,7 +747,7 @@ describe("bootstrap", () => {
     // but SKIP the privileged webapp registration and package mapping
     // steps — those are one-time operations that don't need to rerun on
     // a class-content upgrade.
-    it("should redeploy + recompile but skip webapp+mapping when probe is stale", async () => {
+    it("should redeploy + recompile but skip webapp+mapping when probe is stale and web app present", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
@@ -488,9 +768,16 @@ describe("bootstrap", () => {
         mockResponse(envelope({ result: [] })),
       );
 
-      // NO Configure, NO Package mapping — they are intentionally skipped
-      // on stale upgrades. If the implementation mistakenly calls them,
-      // the next fetchMock call will be undefined and the test will fail.
+      // IsConfigured check on the stale path — web app IS present, so
+      // Configure + Mapping are skipped.
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 1 }] })),
+      );
+
+      // NO Configure, NO Package mapping — skipped because the web app was
+      // verified present. If the implementation mistakenly calls them, the
+      // next fetchMock call would be the EnsureUnitTestRoot response and the
+      // call-count assertion below would fail.
 
       // EnsureUnitTestRoot: runs on stale upgrades too (independent step)
       fetchMock.mockResolvedValueOnce(
@@ -506,7 +793,7 @@ describe("bootstrap", () => {
       expect(result.deployed).toBe(true);
       expect(result.compiled).toBe(true);
       // These are marked true on stale because the one-time install
-      // already ran successfully in the past.
+      // already ran successfully in the past (verified via IsConfigured).
       expect(result.configured).toBe(true);
       expect(result.mapped).toBe(true);
       expect(result.unitTestRootEnsured).toBe(true);
@@ -514,9 +801,76 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // Verify the fetch call count: 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 EnsureUnitTestRoot = 17
+      // 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot = 18
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1;
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1;
+      expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
+
+      http.destroy();
+    });
+
+    // Hardening for the reported root cause on the version-MISMATCH path: if
+    // the classes are stale AND the web app is absent (e.g. %SYS refreshed
+    // while the code DB persisted, then the MCP build was also upgraded),
+    // bootstrap must redeploy/recompile AND self-heal the web app in the same
+    // run — not skip it and leave the instance broken until the next restart.
+    it("should redeploy + self-heal webapp when probe is stale and web app absent", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      // Probe: CSRF + SQL returning an OLD version hash
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: "oldhash12345" }] }),
+      );
+
+      // Deploy: PUT responses for each class
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(
+          mockResponse(envelope({ result: [] })),
+        );
+      }
+      // Compile: POST response
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      // IsConfigured check on the stale path — web app ABSENT (0) → self-heal
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ Configured: 0 }] })),
+      );
+      // Configure: POST response (self-heal)
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      // Package mapping: POST response (self-heal)
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      // EnsureUnitTestRoot: POST response
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })),
+      );
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(true);
+      expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
+      expect(result.unitTestRootEnsured).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.manualInstructions).toBeUndefined();
+
+      // Deploy DID happen (stale redeploys), and Configure DID happen (self-heal).
+      const putCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        const opts = call[1] as { method: string };
+        return opts.method === "PUT";
+      });
+      expect(putCalls.length).toBe(BOOTSTRAP_CLASSES.size);
+      const configureCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+        if ((call[1] as { method: string }).method !== "POST") return false;
+        const body = (call[1] as { body?: string }).body;
+        // "Setup_Configure(" — the trailing paren excludes "Setup_ConfigureMapping("
+        return typeof body === "string" && body.includes("Setup_Configure(");
+      });
+      expect(configureCalls.length).toBe(1);
+
+      // 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot = 20
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -695,7 +1049,7 @@ describe("bootstrap", () => {
     });
 
     it("should have non-empty content for each class", () => {
-      for (const [name, content] of BOOTSTRAP_CLASSES.entries()) {
+      for (const content of BOOTSTRAP_CLASSES.values()) {
         expect(content.length).toBeGreaterThan(0);
         expect(content).toContain("Class ");
         expect(content).toContain("Extends");

@@ -251,8 +251,6 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
   // ── 4. Auto-start (AC4) ─────────────────────────────────────────
 
   describe("production auto-start", () => {
-    let originalAutoStart: unknown;
-
     it("gets current auto-start setting", async () => {
       const result = await productionAutostartTool.handler(
         { action: "get" },
@@ -260,9 +258,6 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
       );
 
       expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        originalAutoStart = result.structuredContent;
-      }
     });
 
     it("sets auto-start and restores original value", async () => {

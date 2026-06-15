@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { sqlExecuteTool } from "../tools/sql.js";

@@ -130,8 +130,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
       it("iris_global_list returns at least one global", async () => {
         const result = await globalListTool.handler({}, ctx);
         expect(result.isError).toBeUndefined();
-        const data = result.structuredContent as Record<string, unknown>;
-        // The list endpoint returns globals array or similar
+        // The list endpoint returns a globals array or similar
         const text = result.content[0]?.text ?? "";
         expect(text.length).toBeGreaterThan(2); // not just "[]"
       });

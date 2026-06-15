@@ -41,16 +41,15 @@ describe.skipIf(!globalThis.__IRIS_AVAILABLE__)(
       client?.destroy();
     });
 
-    it("probeCustomRest returns true when REST service is configured", async () => {
-      const found = await probeCustomRest(client, config, version);
-      // If the custom REST service is deployed, the probe should return true.
-      // If not deployed, this test still passes — it just verifies the probe
-      // does not throw and returns a boolean.
-      expect(typeof found).toBe("boolean");
-      // When the service IS deployed (our CI/dev environment), assert true:
-      if (found) {
-        expect(found).toBe(true);
-      }
+    it("probeCustomRest returns a ProbeResult reflecting deployment + configuration state", async () => {
+      const probe = await probeCustomRest(client, config, version);
+      // The probe returns a discriminated union, not a boolean. Its status
+      // is one of the four states. On a healthy CI/dev instance this is
+      // "current" (classes match AND web app registered); a version-stamped
+      // but web-app-absent instance reports "unconfigured".
+      expect(["missing", "current", "unconfigured", "stale"]).toContain(
+        probe.status,
+      );
     });
 
     it("bootstrap() returns idempotent skip when service is already configured", async () => {

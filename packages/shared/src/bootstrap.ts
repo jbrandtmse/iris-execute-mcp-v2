@@ -16,7 +16,7 @@ import { logger } from "./logger.js";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
 
 /**
- * Probe result tri-state.
+ * Probe result quad-state.
  *
  * - `missing`: the REST service is not deployed (probe query failed —
  *    either the class does not exist or the web application isn't
@@ -24,7 +24,20 @@ import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
  *    + mapping flow.
  *
  * - `current`: the deployed classes match the embedded classes exactly
- *    (version hash matches). Bootstrap skips everything.
+ *    (version hash matches) AND the web application is registered. Bootstrap
+ *    skips everything.
+ *
+ * - `unconfigured`: the deployed classes match the embedded version, but the
+ *    `/api/executemcp/v2` web application is NOT registered. The version
+ *    stamp lives inside the Setup class and is present the moment
+ *    deploy+compile succeed — independent of the separate, %Admin_Manage-
+ *    gated `Configure` step. This divergence happens whenever %SYS state and
+ *    the code-bearing database part ways: a container migration or %SYS
+ *    restore that keeps a persisted code DB, a first install where Configure
+ *    failed (e.g. missing privileges), etc. Bootstrap re-runs ONLY the
+ *    privileged one-time steps (web app registration + package mapping +
+ *    ^UnitTestRoot) — it does NOT redeploy or recompile, since the classes
+ *    are already current. This is the self-healing path.
  *
  * - `stale`: the REST service is deployed but the classes don't match
  *    what's embedded in this MCP server build. Bootstrap redeploys and
@@ -35,6 +48,7 @@ import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
 export type ProbeResult =
   | { status: "missing" }
   | { status: "current" }
+  | { status: "unconfigured" }
   | { status: "stale"; deployedVersion: string };
 
 /** Result of a full bootstrap run. */
@@ -42,7 +56,7 @@ export interface BootstrapResult {
   /** Whether the probe detected the REST service is already configured. */
   probeFound: boolean;
   /** The probe result — lets callers distinguish first-time install from auto-upgrade. */
-  probeStatus: "missing" | "current" | "stale";
+  probeStatus: "missing" | "current" | "unconfigured" | "stale";
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -101,7 +115,22 @@ To complete setup manually, choose one of:
  *   which triggers a full bootstrap that upgrades the stale classes.
  *   This is the one-shot upgrade path for existing beta users.
  *
- * - Returned hash matches `BOOTSTRAP_VERSION` → `{ status: "current" }`.
+ * - Returned hash matches `BOOTSTRAP_VERSION` → the classes are current,
+ *   but a matching version does NOT prove the web application is
+ *   registered (the version stamp lives in the Setup class and is present
+ *   the moment deploy+compile succeed, independent of the privileged
+ *   `Configure` step). We therefore call `ExecuteMCPv2.Setup_IsConfigured()`
+ *   to verify the actual `/api/executemcp/v2` registration:
+ *   - registered → `{ status: "current" }` (skip everything).
+ *   - not registered → `{ status: "unconfigured" }` (re-run the privileged
+ *     steps only — self-heal). This covers the %SYS-refreshed-but-code-DB-
+ *     persisted case (container migration, %SYS restore) and a first install
+ *     whose `Configure` failed.
+ *   - If the `IsConfigured()` query itself fails on a version-matched
+ *     deployment (the proc cannot be missing at a matching version, so this
+ *     is essentially unreachable), we conservatively fall back to
+ *     `{ status: "current" }` rather than spam privileged Configure attempts
+ *     for an indeterminate state.
  *
  * - Returned hash differs from `BOOTSTRAP_VERSION` → `{ status: "stale", deployedVersion }`.
  *   Someone already ran bootstrap with a different class version; we
@@ -130,7 +159,20 @@ export async function probeCustomRest(
         return { status: "missing" };
       }
       if (deployedVersion === BOOTSTRAP_VERSION) {
-        return { status: "current" };
+        // Version matches, but that only proves the classes are present —
+        // not that the privileged web-app registration ever completed.
+        // Verify the actual configured state before declaring "current".
+        let configured: boolean;
+        try {
+          configured = await isConfigured(http, config, version);
+        } catch {
+          // IsConfigured() cannot be missing on a version-matched
+          // deployment, so a throw here means an indeterminate SQL/infra
+          // failure — not evidence the web app is absent. Preserve the
+          // fast skip path rather than re-attempting privileged steps.
+          return { status: "current" };
+        }
+        return configured ? { status: "current" } : { status: "unconfigured" };
       }
       return { status: "stale", deployedVersion };
     }
@@ -143,6 +185,44 @@ export async function probeCustomRest(
     // bootstrap that replaces their stale classes.
     return { status: "missing" };
   }
+}
+
+/**
+ * Check whether the `/api/executemcp/v2` web application is actually
+ * registered on IRIS.
+ *
+ * Calls `ExecuteMCPv2.Setup_IsConfigured()` via the Atelier SQL endpoint,
+ * which checks `Security.Applications.Exists("/api/executemcp/v2")` in the
+ * `%SYS` namespace. This is the authoritative test for the privileged
+ * `Configure` step — separate from, and not implied by, the class version
+ * stamp checked in {@link probeCustomRest}.
+ *
+ * Returns `true` only when the query succeeds AND reports the web app
+ * exists. Returns `false` when the query reports it does not exist (or
+ * returns no row). **Throws** when the SQL call itself fails (proc missing
+ * / privilege / infra error) — the caller decides how to treat an
+ * indeterminate result.
+ */
+export async function isConfigured(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+): Promise<boolean> {
+  const path = atelierPath(version, config.namespace, "action/query");
+  const body = {
+    query: "SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured",
+  };
+  const response = await http.post(path, body);
+  const content = (response.result as { content?: Record<string, unknown>[] })
+    ?.content;
+  if (Array.isArray(content) && content.length > 0) {
+    const row = content[0] as Record<string, unknown>;
+    // IRIS renders a %Boolean SqlProc result as 1/0; tolerate the numeric,
+    // string, and boolean JSON encodings.
+    const configured = String(row["Configured"] ?? "0").toLowerCase();
+    return configured === "1" || configured === "true";
+  }
+  return false;
 }
 
 /**
@@ -264,17 +344,104 @@ export async function configurePackageMapping(
 }
 
 /**
+ * Run the privileged one-time steps: web app registration + package mapping.
+ *
+ * Shared by every path that needs to create/repair the web application:
+ * `missing` (first install), `unconfigured` (self-heal), and `stale` when the
+ * web app is found to be absent. Mutates `result` in place — sets
+ * `configured`/`mapped`, accumulates errors, and populates
+ * `manualInstructions` if the (privileged) Configure step fails. Never throws:
+ * a Configure failure is recorded so the caller can surface a partial install
+ * and the next privileged launch self-heals.
+ */
+async function runPrivilegedSteps(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  result: BootstrapResult,
+): Promise<void> {
+  // Web app registration (requires %Admin_Manage).
+  try {
+    await configureWebApp(http, config, version);
+    result.configured = true;
+    logger.info("Bootstrap: web application configured successfully");
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    result.errors.push(`Configure failed: ${msg}`);
+    result.manualInstructions = MANUAL_INSTRUCTIONS.replace(
+      "NAMESPACE",
+      config.namespace,
+    );
+  }
+
+  // Package mapping to %All (non-fatal — only cross-namespace command exec
+  // depends on it).
+  try {
+    await configurePackageMapping(http, config, version);
+    result.mapped = true;
+    logger.info(
+      "Bootstrap: ExecuteMCPv2 package mapped to %All namespace for cross-namespace support",
+    );
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    result.errors.push(`Package mapping failed: ${msg}`);
+    // Non-fatal: cross-namespace iris_execute_command won't work but everything else will
+  }
+}
+
+/**
+ * Ensure `^UnitTestRoot` in the configured namespace. Independent step with its
+ * own try/catch so a failure here never masks earlier successes. Mutates
+ * `result` in place. iris_execute_tests re-ensures the global per-call in
+ * whatever target namespace it was invoked against, so this only covers the
+ * common case of tests against the configured namespace.
+ */
+async function ensureUnitTestRootStep(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  result: BootstrapResult,
+): Promise<void> {
+  try {
+    result.unitTestRoot = await ensureUnitTestRoot(
+      http,
+      config.namespace,
+      version,
+    );
+    result.unitTestRootEnsured = true;
+    logger.info(
+      `Bootstrap: ^UnitTestRoot ensured in '${config.namespace}' (value: ${result.unitTestRoot})`,
+    );
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    result.errors.push(`EnsureUnitTestRoot failed: ${msg}`);
+    // Non-fatal: iris_execute_tests will re-try per-call in the target namespace
+  }
+}
+
+/**
  * Full bootstrap orchestration.
  *
- * 1. Probe whether the REST service is already configured.
- * 2. If found, return a skip result.
- * 3. Deploy all ObjectScript classes.
- * 4. Compile all classes.
- * 5. Configure the web application.
+ * 1. Probe deployment + configuration state.
+ * 2. `current` (classes match AND web app registered) → skip everything.
+ * 3. `unconfigured` (classes match but web app absent) → skip deploy (source is
+ *    current) but RECOMPILE, then run the privileged steps (configure + mapping
+ *    + UnitTestRoot) to self-heal. The recompile matters: the web app being
+ *    absent means %SYS diverged from the code DB (migration / %SYS reset), which
+ *    can also leave stale or version-incompatible compiled objects even though
+ *    the source hash matches — verified live, the dispatch 500s until recompiled.
+ * 4. `stale` → redeploy + recompile. The privileged steps are normally
+ *    already done, so they're skipped — BUT we verify the web app is actually
+ *    registered first (same root cause as the reported bug); if it's absent,
+ *    we run the privileged steps too, so a divergent instance self-heals in
+ *    one restart instead of two.
+ * 5. `missing` → full install (deploy + compile + configure + mapping + UnitTestRoot).
  * 6. Return result with step-level tracking.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
- * includes manual instructions but does not throw.
+ * includes manual instructions but does not throw. Because the probe checks
+ * the web app registration directly (not just the class version), a later
+ * launch by a privileged user self-heals rather than reporting `current`.
  */
 export async function bootstrap(
   http: IrisHttpClient,
@@ -292,7 +459,7 @@ export async function bootstrap(
     errors: [],
   };
 
-  // Step 1: Probe — distinguishes missing, current, and stale deployments.
+  // Step 1: Probe — distinguishes missing, current, unconfigured, and stale deployments.
   let probe: ProbeResult;
   try {
     probe = await probeCustomRest(http, config, version);
@@ -318,121 +485,109 @@ export async function bootstrap(
     return result;
   }
 
-  // If stale (deployed but different version), log the upgrade transition
-  // so operators can see in logs which version replaced which.
-  if (probe.status === "stale") {
-    logger.info(
-      `Bootstrap: upgrading REST service from version ${probe.deployedVersion} to ${BOOTSTRAP_VERSION}`,
-    );
-  } else {
-    logger.info(
-      `Bootstrap: REST service not found, running full install (version ${BOOTSTRAP_VERSION})`,
-    );
-  }
-
-  // Step 2: Deploy — required for both `missing` and `stale` cases.
-  try {
-    await deployClasses(http, config, version);
+  // Deploy + compile are needed for `missing` (first install) and `stale`
+  // (class-content upgrade). `unconfigured` skips them entirely: the classes
+  // are already at the right version on disk — only the privileged web-app
+  // registration is missing — so redeploying would be wasted work.
+  if (probe.status === "unconfigured") {
+    // Source is already at the right version (hash matched) — no redeploy.
+    // But the web app being absent means %SYS diverged from the code DB
+    // (container migration, %SYS restore/reset). That same divergence can
+    // leave STALE or version-incompatible compiled objects behind even though
+    // the source hash matches — verified live: a migrated code DB dispatches
+    // <NULL VALUE> 500s until recompiled. So recompile (cheap, idempotent)
+    // before the privileged steps; skip deploy since the source is current.
     result.deployed = true;
     logger.info(
-      `Bootstrap: deployed ${BOOTSTRAP_CLASSES.size} classes to ${config.namespace}`,
+      `Bootstrap: REST classes present at version ${BOOTSTRAP_VERSION} but web application not registered — recompiling and running configuration steps`,
     );
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`Deploy failed: ${msg}`);
-    // Cannot continue without deployment
-    return result;
-  }
-
-  // Step 3: Compile — required for both `missing` and `stale` cases.
-  try {
-    await compileClasses(http, config, version);
-    result.compiled = true;
-    logger.info("Bootstrap: classes compiled successfully");
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`Compile failed: ${msg}`);
-    // Cannot continue without compilation
-    return result;
-  }
-
-  // Steps 4 and 5 are one-time privileged operations that only need to run
-  // on a fresh install. On a stale upgrade the webapp is already registered
-  // and the package mapping already exists, so we skip them — this means
-  // an upgrade works even when the running user no longer has %Admin_Manage.
-  if (probe.status === "stale") {
-    result.configured = true;
-    result.mapped = true;
-    // Ensure ^UnitTestRoot independently — own try/catch so a failure here
-    // does not mask the successful class upgrade.
     try {
-      result.unitTestRoot = await ensureUnitTestRoot(
-        http,
-        config.namespace,
-        version,
-      );
-      result.unitTestRootEnsured = true;
+      await compileClasses(http, config, version);
+      result.compiled = true;
+      logger.info("Bootstrap: classes recompiled successfully");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      result.errors.push(`Compile failed: ${msg}`);
+      // Continue to Configure anyway — creating the web app is the primary
+      // self-heal and is independent of compilation. The compile failure is
+      // surfaced via errors[] and compiled=false for the caller to see.
+    }
+  } else {
+    // Log the transition so operators can see in logs what is happening.
+    if (probe.status === "stale") {
       logger.info(
-        `Bootstrap: ^UnitTestRoot ensured in '${config.namespace}' (value: ${result.unitTestRoot})`,
+        `Bootstrap: upgrading REST service from version ${probe.deployedVersion} to ${BOOTSTRAP_VERSION}`,
+      );
+    } else {
+      logger.info(
+        `Bootstrap: REST service not found, running full install (version ${BOOTSTRAP_VERSION})`,
+      );
+    }
+
+    // Step 2: Deploy — required for both `missing` and `stale` cases.
+    try {
+      await deployClasses(http, config, version);
+      result.deployed = true;
+      logger.info(
+        `Bootstrap: deployed ${BOOTSTRAP_CLASSES.size} classes to ${config.namespace}`,
       );
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      result.errors.push(`EnsureUnitTestRoot failed: ${msg}`);
-      // Non-fatal: iris_execute_tests will re-try per-call in the target namespace
+      result.errors.push(`Deploy failed: ${msg}`);
+      // Cannot continue without deployment
+      return result;
     }
-    logger.info(
-      "Bootstrap: upgrade complete — webapp registration and package mapping already exist, skipped",
-    );
-    return result;
+
+    // Step 3: Compile — required for both `missing` and `stale` cases.
+    try {
+      await compileClasses(http, config, version);
+      result.compiled = true;
+      logger.info("Bootstrap: classes compiled successfully");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      result.errors.push(`Compile failed: ${msg}`);
+      // Cannot continue without compilation
+      return result;
+    }
   }
 
-  // Step 4: Configure web app (first-time install only).
-  try {
-    await configureWebApp(http, config, version);
-    result.configured = true;
-    logger.info("Bootstrap: web application configured successfully");
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`Configure failed: ${msg}`);
-    result.manualInstructions = MANUAL_INSTRUCTIONS.replace(
-      "NAMESPACE",
-      config.namespace,
-    );
+  // Privileged one-time operations (web app registration + package mapping),
+  // followed by ^UnitTestRoot. `missing` (first install) and `unconfigured`
+  // (self-heal) always run them. A `stale` upgrade normally skips them — the
+  // webapp + mapping already exist from the original install, so the upgrade
+  // works even when the running user no longer has %Admin_Manage. But verify
+  // that assumption instead of asserting it (the reported bug's root cause):
+  // if %SYS diverged from the code DB, the web app can be absent even on a
+  // version-mismatch upgrade, so self-heal when it's found missing.
+  if (probe.status === "stale") {
+    let staleConfigured: boolean;
+    try {
+      staleConfigured = await isConfigured(http, config, version);
+    } catch {
+      // Indeterminate — preserve the privilege-free upgrade path rather than
+      // forcing a Configure attempt that may need privileges the upgrader lacks.
+      staleConfigured = true;
+    }
+
+    if (staleConfigured) {
+      result.configured = true;
+      result.mapped = true;
+      logger.info(
+        "Bootstrap: upgrade complete — webapp registration and package mapping already exist, skipped",
+      );
+    } else {
+      logger.info(
+        "Bootstrap: upgraded classes but the web application is not registered — running configuration steps to self-heal",
+      );
+      await runPrivilegedSteps(http, config, version, result);
+    }
+  } else {
+    // `missing` and `unconfigured`: (re)create the web app + package mapping.
+    await runPrivilegedSteps(http, config, version, result);
   }
 
-  // Step 5: Map ExecuteMCPv2 package to %All namespace (first-time install only).
-  try {
-    await configurePackageMapping(http, config, version);
-    result.mapped = true;
-    logger.info(
-      "Bootstrap: ExecuteMCPv2 package mapped to %All namespace for cross-namespace support",
-    );
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`Package mapping failed: ${msg}`);
-    // Non-fatal: cross-namespace iris_execute_command won't work but everything else will
-  }
-
-  // Step 6: Ensure ^UnitTestRoot in the configured namespace. Independent from
-  // all prior steps — own try/catch so a failure here does not mask earlier
-  // successes. iris_execute_tests will ensure the global per-call in whatever
-  // target namespace it was invoked against, so this bootstrap step only
-  // covers the common case of tests against the configured namespace.
-  try {
-    result.unitTestRoot = await ensureUnitTestRoot(
-      http,
-      config.namespace,
-      version,
-    );
-    result.unitTestRootEnsured = true;
-    logger.info(
-      `Bootstrap: ^UnitTestRoot ensured in '${config.namespace}' (value: ${result.unitTestRoot})`,
-    );
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`EnsureUnitTestRoot failed: ${msg}`);
-    // Non-fatal: iris_execute_tests will re-try per-call in the target namespace
-  }
+  // ^UnitTestRoot for every non-current path.
+  await ensureUnitTestRootStep(http, config, version, result);
 
   return result;
 }

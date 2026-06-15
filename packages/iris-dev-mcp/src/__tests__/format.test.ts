@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { docConvertTool, docXmlExportTool } from "../tools/format.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";

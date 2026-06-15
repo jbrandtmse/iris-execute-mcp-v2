@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext, HeadResponse } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { docGetTool, docPutTool, docDeleteTool, docListTool, validateDocName } from "../tools/doc.js";
