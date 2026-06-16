@@ -2213,4 +2213,255 @@ ClassMethod LdapManage() As %Status
     Quit $$$OK
 }
 
+/// List X.509 certificate credentials, or get one credential's public metadata.
+/// <p>Backed by <class>%SYS.X509Credentials</class> in <code>%SYS</code>
+/// (Story 15.3). With no <code>alias</code> query parameter, returns a JSON
+/// array of credentials (alias + <code>hasPrivateKey</code> + safe public
+/// certificate fields). With an <code>alias</code> query parameter, returns
+/// that one credential's public metadata.</p>
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3)</b>: private-key material is NEVER
+/// returned. This handler reads ONLY the safe public properties off the opened
+/// object (<code>SubjectDN</code>, <code>IssuerDN</code>,
+/// <code>SerialNumber</code>, <code>Thumbprint</code>,
+/// <code>SubjectKeyIdentifier</code>, <code>ValidityNotBefore/After</code>) plus
+/// the <code>HasPrivateKey</code> presence boolean. It deliberately does NOT
+/// call <method>%SYS.X509Credentials.GetProperties</method>, which populates the
+/// secret <code>PrivateKey</code> / <code>PrivateKeyPassword</code> entries.</p>
+ClassMethod X509List() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?alias= selects single-credential get
+        Set tAlias = $Get(%request.Data("alias", 1))
+
+        ; Switch to %SYS for %SYS.X509Credentials operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAlias '= "" {
+            ; Single credential get — open and read only safe public fields.
+            ; NOTE: %SYS.X509Credentials.Exists returns a truthy %Status (NOT 0)
+            ; when the caller lacks %Admin_Secure:USE, and leaves tCred unset. So
+            ; do NOT trust the boolean return alone — require BOTH a loaded object
+            ; AND an OK status before reading. Otherwise a permission failure would
+            ; be misread as "exists" and crash on the unset OREF.
+            Set tExists = ##class(%SYS.X509Credentials).Exists(tAlias, .tCred, .tStatus)
+            If ('tExists) || $$$ISERR($Get(tStatus, $$$OK)) || '$IsObject($Get(tCred)) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError($Get(tStatus, $$$ERROR($$$GeneralError, "X.509 credential '"_tAlias_"' does not exist"))))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tEntry = ..BuildX509Entry(tCred)
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all credentials. Use the ListDetails query for alias +
+        ; HasPrivateKey, then open each to read the safe public cert metadata.
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("%SYS.X509Credentials:ListDetails")
+        Set tSC = tRS.Execute()
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ListDetails ROWSPEC: Alias, OwnerList, PeerNames, HasPrivateKey, CAFile
+            Set tRowAlias = tRS.Get("Alias")
+            Set tCred = ##class(%SYS.X509Credentials).%OpenId(tRowAlias)
+            If $IsObject(tCred) {
+                Set tEntry = ..BuildX509Entry(tCred)
+            } Else {
+                ; Fall back to the query row's safe fields if open fails.
+                Set tEntry = {}
+                Do tEntry.%Set("alias", tRowAlias)
+                Do tEntry.%Set("hasPrivateKey", +tRS.Get("HasPrivateKey"), "boolean")
+            }
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        ; Close the result set if an exception fired mid-iteration (the success
+        ; path closes it; the catch must too, or the cursor leaks per error).
+        If $IsObject($Get(tRS)) { Do tRS.Close() }
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Build a private-key-free JSON metadata object for one opened
+/// <class>%SYS.X509Credentials</class> object.
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3)</b>: reads ONLY safe public properties.
+/// It NEVER reads <code>PrivateKey</code>, <code>PrivateKeyPassword</code>,
+/// <code>PrivateKeyExport</code>, or <code>PrivateKeyPasswordExport</code> —
+/// only the <code>HasPrivateKey</code> presence boolean is surfaced. Binary
+/// fields (Thumbprint, SubjectKeyIdentifier) are hex-encoded for safe JSON
+/// transport.</p>
+ClassMethod BuildX509Entry(pCred As %SYS.X509Credentials) As %DynamicObject [ Internal ]
+{
+    Set tEntry = {}
+    Do tEntry.%Set("alias", pCred.Alias)
+    Do tEntry.%Set("hasPrivateKey", +pCred.HasPrivateKey, "boolean")
+    Do tEntry.%Set("subjectDN", pCred.SubjectDN)
+    Do tEntry.%Set("issuerDN", pCred.IssuerDN)
+    Do tEntry.%Set("serialNumber", pCred.SerialNumber)
+    ; Binary fields → hex strings (BinaryToHexString is a class method on
+    ; %SYS.X509Credentials). Guard empties so we emit "" rather than throwing.
+    If pCred.Thumbprint '= "" {
+        Do tEntry.%Set("thumbprint", ##class(%SYS.X509Credentials).BinaryToHexString(pCred.Thumbprint))
+    } Else {
+        Do tEntry.%Set("thumbprint", "")
+    }
+    If pCred.SubjectKeyIdentifier '= "" {
+        Do tEntry.%Set("subjectKeyIdentifier", ##class(%SYS.X509Credentials).BinaryToHexString(pCred.SubjectKeyIdentifier))
+    } Else {
+        Do tEntry.%Set("subjectKeyIdentifier", "")
+    }
+    Do tEntry.%Set("notBefore", pCred.ValidityNotBefore)
+    Do tEntry.%Set("notAfter", pCred.ValidityNotAfter)
+    Do tEntry.%Set("peerNames", pCred.PeerNames)
+    Do tEntry.%Set("caFile", pCred.CAFile)
+    ; CRITICAL: NEVER read PrivateKey / PrivateKeyPassword / *Export props.
+    Quit tEntry
+}
+
+/// Import (create) or delete an X.509 certificate credential.
+/// <p>Reads a JSON body with <code>action</code> (import|delete) and
+/// <code>alias</code> (the unique credential key).</p>
+/// <ul>
+///   <li><b>import</b>: requires a base64-encoded <code>certificate</code>
+///       (DER bytes, or a PEM certificate body). The native file-based
+///       <method>%SYS.X509Credentials.Import</method> reads a server-side XML
+///       export file (not agent-friendly), so a single credential is created via
+///       object-create + <method>Save</method> — base64-decode the certificate
+///       into the <code>Certificate</code> property (whose setter auto-derives
+///       Thumbprint/Subject/Issuer/Serial/SubjectKeyIdentifier), then save. An
+///       OPTIONAL base64 <code>privateKey</code> (+ optional
+///       <code>privateKeyPassword</code>) may be supplied write-only.</li>
+///   <li><b>delete</b>: removes the credential via
+///       <method>%SYS.X509Credentials.Delete</method>.</li>
+/// </ul>
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3 / AC 15.3.7)</b>: a supplied private key /
+/// password is accepted IN only — it is NEVER echoed in the response. Errors
+/// propagate via <method>SanitizeError</method> (Rule #9), preserving the real
+/// IRIS error text without leaking any key/password material.</p>
+ClassMethod X509Manage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tAlias = tBody.%Get("alias")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAlias, "alias")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "import") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: import, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; For import, the certificate is required — validate before switching NS.
+        If tAction = "import" {
+            Set tCertB64 = tBody.%Get("certificate")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tCertB64, "certificate")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Switch to %SYS for %SYS.X509Credentials operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "delete" {
+            Set tSC = ##class(%SYS.X509Credentials).Delete(tAlias)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "alias": (tAlias)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; import — construct a credential from the base64 certificate + Save.
+        ; Alias is the IdKey, so a %New()+Save() targeting an existing alias would
+        ; SILENTLY OVERWRITE the existing credential (including its stored private
+        ; key) with a success response. Guard against that data-loss: reject an
+        ; import onto an alias that already exists, so create-vs-overwrite is
+        ; explicit. (Exists also surfaces a permission failure cleanly here.)
+        If ##class(%SYS.X509Credentials).Exists(tAlias) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "X.509 credential '"_tAlias_"' already exists; delete it first to replace it")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; The Certificate setter auto-derives Thumbprint/Subject/Issuer/Serial/
+        ; SubjectKeyIdentifier. A supplied private key/password is set write-only.
+        Set tCred = ##class(%SYS.X509Credentials).%New()
+        Set tCred.Alias = tAlias
+        ; Accept either raw base64 of DER bytes, or a PEM body — Base64Decode of
+        ; the supplied string yields the binary certificate either way (the PEM
+        ; armor lines, if present, must be stripped by the caller).
+        Set tCred.Certificate = $System.Encryption.Base64Decode(tCertB64)
+        Set tPrivKeyB64 = tBody.%Get("privateKey")
+        If tPrivKeyB64 '= "" {
+            ; PrivateKey is PEM-encoded text; decode the base64 wrapper to it.
+            Set tCred.PrivateKey = $System.Encryption.Base64Decode(tPrivKeyB64)
+            Set tPwd = tBody.%Get("privateKeyPassword")
+            If tPwd '= "" Set tCred.PrivateKeyPassword = tPwd
+        }
+        Set tSC = tCred.Save()
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) {
+            ; SanitizeError preserves the %Status text. The status text here is
+            ; about the certificate/alias, never the private key value (Rule #9).
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; CRITICAL: the response echoes ONLY the alias — never the private key.
+        Set tResult = {}
+        Do tResult.%Set("action", "imported")
+        Do tResult.%Set("alias", tAlias)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }
