@@ -56,3 +56,20 @@ export type { BootstrapResult } from "./bootstrap.js";
 export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
 export type { BootstrapClass } from "./bootstrap-classes.js";
 export { resolveTransport } from "./transport.js";
+export {
+  GOVERNANCE_BASELINE,
+  GOVERNANCE_BASELINE_HASH,
+} from "./governance-baseline.js";
+export {
+  parseGovernanceConfig,
+  buildMutatesLookup,
+  defaultSeed,
+  effective,
+  getEffectivePolicy,
+} from "./governance.js";
+export type {
+  MutationClass,
+  GovernanceLayer,
+  GovernanceConfig,
+  MutatesLookup,
+} from "./governance.js";

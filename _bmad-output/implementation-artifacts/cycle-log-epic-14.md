@@ -21,3 +21,9 @@
 2026-06-16T02:08:38Z	Story 14.2	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
 2026-06-16T02:15:28Z	Story 14.2	qa_complete	spawn_at=2026-06-16T02:08:39Z model=claude-opus-4-8 tests_added=15 shared_tests=291 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T02:32:20Z	Story 14.2	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=smoke-14-2(11-assertions,D2-injection+selection+2-live-IRIS-auth-calls,removed) note=nonzero-exit-is-windows-libuv-teardown-artifact model=claude-opus-4-8
+2026-06-16T02:32:44Z	Story 14.2	committed	sha=3ea9d09 submodules=
+2026-06-16T02:36:05Z	Story 14.3	story_created	path=_bmad-output/implementation-artifacts/14-3-governance-policy-model-and-cascade.md model=claude-opus-4-8
+2026-06-16T02:50:35Z	Story 14.3	dev_complete	spawn_at=2026-06-16T02:36:05Z model=claude-opus-4-8 files=7 new_modules=governance.ts,governance-baseline.ts(generated),gen-governance-baseline.mjs tests_added=41 shared_tests=334 baseline_keys=141 baseline_hash=1e62c5ad5bf7 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-06-16T02:50:36Z	Story 14.3	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
+2026-06-16T02:57:00Z	Story 14.3	qa_complete	spawn_at=2026-06-16T02:50:36Z model=claude-opus-4-8 tests_added=45 shared_tests=379 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T03:11:29Z	Story 14.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=generator-deterministic(byte-identical-regen)+engine-smoke-13-assertions(AC14.3.7-proof-141-keys,cascade,proto-safety,parse,getEffectivePolicy-invariant) model=claude-opus-4-8

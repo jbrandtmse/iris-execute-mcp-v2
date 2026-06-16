@@ -66,6 +66,27 @@ export interface ToolDefinition {
   annotations: ToolAnnotations;
   /** Namespace scope governing how namespace is resolved. */
   scope: ToolScope;
+  /**
+   * Mutation classification for tool governance (Epic 14, architecture decision D4).
+   *
+   * Declares whether a tool's operations read or write IRIS state, so the
+   * governance engine ({@link ../governance.js}) can apply the safe default
+   * seed: new `read` actions enabled, new `write`/`change` actions disabled.
+   *
+   * Two forms, matching the governance-key model (`tool` vs `tool:action`):
+   * - **Scalar** (`'read' | 'write'`) — a single-operation tool with no
+   *   `action` enum. The governance key is the bare tool {@link name}.
+   * - **Per-action map** (`Record<actionValue, 'read' | 'write'>`) — a
+   *   multi-action tool whose `inputSchema` has an `action` enum. Each key is
+   *   an enum value; the governance key is `name:action`.
+   *
+   * **Optional and grandfathered:** only NEW actions (Epics 14–17) declare
+   * `mutates`. Every tool that predates governance omits it and is treated as
+   * pre-existing (enabled) via membership in the generated governance baseline
+   * (`governance-baseline.ts`), NOT via this field. Do not retro-classify
+   * existing tools.
+   */
+  mutates?: "read" | "write" | Record<string, "read" | "write">;
   /** Async handler invoked when the tool is called. */
   handler: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }
