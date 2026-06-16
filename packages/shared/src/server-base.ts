@@ -8,9 +8,10 @@
  * array.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { ZodObject } from "zod";
 
@@ -42,10 +43,32 @@ import {
   parseGovernanceConfig,
   buildMutatesLookup,
   effective,
+  getEffectivePolicy,
 } from "./governance.js";
+import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * URI scheme for the advisory governance resource (Epic 14, architecture
+ * decision D6). `iris-governance://default` is the static default/global-policy
+ * resource (appears in `resources/list`); `iris-governance://{profile}` is the
+ * per-profile template (appears in `resources/templates/list` and serves
+ * `resources/read`). Both render the {@link getEffectivePolicy} map as JSON.
+ *
+ * The resource is ADVISORY ONLY (AC 14.5.4): it lets a client preview which
+ * actions a profile permits, but the authoritative boundary is the call-time
+ * enforcement gate in {@link McpServerBase.handleToolCall} (D5). No code path
+ * depends on a client ever reading this resource.
+ */
+const GOVERNANCE_URI_SCHEME = "iris-governance";
+/** Static resource name + URI for the default/global policy (D6). */
+const GOVERNANCE_DEFAULT_RESOURCE_NAME = "iris-governance-default";
+const GOVERNANCE_DEFAULT_URI = `${GOVERNANCE_URI_SCHEME}://${DEFAULT_PROFILE_NAME}`;
+/** Template resource name + URI pattern for the per-profile policy (D6). */
+const GOVERNANCE_TEMPLATE_RESOURCE_NAME = "iris-governance-profile";
+const GOVERNANCE_TEMPLATE_URI = `${GOVERNANCE_URI_SCHEME}://{profile}`;
 
 /**
  * The framework `server` parameter, injected into every tool's input schema at
@@ -296,13 +319,40 @@ export class McpServerBase {
    */
   private mutatesLookup: MutatesLookup = new Map();
 
+  /**
+   * Every governance key this server's advisory resource reports on (Epic 14,
+   * architecture decisions D4/D6): the union of {@link GOVERNANCE_BASELINE} and
+   * this server's own registered tool/action keys, computed with the SAME logic
+   * as {@link computeGovernanceKey} / the baseline generator so the resource's
+   * keys line up exactly with the enforcement gate's. Passed as `allKeys` to
+   * {@link getEffectivePolicy} when the `iris-governance://{profile}` resource is
+   * read. Rebuilt whenever the tool set changes ({@link rebuildGovernedKeys}).
+   *
+   * Including the full baseline (not just this server's keys) means the resource
+   * reports a complete, consistent policy view across the suite — a client can
+   * read any one server's resource and see the effective enablement of every
+   * grandfathered action, plus this server's new actions.
+   */
+  private governedKeys: Set<string> = new Set();
+
   /** Page size for tools/list pagination. */
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
 
   constructor(private readonly options: McpServerBaseOptions) {
     this.mcpServer = new McpServer(
       { name: options.name, version: options.version },
-      { capabilities: { tools: { listChanged: true } } },
+      {
+        // `resources` is declared explicitly here per D6 so the `initialize`
+        // result advertises it. The SDK ALSO calls registerCapabilities with the
+        // identical `resources: { listChanged: true }` when registerResource runs
+        // (mcp.js setResourceRequestHandlers); registerCapabilities merges, so the
+        // two are idempotent and do not conflict. Declaring it up front guarantees
+        // the capability is present even before any transport/registration timing.
+        capabilities: {
+          tools: { listChanged: true },
+          resources: { listChanged: true },
+        },
+      },
     );
 
     if (options.config) {
@@ -322,6 +372,18 @@ export class McpServerBase {
     // live registry (not options.tools) so addTools/removeTools can rebuild it
     // and keep a dynamically-added governed tool's key classified.
     this.rebuildMutatesLookup();
+    // Compute the governance key universe the advisory resource reports on (D6),
+    // also from the live registry so addTools/removeTools keep it in sync.
+    this.rebuildGovernedKeys();
+
+    // Register the advisory governance resource (D6): a static default-policy
+    // resource + a per-profile template. Registered at construction (like tools)
+    // so the resource handlers + the `resources` capability are wired before any
+    // transport connects. The read callbacks close over `this`, so they read the
+    // governance config / governed-key set as they are AT READ TIME — by which
+    // point start() has parsed IRIS_GOVERNANCE. sendResourceListChanged() is a
+    // no-op until a transport attaches, so this is safe pre-connect.
+    this.registerGovernanceResource();
   }
 
   /**
@@ -332,6 +394,147 @@ export class McpServerBase {
    */
   private rebuildMutatesLookup(): void {
     this.mutatesLookup = buildMutatesLookup(this.tools.values());
+  }
+
+  /**
+   * Rebuild {@link governedKeys} (the advisory resource's key universe, D6) from
+   * the live tool registry: the union of {@link GOVERNANCE_BASELINE} and every
+   * registered tool/action key. Keys are computed with the SAME rule the gate
+   * and the baseline generator use — `tool:action` for a tool whose input schema
+   * declares an `action` ZodEnum (one key per enum value), the bare `tool` name
+   * otherwise — so the resource's reported keys align exactly with the gate.
+   * Called at construction and on every {@link addTools} / {@link removeTools}.
+   */
+  private rebuildGovernedKeys(): void {
+    const keys = new Set<string>(GOVERNANCE_BASELINE);
+    for (const tool of this.tools.values()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const actionField = (tool.inputSchema as any)?.shape?.action;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options = (actionField as any)?.options;
+      if (Array.isArray(options) && options.length > 0) {
+        for (const value of options) {
+          keys.add(`${tool.name}:${String(value)}`);
+        }
+      } else {
+        keys.add(tool.name);
+      }
+    }
+    this.governedKeys = keys;
+  }
+
+  // ── Advisory governance resource (D6) ──────────────────────────────
+
+  /**
+   * Compute the effective governance policy for a profile as a JSON-serialized
+   * {@link ReadResourceResult} (architecture decision D6). Shared by the static
+   * default resource and the per-profile template read callbacks.
+   *
+   * Resolves the profile name against the registry FIRST so an unknown profile
+   * surfaces a structured {@link McpError} (mapped from {@link ProfileResolutionError})
+   * rather than silently returning a default-shaped map or crashing the server.
+   * The default profile always resolves (it is reserved), so the static
+   * `iris-governance://default` resource never errors on resolution.
+   *
+   * @param profileName - The profile whose effective policy to report.
+   * @param uri         - The resource URI (echoed into the result `contents`).
+   * @throws {McpError} (InvalidParams) when `profileName` is not a registered profile.
+   */
+  private buildGovernancePolicyResult(
+    profileName: string,
+    uri: string,
+  ): ReadResourceResult {
+    // Resolve against the registry so an unknown profile is a clean resource
+    // error. When the registry is not yet built (server constructed but not
+    // start()ed), fall back to validating just the reserved default — the only
+    // profile guaranteed to exist pre-start.
+    if (this.profiles) {
+      try {
+        resolveProfile(this.profiles, profileName);
+      } catch (error: unknown) {
+        if (error instanceof ProfileResolutionError) {
+          throw new McpError(ErrorCode.InvalidParams, error.message);
+        }
+        throw error;
+      }
+    } else if (profileName !== DEFAULT_PROFILE_NAME) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Unknown server profile "${profileName}". The server is not yet initialised; only "${DEFAULT_PROFILE_NAME}" is available.`,
+      );
+    }
+
+    const policy = getEffectivePolicy(
+      profileName,
+      this.governanceConfig,
+      this.governedKeys,
+      this.mutatesLookup,
+    );
+
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(policy),
+        },
+      ],
+    };
+  }
+
+  /**
+   * Register the advisory governance resource (architecture decision D6 — the
+   * minimal, single-resource-type provider; NOT a generalized ResourceDefinition
+   * framework, which is deferred until a second resource exists). Two pieces:
+   *
+   * - A STATIC resource `iris-governance://default` for the default/global
+   *   policy, so `resources/list` advertises a concrete entry.
+   * - A `ResourceTemplate` `iris-governance://{profile}` for any profile, serving
+   *   `resources/read` and listed under `resources/templates/list`. Its `list`
+   *   callback is `undefined` (D6 minimal — the template is for parameterized
+   *   read, not enumeration of every profile); the SDK requires the field to be
+   *   passed explicitly even when undefined.
+   *
+   * Registering either resource auto-wires the SDK's `resources/list`,
+   * `resources/templates/list`, and `resources/read` handlers and (re)advertises
+   * the `resources` capability (already declared in the constructor).
+   */
+  private registerGovernanceResource(): void {
+    // Static default/global policy resource → resources/list.
+    this.mcpServer.registerResource(
+      GOVERNANCE_DEFAULT_RESOURCE_NAME,
+      GOVERNANCE_DEFAULT_URI,
+      {
+        title: "IRIS governance policy (default profile)",
+        description:
+          "Advisory: the effective enabled/disabled action map for the default " +
+          "server profile. The call-time enforcement gate is authoritative; this " +
+          "resource is a read-only preview.",
+        mimeType: "application/json",
+      },
+      (uri: URL): ReadResourceResult =>
+        this.buildGovernancePolicyResult(DEFAULT_PROFILE_NAME, uri.toString()),
+    );
+
+    // Per-profile policy template → resources/templates/list + resources/read.
+    this.mcpServer.registerResource(
+      GOVERNANCE_TEMPLATE_RESOURCE_NAME,
+      new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, { list: undefined }),
+      {
+        title: "IRIS governance policy (per profile)",
+        description:
+          "Advisory: the effective enabled/disabled action map for a named " +
+          "server profile (iris-governance://<profile>). The call-time " +
+          "enforcement gate is authoritative; this resource is a read-only preview.",
+        mimeType: "application/json",
+      },
+      (uri: URL, variables: Record<string, unknown>): ReadResourceResult => {
+        // The URI template binds {profile}; it may surface as string | string[].
+        const raw = variables.profile;
+        const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
+        return this.buildGovernancePolicyResult(profileName, uri.toString());
+      },
+    );
   }
 
   // ── Tool registration ──────────────────────────────────────────────
@@ -660,6 +863,9 @@ export class McpServerBase {
     // Keep the governance mutates lookup in sync with the live tool set (D4) so
     // a newly-added governed tool's `mutates` classification is enforced.
     this.rebuildMutatesLookup();
+    // Keep the advisory resource's key universe in sync too (D6), so a newly
+    // added tool's keys appear in the effective-policy map.
+    this.rebuildGovernedKeys();
     this.mcpServer.sendToolListChanged();
     logger.info(`Added ${tools.length} tool(s) and notified clients`);
   }
@@ -689,6 +895,10 @@ export class McpServerBase {
       // Rebuild the governance mutates lookup so a removed governed tool's key
       // no longer carries a stale classification (D4).
       this.rebuildMutatesLookup();
+      // Rebuild the advisory resource's key universe too (D6). Note baseline
+      // keys remain (the resource always reports the full grandfathered set);
+      // only this server's own non-baseline keys drop out.
+      this.rebuildGovernedKeys();
       this.mcpServer.sendToolListChanged();
     }
     logger.info(`Removed ${removedCount} tool(s) and notified clients`);

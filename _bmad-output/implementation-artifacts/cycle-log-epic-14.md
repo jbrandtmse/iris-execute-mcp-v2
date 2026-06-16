@@ -33,3 +33,9 @@
 2026-06-16T03:26:42Z	Story 14.4	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
 2026-06-16T03:33:03Z	Story 14.4	qa_complete	spawn_at=2026-06-16T03:26:42Z model=claude-opus-4-8 tests_added=14 shared_tests=425 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T03:46:37Z	Story 14.4	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=real-McpServerBase-gate-vs-live-IRIS-6-assertions(cascade-enable/disable,denial-envelope-code+action+server,handler-not-called,seed-passthrough) note=nonzero-exit-is-windows-libuv-teardown model=claude-opus-4-8
+2026-06-16T03:47:00Z	Story 14.4	committed	sha=71049a7 submodules=
+2026-06-16T03:49:09Z	Story 14.5	story_created	path=_bmad-output/implementation-artifacts/14-5-governance-resource-and-capability.md model=claude-opus-4-8
+2026-06-16T04:06:12Z	Story 14.5	dev_complete	spawn_at=2026-06-16T03:49:09Z model=claude-opus-4-8 files=1 source=server-base.ts(resources-capability+governance-resource) tests_added=13 shared_tests=438 capstone=governance-cross-server.test.ts(AC14.5.6-in-default-suite) clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-06-16T04:06:12Z	Story 14.5	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
+2026-06-16T04:12:39Z	Story 14.5	qa_complete	spawn_at=2026-06-16T04:06:12Z model=claude-opus-4-8 tests_added=12 shared_tests=450 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T04:26:32Z	Story 14.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=real-MCP-SDK-resource-handlers-vs-live-IRIS-7-assertions(capability,list,templates,per-profile-read-cascade-143-keys,unknown-profile-McpError) note=nonzero-exit-is-windows-libuv-teardown model=claude-opus-4-8
