@@ -390,6 +390,25 @@ export class ProfileClientRegistry {
     return this.clients.has(profileName);
   }
 
+  /**
+   * Destroy and drop the cached client for a single profile, if one exists.
+   *
+   * Used when a profile's first-touch establishment fails (e.g. health-check
+   * rejection): destroying aborts any in-flight requests and clears session
+   * state, and dropping it from the cache makes the next call re-create a fresh
+   * client and re-attempt establishment (retryable — no un-established client
+   * lingers). A no-op when no client is cached for the profile.
+   *
+   * @returns `true` if a client was destroyed and removed, `false` otherwise.
+   */
+  drop(profileName: string): boolean {
+    const client = this.clients.get(profileName);
+    if (!client) return false;
+    client.destroy();
+    this.clients.delete(profileName);
+    return true;
+  }
+
   /** Destroy all cached clients (aborts in-flight requests, clears sessions). */
   destroyAll(): void {
     for (const client of this.clients.values()) {

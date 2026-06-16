@@ -11,6 +11,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import type { ZodObject } from "zod";
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
@@ -22,6 +24,7 @@ import { logger } from "./logger.js";
 import type { ProfileRegistry, IrisProfile } from "./profiles.js";
 import {
   ProfileClientRegistry,
+  ProfileResolutionError,
   buildProfileRegistry,
   loadProfileRegistry,
   resolveProfile,
@@ -37,6 +40,60 @@ import type {
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * The framework `server` parameter, injected into every tool's input schema at
+ * registration (architecture decision D2). Defined once here so the description
+ * is identical across all current and future tools and on all five servers, and
+ * so future tools inherit it automatically — never hand-add it per tool.
+ *
+ * The value is the name of a profile from `IRIS_PROFILES`; omitting it selects
+ * the reserved `default` profile (today's single-server behavior). The field is
+ * optional, so adding it to a tool's advertised `inputSchema` is additive and
+ * non-breaking per JSON-Schema/MCP semantics (the Epic 14 back-compat gate).
+ */
+const SERVER_PARAM_FIELD = {
+  server: z
+    .string()
+    .optional()
+    .describe(
+      "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+    ),
+} as const;
+
+/**
+ * Extend a tool's input schema with the shared {@link SERVER_PARAM_FIELD} so the
+ * `server` parameter is advertised and validated centrally (architecture
+ * decision D2). The returned schema is used both for the SDK-advertised
+ * `inputSchema` (so clients see `server`) and for validation in
+ * {@link McpServerBase.handleToolCall} (so Zod captures `server` instead of
+ * stripping it as an unknown key).
+ *
+ * `server` is a name reserved by the framework (D2). If a tool's own input
+ * schema already declares a `server` field, `.extend()` would silently replace
+ * it and {@link McpServerBase.handleToolCall} would then strip it before the
+ * handler — so the tool would silently lose its own argument. We fail fast at
+ * registration instead, naming the offending tool, so the collision is caught
+ * in development rather than mis-routing calls in production.
+ *
+ * @throws {Error} When `inputSchema` already declares a `server` field.
+ */
+export function withServerParam(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inputSchema: ZodObject<any>,
+  toolName?: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): ZodObject<any> {
+  if (Object.prototype.hasOwnProperty.call(inputSchema.shape, "server")) {
+    throw new Error(
+      `Tool ${toolName ?? "(unknown)"} declares a reserved input field "server". ` +
+        `"server" is injected centrally by the framework (architecture decision D2) ` +
+        `to select the connection profile; a tool must not define its own "server" field. ` +
+        `Rename the tool's parameter.`,
+    );
+  }
+  return inputSchema.extend(SERVER_PARAM_FIELD);
+}
 
 /** Options accepted by the {@link McpServerBase} constructor. */
 export interface McpServerBaseOptions {
@@ -159,6 +216,15 @@ export class McpServerBase {
   private readonly mcpServer: McpServer;
   private readonly tools: Map<string, ToolDefinition> = new Map();
   /**
+   * Per-tool input schema extended with the shared `server` parameter (D2).
+   * Keyed by tool name. {@link handleToolCall} validates against THIS schema
+   * (not the tool's original `inputSchema`) so Zod captures `server` rather than
+   * stripping it as an unknown key; `server` is then read and removed before the
+   * handler is invoked, keeping handlers byte-for-byte unchanged.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly extendedSchemas: Map<string, ZodObject<any>> = new Map();
+  /**
    * The default profile's connection config (the `IRIS_*`-derived config).
    * Retained under its original name so existing single-server behavior — and
    * the `handleToolCall` default path — is byte-for-byte unchanged.
@@ -186,6 +252,19 @@ export class McpServerBase {
   private readonly profileMeta: Map<
     string,
     { atelierVersion: number; bootstrapAttempted: boolean }
+  > = new Map();
+  /**
+   * In-flight first-touch establishment Promises, keyed by profile name
+   * (AC 14.2.7 — routed Story 14.1 CR MED #1). When a profile is being
+   * established for the first time, its establishment Promise is cached here so
+   * concurrent first-touch calls for the SAME profile await ONE shared
+   * establishment (and so `attemptProfileBootstrap` runs at most once per
+   * profile). The entry is cleared once establishment settles (success OR
+   * failure) so a failed first touch is retryable.
+   */
+  private readonly establishing: Map<
+    string,
+    Promise<{ client: IrisHttpClient; atelierVersion: number }>
   > = new Map();
   /** Negotiated Atelier version for the default profile (unchanged back-compat field). */
   private atelierVersion = 1;
@@ -221,10 +300,20 @@ export class McpServerBase {
   private registerTool(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
 
+    // Centrally inject the framework `server` parameter into the tool's input
+    // schema (architecture decision D2). The EXTENDED schema is what we advertise
+    // and what handleToolCall validates against; it is stored so the two stay in
+    // lock-step. Injecting here (once, for every tool) — rather than hand-adding
+    // `server` per tool — gives uniform coverage and makes future tools inherit
+    // it for free. outputSchema is untouched (additive, back-compat).
+    const extendedInputSchema = withServerParam(tool.inputSchema, tool.name);
+    this.extendedSchemas.set(tool.name, extendedInputSchema);
+
     // The MCP SDK's registerTool accepts a ZodRawShapeCompat (Record<string, AnySchema>).
-    // ZodObject.shape in Zod v4 gives us exactly that.
+    // ZodObject.shape in Zod v4 gives us exactly that. Advertise the EXTENDED
+    // shape so clients see the optional `server` field.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputShape = tool.inputSchema.shape as any;
+    const inputShape = extendedInputSchema.shape as any;
 
     // Convert outputSchema Zod shape for the SDK (mirrors inputSchema pattern)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -262,8 +351,33 @@ export class McpServerBase {
     tool: ToolDefinition,
     rawArgs: unknown,
   ): Promise<CallToolResult> {
-    // Validate arguments via Zod
-    const parseResult = tool.inputSchema.safeParse(rawArgs);
+    // Validate arguments via Zod against the EXTENDED schema (the original
+    // inputSchema + the framework `server` field). Validating against the
+    // extended schema is what lets Zod capture `server`; parsing with the
+    // unextended `tool.inputSchema` would strip `server` as an unknown key
+    // before we could read it (architecture decision D2).
+    //
+    // The extended schema MUST exist: registerTool populates it for every tool
+    // before the SDK callback can fire, and removeTools deletes the SDK callback
+    // alongside the schema. If it is ever missing, falling back to the unextended
+    // schema would SILENTLY strip `server` and mis-route the call to the default
+    // profile — so we fail fast with a structured error instead.
+    const extendedSchema = this.extendedSchemas.get(tool.name);
+    if (!extendedSchema) {
+      logger.error(
+        `Tool ${tool.name}: missing extended input schema (internal invariant violated).`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Internal error: tool "${tool.name}" is not fully registered (missing extended schema).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const parseResult = extendedSchema.safeParse(rawArgs);
     if (!parseResult.success) {
       const issues = parseResult.error.issues as Array<{
         path: PropertyKey[];
@@ -288,10 +402,16 @@ export class McpServerBase {
       };
     }
 
-    const validatedArgs = parseResult.data;
+    // Separate the framework `server` parameter from the tool's own args, then
+    // STRIP it so the handler never sees it (D2 — handlers stay byte-for-byte
+    // unchanged). `server` is the only key the extended schema adds, so removing
+    // it yields exactly the args the original inputSchema produced.
+    const { server, ...validatedArgs } = parseResult.data as {
+      server?: string;
+    } & Record<string, unknown>;
 
     // Build tool context with namespace resolution
-    if (!this.config || !this.clients) {
+    if (!this.config || !this.clients || !this.profiles) {
       return {
         content: [
           {
@@ -303,19 +423,66 @@ export class McpServerBase {
       };
     }
 
-    // Resolve the DEFAULT profile's client. The default profile's client was
-    // created (and health-checked / version-negotiated) eagerly in start(), so
-    // this returns that same cached instance synchronously — byte-for-byte
-    // today's behavior. Per-call `server`-parameter profile selection is
-    // Story 14.2 (architecture decision D2); this story keeps handleToolCall on
-    // the default profile only.
-    const http = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
+    // Resolve the `server` profile name → profile (architecture decision D2).
+    // Omitted/empty `server` resolves to the reserved `default` profile, whose
+    // client + version were established eagerly in start() — byte-for-byte
+    // today's behavior (the back-compat gate). An unknown profile name surfaces
+    // a structured `isError` result (naming the bad profile + valid names)
+    // rather than throwing out of the SDK handler.
+    let profile: IrisProfile;
+    try {
+      profile = resolveProfile(this.profiles, server);
+    } catch (error: unknown) {
+      if (error instanceof ProfileResolutionError) {
+        logger.warn(
+          `Tool ${tool.name}: ${error.message}`,
+        );
+        return {
+          content: [{ type: "text" as const, text: error.message }],
+          isError: true,
+        };
+      }
+      throw error;
+    }
 
+    // Get-or-create the resolved profile's client (health-check + version
+    // negotiation on first touch of a non-default profile, then cached). The
+    // default profile returns its eagerly-established client + version. Custom
+    // REST servers pass needsCustomRest so the one-time per-profile bootstrap is
+    // attempted on first custom-REST touch (D8). A first-touch failure surfaces
+    // as a structured isError result, not a thrown error out of the SDK handler.
+    let client: IrisHttpClient;
+    let atelierVersion: number;
+    try {
+      ({ client, atelierVersion } = await this.getOrCreateClient(
+        profile.name,
+        this.options.needsCustomRest ?? false,
+      ));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `Tool ${tool.name}: failed to establish profile "${profile.name}": ${message}`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Could not connect to server profile "${profile.name}": ${message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Build context from the RESOLVED PROFILE so that namespace precedence
+    // (AC 14.2.5) falls out naturally: resolveNamespace(override) returns
+    // `override ?? profile.namespace`. `server` selects the instance/profile;
+    // a per-call `namespace` still overrides the namespace within it.
     const ctx = buildToolContext(
       tool.scope,
-      this.config,
-      http,
-      this.atelierVersion,
+      profile,
+      client,
+      atelierVersion,
     );
 
     try {
@@ -364,6 +531,8 @@ export class McpServerBase {
     let removedCount = 0;
     for (const name of names) {
       if (this.tools.delete(name)) {
+        // Drop the extended-schema entry too, so it does not leak after removal.
+        this.extendedSchemas.delete(name);
         // Remove from the SDK's internal registry so the tool is no
         // longer callable or listed.  The SDK does not expose a public
         // unregister API, so we delete from the internal map directly.
@@ -545,11 +714,18 @@ export class McpServerBase {
    *   is attempted once per profile. On failure it surfaces the existing
    *   structured remediation report as a warning rather than a silent no-op.
    *   Atelier-only tools pass `needsBootstrap: false` and never trigger it.
+   * - **Concurrency (AC 14.2.7):** the first-touch establishment Promise is
+   *   cached per profile in {@link establishing}, so two concurrent first-touch
+   *   calls for the same profile await ONE shared establishment and bootstrap is
+   *   attempted at most once. The cache entry clears once establishment settles
+   *   (success OR failure).
+   * - **First-touch failure (AC 14.2.8):** on a non-default health-check
+   *   rejection, the cached (un-established) client is `destroy()`-ed and
+   *   dropped so the failure is retryable — the next call re-creates a fresh
+   *   client and re-attempts establishment; no un-established client lingers.
    *
-   * NOTE (scope boundary with Story 14.2): this method is the seam 14.2 will
-   * call from `handleToolCall` once the per-call `server` parameter is wired.
-   * In this story, `handleToolCall` only ever resolves the default profile, so
-   * behavior is unchanged; this method is exercised directly by unit tests.
+   * This method is the seam {@link handleToolCall} calls once it resolves the
+   * per-call `server` parameter to a profile (architecture decision D2).
    *
    * @param profileName    - A registered profile name.
    * @param needsBootstrap - Whether to attempt the one-time custom-REST bootstrap.
@@ -568,42 +744,91 @@ export class McpServerBase {
     }
 
     const profile: IrisProfile = resolveProfile(this.profiles, profileName);
-    const client = this.clients.getOrCreate(profile.name);
     const existingMeta = this.profileMeta.get(profile.name);
 
-    // Already established (default profile, or a previously-touched profile).
-    if (existingMeta) {
-      // A custom-REST tool may be the FIRST custom-REST use of a profile whose
-      // client was established by an Atelier-only call. Attempt bootstrap once.
-      if (needsBootstrap && !existingMeta.bootstrapAttempted) {
-        await this.attemptProfileBootstrap(profile, client, existingMeta.atelierVersion);
-        existingMeta.bootstrapAttempted = true;
-      }
-      return { client, atelierVersion: existingMeta.atelierVersion };
+    // Fast path: the profile is already established AND no first-touch async
+    // work is needed (either no bootstrap requested, or it was already
+    // attempted). Returns synchronously — the default profile's hot path stays
+    // byte-for-byte today's behavior. `getOrCreate` returns the cached client.
+    if (existingMeta && (!needsBootstrap || existingMeta.bootstrapAttempted)) {
+      return {
+        client: this.clients.getOrCreate(profile.name),
+        atelierVersion: existingMeta.atelierVersion,
+      };
     }
 
-    // First touch of a non-default profile: health check + version negotiation.
-    await checkHealth(client);
+    // Async work is needed: either first-touch establishment, or the first
+    // custom-REST bootstrap of an already-established client. Coalesce through a
+    // single in-flight Promise per profile so concurrent callers share one
+    // establishment + at-most-once bootstrap (AC 14.2.7).
+    const inFlight = this.establishing.get(profile.name);
+    if (inFlight) {
+      return inFlight;
+    }
 
-    let atelierVersion: number;
+    const establishPromise = this.establishProfile(profile, needsBootstrap);
+    this.establishing.set(profile.name, establishPromise);
     try {
-      atelierVersion = await negotiateVersion(client);
-    } catch {
-      logger.warn(
-        `Version negotiation failed for profile "${profile.name}", defaulting to v1`,
-      );
-      atelierVersion = 1;
+      return await establishPromise;
+    } finally {
+      // Clear the in-flight entry once it settles (success OR failure) so a
+      // failed first touch is retryable on the next call (AC 14.2.8).
+      this.establishing.delete(profile.name);
+    }
+  }
+
+  /**
+   * Perform the async establishment work for a profile (health check +
+   * version negotiation on first touch, plus the optional one-time bootstrap).
+   * Always invoked through {@link getOrCreateClient}'s in-flight coalescing, so
+   * it runs at most once concurrently per profile.
+   *
+   * On a non-default first-touch health-check failure, the cached client is
+   * destroyed and dropped (AC 14.2.8) before the error is re-thrown, so no
+   * un-established client lingers and the next call retries cleanly.
+   */
+  private async establishProfile(
+    profile: IrisProfile,
+    needsBootstrap: boolean,
+  ): Promise<{ client: IrisHttpClient; atelierVersion: number }> {
+    // clients/profiles are guaranteed defined by the getOrCreateClient guard.
+    const registry = this.clients as ProfileClientRegistry;
+    const client = registry.getOrCreate(profile.name);
+    let meta = this.profileMeta.get(profile.name);
+
+    // First touch (no meta yet): health check + version negotiation.
+    if (!meta) {
+      try {
+        await checkHealth(client);
+      } catch (error: unknown) {
+        // Drop the un-established client so the failure is retryable; no session
+        // was established on a failed health check, so there is nothing to leak
+        // beyond the cached (unusable) client instance itself (AC 14.2.8).
+        registry.drop(profile.name);
+        throw error;
+      }
+
+      let atelierVersion: number;
+      try {
+        atelierVersion = await negotiateVersion(client);
+      } catch {
+        logger.warn(
+          `Version negotiation failed for profile "${profile.name}", defaulting to v1`,
+        );
+        atelierVersion = 1;
+      }
+
+      meta = { atelierVersion, bootstrapAttempted: false };
+      this.profileMeta.set(profile.name, meta);
     }
 
-    const meta = { atelierVersion, bootstrapAttempted: false };
-    this.profileMeta.set(profile.name, meta);
-
-    if (needsBootstrap) {
-      await this.attemptProfileBootstrap(profile, client, atelierVersion);
+    // Optional one-time bootstrap (first custom-REST use of this profile).
+    if (needsBootstrap && !meta.bootstrapAttempted) {
+      await this.attemptProfileBootstrap(profile, client, meta.atelierVersion);
       meta.bootstrapAttempted = true;
     }
 
-    return { client, atelierVersion };
+    return { client, atelierVersion: meta.atelierVersion };
   }
 
   /**

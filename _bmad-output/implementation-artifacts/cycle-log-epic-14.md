@@ -15,3 +15,9 @@
 2026-06-16T01:34:57Z	Story 14.1	qa_complete	spawn_at=2026-06-16T01:27:46Z model=claude-opus-4-8 tests_added=30 shared_tests=260 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T01:48:09Z	Story 14.1	cr_complete	spawn_at=2026-06-16T01:35:15Z model=claude-opus-4-8 resolved=2 deferred=5 dismissed=6 high=1 med=3 low=3 clarifications=0 closing_sections_present=true
 2026-06-16T01:49:59Z	Story 14.1	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=smoke-14-1.mjs(17-assertions,offline-builtmodule,removed-after) model=claude-opus-4-8
+2026-06-16T01:50:26Z	Story 14.1	committed	sha=213756b submodules=
+2026-06-16T01:53:31Z	Story 14.2	story_created	path=_bmad-output/implementation-artifacts/14-2-server-parameter-across-all-tools.md model=claude-opus-4-8
+2026-06-16T02:08:38Z	Story 14.2	dev_complete	spawn_at=2026-06-16T01:53:31Z model=claude-opus-4-8 files=2 source_modules=server-base.ts,profiles.ts tests_added=14 shared_tests=276 full_suite=1243 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-06-16T02:08:38Z	Story 14.2	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
+2026-06-16T02:15:28Z	Story 14.2	qa_complete	spawn_at=2026-06-16T02:08:39Z model=claude-opus-4-8 tests_added=15 shared_tests=291 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T02:32:20Z	Story 14.2	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=smoke-14-2(11-assertions,D2-injection+selection+2-live-IRIS-auth-calls,removed) note=nonzero-exit-is-windows-libuv-teardown-artifact model=claude-opus-4-8
