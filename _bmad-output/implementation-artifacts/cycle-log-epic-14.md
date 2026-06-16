@@ -47,3 +47,4 @@
 2026-06-16T04:58:16Z	Story 14.6	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=docs-as-user-16-assertions(3-client-configs-JSON-in-env-double-parse-copy-paste-safe,ops=17,suite=89-columns-sum) model=claude-opus-4-8
 2026-06-16T04:58:39Z	Story 14.6	committed	sha=f201a88 submodules=
 2026-06-16T05:00:18Z	Epic 14	epic_summary	stories=7 pipeline_stories=6 shared_tests=205->450 total_high_unresolved=0 total_med_unresolved=0 smoke_defects=0 rework_events=0 bootstrap_bump=none additive=byte-for-byte-back-compat opus_stage_count=all model=claude-opus-4-8
+2026-06-16T15:26:24Z	Epic 14	epic_merged_to_feature	repos=. feature=feature/mgmt-portal-tools feature_sha=220c005 merge_sha=220c005 submodules= epic_branch_deleted=local+remote ide_toggle=skipped(zero-objectscript-changes)
