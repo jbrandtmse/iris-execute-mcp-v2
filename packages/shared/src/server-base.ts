@@ -19,6 +19,14 @@ import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
 import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
+import type { ProfileRegistry, IrisProfile } from "./profiles.js";
+import {
+  ProfileClientRegistry,
+  buildProfileRegistry,
+  loadProfileRegistry,
+  resolveProfile,
+  DEFAULT_PROFILE_NAME,
+} from "./profiles.js";
 import type {
   ToolDefinition,
   ToolContext,
@@ -150,8 +158,36 @@ export function buildToolContext(
 export class McpServerBase {
   private readonly mcpServer: McpServer;
   private readonly tools: Map<string, ToolDefinition> = new Map();
+  /**
+   * The default profile's connection config (the `IRIS_*`-derived config).
+   * Retained under its original name so existing single-server behavior — and
+   * the `handleToolCall` default path — is byte-for-byte unchanged.
+   */
   private config: IrisConnectionConfig | undefined;
-  private http: IrisHttpClient | undefined;
+  /**
+   * Profile registry (Epic 14, architecture decision D1/D7). Always contains
+   * the reserved `default` profile; additional profiles come from `IRIS_PROFILES`.
+   */
+  private profiles: ProfileRegistry | undefined;
+  /**
+   * Per-profile {@link IrisHttpClient} registry (architecture decision D1).
+   * Replaces the former single `this.http`: each profile gets its own client so
+   * session/cookie/CSRF state never bleeds across profiles. The default
+   * profile's client is created eagerly in {@link start}; non-default profiles
+   * are created lazily on first {@link getOrCreateClient}.
+   */
+  private clients: ProfileClientRegistry | undefined;
+  /**
+   * Per-profile connection metadata: the negotiated Atelier version and whether
+   * the one-time custom-REST bootstrap has been attempted (D8). Keyed by
+   * profile name. The default profile's entry is populated eagerly in
+   * {@link start}; non-default entries are populated on first touch.
+   */
+  private readonly profileMeta: Map<
+    string,
+    { atelierVersion: number; bootstrapAttempted: boolean }
+  > = new Map();
+  /** Negotiated Atelier version for the default profile (unchanged back-compat field). */
   private atelierVersion = 1;
 
   /** Page size for tools/list pagination. */
@@ -255,7 +291,7 @@ export class McpServerBase {
     const validatedArgs = parseResult.data;
 
     // Build tool context with namespace resolution
-    if (!this.config || !this.http) {
+    if (!this.config || !this.clients) {
       return {
         content: [
           {
@@ -267,10 +303,18 @@ export class McpServerBase {
       };
     }
 
+    // Resolve the DEFAULT profile's client. The default profile's client was
+    // created (and health-checked / version-negotiated) eagerly in start(), so
+    // this returns that same cached instance synchronously — byte-for-byte
+    // today's behavior. Per-call `server`-parameter profile selection is
+    // Story 14.2 (architecture decision D2); this story keeps handleToolCall on
+    // the default profile only.
+    const http = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
+
     const ctx = buildToolContext(
       tool.scope,
       this.config,
-      this.http,
+      http,
       this.atelierVersion,
     );
 
@@ -367,26 +411,45 @@ export class McpServerBase {
    * Start the MCP server with the specified transport.
    *
    * Startup sequence:
-   * 1. Load config (if not provided)
-   * 2. Create {@link IrisHttpClient}
+   * 1. Load config + build the profile registry (if not provided)
+   * 2. Eagerly create the default profile's {@link IrisHttpClient}
    * 3. Health check via `HEAD /api/atelier/`
    * 4. Negotiate Atelier API version
-   * 5. Connect transport
+   * 5. Bootstrap custom REST service for the default profile (if needed)
+   * 6. Connect transport
+   *
+   * Non-default profiles (from `IRIS_PROFILES`) are NOT established here — they
+   * are created lazily on first use via {@link getOrCreateClient} (architecture
+   * decision D1/D8), so startup cost and behavior for single-server installs is
+   * unchanged.
    *
    * @param transport - `"stdio"` (default) or `"http"`.
    */
   async start(transport: "stdio" | "http" = "stdio"): Promise<void> {
-    // 1. Load config
+    // 1. Load config + build the profile registry.
+    //    loadConfig is preserved for the default profile's config so existing
+    //    single-server behavior is byte-for-byte unchanged.
     if (!this.config) {
       this.config = loadConfig();
     }
+    if (!this.profiles) {
+      // When a config was injected (e.g. tests), derive the registry from it so
+      // the default profile reflects the injected config; otherwise read the
+      // environment centrally (which also parses IRIS_PROFILES).
+      this.profiles = this.options.config
+        ? buildProfileRegistry(this.config)
+        : loadProfileRegistry();
+    }
+    this.clients = new ProfileClientRegistry(this.profiles);
 
-    // 2. Create HTTP client (use config.timeout as server-level default)
-    this.http = new IrisHttpClient(this.config, this.config.timeout);
+    // 2. Eagerly create the default profile's HTTP client (preserves today's
+    //    bootstrap/health-check/negotiation for the default profile exactly).
+    const defaultClient = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
 
-    // 3. Health check
+    // 3. Health check (default profile). A failure here is fatal at startup,
+    //    exactly as before — the default profile must be reachable.
     try {
-      await checkHealth(this.http);
+      await checkHealth(defaultClient);
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -395,9 +458,9 @@ export class McpServerBase {
       return; // Guard: prevent continued execution when process.exit is mocked
     }
 
-    // 4. Negotiate Atelier version
+    // 4. Negotiate Atelier version (default profile).
     try {
-      this.atelierVersion = await negotiateVersion(this.http);
+      this.atelierVersion = await negotiateVersion(defaultClient);
     } catch {
       logger.warn("Version negotiation failed, defaulting to v1");
       this.atelierVersion = 1;
@@ -407,11 +470,11 @@ export class McpServerBase {
       `${this.options.name} v${this.options.version} starting with Atelier API v${this.atelierVersion}`,
     );
 
-    // 4.5. Bootstrap custom REST service if needed
+    // 4.5. Bootstrap custom REST service if needed (default profile).
     if (this.options.needsCustomRest) {
       try {
         const result = await bootstrap(
-          this.http,
+          defaultClient,
           this.config,
           this.atelierVersion,
         );
@@ -432,6 +495,19 @@ export class McpServerBase {
       }
     }
 
+    // Record the default profile's metadata (negotiated version + bootstrap
+    // attempted) so getOrCreateClient short-circuits re-establishing it.
+    // `bootstrapAttempted` reflects whether bootstrap ACTUALLY ran above —
+    // it is true only when this server needs the custom-REST service. If it
+    // were hard-coded true on a `needsCustomRest: false` server, a later
+    // getOrCreateClient(DEFAULT_PROFILE_NAME, true) (the seam Story 14.2 wires)
+    // would wrongly skip the default profile's first-use bootstrap, matching
+    // the non-default path which seeds `bootstrapAttempted: false`.
+    this.profileMeta.set(DEFAULT_PROFILE_NAME, {
+      atelierVersion: this.atelierVersion,
+      bootstrapAttempted: this.options.needsCustomRest === true,
+    });
+
     // 5. Connect transport
     if (transport === "stdio") {
       const stdioTransport = new StdioServerTransport();
@@ -447,6 +523,117 @@ export class McpServerBase {
           "Use stdio transport or implement HTTP setup in the server package.",
       );
       throw new Error("HTTP transport not yet implemented");
+    }
+  }
+
+  // ── Per-profile client establishment (D1/D8) ───────────────────────
+
+  /**
+   * Get the established {@link IrisHttpClient} for a profile, creating and
+   * establishing it lazily on first use (architecture decisions D1/D8).
+   *
+   * - **Default profile:** created and established eagerly in {@link start};
+   *   this method returns the cached client + negotiated version without
+   *   re-establishing it (byte-for-byte today's behavior).
+   * - **Non-default profile:** on first call, creates the profile's own client,
+   *   runs the health check and Atelier-version negotiation, then caches the
+   *   result so the one-time negotiation latency is paid at most once. A
+   *   health-check failure is surfaced as a thrown error (NOT `process.exit`) —
+   *   only the default profile's startup failure is fatal.
+   * - **Lazy bootstrap (D8):** when `needsBootstrap` is true (a custom-REST
+   *   tool's first call against this profile), the existing auto-bootstrap flow
+   *   is attempted once per profile. On failure it surfaces the existing
+   *   structured remediation report as a warning rather than a silent no-op.
+   *   Atelier-only tools pass `needsBootstrap: false` and never trigger it.
+   *
+   * NOTE (scope boundary with Story 14.2): this method is the seam 14.2 will
+   * call from `handleToolCall` once the per-call `server` parameter is wired.
+   * In this story, `handleToolCall` only ever resolves the default profile, so
+   * behavior is unchanged; this method is exercised directly by unit tests.
+   *
+   * @param profileName    - A registered profile name.
+   * @param needsBootstrap - Whether to attempt the one-time custom-REST bootstrap.
+   * @returns The profile's established client and its negotiated Atelier version.
+   * @throws {ProfileResolutionError} When `profileName` is not registered.
+   * @throws {Error} When a non-default profile fails its health check.
+   */
+  async getOrCreateClient(
+    profileName: string,
+    needsBootstrap: boolean = this.options.needsCustomRest ?? false,
+  ): Promise<{ client: IrisHttpClient; atelierVersion: number }> {
+    if (!this.clients || !this.profiles) {
+      throw new Error(
+        "Server not initialised: profile registry not built. Call start() first.",
+      );
+    }
+
+    const profile: IrisProfile = resolveProfile(this.profiles, profileName);
+    const client = this.clients.getOrCreate(profile.name);
+    const existingMeta = this.profileMeta.get(profile.name);
+
+    // Already established (default profile, or a previously-touched profile).
+    if (existingMeta) {
+      // A custom-REST tool may be the FIRST custom-REST use of a profile whose
+      // client was established by an Atelier-only call. Attempt bootstrap once.
+      if (needsBootstrap && !existingMeta.bootstrapAttempted) {
+        await this.attemptProfileBootstrap(profile, client, existingMeta.atelierVersion);
+        existingMeta.bootstrapAttempted = true;
+      }
+      return { client, atelierVersion: existingMeta.atelierVersion };
+    }
+
+    // First touch of a non-default profile: health check + version negotiation.
+    await checkHealth(client);
+
+    let atelierVersion: number;
+    try {
+      atelierVersion = await negotiateVersion(client);
+    } catch {
+      logger.warn(
+        `Version negotiation failed for profile "${profile.name}", defaulting to v1`,
+      );
+      atelierVersion = 1;
+    }
+
+    const meta = { atelierVersion, bootstrapAttempted: false };
+    this.profileMeta.set(profile.name, meta);
+
+    if (needsBootstrap) {
+      await this.attemptProfileBootstrap(profile, client, atelierVersion);
+      meta.bootstrapAttempted = true;
+    }
+
+    return { client, atelierVersion };
+  }
+
+  /**
+   * Attempt the one-time custom-REST bootstrap for a profile (D8).
+   *
+   * Reuses the existing {@link bootstrap} orchestration. On failure it logs the
+   * existing structured "which steps succeeded / failed + manual remediation"
+   * report (never a silent no-op), matching the default profile's own startup
+   * bootstrap behavior.
+   */
+  private async attemptProfileBootstrap(
+    profile: IrisProfile,
+    client: IrisHttpClient,
+    atelierVersion: number,
+  ): Promise<void> {
+    try {
+      const result = await bootstrap(client, profile, atelierVersion);
+      if (result.errors.length > 0) {
+        logger.warn(
+          `Bootstrap for profile "${profile.name}" completed with errors: ${result.errors.join("; ")}`,
+        );
+      }
+      if (result.manualInstructions) {
+        logger.warn(result.manualInstructions);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Bootstrap failed for profile "${profile.name}": ${message}. Custom REST tools may not work against this profile.`,
+      );
     }
   }
 

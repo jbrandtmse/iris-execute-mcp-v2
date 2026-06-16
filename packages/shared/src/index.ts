@@ -4,6 +4,15 @@ export { booleanParam } from "./zod-helpers.js";
 export type { IrisConnectionConfig } from "./config.js";
 export { loadConfig } from "./config.js";
 export {
+  DEFAULT_PROFILE_NAME,
+  ProfileResolutionError,
+  ProfileClientRegistry,
+  buildProfileRegistry,
+  loadProfileRegistry,
+  resolveProfile,
+} from "./profiles.js";
+export type { IrisProfile, ProfileRegistry } from "./profiles.js";
+export {
   IrisConnectionError,
   IrisApiError,
   McpProtocolError,

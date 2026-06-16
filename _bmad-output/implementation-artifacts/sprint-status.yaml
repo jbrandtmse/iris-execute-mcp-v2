@@ -1,5 +1,5 @@
 # generated: 2026-04-05
-# last_updated: 2026-04-23
+# last_updated: 2026-06-15
 # project: iris-execute-mcp-v2
 # project_key: NOKEY
 # tracking_system: file-system
@@ -204,7 +204,7 @@ development_status:
   # STRICTLY ADDITIVE / no breaking changes: no IRIS_PROFILES + no IRIS_GOVERNANCE = byte-for-byte today's behavior.
   epic-14: in-progress
   14-0-epic-13-deferred-cleanup: done
-  14-1-multi-server-profiles-config-and-resolution: backlog
+  14-1-multi-server-profiles-config-and-resolution: done
   14-2-server-parameter-across-all-tools: backlog
   14-3-governance-policy-model-and-cascade: backlog
   14-4-call-time-governance-enforcement: backlog
