@@ -214,7 +214,7 @@ development_status:
 
   # Epic 15: Security & Admin Tools (iris-admin-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 15.6. Additive only.
-  epic-15: in-progress
+  epic-15: done
   15-0-epic-14-deferred-cleanup: done
   15-1-iris-service-manage: done
   15-2-iris-ldap-manage: done
