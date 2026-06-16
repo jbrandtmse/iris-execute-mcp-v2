@@ -210,7 +210,7 @@ development_status:
   14-4-call-time-governance-enforcement: done
   14-5-governance-resource-and-capability: done
   14-6-documentation-rollup: done
-  epic-14-retrospective: optional
+  epic-14-retrospective: done
 
   # Epic 15: Security & Admin Tools (iris-admin-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 15.6. Additive only.

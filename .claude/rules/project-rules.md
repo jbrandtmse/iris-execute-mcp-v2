@@ -401,8 +401,66 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 ---
 
-## Rules captured: 18
-## Epics contributing: 12 (retros 2026-04-21, 2026-04-22)
+## 19. Additive-epic back-compat gate AC with a mechanical proof
+
+**Context:** Any strictly-additive feature epic — a new capability gated behind opt-in config where the "off" state MUST equal today's behavior (the back-compat promise is a release gate).
+
+**Rule:** Require EACH story to carry a back-compat gate AC backed by a **mechanical proof**, not a prose claim. Mechanical = an assertion/test that fails if behavior drifts: an unchanged-output equality (`toEqual` the pre-feature output), an all-enabled/all-unchanged sweep under empty config, a "no extra side-effect" spy assertion, or a byte-for-byte source-unchanged check. The "off" path must be provably identical to pre-feature behavior.
+
+**Why:** Epic 14 (commits `213756b`–`f201a88`): the foundation contract was "no `IRIS_PROFILES` + no `IRIS_GOVERNANCE` = byte-for-byte today's." Every story proved it mechanically rather than asserting it — `loadConfig` left byte-for-byte unchanged (14.1), the generated 141-key baseline all-enabled under empty `IRIS_GOVERNANCE` (14.3), the enforcement gate a pure pass-through under empty config (14.4), the added `server` field / `resources` capability provably additive (14.2/14.5). No back-compat regression shipped across 6 stories that all modified the central dispatch path of all 5 servers.
+
+**How to apply:**
+- Story creation: if the epic is additive, add a back-compat AC naming the exact "off" condition AND the proof mechanism (which assertion fails if it regresses).
+- Code review: treat a prose-only back-compat claim with no failing-if-drift assertion as a finding (HIGH for a release-gated promise).
+
+---
+
+## 20. Generated baseline for provable back-compat over existing capability
+
+**Context:** A feature that could silently disable, hide, or alter an EXISTING capability — governance/policy gates, feature flags over current behavior, deprecation, permission tightening.
+
+**Rule:** Encode the "existing set" in a **generated, output-only** artifact (mirror `gen-bootstrap.mjs`: enumerate from source, deterministic sorted output, content hash, DO-NOT-EDIT header per Rule #18) and assert the new behavior preserves ALL of it. Derive "is this new?" from **baseline membership**, never a hand-maintained `isNew`/allowlist flag that drifts. A test must prove every baseline entry retains its pre-feature behavior under the feature's default/empty config.
+
+**Why:** Epic 14 Story 14.3 (commit `4b506ff`, arch decision D3): `scripts/gen-governance-baseline.mjs` enumerated every existing tool/action into `governance-baseline.ts` (141 keys); the default seed grandfathers exactly the baseline, and a test asserts all 141 resolve enabled under empty `IRIS_GOVERNANCE`. "No pre-existing action disabled by default" became mechanically verifiable instead of maintainable-by-hand. Generalizes Rule #18 (generated files output-only) to the back-compat-proof use case; pairs with Rule #19 (this IS the mechanical proof for a capability gate).
+
+**How to apply:**
+- When adding a gate/flag over existing behavior, build the generator + checked-in baseline + the all-preserved test BEFORE wiring enforcement.
+- Run the generator wherever `gen:bootstrap` drift is checked; the baseline is output-only (never hand-edit — Rule #18).
+
+---
+
+## 21. Named capstone = epic-done gate, in the default suite, review-verified genuine
+
+**Context:** A foundation / cross-cutting epic with a risk that no single per-story unit test covers end-to-end — isolation across components, uniform behavior across servers, an invariant that only emerges when multiple pieces combine.
+
+**Rule:** Designate ONE capstone integration test as the explicit "epic done" gate, name it in the epic's ACs, require it to run in the **DEFAULT** test suite (NOT an excluded `*.integration.test.ts` / tagged-out suffix), and have code review verify it is **genuine** (exercises the real surfaces and would actually fail if the property broke) rather than illusory (asserting on mocks that can't violate the property, or testing one component twice).
+
+**Why:** Epic 14 Story 14.5 (commit `0ed5264`, AC 14.5.6): the cross-server capstone (D1 per-profile session isolation + D5 uniform enforcement across two servers) was the explicit Epic-14-done gate. The dev named it `governance-cross-server.test.ts` — NOT `.integration.test.ts` — precisely because the vitest config excludes that suffix from the default run; otherwise the gate would silently never run. Code review scrutinized it hardest, confirmed it genuinely drives real per-instance cookie jars + the shared gate, and caught a Node-18 `getSetCookie` mock bug that would have made the D1 isolation assertions flake/falsely pass on the supported Node floor.
+
+**How to apply:**
+- Epic planning: identify the cross-cutting risk; assign a capstone AC to the last implementation story; flag it as the de-risking priority (land the unit-level version early — see the Epic 14 "prove isolation first" note).
+- Review of that story: verify the capstone is in the default run and would fail if the property regressed; a capstone that can't fail is a HIGH finding.
+
+---
+
+## 22. Lead per-story smoke against the BUILT artifact, in a real process
+
+**Context:** The lead's per-story smoke gate for a shared-framework / library / TypeScript-build story (no obvious UI/CLI/service to drive manually).
+
+**Rule:** Smoke the **built output** (`dist/`) in a fresh real Node process — NOT the source via the vitest runner — exercising the new public surface as a real consumer would (`import` from `dist/index.js` or the dist module; for connection/resource/enforcement paths, touch live IRIS where cheap and read-only). This catches export-wiring, ESM-resolution, capability-advertisement, and real-runtime issues that mocked-fetch unit tests structurally cannot. Rebuild first so `dist` reflects the latest code-review fixes; remove the disposable smoke script before staging.
+
+**Why:** Epic 14 (Stories 14.1–14.6): each lead smoke ran the built `@iris-mcp/shared` standalone — back-compat + session isolation (14.1); the central `server`-param injection + two live-IRIS authenticated calls through profile-selected clients (14.2); generator determinism + the 141-key all-enabled proof (14.3); the real `handleToolCall` gate denying a governed action against live IRIS (14.4); the real MCP SDK resource handlers returning the per-profile policy over live IRIS (14.5); copy-paste-parsing the doc JSON-in-env examples (14.6). These confirmed the wired-up system end-to-end exactly where the (correct) unit tests used mocked fetch. *Note:* `process.exit` with open keepalive sockets emits a benign Windows libuv `UV_HANDLE_CLOSING` assertion AFTER the pass line — a teardown artifact, not a defect.
+
+**How to apply:**
+- For a shared/library story, write a disposable smoke that imports the built dist and asserts the user-observable outcome in a real process; `pnpm --filter <pkg> build` first; `rm` the script before `git add`.
+- Match the smoke method to the deliverable: pure module → import+assert; connection/resource/enforcement → drive the real surface against live IRIS read-only.
+
+---
+
+## Rules captured: 22
+## Epics contributing: 13 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+
+**Audit note (2026-06-16):** Epic 14 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern-shape bar (Rules #19, #20, #21, #22). All four generalize from evidence spanning the full 6-story foundation epic (not single incidents): #19 back-compat gates held across all stories; #20 the D3 generated baseline; #21 the AC 14.5.6 capstone; #22 the per-story lead smokes 14.1–14.6. No candidates were skipped this retro. Two deferred items were NOT codified as rules (correctly — they are tracked work, not patterns): the `.optional()`-wrapped-action-enum gate/baseline hardening (deferred to Epic 15's first governed write tool) and the pre-existing doc drift (migration-guide dotted names, architecture.md stale counts).
 
 **Audit note (2026-04-21):** Rule #14 ("Password redaction — gate on length") was initially codified during Epic 11 retro, then removed during the retro's self-audit. The retro's own Murat-triage had flagged Bug #8 as narrow ("not a general pattern — fix is in code, no rule needed"), but it was codified anyway. Removal enforces Rule #1's "narrow one-off fixes do NOT become rules" principle. The fix remains in the code and the retro bug log.
 
