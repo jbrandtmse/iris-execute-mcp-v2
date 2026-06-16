@@ -88,6 +88,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/x509" Method="GET" Call="ExecuteMCPv2.REST.Security:X509List" />
   <Route Url="/security/x509" Method="POST" Call="ExecuteMCPv2.REST.Security:X509Manage" />
 
+  <!-- Epic 15: Auditing Configuration & Audit Log Management -->
+  <Route Url="/security/audit" Method="GET" Call="ExecuteMCPv2.REST.Security:AuditStatus" />
+  <Route Url="/security/audit" Method="POST" Call="ExecuteMCPv2.REST.Security:AuditManage" />
+
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />
   <Route Url="/interop/production/summary" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionSummary" />

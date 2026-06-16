@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "dc6e10143476";
+export const BOOTSTRAP_VERSION = "8b074e457c3c";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "dc6e10143476";
+Parameter BOOTSTRAPVERSION = "8b074e457c3c";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -4467,6 +4467,354 @@ ClassMethod X509Manage() As %Status
     Quit $$$OK
 }
 
+/// Audit status (GET) and audit-log view (GET) for <code>iris_audit_manage</code>.
+/// <p>Story 15.4. Backed by <class>Security.System</class> /
+/// <class>Security.Events</class> (audit configuration) and <class>%SYS.Audit</class>
+/// (the audit log), all in <code>%SYS</code>. Routing on the
+/// <code>?action=</code> query parameter:</p>
+/// <ul>
+///   <li>No <code>action</code> (or <code>action=status</code>) &rarr; instance
+///       auditing on/off (<method>Security.System.Get</method> &rarr;
+///       <code>AuditEnabled</code>) plus a per-event summary from the public
+///       <code>Security.Events:List</code> query (ROWSPEC
+///       <code>Source,Type,Name,Description,Enabled,Total,Written,Lost</code>).</li>
+///   <li><code>action=view</code> &rarr; recent audit-log records via the public
+///       <code>%SYS.Audit:List</code> query with optional filters
+///       (<code>begin</code>, <code>end</code>, <code>user</code>,
+///       <code>event</code>, <code>source</code>, <code>type</code>) and a
+///       <code>maxRows</code> cap (default 100, max 1000). This is the same
+///       audit-log read offered by the read-only <code>iris_audit_events</code>
+///       tool, with richer filters.</li>
+/// </ul>
+ClassMethod AuditStatus() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tAction = $Get(%request.Data("action", 1), "status")
+
+        If tAction = "view" {
+            ; -- audit-log view (filtered) --
+            Set tBegin = $Get(%request.Data("begin", 1))
+            Set tEnd = $Get(%request.Data("end", 1))
+            Set tUser = $Get(%request.Data("user", 1), "*")
+            Set tEvent = $Get(%request.Data("event", 1), "*")
+            Set tSource = $Get(%request.Data("source", 1), "*")
+            Set tType = $Get(%request.Data("type", 1), "*")
+            Set tMaxRows = +$Get(%request.Data("maxRows", 1), 100)
+            If tMaxRows < 1 Set tMaxRows = 100
+            If tMaxRows > 1000 Set tMaxRows = 1000
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            Set $NAMESPACE = "%SYS"
+            Set tResult = {}
+            Set tEvents = []
+            Set tRS = ##class(%ResultSet).%New("%SYS.Audit:List")
+            If $IsObject(tRS) {
+                ; List Execute params: BeginDateTime, EndDateTime, EventSources,
+                ; EventTypes, Events, Usernames
+                Set tSC2 = tRS.Execute(tBegin, tEnd, tSource, tType, tEvent, tUser)
+                If $$$ISOK(tSC2) {
+                    Set tRowCount = 0
+                    While tRS.Next() && (tRowCount < tMaxRows) {
+                        Set tEvt = {}
+                        Do tEvt.%Set("timestamp", tRS.Get("TimeStamp"))
+                        Do tEvt.%Set("username", tRS.Get("Username"))
+                        Do tEvt.%Set("eventSource", tRS.Get("EventSource"))
+                        Do tEvt.%Set("eventType", tRS.Get("EventType"))
+                        Do tEvt.%Set("event", tRS.Get("Event"))
+                        Do tEvt.%Set("description", tRS.Get("Description"))
+                        Do tEvt.%Set("clientIPAddress", tRS.Get("ClientIPAddress"))
+                        Do tEvt.%Set("namespace", tRS.Get("Namespace"))
+                        Do tEvents.%Push(tEvt)
+                        Set tRowCount = tRowCount + 1
+                    }
+                }
+                Do tRS.Close()
+            }
+            Do tResult.%Set("events", tEvents)
+            Do tResult.%Set("count", tEvents.%Size(), "number")
+            Do tResult.%Set("maxRows", tMaxRows, "number")
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; -- status: instance auditing on/off + per-event summary --
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+
+        Kill tSysProps
+        Set tSC2 = ##class(Security.System).Get($$$SystemSecurityName, .tSysProps)
+        If $$$ISERR(tSC2) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC2))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; AuditEnabled is a BooleanYN ("Yes"/"No" display, 1/0 logical) — coerce.
+        Set tEnabledRaw = $Get(tSysProps("AuditEnabled"))
+        Set tAuditOn = ((tEnabledRaw = 1) || (tEnabledRaw = "Yes") || (tEnabledRaw = "Y"))
+        Do tResult.%Set("auditEnabled", +tAuditOn, "boolean")
+
+        ; Per-event summary via the public Security.Events:List query.
+        Set tEventsArr = []
+        Set tRS = ##class(%ResultSet).%New("Security.Events:List")
+        If $IsObject(tRS) {
+            Set tSC2 = tRS.Execute("*", "*", "*")
+            If $$$ISOK(tSC2) {
+                While tRS.Next() {
+                    Set tEvt = {}
+                    Do tEvt.%Set("source", tRS.Get("Source"))
+                    Do tEvt.%Set("type", tRS.Get("Type"))
+                    Do tEvt.%Set("name", tRS.Get("Name"))
+                    Do tEvt.%Set("description", tRS.Get("Description"))
+                    Do tEvt.%Set("enabled", tRS.Get("Enabled"))
+                    Do tEvt.%Set("total", +tRS.Get("Total"), "number")
+                    Do tEvt.%Set("written", +tRS.Get("Written"), "number")
+                    Do tEvt.%Set("lost", +tRS.Get("Lost"), "number")
+                    Do tEventsArr.%Push(tEvt)
+                }
+            }
+            Do tRS.Close()
+        }
+        Do tResult.%Set("events", tEventsArr)
+        Do tResult.%Set("eventCount", tEventsArr.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        If $IsObject($Get(tRS)) { Do tRS.Close() }
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Mutating audit actions (POST) for <code>iris_audit_manage</code>: enable,
+/// disable, configureEvent, purge, export.
+/// <p>Story 15.4. Reads a JSON body with <code>action</code> and per-action
+/// parameters. Each mutating action is opt-in under tool governance.</p>
+/// <ul>
+///   <li><b>enable</b>/<b>disable</b>: turn instance auditing on/off via
+///       <method>Security.System.Modify</method> setting
+///       <code>AuditEnabled</code>.</li>
+///   <li><b>configureEvent</b>: enable/disable one audit event via
+///       <method>Security.Events.Modify</method> (requires
+///       <code>source</code>, <code>type</code>, <code>name</code>,
+///       <code>enabled</code>).</li>
+///   <li><b>purge</b>: delete a BOUNDED range of audit-log records via
+///       <method>%SYS.Audit.Delete</method>. DESTRUCTIVE — requires
+///       <code>confirm=true</code> AND at least one bound
+///       (<code>begin</code>/<code>end</code>/<code>user</code>/<code>event</code>/<code>source</code>/<code>type</code>);
+///       returns the count deleted. Never an unbounded wipe.</li>
+///   <li><b>export</b>: write matching audit-log records to a server-side file
+///       via <method>%SYS.Audit.Export</method>. The caller supplies a bare
+///       <code>fileName</code> (no path separators / <code>..</code>); the file
+///       is written into a fixed audit-export directory under the manager
+///       directory. Returns the resolved location + count.</li>
+/// </ul>
+ClassMethod AuditManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "configureEvent") && (tAction '= "purge") && (tAction '= "export") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, configureEvent, purge, export")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── enable / disable instance auditing ─────────────────────
+        If (tAction = "enable") || (tAction = "disable") {
+            Set $NAMESPACE = "%SYS"
+            Kill tProps
+            Set tProps("AuditEnabled") = $Case(tAction, "enable": 1, : 0)
+            Set tSC = ##class(Security.System).Modify($$$SystemSecurityName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", tAction)
+            Do tResult.%Set("auditEnabled", $Case(tAction, "enable": 1, : 0), "boolean")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── configureEvent ─────────────────────────────────────────
+        If tAction = "configureEvent" {
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            Set tName = tBody.%Get("name")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSource, "source")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tType, "type")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If 'tBody.%IsDefined("enabled") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'enabled' is required for configureEvent")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tEnabled = +tBody.%Get("enabled")
+
+            Set $NAMESPACE = "%SYS"
+            Kill tProps
+            Set tProps("Enabled") = tEnabled
+            Set tSC = ##class(Security.Events).Modify(tSource, tType, tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "configureEvent")
+            Do tResult.%Set("source", tSource)
+            Do tResult.%Set("type", tType)
+            Do tResult.%Set("name", tName)
+            Do tResult.%Set("enabled", tEnabled, "boolean")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── purge (DESTRUCTIVE, bounded) ───────────────────────────
+        If tAction = "purge" {
+            ; Confirmation gate (defense in depth — a direct REST caller bypasses
+            ; the TypeScript-layer guard).
+            If '(tBody.%IsDefined("confirm") && (+tBody.%Get("confirm") = 1)) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'confirm' must be true to purge audit-log records")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tBegin = tBody.%Get("begin")
+            Set tEnd = tBody.%Get("end")
+            Set tUser = tBody.%Get("user")
+            Set tEvent = tBody.%Get("event")
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            ; Bounded scope: at least one MEANINGFUL filter, or refuse (no silent
+            ; full wipe). A "*" value is the match-all wildcard, NOT a bound — it
+            ; must not satisfy the gate, otherwise {confirm:true, source:"*"} (or
+            ; any wildcard-only scope) would delete the entire audit log. Empty
+            ; begin/end are unbounded on that axis; any non-empty begin/end is a
+            ; real (date) bound.
+            Set tHasBound = 0
+            If (tBegin '= "") Set tHasBound = 1
+            If (tEnd '= "") Set tHasBound = 1
+            If (tUser '= "") && (tUser '= "*") Set tHasBound = 1
+            If (tEvent '= "") && (tEvent '= "*") Set tHasBound = 1
+            If (tSource '= "") && (tSource '= "*") Set tHasBound = 1
+            If (tType '= "") && (tType '= "*") Set tHasBound = 1
+            If 'tHasBound {
+                Set tSC = $$$ERROR($$$GeneralError, "Purge requires a bounded scope: supply at least one of begin, end, or a non-wildcard user, event, source, or type")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Map empties to the wildcard the API expects.
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            Set $NAMESPACE = "%SYS"
+            Set tNumDeleted = 0
+            ; Delete(.NumDeleted, Begin, End, EventSources, EventTypes, Events, Usernames, SystemIDs)
+            Set tSC = ##class(%SYS.Audit).Delete(.tNumDeleted, tBegin, tEnd, tSource, tType, tEvent, tUser)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "purge")
+            Do tResult.%Set("deleted", +tNumDeleted, "number")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── export (server-side file, path-controlled) ─────────────
+        If tAction = "export" {
+            Set tFileName = tBody.%Get("fileName")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tFileName, "fileName")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            ; Path control: the caller supplies a BARE name — reject any path
+            ; separator or parent-dir traversal so the write stays inside the
+            ; fixed audit-export directory (no arbitrary path from caller input).
+            If (tFileName [ "/") || (tFileName [ "\\") || (tFileName [ "..") || (tFileName [ ":") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'fileName' must be a bare file name with no path separators or '..' traversal")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tBegin = tBody.%Get("begin")
+            Set tEnd = tBody.%Get("end")
+            Set tUser = tBody.%Get("user")
+            Set tEvent = tBody.%Get("event")
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            ; Build the controlled output path under the manager directory.
+            Set tDir = ##class(%File).NormalizeDirectory($System.Util.ManagerDirectory() _ "auditexport")
+            Do ##class(%File).CreateDirectoryChain(tDir)
+            Set tFullPath = ##class(%File).NormalizeFilename(tFileName, tDir)
+            ; Containment re-check (defense in depth): do not trust the character
+            ; blacklist alone — confirm the resolved path still lives inside tDir.
+            If $Extract(tFullPath, 1, $Length(tDir)) '= tDir {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'fileName' resolved outside the audit-export directory")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set $NAMESPACE = "%SYS"
+            Set tNumExported = 0
+            ; Export(FileName, .NumExported, Flags, Begin, End, EventSources, EventTypes, Events, Usernames)
+            Set tSC = ##class(%SYS.Audit).Export(tFullPath, .tNumExported, 0, tBegin, tEnd, tSource, tType, tEvent, tUser)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "export")
+            Do tResult.%Set("location", tFullPath)
+            Do tResult.%Set("exported", +tNumExported, "number")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -8079,6 +8427,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 15: Security / X.509 Certificate Credentials Management -->
   <Route Url="/security/x509" Method="GET" Call="ExecuteMCPv2.REST.Security:X509List" />
   <Route Url="/security/x509" Method="POST" Call="ExecuteMCPv2.REST.Security:X509Manage" />
+
+  <!-- Epic 15: Auditing Configuration & Audit Log Management -->
+  <Route Url="/security/audit" Method="GET" Call="ExecuteMCPv2.REST.Security:AuditStatus" />
+  <Route Url="/security/audit" Method="POST" Call="ExecuteMCPv2.REST.Security:AuditManage" />
 
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />
