@@ -457,8 +457,64 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 ---
 
-## Rules captured: 22
-## Epics contributing: 13 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+## 23. Frozen-foundation baseline when a gate sits over an EVOLVING surface
+
+**Context:** A governance/policy/feature gate whose back-compat proof is a generated baseline, applied to a capability surface that will KEEP GROWING (new tools/actions/flags added in later epics) — not a one-time foundation epic.
+
+**Rule:** The back-compat baseline must be a **FROZEN foundation snapshot** (the surface as of the gate's introduction), and the drift test must be **one-directional**: every committed (foundation) key MUST still exist in the live surface (catches a removed/renamed pre-existing capability — a real regression), but NEW live keys outside the foundation are EXPECTED and allowed. New capability is governed by its **classification** (`mutates`/seed), NOT by baseline membership. Do NOT regenerate the baseline to absorb new keys — that would grandfather a new default-disabled write as enabled (defeating the gate). A bidirectional `committed == live` drift test is correct ONLY for a closed/frozen surface, never for one a future epic extends.
+
+**Why:** Epic 15 Story 15.1 (commit `5d59d83`). Epic 14's D3 baseline + bidirectional drift test was authored for the foundation epic; Epic 14 retro AI#4 ("regenerate `governance-baseline.ts` whenever a tool is added; drift test enforces") assumed the baseline grows. The FIRST real governed write tool exposed the contradiction: `defaultSeed` returns enabled for any baseline member, so a new `iris_service_manage:enable` key that is IN the baseline ships enabled — defeating default-disable; but excluding it fails the bidirectional `missing`-keys assertion. Resolution: freeze `GOVERNANCE_BASELINE` at the Epic-14 141-key snapshot (hash `1e62c5ad5bf7`), relax the drift test to one-directional, govern new keys via `mutates`+`defaultSeed`. Held across all of Epic 15 (89→93 tools) with the foundation hash unchanged.
+
+**How to apply:**
+- When introducing a gate over a growing surface, design the drift test one-directional from the start (assert foundation persists; allow new keys). Reframe any "regenerate the baseline on every change" guidance as "freeze the foundation; classify new entries."
+- Generalizes Rule #20 (generated baseline for back-compat) to the multi-epic / growing-surface case; pairs with Rule #25 (the generator must not silently regrow the frozen file).
+
+---
+
+## 24. Bootstrap/embedded-artifact regen is per-change, not deferrable to a closing story
+
+**Context:** An epic that edits a class/file whose content is embedded in a generated artifact guarded by a **content-hash drift test** (e.g. `bootstrap-classes.ts` + `BOOTSTRAP_VERSION` = SHA-256 of the on-disk classes; `bootstrap.test.ts` asserts on-disk == embedded == version), where the plan says "one consolidated bump at the closing story."
+
+**Rule:** Editing a hash-bootstrapped class REQUIRES regenerating the embedded copy (`gen:bootstrap`, Rule #18 — never hand-edit) and moving the version **in the SAME story**. "Defer the bump to a closing story" is **incompatible** with the drift test — the moment a bootstrapped class changes, on-disk ≠ embedded and version ≠ hash, so the suite goes red and stays red until regen. The version moving each ObjectScript-touching story is correct (it IS a content hash). Reinterpret any "single bump at story N" plan as: the version moves incrementally per change; the CLOSING story VERIFIES idempotence (`gen:bootstrap` produces no diff) and finalizes docs — it does not introduce a deferred bump.
+
+**Why:** Epic 15 Story 15.1 (commit `5d59d83`). The epic plan (and Epics 16/17) said "one `BOOTSTRAP_VERSION` bump at the closing story." Story 15.1's dev correctly halted (Rule 5) — editing `Security.cls` made `bootstrap.test.ts` fail and no amount of deferral kept the suite green. Lead resolved "Option A": regen per ObjectScript story (`8f0cf75be984`→`fae7cadc22fb`→…→`e5f4f6d88c56`); Story 15.6 confirmed `gen:bootstrap` idempotent (no fresh bump). Same reinterpretation applies to any epic whose closing story claims a single deferred bump.
+
+**How to apply:**
+- Story-spec a bootstrapped-ObjectScript story with an explicit "regenerate `bootstrap-classes.ts` + record `BOOTSTRAP_VERSION` from→to" AC; make the closing/docs story an idempotence VERIFY, not the sole bump.
+- If a plan inherits "one bump at the closing story" language, flag it at story creation and reinterpret rather than discovering it mid-dev.
+
+---
+
+## 25. A generator that emits a frozen/committed artifact needs a no-write `--check` mode
+
+**Context:** Any `scripts/gen-*.mjs` (or equivalent) that `writeFileSync`s a committed artifact which has become FROZEN under a frozen-foundation policy (Rule #23) — i.e. the generator's natural output (the full live surface) now DIFFERS from the intentionally-frozen committed file.
+
+**Rule:** Such a generator is a **footgun**: running it for ANY reason (even "just to check counts") silently overwrites the frozen file with a regrown surface, un-freezing it. It MUST gain a `--check`/no-write mode that re-derives and diffs WITHOUT writing (exit non-zero on drift, for CI), and ideally REFUSE to overwrite a file marked frozen (or require an explicit `--force`). Until then, treat invoking it as dangerous: never run it to fetch counts (read the test assertions / count the source arrays instead); if it IS run, immediately `git checkout -- <frozen-file>` to restore. Document the hazard prominently in the generator header and in any story that touches the area.
+
+**Why:** Epic 15 Story 15.6 (retro 2026-06-16). Under the Story 15.1 frozen-foundation model, `gen-governance-baseline.mjs` still enumerates ALL live tools and writes the full set — so running it regrows the frozen 141-key baseline (93 tools → 66 admin keys) and breaks `1e62c5ad5bf7`. The lead tripped this exact footgun fetching tool counts during Story 15.6 prep and had to `git checkout -- governance-baseline.ts`. Story 15.1's AC 15.1.7 added only a prose "do not re-run" note — insufficient, because "re-run to re-verify" still overwrites. The deferred `--check` item (routed from Story 15.0) is the real fix.
+
+**How to apply:**
+- Pair every frozen-foundation artifact (Rule #23) with a `--check` generator mode before the freeze ships; add a DO-NOT-RUN-TO-REGROW banner to the generator.
+- In stories near a frozen artifact, instruct devs to derive facts (counts, membership) from tests/source, never by invoking the generator.
+
+---
+
+## 26. Live-endpoint smoke for stories backed by a deployed REST/ObjectScript surface
+
+**Context:** The lead's per-story smoke for a story whose user-observable deliverable is served by a DEPLOYED endpoint (a `%CSP.REST`/Atelier route, an ObjectScript handler on a live IRIS instance) — as opposed to a pure TS library.
+
+**Rule:** Extend Rule #22: for an endpoint-backed story, drive the **LIVE deployed endpoint over real HTTP** (e.g. `curl` the `%SYS`-namespace REST route against the running instance), not just `import` the built lib. Exercise the read paths (`list`/`get`/`status`) AND a **safe rejection of the destructive path** (send the dangerous request and assert it is REFUSED, changing nothing) — this confirms a security guard is effective on the actual running server, which mocked-fetch unit tests structurally cannot. Use clearly-disposable targets for any state-changing verification and clean up; never run a real destructive op against live data.
+
+**Why:** Epic 15 (Stories 15.1–15.5). Live-HTTP lead smokes confirmed three security fixes end-to-end that unit tests could not: the `iris_service_manage` error envelope + boolean coercion (15.1), and crucially the **rejections** — `iris_audit_manage` wildcard-only purge refused with "Purge requires a bounded scope" on the live server (15.4, the HIGH full-wipe fix), and `iris_resource_manage` `grant SELECT,BOGUS` refused before `SaveObjPriv` (15.5, the HIGH partial-grant fix). Each rejection proved the guard live while changing nothing.
+
+**How to apply:**
+- Endpoint-backed story → smoke method = live HTTP against the deployed route; include at least one "destructive request is rejected" assertion when the tool has a write/destructive action.
+- Governance is enforced at the MCP/tool layer, not the REST route — so a direct REST smoke bypasses governance and tests the ObjectScript handler's OWN guards (bounds, confirmation, validation); that is exactly what you want to verify for the handler.
+
+---
+
+## Rules captured: 26
+## Epics contributing: 14 (retros 2026-04-21, 2026-04-22, 2026-06-16)
 
 **Audit note (2026-06-16):** Epic 14 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern-shape bar (Rules #19, #20, #21, #22). All four generalize from evidence spanning the full 6-story foundation epic (not single incidents): #19 back-compat gates held across all stories; #20 the D3 generated baseline; #21 the AC 14.5.6 capstone; #22 the per-story lead smokes 14.1–14.6. No candidates were skipped this retro. Two deferred items were NOT codified as rules (correctly — they are tracked work, not patterns): the `.optional()`-wrapped-action-enum gate/baseline hardening (deferred to Epic 15's first governed write tool) and the pre-existing doc drift (migration-guide dotted names, architecture.md stale counts).
 
@@ -469,3 +525,5 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 - "One consolidated bootstrap bump per epic" — process-shape, better tracked in epic-cycle-log conventions than as a rule.
 
 These decisions enforce Rule #1's general-pattern-shape requirement.
+
+**Audit note (2026-06-16, Epic 15):** Epic 15 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern bar (Rules #23, #24, #25, #26). All generalize beyond their triggering incident: #23 (frozen-foundation baseline) held across all of Epic 15 (89→93 tools, foundation hash unchanged) and corrects Epic 14 retro AI#4, which was proven wrong by the first real governed write tool; #24 (bootstrap-regen per change) recurs in Epics 16/17's identical "one bump at the closing story" plans; #25 (generator `--check` mode) is the real fix for a footgun the lead tripped live, superseding Story 15.1's insufficient prose note; #26 (live-endpoint smoke) caught/confirmed 3 security fixes across 15.1–15.5. Notably, the Epic 14 retro's own AI#4 became a retro lesson here — a planning assumption ("regenerate the baseline on every tool add") that only a real consumer could falsify. Two items were NOT codified (tracked work, not patterns): the `gen-governance-baseline --check` implementation itself (deferred to a CI story) and the per-alert/per-cleanup deferrals carried in `deferred-work.md`.

@@ -222,7 +222,7 @@ development_status:
   15-4-iris-audit-manage: done
   15-5-resource-manage-sql-privileges: done
   15-6-bootstrap-bump-verification-and-docs: done
-  epic-15-retrospective: optional
+  epic-15-retrospective: done
 
   # Epic 16: Operations Tools (iris-ops-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 16.4. Additive only.
