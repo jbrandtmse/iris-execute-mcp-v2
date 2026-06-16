@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
+    "gen:governance-baseline": "node scripts/gen-governance-baseline.mjs",
     "changeset": "changeset"
   },
   "devDependencies": {
