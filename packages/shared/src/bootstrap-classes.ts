@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "8f0cf75be984";
+export const BOOTSTRAP_VERSION = "d0cf367c3cfc";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "8f0cf75be984";
+Parameter BOOTSTRAPVERSION = "d0cf367c3cfc";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3765,6 +3765,179 @@ ClassMethod OAuthManage() As %Status
         Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         ; CRITICAL: Sanitize error to avoid leaking secrets
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List IRIS services, or get a single service's properties.
+/// <p>Backed by <class>Security.Services</class> in <code>%SYS</code>
+/// (Story 15.1). With no <code>name</code> query parameter, returns a JSON
+/// array of services from the <code>Security.Services:List</code> query
+/// (ROWSPEC: Name, Enabled, Public, Description, EnabledBoolean). With a
+/// <code>name</code> query parameter, calls
+/// <method>Security.Services.Get</method> and returns that service's
+/// properties (<code>enabled</code>, <code>description</code>,
+/// <code>autheEnabled</code>, <code>clientSystems</code>). Avoids the
+/// <code>Capabilities</code>/<code>AutheEnabledCapabilities</code> Internal
+/// properties (Rule #4).</p>
+ClassMethod ServiceList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?name= query parameter selects single-service get vs list
+        Set tName = $Get(%request.Data("name", 1))
+
+        ; Switch to %SYS for Security.Services operations
+        Set $NAMESPACE = "%SYS"
+
+        If tName '= "" {
+            ; Single service get
+            Kill tProps
+            Set tSC = ##class(Security.Services).Get(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tEntry = {}
+            ; Security.Services.Get uses pName as the lookup key and does NOT
+            ; populate tProps("Name") — echo the input directly.
+            Do tEntry.%Set("name", tName)
+            Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+            Do tEntry.%Set("description", $Get(tProps("Description")))
+            Do tEntry.%Set("autheEnabled", +$Get(tProps("AutheEnabled")))
+            Do tEntry.%Set("clientSystems", $Get(tProps("ClientSystems")))
+            ; AVOID Capabilities / AutheEnabledCapabilities (Internal — Rule #4)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all services
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("Security.Services:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ROWSPEC: Name, Enabled, Public, Description, EnabledBoolean
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("enabled", +tRS.Get("EnabledBoolean"), "boolean")
+            Do tEntry.%Set("public", tRS.Get("Public"))
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Enable, disable, or update settings for an IRIS service.
+/// <p>Reads a JSON body with <code>action</code>
+/// (enable|disable|set) and <code>name</code> (the service, e.g.
+/// <code>%Service_SQL</code>). For <code>enable</code>/<code>disable</code>,
+/// sets the <code>Enabled</code> property. For <code>set</code>, applies the
+/// provided <code>settings</code> fields (<code>enabled</code>,
+/// <code>autheEnabled</code>, <code>description</code>,
+/// <code>clientSystems</code>) via <method>Security.Services.Modify</method>.
+/// Only provided fields are modified. Avoids the
+/// <code>Capabilities</code>/<code>AutheEnabledCapabilities</code> Internal
+/// properties (Rule #4). Errors propagate via
+/// <method>SanitizeError</method> (Rule #9), preserving the real IRIS error
+/// text (e.g. service-does-not-exist).</p>
+ClassMethod ServiceManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "set") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, set")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security.Services operations
+        Set $NAMESPACE = "%SYS"
+
+        Kill tProps
+        If tAction = "enable" {
+            Set tProps("Enabled") = 1
+        }
+        ElseIf tAction = "disable" {
+            Set tProps("Enabled") = 0
+        }
+        Else {
+            ; set — apply only provided settings fields
+            Set tSettings = tBody.%Get("settings")
+            If $IsObject(tSettings) {
+                If tSettings.%IsDefined("enabled") Set tProps("Enabled") = +tSettings.%Get("enabled")
+                If tSettings.%IsDefined("autheEnabled") Set tProps("AutheEnabled") = +tSettings.%Get("autheEnabled")
+                If tSettings.%IsDefined("description") Set tProps("Description") = tSettings.%Get("description")
+                If tSettings.%IsDefined("clientSystems") Set tProps("ClientSystems") = tSettings.%Get("clientSystems")
+            }
+            ; A 'set' with no recognized settings field would issue a no-op Modify
+            ; that reports success — reject it so callers are not told a
+            ; do-nothing call succeeded. (Defense in depth: a direct REST caller
+            ; bypasses the TypeScript-layer guard.)
+            If '$Data(tProps) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "The 'set' action requires at least one settings field: enabled, autheEnabled, description, or clientSystems")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        Set tSC = ##class(Security.Services).Modify(tName, .tProps)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("name", tName)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
     }
@@ -7371,6 +7544,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 4: Security / OAuth2 Configuration Management -->
   <Route Url="/security/oauth" Method="GET" Call="ExecuteMCPv2.REST.Security:OAuthList" />
   <Route Url="/security/oauth" Method="POST" Call="ExecuteMCPv2.REST.Security:OAuthManage" />
+
+  <!-- Epic 15: Security / Service Configuration Management -->
+  <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
+  <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
 
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />

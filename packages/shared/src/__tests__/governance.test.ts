@@ -501,14 +501,27 @@ describe("back-compat proof — empty IRIS_GOVERNANCE enables every baseline act
 });
 
 // ════════════════════════════════════════════════════════════════════
-// Baseline drift guard (AC 14.3.7, Rule #18).
+// Frozen-foundation baseline drift guard (AC 14.3.7 + Story 15.1 AC 15.1.7,
+// Rule #18, Rule #20).
 //
-// The committed governance-baseline.ts MUST match a fresh generation from
-// the live tool registries. Mirrors the bootstrap drift check: re-derive
-// the baseline from the BUILT server dists (exactly as
-// scripts/gen-governance-baseline.mjs does) and compare to the committed
-// GOVERNANCE_BASELINE + hash. Fails with a clear "regenerate" message so a
-// dev who adds a tool/action without regenerating is caught.
+// GOVERNANCE_BASELINE is a FROZEN Epic-14 FOUNDATION snapshot (141 keys, hash
+// 1e62c5ad5bf7), NOT a live mirror of every tool. The drift check is therefore
+// ONE-DIRECTIONAL (architecture decision, lead 2026-06-16, frozen-foundation
+// model):
+//
+//   - RETAINED — every committed FOUNDATION key must still exist in the live
+//     derived surface. A vanished foundation key is a real regression (a
+//     grandfathered action would lose its enabled-by-default guarantee), so the
+//     `extra` (committed-but-no-longer-in-tools) assertion stays.
+//   - REPLACED — the former `missing` assertion (live keys absent from the
+//     committed baseline) is now an EXPLICIT ALLOWANCE: new post-foundation tool
+//     keys (Epic 15+ tools, e.g. `iris_service_manage:enable`) are EXPECTED to
+//     live outside the frozen baseline. They are governed by `mutates` +
+//     defaultSeed (new write → disabled, new read → enabled), NOT by baseline
+//     membership, so they must NOT be added to the frozen foundation.
+//
+// The hash-self-consistency test (baseline ↔ GOVERNANCE_BASELINE_HASH) and the
+// sorted-keys test below are RETAINED unchanged.
 // ════════════════════════════════════════════════════════════════════
 
 describe("governance baseline drift check", () => {
@@ -525,10 +538,12 @@ describe("governance baseline drift check", () => {
     "iris-data-mcp",
   ];
 
-  const REGEN_HINT =
-    "run `pnpm turbo run build && pnpm run gen:governance-baseline` and commit packages/shared/src/governance-baseline.ts";
+  const VANISHED_HINT =
+    "a FROZEN foundation key disappeared from the live tool surface — this is a real " +
+    "back-compat regression (a grandfathered action would lose its enabled-by-default " +
+    "guarantee). Restore the tool/action, do NOT regenerate the frozen baseline.";
 
-  /** Re-derive the baseline keys from the built server dists. */
+  /** Re-derive the live governance keys from the built server dists. */
   async function deriveBaselineFromDists(): Promise<Set<string>> {
     const keys = new Set<string>();
     for (const pkg of SERVER_PACKAGES) {
@@ -548,21 +563,26 @@ describe("governance baseline drift check", () => {
     return keys;
   }
 
-  it("committed GOVERNANCE_BASELINE matches a fresh derivation from built dists", async () => {
+  it("every FROZEN foundation key still exists in the live tool surface (one-directional)", async () => {
     const fresh = await deriveBaselineFromDists();
     const committed = new Set(GOVERNANCE_BASELINE);
 
-    const missing = [...fresh].filter((k) => !committed.has(k)).sort();
-    const extra = [...committed].filter((k) => !fresh.has(k)).sort();
+    // RETAINED: a committed foundation key that no longer appears in the live
+    // surface is a real regression — assert there are none.
+    const vanished = [...committed].filter((k) => !fresh.has(k)).sort();
+    expect(
+      vanished,
+      `Governance foundation is BROKEN (frozen foundation keys missing from live tools) — ${VANISHED_HINT}`,
+    ).toEqual([]);
 
-    expect(
-      missing,
-      `Governance baseline is STALE (missing keys present in tools but not committed) — ${REGEN_HINT}`,
-    ).toEqual([]);
-    expect(
-      extra,
-      `Governance baseline is STALE (committed keys no longer in tools) — ${REGEN_HINT}`,
-    ).toEqual([]);
+    // REPLACED (was the bidirectional `missing` assertion): live keys NOT in the
+    // committed baseline are NEW post-foundation tool keys (Epic 15+). They are
+    // EXPECTED to live outside the frozen foundation and are governed by
+    // `mutates` + defaultSeed, not baseline membership. So we make NO assertion
+    // that they appear in the baseline — only document the allowance here.
+    const postFoundation = [...fresh].filter((k) => !committed.has(k)).sort();
+    // (No assertion on `postFoundation`: it may legitimately be non-empty.)
+    void postFoundation;
   });
 
   it("committed GOVERNANCE_BASELINE_HASH matches the SHA-256 of the sorted baseline", () => {
@@ -578,7 +598,9 @@ describe("governance baseline drift check", () => {
     const expectedHash = hasher.digest("hex").substring(0, 12);
     expect(
       GOVERNANCE_BASELINE_HASH,
-      `GOVERNANCE_BASELINE_HASH drift — ${REGEN_HINT}`,
+      "GOVERNANCE_BASELINE_HASH drift — the committed frozen-foundation hash no longer " +
+        "matches the SHA-256 of GOVERNANCE_BASELINE's sorted keys. The frozen foundation " +
+        "must stay 1e62c5ad5bf7; do NOT hand-edit governance-baseline.ts (Rule #18).",
     ).toBe(expectedHash);
   });
 
