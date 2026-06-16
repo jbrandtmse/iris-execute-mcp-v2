@@ -21,7 +21,7 @@ describe("iris-ops-mcp", () => {
     });
 
     it("should export metrics, jobs, system, task, and config tools", () => {
-      expect(tools.length).toBeGreaterThanOrEqual(19);
+      expect(tools.length).toBeGreaterThanOrEqual(20);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 19 tools", () => {
+    it("should create a server instance with 20 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(19);
+      expect(server.toolCount).toBe(20);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -74,7 +74,7 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(19);
+      expect(names).toHaveLength(20);
       expect(names).toContain("iris_metrics_system");
       expect(names).toContain("iris_metrics_alerts");
       expect(names).toContain("iris_metrics_interop");
@@ -87,6 +87,7 @@ describe("iris-ops-mcp", () => {
       expect(names).toContain("iris_audit_events");
       expect(names).toContain("iris_database_check");
       expect(names).toContain("iris_database_action");
+      expect(names).toContain("iris_backup_manage");
       expect(names).toContain("iris_license_info");
       expect(names).toContain("iris_ecp_status");
       expect(names).toContain("iris_task_manage");

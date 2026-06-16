@@ -137,6 +137,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/audit" Method="GET" Call="ExecuteMCPv2.REST.Monitor:AuditEvents" />
   <Route Url="/monitor/database" Method="GET" Call="ExecuteMCPv2.REST.Monitor:DatabaseCheck" />
   <Route Url="/monitor/database/action" Method="POST" Call="ExecuteMCPv2.REST.Monitor:DatabaseAction" />
+  <Route Url="/monitor/backup/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:BackupManage" />
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 
