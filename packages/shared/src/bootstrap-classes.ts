@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "8b074e457c3c";
+export const BOOTSTRAP_VERSION = "e5f4f6d88c56";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "8b074e457c3c";
+Parameter BOOTSTRAPVERSION = "e5f4f6d88c56";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -4815,6 +4815,300 @@ ClassMethod AuditManage() As %Status
     Quit $$$OK
 }
 
+/// Grant or revoke SQL object privileges (schema / table / column level).
+/// <p>Reads a JSON body with <code>action</code> (grant|revoke),
+/// <code>target</code> (a schema, <code>schema.table</code>, or
+/// <code>schema.table(col1,col2)</code>), <code>privilege</code> (one or more
+/// of SELECT,INSERT,UPDATE,DELETE,REFERENCES — comma-delimited or "*"),
+/// <code>grantee</code> (a SQL user or role, comma-delimited list allowed),
+/// and an optional <code>namespace</code> (defaults to the request namespace —
+/// SQL privileges are namespace-scoped, NOT %SYS-scoped).</p>
+/// <p>Backed by <method>%SQL.Manager.API.SaveObjPriv</method> — the same API
+/// the System Management Portal SchemaPriv/ColumnPriv dialogs use. A
+/// <code>target</code> of <code>schema.table(cols)</code> maps to a
+/// column-level grant by passing the column list as the
+/// <code>fields</code> argument; <code>schema.table</code> is a whole-table
+/// grant; a bare <code>schema</code> is a schema-level grant (type 5).</p>
+/// <p>This is ADDITIVE to the existing resource tool — the
+/// <method>ResourceManage</method>/<method>ResourceList</method> handlers are
+/// unchanged. Privileges are SQL object permissions, distinct from IRIS
+/// security resources.</p>
+ClassMethod SqlPrivilegeManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tTarget = tBody.%Get("target")
+        Set tPrivilege = tBody.%Get("privilege")
+        Set tGrantee = tBody.%Get("grantee")
+        Set tReqNS = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTarget, "target")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPrivilege, "privilege")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "grant") && (tAction '= "revoke") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: grant, revoke")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Parse target into objectType + object name + optional column list.
+        ;  - "schema"                  -> type 5 (schema)
+        ;  - "schema.table"            -> type 1 (table)
+        ;  - "schema.table(c1,c2)"     -> type 1 + column fields
+        Set tColumns = ""
+        Set tObjName = tTarget
+        Set tParen = $Find(tTarget, "(")
+        If tParen > 0 {
+            Set tObjName = $Extract(tTarget, 1, tParen - 2)
+            Set tColPart = $Extract(tTarget, tParen, *)
+            ; Strip trailing ")"
+            If $Extract(tColPart, *) = ")" Set tColPart = $Extract(tColPart, 1, *-1)
+            Set tColumns = tColPart
+        }
+        Set tObjName = $ZStrip(tObjName, "<>W")
+        If tObjName = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'target' is missing an object name")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; A column list is only valid for a table/view target (must contain a ".").
+        If (tColumns '= "") && (tObjName '[ ".") {
+            Set tSC = $$$ERROR($$$GeneralError, "Column-level privileges require a 'schema.table(columns)' target")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Type: schema (no ".") -> 5, else table -> 1.
+        Set tType = $Select(tObjName [ ".": 1, 1: 5)
+
+        ; Map privilege keywords to %SQL.Manager.API action letters.
+        ; "*" means all actions.
+        Set tActs = ""
+        If tPrivilege = "*" {
+            Set tActs = "*"
+        }
+        Else {
+            For tI = 1:1:$Length(tPrivilege, ",") {
+                Set tP = $ZConvert($ZStrip($Piece(tPrivilege, ",", tI), "<>W"), "U")
+                If tP = "" Continue
+                Set tLetter = $Case(tP, "SELECT":"s", "INSERT":"i", "UPDATE":"u", "DELETE":"d", "REFERENCES":"r", "ALTER":"a", :"")
+                If tLetter = "" {
+                    Set tSC = $$$ERROR($$$GeneralError, "Invalid privilege '"_tP_"' — expected one or more of SELECT, INSERT, UPDATE, DELETE, REFERENCES (or *)")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    ; Leave tSC as the error so the guard below exits the method
+                    ; (single response only — do NOT reset to $$$OK here, or a
+                    ; valid privilege preceding the invalid one would fall through
+                    ; to SaveObjPriv + a second render).
+                    Quit
+                }
+                Set tActs(tLetter) = ""
+            }
+            If $$$ISERR(tSC) {
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tLetter = ""
+            For  Set tLetter = $Order(tActs(tLetter)) Quit:tLetter=""  Set tActs = tActs_tLetter
+            If tActs = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'privilege' did not resolve to any action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        ; Build column fields $LIST (empty for whole-object).
+        Set tFields = ""
+        If tColumns '= "" {
+            Set tFields = ""
+            For tI = 1:1:$Length(tColumns, ",") {
+                Set tCol = $ZStrip($Piece(tColumns, ",", tI), "<>W")
+                If tCol '= "" Set tFields = tFields_$ListBuild(tCol)
+            }
+        }
+
+        ; SQL privileges are namespace-scoped. Switch to the requested namespace
+        ; (default = the request namespace).
+        If tReqNS '= "" {
+            If '##class(%SYS.Namespace).Exists(tReqNS) {
+                Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tReqNS
+        }
+
+        Set tRevoke = $Case(tAction, "grant":0, :1)
+        Set SQLCODE = 0
+        Set tErrMsg = ""
+        ; SaveObjPriv handles only ONE action letter at a time when "*" is not
+        ; used; loop the resolved letters. With "*" pass it through directly.
+        If tActs = "*" {
+            Do ##class(%SQL.Manager.API).SaveObjPriv("*", tType, tObjName, tGrantee, 0, tRevoke, .SQLCODE, .tErrMsg, $Username, .tFields)
+        }
+        Else {
+            For tI = 1:1:$Length(tActs) {
+                Set tOneAct = $Extract(tActs, tI)
+                Set SQLCODE = 0, tErrMsg = ""
+                Do ##class(%SQL.Manager.API).SaveObjPriv(tOneAct, tType, tObjName, tGrantee, 0, tRevoke, .SQLCODE, .tErrMsg, $Username, .tFields)
+                If SQLCODE < 0 Quit
+            }
+        }
+        Set $NAMESPACE = tOrigNS
+
+        If SQLCODE < 0 {
+            ; Preserve the real SQL error text + SQLCODE (Rule #9).
+            Set tDetail = "SQLCODE "_SQLCODE
+            If tErrMsg '= "" Set tDetail = tDetail_": "_tErrMsg
+            Set tSC = $$$ERROR($$$GeneralError, "SQL privilege "_tAction_" failed ("_tDetail_")")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("target", tTarget)
+        Do tResult.%Set("privilege", tPrivilege)
+        Do tResult.%Set("grantee", tGrantee)
+        Do tResult.%Set("level", $Select(tColumns'="":"column", tType=5:"schema", 1:"table"))
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List the current SQL privileges granted to a target (user or role).
+/// <p>Read action for <code>iris_resource_manage:listPrivileges</code>. Reads
+/// query parameters: <code>grantee</code> (required — the user or role),
+/// optional <code>target</code> (a <code>schema.table</code> to scope a
+/// COLUMN-level listing), <code>system</code> (1 to include system objects),
+/// and <code>namespace</code> (defaults to the request namespace).</p>
+/// <p>Without <code>target</code>: returns object-level privileges via
+/// <query>%SQL.Manager.CatalogPriv:UserPrivs</query> (TYPE, NAME, PRIVILEGE,
+/// GRANTED_BY, GRANT_OPTION, GRANTED_VIA, HAS_COLUMN_PRIV). With a
+/// <code>schema.table</code> target: returns column-level privileges via
+/// <query>%SQL.Manager.CatalogPriv:UserColumnPrivs</query> (COLUMN_NAME,
+/// PRIVILEGE, GRANTED_BY, GRANT_OPTION, GRANTED_VIA).</p>
+ClassMethod SqlPrivilegeList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tGrantee = $Get(%request.Data("grantee", 1))
+        Set tTarget = $Get(%request.Data("target", 1))
+        Set tSystem = +$Get(%request.Data("system", 1))
+        Set tReqNS = $Get(%request.Data("namespace", 1))
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If tReqNS '= "" {
+            If '##class(%SYS.Namespace).Exists(tReqNS) {
+                Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tReqNS
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("grantee", tGrantee)
+        Set tPrivs = []
+
+        If tTarget '= "" {
+            ; Column-level listing for a specific schema.table
+            Set tSchema = $Piece(tTarget, ".", 1)
+            Set tTable = $Piece(tTarget, ".", 2, *)
+            Do tResult.%Set("target", tTarget)
+            Do tResult.%Set("level", "column")
+            Set tRS = ##class(%ResultSet).%New("%SQL.Manager.CatalogPriv:UserColumnPrivs")
+            Set tSC = tRS.Execute(tGrantee, tSchema, tTable, tSystem)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            While tRS.Next() {
+                Set tRow = {}
+                Do tRow.%Set("column", tRS.Get("COLUMN_NAME"))
+                Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
+                Do tRow.%Set("grantedBy", tRS.Get("GRANTED_BY"))
+                Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
+                Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
+                Do tPrivs.%Push(tRow)
+            }
+            Do tRS.Close()
+        }
+        Else {
+            ; Object-level listing (tables/views/procedures/schemas)
+            Do tResult.%Set("level", "object")
+            Set tRS = ##class(%ResultSet).%New("%SQL.Manager.CatalogPriv:UserPrivs")
+            Set tSC = tRS.Execute(tGrantee, tSystem)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            While tRS.Next() {
+                Set tRow = {}
+                Do tRow.%Set("type", tRS.Get("TYPE"))
+                Do tRow.%Set("name", tRS.Get("NAME"))
+                Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
+                Do tRow.%Set("grantedBy", tRS.Get("GRANTED_BY"))
+                Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
+                Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
+                Do tRow.%Set("hasColumnPriv", +tRS.Get("HAS_COLUMN_PRIV"), "boolean")
+                Do tPrivs.%Push(tRow)
+            }
+            Do tRS.Close()
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do tResult.%Set("privileges", tPrivs)
+        Do tResult.%Set("count", tPrivs.%Size())
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -8398,6 +8692,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 4: Security / Resource Management -->
   <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
   <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
+
+  <!-- Epic 15 (Story 15.5): SQL object privileges (schema/table/column grant/revoke/list) -->
+  <Route Url="/security/sqlprivilege" Method="GET" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeList" />
+  <Route Url="/security/sqlprivilege" Method="POST" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeManage" />
 
   <!-- Epic 4: Security / Permission Check -->
   <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />

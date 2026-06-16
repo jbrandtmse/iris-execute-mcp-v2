@@ -59,6 +59,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
   <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
 
+  <!-- Epic 15 (Story 15.5): SQL object privileges (schema/table/column grant/revoke/list) -->
+  <Route Url="/security/sqlprivilege" Method="GET" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeList" />
+  <Route Url="/security/sqlprivilege" Method="POST" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeManage" />
+
   <!-- Epic 4: Security / Permission Check -->
   <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />
 

@@ -220,7 +220,7 @@ development_status:
   15-2-iris-ldap-manage: done
   15-3-iris-x509-manage: done
   15-4-iris-audit-manage: done
-  15-5-resource-manage-sql-privileges: backlog
+  15-5-resource-manage-sql-privileges: done
   15-6-bootstrap-bump-verification-and-docs: backlog
   epic-15-retrospective: optional
 
