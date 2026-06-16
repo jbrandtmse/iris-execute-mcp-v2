@@ -27,3 +27,9 @@
 2026-06-16T02:50:36Z	Story 14.3	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
 2026-06-16T02:57:00Z	Story 14.3	qa_complete	spawn_at=2026-06-16T02:50:36Z model=claude-opus-4-8 tests_added=45 shared_tests=379 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T03:11:29Z	Story 14.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=generator-deterministic(byte-identical-regen)+engine-smoke-13-assertions(AC14.3.7-proof-141-keys,cascade,proto-safety,parse,getEffectivePolicy-invariant) model=claude-opus-4-8
+2026-06-16T03:11:51Z	Story 14.3	committed	sha=4b506ff submodules=
+2026-06-16T03:14:24Z	Story 14.4	story_created	path=_bmad-output/implementation-artifacts/14-4-call-time-governance-enforcement.md model=claude-opus-4-8
+2026-06-16T03:26:42Z	Story 14.4	dev_complete	spawn_at=2026-06-16T03:14:24Z model=claude-opus-4-8 files=1 source=server-base.ts(gate+startup-wiring,+152-additive) tests_added=14 shared_tests=411 full_suite=1378 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-06-16T03:26:42Z	Story 14.4	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
+2026-06-16T03:33:03Z	Story 14.4	qa_complete	spawn_at=2026-06-16T03:26:42Z model=claude-opus-4-8 tests_added=14 shared_tests=425 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T03:46:37Z	Story 14.4	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=real-McpServerBase-gate-vs-live-IRIS-6-assertions(cascade-enable/disable,denial-envelope-code+action+server,handler-not-called,seed-passthrough) note=nonzero-exit-is-windows-libuv-teardown model=claude-opus-4-8

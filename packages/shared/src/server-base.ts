@@ -37,6 +37,12 @@ import type {
   ToolScope,
   PaginateResult,
 } from "./tool-types.js";
+import type { GovernanceConfig, MutatesLookup } from "./governance.js";
+import {
+  parseGovernanceConfig,
+  buildMutatesLookup,
+  effective,
+} from "./governance.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -269,6 +275,27 @@ export class McpServerBase {
   /** Negotiated Atelier version for the default profile (unchanged back-compat field). */
   private atelierVersion = 1;
 
+  /**
+   * Parsed `IRIS_GOVERNANCE` policy (Epic 14, architecture decisions D5/D7).
+   * Drives the call-time enforcement gate in {@link handleToolCall}.
+   *
+   * Defaults to `{}` (an empty config) so a server that is constructed but never
+   * {@link start}ed — and the window before `start()` parses the env — is a SAFE
+   * pass-through: under an empty config every baseline action resolves enabled
+   * (the back-compat gate). {@link start} replaces this with the parsed
+   * `IRIS_GOVERNANCE`, which fails fast (naming the var) on malformed input.
+   */
+  private governanceConfig: GovernanceConfig = {};
+  /**
+   * Key → mutation-class lookup for the registered tools (architecture decision
+   * D4), built from each {@link ToolDefinition.mutates}. Consumed by the gate's
+   * {@link effective} call so a NEW write action defaults disabled and a NEW read
+   * action defaults enabled. Built once in the constructor — the tool set is known
+   * at construction — so the gate has it even before {@link start} (when the
+   * empty `governanceConfig` already makes the gate a pass-through anyway).
+   */
+  private mutatesLookup: MutatesLookup = new Map();
+
   /** Page size for tools/list pagination. */
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
 
@@ -286,6 +313,25 @@ export class McpServerBase {
     for (const tool of options.tools) {
       this.registerTool(tool);
     }
+
+    // Build the governance mutates lookup (D4) from the registered tools. The
+    // tool set is fully known at construction, so this is cheap and lets the
+    // enforcement gate classify NEW actions even before start() parses
+    // IRIS_GOVERNANCE. (governanceConfig stays `{}` until start(), so the gate
+    // is a pure pass-through in the meantime — see the field doc.) Built from the
+    // live registry (not options.tools) so addTools/removeTools can rebuild it
+    // and keep a dynamically-added governed tool's key classified.
+    this.rebuildMutatesLookup();
+  }
+
+  /**
+   * Rebuild {@link mutatesLookup} from the live tool registry (architecture
+   * decision D4). Called at construction and whenever the tool set changes
+   * ({@link addTools} / {@link removeTools}) so a dynamically-added governed
+   * tool's `mutates` metadata is reflected in the enforcement gate's seed.
+   */
+  private rebuildMutatesLookup(): void {
+    this.mutatesLookup = buildMutatesLookup(this.tools.values());
   }
 
   // ── Tool registration ──────────────────────────────────────────────
@@ -338,6 +384,48 @@ export class McpServerBase {
         return this.handleToolCall(tool, args);
       },
     );
+  }
+
+  /**
+   * Compute the governance key for a call (architecture decision D4).
+   *
+   * - **Multi-action tool** — when the tool's input schema declares an `action`
+   *   ZodEnum (i.e. `inputSchema.shape.action.options` is a non-empty array), the
+   *   key is `tool:action`, reading the validated `action` value.
+   * - **Single-operation tool** — otherwise the key is the bare tool name.
+   *
+   * This MUST mirror, exactly, how `scripts/gen-governance-baseline.mjs`
+   * enumerated keys (`inputSchema.shape.action.options`, guarded by
+   * `Array.isArray && length > 0`). Aligning the gate's runtime key with the
+   * generated baseline's keys is what makes a governed action resolve against the
+   * correct baseline / policy entry — if the gate computed `tool` while the
+   * baseline holds `tool:action` (or vice-versa), the cascade would miss and the
+   * effective policy would be wrong. The companion baseline-alignment test pins
+   * this equivalence.
+   *
+   * @param tool          - The tool definition (its schema declares the `action` enum, if any).
+   * @param validatedArgs - The Zod-validated args (with `server` already stripped).
+   * @returns The governance key (`tool` or `tool:action`).
+   */
+  private computeGovernanceKey(
+    tool: ToolDefinition,
+    validatedArgs: Record<string, unknown>,
+  ): string {
+    // Read the schema's `action` field exactly as the generator does. A ZodEnum
+    // exposes its values on `.options` (Zod v4); a ZodString / absent field does
+    // not, so the bare-tool branch is taken. Typed loosely because the SDK schema
+    // shape is `ZodObject<any>`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const actionField = (tool.inputSchema as any)?.shape?.action;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const options = (actionField as any)?.options;
+    if (Array.isArray(options) && options.length > 0) {
+      // Multi-action tool: the governance key includes the chosen action value.
+      // `action` is guaranteed present + a valid enum value here because Zod
+      // validation (which runs BEFORE this) enforces the enum.
+      return `${tool.name}:${String(validatedArgs.action)}`;
+    }
+    return tool.name;
   }
 
   /**
@@ -445,6 +533,56 @@ export class McpServerBase {
       throw error;
     }
 
+    // ── Governance enforcement gate (architecture decision D5) ─────────
+    //
+    // The ONE chokepoint. Ordering per D5: validate (Zod, above) → resolve
+    // `server`→profile (above) → extract action + evaluate policy (here) →
+    // deny-or-proceed → build context + invoke (below). It sits AFTER profile
+    // resolution and BEFORE getOrCreateClient, so a denied call neither
+    // establishes the profile's connection (no health-check / bootstrap) nor
+    // reaches the handler — enforcement is uniform and un-bypassable across all
+    // five servers from this single point.
+    //
+    // Enforcement is CALL-TIME by necessity (AC 14.4.3): the governing profile is
+    // selected per-call via `server`, so per-profile policy cannot be evaluated at
+    // advertise/registration time. Every tool therefore stays in `tools/list`
+    // (advertise-time is untouched); the policy is applied here, when the target
+    // profile is known.
+    //
+    // Back-compat (AC 14.4.4): with no IRIS_GOVERNANCE, `governanceConfig` is `{}`
+    // and every key in the generated baseline resolves enabled, so this gate is a
+    // pure pass-through — today's behavior, byte-for-byte.
+    const governanceKey = this.computeGovernanceKey(tool, validatedArgs);
+    if (
+      !effective(
+        governanceKey,
+        profile.name,
+        this.governanceConfig,
+        this.mutatesLookup,
+      )
+    ) {
+      // Disabled action (AC 14.4.2): structured denial. Human-readable text +
+      // a machine-readable code in structuredContent; the handler is NEVER
+      // invoked and the connection is NOT established.
+      logger.warn(
+        `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}".`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
+          },
+        ],
+        structuredContent: {
+          code: "GOVERNANCE_DISABLED",
+          action: governanceKey,
+          server: profile.name,
+        },
+        isError: true,
+      };
+    }
+
     // Get-or-create the resolved profile's client (health-check + version
     // negotiation on first touch of a non-default profile, then cached). The
     // default profile returns its eagerly-established client + version. Custom
@@ -519,6 +657,9 @@ export class McpServerBase {
     for (const tool of tools) {
       this.registerTool(tool);
     }
+    // Keep the governance mutates lookup in sync with the live tool set (D4) so
+    // a newly-added governed tool's `mutates` classification is enforced.
+    this.rebuildMutatesLookup();
     this.mcpServer.sendToolListChanged();
     logger.info(`Added ${tools.length} tool(s) and notified clients`);
   }
@@ -545,6 +686,9 @@ export class McpServerBase {
       }
     }
     if (removedCount > 0) {
+      // Rebuild the governance mutates lookup so a removed governed tool's key
+      // no longer carries a stale classification (D4).
+      this.rebuildMutatesLookup();
       this.mcpServer.sendToolListChanged();
     }
     logger.info(`Removed ${removedCount} tool(s) and notified clients`);
@@ -610,6 +754,14 @@ export class McpServerBase {
         : loadProfileRegistry();
     }
     this.clients = new ProfileClientRegistry(this.profiles);
+
+    // Parse the governance policy centrally (architecture decisions D5/D7),
+    // mirroring loadProfileRegistry(): read IRIS_GOVERNANCE once at startup.
+    // parseGovernanceConfig fails fast (naming IRIS_GOVERNANCE) on malformed
+    // input, so a misconfigured policy is caught at boot rather than mis-enforced
+    // per call. Absent/empty IRIS_GOVERNANCE ⇒ `{}` ⇒ the enforcement gate is a
+    // pure pass-through (every baseline action enabled — the back-compat gate).
+    this.governanceConfig = parseGovernanceConfig();
 
     // 2. Eagerly create the default profile's HTTP client (preserves today's
     //    bootstrap/health-check/negotiation for the default profile exactly).
