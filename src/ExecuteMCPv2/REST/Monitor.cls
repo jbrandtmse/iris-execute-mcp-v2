@@ -830,4 +830,262 @@ ClassMethod ECPStatus() As %Status
     Quit $$$OK
 }
 
+/// Return detail for a single IRIS process in JSON format.
+/// <p>Queries <code>%SYS.ProcessQuery</code> in the <b>%SYS</b> namespace for the
+/// process identified by the <code>pid</code> query parameter. Returns process
+/// state, routine, namespace, user, resource counters, and the
+/// <code>canBeTerminated</code> / <code>canBeSuspended</code> flags that gate the
+/// control actions in <method>ProcessManage</method>.</p>
+/// <p>Stack/variable inspection is intentionally NOT exposed: <code>%SYS.ProcessQuery</code>
+/// only surfaces a process's own stack via mailbox-message methods that require
+/// the target to cooperate; the read view here reports the state-level detail that
+/// the Management Portal ProcessDetails page shows without that overhead.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>pid</code> — Process ID to inspect (required)</li>
+/// </ul></p>
+ClassMethod ProcessGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate pid BEFORE switching namespace (Utils lives in HSCUSTOM)
+        Set tPid = $Get(%request.Data("pid",1))
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once so the string-keyed lookups
+        ; and the numeric isCurrentProcess check below can never disagree.
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm the process exists before reporting detail
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tProc = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("pid", +tProc.Pid, "number")
+        Do tResult.%Set("namespace", tProc.NameSpace)
+        Do tResult.%Set("routine", tProc.Routine)
+        Do tResult.%Set("state", tProc.State)
+        Do tResult.%Set("userName", tProc.UserName)
+        Do tResult.%Set("clientIPAddress", tProc.ClientIPAddress)
+        Do tResult.%Set("device", tProc.CurrentDevice)
+        Do tResult.%Set("jobType", +tProc.JobType, "number")
+        Do tResult.%Set("commandsExecuted", +tProc.CommandsExecuted, "number")
+        Do tResult.%Set("globalReferences", +tProc.GlobalReferences, "number")
+        Do tResult.%Set("inTransaction", +tProc.InTransaction, "number")
+        Do tResult.%Set("cpuTime", +tProc.CPUTime, "number")
+        Do tResult.%Set("memoryUsedKB", +tProc.MemoryUsed, "number")
+        Do tResult.%Set("priority", +tProc.Priority, "number")
+        Do tResult.%Set("roles", tProc.Roles)
+        Do tResult.%Set("canBeTerminated", +tProc.CanBeTerminated, "boolean")
+        Do tResult.%Set("canBeSuspended", +tProc.CanBeSuspended, "boolean")
+        Do tResult.%Set("canBeExamined", +tProc.CanBeExamined, "boolean")
+        ; isCurrentProcess: true if this is the calling (REST handler) process
+        Do tResult.%Set("isCurrentProcess", (+tProc.Pid = +$Job), "boolean")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Terminate, suspend, or resume an IRIS process.
+/// <p>Accepts a JSON body <code>{action, pid}</code> where <code>action</code> is one
+/// of <code>terminate</code>, <code>suspend</code>, or <code>resume</code>. Opens the
+/// target via <code>##class(SYS.Process).%OpenId(pid)</code> in the <b>%SYS</b>
+/// namespace and calls the corresponding instance method.</p>
+/// <p><b>Self / critical-process guard (defense in depth):</b> a control action is
+/// REFUSED — changing nothing — when:
+/// <ul>
+///   <li>The target is the calling process (<code>pid = $JOB</code>), for any action;</li>
+///   <li>The action is <code>terminate</code> and <code>%SYS.ProcessQuery.CanBeTerminated</code>
+///       is false (a critical system job);</li>
+///   <li>The action is <code>suspend</code> and <code>%SYS.ProcessQuery.CanBeSuspended</code>
+///       is false.</li>
+/// </ul>
+/// The guard is enforced here in the handler so it holds even on a direct REST call,
+/// independent of any TS-layer pre-check. A refusal returns
+/// <code>{action, pid, refused:true, reason}</code> with HTTP 200 (an explanatory
+/// result, not a server error).</p>
+ClassMethod ProcessManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = tBody.%Get("pid")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once, then use it everywhere
+        ; (existence check, opens, guard, response) so the string-keyed lookups and
+        ; the numeric self-guard can never disagree (e.g. " 01234" vs 1234).
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        ; Validate action enum via EXACT membership (NOT a substring contains test):
+        ; a substring test would accept a comma-injected value like "terminate,suspend"
+        ; which would then route to Resume() via the Else fall-through below.
+        If (tAction '= "terminate") && (tAction '= "suspend") && (tAction '= "resume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported control actions: terminate, suspend, resume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm target exists
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Self / critical-process guard (AC 16.1.4) ──
+        ; Refuse BEFORE invoking any control method; a refusal changes nothing.
+        Set tRefused = 0
+        Set tReason = ""
+        If (+tPid = +$Job) {
+            Set tRefused = 1
+            Set tReason = "Refused: cannot "_tAction_" the calling process (PID "_tPid_" = $JOB). This is the process serving the request."
+        }
+        Else {
+            ; Read the can-be-* flags via %SYS.ProcessQuery (no mailbox overhead).
+            ; Fail CLOSED: if the query object cannot be opened (e.g. the process
+            ; exited between the %ExistsId check above and here), refuse rather than
+            ; fall through to the control method with the guard un-applied.
+            Set tQ = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+            If '$IsObject(tQ) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" could not be inspected for the "_tAction_" safety check (it may have just exited); no control action was taken."
+            }
+            ElseIf (tAction = "terminate") && ('+tQ.CanBeTerminated) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be terminated (CanBeTerminated=0 - critical/protected system job)."
+            }
+            ElseIf (tAction = "suspend") && ('+tQ.CanBeSuspended) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be suspended (CanBeSuspended=0 - critical/protected system job)."
+            }
+        }
+
+        If tRefused {
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", tAction)
+            Do tResult.%Set("pid", +tPid, "number")
+            Do tResult.%Set("refused", 1, "boolean")
+            Do tResult.%Set("reason", tReason)
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── Execute the control action ──
+        Set tProc = ##class(SYS.Process).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid_" for control")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Dispatch by EXACT action match (resume reached only when tAction="resume",
+        ; never as a catch-all Else — the enum was already validated above).
+        Set tActionSC = $$$OK
+        If tAction = "terminate" {
+            Set tActionSC = tProc.Terminate()
+        }
+        ElseIf tAction = "suspend" {
+            Set tActionSC = tProc.Suspend()
+        }
+        ElseIf tAction = "resume" {
+            Set tActionSC = tProc.Resume()
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("pid", +tPid, "number")
+        Do tResult.%Set("refused", 0, "boolean")
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }

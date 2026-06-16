@@ -14,6 +14,7 @@ import {
 } from "./metrics.js";
 import { alertsManageTool } from "./alerts.js";
 import { jobsListTool, locksListTool } from "./jobs.js";
+import { processManageTool } from "./process.js";
 import {
   journalInfoTool,
   mirrorStatusTool,
@@ -40,6 +41,7 @@ export const tools: ToolDefinition[] = [
   alertsManageTool,
   jobsListTool,
   locksListTool,
+  processManageTool,
   journalInfoTool,
   mirrorStatusTool,
   auditEventsTool,
