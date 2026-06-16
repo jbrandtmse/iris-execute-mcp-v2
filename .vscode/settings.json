@@ -3,5 +3,17 @@
         "server": "local",
         "ns": "HSCUSTOM",
         "active": true
+    },
+    "intersystems.servers": {
+        "local": {
+            "webServer": {
+                "scheme": "http",
+                "host": "localhost",
+                "port": 52773
+            },
+            "description": "local",
+            "username": "_SYSTEM",
+            "password": "SYS"
+        }
     }
 }
