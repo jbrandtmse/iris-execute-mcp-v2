@@ -17,3 +17,10 @@
 2026-06-16T22:36:14Z	Story 16.1	qa_complete	spawn_at=2026-06-16T22:24:00Z model=claude-opus-4-8 tests=packages/iris-ops-mcp/src/__tests__/process.test.ts tests_added=9 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T22:47:29Z	Story 16.1	cr_complete	spawn_at=2026-06-16T22:27:00Z model=claude-opus-4-8 resolved=3 deferred=4 dismissed=3 high=0 med=3 low=4 clarifications=0 bootstrap=3a395abc1eba->d4e197ef5ffc closing_sections_present=true
 2026-06-16T22:47:52Z	Story 16.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HSCUSTOM-REST:get-pid3736-detail+terminate-CONTROL-daemon-REFUSED(canBeTerminated=0)+daemon-survived-RUNW model=claude-opus-4-8
+2026-06-16T22:48:20Z	Story 16.1	committed	sha=41d36a2 submodules=
+2026-06-16T22:50:16Z	Story 16.2	story_created	path=_bmad-output/implementation-artifacts/16-2-iris-database-action.md
+2026-06-16T23:00:27Z	Story 16.2	dev_complete	spawn_at=2026-06-16T22:40:00Z model=claude-opus-4-8 files=Monitor.cls,Dispatch.cls,database.ts,index.ts,bootstrap-classes.ts loc_added=~420 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=1(spec-DatabaseCompact-nonexistent) cycle_iteration=1 bootstrap=d4e197ef5ffc->f8b3a9e9704c closing_sections_present=true
+2026-06-16T23:00:27Z	Story 16.2	adr_verifications_complete	result=none_required
+2026-06-16T23:05:04Z	Story 16.2	qa_complete	spawn_at=2026-06-16T22:48:00Z model=claude-opus-4-8 tests=packages/iris-ops-mcp/src/__tests__/database.test.ts,database-governance.test.ts tests_added=7 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T23:17:24Z	Story 16.2	cr_complete	spawn_at=2026-06-16T22:52:00Z model=claude-opus-4-8 resolved=1 deferred=3 dismissed=5 high=0 med=1 low=3 clarifications=0 bootstrap=f8b3a9e9704c-unchanged closing_sections_present=true
+2026-06-16T23:17:46Z	Story 16.2	smoke_complete	method=api result=pass iterations=2 defects_caught=0 evidence=live-HSCUSTOM:dismount-nonexistent-dir-REJECTED(existence-guard)+expandVolume-missing-newVolDir-REJECTED+invalid-action-REJECTED+truncate-missing-directory-REJECTED-no-crash model=claude-opus-4-8

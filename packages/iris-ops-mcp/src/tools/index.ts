@@ -25,6 +25,7 @@ import {
   licenseInfoTool,
   ecpStatusTool,
 } from "./infrastructure.js";
+import { databaseActionTool } from "./database.js";
 import {
   taskManageTool,
   taskListTool,
@@ -46,6 +47,7 @@ export const tools: ToolDefinition[] = [
   mirrorStatusTool,
   auditEventsTool,
   databaseCheckTool,
+  databaseActionTool,
   licenseInfoTool,
   ecpStatusTool,
   taskManageTool,

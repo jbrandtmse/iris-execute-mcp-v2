@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "d4e197ef5ffc";
+export const BOOTSTRAP_VERSION = "f8b3a9e9704c";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "d4e197ef5ffc";
+Parameter BOOTSTRAPVERSION = "f8b3a9e9704c";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -7593,6 +7593,163 @@ ClassMethod DatabaseCheck() As %Status
     Quit $$$OK
 }
 
+/// Run a runtime database-maintenance operation via <code>SYS.Database</code> class methods.
+/// <p>Accepts a JSON body <code>{action, directory, ...params}</code> where
+/// <code>action</code> is one of:
+/// <ul>
+///   <li><code>mount</code> — <code>SYS.Database.MountDatabase(dir, readonly)</code></li>
+///   <li><code>dismount</code> — <code>SYS.Database.DismountDatabase(dir)</code> (destructive: takes the DB offline)</li>
+///   <li><code>compact</code> — <code>SYS.Database.CompactDatabase(dir, percentFull, .MbProcessed, .MbCompressed)</code></li>
+///   <li><code>defragment</code> — <code>SYS.Database.Defragment(dir)</code></li>
+///   <li><code>truncate</code> — <code>SYS.Database.ReturnUnusedSpace(dir, targetSize, .ReturnSize)</code> (destructive: shrinks the .DAT, returns trailing free space to the OS)</li>
+///   <li><code>expandVolume</code> — <code>SYS.Database.NewVolume(dir, newVolDir, initialSize)</code> (adds a new volume to a multi-volume database)</li>
+/// </ul></p>
+/// <p>These operations are <b>SYNCHRONOUS</b> — IRIS exposes no native async/queue API
+/// for them. <code>compact</code>, <code>defragment</code>, and <code>truncate</code>
+/// can run for a while on large databases and the request blocks until they finish.
+/// No fabricated started/queued status is returned.</p>
+/// <p><b>Guard:</b> <code>directory</code> is required, and the database must exist
+/// (checked via <code>SYS.Database.%ExistsId</code>) before any action runs; a missing
+/// or unknown directory yields a clean error envelope rather than an opaque
+/// <code>&lt;...&gt;</code> crash. Any non-OK <code>%Status</code> from the underlying
+/// API (e.g. a DB in use, locked, or unmounted) is propagated through
+/// <method>SanitizeError</method>.</p>
+/// <p>This tool covers RUNTIME operations only. Database CONFIG (create / modify /
+/// delete) lives in the admin <code>iris_database_manage</code> tool (Config.Databases).</p>
+ClassMethod DatabaseAction() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; action (required)
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate action enum via EXACT membership (NOT a substring test).
+        If (tAction'="mount")&&(tAction'="dismount")&&(tAction'="compact")&&(tAction'="defragment")&&(tAction'="truncate")&&(tAction'="expandVolume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: mount, dismount, compact, defragment, truncate, expandVolume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; directory (required for every action — the SYS.Database APIs key on it)
+        Set tDirectory = tBody.%Get("directory")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tDirectory, "directory")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read action-specific params (defaults applied; "" coerces via +)
+        Set tReadonly = +tBody.%Get("readonly")
+        Set tPercentFull = 90
+        If tBody.%IsDefined("percentFull") Set tPercentFull = +tBody.%Get("percentFull")
+        Set tTargetSize = +tBody.%Get("targetSize")
+        Set tNewVolDir = tBody.%Get("newVolDir")
+        Set tInitialSize = +tBody.%Get("initialSize")
+
+        Set $NAMESPACE = "%SYS"
+
+        ; ── Guard: confirm the database exists before any operation ──
+        ; SYS.Database is keyed on its directory. A missing / unknown directory
+        ; produces a clean refusal here rather than an opaque <...> crash inside
+        ; the maintenance API (defense in depth; the API %Status is the backstop).
+        If '##class(SYS.Database).%ExistsId(tDirectory) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Database directory '"_tDirectory_"' does not exist or is not a configured IRIS database.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; expandVolume additionally requires newVolDir (validate after NS guard so the
+        ; directory-exists check runs first, then restore NS for the error envelope).
+        If (tAction = "expandVolume") && (tNewVolDir = "") {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "The 'expandVolume' action requires 'newVolDir' (the directory for the new volume).")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Dispatch to the matching SYS.Database class method ──
+        Set tActionSC = $$$OK
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("directory", tDirectory)
+
+        If tAction = "mount" {
+            Set tActionSC = ##class(SYS.Database).MountDatabase(tDirectory, tReadonly)
+            Do tResult.%Set("readonly", tReadonly, "boolean")
+        }
+        ElseIf tAction = "dismount" {
+            Set tActionSC = ##class(SYS.Database).DismountDatabase(tDirectory)
+        }
+        ElseIf tAction = "compact" {
+            Set tMbProcessed = 0
+            Set tMbCompressed = 0
+            Set tActionSC = ##class(SYS.Database).CompactDatabase(tDirectory, tPercentFull, .tMbProcessed, .tMbCompressed)
+            Do tResult.%Set("percentFull", +tPercentFull, "number")
+            Do tResult.%Set("mbProcessed", +tMbProcessed, "number")
+            Do tResult.%Set("mbCompressed", +tMbCompressed, "number")
+        }
+        ElseIf tAction = "defragment" {
+            Set tActionSC = ##class(SYS.Database).Defragment(tDirectory)
+        }
+        ElseIf tAction = "truncate" {
+            Set tReturnSize = 0
+            Set tActionSC = ##class(SYS.Database).ReturnUnusedSpace(tDirectory, tTargetSize, .tReturnSize)
+            Do tResult.%Set("targetSize", +tTargetSize, "number")
+            Do tResult.%Set("returnSize", +tReturnSize, "number")
+        }
+        ElseIf tAction = "expandVolume" {
+            Set tActionSC = ##class(SYS.Database).NewVolume(tDirectory, tNewVolDir, tInitialSize)
+            Do tResult.%Set("newVolDir", tNewVolDir)
+            Do tResult.%Set("initialSize", +tInitialSize, "number")
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        ; Propagate the underlying API %Status on failure (Rule #9) — gives the
+        ; caller the real reason (DB in use, locked, unmounted, insufficient space).
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return license information in JSON format.
 /// <p>Queries <code>$SYSTEM.License</code> class methods for license type,
 /// capacity, current usage, and expiration. Converts <code>$Horolog</code>
@@ -9028,6 +9185,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/mirror" Method="GET" Call="ExecuteMCPv2.REST.Monitor:MirrorStatus" />
   <Route Url="/monitor/audit" Method="GET" Call="ExecuteMCPv2.REST.Monitor:AuditEvents" />
   <Route Url="/monitor/database" Method="GET" Call="ExecuteMCPv2.REST.Monitor:DatabaseCheck" />
+  <Route Url="/monitor/database/action" Method="POST" Call="ExecuteMCPv2.REST.Monitor:DatabaseAction" />
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 
