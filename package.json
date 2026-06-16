@@ -12,6 +12,7 @@
     "format:check": "prettier --check .",
     "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
     "gen:governance-baseline": "node scripts/gen-governance-baseline.mjs",
+    "gen:governance-baseline:check": "node scripts/gen-governance-baseline.mjs --check",
     "changeset": "changeset"
   },
   "devDependencies": {
