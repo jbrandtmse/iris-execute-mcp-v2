@@ -1941,4 +1941,276 @@ ClassMethod ServiceManage() As %Status
     Quit $$$OK
 }
 
+/// List LDAP configurations, get a single config, or run a config-validity test.
+/// <p>Backed by <class>Security.LDAPConfigs</class> in <code>%SYS</code>
+/// (Story 15.2). Routing on the GET query parameters:</p>
+/// <ul>
+///   <li>No <code>name</code> &rarr; list all configs from the
+///       <code>Security.LDAPConfigs:List</code> query (ROWSPEC:
+///       <code>Name, LDAP Enabled, Description, LDAPCACertFile</code>).</li>
+///   <li><code>name</code> only &rarr; single config get via
+///       <method>Security.LDAPConfigs.Get</method>, returning the config's
+///       properties.</li>
+///   <li><code>name</code> + <code>test=1</code> &rarr; a non-mutating
+///       <b>config-validity check</b> (AC 15.2.5): the config exists, its
+///       required fields (<code>LDAPBaseDN</code>,
+///       <code>LDAPBaseDNForGroups</code>, <code>LDAPSearchUsername</code>) are
+///       populated, and its host names are syntactically valid. IRIS exposes no
+///       high-level LDAP connection-test API (only <class>%SYS.LDAP</class>
+///       primitives), so this is NOT a live bind to the LDAP server.</li>
+/// </ul>
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is NEVER included in any
+/// response (NFR6 / Rule #9 / AC 15.2.4) — it is omitted from the property
+/// mapping entirely. Avoids the <code>LDAPDomainName</code> Deprecated/Internal
+/// property (Rule #4).</p>
+ClassMethod LdapList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?name= selects single-config get; ?test=1 selects validity test
+        Set tName = $Get(%request.Data("name", 1))
+        Set tIsTest = (+$Get(%request.Data("test", 1)) = 1)
+
+        ; Switch to %SYS for Security.LDAPConfigs operations
+        Set $NAMESPACE = "%SYS"
+
+        If tName '= "" {
+            ; Single config get / validity test
+            Kill tProps
+            Set tSC = ##class(Security.LDAPConfigs).Get(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            If tIsTest {
+                ; Config-validity check (AC 15.2.5) — non-mutating, no live bind.
+                Set tEntry = ..BuildLdapValidity(tName, .tProps)
+                Do ..RenderResponseBody($$$OK, , tEntry)
+                Quit
+            }
+
+            Set tEntry = ..BuildLdapEntry(tName, .tProps)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all LDAP configurations
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("Security.LDAPConfigs:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ROWSPEC: Name, LDAP Enabled, Description, LDAPCACertFile
+            ; (no password column — safe to surface directly)
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("enabled", +tRS.Get("LDAP Enabled"), "boolean")
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tEntry.%Set("ldapCACertFile", tRS.Get("LDAPCACertFile"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Build a password-redacted JSON object for a single LDAP config from a
+/// <method>Security.LDAPConfigs.Get</method> properties array.
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is deliberately NOT read
+/// from <var>pProps</var> — it is never surfaced (AC 15.2.4). The bind username
+/// is non-secret and IS returned.</p>
+ClassMethod BuildLdapEntry(pName As %String, ByRef pProps As %String) As %DynamicObject [ Internal ]
+{
+    Set tEntry = {}
+    ; Get() uses pName as the lookup key and does NOT populate tProps("Name").
+    Do tEntry.%Set("name", pName)
+    Do tEntry.%Set("description", $Get(pProps("Description")))
+    Do tEntry.%Set("ldapBaseDN", $Get(pProps("LDAPBaseDN")))
+    Do tEntry.%Set("ldapBaseDNForGroups", $Get(pProps("LDAPBaseDNForGroups")))
+    Do tEntry.%Set("ldapHostNames", $Get(pProps("LDAPHostNames")))
+    Do tEntry.%Set("ldapSearchUsername", $Get(pProps("LDAPSearchUsername")))
+    Do tEntry.%Set("ldapClientTimeout", +$Get(pProps("LDAPClientTimeout")))
+    Do tEntry.%Set("ldapServerTimeout", +$Get(pProps("LDAPServerTimeout")))
+    Do tEntry.%Set("ldapUniqueDNIdentifier", $Get(pProps("LDAPUniqueDNIdentifier")))
+    Do tEntry.%Set("ldapFlags", +$Get(pProps("LDAPFlags")))
+    Do tEntry.%Set("ldapCACertFile", $Get(pProps("LDAPCACertFile")))
+    ; CRITICAL: NEVER include LDAPSearchPassword (AC 15.2.4 / Rule #9).
+    ; AVOID LDAPDomainName (Deprecated, Internal — Rule #4).
+    Quit tEntry
+}
+
+/// Build the config-validity result for the scoped-down <code>test</code>
+/// action (AC 15.2.5). Non-mutating; no live LDAP bind. Checks that the config
+/// exists (caller already confirmed via a successful Get), its required fields
+/// are populated, and host names are syntactically present.
+ClassMethod BuildLdapValidity(pName As %String, ByRef pProps As %String) As %DynamicObject [ Internal ]
+{
+    Set tIssues = []
+    Set tBaseDN = $Get(pProps("LDAPBaseDN"))
+    Set tBaseDNGroups = $Get(pProps("LDAPBaseDNForGroups"))
+    Set tSearchUser = $Get(pProps("LDAPSearchUsername"))
+    Set tHosts = $Get(pProps("LDAPHostNames"))
+
+    If tBaseDN = "" Do tIssues.%Push("LDAPBaseDN is not set")
+    If tBaseDNGroups = "" Do tIssues.%Push("LDAPBaseDNForGroups is not set")
+    If tSearchUser = "" Do tIssues.%Push("LDAPSearchUsername is not set")
+    ; Host names: required to reach the server. Each space-separated token may
+    ; carry an optional :port suffix; the port (if present) must be numeric.
+    If tHosts = "" {
+        Do tIssues.%Push("LDAPHostNames is not set")
+    } Else {
+        For tI = 1:1:$Length(tHosts, " ") {
+            Set tHost = $Piece(tHosts, " ", tI)
+            If tHost = "" Continue
+            If tHost [ ":" {
+                Set tPort = $Piece(tHost, ":", 2)
+                If (tPort = "") || ('(tPort ? 1.N)) {
+                    Do tIssues.%Push("Host '"_tHost_"' has an invalid port")
+                }
+            }
+        }
+    }
+
+    Set tValid = (tIssues.%Size() = 0)
+    Set tEntry = {}
+    Do tEntry.%Set("action", "test")
+    Do tEntry.%Set("name", pName)
+    Do tEntry.%Set("valid", tValid, "boolean")
+    Do tEntry.%Set("checkType", "config-validity")
+    Do tEntry.%Set("note", "IRIS exposes no high-level LDAP connection-test API; this is a non-mutating config-validity check, not a live bind.")
+    Do tEntry.%Set("issues", tIssues)
+    Quit tEntry
+}
+
+/// Create, modify, or delete an LDAP configuration.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code> (the LDAP config name), and an optional
+/// <code>settings</code> object (config fields for create/modify). Dispatches
+/// to <class>Security.LDAPConfigs</class> in <code>%SYS</code> via
+/// <method>Create</method>/<method>Modify</method>/<method>Delete</method>
+/// (each takes a <code>Properties</code> array, except <code>Delete</code>
+/// which takes the name).</p>
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is accepted in the
+/// settings body but NEVER echoed in responses or error messages (AC 15.2.4 /
+/// Rule #9). Errors propagate via <method>SanitizeError</method>, preserving the
+/// real IRIS error text (e.g. config-does-not-exist).</p>
+ClassMethod LdapManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security.LDAPConfigs operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "delete" {
+            Set tSC = ##class(Security.LDAPConfigs).Delete(tName)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; create / modify — build the Properties array from settings fields.
+        ; Only provided fields are set; others retain server-side defaults
+        ; (create) or existing values (modify).
+        Kill tProps
+        Set tSettings = tBody.%Get("settings")
+        If $IsObject(tSettings) {
+            If tSettings.%IsDefined("description") Set tProps("Description") = tSettings.%Get("description")
+            If tSettings.%IsDefined("ldapBaseDN") Set tProps("LDAPBaseDN") = tSettings.%Get("ldapBaseDN")
+            If tSettings.%IsDefined("ldapBaseDNForGroups") Set tProps("LDAPBaseDNForGroups") = tSettings.%Get("ldapBaseDNForGroups")
+            If tSettings.%IsDefined("ldapHostNames") Set tProps("LDAPHostNames") = tSettings.%Get("ldapHostNames")
+            If tSettings.%IsDefined("ldapSearchUsername") Set tProps("LDAPSearchUsername") = tSettings.%Get("ldapSearchUsername")
+            ; Password is write-only: accepted, applied, never echoed back.
+            If tSettings.%IsDefined("ldapSearchPassword") Set tProps("LDAPSearchPassword") = tSettings.%Get("ldapSearchPassword")
+            If tSettings.%IsDefined("ldapClientTimeout") Set tProps("LDAPClientTimeout") = +tSettings.%Get("ldapClientTimeout")
+            If tSettings.%IsDefined("ldapServerTimeout") Set tProps("LDAPServerTimeout") = +tSettings.%Get("ldapServerTimeout")
+            If tSettings.%IsDefined("ldapUniqueDNIdentifier") Set tProps("LDAPUniqueDNIdentifier") = tSettings.%Get("ldapUniqueDNIdentifier")
+            If tSettings.%IsDefined("ldapFlags") Set tProps("LDAPFlags") = +tSettings.%Get("ldapFlags")
+            If tSettings.%IsDefined("ldapCACertFile") Set tProps("LDAPCACertFile") = tSettings.%Get("ldapCACertFile")
+        }
+
+        ; A create/modify with no recognized settings field would be a no-op —
+        ; reject so callers are not told a do-nothing call succeeded. (Defense in
+        ; depth: a direct REST caller bypasses the TypeScript-layer guard.)
+        If '$Data(tProps) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "The '"_tAction_"' action requires at least one settings field")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        If tAction = "create" {
+            Set tSC = ##class(Security.LDAPConfigs).Create(tName, .tProps)
+            Set tVerb = "created"
+        }
+        Else {
+            Set tSC = ##class(Security.LDAPConfigs).Modify(tName, .tProps)
+            Set tVerb = "modified"
+        }
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; CRITICAL: Never include the search password in the response.
+        Set tResult = {}
+        Do tResult.%Set("action", tVerb)
+        Do tResult.%Set("name", tName)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }

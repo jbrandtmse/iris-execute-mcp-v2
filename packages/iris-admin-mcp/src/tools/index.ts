@@ -28,6 +28,7 @@ import {
 import { sslManageTool, sslListTool } from "./ssl.js";
 import { oauthManageTool, oauthListTool } from "./oauth.js";
 import { serviceManageTool } from "./service.js";
+import { ldapManageTool } from "./ldap.js";
 
 /** All tool definitions registered by the iris-admin-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -54,4 +55,5 @@ export const tools: ToolDefinition[] = [
   oauthManageTool,
   oauthListTool,
   serviceManageTool,
+  ldapManageTool,
 ];
