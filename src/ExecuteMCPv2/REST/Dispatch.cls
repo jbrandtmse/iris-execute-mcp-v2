@@ -59,6 +59,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
   <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
 
+  <!-- Epic 15 (Story 15.5): SQL object privileges (schema/table/column grant/revoke/list) -->
+  <Route Url="/security/sqlprivilege" Method="GET" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeList" />
+  <Route Url="/security/sqlprivilege" Method="POST" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeManage" />
+
   <!-- Epic 4: Security / Permission Check -->
   <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />
 
@@ -75,6 +79,22 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 4: Security / OAuth2 Configuration Management -->
   <Route Url="/security/oauth" Method="GET" Call="ExecuteMCPv2.REST.Security:OAuthList" />
   <Route Url="/security/oauth" Method="POST" Call="ExecuteMCPv2.REST.Security:OAuthManage" />
+
+  <!-- Epic 15: Security / Service Configuration Management -->
+  <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
+  <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
+
+  <!-- Epic 15: Security / LDAP Configuration Management -->
+  <Route Url="/security/ldap" Method="GET" Call="ExecuteMCPv2.REST.Security:LdapList" />
+  <Route Url="/security/ldap" Method="POST" Call="ExecuteMCPv2.REST.Security:LdapManage" />
+
+  <!-- Epic 15: Security / X.509 Certificate Credentials Management -->
+  <Route Url="/security/x509" Method="GET" Call="ExecuteMCPv2.REST.Security:X509List" />
+  <Route Url="/security/x509" Method="POST" Call="ExecuteMCPv2.REST.Security:X509Manage" />
+
+  <!-- Epic 15: Auditing Configuration & Audit Log Management -->
+  <Route Url="/security/audit" Method="GET" Call="ExecuteMCPv2.REST.Security:AuditStatus" />
+  <Route Url="/security/audit" Method="POST" Call="ExecuteMCPv2.REST.Security:AuditManage" />
 
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />

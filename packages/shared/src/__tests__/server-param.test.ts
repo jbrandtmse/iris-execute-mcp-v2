@@ -102,6 +102,11 @@ function makeEchoTool(name = "iris_doc_get"): ToolDefinition {
     }),
     annotations: { readOnlyHint: true },
     scope: "NS",
+    // Classify as a read (Story 15.0 AC 15.0.3): harmless on the default
+    // baseline name `iris_doc_get` (baseline membership wins), and required for
+    // the non-baseline variants (`iris_with_output`, `iris_added_later`) so the
+    // registration assertion does not fire on these synthetic fixtures.
+    mutates: "read",
     handler: async (args, ctx) => {
       const a = args as Record<string, unknown>;
       if ("server" in a) {

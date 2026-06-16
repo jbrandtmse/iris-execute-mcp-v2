@@ -2,6 +2,20 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-06-16]
+
+### Added — Epic 15: Security & Admin Tools (`@iris-mcp/admin`)
+
+Four new `@iris-mcp/admin` security/administration tools plus an SQL-privilege extension to `iris_resource_manage`. **Strictly additive** — every new mutating action is governance-classified `write` and is disabled by default under an `IRIS_GOVERNANCE` policy; reads are enabled by default. The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is unchanged — the new tools are governed via per-action `mutates` + `defaultSeed`, not baseline membership. Suite tool count: **89 → 93** (admin **22 → 26**; the `iris_resource_manage` extension adds governance keys but no new tool). One consolidated `BOOTSTRAP_VERSION` for the epic at `e5f4f6d88c56` (Security/Dispatch ObjectScript handlers).
+
+- **`iris_service_manage`** ([packages/iris-admin-mcp/src/tools/service.ts](packages/iris-admin-mcp/src/tools/service.ts), `ExecuteMCPv2.REST.Security:ServiceList`/`ServiceManage` via `/security/service`) — list, inspect, and toggle IRIS services and their authentication settings (`Security.Services` in `%SYS`). Actions: `list`/`get` (read, default-enabled), `enable`/`disable`/`set` (write, default-disabled).
+- **`iris_ldap_manage`** ([packages/iris-admin-mcp/src/tools/ldap.ts](packages/iris-admin-mcp/src/tools/ldap.ts), `/security/ldap`) — list/inspect/create/modify/delete and validity-test IRIS LDAP configurations for delegated authentication (`Security.LDAPConfigs` in `%SYS`). Actions: `list`/`get`/`test` (read), `create`/`modify`/`delete` (write, default-disabled). `LDAPSearchPassword` is redacted by omission. The `test` action is a non-mutating config-validity check (config exists, required fields present, host syntactically valid) — there is no high-level LDAP connection-test API.
+- **`iris_x509_manage`** ([packages/iris-admin-mcp/src/tools/x509.ts](packages/iris-admin-mcp/src/tools/x509.ts), `/security/x509`) — list/inspect/import/delete IRIS X.509 certificate credentials (`%SYS.X509Credentials` in `%SYS`). Actions: `list`/`get` (read), `import`/`delete` (write, default-disabled).
+- **`iris_audit_manage`** ([packages/iris-admin-mcp/src/tools/audit.ts](packages/iris-admin-mcp/src/tools/audit.ts), `/security/audit`) — manage auditing configuration and the audit log (`%SYS.Audit*` in `%SYS`). Actions: `status`/`view` (read), `enable`/`disable`/`configureEvent`/`purge`/`export` (write, default-disabled). The destructive `purge` requires explicit bounds (a wildcard-only `"*"` value does **not** satisfy the bound gate) plus `confirm: true`. Distinct from `@iris-mcp/ops`'s read-only `iris_audit_events`.
+- **`iris_resource_manage` extended with SQL object privileges** ([packages/iris-admin-mcp/src/tools/resource.ts](packages/iris-admin-mcp/src/tools/resource.ts), new `/security/sqlprivilege` endpoint) — three new actions: `grant`/`revoke` (write, default-disabled) and `listPrivileges` (read, default-enabled). Targets a schema, `schema.table`, or `schema.table(col1,col2)` for a user or role. Unlike the security-resource actions (which run in `%SYS`), SQL-privilege actions execute in the **target namespace** (the optional `namespace?` parameter), because SQL object privileges are namespace-scoped. Adds 3 governance keys, no new tool.
+
+Documentation: [`packages/iris-admin-mcp/README.md`](packages/iris-admin-mcp/README.md) (4 new tool tables + the SQL-privilege section + namespace-scoping exception), [`tool_support.md`](tool_support.md) (4 new rows + privilege note + admin → 26 / suite → 93 rollup), the root [README](README.md) and [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md) (89 → 93), and [`docs/migration-v1-v2.md`](docs/migration-v1-v2.md) (89 → 93).
+
 ## [Pre-release — 2026-06-15]
 
 ### Added — Epic 14: Multi-Server Profiles, Tool Governance, and the `resources` capability

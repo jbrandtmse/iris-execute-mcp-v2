@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   parseGovernanceConfig,
   buildMutatesLookup,
+  unwrapActionOptions,
+  assertGovernanceClassification,
   defaultSeed,
   effective,
   getEffectivePolicy,
@@ -702,5 +704,371 @@ describe("generator introspection contract (synthetic schemas, no dist import)",
     ]);
     const baseline = new Set(derived);
     expect(defaultSeed("iris_str", new Map(), baseline)).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// STORY 15.0 — Governance action-classification hardening.
+//
+// Hardens the machinery BEFORE Epic 15's first governed write tool
+// (Story 15.1 iris_service_manage:create/delete) so it cannot silently
+// downgrade per-action governance or ship an unclassified write enabled.
+// Every case here exercises a shape that does NOT exist on today's surface
+// (the back-compat gate, AC 15.0.7, is proven elsewhere by the unchanged
+// baseline hash) — these pin the FORWARD-LOOKING safety nets.
+// ════════════════════════════════════════════════════════════════════
+
+// ── Zod-wrapper introspection pin (Dev Notes; Rules #14/#16) ─────────
+//
+// Empirically confirmed against Zod 4.3.6 (and pinned here so a Zod upgrade
+// that changes wrapper internals is caught): each wrapper exposes BOTH
+// `.unwrap()` and `._def.innerType`. `unwrapActionOptions` relies on this.
+
+describe("Story 15.0 — Zod wrapper introspection (pin the accessors)", () => {
+  it("a bare ZodEnum exposes .options directly (no unwrap needed)", () => {
+    const f = z.enum(["a", "b"]);
+    expect(Array.isArray((f as unknown as { options?: unknown[] }).options)).toBe(
+      true,
+    );
+  });
+
+  it("ZodOptional / ZodDefault / ZodNullable each expose .unwrap() and ._def.innerType", () => {
+    for (const wrapped of [
+      z.enum(["a", "b"]).optional(),
+      z.enum(["a", "b"]).default("a"),
+      z.enum(["a", "b"]).nullable(),
+    ]) {
+      const w = wrapped as unknown as {
+        unwrap?: () => unknown;
+        _def?: { innerType?: unknown };
+      };
+      expect(typeof w.unwrap).toBe("function");
+      const viaUnwrap = w.unwrap?.() as { options?: unknown[] };
+      const viaDef = w._def?.innerType as { options?: unknown[] };
+      expect(viaUnwrap.options).toEqual(["a", "b"]);
+      expect(viaDef.options).toEqual(["a", "b"]);
+    }
+  });
+});
+
+// ── AC 15.0.6(a) — wrapped action enum yields per-action keys ─────────
+//
+// Drives BOTH paths: (1) the GATE path via `unwrapActionOptions` (the SAME
+// helper computeGovernanceKey / rebuildGovernedKeys use), and (2) the
+// GENERATOR-introspection path replicated verbatim from
+// gen-governance-baseline.mjs (which calls the mirrored unwrap).
+
+describe("Story 15.0 AC 15.0.6(a) — wrapped action enum → per-action keys (gate + generator)", () => {
+  /**
+   * Generator-side derivation, mirroring scripts/gen-governance-baseline.mjs
+   * AFTER the Story 15.0 unwrap fix (it now peels wrappers before reading
+   * `.options`). Replicated on synthetic schemas so this file never imports a
+   * built dist.
+   */
+  function deriveKeysUnwrapped(
+    tools: Array<{ name: string; inputSchema: { shape?: Record<string, unknown> } }>,
+  ): Set<string> {
+    const keys = new Set<string>();
+    for (const tool of tools) {
+      const actionField = (tool.inputSchema as { shape?: Record<string, unknown> })
+        ?.shape?.action;
+      const options = unwrapActionOptions(actionField);
+      if (Array.isArray(options) && options.length > 0) {
+        for (const value of options) keys.add(`${tool.name}:${String(value)}`);
+      } else {
+        keys.add(tool.name);
+      }
+    }
+    return keys;
+  }
+
+  const wrappers: Array<[string, z.ZodTypeAny]> = [
+    ["optional", z.enum(["read", "wipe"]).optional()],
+    ["default", z.enum(["read", "wipe"]).default("read")],
+    ["nullable", z.enum(["read", "wipe"]).nullable()],
+    ["describe().optional()", z.enum(["read", "wipe"]).describe("x").optional()],
+  ];
+
+  it.each(wrappers)(
+    "GATE: unwrapActionOptions(%s action enum) yields the enum options",
+    (_label, schema) => {
+      const opts = unwrapActionOptions(schema);
+      expect(opts).toEqual(["read", "wipe"]);
+    },
+  );
+
+  it.each(wrappers)(
+    "GENERATOR: a %s action enum derives per-tool:action keys (not the bare key)",
+    (_label, schema) => {
+      const keys = deriveKeysUnwrapped([
+        { name: "iris_x", inputSchema: z.object({ action: schema }) },
+      ]);
+      expect([...keys].sort()).toEqual(["iris_x:read", "iris_x:wipe"]);
+      // Critically NOT collapsed to the bare "iris_x" key (the pre-fix bug).
+      expect(keys.has("iris_x")).toBe(false);
+    },
+  );
+
+  it("gate and generator agree on the SAME key set for a wrapped enum (lock-step)", () => {
+    const schema = z.enum(["read", "wipe"]).optional();
+    const gateOpts = unwrapActionOptions(schema);
+    const gateKeys = new Set(
+      (gateOpts as string[]).map((v) => `iris_x:${v}`),
+    );
+    const genKeys = deriveKeysUnwrapped([
+      { name: "iris_x", inputSchema: z.object({ action: schema }) },
+    ]);
+    expect(genKeys).toEqual(gateKeys);
+  });
+
+  it("a non-enum action (z.string) still unwraps to undefined → bare key", () => {
+    expect(unwrapActionOptions(z.string())).toBeUndefined();
+    expect(unwrapActionOptions(z.string().optional())).toBeUndefined();
+    const keys = deriveKeysUnwrapped([
+      { name: "iris_s", inputSchema: z.object({ action: z.string().optional() }) },
+    ]);
+    expect([...keys]).toEqual(["iris_s"]);
+  });
+
+  it("an absent action field yields the bare key (no false multi-action)", () => {
+    expect(unwrapActionOptions(undefined)).toBeUndefined();
+    const keys = deriveKeysUnwrapped([
+      { name: "iris_single", inputSchema: z.object({ x: z.number() }) },
+    ]);
+    expect([...keys]).toEqual(["iris_single"]);
+  });
+});
+
+// ── AC 15.0.6(b) — registration assertion fires for an unclassified new write ─
+
+describe("Story 15.0 AC 15.0.6(b) — assertGovernanceClassification (fail-fast)", () => {
+  const baseline: ReadonlySet<string> = new Set(["iris_old", "iris_old:get"]);
+
+  it("does NOT throw when every key is a baseline member (today's surface)", () => {
+    const lookup: MutatesLookup = new Map();
+    expect(() =>
+      assertGovernanceClassification(["iris_old", "iris_old:get"], lookup, baseline),
+    ).not.toThrow();
+  });
+
+  it("does NOT throw when a new key carries a mutates classification", () => {
+    const lookup: MutatesLookup = new Map([["iris_new:create", "write"]]);
+    expect(() =>
+      assertGovernanceClassification(
+        ["iris_old", "iris_new:create"],
+        lookup,
+        baseline,
+      ),
+    ).not.toThrow();
+  });
+
+  it("THROWS for a new (non-baseline) write key missing mutates, naming the key", () => {
+    const lookup: MutatesLookup = new Map(); // forgot to classify iris_new:wipe
+    expect(() =>
+      assertGovernanceClassification(["iris_new:wipe"], lookup, baseline),
+    ).toThrow(/iris_new:wipe/);
+  });
+
+  it("THROWS for an unclassified new single-op tool key too", () => {
+    const lookup: MutatesLookup = new Map();
+    expect(() =>
+      assertGovernanceClassification(["iris_brand_new"], lookup, baseline),
+    ).toThrow(/iris_brand_new/);
+  });
+
+  it("is dormant against the REAL baseline (no current key is unclassified)", () => {
+    // The real all-baseline surface declares NO mutates yet every key is a
+    // baseline member → the assertion must be a no-op (AC 15.0.7 / D3).
+    const lookup: MutatesLookup = new Map();
+    expect(() =>
+      assertGovernanceClassification(GOVERNANCE_BASELINE, lookup),
+    ).not.toThrow();
+  });
+});
+
+// ── AC 15.0.6(c) — buildMutatesLookup value + reserved-key validation ─
+
+describe("Story 15.0 AC 15.0.6(c) — buildMutatesLookup validation", () => {
+  function stub(
+    name: string,
+    mutates?: ToolDefinition["mutates"],
+  ): ToolDefinition {
+    const def: ToolDefinition = {
+      name,
+      title: name,
+      description: name,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      inputSchema: {} as any,
+      annotations: {},
+      scope: "NS",
+      handler: async () => ({ content: [{ type: "text", text: "" }] }),
+    };
+    if (mutates !== undefined) def.mutates = mutates;
+    return def;
+  }
+
+  it("THROWS on a scalar mutates typo (e.g. 'wite' is not read/write)", () => {
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      buildMutatesLookup([stub("iris_typo", "wite" as any)]),
+    ).toThrow(/read.*write|read" or "write/i);
+  });
+
+  it("THROWS on a per-action mutates typo, naming the tool:action key", () => {
+    expect(() =>
+      buildMutatesLookup([
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        stub("iris_map", { create: "writ" as any }),
+      ]),
+    ).toThrow(/iris_map:create/);
+  });
+
+  it("THROWS on a reserved record action key (constructor / prototype)", () => {
+    // `__proto__` as a literal key would be swallowed by Object.entries (it
+    // sets the prototype), so we test the two reserved keys that survive as own
+    // properties and must be rejected.
+    for (const reserved of ["constructor", "prototype"]) {
+      expect(() =>
+        buildMutatesLookup([stub("iris_r", { [reserved]: "write" })]),
+      ).toThrow(/reserved/i);
+    }
+  });
+
+  it("still accepts valid read/write scalars and per-action maps", () => {
+    const lookup = buildMutatesLookup([
+      stub("iris_w", "write"),
+      stub("iris_m", { get: "read", drop: "write" }),
+    ]);
+    expect(lookup.get("iris_w")).toBe("write");
+    expect(lookup.get("iris_m:get")).toBe("read");
+    expect(lookup.get("iris_m:drop")).toBe("write");
+  });
+});
+
+// ── AC 15.0.6(d) — generator fail-fast guards (replicated logic) ──────
+//
+// The generator (scripts/gen-governance-baseline.mjs) throws on malformed
+// shapes. It imports built dists, so we cannot drive it with synthetic tools
+// here; instead we replicate its guard logic VERBATIM and assert it throws on
+// the same shapes the generator guards. (The generator's lock-step unwrap is
+// the same `unwrapActionOptions` already pinned above.)
+
+describe("Story 15.0 AC 15.0.6(d) — generator guards throw on malformed shapes", () => {
+  /** Verbatim replica of the generator's per-tool guard + dedup logic. */
+  function enumerate(
+    pkg: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools: any[],
+    seen: Map<string, string> = new Map(),
+  ): Set<string> {
+    const keys = new Set<string>();
+    function addKey(key: string, toolName: string) {
+      const origin = `${pkg}/${toolName}`;
+      if (seen.has(key)) {
+        throw new Error(`duplicate governance key "${key}" — ${seen.get(key)} / ${origin}`);
+      }
+      seen.set(key, origin);
+      keys.add(key);
+    }
+    for (const tool of tools) {
+      if (typeof tool?.name !== "string" || tool.name === "") {
+        throw new Error(`missing/empty name in ${pkg}`);
+      }
+      if (tool.inputSchema == null) {
+        throw new Error(`${pkg}/${tool.name} missing inputSchema`);
+      }
+      const actionField = tool.inputSchema?.shape?.action;
+      if (actionField != null) {
+        const options = unwrapActionOptions(actionField);
+        if (options !== undefined) {
+          if (!Array.isArray(options) || options.length === 0) {
+            throw new Error(`${pkg}/${tool.name} empty action enum`);
+          }
+          for (const value of options) {
+            if (typeof value !== "string") {
+              throw new Error(`${pkg}/${tool.name} non-string action option`);
+            }
+          }
+          for (const value of options) {
+            addKey(`${tool.name}:${value}`, tool.name);
+          }
+          continue;
+        }
+      }
+      addKey(tool.name, tool.name);
+    }
+    return keys;
+  }
+
+  it("THROWS on a tool missing `name`", () => {
+    expect(() =>
+      enumerate("pkg", [{ inputSchema: z.object({}) }]),
+    ).toThrow(/missing\/empty name/);
+  });
+
+  it("THROWS on a tool missing `inputSchema`", () => {
+    expect(() => enumerate("pkg", [{ name: "iris_x" }])).toThrow(/missing inputSchema/);
+  });
+
+  it("THROWS on an EMPTY action enum (z.enum([]))", () => {
+    expect(() =>
+      enumerate("pkg", [
+        { name: "iris_x", inputSchema: z.object({ action: z.enum([]) }) },
+      ]),
+    ).toThrow(/empty action enum/);
+  });
+
+  it("THROWS on a non-string action option", () => {
+    // Build a fake action field that unwraps to numeric options (Zod enums are
+    // string-only, so synthesize the introspected shape directly).
+    const fakeNumericEnum = { options: [1, 2] };
+    expect(() =>
+      enumerate("pkg", [
+        { name: "iris_x", inputSchema: { shape: { action: fakeNumericEnum } } },
+      ]),
+    ).toThrow(/non-string action option/);
+  });
+
+  it("THROWS on a duplicate tool name across packages (cross-package collision)", () => {
+    const seen = new Map<string, string>();
+    enumerate(
+      "pkg-a",
+      [{ name: "iris_dup", inputSchema: z.object({ x: z.number() }) }],
+      seen,
+    );
+    expect(() =>
+      enumerate(
+        "pkg-b",
+        [{ name: "iris_dup", inputSchema: z.object({ y: z.number() }) }],
+        seen,
+      ),
+    ).toThrow(/duplicate governance key "iris_dup"/);
+  });
+
+  it("THROWS on a duplicate tool:action key across packages", () => {
+    const seen = new Map<string, string>();
+    enumerate(
+      "pkg-a",
+      [{ name: "iris_m", inputSchema: z.object({ action: z.enum(["go"]) }) }],
+      seen,
+    );
+    expect(() =>
+      enumerate(
+        "pkg-b",
+        [{ name: "iris_m", inputSchema: z.object({ action: z.enum(["go"]) }) }],
+        seen,
+      ),
+    ).toThrow(/duplicate governance key "iris_m:go"/);
+  });
+
+  it("does NOT throw on a well-formed bare-enum tool (positive control)", () => {
+    expect(() =>
+      enumerate("pkg", [
+        {
+          name: "iris_ok",
+          inputSchema: z.object({ action: z.enum(["a", "b"]) }),
+        },
+      ]),
+    ).not.toThrow();
   });
 });

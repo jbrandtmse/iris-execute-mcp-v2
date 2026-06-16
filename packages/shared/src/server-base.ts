@@ -42,6 +42,8 @@ import type { GovernanceConfig, MutatesLookup } from "./governance.js";
 import {
   parseGovernanceConfig,
   buildMutatesLookup,
+  unwrapActionOptions,
+  assertGovernanceClassification,
   effective,
   getEffectivePolicy,
 } from "./governance.js";
@@ -375,6 +377,10 @@ export class McpServerBase {
     // Compute the governance key universe the advisory resource reports on (D6),
     // also from the live registry so addTools/removeTools keep it in sync.
     this.rebuildGovernedKeys();
+    // Fail fast if a NEW (non-baseline) governed key lacks a `mutates` class
+    // (AC 15.0.3). Dormant on today's all-baseline surface; the safety net for
+    // Epic 15+ write tools. Runs after BOTH rebuilds so it reads current state.
+    this.assertGovernanceClassified();
 
     // Register the advisory governance resource (D6): a static default-policy
     // resource + a per-profile template. Registered at construction (like tools)
@@ -408,10 +414,13 @@ export class McpServerBase {
   private rebuildGovernedKeys(): void {
     const keys = new Set<string>(GOVERNANCE_BASELINE);
     for (const tool of this.tools.values()) {
+      // Use the SHARED unwrap helper (Story 15.0 AC 15.0.1) so this key universe
+      // lines up exactly with computeGovernanceKey and the baseline generator —
+      // including a future wrapped (`.optional()`/`.default()`/`.nullable()`)
+      // action enum, which is peeled to its inner ZodEnum here too.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const actionField = (tool.inputSchema as any)?.shape?.action;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const options = (actionField as any)?.options;
+      const options = unwrapActionOptions(actionField);
       if (Array.isArray(options) && options.length > 0) {
         for (const value of options) {
           keys.add(`${tool.name}:${String(value)}`);
@@ -421,6 +430,22 @@ export class McpServerBase {
       }
     }
     this.governedKeys = keys;
+  }
+
+  /**
+   * Fail fast (Story 15.0 AC 15.0.3) if any governed key in this server's key
+   * universe is NEW (absent from {@link GOVERNANCE_BASELINE}) yet carries no
+   * `mutates` classification — which would otherwise let the default seed treat
+   * it as a read and ship a write enabled-by-default. Catches "added a new write
+   * tool but forgot `mutates`" at registration rather than silently mis-seeding.
+   *
+   * Dormant on today's surface: every current key is a baseline member, so this
+   * only activates once Epic 15+ genuinely-new tools land. Called after every
+   * {@link rebuildMutatesLookup} + {@link rebuildGovernedKeys} pair (construction
+   * and dynamic add/remove) so the lookup and key universe it reads are current.
+   */
+  private assertGovernanceClassified(): void {
+    assertGovernanceClassification(this.governedKeys, this.mutatesLookup);
   }
 
   // ── Advisory governance resource (D6) ──────────────────────────────
@@ -614,18 +639,32 @@ export class McpServerBase {
     tool: ToolDefinition,
     validatedArgs: Record<string, unknown>,
   ): string {
-    // Read the schema's `action` field exactly as the generator does. A ZodEnum
-    // exposes its values on `.options` (Zod v4); a ZodString / absent field does
-    // not, so the bare-tool branch is taken. Typed loosely because the SDK schema
-    // shape is `ZodObject<any>`.
+    // Read the schema's `action` field exactly as the generator does, via the
+    // SHARED `unwrapActionOptions` helper (Story 15.0 AC 15.0.1) so the gate and
+    // `scripts/gen-governance-baseline.mjs` stay in lock-step: a bare ZodEnum
+    // exposes `.options` directly, and a wrapped enum (`.optional()`/`.default()`
+    // /`.nullable()`) is peeled to its inner ZodEnum first. A ZodString / absent
+    // field has no options, so the bare-tool branch is taken. Typed loosely
+    // because the SDK schema shape is `ZodObject<any>`.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const actionField = (tool.inputSchema as any)?.shape?.action;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const options = (actionField as any)?.options;
-    if (Array.isArray(options) && options.length > 0) {
-      // Multi-action tool: the governance key includes the chosen action value.
-      // `action` is guaranteed present + a valid enum value here because Zod
-      // validation (which runs BEFORE this) enforces the enum.
+    const options = unwrapActionOptions(actionField);
+    if (
+      Array.isArray(options) &&
+      options.length > 0 &&
+      // AC 15.0.2 (generalized): only compose `tool:action` when the validated
+      // `action` is an ACTUAL member of the (unwrapped) enum options — i.e. a key
+      // the baseline generator could itself produce. A bare `action !== undefined`
+      // guard caught the omitted/`undefined` case but NOT a `.nullable()` enum's
+      // `null` (which built the never-matching `tool:null`) nor any other
+      // non-member value; both would resolve through the seed instead of the
+      // per-action policy — a per-action write deny silently bypassed (fail-open).
+      // Membership keeps the gate key in lock-step with the generated baseline and
+      // falls back to the bare-tool key for an absent/null/non-member action.
+      options.includes(validatedArgs.action)
+    ) {
+      // Multi-action tool with a concrete, in-enum action value: the governance
+      // key includes the chosen action.
       return `${tool.name}:${String(validatedArgs.action)}`;
     }
     return tool.name;
@@ -866,6 +905,9 @@ export class McpServerBase {
     // Keep the advisory resource's key universe in sync too (D6), so a newly
     // added tool's keys appear in the effective-policy map.
     this.rebuildGovernedKeys();
+    // Fail fast if a dynamically-added NEW governed key lacks a `mutates` class
+    // (AC 15.0.3) — same safety net as construction.
+    this.assertGovernanceClassified();
     this.mcpServer.sendToolListChanged();
     logger.info(`Added ${tools.length} tool(s) and notified clients`);
   }
@@ -899,6 +941,10 @@ export class McpServerBase {
       // keys remain (the resource always reports the full grandfathered set);
       // only this server's own non-baseline keys drop out.
       this.rebuildGovernedKeys();
+      // Re-assert classification after removal (AC 15.0.3): removing a tool
+      // cannot introduce an unclassified key, but keeping the call alongside the
+      // rebuild pair makes the invariant uniform across every mutation path.
+      this.assertGovernanceClassified();
       this.mcpServer.sendToolListChanged();
     }
     logger.info(`Removed ${removedCount} tool(s) and notified clients`);
