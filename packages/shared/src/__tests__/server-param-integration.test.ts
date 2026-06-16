@@ -104,6 +104,11 @@ function makeEchoTool(name = "iris_doc_get", scope: ToolScope = "NS"): ToolDefin
     }),
     annotations: { readOnlyHint: true },
     scope,
+    // Classify as a read (Story 15.0 AC 15.0.3): harmless on the default
+    // baseline name `iris_doc_get`, and required for the non-baseline scope
+    // variants (`iris_ns_tool`, `iris_sys_tool`, `iris_none_tool`,
+    // `iris_both_tool`) so the registration assertion stays quiet.
+    mutates: "read",
     handler: async (args, ctx) => {
       const a = args as Record<string, unknown>;
       if ("server" in a) {
@@ -578,6 +583,8 @@ describe("Story 14.2 (complementary) — additive `server` on a tool with requir
       }),
       annotations: { readOnlyHint: true },
       scope: "NS",
+      // Non-baseline synthetic fixture → classify (Story 15.0 AC 15.0.3).
+      mutates: "read",
       handler: async (args, ctx) => {
         const a = args as Record<string, unknown>;
         if ("server" in a) {
@@ -679,6 +686,8 @@ describe("Story 14.2 (complementary) — unknown-profile structured error never 
       inputSchema: z.object({ namespace: z.string().optional() }),
       annotations: { readOnlyHint: true },
       scope: "NS",
+      // Non-baseline synthetic fixture → classify (Story 15.0 AC 15.0.3).
+      mutates: "read",
       handler: handlerSpy,
     };
 

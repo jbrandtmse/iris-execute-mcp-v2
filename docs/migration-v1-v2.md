@@ -25,7 +25,7 @@ Both v1 projects (`iris-execute-mcp` by jbrandtmse and `mcp-server-iris` by Care
 | **Connection** | SuperServer port `1972` (native IRIS binary protocol) | Web port `52773` (HTTP/HTTPS via Atelier REST API) |
 | **Runtime** | Python (FastMCP / uvx) | Node.js / TypeScript (npx) |
 | **Installation** | `pip install` / venv / `uvx` | `npx -y @iris-mcp/<package>` (no install step) |
-| **Tool naming** | `execute_command`, `get_global`, etc. | Dot-namespaced: `iris.execute.command`, `iris.global.get`, etc. |
+| **Tool naming** | `execute_command`, `get_global`, etc. | Underscore-namespaced: `iris_execute_command`, `iris_global_get`, etc. |
 | **Architecture** | Single server, 8 tools | 5 servers, 89 tools total |
 | **IRIS classes** | `ExecuteMCP.*` (manual import required) | `ExecuteMCPv2.*` (auto-bootstrapped on first connection) |
 | **Env var: host** | `IRIS_HOSTNAME` | `IRIS_HOST` |
@@ -60,27 +60,27 @@ Every v1 tool has a direct equivalent in the `@iris-mcp/dev` package:
 
 | v1 Tool | v2 Tool | v2 Package | Notes |
 |---------|---------|------------|-------|
-| `execute_command` | `iris.execute.command` | `@iris-mcp/dev` | Same functionality |
-| `execute_classmethod` | `iris.execute.classmethod` | `@iris-mcp/dev` | Same functionality |
-| `get_global` | `iris.global.get` | `@iris-mcp/dev` | Same functionality |
-| `set_global` | `iris.global.set` | `@iris-mcp/dev` | Same functionality |
-| `get_system_info` | `iris.server.info` | `@iris-mcp/dev` | Renamed |
-| `compile_objectscript_class` | `iris.doc.compile` | `@iris-mcp/dev` | Pass class name(s) |
-| `compile_objectscript_package` | `iris.doc.compile` | `@iris-mcp/dev` | Same tool -- pass package name |
-| `execute_unit_tests` | `iris.execute.tests` | `@iris-mcp/dev` | Same functionality |
+| `execute_command` | `iris_execute_command` | `@iris-mcp/dev` | Same functionality |
+| `execute_classmethod` | `iris_execute_classmethod` | `@iris-mcp/dev` | Same functionality |
+| `get_global` | `iris_global_get` | `@iris-mcp/dev` | Same functionality |
+| `set_global` | `iris_global_set` | `@iris-mcp/dev` | Same functionality |
+| `get_system_info` | `iris_server_info` | `@iris-mcp/dev` | Renamed |
+| `compile_objectscript_class` | `iris_doc_compile` | `@iris-mcp/dev` | Pass class name(s) |
+| `compile_objectscript_package` | `iris_doc_compile` | `@iris-mcp/dev` | Same tool -- pass package name |
+| `execute_unit_tests` | `iris_execute_tests` | `@iris-mcp/dev` | Same functionality |
 
 ### Additional v2 tools in @iris-mcp/dev (no v1 equivalent)
 
 v2 adds many tools that had no v1 counterpart:
 
-- `iris.doc.get`, `iris.doc.put`, `iris.doc.delete`, `iris.doc.list` -- document CRUD via Atelier API
-- `iris.doc.load` -- bulk load `.cls` / `.mac` files from disk
-- `iris.doc.index`, `iris.doc.search` -- code intelligence and search
-- `iris.doc.convert`, `iris.doc.xml_export` -- format conversion
-- `iris.sql.execute` -- direct SQL execution
-- `iris.server.namespace` -- namespace listing
-- `iris.global.kill`, `iris.global.list` -- additional global operations
-- `iris.macro.info` -- macro lookup
+- `iris_doc_get`, `iris_doc_put`, `iris_doc_delete`, `iris_doc_list` -- document CRUD via Atelier API
+- `iris_doc_load` -- bulk load `.cls` / `.mac` files from disk
+- `iris_doc_index`, `iris_doc_search` -- code intelligence and search
+- `iris_doc_convert`, `iris_doc_xml_export` -- format conversion
+- `iris_sql_execute` -- direct SQL execution
+- `iris_server_namespace` -- namespace listing
+- `iris_global_kill`, `iris_global_list` -- additional global operations
+- `iris_macro_info` -- macro lookup
 
 ---
 
@@ -307,11 +307,11 @@ No. v2 auto-bootstraps its `ExecuteMCPv2.*` helper classes on first connection. 
 
 ### My v1 scripts reference tool names like `execute_command`. Will they break?
 
-Yes, v2 uses dot-namespaced tool names (e.g., `iris.execute.command`). You will need to update any automation or prompts that reference v1 tool names. See the [Tool Mapping](#tool-mapping-iris-execute-mcp-v1-to-v2) section above for the complete mapping.
+Yes, v2 uses underscore-namespaced tool names (e.g., `iris_execute_command`). You will need to update any automation or prompts that reference v1 tool names. See the [Tool Mapping](#tool-mapping-iris-execute-mcp-v1-to-v2) section above for the complete mapping.
 
 ### What about the DirectTestRunner performance improvements from v1?
 
-v2's `iris.execute.tests` tool provides the same fast test execution. The `ExecuteMCPv2.TestRunner` class is auto-bootstrapped and provides equivalent performance to v1's DirectTestRunner.
+v2's `iris_execute_tests` tool provides the same fast test execution. The `ExecuteMCPv2.TestRunner` class is auto-bootstrapped and provides equivalent performance to v1's DirectTestRunner.
 
 ### I only need development tools. Do I need all five v2 servers?
 

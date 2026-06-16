@@ -80,11 +80,19 @@ export interface ToolDefinition {
    *   multi-action tool whose `inputSchema` has an `action` enum. Each key is
    *   an enum value; the governance key is `name:action`.
    *
-   * **Optional and grandfathered:** only NEW actions (Epics 14–17) declare
-   * `mutates`. Every tool that predates governance omits it and is treated as
-   * pre-existing (enabled) via membership in the generated governance baseline
-   * (`governance-baseline.ts`), NOT via this field. Do not retro-classify
-   * existing tools.
+   * **Required for every NEW (non-baseline) tool; grandfathered tools omit it
+   * (Story 15.0 AC 15.0.3).** Every tool/action key that is NOT a member of the
+   * generated governance baseline (`governance-baseline.ts`) MUST declare
+   * `mutates` — `'read'` or `'write'` (or a per-action map). A registration-time
+   * assertion (`assertGovernanceClassification`, invoked from
+   * {@link ./server-base.js | McpServerBase}) throws, naming the offending key,
+   * if a non-baseline key reaches registration without a classification —
+   * catching a forgotten classification for reads AND writes before it can
+   * mis-seed the policy.
+   *
+   * Every tool that PREDATES governance is exempt: it omits `mutates` and is
+   * treated as pre-existing (enabled) via baseline membership, NOT via this
+   * field. Do NOT retro-classify existing (baseline) tools.
    */
   mutates?: "read" | "write" | Record<string, "read" | "write">;
   /** Async handler invoked when the tool is called. */

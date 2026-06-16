@@ -73,6 +73,61 @@ function governanceError(detail: string): Error {
 }
 
 /**
+ * Read the `action` enum's `.options` array from a tool input-schema field,
+ * peeling any `ZodOptional` / `ZodDefault` / `ZodNullable` wrappers first
+ * (architecture decision D4; Story 15.0 AC 15.0.1).
+ *
+ * A bare `z.enum([...])` (and `.describe(...)`) exposes its values directly on
+ * `.options` (Zod v4). But a wrapped enum — `z.enum([...]).optional()` →
+ * `ZodOptional`, `.default(x)` → `ZodDefault`, `.nullable()` → `ZodNullable` —
+ * exposes `.options === undefined`. Without unwrapping, a future tool that
+ * declares `action: z.enum([...]).optional()` would collapse to the bare-tool
+ * governance key instead of per-`tool:action` keys, silently downgrading
+ * per-action governance to whole-tool governance (a fail-open for any per-action
+ * deny an operator writes).
+ *
+ * **CRITICAL — lock-step (AC 15.0.1).** This logic is the SINGLE SOURCE OF TRUTH
+ * for the GATE side (`computeGovernanceKey`, `rebuildGovernedKeys` in
+ * `server-base.ts`). The build-time baseline generator
+ * (`scripts/gen-governance-baseline.mjs`) is a separate `.mjs` that cannot import
+ * this TS module (it imports built dists), so it REPLICATES this exact algorithm
+ * with a "MUST mirror" comment. If you change the peel logic here, change it
+ * there too, or the gate and the generated baseline will disagree and the
+ * cascade will miss.
+ *
+ * Verified empirically against Zod 4.3.6: each wrapper exposes BOTH `.unwrap()`
+ * and `._def.innerType` → the inner type; wrappers can nest
+ * (`.describe(...).optional()`), so we peel iteratively (bounded) until an
+ * `.options` array surfaces or no further inner type exists.
+ *
+ * @param actionField - The `inputSchema.shape.action` field (or `undefined`).
+ * @returns The enum option array if the (unwrapped) field is a ZodEnum, else `undefined`.
+ */
+export function unwrapActionOptions(actionField: unknown): unknown[] | undefined {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let field: any = actionField;
+  // Bounded peel: a realistic chain is at most a couple of wrappers; the cap
+  // guards against a pathological/cyclic structure rather than expected input.
+  for (let depth = 0; depth < 10 && field != null; depth++) {
+    if (Array.isArray(field.options)) {
+      return field.options as unknown[];
+    }
+    // Peel one wrapper layer. Both accessors resolve to the inner type on
+    // ZodOptional/ZodDefault/ZodNullable; prefer `.unwrap()` and fall back to
+    // `._def.innerType` so either Zod-internal shape is handled.
+    const inner =
+      typeof field.unwrap === "function"
+        ? field.unwrap()
+        : field._def?.innerType;
+    if (inner == null || inner === field) {
+      return undefined;
+    }
+    field = inner;
+  }
+  return undefined;
+}
+
+/**
  * Reserved object keys that, used as a governance key or profile name, would
  * collide with the prototype chain. `JSON.parse` materializes them as own
  * properties, but a *plain-object* read (`obj[key]`) of `"constructor"` /
@@ -230,14 +285,95 @@ export function buildMutatesLookup(
     const m = tool.mutates;
     if (m === undefined) continue;
     if (typeof m === "string") {
-      lookup.set(tool.name, m);
+      // Validate the scalar class value (AC 15.0.4): `mutates` is erased at
+      // runtime, so a typo like `"wite"` would otherwise be accepted and
+      // silently classified as a read (enabled) by `defaultSeed`. Fail fast.
+      assertMutationClass(m, tool.name);
+      lookup.set(tool.name, m as MutationClass);
     } else {
       for (const [action, cls] of Object.entries(m)) {
-        lookup.set(`${tool.name}:${action}`, cls);
+        // Screen record-form action keys against the reserved set (AC 15.0.4),
+        // mirroring the RESERVED_KEYS guard in `validateLayer` (CR-14.3-1). A
+        // `__proto__` action key in a `mutates` map literal would already be
+        // lost by `Object.entries` (it sets the prototype, not an own prop), so
+        // a reserved key reaching here is a developer error worth surfacing.
+        if (RESERVED_KEYS.has(action)) {
+          throw new Error(
+            `Tool "${tool.name}" declares a reserved \`mutates\` action key "${action}". ` +
+              `Reserved keys (${[...RESERVED_KEYS].join(", ")}) cannot be used as action names.`,
+          );
+        }
+        // Validate the per-action class value (AC 15.0.4).
+        assertMutationClass(cls, `${tool.name}:${action}`);
+        lookup.set(`${tool.name}:${action}`, cls as MutationClass);
       }
     }
   }
   return lookup;
+}
+
+/**
+ * Throw a clear error if `value` is not exactly `"read"` or `"write"` (Story
+ * 15.0 AC 15.0.4). Because the {@link ToolDefinition.mutates} type is erased at
+ * runtime, an authoring typo would otherwise flow through unvalidated and be
+ * treated as a read by {@link defaultSeed} — shipping a write enabled-by-default.
+ *
+ * @param value - The candidate mutation class (unknown at runtime).
+ * @param keyLabel - The offending governance key, named in the error message.
+ */
+function assertMutationClass(
+  value: unknown,
+  keyLabel: string,
+): asserts value is MutationClass {
+  if (value !== "read" && value !== "write") {
+    throw new Error(
+      `Tool governance: \`mutates\` class for "${keyLabel}" must be exactly "read" or "write". ` +
+        `Received: ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
+/**
+ * Assert that every governed (non-baseline) tool/action key carries a `mutates`
+ * classification — the registration-time fail-fast safety net (Story 15.0 AC
+ * 15.0.3). Catches "added a new write tool but forgot `mutates`", which would
+ * otherwise let {@link defaultSeed} treat the unclassified key as a read and
+ * ship the write ENABLED-by-default.
+ *
+ * A key is exempt when it is in the {@link GOVERNANCE_BASELINE} (pre-existing,
+ * grandfathered) — those legitimately carry no `mutates`. Only a key that is
+ * BOTH absent from the baseline AND absent from `mutatesLookup` is an error.
+ *
+ * **Dormant on today's surface (AC 15.0.7):** every current governance key is a
+ * baseline member, so this never fires until Epic 15+ adds genuinely-new tools —
+ * exactly when the safety net is wanted.
+ *
+ * @param allKeys - Every governance key the server knows (baseline ∪ registered keys).
+ * @param mutatesLookup - Key → mutation class for new actions.
+ * @param baseline - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @throws {Error} naming the first unclassified non-baseline key.
+ */
+export function assertGovernanceClassification(
+  allKeys: Iterable<string>,
+  mutatesLookup: MutatesLookup,
+  baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
+): void {
+  const unclassified: string[] = [];
+  for (const key of allKeys) {
+    if (baseline.has(key)) continue;
+    if (mutatesLookup.has(key)) continue;
+    unclassified.push(key);
+  }
+  if (unclassified.length > 0) {
+    unclassified.sort();
+    throw new Error(
+      `Tool governance: ${unclassified.length} new (non-baseline) governance key(s) lack a ` +
+        `\`mutates\` classification and would ship enabled-by-default: ` +
+        `${unclassified.map((k) => `"${k}"`).join(", ")}. ` +
+        `Declare \`mutates: "read" | "write"\` on the tool (or per-action), or regenerate the ` +
+        `governance baseline if the key is genuinely pre-existing.`,
+    );
+  }
 }
 
 /**
@@ -246,8 +382,16 @@ export function buildMutatesLookup(
  *
  * - In the generated baseline ⇒ pre-existing ⇒ `true` (grandfathered enabled).
  * - Not in the baseline ⇒ new ⇒ `false` iff its {@link MutatesLookup} class is
- *   `'write'`, otherwise `true` (a new `read`, or an unknown/unclassified key,
- *   defaults to enabled).
+ *   `'write'`, otherwise `true` (a new `read` defaults to enabled).
+ *
+ * **Unclassified-key handling is defense-in-depth (Story 15.0 AC 15.0.3).** A
+ * non-baseline key with NO `mutates` class still falls to the read-default
+ * (`true`) here, but as of Story 15.0 that state is UNREACHABLE in a running
+ * server: {@link assertGovernanceClassification} (invoked at registration) throws
+ * on any non-baseline key lacking a classification, so a new tool — read OR
+ * write — cannot ship unclassified. The fail-open-to-read branch below remains
+ * only as a belt-and-braces default for direct/synthetic callers of this pure
+ * function (e.g. unit tests).
  *
  * @param key           - The governance key (`tool` or `tool:action`).
  * @param mutatesLookup - Key → mutation class for new actions.

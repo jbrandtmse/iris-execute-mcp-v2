@@ -63,6 +63,8 @@ export {
 export {
   parseGovernanceConfig,
   buildMutatesLookup,
+  unwrapActionOptions,
+  assertGovernanceClassification,
   defaultSeed,
   effective,
   getEffectivePolicy,

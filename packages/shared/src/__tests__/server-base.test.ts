@@ -60,6 +60,9 @@ function makeSysInfoTool(): ToolDefinition {
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true },
     scope: "SYS",
+    // Non-baseline synthetic fixture: declare a `mutates` class so it satisfies
+    // the Story 15.0 registration assertion (every non-baseline key must classify).
+    mutates: "read",
     handler: async (_args, ctx) => ({
       content: [
         { type: "text" as const, text: `ns=${ctx.resolveNamespace()}` },
@@ -127,6 +130,67 @@ describe("server-base", () => {
     it("should return undefined for unknown tool names", () => {
       const server = new McpServerBase(makeServerOpts());
       expect(server.getTool("nonexistent")).toBeUndefined();
+    });
+  });
+
+  // ── Story 15.0 AC 15.0.3 / 15.0.6(b) — registration classification gate ──
+  //
+  // Every NON-baseline tool/action key MUST declare `mutates`. The
+  // registration-time assertion throws (naming the key) for an unclassified new
+  // tool — read OR write — and is exempt for baseline/grandfathered tools.
+  describe("registration classification assertion (Story 15.0 AC 15.0.3)", () => {
+    /** A NEW (non-baseline) tool with NO `mutates` declared. */
+    function makeUnclassifiedTool(name: string): ToolDefinition {
+      return {
+        name,
+        title: name,
+        description: "A new tool that forgot to classify mutates.",
+        inputSchema: z.object({}),
+        annotations: {},
+        scope: "NONE",
+        handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      };
+    }
+
+    it("THROWS at construction for a new non-baseline tool missing `mutates`", () => {
+      expect(
+        () =>
+          new McpServerBase(
+            makeServerOpts([makeUnclassifiedTool("iris_unclassified_new")]),
+          ),
+      ).toThrow(/iris_unclassified_new/);
+    });
+
+    it("THROWS at construction whether the forgotten tool is read- or write-like", () => {
+      // The gate is classification-presence, not class-value: a destructive
+      // annotation does NOT exempt it — `mutates` must be declared explicitly.
+      const writeLike: ToolDefinition = {
+        ...makeUnclassifiedTool("iris_destructive_new"),
+        annotations: { destructiveHint: true, readOnlyHint: false },
+      };
+      expect(() => new McpServerBase(makeServerOpts([writeLike]))).toThrow(
+        /iris_destructive_new/,
+      );
+    });
+
+    it("does NOT throw when the new tool declares `mutates`", () => {
+      const classified: ToolDefinition = {
+        ...makeUnclassifiedTool("iris_classified_new"),
+        mutates: "read",
+      };
+      expect(() => new McpServerBase(makeServerOpts([classified]))).not.toThrow();
+    });
+
+    it("does NOT throw for a baseline tool that omits `mutates` (grandfathered)", () => {
+      // `iris_doc_get` is a real baseline key → exempt from classification.
+      expect(() => new McpServerBase(makeServerOpts([makeGetDocTool()]))).not.toThrow();
+    });
+
+    it("THROWS via addTools() for a dynamically-added unclassified tool", () => {
+      const server = new McpServerBase(makeServerOpts([]));
+      expect(() =>
+        server.addTools([makeUnclassifiedTool("iris_added_unclassified")]),
+      ).toThrow(/iris_added_unclassified/);
     });
   });
 
@@ -538,6 +602,8 @@ describe("server-base", () => {
         outputSchema,
         annotations: { readOnlyHint: true },
         scope: "NONE",
+        // Non-baseline synthetic fixture → must classify (Story 15.0 AC 15.0.3).
+        mutates: "read",
         handler: async () => ({
           content: [{ type: "text" as const, text: "ok" }],
           structuredContent: { result: "hello", count: 1 },
@@ -586,6 +652,8 @@ describe("server-base", () => {
         inputSchema: z.object({}),
         annotations: {},
         scope: "NONE",
+        // Non-baseline synthetic fixture → must classify (Story 15.0 AC 15.0.3).
+        mutates: "read",
         handler: async () => ({
           content: [{ type: "text" as const, text: "ok" }],
         }),

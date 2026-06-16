@@ -23,6 +23,33 @@ const SERVER_PACKAGES = [
   'iris-data-mcp',
 ];
 
+// Read the `action` enum's `.options`, peeling any ZodOptional / ZodDefault /
+// ZodNullable wrapper first (Story 15.0 AC 15.0.1).
+//
+// CRITICAL — lock-step: this MUST MIRROR `unwrapActionOptions` in
+// packages/shared/src/governance.ts (the gate side). A bare `z.enum([...])` (and
+// `.describe(...)`) exposes `.options` directly; a wrapped enum
+// (`.optional()`/`.default()`/`.nullable()`) exposes `.options === undefined`,
+// so without unwrapping a future wrapped action enum would collapse to the bare
+// tool key in the baseline while the gate (which DOES unwrap) emits per-action
+// keys — making the two disagree and the cascade miss. If you change the peel
+// logic here, change `unwrapActionOptions` too.
+function unwrapActionOptions(actionField) {
+  let field = actionField;
+  for (let depth = 0; depth < 10 && field != null; depth++) {
+    if (Array.isArray(field.options)) {
+      return field.options;
+    }
+    const inner =
+      typeof field.unwrap === 'function' ? field.unwrap() : field._def?.innerType;
+    if (inner == null || inner === field) {
+      return undefined;
+    }
+    field = inner;
+  }
+  return undefined;
+}
+
 // Step 1: Import the built `tools` array from each server package's dist and
 // enumerate governance keys.
 //
@@ -31,10 +58,29 @@ const SERVER_PACKAGES = [
 //     `tool:<value>` for every enum option.
 //   - Single-operation tool (no `action` enum): emit the bare `tool` name.
 //
-// Zod v4: a ZodEnum exposes its values on `.options` (an array of strings).
+// Fail-fast guards (Story 15.0 AC 15.0.5): rather than silently downgrading a
+// malformed tool shape to a bare/"undefined" key, the generator THROWS, naming
+// the offending package + tool. A `seen` set across ALL packages turns an
+// accidental cross-package duplicate tool name / `tool:action` key (previously a
+// silent Set merge) into a hard build error.
 const keys = new Set();
+const seen = new Map(); // governance key → "pkg/tool" that first produced it
 let toolCount = 0;
 const perPackage = [];
+
+/** Add a key, throwing on a cross-package duplicate (AC 15.0.5). */
+function addKey(key, pkg, toolName) {
+  const origin = `${pkg}/${toolName}`;
+  if (seen.has(key)) {
+    throw new Error(
+      `gen-governance-baseline: duplicate governance key "${key}" — produced by ` +
+        `${seen.get(key)} and again by ${origin}. Tool names (and tool:action keys) ` +
+        `must be unique across all server packages.`,
+    );
+  }
+  seen.set(key, origin);
+  keys.add(key);
+}
 
 for (const pkg of SERVER_PACKAGES) {
   const distEntry = resolve(root, `packages/${pkg}/dist/tools/index.js`);
@@ -59,19 +105,51 @@ for (const pkg of SERVER_PACKAGES) {
   let pkgKeyCount = 0;
   for (const tool of tools) {
     toolCount++;
-    const action = tool.inputSchema?.shape?.action;
-    const options = action?.options;
-    if (Array.isArray(options) && options.length > 0) {
-      // Multi-action tool — one key per enum value.
-      for (const value of options) {
-        keys.add(`${tool.name}:${value}`);
-        pkgKeyCount++;
-      }
-    } else {
-      // Single-operation tool — bare tool name.
-      keys.add(tool.name);
-      pkgKeyCount++;
+    // Guard: a tool MUST have a string `name` and an `inputSchema` (AC 15.0.5).
+    if (typeof tool?.name !== 'string' || tool.name === '') {
+      throw new Error(
+        `gen-governance-baseline: ${pkg} has a tool with a missing/empty "name" ` +
+          `(got ${JSON.stringify(tool?.name)}).`,
+      );
     }
+    if (tool.inputSchema == null) {
+      throw new Error(
+        `gen-governance-baseline: ${pkg}/${tool.name} is missing "inputSchema".`,
+      );
+    }
+    const actionField = tool.inputSchema?.shape?.action;
+    if (actionField != null) {
+      // The field is present. If it unwraps to a ZodEnum, it MUST be a non-empty
+      // enum of string options; anything else is a malformed shape we refuse to
+      // silently downgrade. (A non-enum `action`, e.g. z.string(), unwraps to
+      // undefined options and is treated as a single-op tool, matching the gate.)
+      const options = unwrapActionOptions(actionField);
+      if (options !== undefined) {
+        if (!Array.isArray(options) || options.length === 0) {
+          throw new Error(
+            `gen-governance-baseline: ${pkg}/${tool.name} declares an EMPTY "action" ` +
+              `enum. A multi-action tool must declare at least one action value.`,
+          );
+        }
+        for (const value of options) {
+          if (typeof value !== 'string') {
+            throw new Error(
+              `gen-governance-baseline: ${pkg}/${tool.name} has a non-string "action" ` +
+                `enum option (${JSON.stringify(value)}). Action values must be strings.`,
+            );
+          }
+        }
+        // Multi-action tool — one key per enum value.
+        for (const value of options) {
+          addKey(`${tool.name}:${value}`, pkg, tool.name);
+          pkgKeyCount++;
+        }
+        continue;
+      }
+    }
+    // Single-operation tool — bare tool name.
+    addKey(tool.name, pkg, tool.name);
+    pkgKeyCount++;
   }
   perPackage.push({ pkg, tools: tools.length, keys: pkgKeyCount });
 }
