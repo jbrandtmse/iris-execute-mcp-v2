@@ -39,3 +39,9 @@
 2026-06-16T04:06:12Z	Story 14.5	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
 2026-06-16T04:12:39Z	Story 14.5	qa_complete	spawn_at=2026-06-16T04:06:12Z model=claude-opus-4-8 tests_added=12 shared_tests=450 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T04:26:32Z	Story 14.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=real-MCP-SDK-resource-handlers-vs-live-IRIS-7-assertions(capability,list,templates,per-profile-read-cascade-143-keys,unknown-profile-McpError) note=nonzero-exit-is-windows-libuv-teardown model=claude-opus-4-8
+2026-06-16T04:26:56Z	Story 14.5	committed	sha=0ed5264 submodules=
+2026-06-16T04:28:51Z	Story 14.6	story_created	path=_bmad-output/implementation-artifacts/14-6-documentation-rollup.md model=claude-opus-4-8
+2026-06-16T04:42:36Z	Story 14.6	dev_complete	spawn_at=2026-06-16T04:28:51Z model=claude-opus-4-8 files=13 docs_only=true tests_added=0 ops_count=17 suite_total=89 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-06-16T04:42:36Z	Story 14.6	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
+2026-06-16T04:45:55Z	Story 14.6	qa_complete	spawn_at=2026-06-16T04:42:36Z model=claude-opus-4-8 tests_added=0 docs_validation=7/7-pass first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-16T04:58:16Z	Story 14.6	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=docs-as-user-16-assertions(3-client-configs-JSON-in-env-double-parse-copy-paste-safe,ops=17,suite=89-columns-sum) model=claude-opus-4-8

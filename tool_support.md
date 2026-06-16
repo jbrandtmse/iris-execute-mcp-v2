@@ -239,7 +239,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 88-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 89-tool total.
 
 ---
 
@@ -250,9 +250,9 @@ were silently returning stale or per-process data.
 | `@iris-mcp/dev` | 18 | 6 | 0 | **24** |
 | `@iris-mcp/admin` | 0 | 22 | 0 | **22** |
 | `@iris-mcp/interop` | 0 | 19 | 0 | **19** |
-| `@iris-mcp/ops` | 0 | 16 | 0 | **16** |
+| `@iris-mcp/ops` | 0 | 17 | 0 | **17** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** |
-| **Total** | **18** | **65** | **5** | **88** |
+| **Total** | **18** | **66** | **5** | **89** |
 
 ---
 
@@ -264,7 +264,7 @@ were silently returning stale or per-process data.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 65 of the 88 tools (74% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 66 of the 89 tools (74% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -278,7 +278,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 65 of 88 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 66 of 89 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

@@ -209,7 +209,7 @@ development_status:
   14-3-governance-policy-model-and-cascade: done
   14-4-call-time-governance-enforcement: done
   14-5-governance-resource-and-capability: done
-  14-6-documentation-rollup: backlog
+  14-6-documentation-rollup: done
   epic-14-retrospective: optional
 
   # Epic 15: Security & Admin Tools (iris-admin-mcp)

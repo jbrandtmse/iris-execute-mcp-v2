@@ -2,6 +2,22 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-06-15]
+
+### Added — Epic 14: Multi-Server Profiles, Tool Governance, and the `resources` capability
+
+A platform-foundation epic. Three strictly-additive capabilities land entirely in the shared layer (`@iris-mcp/shared`); the five server entry points and every existing tool handler are unchanged. **All additive — no breaking changes, no `BOOTSTRAP_VERSION` bump** (these are TypeScript-layer capabilities; nothing on the IRIS side changes). With neither new environment variable set, behavior is byte-for-byte identical to before.
+
+- **Multi-server profiles (`IRIS_PROFILES`)** — a new optional JSON environment variable defines named IRIS instances: `{ "<name>": { host, port, username, password, namespace, https } }`. The existing `IRIS_*` variables synthesize a reserved `default` profile, so single-server installs are unchanged. Every tool gains an optional `server` parameter carrying **only** the profile name (credentials never leave the server process); omitted → `default`. `server` selects the instance and composes with the existing per-call `namespace` override (`server` picks the instance, `namespace` picks the namespace within it). Profiles may omit fields to inherit the default's. Each profile gets its own session/cookie cache (no cross-profile bleed); the default profile's client is established eagerly at startup exactly as today, and non-default profiles are negotiated lazily on first use.
+- **Tool governance (`IRIS_GOVERNANCE`)** — a new optional JSON environment variable enables/disables individual tool actions, optionally per profile: `{ "global": { "<tool|tool:action>": true|false }, "profiles": { "<name>": { … } } }`. Effective policy resolves as `profile.explicit ?? global.explicit ?? defaultSeed`. The default seed (generated mechanically from the shipped tool catalog) enables every existing action and every new read action, and disables new write/change actions — so newly-added mutating capability is opt-in. Enforcement is **call-time** (it must be: the governing profile is selected per call via `server`): all tools stay advertised, but a disabled action returns a structured `isError` result `{ code: "GOVERNANCE_DISABLED", action, server }` without invoking the handler. With no `IRIS_GOVERNANCE` set, every tool is enabled — today's behavior.
+- **New MCP `resources` capability** — the suite was tools-only; the shared server base now also advertises `resources` (`resources/list`, `resources/read`, `resources/templates/list`). A static `iris-governance://default` resource and an `iris-governance://{profile}` template return the effective policy map as JSON so a client can avoid issuing calls it knows are blocked. The resource is **advisory**; the call-time gate remains the authoritative boundary. Clients that ignore `resources` are unaffected.
+
+Documentation: the root [README](README.md#multiple-servers--governance) gains a *Multiple Servers & Governance* section (model, cascade, worked example, back-compat promise); the three client-config guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) gain correctly-escaped copy-pasteable JSON-in-env blocks; and each per-package README links to the shared docs.
+
+### Fixed
+
+- **Docs: `@iris-mcp/ops` tool count reconciled to 17 and suite total to 89** ([tool_support.md](tool_support.md), [README.md](README.md), [packages/iris-mcp-all/README.md](packages/iris-mcp-all/README.md), [docs/migration-v1-v2.md](docs/migration-v1-v2.md)) — the `iris_alerts_manage` tool (added 2026-04-22, Story 12.6) had been propagated to `tool_support.md`'s ops section heading and Mix line (both already 17) but not to the Suite-wide rollup row or the suite/meta-package READMEs and migration guide (which still said 16). The ops count is now consistently **17** everywhere and the suite total is **89** (was 88). Epic 14 adds no new IRIS tools, so this 16→17 / 88→89 reconciliation is the only tool-count change. Routed from the Story 13.2 code review (CR 13.2) via Story 14.0; closes that deferred item. Docs-only — no `BOOTSTRAP_VERSION` bump.
+
 ## [Pre-release — 2026-05-29]
 
 ### Fixed
