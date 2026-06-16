@@ -45,3 +45,5 @@
 2026-06-16T04:42:36Z	Story 14.6	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8
 2026-06-16T04:45:55Z	Story 14.6	qa_complete	spawn_at=2026-06-16T04:42:36Z model=claude-opus-4-8 tests_added=0 docs_validation=7/7-pass first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T04:58:16Z	Story 14.6	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=docs-as-user-16-assertions(3-client-configs-JSON-in-env-double-parse-copy-paste-safe,ops=17,suite=89-columns-sum) model=claude-opus-4-8
+2026-06-16T04:58:39Z	Story 14.6	committed	sha=f201a88 submodules=
+2026-06-16T05:00:18Z	Epic 14	epic_summary	stories=7 pipeline_stories=6 shared_tests=205->450 total_high_unresolved=0 total_med_unresolved=0 smoke_defects=0 rework_events=0 bootstrap_bump=none additive=byte-for-byte-back-compat opus_stage_count=all model=claude-opus-4-8

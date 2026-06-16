@@ -202,7 +202,7 @@ development_status:
   # Added 2026-06-15 via bmad-correct-course. See sprint-change-proposal-2026-06-15.md.
   # TypeScript-only (shared + all servers). No BOOTSTRAP_VERSION bump. HARD PREREQUISITE for Epics 15-17.
   # STRICTLY ADDITIVE / no breaking changes: no IRIS_PROFILES + no IRIS_GOVERNANCE = byte-for-byte today's behavior.
-  epic-14: in-progress
+  epic-14: done
   14-0-epic-13-deferred-cleanup: done
   14-1-multi-server-profiles-config-and-resolution: done
   14-2-server-parameter-across-all-tools: done
