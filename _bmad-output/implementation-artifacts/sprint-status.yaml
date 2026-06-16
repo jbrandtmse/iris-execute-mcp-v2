@@ -202,13 +202,15 @@ development_status:
   # Added 2026-06-15 via bmad-correct-course. See sprint-change-proposal-2026-06-15.md.
   # TypeScript-only (shared + all servers). No BOOTSTRAP_VERSION bump. HARD PREREQUISITE for Epics 15-17.
   # STRICTLY ADDITIVE / no breaking changes: no IRIS_PROFILES + no IRIS_GOVERNANCE = byte-for-byte today's behavior.
-  epic-14: backlog
+  epic-14: in-progress
+  14-0-epic-13-deferred-cleanup: done
   14-1-multi-server-profiles-config-and-resolution: backlog
   14-2-server-parameter-across-all-tools: backlog
   14-3-governance-policy-model-and-cascade: backlog
   14-4-call-time-governance-enforcement: backlog
   14-5-governance-resource-and-capability: backlog
   14-6-documentation-rollup: backlog
+  epic-14-retrospective: optional
 
   # Epic 15: Security & Admin Tools (iris-admin-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 15.6. Additive only.
@@ -219,6 +221,7 @@ development_status:
   15-4-iris-audit-manage: backlog
   15-5-resource-manage-sql-privileges: backlog
   15-6-bootstrap-bump-verification-and-docs: backlog
+  epic-15-retrospective: optional
 
   # Epic 16: Operations Tools (iris-ops-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 16.4. Additive only.
@@ -227,6 +230,7 @@ development_status:
   16-2-iris-database-action: backlog
   16-3-iris-backup-manage: backlog
   16-4-bootstrap-bump-verification-and-docs: backlog
+  epic-16-retrospective: optional
 
   # Epic 17: Interop & Dev Tools (iris-interop-mcp + iris-dev-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 17.4. Additive only.
@@ -235,3 +239,4 @@ development_status:
   17-2-production-item-add-remove-and-settings: backlog
   17-3-iris-sql-analyze: backlog
   17-4-bootstrap-bump-verification-and-docs: backlog
+  epic-17-retrospective: optional

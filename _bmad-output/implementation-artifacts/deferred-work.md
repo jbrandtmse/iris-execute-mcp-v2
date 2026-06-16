@@ -221,3 +221,23 @@ The following items remain open. They are NOT in Epic 12 scope and will be re-tr
 ## Deferred from: code review of 13-2-documentation-rollup (2026-04-23)
 
 - **Pre-existing `@iris-mcp/ops` tool-count drift: section heading and Mix line say 17, but Suite-wide rollup and READMEs say 16** (`tool_support.md:145`, `tool_support.md:167`, `tool_support.md:253`, plus cross-refs at `README.md:16`, `packages/iris-mcp-all/README.md:26`, `docs/migration-v1-v2.md:30`) — The `@iris-mcp/ops` per-table section at `tool_support.md:145` reads `Operations & Monitoring (17)` and the Mix line at line 167 reads `17 ExecuteMCPv2`. Counting the ops table rows confirms 17 tools (including `iris_alerts_manage` added in Epic 12 Story 12.6, commit `a373316`). However the Suite-wide rollup at line 253 says `| \`@iris-mcp/ops\` | 0 | 16 | 0 | **16** |` and the suite/meta-package READMEs show `@iris-mcp/ops` with tool count 16. Likely root cause: Epic 12 Story 12.6 (which added `iris_alerts_manage`) updated the per-table section and Mix line but did not propagate the count change into the Suite-wide rollup or the suite READMEs. **Not in scope for Story 13.2** — dev followed the AC literally (87 → 88 suite total, based on +1 dev tool) and flagged this drift in the review context. Out-of-scope but worth fixing in a follow-up docs-rollup pass: increment ops by 1 to 17 across the rollup row (changing `@iris-mcp/ops` row from `0 | 16 | 0 | **16**` to `0 | 17 | 0 | **17**`), update suite README dev/ops row, meta-package README, migration guide. Suite total should then become 89 (not 88). LOW severity — a cosmetic count inconsistency, not a functional issue.
+
+---
+
+## Triaged via Story 14.0 (2026-06-15)
+
+Story 14.0 (Epic 14 retro-review gate) formally re-triaged every open `deferred-work.md` item against Epic 14's scope. Epic 13's retrospective was skipped (commit `079ed17`), so this triage runs off `deferred-work.md`. See [`14-0-epic-13-deferred-cleanup.md`](14-0-epic-13-deferred-cleanup.md) for the authoritative per-item triage tables.
+
+**Decision summary: 0 INCLUDE, all DEFER** (one item ROUTED). Epic 14 is a strictly-additive Platform Foundation epic (multi-server profiles, governance cascade, MCP resources); none of the open items intersect its scope, and all are LOW / INFO / cosmetic / "future hardening pass" items already triaged across Stories 7.0/8.0/9.0/12.0.
+
+### Routed (assigned to an Epic 14 story)
+
+- **`@iris-mcp/ops` tool-count drift (CR 13.2, from 13-2 code review)** — **ROUTED to Story 14.6 (Documentation Rollup)**. The section heading/Mix line say 17 while the suite-wide rollup and READMEs say 16 (`iris_alerts_manage` from Story 12.6 not propagated everywhere). Story 14.6 reconciles suite/per-package tool counts as part of the Epic 14 docs rollup; suite total should land at 89. Remains open here until Story 14.6 closes it.
+
+### Retained as open deferred items (NOT in Epic 14 scope)
+
+All remaining open items are explicitly carried forward unchanged — re-triage after Epic 14's retrospective. They are NOT addressed by any Epic 14 story:
+
+**Carried from Story 12.0 "retained open":** Epic 11 retro #1 (pre-publish smoke → publishing checklist), #3 (retrospective-skill automation), #6 (locale prefix-strip generalization); CR 10.1 (`generated` on `/modified/{ts}`; digit-prefixed package rows); CR 10.2 (`.manifest.json.tmp` cleanup; `docNameToFilePath` edge cases); CR 11.3 (`%ResultSet.Close()` exception path — `Config.cls` + `SystemConfig.cls`); CR 11.1 (EN/AR-only prefix-strip; `Use tInitIO` mnemonic); Epic 8.x legacy (duplicate `getIntegrationConfig`, DRY env-var docs, missing `package.json` fields).
+
+**New Epic 12 code-review deferrals:** CR 12.1 (`changePasswordOnNextLogin:false→0` test); CR 12.2 (`tTimeout=0` override; CHANGELOG ordering; test-count delta); CR 12.3 (`ProductionSummary` stateCode-2 fallback; duplicate create test; delete running-check state coverage; orphaned `Ens.Config.Production` record); live-verify 12.4 (`iris_docdb_find` typed-property population — LOW–MEDIUM, strongest future-cleanup candidate); CR 12.4 (`buildDocDbRestriction` JSDoc; `Config.cls` create no-rollback); CR 12.5 (`iris_oauth_manage` `supportedScopes` schema; `iris_rest_manage` `scope:all` dedup); Story 12.6 (per-alert `clear` by index; alert `acknowledge` — both "if demand").
