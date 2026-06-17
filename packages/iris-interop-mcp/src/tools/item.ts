@@ -21,22 +21,44 @@ export const productionItemTool: ToolDefinition = {
   name: "iris_production_item",
   title: "Manage Production Item",
   description:
-    "Enable, disable, get settings, or set settings for an individual Interoperability " +
-    "production config item. 'get' returns host and adapter settings. 'set' updates " +
-    "settings like poolSize, enabled, comment, category, className, adapterClassName. " +
-    "'enable'/'disable' toggles the item in the running production.",
+    "Add, remove, enable, disable, get settings, or set settings for an individual " +
+    "Interoperability production config item. 'get' returns host and adapter settings. " +
+    "'set' updates settings: the property keys poolSize, enabled, comment, category, " +
+    "className map to Ens.Config.Item properties, and ANY OTHER key (e.g. " +
+    "adapterClassName, or a host/adapter setting like FilePath, Charset) is routed to " +
+    "an Ens.Config.Setting on the item (Target Adapter by default; pass " +
+    "'<Name>@Host' / '<Name>@Adapter' to force the target). 'enable'/'disable' toggles " +
+    "the item in the running production. 'add' creates a new item (requires 'className'; " +
+    "Required Name+ClassName); 'remove' deletes it. For 'add'/'remove' the target " +
+    "production defaults to the namespace's active production; pass 'production' " +
+    "explicitly when there is no active production.\n\n" +
+    "The mutating actions add/remove are opt-in under tool governance and are DISABLED " +
+    "by default until enabled via IRIS_GOVERNANCE; enable/disable/get/set are " +
+    "grandfathered (always available).",
   inputSchema: z.object({
     action: z
-      .enum(["enable", "disable", "get", "set"])
+      .enum(["add", "remove", "enable", "disable", "get", "set"])
       .describe("Action to perform on the config item"),
     itemName: z
       .string()
       .describe("Name of the production config item (e.g., 'MyApp.Service.FileIn')"),
+    className: z
+      .string()
+      .optional()
+      .describe(
+        "Host class name for the config item. Required for 'add' (the item's Ens.Config.Item.ClassName).",
+      ),
+    production: z
+      .string()
+      .optional()
+      .describe(
+        "Target production name for 'add'/'remove'. Defaults to the namespace's active production; required when no production is active. Ignored by enable/disable/get/set (those operate by itemName).",
+      ),
     settings: z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        "Settings object for 'set' action. Keys: poolSize, enabled, comment, category, className, adapterClassName",
+        "Settings object for 'add'/'set'. Property keys (poolSize, enabled, comment, category, className) map to Ens.Config.Item properties; any other key routes to an Ens.Config.Setting (Target Adapter by default; suffix a key with '@Host' or '@Adapter' to force the setting target).",
       ),
     namespace: z
       .string()
@@ -50,16 +72,29 @@ export const productionItemTool: ToolDefinition = {
     openWorldHint: false,
   },
   scope: "NS",
+  // Governance (Story 17.2, frozen-foundation model): the existing
+  // enable/disable/get/set keys are in the frozen baseline (1e62c5ad5bf7) →
+  // grandfathered, so they are NOT declared here. The NEW add/remove keys are
+  // absent from the baseline → they MUST be classified; both are writes →
+  // default-DISABLED until an operator opts in via IRIS_GOVERNANCE.
+  mutates: {
+    add: "write",
+    remove: "write",
+  },
   handler: async (args, ctx) => {
-    const { action, itemName, settings, namespace } = args as {
+    const { action, itemName, className, production, settings, namespace } = args as {
       action: string;
       itemName: string;
+      className?: string;
+      production?: string;
       settings?: Record<string, unknown>;
       namespace?: string;
     };
 
     const ns = ctx.resolveNamespace(namespace);
     const body: Record<string, unknown> = { action, itemName, namespace: ns };
+    if (className !== undefined) body.className = className;
+    if (production !== undefined) body.production = production;
     if (settings) body.settings = settings;
 
     const path = `${BASE_URL}/interop/production/item`;
