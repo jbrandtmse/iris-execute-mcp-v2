@@ -226,7 +226,8 @@ development_status:
 
   # Epic 16: Operations Tools (iris-ops-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 16.4. Additive only.
-  epic-16: in-progress
+  # 2026-06-17: corrected stale 'in-progress' marker — all stories (16.0–16.4) + retrospective are done.
+  epic-16: done
   16-0-epic-15-deferred-cleanup: done
   16-1-iris-process-manage: done
   16-2-iris-database-action: done
