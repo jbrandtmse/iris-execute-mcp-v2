@@ -121,10 +121,25 @@ The lead Dev-Notes baseline lists `adapterClassName`→`AdapterClassName` as one
 
 ### Area 2a — Add / Remove recipe (Story 17.2, ADDITIVE)
 
+> **⚠️ DISCREPANCY #1b (found live during Story 17.2 dev — Rule #5/#16 amendment):** the
+> original recipe below opened the production with a BARE `%OpenId(tProdName)` for BOTH
+> add and remove. This is WRONG for a consistent add→remove round-trip. `SaveToClass`
+> writes the item list into the production **class** definition's `ProductionDefinition`
+> XData (the source of truth) — it does NOT update the `Ens.Config.Production` config-object
+> extent. So immediately after an `add`, a bare `%OpenId`/`FindItemByConfigName` reads the
+> STALE extent and reports the just-added item as "not found" (and `Items.Count()` unchanged).
+> **Fix (now in the handler):** call `##class(Ens.Config.Production).LoadFromClass(tProdName)`
+> to sync the extent from the class XData BEFORE `%OpenId`, in BOTH the add and remove paths.
+> Live-verified on `SessionAgent.Sample.Production`: add → (LoadFromClass) item found, count
+> 5→6, Host/Adapter `Ens.Config.Setting` persisted; remove → (LoadFromClass) count 6→5,
+> original state restored.
+
 ```objectscript
 ; --- ADD an item ---
-Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)   ; or OpenItemByConfigName context
-If '$IsObject(tProd) { ; error: production not found }
+If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) { ; error: production not found }
+Do ##class(Ens.Config.Production).LoadFromClass(tProdName)   ; sync extent from class XData (REQUIRED)
+Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+If '$IsObject(tProd) { ; error: failed to open production }
 Set tItem = ##class(Ens.Config.Item).%New()
 Set tItem.Name = tName                 ; Required
 Set tItem.ClassName = tClassName       ; Required
@@ -132,10 +147,13 @@ Set:tPoolSizeProvided  tItem.PoolSize = +tPoolSize
 Set:tEnabledProvided   tItem.Enabled  = +tEnabled     ; default 1
 Set:tCommentProvided   tItem.Comment  = tComment
 Set:tCategoryProvided  tItem.Category = tCategory
+; (arbitrary host/adapter keys → Ens.Config.Setting on tItem.Settings; see Area 2b)
 Do tProd.Items.Insert(tItem)
-Set tSC = tProd.SaveToClass(tItem)     ; persists + recompiles the production class
+Set tSC = tProd.SaveToClass(tItem)     ; persists into the production class XData
 
 ; --- REMOVE an item ---
+If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) { ; error: production not found }
+Do ##class(Ens.Config.Production).LoadFromClass(tProdName)   ; sync extent from class XData (REQUIRED)
 Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
 Set tItem = tProd.FindItemByConfigName(tName, .tStatus)   ; locate by config name
 If '$IsObject(tItem) { ; error: item not found in production }
@@ -143,7 +161,8 @@ Do tProd.RemoveItem(tItem)
 Set tSC = tProd.SaveToClass()
 ```
 
-**Live confirmation:** opened `SessionAgent.Sample.Production` read-only → `p.Items.Count()=5`, `$classname(p.Items.GetAt(1))="Ens.Config.Item"`, first item `SessionAgent.Sample.BS.OrderIngest`, `$classname(...Settings)="%Collection.ListOfObj"`. (No add/remove was executed — recipe verified by source + method existence: `SaveToClass`, `RemoveItem`, `FindItemByConfigName`, `OpenItemByConfigName` all `%ExistsId`=1.)
+**Live confirmation (pre-spec, read-only):** opened `SessionAgent.Sample.Production` → `p.Items.Count()=5`, `$classname(p.Items.GetAt(1))="Ens.Config.Item"`, first item `SessionAgent.Sample.BS.OrderIngest`, `$classname(...Settings)="%Collection.ListOfObj"`. (Add/remove method existence verified: `SaveToClass`, `RemoveItem`, `FindItemByConfigName`, `OpenItemByConfigName`, `LoadFromClass` all `%ExistsId`=1.)
+**Live confirmation (Story 17.2 dev, executed):** full add → arbitrary-setting → remove round-trip executed on `SessionAgent.Sample.Production` with the `LoadFromClass` sync; item persisted to class XData + extent (after sync) showed count 6 with Host `Charset=UTF-8`; remove restored to 5. The original `%OpenId`-only recipe was proven to read a stale extent (count stayed 5, item "not found") — hence the DISCREPANCY #1b amendment above.
 
 ### Area 2b — Arbitrary host/adapter setting recipe (Story 17.2, ADDITIVE)
 

@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "8c748712e247";
+export const BOOTSTRAP_VERSION = "39dc932907cb";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "8c748712e247";
+Parameter BOOTSTRAPVERSION = "39dc932907cb";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -5434,10 +5434,15 @@ ClassMethod ProductionStatus() As %Status
     Quit $$$OK
 }
 
-/// Enable, disable, get, or set settings for an individual production config item.
-/// <p>Accepts a JSON body with <code>action</code> ("enable", "disable", "get", "set"),
-/// <code>itemName</code> (the config item name), optional <code>settings</code> (for set),
-/// and optional <code>namespace</code>.</p>
+/// Add, remove, enable, disable, get, or set settings for an individual production config item.
+/// <p>Accepts a JSON body with <code>action</code> ("add", "remove", "enable", "disable", "get", "set"),
+/// <code>itemName</code> (the config item name), optional <code>className</code> (Required for add),
+/// optional <code>production</code> (target production for add/remove; defaults to the active production),
+/// optional <code>settings</code> (for add/set), and optional <code>namespace</code>.</p>
+/// <p>For <code>set</code>/<code>add</code>, the property keys poolSize/enabled/comment/category/className map
+/// to <class>Ens.Config.Item</class> properties; any other key is routed to an <class>Ens.Config.Setting</class>
+/// on the item (Target Adapter by default; a key may carry a <code>@Host</code>/<code>@Adapter</code> suffix to
+/// force the target).</p>
 ClassMethod ItemManage() As %Status
 {
     Set tSC = $$$OK
@@ -5464,8 +5469,8 @@ ClassMethod ItemManage() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tItemName, "itemName")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "get") && (tAction '= "set") {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, get, set")
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "get") && (tAction '= "set") && (tAction '= "add") && (tAction '= "remove") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, get, set, add, remove")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
@@ -5557,7 +5562,11 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
-            ; Apply settings from the JSON object
+            ; Apply settings from the JSON object.
+            ; The 5 working property keys map to Ens.Config.Item properties EXACTLY
+            ; as before (back-compat gate). Any OTHER key (incl. adapterClassName,
+            ; which is NOT a settable property) routes to an Ens.Config.Setting on
+            ; the item's Settings list (additive: error -> success per 17-0 framing B).
             Set tUpdated = []
             Set tIter = tSettings.%GetIterator()
             While tIter.%GetNext(.tKey, .tValue) {
@@ -5566,7 +5575,7 @@ ClassMethod ItemManage() As %Status
                 ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
-                ElseIf tKey = "adapterClassName" { Set tItem.AdapterClassName = tValue Do tUpdated.%Push(tKey) }
+                Else { Do ..ApplyArbitrarySetting(tItem, tKey, tValue) Do tUpdated.%Push(tKey) }
             }
 
             Set tSC = tItem.%Save()
@@ -5580,6 +5589,117 @@ ClassMethod ItemManage() As %Status
             Set tResult = {"action": "set", "itemName": (tItemName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
+        ElseIf tAction = "add" {
+            ; Resolve target production: explicit 'production' or the active one.
+            Set tProdName = tBody.%Get("production")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for add")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tClassName = tBody.%Get("className")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
+            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Sync the config-object extent from the production class XData (source of
+            ; truth) before opening — SaveToClass writes the class, not the extent, so
+            ; an unsynced %OpenId would see a stale item list (live-verified Story 17.2).
+            Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tItem = ##class(Ens.Config.Item).%New()
+            Set tItem.Name = tItemName
+            Set tItem.ClassName = tClassName
+
+            ; Optional settings on the new item (same routing as 'set').
+            Set tUpdated = []
+            Set tSettings = tBody.%Get("settings")
+            If $IsObject(tSettings) {
+                Set tIter = tSettings.%GetIterator()
+                While tIter.%GetNext(.tKey, .tValue) {
+                    If tKey = "poolSize" { Set tItem.PoolSize = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                    Else { Do ..ApplyArbitrarySetting(tItem, tKey, tValue) Do tUpdated.%Push(tKey) }
+                }
+            }
+
+            Do tProd.Items.Insert(tItem)
+            Set tSC = tProd.SaveToClass(tItem)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tClassName), "updatedSettings": (tUpdated)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "remove" {
+            ; Resolve target production: explicit 'production' or the active one.
+            Set tProdName = tBody.%Get("production")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for remove")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Sync the config-object extent from the production class XData before
+            ; opening (see add branch) so FindItemByConfigName sees the current items.
+            Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            If '$IsObject(tItem) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Do tProd.RemoveItem(tItem)
+            Set tSC = tProd.SaveToClass()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "removed", "itemName": (tItemName), "production": (tProdName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
     }
     Catch ex {
         Set $NAMESPACE = tOrigNS
@@ -5587,6 +5707,40 @@ ClassMethod ItemManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Apply an arbitrary host/adapter setting to a config item via Ens.Config.Setting.
+/// <p>Used by ItemManage add/set for any key that is not one of the 5 recognized
+/// Ens.Config.Item property keys. The setting Target defaults to "Adapter"; a key may
+/// carry a trailing <code>@Host</code> or <code>@Adapter</code> suffix to force the target.
+/// The item is NOT saved here — the caller saves and refreshes the production.</p>
+ClassMethod ApplyArbitrarySetting(pItem As Ens.Config.Item, pKey As %String, pValue As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Set tTarget = "Adapter"
+        Set tName = pKey
+        Set tAt = $Find(pKey, "@")
+        If tAt > 0 {
+            Set tSuffix = $Extract(pKey, tAt, *)
+            If (tSuffix = "Host") || (tSuffix = "Adapter") {
+                Set tTarget = tSuffix
+                Set tName = $Extract(pKey, 1, tAt - 2)
+            }
+        }
+        Set tSetting = pItem.FindSettingByName(tName, tTarget)
+        If '$IsObject(tSetting) {
+            Set tSetting = ##class(Ens.Config.Setting).%New()
+            Set tSetting.Target = tTarget
+            Set tSetting.Name = tName
+            Do pItem.Settings.Insert(tSetting)
+        }
+        Set tSetting.Value = pValue
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Get or set the auto-start production configuration.
