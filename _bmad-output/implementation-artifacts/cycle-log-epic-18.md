@@ -11,3 +11,4 @@
 2026-06-17T04:07:18Z	Story 18.0	committed	sha=2dc3536 submodules=
 2026-06-17T18:15:58Z	Story 18.0	docs_followup_committed	sha=b7e7da0,e4bcad8 scope=governance-default-state-README+tool_support+per-server-READMEs note=user-requested
 2026-06-17T18:15:58Z	Epic 18	retrospective_complete	retro=epic-18-retro-2026-06-17.md rules_codified=1 new_rule=30 sha=ee20c2b
+2026-06-17T18:16:23Z	Epic 18	epic_merged_to_feature	repos=. feature_sha=0cb4a32 merge_sha=0cb4a32 submodules=
