@@ -25,6 +25,7 @@ import { docExportTool } from "./export.js";
 import { packageListTool } from "./packages.js";
 import { routineIntermediateTool } from "./routine.js";
 import { sqlExecuteTool } from "./sql.js";
+import { sqlAnalyzeTool } from "./sqlAnalyze.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
 import {
   globalGetTool,
@@ -51,6 +52,7 @@ export const tools: ToolDefinition[] = [
   docConvertTool,
   docXmlExportTool,
   sqlExecuteTool,
+  sqlAnalyzeTool,
   serverInfoTool,
   serverNamespaceTool,
   globalGetTool,

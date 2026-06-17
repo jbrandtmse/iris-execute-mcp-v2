@@ -20,7 +20,7 @@ describe("iris-dev-mcp", () => {
     });
 
     it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, and execute tools", () => {
-      expect(tools).toHaveLength(24);
+      expect(tools).toHaveLength(25);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris_doc_get");
       expect(names).toContain("iris_doc_put");
@@ -33,6 +33,7 @@ describe("iris-dev-mcp", () => {
       expect(names).toContain("iris_doc_convert");
       expect(names).toContain("iris_doc_xml_export");
       expect(names).toContain("iris_sql_execute");
+      expect(names).toContain("iris_sql_analyze");
       expect(names).toContain("iris_server_info");
       expect(names).toContain("iris_server_namespace");
       expect(names).toContain("iris_global_get");
@@ -59,14 +60,14 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 24 tools", () => {
+    it("should create a server instance with 25 tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(24);
+      expect(server.toolCount).toBe(25);
     });
 
     it("should report all tool names", () => {
@@ -87,6 +88,7 @@ describe("iris-dev-mcp", () => {
         "iris_doc_convert",
         "iris_doc_xml_export",
         "iris_sql_execute",
+        "iris_sql_analyze",
         "iris_server_info",
         "iris_server_namespace",
         "iris_global_get",

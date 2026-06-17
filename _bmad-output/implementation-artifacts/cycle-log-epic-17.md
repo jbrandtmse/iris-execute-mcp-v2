@@ -25,3 +25,9 @@
 2026-06-17T03:35:00Z	Story 17.2	cr_complete	spawn_at=2026-06-17T03:11:00Z model=claude-opus-4-8 resolved=0 deferred=5 dismissed=1 high=0 med=3 low=2 bootstrap=39dc932907cb-unchanged clarifications=0 closing_sections_present=true
 2026-06-17T03:40:00Z	Story 17.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM-disposable-prod:add+add-no-className-REJECTED+get-backcompat-shape+remove-roundtrip+add-with-@Host/@Adapter-settings-verified(comment->prop,ArchivePath->Host,Charset->Adapter);set-NameExists-extent-lag-PRE-EXISTING-line-unchanged model=claude-opus-4-8
 2026-06-17T03:42:00Z	Story 17.2	committed	sha=a4100a0 submodules=
+2026-06-17T03:50:00Z	Story 17.3	story_created	path=_bmad-output/implementation-artifacts/17-3-iris-sql-analyze.md
+2026-06-17T04:15:00Z	Story 17.3	dev_complete	spawn_at=2026-06-17T03:51:00Z model=claude-opus-4-8 files=sqlAnalyze.ts,index.ts,index.test.ts loc_added=~280 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 bootstrap=39dc932907cb-unchanged-TS-only cycle_iteration=1 closing_sections_present=true
+2026-06-17T04:15:10Z	Story 17.3	adr_verifications_complete	result=none_required note=no-docs-adr-registry
+2026-06-17T04:30:00Z	Story 17.3	qa_complete	spawn_at=2026-06-17T04:16:00Z model=claude-opus-4-8 tests_added=12 dev_suite=326 governance=5 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-17T04:50:00Z	Story 17.3	cr_complete	spawn_at=2026-06-17T04:31:00Z model=claude-opus-4-8 resolved=2 deferred=0 dismissed=6 high=0 med=1 low=1 bootstrap=39dc932907cb-unchanged clarifications=0 closing_sections_present=true
+2026-06-17T04:55:00Z	Story 17.3	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM-readonly:EXPLAIN-returns-plan+index-source(Ens_Config.Item.IDKEY)+CURRENT_STATEMENTS-returns-executing-row+STATEMENTS-returns-stat-rows model=claude-opus-4-8
