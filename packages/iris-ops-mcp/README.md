@@ -1,6 +1,6 @@
 # @iris-mcp/ops
 
-**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, journals, mirrors, audit events, database integrity, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
+**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, process control, journals, mirrors, audit events, database integrity, database maintenance operations, backups, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -120,6 +120,7 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 |------|-------------|----------------|-------------|
 | `iris_jobs_list` | List all running IRIS jobs/processes | *(none)* | readOnly, idempotent |
 | `iris_locks_list` | List all current system locks | *(none)* | readOnly, idempotent |
+| `iris_process_manage` | Inspect one process by PID, or terminate/suspend/resume it (control actions opt-in via governance, default-disabled; self/critical jobs refused) | `action`, `pid`, `namespace?` | destructive |
 
 ### Infrastructure Tools
 
@@ -129,6 +130,8 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 | `iris_mirror_status` | Mirror configuration and membership status | *(none)* | readOnly, idempotent |
 | `iris_audit_events` | Audit log events with filters | `beginDate?`, `endDate?`, `username?`, `eventType?`, `maxRows?` | readOnly, idempotent |
 | `iris_database_check` | Database status (mounted, encrypted, size) | `name?` | readOnly, idempotent |
+| `iris_database_action` | Runtime database maintenance: mount/dismount/compact/defragment/truncate/expandVolume by directory (all mutating, opt-in via governance, default-disabled) | `action`, `directory`, `readonly?`, `percentFull?`, `targetSize?`, `newVolDir?`, `initialSize?`, `namespace?` | destructive |
+| `iris_backup_manage` | Run a user-defined backup task, freeze/thaw the instance, or list backup history (write actions opt-in via governance, default-disabled; restore not supported) | `action`, `taskName?`, `backupType?`, `jobbackup?`, `device?`, `logFile?`, `description?`, `username?`, `password?`, `namespace?` | destructive |
 | `iris_license_info` | License type, capacity, usage, expiration | *(none)* | readOnly, idempotent |
 | `iris_ecp_status` | ECP connection status | *(none)* | readOnly, idempotent |
 

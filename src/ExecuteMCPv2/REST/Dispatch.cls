@@ -129,11 +129,15 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/alerts/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:AlertsManage" />
   <Route Url="/monitor/interop" Method="GET" Call="ExecuteMCPv2.REST.Monitor:InteropMetrics" />
   <Route Url="/monitor/jobs" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JobsList" />
+  <Route Url="/monitor/process" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ProcessGet" />
+  <Route Url="/monitor/process/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:ProcessManage" />
   <Route Url="/monitor/locks" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LocksList" />
   <Route Url="/monitor/journal" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JournalInfo" />
   <Route Url="/monitor/mirror" Method="GET" Call="ExecuteMCPv2.REST.Monitor:MirrorStatus" />
   <Route Url="/monitor/audit" Method="GET" Call="ExecuteMCPv2.REST.Monitor:AuditEvents" />
   <Route Url="/monitor/database" Method="GET" Call="ExecuteMCPv2.REST.Monitor:DatabaseCheck" />
+  <Route Url="/monitor/database/action" Method="POST" Call="ExecuteMCPv2.REST.Monitor:DatabaseAction" />
+  <Route Url="/monitor/backup/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:BackupManage" />
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 

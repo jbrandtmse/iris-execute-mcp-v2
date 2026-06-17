@@ -15,10 +15,10 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 | [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 24 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 19 | Ensemble/Health Connect production lifecycle, credentials, lookups, rules, transforms |
-| [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 17 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management |
+| [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **93 tools** across 5 servers — install one or all.
+> **96 tools** across 5 servers — install one or all.
 
 ### Meta-package
 
@@ -297,7 +297,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(24)    │ │(26)    │ │(19)    │ │(17)    │ │(7)     │
+     │(24)    │ │(26)    │ │(19)    │ │(20)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘
