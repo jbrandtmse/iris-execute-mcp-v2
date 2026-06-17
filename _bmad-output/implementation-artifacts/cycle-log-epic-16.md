@@ -40,3 +40,5 @@
 2026-06-17T00:10:30Z	Story 16.4	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=govcheck-exit0-141frozen-180live+process-get-live+backup-listHistory-live+database-guard-live+counts-reconcile-suite96 model=claude-opus-4-8
 2026-06-17T00:10:54Z	Story 16.4	committed	sha=24a798c submodules=
 2026-06-17T00:38:39Z	Epic 16	retrospective_complete	doc=epic-16-retro-2026-06-16.md rules_added=0(covered-by-23-26) action_items=4 model=claude-opus-4-8
+2026-06-17T00:39:59Z	Epic 16	epic_summary	stories=5 pipeline_stories=4+1cleanup new_tools=3(process,database,backup)+1generator(--check) suite_tools=93->96 ops_tools=17->20 bootstrap_version=e5f4f6d88c56->fe972c4cb317 governance_hash=1e62c5ad5bf7-frozen high_findings_caught=7 spec_corrections=2(DatabaseCompact-nonexistent,no-predefined-backup-tasks) restore=deferred additive=back-compat-gate-held model=claude-opus-4-8
+2026-06-17T00:39:59Z	Epic 16	epic_merged_to_feature	repos=. feature=feature/mgmt-portal-tools feature_sha=744af2f merge_sha=744af2f submodules= epic_branch_deleted=local+remote ide_toggle=window-b-toggled-then-restored
