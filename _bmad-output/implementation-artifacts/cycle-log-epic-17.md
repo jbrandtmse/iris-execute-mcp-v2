@@ -16,3 +16,4 @@
 2026-06-17T01:15:10Z	Story 17.1	adr_verifications_complete	result=none_required note=no-docs-adr-registry
 2026-06-17T01:30:00Z	Story 17.1	qa_complete	spawn_at=2026-06-17T01:16:00Z model=claude-opus-4-8 tests_added=5 total_unit=19 governance=4 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T01:55:00Z	Story 17.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM:list-200-objwrap+set/get/delete-roundtrip+||-injection-guard-REJECTED-#5001-no-write+get-found-false-after-delete model=claude-opus-4-8
+2026-06-17T01:57:00Z	Story 17.1	committed	sha=d36e085 submodules=
