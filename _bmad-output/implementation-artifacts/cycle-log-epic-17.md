@@ -24,3 +24,4 @@
 2026-06-17T03:10:00Z	Story 17.2	qa_complete	spawn_at=2026-06-17T02:51:00Z model=claude-opus-4-8 tests_added=11 total_unit_item=43 governance=present interop_suite=219 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T03:35:00Z	Story 17.2	cr_complete	spawn_at=2026-06-17T03:11:00Z model=claude-opus-4-8 resolved=0 deferred=5 dismissed=1 high=0 med=3 low=2 bootstrap=39dc932907cb-unchanged clarifications=0 closing_sections_present=true
 2026-06-17T03:40:00Z	Story 17.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM-disposable-prod:add+add-no-className-REJECTED+get-backcompat-shape+remove-roundtrip+add-with-@Host/@Adapter-settings-verified(comment->prop,ArchivePath->Host,Charset->Adapter);set-NameExists-extent-lag-PRE-EXISTING-line-unchanged model=claude-opus-4-8
+2026-06-17T03:42:00Z	Story 17.2	committed	sha=a4100a0 submodules=
