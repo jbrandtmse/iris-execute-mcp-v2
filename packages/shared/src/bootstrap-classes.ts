@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "b336b1dc285e";
+export const BOOTSTRAP_VERSION = "ee8c41a12284";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "b336b1dc285e";
+Parameter BOOTSTRAPVERSION = "ee8c41a12284";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3529,15 +3529,42 @@ ClassMethod OAuthList() As %Status
 
         If tRS.%SQLCODE '< 0 {
             While tRS.%Next() {
+                Set tId = tRS.%Get("ID")
                 Set tEntry = {}
-                Do tEntry.%Set("id", tRS.%Get("ID"))
-                Do tEntry.%Set("issuerEndpoint", tRS.%Get("IssuerEndpoint"))
-                Do tEntry.%Set("description", tRS.%Get("Description"))
-                Do tEntry.%Set("supportedScopes", tRS.%Get("SupportedScopes"))
-                Do tEntry.%Set("accessTokenInterval", +tRS.%Get("AccessTokenInterval"), "number")
-                Do tEntry.%Set("authorizationCodeInterval", +tRS.%Get("AuthorizationCodeInterval"), "number")
-                Do tEntry.%Set("refreshTokenInterval", +tRS.%Get("RefreshTokenInterval"), "number")
-                Do tEntry.%Set("signingAlgorithm", tRS.%Get("SigningAlgorithm"))
+                Do tEntry.%Set("id", tId)
+                ; IssuerEndpoint (an OAuth2.Endpoint %SerialObject) and SupportedScopes
+                ; (an array collection) serialize as opaque $List bytes when read as raw
+                ; SQL columns. Open the object and read logical values via accessors:
+                ; IssuerEndpoint.GetServerURL() reconstructs the URL, and SupportedScopes
+                ; is enumerated into a JSON array of scope names.
+                Set tCfg = ##class(OAuth2.Server.Configuration).%OpenId(tId)
+                If $IsObject(tCfg) {
+                    Set tIssuer = ""
+                    If $IsObject(tCfg.IssuerEndpoint) Set tIssuer = tCfg.IssuerEndpoint.GetServerURL()
+                    Do tEntry.%Set("issuerEndpoint", tIssuer)
+                    Do tEntry.%Set("description", tCfg.Description)
+                    Set tScopeArr = []
+                    Set tScopeKey = ""
+                    For {
+                        Set tScopeDesc = tCfg.SupportedScopes.GetNext(.tScopeKey)
+                        If tScopeKey = "" Quit
+                        Do tScopeArr.%Push(tScopeKey)
+                    }
+                    Do tEntry.%Set("supportedScopes", tScopeArr)
+                    Do tEntry.%Set("accessTokenInterval", +tCfg.AccessTokenInterval, "number")
+                    Do tEntry.%Set("authorizationCodeInterval", +tCfg.AuthorizationCodeInterval, "number")
+                    Do tEntry.%Set("refreshTokenInterval", +tCfg.RefreshTokenInterval, "number")
+                    Do tEntry.%Set("signingAlgorithm", tCfg.SigningAlgorithm)
+                } Else {
+                    ; Fallback to raw SQL values if the object cannot be opened.
+                    Do tEntry.%Set("issuerEndpoint", tRS.%Get("IssuerEndpoint"))
+                    Do tEntry.%Set("description", tRS.%Get("Description"))
+                    Do tEntry.%Set("supportedScopes", tRS.%Get("SupportedScopes"))
+                    Do tEntry.%Set("accessTokenInterval", +tRS.%Get("AccessTokenInterval"), "number")
+                    Do tEntry.%Set("authorizationCodeInterval", +tRS.%Get("AuthorizationCodeInterval"), "number")
+                    Do tEntry.%Set("refreshTokenInterval", +tRS.%Get("RefreshTokenInterval"), "number")
+                    Do tEntry.%Set("signingAlgorithm", tRS.%Get("SigningAlgorithm"))
+                }
                 Do tServers.%Push(tEntry)
             }
         }
@@ -3680,7 +3707,18 @@ ClassMethod OAuthManage() As %Status
                     }
 
                     Set tConfig = ##class(OAuth2.Server.Configuration).%New()
-                    Set tConfig.IssuerEndpoint = tIssuerURL
+                    ; IssuerEndpoint is an OAuth2.Endpoint (%SerialObject) — NOT a string.
+                    ; A scalar assignment (Set tConfig.IssuerEndpoint = tIssuerURL) silently
+                    ; produced an endpoint with empty Host/Prefix, so the issuer URL was lost
+                    ; (GetServerURL then returned just "https://"). Parse the URL into the
+                    ; Host/Port/Prefix/UseSSL sub-properties the way the IRIS portal does.
+                    Do ##class(%Net.URLParser).Decompose(tIssuerURL, .tUrlParts)
+                    Set tConfig.IssuerEndpoint.Host = $Get(tUrlParts("host"))
+                    Set tConfig.IssuerEndpoint.Port = $Get(tUrlParts("port"))
+                    Set tEndpointPrefix = $Get(tUrlParts("path"))
+                    If $Extract(tEndpointPrefix, 1) = "/" Set tEndpointPrefix = $Extract(tEndpointPrefix, 2, *)
+                    Set tConfig.IssuerEndpoint.Prefix = tEndpointPrefix
+                    Set tConfig.IssuerEndpoint.UseSSL = ($ZConvert($Get(tUrlParts("scheme")), "L") '= "http")
                     If tBody.%IsDefined("description") Set tConfig.Description = tBody.%Get("description")
                     ; SupportedScopes is an "array Of %String" (Required) keyed by scope
                     ; name with the scope's description as the value. It is a COLLECTION,
