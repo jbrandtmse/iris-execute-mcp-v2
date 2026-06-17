@@ -120,7 +120,9 @@ export const backupManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Namespace override (optional; backup operations are %SYS-scoped, so this is usually omitted)",
+        "Accepted but has NO EFFECT: backup operations are instance-wide / " +
+          "%SYS-scoped (Backup.General runs in %SYS regardless of namespace), so " +
+          "any value passed here is ignored. Retained for backward compatibility.",
       ),
   }),
   annotations: {

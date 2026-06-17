@@ -34,7 +34,13 @@ export const productionItemTool: ToolDefinition = {
     "explicitly when there is no active production.\n\n" +
     "The mutating actions add/remove are opt-in under tool governance and are DISABLED " +
     "by default until enabled via IRIS_GOVERNANCE; enable/disable/get/set are " +
-    "grandfathered (always available).",
+    "grandfathered (always available).\n\n" +
+    "NOTE (visibility of a just-added item): 'add'/'remove' persist to the production " +
+    "class definition (XData), while 'get'/'set' read the Ens.Config.Item SQL extent. " +
+    "The extent is re-synced from the class only on the next add/remove (LoadFromClass). " +
+    "So an item created by 'add' is NOT visible to an immediate 'get'/'set' until the " +
+    "next add/remove (or a recompile) syncs the extent — this is an accepted IRIS " +
+    "persistence-model split, not an error.",
   inputSchema: z.object({
     action: z
       .enum(["add", "remove", "enable", "disable", "get", "set"])

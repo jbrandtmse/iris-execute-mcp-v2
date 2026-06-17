@@ -58,6 +58,63 @@ describe("iris_process_manage", () => {
     expect(processManageTool.annotations.destructiveHint).toBe(true);
   });
 
+  // ── namespace param: accepted-but-ignored (Story 18.0, CR 16.1-1) ──
+
+  it("namespace description states the value has NO EFFECT (%SYS-scoped)", () => {
+    const shape = (
+      processManageTool.inputSchema as unknown as {
+        shape: { namespace: { description?: string } };
+      }
+    ).shape;
+    const desc = shape.namespace.description ?? "";
+    expect(desc).toContain("NO EFFECT");
+    expect(desc).toContain("%SYS-scoped");
+  });
+
+  it("namespace param is still accepted and forwarded without error (back-compat)", async () => {
+    mockHttp.get.mockResolvedValue(envelope(sampleDetail));
+
+    const result = await processManageTool.handler(
+      { action: "get", pid: 1234, namespace: "%SYS" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining("namespace=%25SYS"),
+    );
+  });
+
+  it("an empty-string namespace is accepted and dropped from the query path (accepted-but-ignored)", async () => {
+    mockHttp.get.mockResolvedValue(envelope(sampleDetail));
+
+    const result = await processManageTool.handler(
+      { action: "get", pid: 1234, namespace: "" },
+      ctx,
+    );
+
+    // Empty string is treated as "not supplied" — accepted without error and
+    // never appended to the wire (the param has no effect either way).
+    expect(result.isError).toBeUndefined();
+    const calledPath = String(mockHttp.get.mock.calls[0]?.[0] ?? "");
+    expect(calledPath).not.toContain("namespace=");
+  });
+
+  it("an empty-string namespace is accepted and dropped from the control POST body (accepted-but-ignored)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "suspend", pid: 1234, refused: 0, success: 1 }),
+    );
+
+    const result = await processManageTool.handler(
+      { action: "suspend", pid: 1234, namespace: "" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const body = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("namespace");
+  });
+
   // ── get (read) ──
 
   it("get should call GET /monitor/process?pid= and return detail", async () => {

@@ -3630,3 +3630,26 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 17.4.2** — Live-verify each tool/enhancement on HSCUSTOM with safe calls (Rule #16).
 - **AC 17.4.3** — `iris-interop` + `iris-dev` READMEs + `tool_support.md` + `iris-mcp-all` + CHANGELOG updated; counts rolled up.
 - **AC 17.4.4** — Deploy via glob-prefixed `iris_doc_load` (Rule #17).
+
+## Epic 18: Deferred-Work Cleanup & Hardening (post-Epic-17)
+
+**Goal**: Close the feedback loop from the Epic 17 retrospective — triage the deferred items accumulated across Epics 16–17, resolve the ones worth doing now, and formally re-defer/close the rest with rationale. **Minimal epic: a single cleanup story (18.0); no new feature tools.**
+
+**Scope**: Triage-and-resolve only. Story 18.0 reviews `deferred-work.md` (Epic 17 Action Item #1: CR 17.2-1…-5 + the cross-tool `namespace`-accepted-but-ignored pattern CR 16.1-1/16.2-1/16.3 + generator/drift-test de-dup CR 16.0-1/-2) and the carried `iris_backup_manage restore` deferral (Epic 17 retro AI#4), folds the **include-now** items into 18.0 itself, and re-defers the rest with explicit rationale. **Strictly additive — any code fix must preserve existing behavior; ObjectScript changes (if any) carry a `BOOTSTRAP_VERSION` regen per Rule #24, governance baseline stays frozen `1e62c5ad5bf7` per Rule #23/#25.**
+
+**Stories**:
+- 18.0 Epic 17 deferred cleanup — triage all carried deferred items + re-affirm AI#4 backup-restore (the retrospective-review gate authors this story's triage table)
+
+**Out of scope (deferred)**: any new tool, action, or capability; restore action for `iris_backup_manage` (re-affirmed deferred per AI#4 — IRIS restore is interactive with no scriptable classmethod).
+
+### Story 18.0: Epic 17 Deferred Cleanup
+**As a** maintainer, **I want** the Epic 16–17 deferred items triaged and the include-now ones resolved, **so that** accumulation does not go silent and the next epic starts from a clean ledger.
+**Acceptance Criteria**:
+- **AC 18.0.1** — Every open item in `deferred-work.md` originating from Epics 16–17 (CR 16.0-1/-2, CR 16.1-x, CR 16.2-x, CR 16.3-x, CR 17.1-x, CR 17.2-1…-5) plus retro AI#4 is triaged into one of: **include-now** (fixed in this story), **re-defer** (with rationale + target), or **drop/won't-fix** (with rationale). A triage table is recorded in the story file.
+- **AC 18.0.2** — Each **include-now** fix is implemented and preserves existing behavior (strictly additive; Rule #19 back-compat where a touched surface has existing consumers).
+- **AC 18.0.3** — If any ObjectScript handler is modified, `bootstrap-classes.ts` is regenerated and `BOOTSTRAP_VERSION` moved in this same story (Rule #24); `bootstrap.test.ts` green. If no ObjectScript change, bootstrap hash stays unchanged and that is asserted.
+- **AC 18.0.4** — Governance baseline stays frozen (`1e62c5ad5bf7`, 141 keys); `gen:governance-baseline:check` exit 0 (Rule #23/#25); no bare generator run.
+- **AC 18.0.5** — `deferred-work.md` is updated: include-now items marked resolved (with the fix), re-deferred items retained with updated rationale/target, dropped items closed with rationale. AI#4 backup-restore re-affirmed as deferred.
+- **AC 18.0.6** — Full monorepo test suite green; lint + type-check clean. Any code path touched is exercised by an existing or newly-added test.
+
+**Implementation Notes**: This is a lead-authored triage story (retrospective-review gate). Read `deferred-work.md` Epic 16–17 sections and the Epic 17 retro Action Items. Apply Rule #16 (live-probe) before trusting any IRIS-API claim in a deferred item's suggested resolution. For include-now candidates, prefer low-risk, well-scoped fixes (e.g. the `namespace`-param schema/description cleanup, the generator/drift-test shared-helper de-dup) over reopening larger IRIS-pattern limitations (extent/XData split — keep deferred, mirrors Story 5-3 won't-fix).

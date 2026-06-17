@@ -212,6 +212,14 @@ describe("iris_production_item", () => {
     expect(productionItemTool.name).toBe("iris_production_item");
   });
 
+  // ── Story 18.0 (CR 17.2-4 doc-only): extent/XData add-then-get visibility note ──
+
+  it("description documents the add-then-get extent/XData visibility split (Rule #27)", () => {
+    const desc = productionItemTool.description ?? "";
+    expect(desc).toContain("NOT visible to an immediate 'get'/'set'");
+    expect(desc).toContain("LoadFromClass");
+  });
+
   // ════════════════════════════════════════════════════════════════
   // Story 17.2 — ADD / REMOVE (additive mutating actions)
   // ════════════════════════════════════════════════════════════════

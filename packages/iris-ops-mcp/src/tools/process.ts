@@ -62,8 +62,10 @@ export const processManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Namespace override (optional; process operations are %SYS-scoped, so " +
-          "this is usually omitted)",
+        "Accepted but has NO EFFECT: process inspection/control is %SYS-scoped " +
+          "(it operates against the system-wide process table regardless of " +
+          "namespace), so any value passed here is ignored. Retained for " +
+          "backward compatibility.",
       ),
   }),
   annotations: {

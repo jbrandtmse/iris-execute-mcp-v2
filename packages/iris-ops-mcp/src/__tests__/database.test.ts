@@ -42,6 +42,53 @@ describe("iris_database_action", () => {
     expect(databaseActionTool.annotations.destructiveHint).toBe(true);
   });
 
+  // ── namespace param: accepted-but-ignored (Story 18.0, CR 16.2-1) ──
+
+  it("namespace description states the value has NO EFFECT (%SYS-scoped)", () => {
+    const shape = (
+      databaseActionTool.inputSchema as unknown as {
+        shape: { namespace: { description?: string } };
+      }
+    ).shape;
+    const desc = shape.namespace.description ?? "";
+    expect(desc).toContain("NO EFFECT");
+    expect(desc).toContain("%SYS-scoped");
+  });
+
+  it("namespace param is still accepted and forwarded without error (back-compat)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "mount", directory: DIR, success: 1 }),
+    );
+
+    const result = await databaseActionTool.handler(
+      { action: "mount", directory: DIR, namespace: "%SYS" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ namespace: "%SYS" }),
+    );
+  });
+
+  it("an empty-string namespace is accepted and dropped from the POST body (accepted-but-ignored)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ action: "mount", directory: DIR, success: 1 }),
+    );
+
+    const result = await databaseActionTool.handler(
+      { action: "mount", directory: DIR, namespace: "" },
+      ctx,
+    );
+
+    // Empty string is treated as "not supplied" — accepted without error and
+    // never placed on the wire (the param has no effect either way).
+    expect(result.isError).toBeUndefined();
+    const body = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("namespace");
+  });
+
   // ── mount ──
 
   it("mount should POST /monitor/database/action with {action, directory}", async () => {
