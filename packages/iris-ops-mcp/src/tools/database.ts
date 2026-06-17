@@ -109,7 +109,10 @@ export const databaseActionTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Namespace override (optional; database operations are %SYS-scoped, so this is usually omitted)",
+        "Accepted but has NO EFFECT: database maintenance is %SYS-scoped " +
+          "(SYS.Database keys on the directory path and runs in %SYS regardless " +
+          "of namespace), so any value passed here is ignored. Retained for " +
+          "backward compatibility.",
       ),
   }),
   annotations: {

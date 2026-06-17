@@ -460,8 +460,12 @@ ClassMethod ItemManage() As %Status
                 ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
-                Else { Do ..ApplyArbitrarySetting(tItem, tKey, tValue) Do tUpdated.%Push(tKey) }
+                ; CR 17.2-1: propagate the helper's %Status — a failed setting
+                ; application must surface as an error, not be reported as updated.
+                Else { Set tApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Do tUpdated.%Push(tKey) }
             }
+            ; Stop after a setting-application failure inside the iterator.
+            If $$$ISERR($Get(tApplySC, $$$OK)) Quit
 
             Set tSC = tItem.%Save()
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -490,6 +494,18 @@ ClassMethod ItemManage() As %Status
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+            ; CR 17.2-3: reject a host className that does not exist / is not compiled.
+            ; SaveToClass would otherwise swallow an OnConfigChange <METHOD DOES NOT
+            ; EXIST> and persist a broken item. %Dictionary.CompiledClass.%ExistsId
+            ; is true only for a successfully-compiled class (stricter than ClassDefinition).
+            If '##class(%Dictionary.CompiledClass).%ExistsId(tClassName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' does not exist or is not compiled")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
             If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
@@ -500,11 +516,30 @@ ClassMethod ItemManage() As %Status
             ; Sync the config-object extent from the production class XData (source of
             ; truth) before opening — SaveToClass writes the class, not the extent, so
             ; an unsynced %OpenId would see a stale item list (live-verified Story 17.2).
-            Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            ; CR 17.2-5: check the LoadFromClass %Status — a silent failure here would
+            ; leave a stale/half-loaded extent for the subsequent %OpenId / dup check.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
             If '$IsObject(tProd) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; CR 17.2-3: reject a duplicate item Name in the production — the
+            ; (Production,Name) index is not unique, so add is otherwise non-idempotent.
+            Set tDup = tProd.FindItemByConfigName(tItemName)
+            If $IsObject(tDup) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' already exists in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -516,6 +551,7 @@ ClassMethod ItemManage() As %Status
 
             ; Optional settings on the new item (same routing as 'set').
             Set tUpdated = []
+            Set tAddApplySC = $$$OK
             Set tSettings = tBody.%Get("settings")
             If $IsObject(tSettings) {
                 Set tIter = tSettings.%GetIterator()
@@ -525,8 +561,16 @@ ClassMethod ItemManage() As %Status
                     ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
-                    Else { Do ..ApplyArbitrarySetting(tItem, tKey, tValue) Do tUpdated.%Push(tKey) }
+                    ; CR 17.2-1: propagate the helper's %Status instead of swallowing it.
+                    Else { Set tAddApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tAddApplySC) Quit  Do tUpdated.%Push(tKey) }
                 }
+            }
+            ; Surface a setting-application failure before persisting the new item.
+            If $$$ISERR(tAddApplySC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tAddApplySC))
+                Set tSC = $$$OK
+                Quit
             }
 
             Do tProd.Items.Insert(tItem)
@@ -558,7 +602,15 @@ ClassMethod ItemManage() As %Status
             }
             ; Sync the config-object extent from the production class XData before
             ; opening (see add branch) so FindItemByConfigName sees the current items.
-            Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            ; CR 17.2-5: check the LoadFromClass %Status — a silent failure would
+            ; leave a stale/half-loaded extent for the FindItemByConfigName lookup.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
             Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
             If '$IsObject(tProd) {
                 Set $NAMESPACE = tOrigNS
@@ -605,13 +657,30 @@ ClassMethod ApplyArbitrarySetting(pItem As Ens.Config.Item, pKey As %String, pVa
     Try {
         Set tTarget = "Adapter"
         Set tName = pKey
-        Set tAt = $Find(pKey, "@")
+        ; CR 17.2-2: scan the LAST '@' (not $Find's first '@'), so a setting whose
+        ; own name embeds '@' parses correctly. A trailing '@<suffix>' segment
+        ; forces the setting Target, but ONLY for the validated Host/Adapter targets.
+        Set tAt = 0
+        For tI = 1:1:$Length(pKey) {
+            If $Extract(pKey, tI) = "@" Set tAt = tI
+        }
         If tAt > 0 {
-            Set tSuffix = $Extract(pKey, tAt, *)
-            If (tSuffix = "Host") || (tSuffix = "Adapter") {
-                Set tTarget = tSuffix
-                Set tName = $Extract(pKey, 1, tAt - 2)
+            Set tSuffix = $Extract(pKey, tAt + 1, *)
+            Set tBase = $Extract(pKey, 1, tAt - 1)
+            ; Reject an unknown suffix instead of silently folding it into the name
+            ; with the default Adapter target — a typo'd/unknown suffix would
+            ; otherwise be reported as a successful update against the wrong key.
+            If (tSuffix '= "Host") && (tSuffix '= "Adapter") {
+                Set tSC = $$$ERROR($$$GeneralError, "Setting key '"_pKey_"' has an unknown '@' target suffix '"_tSuffix_"'; expected '@Host' or '@Adapter'")
+                Quit
             }
+            ; Reject a leading '@' (empty setting Name before the suffix).
+            If tBase = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Setting key '"_pKey_"' has an empty name before the '@"_tSuffix_"' target suffix")
+                Quit
+            }
+            Set tTarget = tSuffix
+            Set tName = tBase
         }
         Set tSetting = pItem.FindSettingByName(tName, tTarget)
         If '$IsObject(tSetting) {

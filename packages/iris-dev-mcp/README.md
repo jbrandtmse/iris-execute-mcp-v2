@@ -153,6 +153,8 @@ Add to your Cursor MCP settings:
 | `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
 | `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), or currently-running statements (`running`) | `action`, `query?`, `filter?`, `maxRows?`, `namespace?` | readOnly, idempotent |
 
+> **Governance defaults:** all four `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
+
 ### Server Tools
 
 | Tool | Description | Key Parameters | Annotations |

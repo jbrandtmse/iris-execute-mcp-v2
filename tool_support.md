@@ -44,6 +44,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 **Mix:** 19 Atelier · 6 ExecuteMCPv2 · 0 other
 
+> **Epic 17 (2026-06-16) — governance defaults:** added `iris_sql_analyze` (`explain`/`stats`/`indexUsage`/`running`). All four actions are governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled). The tool is Atelier/SQL-only (no ObjectScript handler, no bootstrap contribution).
+
 ---
 
 ## `@iris-mcp/admin` — Administration (26)
@@ -148,6 +150,8 @@ their Zod schemas but silently dropped them server-side.
 
 **Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
 
+> **Epic 17 (2026-06-16) — governance defaults:** added `iris_default_settings_manage` (`list`/`get`/`set`/`delete`) and extended `iris_production_item` with `add`/`remove` actions plus arbitrary host/adapter settings (interop stays 19 → 20: one new tool; `iris_production_item` is enhanced in place). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_default_settings_manage:set`/`:delete` and `iris_production_item:add`/`:remove`. Reads/pre-existing actions are **enabled by default**: `iris_default_settings_manage:list`/`:get` and the original `iris_production_item:enable`/`:disable`/`:get`/`:set` (the latter four are pre-governance baseline keys). *Epic 18 (2026-06-17) hardened the new add/arbitrary-settings surface — bad-className/duplicate-name/unknown-`@`-suffix inputs are now rejected before any write — without changing these governance defaults.*
+
 ---
 
 ## `@iris-mcp/ops` — Operations & Monitoring (20)
@@ -176,6 +180,8 @@ their Zod schemas but silently dropped them server-side.
 | 20 | `iris_backup_manage` | 🟥 ExecuteMCPv2 | `/monitor/backup/manage` |
 
 **Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**.
+
+> **Epic 16 (2026-06-16) — governance defaults:** added `iris_process_manage`, `iris_database_action`, and `iris_backup_manage` (ops 17 → 20). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_process_manage:terminate`/`:suspend`/`:resume`; **all six** `iris_database_action` actions (`mount`/`dismount`/`compact`/`defragment`/`truncate`/`expandVolume`); and `iris_backup_manage:run`/`:freeze`/`:thaw`. Reads are **enabled by default**: `iris_process_manage:get` and `iris_backup_manage:listHistory`. (`iris_backup_manage` has no `restore` action — IRIS restore is interactive with no scriptable classmethod; see the `iris-ops` README.)
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
 

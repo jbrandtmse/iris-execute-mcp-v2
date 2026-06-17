@@ -206,6 +206,8 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 
 > **Note:** `iris_audit_manage` configures auditing and manages the audit *log*. It is distinct from `@iris-mcp/ops`'s read-only `iris_audit_events`, which only queries audit events.
 
+> **Governance defaults (service / LDAP / X.509 / audit):** the **write** actions of these tools are classified `write` and are **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_service_manage:enable`/`:disable`/`:set`, `iris_ldap_manage:create`/`:modify`/`:delete`, `iris_x509_manage:import`/`:delete`, and `iris_audit_manage:enable`/`:disable`/`:configureEvent`/`:purge`/`:export`. Their **read** actions are **enabled by default** — `:list`/`:get`/`:test`/`:status`/`:view`. (`iris_resource_manage:grant`/`:revoke` follow the same rule; see the SQL-privilege governance note above.)
+
 ---
 
 ## Tool Examples

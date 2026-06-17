@@ -546,8 +546,25 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 ---
 
-## Rules captured: 29
-## Epics contributing: 15 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+## 30. Per-epic docs rollup must flag governance default-disabled state
+
+**Context:** A per-epic documentation rollup (the closing "docs rollup" story, or any doc pass) that adds a NEW governed tool or action to the user-facing docs (README, per-server READMEs, `tool_support.md`, catalogs) on a governance-wired server.
+
+**Rule:** Updating the docs for a new governed tool/action is NOT complete when the catalog row + tool count are added. The rollup MUST ALSO state **which new actions are default-disabled** under `IRIS_GOVERNANCE` (the `write`-classified actions) vs **enabled by default** (reads + pre-governance baseline). Put the callout where a reader of that tool will see it — the per-server README's tool section AND the authoritative catalog (`tool_support.md`) — mirroring the established Epic-15 note style. A user deciding whether to enable a tool needs the default-state at the point of documentation, not only the abstract default-seed rule buried in the governance section.
+
+**Why:** Epic 18 Story 18.0 close-out (commits `b7e7da0`, `e4bcad8`): the per-epic rollups for Epics 16 (16.4) and 17 (17.4) added catalog rows + refreshed counts but omitted the governance default-disabled callout that Epic 15's rollup (15.6) had included. So `iris_process_manage`/`iris_database_action`/`iris_backup_manage` (Epic 16) and `iris_default_settings_manage`/`iris_production_item` add-remove/`iris_sql_analyze` (Epic 17) were documented without indicating which actions ship default-disabled. The Project Lead caught it at Epic 18 close and required a doc pass across README + `tool_support.md` + every per-server README. The gap is recurring-shape — it would silently recur on every future governed-tool epic — so it is a rule, not a one-off.
+
+**How to apply:**
+- Closing-story docs-rollup AC: add an explicit "state default-disabled vs default-enabled for each new tool/action" requirement, not just "add catalog row + bump counts."
+- Code review of a docs-rollup story: a new governed tool documented WITHOUT its default-state callout is a finding.
+- The default-state derives mechanically from `mutates` (writes → default-disabled, reads → enabled) per Rule #23/#28 — so the callout is a copy of the classification the tool already carries, never a fresh judgment.
+
+---
+
+## Rules captured: 30
+## Epics contributing: 16 (retros 2026-04-21, 2026-04-22, 2026-06-16, 2026-06-17)
+
+**Audit note (2026-06-17, Epic 18):** Epic 18 was a minimal single-story cleanup epic (Story 18.0 only — Epic 17 deferred-item triage + include-now hardening). The retro nominated 1 rule candidate; the Project Lead confirmed it passes the general-pattern bar (Rule #30 — per-epic docs rollup must flag governance default-disabled state). It generalizes beyond its triggering incident: the docs-rollup governance-callout gap would silently recur on every future governed-tool epic (it was the Epic 15 rollup that included the callout; Epics 16/17 rollups omitted it). Existing rules were exercised and held, not re-codified (Rule #1): Rule #16 (18.0 dev re-probed `Ens.Config.*` + `Interop.cls` before trusting deferred-item suggestions), Rule #19 (the new guards stayed strictly additive — 17.2 back-compat snapshots green), Rule #23/#25 (baseline frozen `1e62c5ad5bf7`), Rule #24 (bootstrap regen `39dc932907cb`→`fd3f065bcd3c`), Rule #26 (live-HTTP smoke proved 5 guarded-path rejections with 0-row no-write integrity), Rule #27 (`LoadFromClass` sync preserved in CR 17.2-5), Rule #29 (the `add` className/dup-name guard is the analogous input-hygiene guard to the `||` IdKey guard). 2 review items (CR 18.0-1 MED, CR 18.0-2 LOW) are tracked work in `deferred-work.md`, not patterns — routed to the next cleanup-epic Story X.0.
 
 **Audit note (2026-06-16, Epic 17):** Epic 17 retro nominated 3 rule candidates; the Project Lead confirmed all 3 pass the general-pattern bar (Rules #27, #28, #29). Each generalizes beyond its triggering incident: #27 (Ens.Config XData-vs-extent / LoadFromClass) applies to any future Interop config-item handler and was confirmed both in 17.2 dev (the add→remove round-trip) and the 17.2 live smoke (get-after-add miss); #28 (reads still need `mutates`) corrects the Story 17.0 probe doc and applies to every future read tool/action on a governed server; #29 (composite-IdKey delimiter guard) applies to any compound-id-from-input handler and was proven live. Existing rules were exercised and held, not re-codified: Rule #16 (pre-spec probe caught 2 discrepancies in 17.0 + a 3rd in 17.2), Rule #19 (17.2 back-compat gate, strengthened to full-object `toEqual`), Rule #24 (per-story bootstrap regen `fe972c4cb317`→`39dc932907cb`; 17.4 verified idempotent — NOT a deferred bump), Rule #23/#25 (baseline frozen `1e62c5ad5bf7` across the epic). No candidates skipped; 5 MED/LOW review items deferred to `deferred-work.md` (tracked work, not patterns) for Epic 18 Story 18.0 triage.
 
