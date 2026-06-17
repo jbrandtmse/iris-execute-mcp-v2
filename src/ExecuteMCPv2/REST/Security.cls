@@ -1504,7 +1504,12 @@ ClassMethod OAuthList() As %Status
 
         ; List OAuth2 server definitions via SQL
         Set tStatement = ##class(%SQL.Statement).%New()
-        Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2.Server.Configuration")
+        ; SQL table is OAuth2_Server.Configuration — the package dots (OAuth2.Server)
+        ; collapse to an underscore in the SQL schema name. The two-dot form
+        ; "OAuth2.Server.Configuration" is invalid SQL, so %Prepare failed and the
+        ; handler silently returned an empty server list (the "table may not exist"
+        ; fallback below) — meaning servers were NEVER listed. (Bug fix.)
+        Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2_Server.Configuration")
         If $$$ISERR(tSC) {
             ; Table may not exist - return empty results
             Set $NAMESPACE = tOrigNS
@@ -1674,7 +1679,37 @@ ClassMethod OAuthManage() As %Status
                     Set tConfig = ##class(OAuth2.Server.Configuration).%New()
                     Set tConfig.IssuerEndpoint = tIssuerURL
                     If tBody.%IsDefined("description") Set tConfig.Description = tBody.%Get("description")
-                    If tBody.%IsDefined("supportedScopes") Set tConfig.SupportedScopes = tBody.%Get("supportedScopes")
+                    ; SupportedScopes is an "array Of %String" (Required) keyed by scope
+                    ; name with the scope's description as the value. It is a COLLECTION,
+                    ; so it must be populated member-by-member — a scalar/array assignment
+                    ; (Set tConfig.SupportedScopes = <value>) fails with <METHOD DOES NOT
+                    ; EXIST>SupportedScopesSet *GetNext on the collection setter. The MCP TS
+                    ; layer sends scopes as a JSON array; a direct REST caller may send a
+                    ; space-/comma-separated string. Handle both.
+                    Set tScopes = tBody.%Get("supportedScopes")
+                    If $IsObject(tScopes) {
+                        Set tScopeIter = tScopes.%GetIterator()
+                        While tScopeIter.%GetNext(.tScopeKey, .tScopeVal) {
+                            Set tScopeVal = $ZStrip(tScopeVal, "<>W")
+                            If tScopeVal '= "" Do tConfig.SupportedScopes.SetAt(tScopeVal, tScopeVal)
+                        }
+                    } ElseIf tScopes '= "" {
+                        Set tScopes = $Translate(tScopes, ",", " ")
+                        For tScopeIdx = 1:1:$Length(tScopes, " ") {
+                            Set tScope = $ZStrip($Piece(tScopes, " ", tScopeIdx), "<>W")
+                            If tScope '= "" Do tConfig.SupportedScopes.SetAt(tScope, tScope)
+                        }
+                    }
+                    ; CustomizationNamespace and CustomizationRoles are also Required by
+                    ; OAuth2.Server.Configuration but were never set (so %Save always failed
+                    ; even once the scopes crash was fixed). Wire them from the body.
+                    ; CustomizationNamespace defaults to the request namespace when omitted;
+                    ; CustomizationRoles has no safe default (it grants roles to customization
+                    ; code), so an omitted/empty value surfaces the clean IRIS "required" error.
+                    Set tCustNS = tBody.%Get("customizationNamespace")
+                    If tCustNS = "" Set tCustNS = tOrigNS
+                    Set tConfig.CustomizationNamespace = tCustNS
+                    If (tBody.%Get("customizationRoles") '= "") Set tConfig.CustomizationRoles = tBody.%Get("customizationRoles")
                     If tBody.%IsDefined("accessTokenInterval") Set tConfig.AccessTokenInterval = +tBody.%Get("accessTokenInterval")
                     If tBody.%IsDefined("authorizationCodeInterval") Set tConfig.AuthorizationCodeInterval = +tBody.%Get("authorizationCodeInterval")
                     If tBody.%IsDefined("refreshTokenInterval") Set tConfig.RefreshTokenInterval = +tBody.%Get("refreshTokenInterval")
@@ -1742,7 +1777,10 @@ ClassMethod OAuthManage() As %Status
                 }
 
                 If tEntity = "server" {
-                    Set tSC = ##class(OAuth2.Server.Configuration).Delete(tName)
+                    ; OAuth2.Server.Configuration is a singleton; its Delete() takes NO
+                    ; arguments. Passing tName threw <PARAMETER> (server delete was broken).
+                    ; The 'name' param is accepted for API symmetry but not needed here.
+                    Set tSC = ##class(OAuth2.Server.Configuration).Delete()
                 }
                 ElseIf tEntity = "client" {
                     Set tSC = ##class(OAuth2.Client).Delete(tName)

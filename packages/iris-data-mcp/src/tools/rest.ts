@@ -236,7 +236,23 @@ export const restManageTool: ToolDefinition = {
       // FEAT-6: summary mode for get action (default)
       if (action === "get" && !useFullSpec && result && typeof result === "object") {
         const raw = result as Record<string, unknown>;
-        const swaggerRaw = raw.swaggerSpec as Record<string, unknown> | null | undefined;
+        // The Mgmnt API `get` returns the swagger spec at the TOP LEVEL of the
+        // result (keys like `swagger`/`info`/`paths`/`basePath`), NOT nested under
+        // a `swaggerSpec` field the way the `list` rows are. Accept either shape:
+        // prefer a nested `swaggerSpec` object if present, otherwise treat the
+        // result itself as the spec when it carries swagger/openapi markers.
+        // (Previously this only read `raw.swaggerSpec`, so the summary was always
+        // null for spec-first apps even though the full spec was clearly present.)
+        let swaggerRaw = raw.swaggerSpec as Record<string, unknown> | null | undefined;
+        if (
+          (!swaggerRaw || typeof swaggerRaw !== "object") &&
+          (raw.swagger !== undefined ||
+            raw.openapi !== undefined ||
+            raw.info !== undefined ||
+            raw.paths !== undefined)
+        ) {
+          swaggerRaw = raw;
+        }
         let swaggerSummary: Record<string, unknown> | null = null;
         if (swaggerRaw && typeof swaggerRaw === "object") {
           // Count paths and definitions to avoid sending the full blob
@@ -252,10 +268,12 @@ export const restManageTool: ToolDefinition = {
             version: info?.version ?? null,
           };
         }
+        // The `get` spec body carries no name/dispatchClass/namespace of its own,
+        // so fall back to the requested application path and resolved namespace.
         const summarized = {
-          name: raw.name,
-          dispatchClass: raw.dispatchClass,
-          namespace: raw.namespace,
+          name: raw.name ?? application,
+          dispatchClass: raw.dispatchClass ?? null,
+          namespace: raw.namespace ?? ns,
           swaggerSpec: swaggerSummary,
         };
         return {
