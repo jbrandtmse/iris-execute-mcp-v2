@@ -8,3 +8,4 @@
 2026-06-17T03:54:15Z	Story 18.0	qa_complete	model=claude-opus-4-8 tests_added=4 first_run_failures=0 closing_sections_present=true
 2026-06-17T04:03:56Z	Story 18.0	cr_complete	model=claude-opus-4-8 resolved=1 deferred=2 dismissed=5 high=0 med=1 low=1 clarifications=0 closing_sections_present=true
 2026-06-17T04:06:43Z	Story 18.0	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-http-5-rejections-no-write model=claude-opus-4-8
+2026-06-17T04:07:18Z	Story 18.0	committed	sha=2dc3536 submodules=
