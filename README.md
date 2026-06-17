@@ -267,6 +267,22 @@ The suite exposes an MCP **resource** (alongside its tools) so a client can read
 
 Reading the resource returns the effective policy map as JSON. It is **advisory** — a convenience so a client can avoid issuing calls it knows are blocked. The call-time gate remains the authoritative boundary; the resource never grants or denies anything on its own.
 
+### Default-disabled write actions in the current release
+
+Per the default-seed rule above, the **new write actions** added after governance shipped are **disabled by default** (opt-in via `IRIS_GOVERNANCE`); their sibling reads are enabled by default. The set shipped to date:
+
+| Server | Tool | Default-**disabled** (write) actions | Default-enabled (read/pre-existing) |
+|---|---|---|---|
+| admin | `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_audit_manage` | the `create`/`modify`/`delete`/mutating actions; `iris_resource_manage:grant`/`:revoke` | `list`/`get`/`status`/`test`/`listPrivileges` |
+| ops | `iris_process_manage` | `terminate`, `suspend`, `resume` | `get` |
+| ops | `iris_database_action` | `mount`, `dismount`, `compact`, `defragment`, `truncate`, `expandVolume` (all six) | — |
+| ops | `iris_backup_manage` | `run`, `freeze`, `thaw` | `listHistory` |
+| interop | `iris_default_settings_manage` | `set`, `delete` | `list`, `get` |
+| interop | `iris_production_item` | `add`, `remove` (new) | `enable`, `disable`, `get`, `set` (pre-governance baseline) |
+| dev | `iris_sql_analyze` | — (all four actions are reads) | `explain`, `stats`, `indexUsage`, `running` |
+
+Every **pre-governance** tool action (everything shipped before the governance layer) stays enabled by default. The authoritative per-tool catalog with endpoints and governance notes is [`tool_support.md`](tool_support.md).
+
 ### Backward Compatibility
 
 **Existing single-server `IRIS_*` setups require no changes.** This is a release-gate promise:
