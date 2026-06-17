@@ -232,7 +232,7 @@ development_status:
   16-2-iris-database-action: done
   16-3-iris-backup-manage: done
   16-4-bootstrap-bump-verification-and-docs: done
-  epic-16-retrospective: optional
+  epic-16-retrospective: done
 
   # Epic 17: Interop & Dev Tools (iris-interop-mcp + iris-dev-mcp)
   # Added 2026-06-15 via bmad-correct-course. One BOOTSTRAP_VERSION bump at Story 17.4. Additive only.
