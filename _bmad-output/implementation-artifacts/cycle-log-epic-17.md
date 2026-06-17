@@ -38,3 +38,4 @@
 2026-06-17T05:45:00Z	Story 17.4	qa_complete	spawn_at=2026-06-17T05:31:00Z model=claude-opus-4-8 tests_added=0 reason=doc-verification-closer-no-testable-surface suite=green-12/12 counts-reconcile-98 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T05:55:00Z	Story 17.4	cr_complete	spawn_at=2026-06-17T05:46:00Z model=claude-opus-4-8 resolved=0 deferred=0 dismissed=0 high=0 med=0 low=0 verdict=clean-no-findings clarifications=0 closing_sections_present=true
 2026-06-17T06:00:00Z	Story 17.4	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=docs-artifact-matches-reality:per-server-sum=98=docs-98+BOOTSTRAP_VERSION=39dc932907cb+baseline=141keys+default_settings-list-live-HTTP-200 model=claude-opus-4-8
+2026-06-17T06:02:00Z	Story 17.4	committed	sha=ea7769c submodules=
