@@ -148,7 +148,7 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/ops` — Operations & Monitoring (17)
+## `@iris-mcp/ops` — Operations & Monitoring (20)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -169,8 +169,11 @@ their Zod schemas but silently dropped them server-side.
 | 15 | `iris_task_run` | 🟥 ExecuteMCPv2 | `/task/run` |
 | 16 | `iris_task_history` | 🟥 ExecuteMCPv2 | `/task/history` |
 | 17 | `iris_config_manage` | 🟥 ExecuteMCPv2 | `/system/config` |
+| 18 | `iris_process_manage` | 🟥 ExecuteMCPv2 | `/monitor/process` + `/monitor/process/manage` |
+| 19 | `iris_database_action` | 🟥 ExecuteMCPv2 | `/monitor/database/action` |
+| 20 | `iris_backup_manage` | 🟥 ExecuteMCPv2 | `/monitor/backup/manage` |
 
-**Mix:** 0 Atelier · 17 ExecuteMCPv2 · 0 other — **fully custom**.
+**Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**.
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
 
@@ -245,7 +248,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 93-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 96-tool total.
 
 ---
 
@@ -256,9 +259,9 @@ were silently returning stale or per-process data.
 | `@iris-mcp/dev` | 18 | 6 | 0 | **24** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** |
 | `@iris-mcp/interop` | 0 | 19 | 0 | **19** |
-| `@iris-mcp/ops` | 0 | 17 | 0 | **17** |
+| `@iris-mcp/ops` | 0 | 20 | 0 | **20** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** |
-| **Total** | **18** | **70** | **5** | **93** |
+| **Total** | **18** | **73** | **5** | **96** |
 
 ---
 
@@ -270,7 +273,7 @@ were silently returning stale or per-process data.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 70 of the 93 tools (75% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 73 of the 96 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -284,7 +287,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 70 of 93 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 73 of 96 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

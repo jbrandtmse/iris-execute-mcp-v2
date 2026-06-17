@@ -31,3 +31,10 @@
 2026-06-16T23:38:48Z	Story 16.3	qa_complete	spawn_at=2026-06-16T23:14:00Z model=claude-opus-4-8 tests=packages/iris-ops-mcp/src/__tests__/backup-e2e.test.ts tests_added=8 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-16T23:48:10Z	Story 16.3	cr_complete	spawn_at=2026-06-16T23:18:00Z model=claude-opus-4-8 resolved=1 deferred=3 dismissed=3 high=1 med=0 low=0 clarifications=0 bootstrap=04984d638f8d->fe972c4cb317 closing_sections_present=true
 2026-06-16T23:48:28Z	Story 16.3	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HSCUSTOM:listHistory-success-empty+restore-deferred-REJECTED-clean+run-missing-taskName-REJECTED-no-freeze-triggered model=claude-opus-4-8
+2026-06-16T23:48:57Z	Story 16.3	committed	sha=9154c7e submodules=
+2026-06-16T23:50:30Z	Story 16.4	story_created	path=_bmad-output/implementation-artifacts/16-4-bootstrap-bump-verification-and-docs.md
+2026-06-17T00:00:22Z	Story 16.4	dev_complete	spawn_at=2026-06-16T23:30:00Z model=claude-opus-4-8 files=README.md,iris-ops-README,iris-mcp-all-README,tool_support.md,migration-v1-v2.md,CHANGELOG.md,architecture.md loc_added=docs-only clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 bootstrap=fe972c4cb317-idempotent docs=ops17->20-suite93->96 closing_sections_present=true
+2026-06-17T00:00:22Z	Story 16.4	adr_verifications_complete	result=none_required
+2026-06-17T00:03:08Z	Story 16.4	qa_complete	spawn_at=2026-06-16T23:36:00Z model=claude-opus-4-8 tests_added=0 reason=docs-only-closer count-reconciliation-verified first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-17T00:10:18Z	Story 16.4	cr_complete	spawn_at=2026-06-16T23:40:00Z model=claude-opus-4-8 resolved=0 deferred=0 dismissed=1 high=0 med=0 low=0 clarifications=0 docs-only-counts-reconcile bootstrap=fe972c4cb317-unchanged closing_sections_present=true
+2026-06-17T00:10:30Z	Story 16.4	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=govcheck-exit0-141frozen-180live+process-get-live+backup-listHistory-live+database-guard-live+counts-reconcile-suite96 model=claude-opus-4-8
