@@ -8,7 +8,7 @@ Migrate from **iris-execute-mcp** (v1) or **mcp-server-iris** (CaretDev v1) to t
 
 The original `iris-execute-mcp` provided 8 development tools over a Python/SuperServer connection. The v2 rewrite brings:
 
-- **96 tools** across 5 specialized MCP servers (up from 8 in a single server)
+- **98 tools** across 5 specialized MCP servers (up from 8 in a single server)
 - **Node.js/TypeScript** runtime instead of Python
 - **HTTP/REST connection** via the Atelier API instead of the IRIS SuperServer binary protocol
 - **Auto-bootstrap**: IRIS helper classes install automatically on first connection -- no manual import or compile step
@@ -26,7 +26,7 @@ Both v1 projects (`iris-execute-mcp` by jbrandtmse and `mcp-server-iris` by Care
 | **Runtime** | Python (FastMCP / uvx) | Node.js / TypeScript (npx) |
 | **Installation** | `pip install` / venv / `uvx` | `npx -y @iris-mcp/<package>` (no install step) |
 | **Tool naming** | `execute_command`, `get_global`, etc. | Underscore-namespaced: `iris_execute_command`, `iris_global_get`, etc. |
-| **Architecture** | Single server, 8 tools | 5 servers, 96 tools total |
+| **Architecture** | Single server, 8 tools | 5 servers, 98 tools total |
 | **IRIS classes** | `ExecuteMCP.*` (manual import required) | `ExecuteMCPv2.*` (auto-bootstrapped on first connection) |
 | **Env var: host** | `IRIS_HOSTNAME` | `IRIS_HOST` |
 | **Env var: port** | `IRIS_PORT` = `1972` (SuperServer) | `IRIS_PORT` = `52773` (web server) |
@@ -78,6 +78,7 @@ v2 adds many tools that had no v1 counterpart:
 - `iris_doc_index`, `iris_doc_search` -- code intelligence and search
 - `iris_doc_convert`, `iris_doc_xml_export` -- format conversion
 - `iris_sql_execute` -- direct SQL execution
+- `iris_sql_analyze` -- query plan, index usage, and statement statistics analysis
 - `iris_server_namespace` -- namespace listing
 - `iris_global_kill`, `iris_global_list` -- additional global operations
 - `iris_macro_info` -- macro lookup
@@ -90,9 +91,9 @@ The CaretDev `mcp-server-iris` also connects via SuperServer port 1972 with Pyth
 
 | v2 Package | Domain | Tool Count |
 |------------|--------|------------|
-| `@iris-mcp/dev` | Development, compilation, execution, globals, SQL, package browsing, bulk export, macro-expanded routine lookup | 24 |
+| `@iris-mcp/dev` | Development, compilation, execution, globals, SQL, SQL analysis, package browsing, bulk export, macro-expanded routine lookup | 25 |
 | `@iris-mcp/admin` | Namespaces, databases, users, roles, security (incl. SQL privileges), web apps, SSL, OAuth, services, LDAP, X.509, auditing | 26 |
-| `@iris-mcp/interop` | Interoperability productions, credentials, lookups, rules, transforms | 19 |
+| `@iris-mcp/interop` | Interoperability productions, production items, system default settings, credentials, lookups, rules, transforms | 20 |
 | `@iris-mcp/ops` | Metrics, jobs, locks, process control, journals, mirrors, tasks, config, auditing, alert management, database maintenance operations, backups | 20 |
 | `@iris-mcp/data` | DocDB, analytics/MDX, REST API management | 7 |
 

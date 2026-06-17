@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution and analysis, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -151,6 +151,7 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
+| `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), or currently-running statements (`running`) | `action`, `query?`, `filter?`, `maxRows?`, `namespace?` | readOnly, idempotent |
 
 ### Server Tools
 
@@ -599,6 +600,28 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
 </details>
 
 <details>
+<summary><strong>iris_sql_analyze</strong> -- Show a query plan</summary>
+
+**Input:**
+```json
+{
+  "action": "explain",
+  "query": "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH 'Ens'"
+}
+```
+
+`explain` returns the query plan text; `indexUsage` additionally parses the maps/indexes named in the plan; `stats` reads cached-statement statistics (`INFORMATION_SCHEMA.STATEMENTS`); `running` lists currently-executing statements (`INFORMATION_SCHEMA.CURRENT_STATEMENTS`). `query` is required for `explain`/`indexUsage`.
+
+**Output:**
+```json
+{
+  "action": "explain",
+  "plan": "<plans>\n <plan>\n   ...\n   Read master map %Dictionary.ClassDefinition.Master ...\n </plan>\n</plans>"
+}
+```
+</details>
+
+<details>
 <summary><strong>iris_server_info</strong> -- Get server info</summary>
 
 **Input:**
@@ -789,7 +812,7 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 24 tools in this package accept the `namespace` parameter** except:
+**All 25 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.

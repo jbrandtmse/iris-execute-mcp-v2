@@ -118,8 +118,9 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_item` | Enable, disable, get, or set config item settings | `action`, `itemName`, `settings?`, `namespace?` | -- |
+| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
+| `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `deployable?`, `namespace?` | destructive |
 
 ### Production Monitoring Tools
 
@@ -291,6 +292,68 @@ All five actions (`start`, `stop`, `restart`, `update`, `recover`) are verified 
     "FilePath": "/data/incoming",
     "FileSpec": "*.txt"
   }
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_production_item</strong> -- Add a config item with an arbitrary adapter setting</summary>
+
+**Input:**
+```json
+{
+  "action": "add",
+  "production": "MyApp.FHIRProduction",
+  "itemName": "MyApp.Service.FileIn",
+  "className": "EnsLib.File.PassthroughService",
+  "settings": {
+    "comment": "inbound file feed",
+    "FilePath": "/data/incoming"
+  }
+}
+```
+
+Property keys (`poolSize`, `enabled`, `comment`, `category`, `className`) map to `Ens.Config.Item` properties; any other key (e.g. `FilePath`) routes to an `Ens.Config.Setting` (Target `Adapter` by default; suffix a key with `@Host` or `@Adapter` to force the target). Use `"action": "remove"` with `itemName` (and `production`) to remove an item.
+
+**Output:**
+```json
+{
+  "action": "added",
+  "itemName": "MyApp.Service.FileIn",
+  "production": "MyApp.FHIRProduction",
+  "className": "EnsLib.File.PassthroughService",
+  "updatedSettings": ["comment", "FilePath"]
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_default_settings_manage</strong> -- Set a System Default Setting</summary>
+
+**Input:**
+```json
+{
+  "action": "set",
+  "production": "MyApp.FHIRProduction",
+  "item": "MyApp.Service.FileIn",
+  "hostClass": "EnsLib.File.PassthroughService",
+  "setting": "FilePath",
+  "value": "/data/incoming",
+  "deployable": true
+}
+```
+
+Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` (= applies to all) when omitted. `list` and `get` are read actions; `set` and `delete` are write actions, opt-in under tool governance (disabled by default).
+
+**Output:**
+```json
+{
+  "action": "set",
+  "production": "MyApp.FHIRProduction",
+  "item": "MyApp.Service.FileIn",
+  "hostClass": "EnsLib.File.PassthroughService",
+  "setting": "FilePath",
+  "value": "/data/incoming"
 }
 ```
 </details>
@@ -612,7 +675,7 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 19 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 20 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, and monitoring tools

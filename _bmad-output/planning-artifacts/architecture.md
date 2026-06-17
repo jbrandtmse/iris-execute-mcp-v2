@@ -29,7 +29,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 **Functional Requirements:**
 109 FRs across 17 categories covering two distinct systems:
-- **Node.js/TypeScript MCP Servers** (consumer-side): Connection lifecycle (FR1-FR7c), auto-bootstrap (FR8-FR15), and 96 tools organized across 5 domain servers
+- **Node.js/TypeScript MCP Servers** (consumer-side): Connection lifecycle (FR1-FR7c), auto-bootstrap (FR8-FR15), and 98 tools organized across 5 domain servers
 - **ObjectScript REST Service** (IRIS-side): Custom handlers for ~40% of tools where the Atelier API lacks coverage — globals, execution, security, config, interop, monitoring, tasks, analytics
 
 The FR distribution reveals architectural weight: iris-dev-mcp (FR16-FR39, 24 FRs) is heaviest on Atelier API integration, iris-admin-mcp (FR40-FR62, 23 FRs) is heaviest on custom REST, and iris-interop-mcp (FR63-FR80, 18 FRs) wraps Ensemble's complex Ens.Director API.
@@ -161,9 +161,9 @@ iris-mcp-v2/
 │   │   │   └── bootstrap.ts    # Auto-bootstrap orchestration
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   ├── iris-dev-mcp/           # @iris-mcp/dev (24 tools)
+│   ├── iris-dev-mcp/           # @iris-mcp/dev (25 tools)
 │   ├── iris-admin-mcp/         # @iris-mcp/admin (26 tools)
-│   ├── iris-interop-mcp/       # @iris-mcp/interop (19 tools)
+│   ├── iris-interop-mcp/       # @iris-mcp/interop (20 tools)
 │   ├── iris-ops-mcp/           # @iris-mcp/ops (20 tools)
 │   ├── iris-data-mcp/          # @iris-mcp/data (7 tools)
 │   └── iris-mcp-all/           # @iris-mcp/all (meta-package)

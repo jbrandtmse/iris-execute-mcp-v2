@@ -243,10 +243,10 @@ development_status:
   #   (1) Ens.Config.Item.AdapterClassName is a read-only calculated METHOD, not a settable property — current ItemManage "6 keys" = 5 working + adapterClassName which THROWS <PROPERTY DOES NOT EXIST>. 17.2 back-compat assertion pins the 5 working property keys; adapterClassName fix (route to Ens.Config.Setting) is additive.
   #   (2) INFORMATION_SCHEMA tables use UNDERSCORES on HSCUSTOM: CURRENT_STATEMENTS / STATEMENT_DAILY_STATS / STATEMENT_HOURLY_STATS (lead evidence had no-underscore names which return SQLCODE -30).
   #   Determination: iris_sql_analyze (17.3) is Atelier/SQL-only (EXPLAIN <query> + INFORMATION_SCHEMA views) — NO ObjectScript handler, NO bootstrap contribution. 17.4 bump covers ONLY 17.1+17.2 interop ObjectScript.
-  epic-17: in-progress
+  epic-17: done
   17-0-epic-16-deferred-cleanup: done
   17-1-iris-default-settings-manage: done
   17-2-production-item-add-remove-and-settings: done
   17-3-iris-sql-analyze: done
-  17-4-bootstrap-bump-verification-and-docs: backlog
+  17-4-bootstrap-bump-verification-and-docs: done
   epic-17-retrospective: optional
