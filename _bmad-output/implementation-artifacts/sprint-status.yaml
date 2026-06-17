@@ -254,6 +254,6 @@ development_status:
   # Epic 18: Deferred-Work Cleanup & Hardening (post-Epic-17)
   # Added 2026-06-17 via /epic-cycle 18 (minimal: Story 18.0 only — Epic 17 deferred-item triage + include-now fixes). Additive only.
   # Rule #24 bootstrap regen IFF an ObjectScript handler is touched; else hash unchanged. Rule #23/#25 governance baseline frozen 1e62c5ad5bf7.
-  epic-18: in-progress
+  epic-18: done
   18-0-epic-17-deferred-cleanup: done
-  epic-18-retrospective: optional
+  epic-18-retrospective: done
