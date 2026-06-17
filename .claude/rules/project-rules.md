@@ -513,8 +513,47 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 ---
 
-## Rules captured: 26
-## Epics contributing: 14 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+## 27. `Ens.Config` config objects: class-XData is source of truth, the SQL extent is a synced cache
+
+**Context:** Any handler that adds/removes/edits Interoperability config items via `Ens.Config.Production` / `Ens.Config.Item` (e.g. `iris_production_item` add/remove), and a LATER action in the same flow (or a follow-up call) reads the item back via the SQL extent (`Ens_Config.Item` SELECT, `Ens.Config.Item.NameExists`, `%OpenId` on the item id).
+
+**Rule:** `Ens.Config.Production.SaveToClass()` and `RemoveItem()` write the **production class definition (XData `ProductionDefinition`)** — NOT the `Ens.Config.Item` SQL extent. The extent is a synced cache populated from the XData by `Ens.Config.Production.LoadFromClass(pClassName)` (single arg; it deletes + re-saves the extent from the class). Consequences a handler MUST account for:
+- After a fresh `%OpenId(prod)`, `tProd.Items` reflects the **stale extent**, not the XData. Call `##class(Ens.Config.Production).LoadFromClass(prod)` BEFORE `%OpenId` in add/remove so you operate on current items (the add→remove round-trip otherwise can't see a just-added item).
+- A just-`add`-ed item is in the XData but NOT yet in the extent, so an immediate `get`/`set` (which use `NameExists`/raw `Ens_Config.Item` SQL) returns "not found" until a `LoadFromClass`/compile syncs the extent. This is expected, not a bug — but document it, and consider a post-add `LoadFromClass` if immediate get/set visibility is desired.
+- `Ens.Config.Item` has a COMPOSITE `Index Name On (Production, Name)`, so `NameExists(name)` (one-arg) does not uniquely resolve an item in an arbitrary/non-active production.
+
+**Why:** Epic 17 Story 17.2 (commit `a4100a0`): the Story 17.0 probe recipe (Area 2a) read items via a bare `%OpenId(prod)` and the add→remove round-trip failed because the extent was stale; dev added the `LoadFromClass` sync (DISCREPANCY #1b, Rule #5 probe-doc amendment). The 17.2 lead smoke then observed `get`-after-`add` returning "not found" while `remove` (which uses `LoadFromClass`+`FindItemByConfigName` on the XData) succeeded — confirming the extent/XData split live. Pairs with Rule #2 (read IRIS source) and Rule #16 (live probe).
+
+---
+
+## 28. New governance keys need a `mutates` class even when they're reads
+
+**Context:** Adding ANY new tool (or new `action` to an existing tool) on a governance-wired server (all 5 suite servers since Epic 14), where the new tool/action is a READ.
+
+**Rule:** Every NEW (post-foundation, absent-from-frozen-baseline) governance key MUST carry a `mutates` classification — `read` OR `write` — or `assertGovernanceClassification` THROWS at server registration. A read is NOT exempt: declare `mutates: "read"` (or per-action `{action: "read", …}`). A read resolves to default-ENABLED via `defaultSeed` (only `write` → default-disabled), but the classification is still mandatory; omitting it is a registration-time crash, not a silent enable. Do NOT conclude "reads need no `mutates`" — they need `mutates: "read"`.
+
+**Why:** Epic 17 Story 17.3 (commit `56cde54`): `iris_sql_analyze`'s four actions (`explain`/`stats`/`indexUsage`/`running`) are all reads; the Story 17.0 probe doc wrote "READ-ONLY → reads → default-enabled (no mutates)", which would have thrown at registration (`server-base.ts rebuildGovernedKeys` derives a `tool:action` key per enum value; none are in the frozen baseline `1e62c5ad5bf7`; `assertGovernanceClassification` rejects any unclassified non-baseline key). Spec corrected to `mutates: {explain:"read", stats:"read", indexUsage:"read", running:"read"}`. Generalizes the Story 15.0 strict-classification contract to the reads case; pairs with Rule #23 (frozen-foundation baseline).
+
+---
+
+## 29. Reject the delimiter in user-supplied slots of a composite IdKey
+
+**Context:** Any handler that assembles a multi-part IRIS IdKey from caller-supplied values to feed `%OpenId`/`%ExistsId`/`%DeleteId` — e.g. `prod_"||"_item_"||"_hostClass_"||"_setting` for `Ens.Config.DefaultSettings`, or any `$ListBuild`/concatenation-delimited compound id.
+
+**Rule:** Before assembling the id, REJECT any slot value that itself contains the delimiter (`||` for `Ens.Config.DefaultSettings`; the relevant separator for other compound keys). A slot carrying the delimiter splits into the wrong subscripts and silently targets a DIFFERENT row — a get/set/delete against an unintended key (a quiet correctness + integrity hole, injection-flavored). Reject with a clear error (`"Key slot values may not contain the '||' delimiter"`) before any `%OpenId`/`%Save`/`%DeleteId`.
+
+**Why:** Epic 17 Story 17.1 (commit `d36e085`, CR 17.1 patch): `iris_default_settings_manage` built its IdKey from four caller slots joined by `||`; without a guard, `production:"X||evil"` would mis-target. The reviewer added a reject-before-assemble guard; the lead smoke proved it live — `production:"ZZZSmoke171||evil"` returned `ERROR #5001: Key slot values may not contain the '||' delimiter` with `result:{}` (no write). Pairs with Rule #26 (live destructive/guarded-path rejection in the smoke).
+
+---
+
+## Rules captured: 29
+## Epics contributing: 15 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+
+**Audit note (2026-06-16, Epic 17):** Epic 17 retro nominated 3 rule candidates; the Project Lead confirmed all 3 pass the general-pattern bar (Rules #27, #28, #29). Each generalizes beyond its triggering incident: #27 (Ens.Config XData-vs-extent / LoadFromClass) applies to any future Interop config-item handler and was confirmed both in 17.2 dev (the add→remove round-trip) and the 17.2 live smoke (get-after-add miss); #28 (reads still need `mutates`) corrects the Story 17.0 probe doc and applies to every future read tool/action on a governed server; #29 (composite-IdKey delimiter guard) applies to any compound-id-from-input handler and was proven live. Existing rules were exercised and held, not re-codified: Rule #16 (pre-spec probe caught 2 discrepancies in 17.0 + a 3rd in 17.2), Rule #19 (17.2 back-compat gate, strengthened to full-object `toEqual`), Rule #24 (per-story bootstrap regen `fe972c4cb317`→`39dc932907cb`; 17.4 verified idempotent — NOT a deferred bump), Rule #23/#25 (baseline frozen `1e62c5ad5bf7` across the epic). No candidates skipped; 5 MED/LOW review items deferred to `deferred-work.md` (tracked work, not patterns) for Epic 18 Story 18.0 triage.
+
+## Original audit notes (pre-Epic-17)
+## Rules captured (prior): 26
+## Epics contributing (prior): 14 (retros 2026-04-21, 2026-04-22, 2026-06-16)
 
 **Audit note (2026-06-16):** Epic 14 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern-shape bar (Rules #19, #20, #21, #22). All four generalize from evidence spanning the full 6-story foundation epic (not single incidents): #19 back-compat gates held across all stories; #20 the D3 generated baseline; #21 the AC 14.5.6 capstone; #22 the per-story lead smokes 14.1–14.6. No candidates were skipped this retro. Two deferred items were NOT codified as rules (correctly — they are tracked work, not patterns): the `.optional()`-wrapped-action-enum gate/baseline hardening (deferred to Epic 15's first governed write tool) and the pre-existing doc drift (migration-guide dotted names, architecture.md stale counts).
 
