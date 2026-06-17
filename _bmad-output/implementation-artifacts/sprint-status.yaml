@@ -245,7 +245,7 @@ development_status:
   #   Determination: iris_sql_analyze (17.3) is Atelier/SQL-only (EXPLAIN <query> + INFORMATION_SCHEMA views) — NO ObjectScript handler, NO bootstrap contribution. 17.4 bump covers ONLY 17.1+17.2 interop ObjectScript.
   epic-17: in-progress
   17-0-epic-16-deferred-cleanup: done
-  17-1-iris-default-settings-manage: backlog
+  17-1-iris-default-settings-manage: done
   17-2-production-item-add-remove-and-settings: backlog
   17-3-iris-sql-analyze: backlog
   17-4-bootstrap-bump-verification-and-docs: backlog

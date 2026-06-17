@@ -104,6 +104,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/item" Method="POST" Call="ExecuteMCPv2.REST.Interop:ItemManage" />
   <Route Url="/interop/production/autostart" Method="POST" Call="ExecuteMCPv2.REST.Interop:AutoStart" />
 
+  <!-- Epic 17 (Story 17.1): System Default Settings (Ens.Config.DefaultSettings) -->
+  <Route Url="/interop/defaultsettings" Method="GET" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsList" />
+  <Route Url="/interop/defaultsettings" Method="POST" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsManage" />
+
   <!-- Epic 5: Production Monitoring -->
   <Route Url="/interop/production/logs" Method="GET" Call="ExecuteMCPv2.REST.Interop:EventLog" />
   <Route Url="/interop/production/queues" Method="GET" Call="ExecuteMCPv2.REST.Interop:QueueStatus" />

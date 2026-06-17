@@ -11,3 +11,8 @@
 2026-06-17T00:25:00Z	Story 17.0	cr_complete	spawn_at=2026-06-17T00:11:00Z model=claude-opus-4-8 resolved=1 deferred=0 dismissed=0 high=0 med=1 low=0 clarifications=0 closing_sections_present=true
 2026-06-17T00:30:00Z	Story 17.0	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live-HSCUSTOM-read-only:Ens_Config.DefaultSettings-queryable+EXPLAIN-returns-plan+INFORMATION_SCHEMA.CURRENT_STATEMENTS-underscored-returns-row model=claude-opus-4-8
 2026-06-17T00:32:00Z	Story 17.0	committed	sha=2b6b1ee submodules=
+2026-06-17T00:45:00Z	Story 17.1	story_created	path=_bmad-output/implementation-artifacts/17-1-iris-default-settings-manage.md
+2026-06-17T01:15:00Z	Story 17.1	dev_complete	spawn_at=2026-06-17T00:46:00Z model=claude-opus-4-8 files=Interop.cls,Dispatch.cls,defaultSettings.ts,index.ts,index.test.ts,bootstrap-classes.ts loc_added=~450 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 bootstrap=fe972c4cb317->56f492db456d cycle_iteration=1 closing_sections_present=true
+2026-06-17T01:15:10Z	Story 17.1	adr_verifications_complete	result=none_required note=no-docs-adr-registry
+2026-06-17T01:30:00Z	Story 17.1	qa_complete	spawn_at=2026-06-17T01:16:00Z model=claude-opus-4-8 tests_added=5 total_unit=19 governance=4 first_run_failures=0 clarifications=0 closing_sections_present=true
+2026-06-17T01:55:00Z	Story 17.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM:list-200-objwrap+set/get/delete-roundtrip+||-injection-guard-REJECTED-#5001-no-write+get-found-false-after-delete model=claude-opus-4-8

@@ -1792,4 +1792,290 @@ ClassMethod LookupTransfer() As %Status
     Quit $$$OK
 }
 
+/// List Interoperability System Default Settings (<class>Ens.Config.DefaultSettings</class>).
+/// <p>Returns all default-setting rows, optionally filtered by any of the four key
+/// dimensions (<code>production</code>, <code>item</code>, <code>hostClass</code>,
+/// <code>setting</code>) supplied as query parameters. Each row is the
+/// production/item/host-class/setting tuple plus its value, description, and
+/// deployable flag.</p>
+/// <p>Query parameters: <code>production</code>, <code>item</code>, <code>hostClass</code>,
+/// <code>setting</code> (filters), <code>namespace</code> (target namespace).</p>
+ClassMethod DefaultSettingsList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tProduction = $Get(%request.Data("production",1))
+        Set tItem = $Get(%request.Data("item",1))
+        Set tHostClass = $Get(%request.Data("hostClass",1))
+        Set tSetting = $Get(%request.Data("setting",1))
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Build parameterized SQL with optional key-dimension filters.
+        ; Description is named explicitly (not part of EnumerateSettings ROWSPEC).
+        Set tSQL = "SELECT ID, ProductionName, ItemName, HostClassName, SettingName, SettingValue, Description, Deployable FROM Ens_Config.DefaultSettings"
+        Set tWhere = ""
+        Set tParamCount = 0
+        If tProduction '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ProductionName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tProduction
+        }
+        If tItem '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ItemName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tItem
+        }
+        If tHostClass '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" HostClassName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tHostClass
+        }
+        If tSetting '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" SettingName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tSetting
+        }
+        If tWhere '= "" { Set tSQL = tSQL_" WHERE"_tWhere }
+        Set tSQL = tSQL_" ORDER BY ProductionName, ItemName, HostClassName, SettingName"
+
+        ; Execute SQL based on parameter count
+        If tParamCount = 0 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+        }
+        ElseIf tParamCount = 1 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1))
+        }
+        ElseIf tParamCount = 2 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2))
+        }
+        ElseIf tParamCount = 3 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2), tParams(3))
+        }
+        Else {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2), tParams(3), tParams(4))
+        }
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tSettings = []
+        While tRS.%Next() {
+            Set tRow = {}
+            Do tRow.%Set("id", tRS.ID, "number")
+            Do tRow.%Set("production", tRS.ProductionName)
+            Do tRow.%Set("item", tRS.ItemName)
+            Do tRow.%Set("hostClass", tRS.HostClassName)
+            Do tRow.%Set("setting", tRS.SettingName)
+            Do tRow.%Set("value", tRS.SettingValue)
+            If tRS.Description '= "" {
+                Do tRow.%Set("description", tRS.Description)
+            }
+            Do tRow.%Set("deployable", tRS.Deployable, "boolean")
+            Do tSettings.%Push(tRow)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("settings", tSettings)
+        Do tResult.%Set("count", tSettings.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Get, set, or delete a single Interoperability System Default Setting
+/// (<class>Ens.Config.DefaultSettings</class>).
+/// <p>Accepts a JSON body with <code>action</code> ("get", "set", "delete"),
+/// the key tuple <code>production</code>/<code>item</code>/<code>hostClass</code>/<code>setting</code>
+/// (each defaulting to <code>"*"</code> when omitted, matching the class
+/// <code>InitialExpression</code>), <code>value</code> (for set), optional
+/// <code>description</code> and <code>deployable</code> (for set), and optional
+/// <code>namespace</code>.</p>
+/// <p>The IdKey is the 4-tuple joined with <code>||</code>. <method>%Save()</method>
+/// and <method>%DeleteId()</method> auto-update the production mod flags via the
+/// class's <code>%OnAfterSave</code>/<code>%OnAfterDelete</code> hooks — no manual
+/// production recompile is required.</p>
+ClassMethod DefaultSettingsManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters
+        Set tAction = tBody.%Get("action")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "get") && (tAction '= "set") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: get, set, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Resolve the 4-tuple key; each slot defaults to "*" (the InitialExpression).
+        Set tProduction = tBody.%Get("production")
+        Set:tProduction="" tProduction = "*"
+        Set tItem = tBody.%Get("item")
+        Set:tItem="" tItem = "*"
+        Set tHostClass = tBody.%Get("hostClass")
+        Set:tHostClass="" tHostClass = "*"
+        Set tSetting = tBody.%Get("setting")
+        Set:tSetting="" tSetting = "*"
+
+        ; Reject any key slot containing the "||" IdKey delimiter. The IdKey is the
+        ; 4-tuple joined with "||", so an embedded "||" would split tId into the wrong
+        ; subscripts and resolve/modify a DIFFERENT row than the caller named (silent
+        ; wrong-row get/set/delete). Guard before assembling tId.
+        If (tProduction["||") || (tItem["||") || (tHostClass["||") || (tSetting["||") {
+            Set tSC = $$$ERROR($$$GeneralError, "Key slot values may not contain the '||' delimiter")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tId = tProduction_"||"_tItem_"||"_tHostClass_"||"_tSetting
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "get" {
+            If '##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set $NAMESPACE = tOrigNS
+                Set tResult = {}
+                Do tResult.%Set("action", "get")
+                Do tResult.%Set("found", 0, "boolean")
+                Do tResult.%Set("production", tProduction)
+                Do tResult.%Set("item", tItem)
+                Do tResult.%Set("hostClass", tHostClass)
+                Do tResult.%Set("setting", tSetting)
+                Do ..RenderResponseBody($$$OK, , tResult)
+                Quit
+            }
+            Set tObj = ##class(Ens.Config.DefaultSettings).%OpenId(tId)
+            If '$IsObject(tObj) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open default setting '"_tId_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("found", 1, "boolean")
+            Do tResult.%Set("production", tObj.ProductionName)
+            Do tResult.%Set("item", tObj.ItemName)
+            Do tResult.%Set("hostClass", tObj.HostClassName)
+            Do tResult.%Set("setting", tObj.SettingName)
+            Do tResult.%Set("value", tObj.SettingValue)
+            If tObj.Description '= "" {
+                Do tResult.%Set("description", tObj.Description)
+            }
+            Do tResult.%Set("deployable", tObj.Deployable, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "set" {
+            ; value is required for set
+            If 'tBody.%IsDefined("value") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'value' is required for set action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tValue = tBody.%Get("value")
+
+            If ##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set tObj = ##class(Ens.Config.DefaultSettings).%OpenId(tId)
+            } Else {
+                Set tObj = ##class(Ens.Config.DefaultSettings).%New()
+                Set tObj.ProductionName = tProduction, tObj.ItemName = tItem
+                Set tObj.HostClassName = tHostClass, tObj.SettingName = tSetting
+            }
+            If '$IsObject(tObj) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open or create default setting '"_tId_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tObj.SettingValue = tValue
+            If tBody.%IsDefined("description") { Set tObj.Description = tBody.%Get("description") }
+            If tBody.%IsDefined("deployable") { Set tObj.Deployable = +tBody.%Get("deployable") }
+
+            ; %OnAfterSave auto-updates production mod flags — NO manual recompile.
+            Set tSC = tObj.%Save()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "set")
+            Do tResult.%Set("production", tProduction)
+            Do tResult.%Set("item", tItem)
+            Do tResult.%Set("hostClass", tHostClass)
+            Do tResult.%Set("setting", tSetting)
+            Do tResult.%Set("value", tValue)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            If '##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Default setting '"_tId_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; %OnAfterDelete auto-updates production mod flags.
+            Set tSC = ##class(Ens.Config.DefaultSettings).%DeleteId(tId)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "deleted")
+            Do tResult.%Set("production", tProduction)
+            Do tResult.%Set("item", tItem)
+            Do tResult.%Set("hostClass", tHostClass)
+            Do tResult.%Set("setting", tSetting)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }

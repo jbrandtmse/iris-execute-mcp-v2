@@ -46,6 +46,9 @@ import {
 import {
   interopRestTool,
 } from "./rest.js";
+import {
+  defaultSettingsManageTool,
+} from "./defaultSettings.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -68,4 +71,5 @@ export const tools: ToolDefinition[] = [
   transformListTool,
   transformTestTool,
   interopRestTool,
+  defaultSettingsManageTool,
 ];
