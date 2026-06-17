@@ -31,3 +31,4 @@
 2026-06-17T04:30:00Z	Story 17.3	qa_complete	spawn_at=2026-06-17T04:16:00Z model=claude-opus-4-8 tests_added=12 dev_suite=326 governance=5 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T04:50:00Z	Story 17.3	cr_complete	spawn_at=2026-06-17T04:31:00Z model=claude-opus-4-8 resolved=2 deferred=0 dismissed=6 high=0 med=1 low=1 bootstrap=39dc932907cb-unchanged clarifications=0 closing_sections_present=true
 2026-06-17T04:55:00Z	Story 17.3	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP-HSCUSTOM-readonly:EXPLAIN-returns-plan+index-source(Ens_Config.Item.IDKEY)+CURRENT_STATEMENTS-returns-executing-row+STATEMENTS-returns-stat-rows model=claude-opus-4-8
+2026-06-17T04:57:00Z	Story 17.3	committed	sha=470a1e5 submodules=
