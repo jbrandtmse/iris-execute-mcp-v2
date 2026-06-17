@@ -40,3 +40,4 @@
 2026-06-17T06:00:00Z	Story 17.4	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=docs-artifact-matches-reality:per-server-sum=98=docs-98+BOOTSTRAP_VERSION=39dc932907cb+baseline=141keys+default_settings-list-live-HTTP-200 model=claude-opus-4-8
 2026-06-17T06:02:00Z	Story 17.4	committed	sha=ea7769c submodules=
 2026-06-17T06:05:00Z	Epic 17	epic_summary	stories=5 wall_clock_hours=~6.5 total_high=0 total_med=5 total_low=4 total_smoke_defects=0 rework_events=0 new_tools=2 enhancements=1 suite=96->98 bootstrap=fe972c4cb317->39dc932907cb governance_baseline=1e62c5ad5bf7-frozen opus_stage_count=all
+2026-06-17T06:15:00Z	Epic 17	retrospective_complete	retro=epic-17-retro-2026-06-16.md rules_codified=27,28,29 action_items=3 deferred=5 model=claude-opus-4-8
