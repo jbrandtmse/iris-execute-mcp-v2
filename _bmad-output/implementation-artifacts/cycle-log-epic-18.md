@@ -9,3 +9,5 @@
 2026-06-17T04:03:56Z	Story 18.0	cr_complete	model=claude-opus-4-8 resolved=1 deferred=2 dismissed=5 high=0 med=1 low=1 clarifications=0 closing_sections_present=true
 2026-06-17T04:06:43Z	Story 18.0	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-http-5-rejections-no-write model=claude-opus-4-8
 2026-06-17T04:07:18Z	Story 18.0	committed	sha=2dc3536 submodules=
+2026-06-17T18:15:58Z	Story 18.0	docs_followup_committed	sha=b7e7da0,e4bcad8 scope=governance-default-state-README+tool_support+per-server-READMEs note=user-requested
+2026-06-17T18:15:58Z	Epic 18	retrospective_complete	retro=epic-18-retro-2026-06-17.md rules_codified=1 new_rule=30 sha=ee20c2b
