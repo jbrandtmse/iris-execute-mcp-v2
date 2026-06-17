@@ -2,7 +2,7 @@
     "objectscript.conn": {
         "server": "local",
         "ns": "HSCUSTOM",
-        "active": true
+        "active": false
     },
     "intersystems.servers": {
         "local": {
