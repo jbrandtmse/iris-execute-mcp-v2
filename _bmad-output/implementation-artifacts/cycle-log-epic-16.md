@@ -38,3 +38,4 @@
 2026-06-17T00:03:08Z	Story 16.4	qa_complete	spawn_at=2026-06-16T23:36:00Z model=claude-opus-4-8 tests_added=0 reason=docs-only-closer count-reconciliation-verified first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T00:10:18Z	Story 16.4	cr_complete	spawn_at=2026-06-16T23:40:00Z model=claude-opus-4-8 resolved=0 deferred=0 dismissed=1 high=0 med=0 low=0 clarifications=0 docs-only-counts-reconcile bootstrap=fe972c4cb317-unchanged closing_sections_present=true
 2026-06-17T00:10:30Z	Story 16.4	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=govcheck-exit0-141frozen-180live+process-get-live+backup-listHistory-live+database-guard-live+counts-reconcile-suite96 model=claude-opus-4-8
+2026-06-17T00:10:54Z	Story 16.4	committed	sha=24a798c submodules=
