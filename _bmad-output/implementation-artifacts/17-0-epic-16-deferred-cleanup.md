@@ -1,6 +1,6 @@
 # Story 17.0: Epic 16 Deferred Cleanup + Epic 17 Pre-Spec API Probes
 
-**Status:** review
+**Status:** done
 
 **Epic:** 17 — Interop & Dev Tools (`iris-interop-mcp` + `iris-dev-mcp`)
 

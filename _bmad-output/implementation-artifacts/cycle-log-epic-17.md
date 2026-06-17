@@ -10,3 +10,4 @@
 2026-06-17T00:10:00Z	Story 17.0	qa_complete	spawn_at=2026-06-17T00:06:00Z model=claude-opus-4-8 tests_added=0 reason=doc-only-no-testable-surface first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-06-17T00:25:00Z	Story 17.0	cr_complete	spawn_at=2026-06-17T00:11:00Z model=claude-opus-4-8 resolved=1 deferred=0 dismissed=0 high=0 med=1 low=0 clarifications=0 closing_sections_present=true
 2026-06-17T00:30:00Z	Story 17.0	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live-HSCUSTOM-read-only:Ens_Config.DefaultSettings-queryable+EXPLAIN-returns-plan+INFORMATION_SCHEMA.CURRENT_STATEMENTS-underscored-returns-row model=claude-opus-4-8
+2026-06-17T00:32:00Z	Story 17.0	committed	sha=2b6b1ee submodules=
