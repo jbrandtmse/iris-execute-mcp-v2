@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "ee8c41a12284";
+export const BOOTSTRAP_VERSION = "daeb5f0bd525";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "ee8c41a12284";
+Parameter BOOTSTRAPVERSION = "daeb5f0bd525";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -5682,6 +5682,12 @@ ClassMethod ItemManage() As %Status
             }
 
             Set tClassName = tBody.%Get("className")
+            ; CR 18.0-1 (whitespace half): strip surrounding whitespace so a stray
+            ; leading/trailing space in the className does not produce a confusing
+            ; "does not exist or is not compiled" rejection, and so the stored item
+            ; ClassName is clean. An all-whitespace value collapses to "" and is then
+            ; caught by ValidateRequired below.
+            Set tClassName = $ZStrip(tClassName, "<>W")
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 

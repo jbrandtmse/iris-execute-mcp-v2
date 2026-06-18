@@ -491,6 +491,12 @@ ClassMethod ItemManage() As %Status
             }
 
             Set tClassName = tBody.%Get("className")
+            ; CR 18.0-1 (whitespace half): strip surrounding whitespace so a stray
+            ; leading/trailing space in the className does not produce a confusing
+            ; "does not exist or is not compiled" rejection, and so the stored item
+            ; ClassName is clean. An all-whitespace value collapses to "" and is then
+            ; caught by ValidateRequired below.
+            Set tClassName = $ZStrip(tClassName, "<>W")
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
