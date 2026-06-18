@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 20 tools", () => {
+    it("should create a server instance with 20 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,7 +43,9 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(20);
+      // 20 package tools + the framework `iris_server_profiles` discovery tool
+      // (Epic 19, decision E1 — registered on every server by the shared base).
+      expect(server.toolCount).toBe(21);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -74,7 +76,9 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(20);
+      // 20 package tools + the framework discovery tool (Epic 19, decision E1).
+      expect(names).toHaveLength(21);
+      expect(names).toContain("iris_server_profiles");
       expect(names).toContain("iris_metrics_system");
       expect(names).toContain("iris_metrics_alerts");
       expect(names).toContain("iris_metrics_interop");

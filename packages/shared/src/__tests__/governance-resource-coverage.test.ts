@@ -50,6 +50,10 @@ import {
   parseGovernanceConfig,
   buildMutatesLookup,
 } from "../governance.js";
+import {
+  SERVER_DISCOVERY_TOOL_NAME,
+  serverDiscoveryTool,
+} from "../server-discovery.js";
 import type { ToolDefinition } from "../tool-types.js";
 
 // A successful, no-op bootstrap result (REST service already current).
@@ -297,11 +301,12 @@ describe("Story 14.5 — per-profile read reflects the global+profile cascade (A
     // the SAME profile/config/keys — not just the two probed keys.
     const allKeys = new Set<string>(GOVERNANCE_BASELINE);
     allKeys.add("iris_new_write");
+    allKeys.add(SERVER_DISCOVERY_TOOL_NAME); // framework tool (Epic 19, decision E1)
     const expected = getEffectivePolicy(
       "stage",
       parseGovernanceConfig({ IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE }),
       allKeys,
-      buildMutatesLookup(tools),
+      buildMutatesLookup([...tools, serverDiscoveryTool]),
     );
     expect(stagePolicy).toEqual(expected);
 
@@ -364,7 +369,7 @@ describe("Story 14.5 — resources/list and templates/list exact shapes (AC 14.5
   beforeEach(env.setup);
   afterEach(env.teardown);
 
-  it("the static governance resource is the ONLY governance entry in resources/list, with uri+name+mimeType", async () => {
+  it("the static governance resource is listed with uri+name+mimeType (the template {profile} URI never leaks as a static entry)", async () => {
     setDefaultEnv();
     stageDefaultStartup(env.fetchMock);
     const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
@@ -377,18 +382,14 @@ describe("Story 14.5 — resources/list and templates/list exact shapes (AC 14.5
       mimeType?: string;
     }>;
 
-    const govEntries = resources.filter((r) =>
-      r.uri.startsWith("iris-governance://"),
-    );
-    // Exactly one STATIC governance resource is listed; the {profile} TEMPLATE
-    // must NOT appear in the static list (it belongs to templates/list).
-    expect(govEntries).toHaveLength(1);
-    const entry = govEntries[0];
+    // The STATIC default-policy resource is present with its full shape.
+    const entry = resources.find((r) => r.uri === GOV_DEFAULT_URI);
     if (!entry) throw new Error("expected the static governance resource");
-    expect(entry.uri).toBe(GOV_DEFAULT_URI);
     expect(entry.name).toBe("iris-governance-default");
     expect(entry.mimeType).toBe("application/json");
-    // The template URI (with the {profile} placeholder) is not a static entry.
+    // The raw template URI (with the {profile} placeholder) is NOT a static entry
+    // — only the static default + the template `list`-enumerated concrete per-
+    // profile entries (Epic 19, decision E1 / AC 19.0.7) appear here.
     expect(resources.some((r) => r.uri === GOV_TEMPLATE_URI)).toBe(false);
   });
 
@@ -527,10 +528,14 @@ describe("Story 14.5 — governedKeys union includes a registered single-op tool
     for (const key of GOVERNANCE_BASELINE) {
       expect(key in policy).toBe(true);
     }
-    // The map size is baseline ∪ {the one new key} (the new key is not already
-    // in the baseline, so it adds exactly one).
+    // The framework discovery tool (Epic 19, decision E1) is also a NEW key on
+    // every server; it is enabled by seed (a read) and appears in the map.
+    expect(policy[SERVER_DISCOVERY_TOOL_NAME]).toBe(true);
+    // The map size is baseline ∪ {the one new read key, the framework key} — both
+    // are non-baseline, so they add exactly two.
     expect(GOVERNANCE_BASELINE.has("iris_brand_new_read")).toBe(false);
-    expect(Object.keys(policy).length).toBe(GOVERNANCE_BASELINE.size + 1);
+    expect(GOVERNANCE_BASELINE.has(SERVER_DISCOVERY_TOOL_NAME)).toBe(false);
+    expect(Object.keys(policy).length).toBe(GOVERNANCE_BASELINE.size + 2);
   });
 });
 

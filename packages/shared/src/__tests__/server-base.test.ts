@@ -10,8 +10,18 @@ import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
 import { IrisHttpClient } from "../http-client.js";
+import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * The framework registers ONE additional tool on every server (Epic 19, decision
+ * E1 — the `iris_server_profiles` discovery tool), so `toolCount` /
+ * `getToolNames()` always include it on top of a package's own tools. Counts
+ * below add this constant rather than a bare literal so the source of the +1 is
+ * explicit.
+ */
+const FRAMEWORK_TOOL_COUNT = 1;
 
 function makeConfig(): IrisConnectionConfig {
   return {
@@ -100,15 +110,16 @@ describe("server-base", () => {
   describe("McpServerBase constructor", () => {
     it("should create a server with no tools", () => {
       const server = new McpServerBase(makeServerOpts());
-      expect(server.toolCount).toBe(0);
-      expect(server.getToolNames()).toEqual([]);
+      // Only the framework discovery tool is present (Epic 19, decision E1).
+      expect(server.toolCount).toBe(FRAMEWORK_TOOL_COUNT);
+      expect(server.getToolNames()).toEqual([SERVER_DISCOVERY_TOOL_NAME]);
     });
 
     it("should register tools on construction", () => {
       const server = new McpServerBase(
         makeServerOpts([makeGetDocTool(), makeSysInfoTool()]),
       );
-      expect(server.toolCount).toBe(2);
+      expect(server.toolCount).toBe(2 + FRAMEWORK_TOOL_COUNT);
       expect(server.getToolNames()).toContain("iris_doc_get");
       expect(server.getToolNames()).toContain("iris_sys_info");
     });
@@ -197,27 +208,27 @@ describe("server-base", () => {
   describe("addTools and removeTools (listChanged)", () => {
     it("should add tools dynamically", () => {
       const server = new McpServerBase(makeServerOpts());
-      expect(server.toolCount).toBe(0);
+      expect(server.toolCount).toBe(FRAMEWORK_TOOL_COUNT);
 
       server.addTools([makeGetDocTool()]);
-      expect(server.toolCount).toBe(1);
+      expect(server.toolCount).toBe(1 + FRAMEWORK_TOOL_COUNT);
       expect(server.getTool("iris_doc_get")).toBeDefined();
     });
 
     it("should add multiple tools at once", () => {
       const server = new McpServerBase(makeServerOpts());
       server.addTools([makeGetDocTool(), makeSysInfoTool()]);
-      expect(server.toolCount).toBe(2);
+      expect(server.toolCount).toBe(2 + FRAMEWORK_TOOL_COUNT);
     });
 
     it("should remove tools dynamically", () => {
       const server = new McpServerBase(
         makeServerOpts([makeGetDocTool(), makeSysInfoTool()]),
       );
-      expect(server.toolCount).toBe(2);
+      expect(server.toolCount).toBe(2 + FRAMEWORK_TOOL_COUNT);
 
       server.removeTools(["iris_doc_get"]);
-      expect(server.toolCount).toBe(1);
+      expect(server.toolCount).toBe(1 + FRAMEWORK_TOOL_COUNT);
       expect(server.getTool("iris_doc_get")).toBeUndefined();
       expect(server.getTool("iris_sys_info")).toBeDefined();
     });
@@ -226,7 +237,7 @@ describe("server-base", () => {
       const server = new McpServerBase(makeServerOpts([makeGetDocTool()]));
       // Should not throw
       server.removeTools(["nonexistent"]);
-      expect(server.toolCount).toBe(1);
+      expect(server.toolCount).toBe(1 + FRAMEWORK_TOOL_COUNT);
     });
   });
 
@@ -611,7 +622,7 @@ describe("server-base", () => {
       };
 
       const server = new McpServerBase(makeServerOpts([tool]));
-      expect(server.toolCount).toBe(1);
+      expect(server.toolCount).toBe(1 + FRAMEWORK_TOOL_COUNT);
 
       const registered = server.getTool("iris_test_output");
       expect(registered).toBeDefined();
@@ -623,7 +634,7 @@ describe("server-base", () => {
     it("should register a tool without outputSchema (regression guard)", () => {
       const tool = makeGetDocTool();
       const server = new McpServerBase(makeServerOpts([tool]));
-      expect(server.toolCount).toBe(1);
+      expect(server.toolCount).toBe(1 + FRAMEWORK_TOOL_COUNT);
 
       const registered = server.getTool("iris_doc_get");
       expect(registered).toBeDefined();

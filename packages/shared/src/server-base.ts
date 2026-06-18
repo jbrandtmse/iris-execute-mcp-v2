@@ -48,6 +48,12 @@ import {
   getEffectivePolicy,
 } from "./governance.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
+import {
+  SERVER_DISCOVERY_TOOL_NAME,
+  SERVER_DISCOVERY_INSTRUCTIONS,
+  serverDiscoveryTool,
+  computeServerDiscovery,
+} from "./server-discovery.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -354,6 +360,11 @@ export class McpServerBase {
           tools: { listChanged: true },
           resources: { listChanged: true },
         },
+        // Server-level usage guidance (Epic 19, decision E1 / AC 19.0.5). Carried
+        // into the `initialize` result by the SDK so capable clients surface it at
+        // connect time; reinforces the call-first guidance also in the discovery
+        // tool's own description. Generic across all five servers.
+        instructions: SERVER_DISCOVERY_INSTRUCTIONS,
       },
     );
 
@@ -365,6 +376,25 @@ export class McpServerBase {
     for (const tool of options.tools) {
       this.registerTool(tool);
     }
+
+    // Register the framework-provided discovery tool centrally (Epic 19,
+    // decision E1) — wired here, exactly like the D2 `server`-param injection and
+    // the D6 governance resource, so it appears on all five servers without any
+    // per-package `tools/index.ts` wiring. It MUST go through registerTool (it
+    // lives in `this.tools`) so rebuildGovernedKeys/rebuildMutatesLookup pick it
+    // up and its `mutates: "read"` classification is enforced; its CALL is
+    // special-cased in handleToolCall (it needs the profile/governance internals
+    // and must not establish an IRIS connection). Registered before the rebuilds
+    // below so its key/classification are reflected. Guard against a package that
+    // already supplies a same-named tool (it must not — the name is reserved).
+    if (this.tools.has(SERVER_DISCOVERY_TOOL_NAME)) {
+      throw new Error(
+        `Tool name "${SERVER_DISCOVERY_TOOL_NAME}" is reserved by the framework ` +
+          `(the server & governance discovery tool, decision E1) and must not be ` +
+          `declared by a server package.`,
+      );
+    }
+    this.registerTool(serverDiscoveryTool);
 
     // Build the governance mutates lookup (D4) from the registered tools. The
     // tool set is fully known at construction, so this is cheap and lets the
@@ -542,9 +572,33 @@ export class McpServerBase {
     );
 
     // Per-profile policy template → resources/templates/list + resources/read.
+    //
+    // The `list` callback (Epic 19, decision E1 optional companion / AC 19.0.7)
+    // enumerates one concrete `iris-governance://<profile>` resource per
+    // configured profile, so resource-reading clients can ALSO discover the
+    // profile roster (by name) via `resources/list` — closing the same
+    // enumeration hole the discovery tool closes for tool-calling clients. It
+    // reads `this.profiles` at CALL TIME (closure), so it reflects the registry
+    // built in start(); before start() (`this.profiles` undefined) it lists just
+    // the reserved default, mirroring buildGovernancePolicyResult's pre-start
+    // fallback. Was previously `undefined` (D6 minimal); now provided.
     this.mcpServer.registerResource(
       GOVERNANCE_TEMPLATE_RESOURCE_NAME,
-      new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, { list: undefined }),
+      new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, {
+        list: (): { resources: Array<{ uri: string; name: string }> } => {
+          const names = this.profiles
+            ? [...this.profiles.keys()]
+            : [DEFAULT_PROFILE_NAME];
+          return {
+            resources: names.map((name) => ({
+              uri: `${GOVERNANCE_URI_SCHEME}://${name}`,
+              name: `${GOVERNANCE_TEMPLATE_RESOURCE_NAME}-${name}`,
+              description: `Advisory governance policy for the "${name}" server profile.`,
+              mimeType: "application/json",
+            })),
+          };
+        },
+      }),
       {
         title: "IRIS governance policy (per profile)",
         description:
@@ -764,15 +818,27 @@ export class McpServerBase {
       profile = resolveProfile(this.profiles, server);
     } catch (error: unknown) {
       if (error instanceof ProfileResolutionError) {
-        logger.warn(
-          `Tool ${tool.name}: ${error.message}`,
-        );
-        return {
-          content: [{ type: "text" as const, text: error.message }],
-          isError: true,
-        };
+        // The framework discovery tool is connection-agnostic (it reports
+        // in-memory config and never connects), so the `server` arg is
+        // irrelevant to it — its own `profile` arg selects which policy to
+        // report. An unknown `server` therefore must NOT hard-fail the
+        // "call discovery first to learn valid profile names" workflow
+        // (CR 19.0-2): fall back to the reserved default profile and proceed.
+        // The tool's own `profile` arg is still validated downstream.
+        if (tool.name === SERVER_DISCOVERY_TOOL_NAME) {
+          profile = resolveProfile(this.profiles, DEFAULT_PROFILE_NAME);
+        } else {
+          logger.warn(
+            `Tool ${tool.name}: ${error.message}`,
+          );
+          return {
+            content: [{ type: "text" as const, text: error.message }],
+            isError: true,
+          };
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     // ── Governance enforcement gate (architecture decision D5) ─────────
@@ -823,6 +889,46 @@ export class McpServerBase {
         },
         isError: true,
       };
+    }
+
+    // ── Discovery tool short-circuit (Epic 19, decision E1) ────────────
+    //
+    // The framework discovery tool reports IN-MEMORY config (the profile roster +
+    // effective governance policy). It is handled HERE — after Zod validation,
+    // `server` resolution, and the governance gate (so it is governed uniformly,
+    // a no-op since it is `mutates: "read"` → enabled-by-default), but BEFORE
+    // getOrCreateClient — for two reasons: (a) it needs the server-base internals
+    // (`this.profiles`/`this.governanceConfig`/`this.governedKeys`/
+    // `this.mutatesLookup`) the standard ToolContext does not expose, and (b) it
+    // must NOT establish an IRIS connection (it works even when the target IRIS
+    // is down). `this.profiles` is guaranteed defined by the "Server not
+    // initialised" guard above. An unknown single `profile` arg surfaces a clean
+    // structured error (ProfileResolutionError), not a thrown SDK error.
+    if (tool.name === SERVER_DISCOVERY_TOOL_NAME) {
+      try {
+        const discovery = computeServerDiscovery(
+          validatedArgs as { profile?: string; allProfiles?: boolean },
+          this.profiles,
+          this.governanceConfig,
+          this.governedKeys,
+          this.mutatesLookup,
+        );
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(discovery, null, 2) },
+          ],
+          structuredContent: discovery as unknown as Record<string, unknown>,
+        };
+      } catch (error: unknown) {
+        if (error instanceof ProfileResolutionError) {
+          logger.warn(`Tool ${tool.name}: ${error.message}`);
+          return {
+            content: [{ type: "text" as const, text: error.message }],
+            isError: true,
+          };
+        }
+        throw error;
+      }
     }
 
     // Get-or-create the resolved profile's client (health-check + version

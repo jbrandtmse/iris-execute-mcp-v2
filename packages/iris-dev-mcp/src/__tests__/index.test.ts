@@ -60,14 +60,16 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 25 tools", () => {
+    it("should create a server instance with 25 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(25);
+      // 25 package tools + the framework `iris_server_profiles` discovery tool
+      // (Epic 19, decision E1 — registered on every server by the shared base).
+      expect(server.toolCount).toBe(26);
     });
 
     it("should report all tool names", () => {
@@ -102,6 +104,9 @@ describe("iris-dev-mcp", () => {
         "iris_doc_export",
         "iris_package_list",
         "iris_routine_intermediate",
+        // The framework discovery tool is registered last by the shared base
+        // (Epic 19, decision E1), after the package's own tools.
+        "iris_server_profiles",
       ]);
     });
 

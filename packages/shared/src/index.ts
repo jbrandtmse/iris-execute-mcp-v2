@@ -75,3 +75,16 @@ export type {
   GovernanceConfig,
   MutatesLookup,
 } from "./governance.js";
+export {
+  SERVER_DISCOVERY_TOOL_NAME,
+  SERVER_DISCOVERY_INSTRUCTIONS,
+  serverDiscoveryTool,
+  serverDiscoveryInputSchema,
+  buildRoster,
+  buildRosterEntry,
+  computeServerDiscovery,
+} from "./server-discovery.js";
+export type {
+  ProfileRosterEntry,
+  ServerDiscoveryResult,
+} from "./server-discovery.js";
