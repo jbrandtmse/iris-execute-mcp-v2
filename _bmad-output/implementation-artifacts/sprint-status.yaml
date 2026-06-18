@@ -262,6 +262,6 @@ development_status:
   # Epic 19: Server & Governance Discovery
   # Added 2026-06-18 via bmad-correct-course. See sprint-change-proposal-2026-06-18.md.
   # TypeScript-only (shared). No BOOTSTRAP_VERSION bump. Built on Epic 14. Strictly additive.
-  epic-19: in-progress
+  epic-19: done
   19-0-server-and-governance-discovery-tool: done
-  epic-19-retrospective: optional
+  epic-19-retrospective: done
