@@ -3653,3 +3653,40 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 18.0.6** — Full monorepo test suite green; lint + type-check clean. Any code path touched is exercised by an existing or newly-added test.
 
 **Implementation Notes**: This is a lead-authored triage story (retrospective-review gate). Read `deferred-work.md` Epic 16–17 sections and the Epic 17 retro Action Items. Apply Rule #16 (live-probe) before trusting any IRIS-API claim in a deferred item's suggested resolution. For include-now candidates, prefer low-risk, well-scoped fixes (e.g. the `namespace`-param schema/description cleanup, the generator/drift-test shared-helper de-dup) over reopening larger IRIS-pattern limitations (extent/XData split — keep deferred, mirrors Story 5-3 won't-fix).
+
+## Epic 19: Server & Governance Discovery (added 2026-06-18)
+
+**Goal**: Give an AI client a callable, discover-first way to learn which server profiles are configured (with non-secret connection metadata) and what governance policy is in effect — so it never has to guess or read client config files. Closes the discoverability gap left by the advisory-only Epic 14 governance resource (D6). See [sprint-change-proposal-2026-06-18.md](./sprint-change-proposal-2026-06-18.md).
+
+**Scope**: TypeScript-only, entirely in `@iris-mcp/shared`. A new **framework-provided** read tool registered centrally in the server base (appears on all five servers), reusing the existing profile registry (`profiles.ts`) and `getEffectivePolicy` (`governance.ts`). **No new ObjectScript — `BOOTSTRAP_VERSION` unchanged.** Built on the Epic 14 foundation. **Strictly additive — absent `IRIS_PROFILES`/`IRIS_GOVERNANCE`, the tool reports the single `default` profile and the default-seed policy; no existing tool, schema, or behavior changes.**
+
+**Functional Requirements (new)**: FR127.
+
+**Stories**:
+- 19.0 Server & governance discovery tool (+ optional resource-enumeration enhancement) + docs
+
+**Out of scope (deferred)**:
+- Profile/policy **hot-reload** — config is still read at startup (consistent with Epic 14 D7); discovery reports the current in-memory state.
+- Returning **secrets** of any kind (passwords, tokens) — never.
+- A generalized `ResourceDefinition` framework — still YAGNI (Epic 14 D6 stands).
+
+### Story 19.0: Server & Governance Discovery Tool
+
+**As an** AI client connected to a suite server, **I want** a single tool that reports the configured server profiles (with non-secret connection metadata) and the effective governance policy, **so that** I can choose the right `server` profile and avoid blocked actions without reading the client's config files or guessing.
+
+**Acceptance Criteria**:
+- **AC 19.0.1** — A new read tool (proposed name `iris_server_profiles`; final name confirmed in dev) is **registered centrally in `@iris-mcp/shared` `server-base.ts`** — framework-provided, NOT added to any package `tools/index.ts` — so it is present on all five servers (dev, admin, interop, ops, data) without per-package wiring.
+- **AC 19.0.2** — Output includes a **profile roster**: for each configured profile, `{ name, isDefault, host, port, username, namespace, https, baseUrl, timeout }`. The `password` field is **never** included in the output (verified by an explicit assertion). Roster is built from the profile registry (`profiles.ts`).
+- **AC 19.0.3** — Output includes the **effective governance policy** (enabled/disabled action map) computed via the existing `getEffectivePolicy` — the same source the D6 resource uses — so the tool and resource cannot drift. The tool accepts an optional `profile` argument selecting which profile's policy to report (defaults to `default`), and an optional flag to return policy for **all** profiles.
+- **AC 19.0.4** — Governance classification: the tool is `mutates: "read"` → **default-enabled**; it is a new non-baseline key and does **not** modify the frozen baseline (`1e62c5ad5bf7`). `assertGovernanceClassification` passes at registration.
+- **AC 19.0.5** — The tool **description** instructs the client to call it **first** to discover available profiles and governance before invoking other tools. The MCP server **`instructions`** field (set on the shared server base) reinforces the same guidance so capable clients surface it at connect time.
+- **AC 19.0.6** — **Back-compat (mechanical proof, Rule #19):** with neither `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, the tool reports exactly one profile (`default`, with today's `IRIS_*`-derived connection metadata) and the default-seed policy (every baseline action enabled). A test asserts this "off" state and asserts no existing tool/schema/output changed.
+- **AC 19.0.7** — **(Optional companion, recommended)** the per-profile governance resource template's `list` callback enumerates the configured profile names, so resource-reading clients can also discover the roster via `resources/templates/list`. If included, covered by a test; if deferred, recorded as a follow-up.
+- **AC 19.0.8** — Unit tests: roster shape + **password-absence assertion**, policy correctness vs `getEffectivePolicy`, optional-`profile` + all-profiles selection, default-only back-compat, presence of the tool on a representative server, governance classification.
+- **AC 19.0.9** — Docs rollup: root `README.md` + every per-package README + `tool_support.md` + `iris-mcp-all` document the new tool, its **call-first** guidance, and that it is a **read** (enabled by default) per Rule #30; per-server tool counts bumped; CHANGELOG entry.
+
+**Implementation Notes**:
+- Mirror the central-registration mechanics of D2 (`server` injection) / D6 (resource) — the tool is wired once in `server-base.ts`.
+- Reuse `profiles.ts` for the roster and `getEffectivePolicy` (`governance.ts`) for policy; do not duplicate either.
+- Redaction is the one safety-critical line: construct the output by **allow-listing** non-secret fields, not by deleting `password` from a spread (so a future field addition can't accidentally leak).
+- Lead per-story smoke (Rule #22 / #26): drive the built artifact / live server, confirm the roster excludes the password and the policy matches the resource.

@@ -41,6 +41,10 @@ import {
   parseGovernanceConfig,
   buildMutatesLookup,
 } from "../governance.js";
+import {
+  SERVER_DISCOVERY_TOOL_NAME,
+  serverDiscoveryTool,
+} from "../server-discovery.js";
 import type { ToolDefinition } from "../tool-types.js";
 
 // A successful, no-op bootstrap result (REST service already current).
@@ -365,11 +369,12 @@ describe("Story 14.5 — resources/read effective policy (AC 14.5.3)", () => {
     const allKeys = new Set<string>(GOVERNANCE_BASELINE);
     allKeys.add("iris_doc_get"); // already in baseline; harmless
     allKeys.add("iris_new_write"); // NEW key the server registered
+    allKeys.add(SERVER_DISCOVERY_TOOL_NAME); // framework tool (Epic 19, decision E1)
     const expected = getEffectivePolicy(
       "default",
       parseGovernanceConfig({ IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE }),
       allKeys,
-      buildMutatesLookup(tools),
+      buildMutatesLookup([...tools, serverDiscoveryTool]),
     );
     expect(policy).toEqual(expected);
   });

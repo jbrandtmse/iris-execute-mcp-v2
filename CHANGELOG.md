@@ -2,6 +2,16 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-06-18]
+
+### Added — Epic 19: Server & Governance Discovery (`@iris-mcp/shared`, all servers)
+
+One new **framework-provided** read tool, registered once in the shared server base (`packages/shared/src/server-base.ts`) — like the `server`-param injection (D2) and the governance resource (D6) — so it appears uniformly on all five servers without any per-package `tools/index.ts` wiring (architecture decision **E1**). **Strictly additive** — with neither `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, behavior is byte-for-byte today's plus this one optional-to-call tool (back-compat mechanical proof, Rule #19). TypeScript-only: **no `BOOTSTRAP_VERSION` bump** (no ObjectScript) and the frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged** — the new key is a non-baseline `read`, governed via `mutates` classification, not baseline membership. Per-server *package* tool counts are unchanged (the tool is not in any package array); each server's *advertised* surface gains +1, so the suite advertises **103** tools (98 package + 5 × the one framework tool).
+
+- **`iris_server_profiles`** ([packages/shared/src/server-discovery.ts](packages/shared/src/server-discovery.ts), in-memory — no IRIS connection) — **call this first.** Reports (1) the configured server-profile roster with non-secret connection metadata (`name`, `isDefault`, `host`, `port`, `username`, `namespace`, `https`, `baseUrl`, `timeout`) — the **`password` is never included** (built via an explicit allow-list, never a spread-and-delete, so a future profile field cannot leak); and (2) the effective governance policy (enabled/disabled action map) for a selected profile (optional `profile` arg, default `default`) or every profile (`allProfiles: true`), computed via the same `getEffectivePolicy` engine the governance resource uses (so the two cannot drift). Governance-classified `read` → **enabled by default** (an operator can still disable it via `IRIS_GOVERNANCE`). The call-first guidance also lives in the MCP server `instructions` field (surfaced at connect time). Companion: the per-profile governance resource template's `list` callback now enumerates one `iris-governance://<profile>` entry per configured profile, so resource-reading clients can discover the roster too.
+
+Documentation: the root [README](README.md) (new "Discovering profiles & policy" section + advertised-count note), every per-package README (new "Framework Tools" subsection), [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md) (discover-first note), and [`tool_support.md`](tool_support.md) (new "Framework tools" section + advertised-count column, suite 98 package / 103 advertised).
+
 ## [Pre-release — 2026-06-16]
 
 ### Added — Epic 17: Interop & Dev Tools (`@iris-mcp/interop` + `@iris-mcp/dev`)

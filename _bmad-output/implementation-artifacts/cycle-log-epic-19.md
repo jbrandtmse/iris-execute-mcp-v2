@@ -1,0 +1,14 @@
+2026-06-18T18:03:37Z	Epic 19	epic_branch_created	repos=. from=5fabe79
+2026-06-18T18:03:37Z	Epic 19	epic_branch_checked_out	repos=. head=5fabe79
+2026-06-18T18:05:00Z	Epic 19	sprint_planning_complete	model=claude-opus-4-8 epic19_authored_in_epics_md=true stories=1 added_retro_entry=epic-19-retrospective
+2026-06-18T18:05:00Z	Epic 19	retro_review_complete	source_retro=_bmad-output/implementation-artifacts/epic-18-retro-2026-06-17.md included=0 deferred=10 dropped=0 note=all-carried-items-re-deferred-ObjectScript/ops-hardening-routed-to-future-cleanup-epic;Epic19-is-focused-single-story-feature-epic-TS-shared-core-only;no-colliding-StoryX.0-created
+2026-06-18T18:12:00Z	Story 19.0	story_created	path=_bmad-output/implementation-artifacts/19-0-server-and-governance-discovery-tool.md
+2026-06-18T18:35:00Z	Story 19.0	dev_complete	spawn_at=2026-06-18T18:13:00Z model=claude-opus-4-8 files=22 tests_added=17 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true note=iris_server_profiles-framework-tool;special-cased-handleToolCall;AC19.0.7-shipped;no-bootstrap-bump;baseline-frozen-1e62c5ad5bf7;suite-1885-green
+2026-06-18T18:35:00Z	Story 19.0	adr_verifications_complete	result=none_required note=headless-TS-shared-core-story;no-visual/perf/audit-ADR-tooled-ACs;E1-conformance-verified-in-code-review-stage
+2026-06-18T18:42:00Z	Story 19.0	qa_complete	spawn_at=2026-06-18T18:36:00Z model=claude-opus-4-8 tests_added=11 first_run_failures=0 clarifications=0 closing_sections_present=true note=server-discovery.e2e.test.ts;drives-tools/list+tools/call+resources/read;policy-toEqual-live-D6-resource;default-suite-532-green
+2026-06-18T18:55:00Z	Story 19.0	cr_complete	spawn_at=2026-06-18T18:43:00Z model=claude-opus-4-8 resolved=1 deferred=2 dismissed=5 high=0 med=1 low=2 clarifications=0 closing_sections_present=true note=3-layer-Blind/Edge/Auditor;E1+redaction+non-drift+mutates:read+frozen-baseline-verified;MED-CR19.0-FIX-allProfiles-proto-pollution-safe-Object.defineProperty;shared-533-green
+2026-06-18T19:05:00Z	Story 19.0	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=built-dist+live-IRIS;15/15-checks;redaction(no-pw-key/value)+governance-disables+tool-vs-D6-resource-non-drift;UV_HANDLE_CLOSING-benign-teardown model=claude-opus-4-8
+2026-06-18T19:08:00Z	Story 19.0	committed	sha=1248d2f submodules=
+2026-06-18T19:40:00Z	Story 19.0	cr_followup_committed	sha=537ccd8 scope=CR-19.0-1+19.0-2-LOW-resolved-in-retro note=user-requested;+3-regression-tests;live-re-smoke-6/6
+2026-06-18T19:40:00Z	Epic 19	retrospective_complete	retro=epic-19-retro-2026-06-18.md rules_codified=1 new_rule=31 deferred_items_at_close=0
+2026-06-18T19:45:00Z	Epic 19	epic_merged_to_feature	repos=. feature_sha=3b10bbd merge_sha=3b10bbd submodules=

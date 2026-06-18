@@ -260,16 +260,30 @@ were silently returning stale or per-process data.
 
 ---
 
+## Framework tools (all servers)
+
+These tools are provided by the shared framework (`@iris-mcp/shared` `server-base.ts`) and registered automatically on **every** server — they are NOT in any package's `tools/index.ts`. Each adds +1 to that server's advertised tool count.
+
+| Tool | API | Purpose | Governance |
+|---|:---:|---|---|
+| `iris_server_profiles` | — (in-memory) | **Call this FIRST.** Reports the configured server-profile roster (non-secret connection metadata — `password` is NEVER included) and the effective governance policy (which actions are enabled/disabled) for a selected profile (optional `profile` arg; default `default`) or all profiles (`allProfiles: true`). Lets a client pick the right `server` profile and avoid disabled actions without reading client config. Does not connect to IRIS. | **read → enabled by default** (Epic 19, decision E1) |
+
+> **Epic 19 (2026-06-18) — governance defaults:** added the framework tool `iris_server_profiles`. It is governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled; an operator may still disable it explicitly via `IRIS_GOVERNANCE`). It is a new non-baseline key, so the frozen governance baseline (`1e62c5ad5bf7`) is unchanged.
+
+---
+
 ## Suite-wide rollup
 
-| Server | Atelier | ExecuteMCPv2 | Other | Total |
-|---|:---:|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 19 | 6 | 0 | **25** |
-| `@iris-mcp/admin` | 0 | 26 | 0 | **26** |
-| `@iris-mcp/interop` | 0 | 20 | 0 | **20** |
-| `@iris-mcp/ops` | 0 | 20 | 0 | **20** |
-| `@iris-mcp/data` | 0 | 2 | 5 | **7** |
-| **Total** | **19** | **74** | **5** | **98** |
+Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` array). Every server ALSO advertises the one framework tool `iris_server_profiles` (see "Framework tools" above), so each server's advertised surface is one greater than the package total shown here.
+
+| Server | Atelier | ExecuteMCPv2 | Other | Package total | Advertised (+1 framework) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `@iris-mcp/dev` | 19 | 6 | 0 | **25** | **26** |
+| `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
+| `@iris-mcp/interop` | 0 | 20 | 0 | **20** | **21** |
+| `@iris-mcp/ops` | 0 | 20 | 0 | **20** | **21** |
+| `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
+| **Total** | **19** | **74** | **5** | **98** | **103** |
 
 ---
 

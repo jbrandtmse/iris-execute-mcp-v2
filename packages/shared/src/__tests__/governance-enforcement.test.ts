@@ -700,7 +700,8 @@ describe("Story 14.4 — call-time enforcement keeps every tool advertised (AC 1
     // still include it.
     expect(isAdvertised(server, "iris_doc_get")).toBe(true);
     expect(server.getToolNames()).toContain("iris_doc_get");
-    expect(server.toolCount).toBe(1);
+    // 1 package tool + the framework discovery tool (Epic 19, decision E1).
+    expect(server.toolCount).toBe(2);
 
     // And the denial only happens at call time.
     const result = await callTool(server, "iris_doc_get", {});
