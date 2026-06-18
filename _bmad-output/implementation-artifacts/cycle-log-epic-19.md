@@ -11,3 +11,4 @@
 2026-06-18T19:08:00Z	Story 19.0	committed	sha=1248d2f submodules=
 2026-06-18T19:40:00Z	Story 19.0	cr_followup_committed	sha=537ccd8 scope=CR-19.0-1+19.0-2-LOW-resolved-in-retro note=user-requested;+3-regression-tests;live-re-smoke-6/6
 2026-06-18T19:40:00Z	Epic 19	retrospective_complete	retro=epic-19-retro-2026-06-18.md rules_codified=1 new_rule=31 deferred_items_at_close=0
+2026-06-18T19:45:00Z	Epic 19	epic_merged_to_feature	repos=. feature_sha=3b10bbd merge_sha=3b10bbd submodules=
