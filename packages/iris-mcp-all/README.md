@@ -28,7 +28,11 @@ This installs all five servers:
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **98 tools** across 5 servers.
+> **98 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
+
+### Discover profiles & policy first
+
+Every server provides a framework tool, **`iris_server_profiles`** — call it **first** to discover the configured server-profile roster (non-secret connection metadata; the `password` is never included) and the effective governance policy (which actions are enabled/disabled), so a client can pick the right `server` profile and avoid disabled actions without reading config files. It is a **read tool, enabled by default**, reports in-memory config, and does not connect to IRIS. The same guidance is surfaced via the MCP server `instructions` field at connect time. Details: [Discovering profiles and policy](../../README.md#discovering-profiles-and-policy-call-this-first).
 
 ---
 

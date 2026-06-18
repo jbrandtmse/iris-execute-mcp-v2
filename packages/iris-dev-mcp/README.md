@@ -107,6 +107,16 @@ Add to your Cursor MCP settings:
 
 ## Tool Reference
 
+### Framework Tools
+
+Provided by the shared framework and available on **every** suite server (Epic 19).
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_server_profiles` | **Call this first.** Reports the configured server-profile roster (non-secret connection metadata — `password` is never included) and the effective governance policy (which actions are enabled/disabled). | `profile?`, `allProfiles?` | readOnly, idempotent |
+
+`iris_server_profiles` is a **read tool, enabled by default**. It reports in-memory config and does not connect to IRIS. Use it to choose the right `server` profile and avoid governance-disabled actions before invoking other tools.
+
 ### Document Tools
 
 | Tool | Description | Key Parameters | Annotations |

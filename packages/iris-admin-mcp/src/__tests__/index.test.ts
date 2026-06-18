@@ -35,7 +35,7 @@ describe("iris-admin-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 26 tools", () => {
+    it("should create a server instance with 26 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/admin",
         version: "0.0.0",
@@ -43,7 +43,9 @@ describe("iris-admin-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(26);
+      // 26 package tools + the framework `iris_server_profiles` discovery tool
+      // (Epic 19, decision E1 — registered on every server by the shared base).
+      expect(server.toolCount).toBe(27);
     });
 
     it("should report correct tool names", () => {

@@ -46,7 +46,7 @@ describe("iris-data-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 7 tools", () => {
+    it("should create a server instance with 7 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -54,7 +54,9 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      expect(server.toolCount).toBe(7);
+      // 7 package tools + the framework `iris_server_profiles` discovery tool
+      // (Epic 19, decision E1 — registered on every server by the shared base).
+      expect(server.toolCount).toBe(8);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -77,7 +79,7 @@ describe("iris-data-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return 7 tool names", () => {
+    it("should return 7 package tool names (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/data",
         version: "0.0.1",
@@ -85,7 +87,8 @@ describe("iris-data-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      expect(names).toHaveLength(7);
+      // 7 package tools + the framework discovery tool (Epic 19, decision E1).
+      expect(names).toHaveLength(8);
       expect(names).toContain("iris_docdb_manage");
       expect(names).toContain("iris_docdb_document");
       expect(names).toContain("iris_docdb_find");
@@ -93,6 +96,7 @@ describe("iris-data-mcp", () => {
       expect(names).toContain("iris_analytics_mdx");
       expect(names).toContain("iris_analytics_cubes");
       expect(names).toContain("iris_rest_manage");
+      expect(names).toContain("iris_server_profiles");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
