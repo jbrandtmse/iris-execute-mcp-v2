@@ -846,6 +846,32 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 </details>
 
 <details>
+<summary><strong>iris_oauth_manage</strong> -- Create an OAuth2 server definition</summary>
+
+**Input:**
+```json
+{
+  "action": "create",
+  "entity": "server",
+  "issuerURL": "https://auth.example.com/oauth2",
+  "supportedScopes": "openid profile email",
+  "customizationRoles": "%DB_IRISSYS"
+}
+```
+
+`supportedScopes` and `customizationRoles` are **required** by IRIS for a server definition; `customizationNamespace` defaults to the request namespace when omitted. The issuer URL is parsed into the server's endpoint (host/port/prefix/SSL).
+
+**Output:**
+```json
+{
+  "action": "created",
+  "entity": "server",
+  "issuerEndpoint": "https://auth.example.com/oauth2"
+}
+```
+</details>
+
+<details>
 <summary><strong>iris_oauth_manage</strong> -- OIDC discovery</summary>
 
 **Input:**
@@ -859,11 +885,17 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 **Output:**
 ```json
 {
-  "issuer": "https://accounts.google.com",
-  "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-  "token_endpoint": "https://oauth2.googleapis.com/token"
+  "action": "discovered",
+  "issuerURL": "https://accounts.google.com",
+  "configuration": {
+    "issuerEndpoint": "https://accounts.google.com",
+    "authorizationEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenEndpoint": "https://oauth2.googleapis.com/token"
+  }
 }
 ```
+
+> Discovery requires an outbound TLS connection to the issuer, which needs a configured SSL/TLS client configuration on the IRIS instance.
 </details>
 
 <details>
@@ -874,12 +906,23 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 {}
 ```
 
-**Output:**
+**Output:** (a configured server; empty arrays when none exist)
 ```json
 {
-  "servers": [],
+  "servers": [
+    {
+      "id": "singleton",
+      "issuerEndpoint": "https://auth.example.com/oauth2",
+      "description": "Example authorization server",
+      "supportedScopes": ["email", "openid", "profile"],
+      "accessTokenInterval": 3600,
+      "authorizationCodeInterval": 60,
+      "refreshTokenInterval": 86400,
+      "signingAlgorithm": "RS256"
+    }
+  ],
   "clients": [],
-  "serverCount": 0,
+  "serverCount": 1,
   "clientCount": 0
 }
 ```

@@ -112,10 +112,10 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
-| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | idempotent |
 
 ### Package Browsing Tools
@@ -144,7 +144,7 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import) |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import), not idempotent |
 
 ### SQL Tools
 
@@ -400,11 +400,13 @@ Files are written to `C:/dev/iris-export/MyApp/Service.cls`, `C:/dev/iris-export
 ```json
 {
   "packages": [
-    { "name": "MyApp.Services", "count": 12 },
-    { "name": "MyApp.Utils", "count": 4 },
-    { "name": "MyApp.Tests", "count": 8 }
+    { "name": "MyApp.Services", "docCount": 12, "depth": 2 },
+    { "name": "MyApp.Utils", "docCount": 4, "depth": 2 },
+    { "name": "MyApp.Tests", "docCount": 8, "depth": 2 }
   ],
   "count": 3,
+  "namespace": "USER",
+  "depth": 2,
   "totalDocs": 24
 }
 ```
@@ -513,7 +515,7 @@ files. Pass an explicit `files` value to narrow the search.
 
 Returns the `.1.int` routine (or `.int` for `.mac`/`.int` sources) IRIS generates during compilation — the fully macro-expanded form IRIS actually executes at runtime. Useful when you need to see what `$$$` macros expand to (e.g., what `$$$OK` or `$$$ThrowOnError` resolves to in a specific class's context), or to inspect compiled output without running code.
 
-Pass the **bare class/routine name** (no `.cls` extension). The tool auto-resolves by trying candidate document paths in order: `<name>.1.int`, `<name>.int`, `<name>.mac`. The first 2xx response wins; `candidatesTried` reports which paths were attempted. If all candidates return 404 the tool returns a `compile-first` hint.
+Pass the **bare class/routine name** (no `.cls` extension). The tool auto-resolves by trying candidate document paths in order: `<name>.1.int`, then `<name>.int` (the `.mac` source itself is intentionally NOT a candidate — the macro-expanded intermediate is what this tool returns). The first 2xx response wins; `candidatesTried` reports which paths were attempted. If all candidates return 404 the tool returns a `compile-first` hint.
 
 **Input:**
 ```json

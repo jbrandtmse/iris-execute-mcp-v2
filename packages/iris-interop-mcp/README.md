@@ -120,7 +120,7 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 |------|-------------|----------------|-------------|
 | `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
-| `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `deployable?`, `namespace?` | destructive |
+| `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
 
 > **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. (A just-`add`-ed config item is not visible to an immediate `get`/`set` until the next add/remove syncs the config extent from the production class — see the `iris_production_item` examples below.)
 
@@ -700,6 +700,8 @@ All 20 interoperability tools operate in the context of a specific IRIS namespac
 | `Production not found` | No production configured in the namespace | Use `iris_production_manage` to create one, or check the namespace |
 | `Production must be stopped` | Attempting to delete a running production | Stop the production first with `iris_production_control` |
 | `Config item not found` | Invalid item name | Check item names with `iris_production_status` (detail=true) |
+| `Host class 'X' does not exist or is not compiled` | `iris_production_item` `add` with a `className` that is not a compiled class (surrounding whitespace is trimmed before this check) | Compile the host class first, or correct the `className` |
+| `Config item 'X' already exists in production 'Y'` | `iris_production_item` `add` with a duplicate item name in the target production | Use a unique `itemName`, or `remove` the existing item first |
 | `at least one of sessionId or headerId is required` | Missing filter for message trace | Provide either `sessionId` or `headerId` |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 

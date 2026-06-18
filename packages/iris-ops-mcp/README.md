@@ -613,9 +613,14 @@ alongside the existing `availableLocales` enumeration and `localeCount`:
 
 Most operations tools are **system-level** and do not require a namespace parameter. They operate across the entire IRIS instance.
 
-**Tools that accept the `namespace` parameter:**
+**Tools where `namespace` has a real effect:**
 - `iris_metrics_interop` -- optionally filter interop metrics to a single namespace
 - `iris_task_manage` -- specify the execution namespace for a new task
+
+**Tools that accept `namespace` but IGNORE it** (the operation is `%SYS`-scoped; the param is retained only for backward compatibility and has no effect):
+- `iris_process_manage` -- process inspection/control runs against the system-wide process table
+- `iris_database_action` -- `SYS.Database` keys on the directory path and runs in `%SYS`
+- `iris_backup_manage` -- backup/freeze/thaw are instance-wide via `Backup.General` in `%SYS`
 
 **Tools that do NOT accept `namespace`** (system-wide scope):
 - `iris_metrics_system`, `iris_metrics_alerts`, `iris_alerts_manage`

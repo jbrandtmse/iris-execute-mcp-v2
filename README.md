@@ -273,7 +273,11 @@ Per the default-seed rule above, the **new write actions** added after governanc
 
 | Server | Tool | Default-**disabled** (write) actions | Default-enabled (read/pre-existing) |
 |---|---|---|---|
-| admin | `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_audit_manage` | the `create`/`modify`/`delete`/mutating actions; `iris_resource_manage:grant`/`:revoke` | `list`/`get`/`status`/`test`/`listPrivileges` |
+| admin | `iris_service_manage` | `enable`, `disable`, `set` | `list`, `get` |
+| admin | `iris_ldap_manage` | `create`, `modify`, `delete` | `list`, `get`, `test` |
+| admin | `iris_x509_manage` | `import`, `delete` | `list`, `get` |
+| admin | `iris_audit_manage` | `enable`, `disable`, `configureEvent`, `purge`, `export` | `status`, `view` |
+| admin | `iris_resource_manage` (SQL privileges) | `grant`, `revoke` | `listPrivileges` (resource `create`/`modify`/`delete` are pre-governance, enabled) |
 | ops | `iris_process_manage` | `terminate`, `suspend`, `resume` | `get` |
 | ops | `iris_database_action` | `mount`, `dismount`, `compact`, `defragment`, `truncate`, `expandVolume` (all six) | — |
 | ops | `iris_backup_manage` | `run`, `freeze`, `thaw` | `listHistory` |
