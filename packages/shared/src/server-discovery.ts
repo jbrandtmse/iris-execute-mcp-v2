@@ -148,6 +148,14 @@ export function computeServerDiscovery(
 
   let governance: ServerDiscoveryResult["governance"];
   if (args.allProfiles) {
+    // Validate an explicitly-supplied `profile` even though `allProfiles`
+    // supersedes its single-policy output (CR 19.0-1): a client's typo'd
+    // `profile` is surfaced as a clean ProfileResolutionError — the SAME error
+    // the single-profile branch raises — instead of being silently ignored.
+    // An omitted/empty `profile` is not validated (it carries no intent here).
+    if (args.profile !== undefined && args.profile !== "") {
+      resolveProfile(profiles, args.profile);
+    }
     const policies: Record<string, Record<string, boolean>> = {};
     for (const name of profiles.keys()) {
       // Use defineProperty so a profile name that collides with a prototype
@@ -202,7 +210,9 @@ export const serverDiscoveryInputSchema = z.object({
     .optional()
     .describe(
       "When true, return the effective governance policy for EVERY configured " +
-        "profile (as `governance.policies`) instead of a single profile's policy.",
+        "profile (as `governance.policies`) instead of a single profile's policy. " +
+        "A supplied `profile` is still validated (an unknown name errors) but its " +
+        "single-policy output is superseded by the per-profile map.",
     ),
 });
 

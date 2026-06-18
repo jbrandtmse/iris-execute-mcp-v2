@@ -436,6 +436,70 @@ describe("Story 19.0 — effective governance policy (AC 19.0.3)", () => {
     // No additional fetch was made by the discovery call.
     expect(env.fetchMock.mock.calls.length).toBe(before);
   });
+
+  it("validates an unknown `profile` even when `allProfiles:true` (CR 19.0-1)", async () => {
+    // Regression (CR 19.0-1): a typo'd `profile` is surfaced as a structured
+    // error in the allProfiles branch too, matching the single-profile branch —
+    // it is NOT silently ignored.
+    setDefaultEnv();
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+    await server.start("stdio");
+
+    const result = await callTool(server, SERVER_DISCOVERY_TOOL_NAME, {
+      allProfiles: true,
+      profile: "ghost",
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0]!.text).toMatch(
+      /Unknown server profile "ghost"/,
+    );
+  });
+
+  it("accepts a VALID `profile` alongside `allProfiles:true` (still returns the full map) (CR 19.0-1)", async () => {
+    setDefaultEnv();
+    process.env.IRIS_PROFILES = JSON.stringify({
+      prod: { host: "prod.example.com", namespace: "PRODNS" },
+    });
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+    await server.start("stdio");
+
+    const result = discoveryOf(
+      await callTool(server, SERVER_DISCOVERY_TOOL_NAME, {
+        allProfiles: true,
+        profile: "prod",
+      }),
+    );
+    // `profile` is validated (no error) but its single-policy output is
+    // superseded by the per-profile map.
+    expect(result.governance.policy).toBeUndefined();
+    expect(Object.keys(result.governance.policies!).sort()).toEqual(["default", "prod"]);
+  });
+
+  it("ignores an invalid framework `server` arg (falls back to default, no hard fail) (CR 19.0-2)", async () => {
+    // Regression (CR 19.0-2): the discovery tool is connection-agnostic, so an
+    // unknown `server` does NOT fail the call (the tool's own `profile` arg
+    // selects the policy). This keeps the "call discovery first to learn valid
+    // profile names" workflow usable even if the client guesses a bad `server`.
+    setDefaultEnv();
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+    await server.start("stdio");
+
+    const result = await callTool(server, SERVER_DISCOVERY_TOOL_NAME, {
+      server: "does-not-exist",
+    });
+    expect(result.isError).toBeFalsy();
+    const disc = discoveryOf(result);
+    expect(disc.profiles.some((p) => p.name === "default")).toBe(true);
+    // A NON-discovery tool still hard-fails on an unknown `server`.
+    const echo = await callTool(server, "iris_doc_get", { server: "does-not-exist" });
+    expect(echo.isError).toBe(true);
+    expect((echo.content as Array<{ text: string }>)[0]!.text).toMatch(
+      /Unknown server profile "does-not-exist"/,
+    );
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════

@@ -818,15 +818,27 @@ export class McpServerBase {
       profile = resolveProfile(this.profiles, server);
     } catch (error: unknown) {
       if (error instanceof ProfileResolutionError) {
-        logger.warn(
-          `Tool ${tool.name}: ${error.message}`,
-        );
-        return {
-          content: [{ type: "text" as const, text: error.message }],
-          isError: true,
-        };
+        // The framework discovery tool is connection-agnostic (it reports
+        // in-memory config and never connects), so the `server` arg is
+        // irrelevant to it — its own `profile` arg selects which policy to
+        // report. An unknown `server` therefore must NOT hard-fail the
+        // "call discovery first to learn valid profile names" workflow
+        // (CR 19.0-2): fall back to the reserved default profile and proceed.
+        // The tool's own `profile` arg is still validated downstream.
+        if (tool.name === SERVER_DISCOVERY_TOOL_NAME) {
+          profile = resolveProfile(this.profiles, DEFAULT_PROFILE_NAME);
+        } else {
+          logger.warn(
+            `Tool ${tool.name}: ${error.message}`,
+          );
+          return {
+            content: [{ type: "text" as const, text: error.message }],
+            isError: true,
+          };
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     // ── Governance enforcement gate (architecture decision D5) ─────────
