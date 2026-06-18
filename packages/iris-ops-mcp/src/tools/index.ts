@@ -14,6 +14,7 @@ import {
 } from "./metrics.js";
 import { alertsManageTool } from "./alerts.js";
 import { jobsListTool, locksListTool } from "./jobs.js";
+import { processManageTool } from "./process.js";
 import {
   journalInfoTool,
   mirrorStatusTool,
@@ -24,6 +25,8 @@ import {
   licenseInfoTool,
   ecpStatusTool,
 } from "./infrastructure.js";
+import { databaseActionTool } from "./database.js";
+import { backupManageTool } from "./backup.js";
 import {
   taskManageTool,
   taskListTool,
@@ -40,10 +43,13 @@ export const tools: ToolDefinition[] = [
   alertsManageTool,
   jobsListTool,
   locksListTool,
+  processManageTool,
   journalInfoTool,
   mirrorStatusTool,
   auditEventsTool,
   databaseCheckTool,
+  databaseActionTool,
+  backupManageTool,
   licenseInfoTool,
   ecpStatusTool,
   taskManageTool,

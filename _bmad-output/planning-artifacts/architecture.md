@@ -3,6 +3,7 @@ stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8]
 lastStep: 8
 status: 'complete'
 completedAt: '2026-04-05'
+amendedAt: '2026-06-15'  # Epic 14 Foundation ADR appended — multi-server profiles + tool governance + resources capability (Winston / bmad-create-architecture)
 inputDocuments:
   - product-brief-iris-execute-mcp-v2.md
   - product-brief-iris-execute-mcp-v2-distillate.md
@@ -28,7 +29,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 **Functional Requirements:**
 109 FRs across 17 categories covering two distinct systems:
-- **Node.js/TypeScript MCP Servers** (consumer-side): Connection lifecycle (FR1-FR7c), auto-bootstrap (FR8-FR15), and 86 tools organized across 5 domain servers
+- **Node.js/TypeScript MCP Servers** (consumer-side): Connection lifecycle (FR1-FR7c), auto-bootstrap (FR8-FR15), and 98 tools organized across 5 domain servers
 - **ObjectScript REST Service** (IRIS-side): Custom handlers for ~40% of tools where the Atelier API lacks coverage — globals, execution, security, config, interop, monitoring, tasks, analytics
 
 The FR distribution reveals architectural weight: iris-dev-mcp (FR16-FR39, 24 FRs) is heaviest on Atelier API integration, iris-admin-mcp (FR40-FR62, 23 FRs) is heaviest on custom REST, and iris-interop-mcp (FR63-FR80, 18 FRs) wraps Ensemble's complex Ens.Director API.
@@ -160,11 +161,11 @@ iris-mcp-v2/
 │   │   │   └── bootstrap.ts    # Auto-bootstrap orchestration
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   ├── iris-dev-mcp/           # @iris-mcp/dev (20 tools)
-│   ├── iris-admin-mcp/         # @iris-mcp/admin (22 tools)
-│   ├── iris-interop-mcp/       # @iris-mcp/interop (19 tools)
-│   ├── iris-ops-mcp/           # @iris-mcp/ops (16 tools)
-│   ├── iris-data-mcp/          # @iris-mcp/data (9 tools)
+│   ├── iris-dev-mcp/           # @iris-mcp/dev (25 tools)
+│   ├── iris-admin-mcp/         # @iris-mcp/admin (26 tools)
+│   ├── iris-interop-mcp/       # @iris-mcp/interop (20 tools)
+│   ├── iris-ops-mcp/           # @iris-mcp/ops (20 tools)
+│   ├── iris-data-mcp/          # @iris-mcp/data (7 tools)
 │   └── iris-mcp-all/           # @iris-mcp/all (meta-package)
 ├── src/                        # IRIS-side ObjectScript classes
 │   └── ExecuteMCPv2/
@@ -315,7 +316,7 @@ This convention matches the Anthropic Messages API `tools[].name` regex `^[a-zA-
 **Enforcement:** A regression test in `packages/shared/src/__tests__/tool-naming.test.ts` iterates every registered tool across all 5 servers and asserts `/^[a-z0-9_]{1,64}$/`, preventing any future regression from landing. The rename from the original dot-notation (`iris.doc.get`) to flat underscore (`iris_doc_get`) was performed in Epic 9 after the defect was discovered during beta testing.
 
 **Pagination: Server-Controlled, Opaque Cursors**
-- Default 50 tools per page (spec-compliant but practically single-page for all servers — max is 22 tools)
+- Default 50 tools per page (spec-compliant but practically single-page for all servers — max is 26 tools)
 - Base64-encoded cursor with page offset
 - Most clients get everything in one request; pagination exists for spec compliance
 
@@ -367,6 +368,48 @@ This convention matches the Anthropic Messages API `tools[].name` regex `^[a-zA-
 - iris-admin-mcp through iris-data-mcp depend on the ObjectScript REST service being deployable
 - Auto-bootstrap depends on the Atelier API client (part of shared) being functional
 - Integration tests depend on the local IRIS development instance being accessible via web port
+
+### Multi-Server Profiles & Tool Governance (Epic 14 — added 2026-06-15)
+
+This decision record extends four sections above for the platform capabilities added by Epic 14. All additions are backward-compatible: with neither `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, behavior is identical to the original single-server, ungoverned design.
+
+**Multi-server profiles (extends *HTTP Client & Connection Architecture* and *Authentication & Security*):**
+- Connection config is resolved per *profile*. `IRIS_PROFILES` (a JSON blob in an environment variable) defines named profiles `{ name: { host, port, username, password, namespace, https } }`. The existing `IRIS_*` variables synthesize a reserved `default` profile, so single-server installs are unchanged.
+- `IrisHttpClient` keys its session/cookie cache per profile (no cross-profile session bleed). Every tool gains an optional `server` parameter (profile name); omitted → `default`. The `server` param carries only the profile name — credentials never leave the server process. This composes with the existing per-call `namespace` override: `server` picks the instance, `namespace` picks the namespace within it.
+
+**Tool governance (extends *MCP Server Registration Pattern* and *Error Handling Strategy*):**
+- Each tool action declares `mutates: read | write` metadata at registration. `IRIS_GOVERNANCE` (JSON env blob) defines a two-layer policy: `global` baseline + per-`profiles` overrides.
+- Effective policy resolves as `profile.explicit(action) ?? global.explicit(action) ?? defaultSeed(action)`. The default seed enables existing actions and new read actions, and disables new write/change actions — so newly-added mutating capability is opt-in.
+- Enforcement is **call-time** (a gate in the shared registration framework, run after profile resolution and before the handler). It is call-time *by necessity*: the governing profile is selected per call via `server`, so per-profile policy cannot be evaluated at advertise/registration time. All tools remain advertised; a disabled action returns a structured denial error naming the action and target profile.
+
+**New `resources` capability (extends *MCP Server Registration Pattern*):**
+- The suite was tools-only; Epic 14 adds the MCP `resources` capability to the shared server base (`resources/list`, `resources/read`, `resources/templates/list`). The resource template `iris-governance://{profile}` returns the effective policy for a profile, letting a client avoid blocked calls. It is advisory — the call-time gate remains the authoritative boundary.
+
+**Config home:** both `IRIS_PROFILES` and `IRIS_GOVERNANCE` are JSON blobs in environment variables (not external files), keeping all configuration in the MCP client's `env` block alongside the existing `IRIS_*` vars.
+
+#### Epic 14 Foundation — Architecture Decision Record (amended 2026-06-15)
+
+Grounded in a read of the `@iris-mcp/shared` tool-call flow (registration → context → client → IRIS). These are the load-bearing engineering decisions for Epic 14.
+
+> **The crux:** a server profile is *not* like a namespace. The existing per-call `namespace` override ([`server-base.ts:110`](../../packages/shared/src/server-base.ts) `resolveNamespace`) is a path-only string on the *same* authenticated session. A server profile is a *different host + credentials* → a different session (cookie jar, CSRF token, base URL) and cannot reuse the single `IrisHttpClient` ([`http-client.ts:41`](../../packages/shared/src/http-client.ts)). That distinction drives **D1**.
+
+**D1 — Per-profile client registry (the crux).** Replace the single `this.http` (created once in `McpServerBase.start()`, `server-base.ts:385`) with a lazily-populated `Map<profileName, IrisHttpClient>`. `handleToolCall` (`server-base.ts:225`) resolves the `server` param → profile, gets-or-creates that profile's client (health-check + Atelier-version negotiation on first touch, then cached), and `buildToolContext` (`server-base.ts:102`) receives that client + the profile's namespace default + negotiated Atelier version. The **default** profile's client is created eagerly at startup, preserving today's bootstrap/health-check/negotiation exactly. *Rationale:* session state is bound to host+credentials; sharing one client across profiles would cross-contaminate auth, and different profiles may run different IRIS/Atelier versions. *Cost:* first call to a new profile pays a one-time negotiation latency — acceptable.
+
+**D2 — `server` is a framework parameter, injected centrally, invisible to handlers.** Merge `server: z.string().optional()` into every tool's input schema at registration (`registerTool`, `server-base.ts:185-216`, extending `tool.inputSchema.shape` at line 191). `handleToolCall` consumes `server` to select the profile client, then strips it before invoking the handler. Handlers keep using `ctx.http` / `ctx.resolveNamespace(namespace)` exactly as today — **zero handler changes**. *Rationale:* DRY + total coverage (every current and future tool, for free) vs. the per-tool `namespace` declaration; keeping `server` out of the handler preserves existing handler code byte-for-byte. *Back-compat nuance (explicit):* this adds one optional field to every tool's advertised `inputSchema`. Per JSON-Schema/MCP semantics that is additive and non-breaking — calls omitting `server` behave identically; output schemas untouched. This is our accepted definition of "no breaking change" for schemas.
+
+**D3 — Provable back-compat via a generated governance baseline.** A build-time generator (`scripts/gen-governance-baseline.mjs`, mirroring `gen-bootstrap.mjs`) enumerates every existing tool and its `action`-enum values into `packages/shared/src/governance-baseline.ts` (generated, output-only — Rule #18). The default seed enables every baseline entry; anything NOT in the baseline is "new" → read enabled, write disabled. *Rationale:* makes "no pre-existing action is disabled by default" mechanically verifiable rather than a hand-maintained `isNew` flag that can drift; existing actions need no manual read/write classification (grandfathered enabled).
+
+**D4 — Governance key + the `action` discriminator standard.** The governance key is `tool` for single-operation tools and `tool:action` for multi-action tools. New governed tools MUST surface their mutating operations via an `action` enum parameter (all Epic 15–17 tools already do); the gate reads `args.action`. Only NEW actions carry `mutates: 'read' | 'write'` metadata. *Rationale:* matches the existing multi-action idiom (`iris_production_item`, `iris_*_manage`); existing single-op tools are grandfathered, so no retro-classification.
+
+**D5 — Gate placement & ordering (one chokepoint).** Inside `handleToolCall` (`server-base.ts:225`): validate args (Zod) → resolve `server`→profile → extract `action` → evaluate `getEffectivePolicy(profile)[key]` → if disabled, return a structured `isError` result (machine-readable code, names action + profile) WITHOUT calling the handler → else build per-profile context and invoke. One change point cascades to all five servers. *Rationale:* validate-before-gate gives reliable action extraction + clean errors; a single chokepoint keeps enforcement uniform and un-bypassable.
+
+**D6 — Minimal governance resource (no premature framework).** Add `resources: { listChanged: true }` to capabilities (`server-base.ts:163`); implement `resources/list`, `resources/templates/list` (`iris-governance://{profile}`), and `resources/read` → `getEffectivePolicy(profile)` as JSON. Build a focused governance-resource provider; do NOT generalize into a `ResourceDefinition` framework yet (YAGNI — one resource type today). *Rationale:* additive (clients ignoring `resources` unaffected); generalize only when a second resource appears.
+
+**D7 — Config parsing & fail-fast.** Parse `IRIS_PROFILES` and `IRIS_GOVERNANCE` centrally in `config.ts` (`loadConfig`, `config.ts:43-83`) at startup; malformed JSON fails fast naming the offending var. The default profile is synthesized from the existing `IRIS_*` vars under the reserved name `default`; a profile may omit fields to inherit the default's. *Rationale:* both are new vars — only opted-in operators are affected, so fail-fast carries no back-compat risk and beats silent misconfiguration.
+
+**Blast radius:** the entire foundation lands in `@iris-mcp/shared` — principally `server-base.ts` (client registry, gate, capability, resource handlers), `config.ts` (profile/governance parsing), two new modules (`profiles.ts`, `governance.ts`), and the generated `governance-baseline.ts`. The five server entry points and **every existing tool handler are unchanged** — the single-wiring-point leverage the suite was designed for.
+
+**D8 — Lazy per-profile bootstrap with graceful failure (decided 2026-06-15).** Custom-REST tools (admin/interop/ops) require the `ExecuteMCPv2` REST service on the *target* instance. On the first custom-REST call against a non-default profile, the framework **attempts the existing auto-bootstrap flow** (detect → deploy → compile → register, FR8–FR15; reuse the `start()` bootstrap orchestration at `server-base.ts:411-433`), caching the result so it runs at most once per profile. **If the attempt fails** (e.g., insufficient privileges), it falls back to the existing structured "which steps succeeded / which failed + manual remediation" report (FR12/FR13), surfaced as a clear, actionable error — **not** a silent no-op. Atelier-only tools (most of iris-dev) never trigger bootstrap and work against any profile. *Rationale:* reuses proven bootstrap machinery and matches the default profile's own startup behavior; graceful failure keeps the agent informed rather than guessing. *Note:* the bootstrap attempt mutates the target on first use (identical to today's default-profile startup) — it is part of establishing the profile's connection, not a separately-governed tool action.
 
 ## Implementation Patterns & Consistency Rules
 
@@ -702,11 +745,13 @@ iris-mcp-v2/
 │   │   │       ├── journal.ts        # iris_journal_info (FR86)
 │   │   │       ├── mirror.ts         # iris_mirror_status (FR87)
 │   │   │       ├── audit.ts          # iris_audit_events (FR88)
-│   │   │       ├── database.ts       # iris_database_check (FR89)
+│   │   │       ├── database.ts       # iris_database_check (FR89), iris_database_action (FR122)
 │   │   │       ├── license.ts        # iris_license_info (FR90)
 │   │   │       ├── ecp.ts            # iris_ecp_status (FR91)
 │   │   │       ├── task.ts           # iris_task_manage/list/run/history (FR92-FR95)
-│   │   │       └── config.ts         # iris_config_manage (FR96-FR99)
+│   │   │       ├── config.ts         # iris_config_manage (FR96-FR99)
+│   │   │       ├── process.ts        # iris_process_manage (FR121)
+│   │   │       └── backup.ts         # iris_backup_manage (FR123)
 │   │   ├── __tests__/
 │   │   │   └── ...
 │   │   ├── package.json              # name: @iris-mcp/ops

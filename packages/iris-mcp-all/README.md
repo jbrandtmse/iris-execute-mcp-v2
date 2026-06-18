@@ -22,13 +22,13 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 24 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup |
-| [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 22 | Namespace, database, user, role, resource, web-app, SSL/TLS, and OAuth2 management |
-| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 19 | Ensemble/Health Connect production lifecycle, credentials, lookups, rules, transforms |
-| [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 16 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 25 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis |
+| [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
+| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 20 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms |
+| [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **88 tools** across 5 servers.
+> **98 tools** across 5 servers.
 
 ---
 
@@ -44,6 +44,10 @@ All servers share the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool across all five servers accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and the servers behave exactly as single-instance, fully-enabled installs. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
 ---
 

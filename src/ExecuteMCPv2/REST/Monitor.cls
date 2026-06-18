@@ -680,6 +680,163 @@ ClassMethod DatabaseCheck() As %Status
     Quit $$$OK
 }
 
+/// Run a runtime database-maintenance operation via <code>SYS.Database</code> class methods.
+/// <p>Accepts a JSON body <code>{action, directory, ...params}</code> where
+/// <code>action</code> is one of:
+/// <ul>
+///   <li><code>mount</code> — <code>SYS.Database.MountDatabase(dir, readonly)</code></li>
+///   <li><code>dismount</code> — <code>SYS.Database.DismountDatabase(dir)</code> (destructive: takes the DB offline)</li>
+///   <li><code>compact</code> — <code>SYS.Database.CompactDatabase(dir, percentFull, .MbProcessed, .MbCompressed)</code></li>
+///   <li><code>defragment</code> — <code>SYS.Database.Defragment(dir)</code></li>
+///   <li><code>truncate</code> — <code>SYS.Database.ReturnUnusedSpace(dir, targetSize, .ReturnSize)</code> (destructive: shrinks the .DAT, returns trailing free space to the OS)</li>
+///   <li><code>expandVolume</code> — <code>SYS.Database.NewVolume(dir, newVolDir, initialSize)</code> (adds a new volume to a multi-volume database)</li>
+/// </ul></p>
+/// <p>These operations are <b>SYNCHRONOUS</b> — IRIS exposes no native async/queue API
+/// for them. <code>compact</code>, <code>defragment</code>, and <code>truncate</code>
+/// can run for a while on large databases and the request blocks until they finish.
+/// No fabricated started/queued status is returned.</p>
+/// <p><b>Guard:</b> <code>directory</code> is required, and the database must exist
+/// (checked via <code>SYS.Database.%ExistsId</code>) before any action runs; a missing
+/// or unknown directory yields a clean error envelope rather than an opaque
+/// <code>&lt;...&gt;</code> crash. Any non-OK <code>%Status</code> from the underlying
+/// API (e.g. a DB in use, locked, or unmounted) is propagated through
+/// <method>SanitizeError</method>.</p>
+/// <p>This tool covers RUNTIME operations only. Database CONFIG (create / modify /
+/// delete) lives in the admin <code>iris_database_manage</code> tool (Config.Databases).</p>
+ClassMethod DatabaseAction() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; action (required)
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate action enum via EXACT membership (NOT a substring test).
+        If (tAction'="mount")&&(tAction'="dismount")&&(tAction'="compact")&&(tAction'="defragment")&&(tAction'="truncate")&&(tAction'="expandVolume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: mount, dismount, compact, defragment, truncate, expandVolume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; directory (required for every action — the SYS.Database APIs key on it)
+        Set tDirectory = tBody.%Get("directory")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tDirectory, "directory")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read action-specific params (defaults applied; "" coerces via +)
+        Set tReadonly = +tBody.%Get("readonly")
+        Set tPercentFull = 90
+        If tBody.%IsDefined("percentFull") Set tPercentFull = +tBody.%Get("percentFull")
+        Set tTargetSize = +tBody.%Get("targetSize")
+        Set tNewVolDir = tBody.%Get("newVolDir")
+        Set tInitialSize = +tBody.%Get("initialSize")
+
+        Set $NAMESPACE = "%SYS"
+
+        ; ── Guard: confirm the database exists before any operation ──
+        ; SYS.Database is keyed on its directory. A missing / unknown directory
+        ; produces a clean refusal here rather than an opaque <...> crash inside
+        ; the maintenance API (defense in depth; the API %Status is the backstop).
+        If '##class(SYS.Database).%ExistsId(tDirectory) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Database directory '"_tDirectory_"' does not exist or is not a configured IRIS database.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; expandVolume additionally requires newVolDir (validate after NS guard so the
+        ; directory-exists check runs first, then restore NS for the error envelope).
+        If (tAction = "expandVolume") && (tNewVolDir = "") {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "The 'expandVolume' action requires 'newVolDir' (the directory for the new volume).")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Dispatch to the matching SYS.Database class method ──
+        Set tActionSC = $$$OK
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("directory", tDirectory)
+
+        If tAction = "mount" {
+            Set tActionSC = ##class(SYS.Database).MountDatabase(tDirectory, tReadonly)
+            Do tResult.%Set("readonly", tReadonly, "boolean")
+        }
+        ElseIf tAction = "dismount" {
+            Set tActionSC = ##class(SYS.Database).DismountDatabase(tDirectory)
+        }
+        ElseIf tAction = "compact" {
+            Set tMbProcessed = 0
+            Set tMbCompressed = 0
+            Set tActionSC = ##class(SYS.Database).CompactDatabase(tDirectory, tPercentFull, .tMbProcessed, .tMbCompressed)
+            Do tResult.%Set("percentFull", +tPercentFull, "number")
+            Do tResult.%Set("mbProcessed", +tMbProcessed, "number")
+            Do tResult.%Set("mbCompressed", +tMbCompressed, "number")
+        }
+        ElseIf tAction = "defragment" {
+            Set tActionSC = ##class(SYS.Database).Defragment(tDirectory)
+        }
+        ElseIf tAction = "truncate" {
+            Set tReturnSize = 0
+            Set tActionSC = ##class(SYS.Database).ReturnUnusedSpace(tDirectory, tTargetSize, .tReturnSize)
+            Do tResult.%Set("targetSize", +tTargetSize, "number")
+            Do tResult.%Set("returnSize", +tReturnSize, "number")
+        }
+        ElseIf tAction = "expandVolume" {
+            Set tActionSC = ##class(SYS.Database).NewVolume(tDirectory, tNewVolDir, tInitialSize)
+            Do tResult.%Set("newVolDir", tNewVolDir)
+            Do tResult.%Set("initialSize", +tInitialSize, "number")
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        ; Propagate the underlying API %Status on failure (Rule #9) — gives the
+        ; caller the real reason (DB in use, locked, unmounted, insufficient space).
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return license information in JSON format.
 /// <p>Queries <code>$SYSTEM.License</code> class methods for license type,
 /// capacity, current usage, and expiration. Converts <code>$Horolog</code>
@@ -820,6 +977,437 @@ ClassMethod ECPStatus() As %Status
         }
 
         Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return detail for a single IRIS process in JSON format.
+/// <p>Queries <code>%SYS.ProcessQuery</code> in the <b>%SYS</b> namespace for the
+/// process identified by the <code>pid</code> query parameter. Returns process
+/// state, routine, namespace, user, resource counters, and the
+/// <code>canBeTerminated</code> / <code>canBeSuspended</code> flags that gate the
+/// control actions in <method>ProcessManage</method>.</p>
+/// <p>Stack/variable inspection is intentionally NOT exposed: <code>%SYS.ProcessQuery</code>
+/// only surfaces a process's own stack via mailbox-message methods that require
+/// the target to cooperate; the read view here reports the state-level detail that
+/// the Management Portal ProcessDetails page shows without that overhead.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>pid</code> — Process ID to inspect (required)</li>
+/// </ul></p>
+ClassMethod ProcessGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate pid BEFORE switching namespace (Utils lives in HSCUSTOM)
+        Set tPid = $Get(%request.Data("pid",1))
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once so the string-keyed lookups
+        ; and the numeric isCurrentProcess check below can never disagree.
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm the process exists before reporting detail
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tProc = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("pid", +tProc.Pid, "number")
+        Do tResult.%Set("namespace", tProc.NameSpace)
+        Do tResult.%Set("routine", tProc.Routine)
+        Do tResult.%Set("state", tProc.State)
+        Do tResult.%Set("userName", tProc.UserName)
+        Do tResult.%Set("clientIPAddress", tProc.ClientIPAddress)
+        Do tResult.%Set("device", tProc.CurrentDevice)
+        Do tResult.%Set("jobType", +tProc.JobType, "number")
+        Do tResult.%Set("commandsExecuted", +tProc.CommandsExecuted, "number")
+        Do tResult.%Set("globalReferences", +tProc.GlobalReferences, "number")
+        Do tResult.%Set("inTransaction", +tProc.InTransaction, "number")
+        Do tResult.%Set("cpuTime", +tProc.CPUTime, "number")
+        Do tResult.%Set("memoryUsedKB", +tProc.MemoryUsed, "number")
+        Do tResult.%Set("priority", +tProc.Priority, "number")
+        Do tResult.%Set("roles", tProc.Roles)
+        Do tResult.%Set("canBeTerminated", +tProc.CanBeTerminated, "boolean")
+        Do tResult.%Set("canBeSuspended", +tProc.CanBeSuspended, "boolean")
+        Do tResult.%Set("canBeExamined", +tProc.CanBeExamined, "boolean")
+        ; isCurrentProcess: true if this is the calling (REST handler) process
+        Do tResult.%Set("isCurrentProcess", (+tProc.Pid = +$Job), "boolean")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Terminate, suspend, or resume an IRIS process.
+/// <p>Accepts a JSON body <code>{action, pid}</code> where <code>action</code> is one
+/// of <code>terminate</code>, <code>suspend</code>, or <code>resume</code>. Opens the
+/// target via <code>##class(SYS.Process).%OpenId(pid)</code> in the <b>%SYS</b>
+/// namespace and calls the corresponding instance method.</p>
+/// <p><b>Self / critical-process guard (defense in depth):</b> a control action is
+/// REFUSED — changing nothing — when:
+/// <ul>
+///   <li>The target is the calling process (<code>pid = $JOB</code>), for any action;</li>
+///   <li>The action is <code>terminate</code> and <code>%SYS.ProcessQuery.CanBeTerminated</code>
+///       is false (a critical system job);</li>
+///   <li>The action is <code>suspend</code> and <code>%SYS.ProcessQuery.CanBeSuspended</code>
+///       is false.</li>
+/// </ul>
+/// The guard is enforced here in the handler so it holds even on a direct REST call,
+/// independent of any TS-layer pre-check. A refusal returns
+/// <code>{action, pid, refused:true, reason}</code> with HTTP 200 (an explanatory
+/// result, not a server error).</p>
+ClassMethod ProcessManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = tBody.%Get("pid")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once, then use it everywhere
+        ; (existence check, opens, guard, response) so the string-keyed lookups and
+        ; the numeric self-guard can never disagree (e.g. " 01234" vs 1234).
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        ; Validate action enum via EXACT membership (NOT a substring contains test):
+        ; a substring test would accept a comma-injected value like "terminate,suspend"
+        ; which would then route to Resume() via the Else fall-through below.
+        If (tAction '= "terminate") && (tAction '= "suspend") && (tAction '= "resume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported control actions: terminate, suspend, resume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm target exists
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Self / critical-process guard (AC 16.1.4) ──
+        ; Refuse BEFORE invoking any control method; a refusal changes nothing.
+        Set tRefused = 0
+        Set tReason = ""
+        If (+tPid = +$Job) {
+            Set tRefused = 1
+            Set tReason = "Refused: cannot "_tAction_" the calling process (PID "_tPid_" = $JOB). This is the process serving the request."
+        }
+        Else {
+            ; Read the can-be-* flags via %SYS.ProcessQuery (no mailbox overhead).
+            ; Fail CLOSED: if the query object cannot be opened (e.g. the process
+            ; exited between the %ExistsId check above and here), refuse rather than
+            ; fall through to the control method with the guard un-applied.
+            Set tQ = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+            If '$IsObject(tQ) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" could not be inspected for the "_tAction_" safety check (it may have just exited); no control action was taken."
+            }
+            ElseIf (tAction = "terminate") && ('+tQ.CanBeTerminated) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be terminated (CanBeTerminated=0 - critical/protected system job)."
+            }
+            ElseIf (tAction = "suspend") && ('+tQ.CanBeSuspended) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be suspended (CanBeSuspended=0 - critical/protected system job)."
+            }
+        }
+
+        If tRefused {
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", tAction)
+            Do tResult.%Set("pid", +tPid, "number")
+            Do tResult.%Set("refused", 1, "boolean")
+            Do tResult.%Set("reason", tReason)
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── Execute the control action ──
+        Set tProc = ##class(SYS.Process).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid_" for control")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Dispatch by EXACT action match (resume reached only when tAction="resume",
+        ; never as a catch-all Else — the enum was already validated above).
+        Set tActionSC = $$$OK
+        If tAction = "terminate" {
+            Set tActionSC = tProc.Terminate()
+        }
+        ElseIf tAction = "suspend" {
+            Set tActionSC = tProc.Suspend()
+        }
+        ElseIf tAction = "resume" {
+            Set tActionSC = tProc.Resume()
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("pid", +tPid, "number")
+        Do tResult.%Set("refused", 0, "boolean")
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Run / freeze / thaw a backup, or list backup history (Story 16.3).
+/// <p>Backed by <code>Backup.General</code> in <code>%SYS</code>:
+/// <ul>
+/// <li><b>run</b> &rarr; <code>StartTask(taskName, jobbackup, quietflag)</code> — runs a
+/// USER-DEFINED backup task BY NAME. Live-probe (Rule #16) confirmed there are no
+/// predefined/shipped task names; the operator defines the task (name + database
+/// list + type) in the Management Portal first, and the backup TYPE is a property of
+/// that definition (so <code>backupType</code> here is informational only, not used to
+/// pick the task). Requires <code>taskName</code>.</li>
+/// <li><b>freeze</b> &rarr; <code>ExternalFreeze(LogFile, Text, ...)</code> — quiesces ALL
+/// database writes instance-wide until a thaw. DISRUPTIVE.</li>
+/// <li><b>thaw</b> &rarr; <code>ExternalThaw(LogFile, Username, Password)</code> — resumes
+/// writes after a freeze.</li>
+/// <li><b>listHistory</b> (read) &rarr; walks <code>^SYS("BUHISTORY", hindex, ...)</code>
+/// most-recent-first, returning timestamp / type / status / device / log / description.</li>
+/// </ul>
+/// <b>restore is NOT supported via this tool</b> (Rule #16, AC 16.3.3): IRIS restore is
+/// interactive (<code>^DBREST</code> / <code>CLUMENU^JRNRESTO</code>) and not cleanly
+/// scriptable through <code>Backup.General</code>. An <code>action="restore"</code> request
+/// is rejected here with a clear message rather than crashing — use the IRIS restore
+/// utility / Management Portal restore instead.</p>
+ClassMethod BackupManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; action (required)
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── restore guard (AC 16.3.3): defend the server even though restore is
+        ; not in the tool's enum — refuse cleanly, never crash. ──
+        If tAction = "restore" {
+            Set tSC = $$$ERROR($$$GeneralError, "Restore is not supported via this tool. IRIS restore is interactive (^DBREST / CLUMENU^JRNRESTO) and not cleanly scriptable via Backup.General; use the IRIS restore utility or the Management Portal restore instead.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate action enum via EXACT membership (NOT a substring test).
+        If (tAction'="run")&&(tAction'="freeze")&&(tAction'="thaw")&&(tAction'="listHistory") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: run, freeze, thaw, listHistory. (restore is not supported — use the IRIS restore utility.)")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read params (defaults applied; "" coerces via +)
+        Set tTaskName = tBody.%Get("taskName")
+        Set tBackupType = tBody.%Get("backupType")
+        Set tJobBackup = +tBody.%Get("jobbackup")
+        Set tDevice = tBody.%Get("device")
+        Set tLogFile = tBody.%Get("logFile")
+        Set tDescription = tBody.%Get("description")
+        Set tUsername = tBody.%Get("username")
+        Set tPassword = tBody.%Get("password")
+
+        ; run requires taskName (validate before NS switch — Utils is in HSCUSTOM)
+        If tAction = "run" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTaskName, "taskName")
+            If $$$ISERR(tSC) {
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        Set $NAMESPACE = "%SYS"
+
+        Set tActionSC = $$$OK
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+
+        If tAction = "listHistory" {
+            ; Walk ^SYS("BUHISTORY", hindex, ...) most-recent-first. The hindex is
+            ; date*1000000+time ($HOROLOG parts); the "0" index node is skipped by
+            ; reverse $Order from "" (numeric keys are all positive).
+            Set tEntries = []
+            Set tCount = 0
+            Set tMax = 50
+            Set tKey = $Order(^SYS("BUHISTORY", ""), -1)
+            While (tKey '= "") && (tCount < tMax) {
+                ; Only treat canonical positive-integer subscripts as history index
+                ; nodes. This skips the "0" metadata node (LOGNOTPURGED, etc.) AND
+                ; defends against any non-numeric / non-canonical subscript a corrupt
+                ; or foreign-written global might carry (which would otherwise feed
+                ; garbage to $ZDateTime below).
+                If (tKey = +tKey) && (tKey = (tKey \ 1)) && (+tKey > 0) {
+                    Set tEntry = {}
+                    ; Decode hindex = days*1000000 + seconds back to a $HOROLOG string.
+                    ; Guard the timestamp render: a node whose seconds part is out of
+                    ; $HOROLOG range (>=86400) or otherwise illegal must degrade this
+                    ; ONE entry's timestamp gracefully, never abort the whole listing.
+                    Set tHoro = (tKey \ 1000000) _ "," _ (tKey # 1000000)
+                    Set tTimestamp = ""
+                    Try {
+                        Set tTimestamp = $ZDateTime(tHoro, 3)
+                    } Catch tTSErr {
+                        Set tTimestamp = ""
+                    }
+                    Do tEntry.%Set("timestamp", tTimestamp)
+                    Do tEntry.%Set("type", $Get(^SYS("BUHISTORY", tKey, "TYPE")))
+                    Do tEntry.%Set("status", $Get(^SYS("BUHISTORY", tKey, "STATUS")))
+                    Do tEntry.%Set("device", $Get(^SYS("BUHISTORY", tKey, "DEVICE")))
+                    Do tEntry.%Set("logFile", $Get(^SYS("BUHISTORY", tKey, "LOG")))
+                    Do tEntry.%Set("description", $Get(^SYS("BUHISTORY", tKey, "DESC")))
+                    Do tEntry.%Set("list", $Get(^SYS("BUHISTORY", tKey, "LIST")))
+                    Do tEntries.%Push(tEntry)
+                    Set tCount = tCount + 1
+                }
+                Set tKey = $Order(^SYS("BUHISTORY", tKey), -1)
+            }
+            Do tResult.%Set("entries", tEntries)
+            Do tResult.%Set("count", tCount, "number")
+        }
+        ElseIf tAction = "run" {
+            ; StartTask(taskname, jobbackup, quietflag) — quietflag=1 keeps output
+            ; off the principal device (we have none in a REST context).
+            Set tActionSC = ##class(Backup.General).StartTask(tTaskName, tJobBackup, 1)
+            Do tResult.%Set("taskName", tTaskName)
+            Do tResult.%Set("jobbackup", +tJobBackup, "boolean")
+            If tBackupType '= "" Do tResult.%Set("backupType", tBackupType)
+        }
+        ElseIf tAction = "freeze" {
+            ; ExternalFreeze(LogFile, Text, SwitchJournalFile=1, TimeOut=10, ...)
+            Set tActionSC = ##class(Backup.General).ExternalFreeze(tLogFile, tDescription)
+            If tLogFile '= "" Do tResult.%Set("logFile", tLogFile)
+        }
+        ElseIf tAction = "thaw" {
+            ; ExternalThaw(LogFile, Username, Password)
+            Set tActionSC = ##class(Backup.General).ExternalThaw(tLogFile, tUsername, tPassword)
+            If tLogFile '= "" Do tResult.%Set("logFile", tLogFile)
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        ; Propagate the underlying API %Status on failure (Rule #9).
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Do tResult.%Set("success", 1, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {

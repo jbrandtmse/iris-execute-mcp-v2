@@ -401,8 +401,178 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 ---
 
-## Rules captured: 18
-## Epics contributing: 12 (retros 2026-04-21, 2026-04-22)
+## 19. Additive-epic back-compat gate AC with a mechanical proof
+
+**Context:** Any strictly-additive feature epic — a new capability gated behind opt-in config where the "off" state MUST equal today's behavior (the back-compat promise is a release gate).
+
+**Rule:** Require EACH story to carry a back-compat gate AC backed by a **mechanical proof**, not a prose claim. Mechanical = an assertion/test that fails if behavior drifts: an unchanged-output equality (`toEqual` the pre-feature output), an all-enabled/all-unchanged sweep under empty config, a "no extra side-effect" spy assertion, or a byte-for-byte source-unchanged check. The "off" path must be provably identical to pre-feature behavior.
+
+**Why:** Epic 14 (commits `213756b`–`f201a88`): the foundation contract was "no `IRIS_PROFILES` + no `IRIS_GOVERNANCE` = byte-for-byte today's." Every story proved it mechanically rather than asserting it — `loadConfig` left byte-for-byte unchanged (14.1), the generated 141-key baseline all-enabled under empty `IRIS_GOVERNANCE` (14.3), the enforcement gate a pure pass-through under empty config (14.4), the added `server` field / `resources` capability provably additive (14.2/14.5). No back-compat regression shipped across 6 stories that all modified the central dispatch path of all 5 servers.
+
+**How to apply:**
+- Story creation: if the epic is additive, add a back-compat AC naming the exact "off" condition AND the proof mechanism (which assertion fails if it regresses).
+- Code review: treat a prose-only back-compat claim with no failing-if-drift assertion as a finding (HIGH for a release-gated promise).
+
+---
+
+## 20. Generated baseline for provable back-compat over existing capability
+
+**Context:** A feature that could silently disable, hide, or alter an EXISTING capability — governance/policy gates, feature flags over current behavior, deprecation, permission tightening.
+
+**Rule:** Encode the "existing set" in a **generated, output-only** artifact (mirror `gen-bootstrap.mjs`: enumerate from source, deterministic sorted output, content hash, DO-NOT-EDIT header per Rule #18) and assert the new behavior preserves ALL of it. Derive "is this new?" from **baseline membership**, never a hand-maintained `isNew`/allowlist flag that drifts. A test must prove every baseline entry retains its pre-feature behavior under the feature's default/empty config.
+
+**Why:** Epic 14 Story 14.3 (commit `4b506ff`, arch decision D3): `scripts/gen-governance-baseline.mjs` enumerated every existing tool/action into `governance-baseline.ts` (141 keys); the default seed grandfathers exactly the baseline, and a test asserts all 141 resolve enabled under empty `IRIS_GOVERNANCE`. "No pre-existing action disabled by default" became mechanically verifiable instead of maintainable-by-hand. Generalizes Rule #18 (generated files output-only) to the back-compat-proof use case; pairs with Rule #19 (this IS the mechanical proof for a capability gate).
+
+**How to apply:**
+- When adding a gate/flag over existing behavior, build the generator + checked-in baseline + the all-preserved test BEFORE wiring enforcement.
+- Run the generator wherever `gen:bootstrap` drift is checked; the baseline is output-only (never hand-edit — Rule #18).
+
+---
+
+## 21. Named capstone = epic-done gate, in the default suite, review-verified genuine
+
+**Context:** A foundation / cross-cutting epic with a risk that no single per-story unit test covers end-to-end — isolation across components, uniform behavior across servers, an invariant that only emerges when multiple pieces combine.
+
+**Rule:** Designate ONE capstone integration test as the explicit "epic done" gate, name it in the epic's ACs, require it to run in the **DEFAULT** test suite (NOT an excluded `*.integration.test.ts` / tagged-out suffix), and have code review verify it is **genuine** (exercises the real surfaces and would actually fail if the property broke) rather than illusory (asserting on mocks that can't violate the property, or testing one component twice).
+
+**Why:** Epic 14 Story 14.5 (commit `0ed5264`, AC 14.5.6): the cross-server capstone (D1 per-profile session isolation + D5 uniform enforcement across two servers) was the explicit Epic-14-done gate. The dev named it `governance-cross-server.test.ts` — NOT `.integration.test.ts` — precisely because the vitest config excludes that suffix from the default run; otherwise the gate would silently never run. Code review scrutinized it hardest, confirmed it genuinely drives real per-instance cookie jars + the shared gate, and caught a Node-18 `getSetCookie` mock bug that would have made the D1 isolation assertions flake/falsely pass on the supported Node floor.
+
+**How to apply:**
+- Epic planning: identify the cross-cutting risk; assign a capstone AC to the last implementation story; flag it as the de-risking priority (land the unit-level version early — see the Epic 14 "prove isolation first" note).
+- Review of that story: verify the capstone is in the default run and would fail if the property regressed; a capstone that can't fail is a HIGH finding.
+
+---
+
+## 22. Lead per-story smoke against the BUILT artifact, in a real process
+
+**Context:** The lead's per-story smoke gate for a shared-framework / library / TypeScript-build story (no obvious UI/CLI/service to drive manually).
+
+**Rule:** Smoke the **built output** (`dist/`) in a fresh real Node process — NOT the source via the vitest runner — exercising the new public surface as a real consumer would (`import` from `dist/index.js` or the dist module; for connection/resource/enforcement paths, touch live IRIS where cheap and read-only). This catches export-wiring, ESM-resolution, capability-advertisement, and real-runtime issues that mocked-fetch unit tests structurally cannot. Rebuild first so `dist` reflects the latest code-review fixes; remove the disposable smoke script before staging.
+
+**Why:** Epic 14 (Stories 14.1–14.6): each lead smoke ran the built `@iris-mcp/shared` standalone — back-compat + session isolation (14.1); the central `server`-param injection + two live-IRIS authenticated calls through profile-selected clients (14.2); generator determinism + the 141-key all-enabled proof (14.3); the real `handleToolCall` gate denying a governed action against live IRIS (14.4); the real MCP SDK resource handlers returning the per-profile policy over live IRIS (14.5); copy-paste-parsing the doc JSON-in-env examples (14.6). These confirmed the wired-up system end-to-end exactly where the (correct) unit tests used mocked fetch. *Note:* `process.exit` with open keepalive sockets emits a benign Windows libuv `UV_HANDLE_CLOSING` assertion AFTER the pass line — a teardown artifact, not a defect.
+
+**How to apply:**
+- For a shared/library story, write a disposable smoke that imports the built dist and asserts the user-observable outcome in a real process; `pnpm --filter <pkg> build` first; `rm` the script before `git add`.
+- Match the smoke method to the deliverable: pure module → import+assert; connection/resource/enforcement → drive the real surface against live IRIS read-only.
+
+---
+
+## 23. Frozen-foundation baseline when a gate sits over an EVOLVING surface
+
+**Context:** A governance/policy/feature gate whose back-compat proof is a generated baseline, applied to a capability surface that will KEEP GROWING (new tools/actions/flags added in later epics) — not a one-time foundation epic.
+
+**Rule:** The back-compat baseline must be a **FROZEN foundation snapshot** (the surface as of the gate's introduction), and the drift test must be **one-directional**: every committed (foundation) key MUST still exist in the live surface (catches a removed/renamed pre-existing capability — a real regression), but NEW live keys outside the foundation are EXPECTED and allowed. New capability is governed by its **classification** (`mutates`/seed), NOT by baseline membership. Do NOT regenerate the baseline to absorb new keys — that would grandfather a new default-disabled write as enabled (defeating the gate). A bidirectional `committed == live` drift test is correct ONLY for a closed/frozen surface, never for one a future epic extends.
+
+**Why:** Epic 15 Story 15.1 (commit `5d59d83`). Epic 14's D3 baseline + bidirectional drift test was authored for the foundation epic; Epic 14 retro AI#4 ("regenerate `governance-baseline.ts` whenever a tool is added; drift test enforces") assumed the baseline grows. The FIRST real governed write tool exposed the contradiction: `defaultSeed` returns enabled for any baseline member, so a new `iris_service_manage:enable` key that is IN the baseline ships enabled — defeating default-disable; but excluding it fails the bidirectional `missing`-keys assertion. Resolution: freeze `GOVERNANCE_BASELINE` at the Epic-14 141-key snapshot (hash `1e62c5ad5bf7`), relax the drift test to one-directional, govern new keys via `mutates`+`defaultSeed`. Held across all of Epic 15 (89→93 tools) with the foundation hash unchanged.
+
+**How to apply:**
+- When introducing a gate over a growing surface, design the drift test one-directional from the start (assert foundation persists; allow new keys). Reframe any "regenerate the baseline on every change" guidance as "freeze the foundation; classify new entries."
+- Generalizes Rule #20 (generated baseline for back-compat) to the multi-epic / growing-surface case; pairs with Rule #25 (the generator must not silently regrow the frozen file).
+
+---
+
+## 24. Bootstrap/embedded-artifact regen is per-change, not deferrable to a closing story
+
+**Context:** An epic that edits a class/file whose content is embedded in a generated artifact guarded by a **content-hash drift test** (e.g. `bootstrap-classes.ts` + `BOOTSTRAP_VERSION` = SHA-256 of the on-disk classes; `bootstrap.test.ts` asserts on-disk == embedded == version), where the plan says "one consolidated bump at the closing story."
+
+**Rule:** Editing a hash-bootstrapped class REQUIRES regenerating the embedded copy (`gen:bootstrap`, Rule #18 — never hand-edit) and moving the version **in the SAME story**. "Defer the bump to a closing story" is **incompatible** with the drift test — the moment a bootstrapped class changes, on-disk ≠ embedded and version ≠ hash, so the suite goes red and stays red until regen. The version moving each ObjectScript-touching story is correct (it IS a content hash). Reinterpret any "single bump at story N" plan as: the version moves incrementally per change; the CLOSING story VERIFIES idempotence (`gen:bootstrap` produces no diff) and finalizes docs — it does not introduce a deferred bump.
+
+**Why:** Epic 15 Story 15.1 (commit `5d59d83`). The epic plan (and Epics 16/17) said "one `BOOTSTRAP_VERSION` bump at the closing story." Story 15.1's dev correctly halted (Rule 5) — editing `Security.cls` made `bootstrap.test.ts` fail and no amount of deferral kept the suite green. Lead resolved "Option A": regen per ObjectScript story (`8f0cf75be984`→`fae7cadc22fb`→…→`e5f4f6d88c56`); Story 15.6 confirmed `gen:bootstrap` idempotent (no fresh bump). Same reinterpretation applies to any epic whose closing story claims a single deferred bump.
+
+**How to apply:**
+- Story-spec a bootstrapped-ObjectScript story with an explicit "regenerate `bootstrap-classes.ts` + record `BOOTSTRAP_VERSION` from→to" AC; make the closing/docs story an idempotence VERIFY, not the sole bump.
+- If a plan inherits "one bump at the closing story" language, flag it at story creation and reinterpret rather than discovering it mid-dev.
+
+---
+
+## 25. A generator that emits a frozen/committed artifact needs a no-write `--check` mode
+
+**Context:** Any `scripts/gen-*.mjs` (or equivalent) that `writeFileSync`s a committed artifact which has become FROZEN under a frozen-foundation policy (Rule #23) — i.e. the generator's natural output (the full live surface) now DIFFERS from the intentionally-frozen committed file.
+
+**Rule:** Such a generator is a **footgun**: running it for ANY reason (even "just to check counts") silently overwrites the frozen file with a regrown surface, un-freezing it. It MUST gain a `--check`/no-write mode that re-derives and diffs WITHOUT writing (exit non-zero on drift, for CI), and ideally REFUSE to overwrite a file marked frozen (or require an explicit `--force`). Until then, treat invoking it as dangerous: never run it to fetch counts (read the test assertions / count the source arrays instead); if it IS run, immediately `git checkout -- <frozen-file>` to restore. Document the hazard prominently in the generator header and in any story that touches the area.
+
+**Why:** Epic 15 Story 15.6 (retro 2026-06-16). Under the Story 15.1 frozen-foundation model, `gen-governance-baseline.mjs` still enumerates ALL live tools and writes the full set — so running it regrows the frozen 141-key baseline (93 tools → 66 admin keys) and breaks `1e62c5ad5bf7`. The lead tripped this exact footgun fetching tool counts during Story 15.6 prep and had to `git checkout -- governance-baseline.ts`. Story 15.1's AC 15.1.7 added only a prose "do not re-run" note — insufficient, because "re-run to re-verify" still overwrites. The deferred `--check` item (routed from Story 15.0) is the real fix.
+
+**How to apply:**
+- Pair every frozen-foundation artifact (Rule #23) with a `--check` generator mode before the freeze ships; add a DO-NOT-RUN-TO-REGROW banner to the generator.
+- In stories near a frozen artifact, instruct devs to derive facts (counts, membership) from tests/source, never by invoking the generator.
+
+---
+
+## 26. Live-endpoint smoke for stories backed by a deployed REST/ObjectScript surface
+
+**Context:** The lead's per-story smoke for a story whose user-observable deliverable is served by a DEPLOYED endpoint (a `%CSP.REST`/Atelier route, an ObjectScript handler on a live IRIS instance) — as opposed to a pure TS library.
+
+**Rule:** Extend Rule #22: for an endpoint-backed story, drive the **LIVE deployed endpoint over real HTTP** (e.g. `curl` the `%SYS`-namespace REST route against the running instance), not just `import` the built lib. Exercise the read paths (`list`/`get`/`status`) AND a **safe rejection of the destructive path** (send the dangerous request and assert it is REFUSED, changing nothing) — this confirms a security guard is effective on the actual running server, which mocked-fetch unit tests structurally cannot. Use clearly-disposable targets for any state-changing verification and clean up; never run a real destructive op against live data.
+
+**Why:** Epic 15 (Stories 15.1–15.5). Live-HTTP lead smokes confirmed three security fixes end-to-end that unit tests could not: the `iris_service_manage` error envelope + boolean coercion (15.1), and crucially the **rejections** — `iris_audit_manage` wildcard-only purge refused with "Purge requires a bounded scope" on the live server (15.4, the HIGH full-wipe fix), and `iris_resource_manage` `grant SELECT,BOGUS` refused before `SaveObjPriv` (15.5, the HIGH partial-grant fix). Each rejection proved the guard live while changing nothing.
+
+**How to apply:**
+- Endpoint-backed story → smoke method = live HTTP against the deployed route; include at least one "destructive request is rejected" assertion when the tool has a write/destructive action.
+- Governance is enforced at the MCP/tool layer, not the REST route — so a direct REST smoke bypasses governance and tests the ObjectScript handler's OWN guards (bounds, confirmation, validation); that is exactly what you want to verify for the handler.
+
+---
+
+## 27. `Ens.Config` config objects: class-XData is source of truth, the SQL extent is a synced cache
+
+**Context:** Any handler that adds/removes/edits Interoperability config items via `Ens.Config.Production` / `Ens.Config.Item` (e.g. `iris_production_item` add/remove), and a LATER action in the same flow (or a follow-up call) reads the item back via the SQL extent (`Ens_Config.Item` SELECT, `Ens.Config.Item.NameExists`, `%OpenId` on the item id).
+
+**Rule:** `Ens.Config.Production.SaveToClass()` and `RemoveItem()` write the **production class definition (XData `ProductionDefinition`)** — NOT the `Ens.Config.Item` SQL extent. The extent is a synced cache populated from the XData by `Ens.Config.Production.LoadFromClass(pClassName)` (single arg; it deletes + re-saves the extent from the class). Consequences a handler MUST account for:
+- After a fresh `%OpenId(prod)`, `tProd.Items` reflects the **stale extent**, not the XData. Call `##class(Ens.Config.Production).LoadFromClass(prod)` BEFORE `%OpenId` in add/remove so you operate on current items (the add→remove round-trip otherwise can't see a just-added item).
+- A just-`add`-ed item is in the XData but NOT yet in the extent, so an immediate `get`/`set` (which use `NameExists`/raw `Ens_Config.Item` SQL) returns "not found" until a `LoadFromClass`/compile syncs the extent. This is expected, not a bug — but document it, and consider a post-add `LoadFromClass` if immediate get/set visibility is desired.
+- `Ens.Config.Item` has a COMPOSITE `Index Name On (Production, Name)`, so `NameExists(name)` (one-arg) does not uniquely resolve an item in an arbitrary/non-active production.
+
+**Why:** Epic 17 Story 17.2 (commit `a4100a0`): the Story 17.0 probe recipe (Area 2a) read items via a bare `%OpenId(prod)` and the add→remove round-trip failed because the extent was stale; dev added the `LoadFromClass` sync (DISCREPANCY #1b, Rule #5 probe-doc amendment). The 17.2 lead smoke then observed `get`-after-`add` returning "not found" while `remove` (which uses `LoadFromClass`+`FindItemByConfigName` on the XData) succeeded — confirming the extent/XData split live. Pairs with Rule #2 (read IRIS source) and Rule #16 (live probe).
+
+---
+
+## 28. New governance keys need a `mutates` class even when they're reads
+
+**Context:** Adding ANY new tool (or new `action` to an existing tool) on a governance-wired server (all 5 suite servers since Epic 14), where the new tool/action is a READ.
+
+**Rule:** Every NEW (post-foundation, absent-from-frozen-baseline) governance key MUST carry a `mutates` classification — `read` OR `write` — or `assertGovernanceClassification` THROWS at server registration. A read is NOT exempt: declare `mutates: "read"` (or per-action `{action: "read", …}`). A read resolves to default-ENABLED via `defaultSeed` (only `write` → default-disabled), but the classification is still mandatory; omitting it is a registration-time crash, not a silent enable. Do NOT conclude "reads need no `mutates`" — they need `mutates: "read"`.
+
+**Why:** Epic 17 Story 17.3 (commit `56cde54`): `iris_sql_analyze`'s four actions (`explain`/`stats`/`indexUsage`/`running`) are all reads; the Story 17.0 probe doc wrote "READ-ONLY → reads → default-enabled (no mutates)", which would have thrown at registration (`server-base.ts rebuildGovernedKeys` derives a `tool:action` key per enum value; none are in the frozen baseline `1e62c5ad5bf7`; `assertGovernanceClassification` rejects any unclassified non-baseline key). Spec corrected to `mutates: {explain:"read", stats:"read", indexUsage:"read", running:"read"}`. Generalizes the Story 15.0 strict-classification contract to the reads case; pairs with Rule #23 (frozen-foundation baseline).
+
+---
+
+## 29. Reject the delimiter in user-supplied slots of a composite IdKey
+
+**Context:** Any handler that assembles a multi-part IRIS IdKey from caller-supplied values to feed `%OpenId`/`%ExistsId`/`%DeleteId` — e.g. `prod_"||"_item_"||"_hostClass_"||"_setting` for `Ens.Config.DefaultSettings`, or any `$ListBuild`/concatenation-delimited compound id.
+
+**Rule:** Before assembling the id, REJECT any slot value that itself contains the delimiter (`||` for `Ens.Config.DefaultSettings`; the relevant separator for other compound keys). A slot carrying the delimiter splits into the wrong subscripts and silently targets a DIFFERENT row — a get/set/delete against an unintended key (a quiet correctness + integrity hole, injection-flavored). Reject with a clear error (`"Key slot values may not contain the '||' delimiter"`) before any `%OpenId`/`%Save`/`%DeleteId`.
+
+**Why:** Epic 17 Story 17.1 (commit `d36e085`, CR 17.1 patch): `iris_default_settings_manage` built its IdKey from four caller slots joined by `||`; without a guard, `production:"X||evil"` would mis-target. The reviewer added a reject-before-assemble guard; the lead smoke proved it live — `production:"ZZZSmoke171||evil"` returned `ERROR #5001: Key slot values may not contain the '||' delimiter` with `result:{}` (no write). Pairs with Rule #26 (live destructive/guarded-path rejection in the smoke).
+
+---
+
+## 30. Per-epic docs rollup must flag governance default-disabled state
+
+**Context:** A per-epic documentation rollup (the closing "docs rollup" story, or any doc pass) that adds a NEW governed tool or action to the user-facing docs (README, per-server READMEs, `tool_support.md`, catalogs) on a governance-wired server.
+
+**Rule:** Updating the docs for a new governed tool/action is NOT complete when the catalog row + tool count are added. The rollup MUST ALSO state **which new actions are default-disabled** under `IRIS_GOVERNANCE` (the `write`-classified actions) vs **enabled by default** (reads + pre-governance baseline). Put the callout where a reader of that tool will see it — the per-server README's tool section AND the authoritative catalog (`tool_support.md`) — mirroring the established Epic-15 note style. A user deciding whether to enable a tool needs the default-state at the point of documentation, not only the abstract default-seed rule buried in the governance section.
+
+**Why:** Epic 18 Story 18.0 close-out (commits `b7e7da0`, `e4bcad8`): the per-epic rollups for Epics 16 (16.4) and 17 (17.4) added catalog rows + refreshed counts but omitted the governance default-disabled callout that Epic 15's rollup (15.6) had included. So `iris_process_manage`/`iris_database_action`/`iris_backup_manage` (Epic 16) and `iris_default_settings_manage`/`iris_production_item` add-remove/`iris_sql_analyze` (Epic 17) were documented without indicating which actions ship default-disabled. The Project Lead caught it at Epic 18 close and required a doc pass across README + `tool_support.md` + every per-server README. The gap is recurring-shape — it would silently recur on every future governed-tool epic — so it is a rule, not a one-off.
+
+**How to apply:**
+- Closing-story docs-rollup AC: add an explicit "state default-disabled vs default-enabled for each new tool/action" requirement, not just "add catalog row + bump counts."
+- Code review of a docs-rollup story: a new governed tool documented WITHOUT its default-state callout is a finding.
+- The default-state derives mechanically from `mutates` (writes → default-disabled, reads → enabled) per Rule #23/#28 — so the callout is a copy of the classification the tool already carries, never a fresh judgment.
+
+---
+
+## Rules captured: 30
+## Epics contributing: 16 (retros 2026-04-21, 2026-04-22, 2026-06-16, 2026-06-17)
+
+**Audit note (2026-06-17, Epic 18):** Epic 18 was a minimal single-story cleanup epic (Story 18.0 only — Epic 17 deferred-item triage + include-now hardening). The retro nominated 1 rule candidate; the Project Lead confirmed it passes the general-pattern bar (Rule #30 — per-epic docs rollup must flag governance default-disabled state). It generalizes beyond its triggering incident: the docs-rollup governance-callout gap would silently recur on every future governed-tool epic (it was the Epic 15 rollup that included the callout; Epics 16/17 rollups omitted it). Existing rules were exercised and held, not re-codified (Rule #1): Rule #16 (18.0 dev re-probed `Ens.Config.*` + `Interop.cls` before trusting deferred-item suggestions), Rule #19 (the new guards stayed strictly additive — 17.2 back-compat snapshots green), Rule #23/#25 (baseline frozen `1e62c5ad5bf7`), Rule #24 (bootstrap regen `39dc932907cb`→`fd3f065bcd3c`), Rule #26 (live-HTTP smoke proved 5 guarded-path rejections with 0-row no-write integrity), Rule #27 (`LoadFromClass` sync preserved in CR 17.2-5), Rule #29 (the `add` className/dup-name guard is the analogous input-hygiene guard to the `||` IdKey guard). 2 review items (CR 18.0-1 MED, CR 18.0-2 LOW) are tracked work in `deferred-work.md`, not patterns — routed to the next cleanup-epic Story X.0.
+
+**Audit note (2026-06-16, Epic 17):** Epic 17 retro nominated 3 rule candidates; the Project Lead confirmed all 3 pass the general-pattern bar (Rules #27, #28, #29). Each generalizes beyond its triggering incident: #27 (Ens.Config XData-vs-extent / LoadFromClass) applies to any future Interop config-item handler and was confirmed both in 17.2 dev (the add→remove round-trip) and the 17.2 live smoke (get-after-add miss); #28 (reads still need `mutates`) corrects the Story 17.0 probe doc and applies to every future read tool/action on a governed server; #29 (composite-IdKey delimiter guard) applies to any compound-id-from-input handler and was proven live. Existing rules were exercised and held, not re-codified: Rule #16 (pre-spec probe caught 2 discrepancies in 17.0 + a 3rd in 17.2), Rule #19 (17.2 back-compat gate, strengthened to full-object `toEqual`), Rule #24 (per-story bootstrap regen `fe972c4cb317`→`39dc932907cb`; 17.4 verified idempotent — NOT a deferred bump), Rule #23/#25 (baseline frozen `1e62c5ad5bf7` across the epic). No candidates skipped; 5 MED/LOW review items deferred to `deferred-work.md` (tracked work, not patterns) for Epic 18 Story 18.0 triage.
+
+## Original audit notes (pre-Epic-17)
+## Rules captured (prior): 26
+## Epics contributing (prior): 14 (retros 2026-04-21, 2026-04-22, 2026-06-16)
+
+**Audit note (2026-06-16):** Epic 14 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern-shape bar (Rules #19, #20, #21, #22). All four generalize from evidence spanning the full 6-story foundation epic (not single incidents): #19 back-compat gates held across all stories; #20 the D3 generated baseline; #21 the AC 14.5.6 capstone; #22 the per-story lead smokes 14.1–14.6. No candidates were skipped this retro. Two deferred items were NOT codified as rules (correctly — they are tracked work, not patterns): the `.optional()`-wrapped-action-enum gate/baseline hardening (deferred to Epic 15's first governed write tool) and the pre-existing doc drift (migration-guide dotted names, architecture.md stale counts).
 
 **Audit note (2026-04-21):** Rule #14 ("Password redaction — gate on length") was initially codified during Epic 11 retro, then removed during the retro's self-audit. The retro's own Murat-triage had flagged Bug #8 as narrow ("not a general pattern — fix is in code, no rule needed"), but it was codified anyway. Removal enforces Rule #1's "narrow one-off fixes do NOT become rules" principle. The fix remains in the code and the retro bug log.
 
@@ -411,3 +581,5 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 - "One consolidated bootstrap bump per epic" — process-shape, better tracked in epic-cycle-log conventions than as a rule.
 
 These decisions enforce Rule #1's general-pattern-shape requirement.
+
+**Audit note (2026-06-16, Epic 15):** Epic 15 retro nominated 4 rule candidates; the Project Lead confirmed all 4 pass the general-pattern bar (Rules #23, #24, #25, #26). All generalize beyond their triggering incident: #23 (frozen-foundation baseline) held across all of Epic 15 (89→93 tools, foundation hash unchanged) and corrects Epic 14 retro AI#4, which was proven wrong by the first real governed write tool; #24 (bootstrap-regen per change) recurs in Epics 16/17's identical "one bump at the closing story" plans; #25 (generator `--check` mode) is the real fix for a footgun the lead tripped live, superseding Story 15.1's insufficient prose note; #26 (live-endpoint smoke) caught/confirmed 3 security fixes across 15.1–15.5. Notably, the Epic 14 retro's own AI#4 became a retro lesson here — a planning assumption ("regenerate the baseline on every tool add") that only a real consumer could falsify. Two items were NOT codified (tracked work, not patterns): the `gen-governance-baseline --check` implementation itself (deferred to a CI story) and the per-alert/per-cleanup deferrals carried in `deferred-work.md`.

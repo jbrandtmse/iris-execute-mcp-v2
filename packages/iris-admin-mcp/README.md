@@ -1,6 +1,6 @@
 # @iris-mcp/admin
 
-**IRIS Administration MCP Server** -- Namespace, database, user, role, resource, web application, SSL/TLS, and OAuth2 management via the Model Context Protocol.
+**IRIS Administration MCP Server** -- Namespace, database, user, role, resource (incl. SQL privileges), web application, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -32,6 +32,10 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
 ---
 
@@ -133,7 +137,7 @@ All servers use the same environment variables:
 |------|-------------|----------------|-------------|
 | `iris_role_manage` | Create, modify, or delete a security role | `action`, `name`, `description?`, `resources?`, `grantedRoles?` | destructive |
 | `iris_role_list` | List all security roles | `cursor?` | readOnly, idempotent |
-| `iris_resource_manage` | Create, modify, or delete a security resource | `action`, `name`, `description?`, `publicPermission?` | destructive |
+| `iris_resource_manage` | Create/modify/delete a security resource, **or grant/revoke/list SQL object privileges** | `action` (`create`, `modify`, `delete`, `grant`, `revoke`, `listPrivileges`), `name?`, `description?`, `publicPermission?`, `target?`, `privilege?`, `grantee?`, `namespace?` | destructive |
 | `iris_resource_list` | List all security resources | `cursor?` | readOnly, idempotent |
 
 ### Web Application Tools
@@ -163,6 +167,46 @@ All servers use the same environment variables:
 - `supportedScopes` — accepts a space- or comma-separated string (e.g., `"openid profile email"` or `"openid,profile,email"`). The tool splits the string into an array before sending to IRIS.
 - `customizationNamespace` — IRIS namespace containing OAuth2 customization classes (required by IRIS; defaults to `""` when omitted).
 - `customizationRoles` — roles granted to the customization code (required by IRIS; defaults to `""` when omitted).
+
+### SQL Privilege Tools
+
+`iris_resource_manage` also manages **SQL object privileges** (schema/table/column GRANT/REVOKE) via three additional actions. Unlike the security-resource actions (which run in `%SYS`), these execute in the **target namespace** (the `namespace?` parameter, defaulting to the configured default).
+
+| Action | Description | Key Parameters | Mutates |
+|--------|-------------|----------------|---------|
+| `grant` | Grant one or more SQL privileges on a schema/table/column to a user or role | `target` (schema, `schema.table`, or `schema.table(col1,col2)`), `privilege` (e.g. `SELECT`, `INSERT,UPDATE`, `%ALTER`), `grantee`, `namespace?` | write (default-disabled under governance) |
+| `revoke` | Revoke SQL privileges from a user or role | `target`, `privilege`, `grantee`, `namespace?` | write (default-disabled under governance) |
+| `listPrivileges` | List the current SQL grants held by a user or role | `grantee`, `target?` (omit for object-level listing; pass `schema.table` for a column-level listing), `namespace?` | read (enabled by default) |
+
+> **Governance:** `grant` and `revoke` are classified `write` (denied by default under an `IRIS_GOVERNANCE` policy until explicitly allowed); `listPrivileges` is a `read` (enabled by default). SQL privileges are namespace-scoped.
+
+### Service Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_service_manage` | List/inspect/toggle IRIS services and their authentication settings (`Security.Services` in `%SYS`) | `action` (`list`, `get`, `enable`, `disable`, `set`), `name?`, `settings?`, `namespace?`, `cursor?` | destructive |
+
+### LDAP Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_ldap_manage` | List/inspect/create/modify/delete/validity-test IRIS LDAP configurations for delegated authentication (`Security.LDAPConfigs` in `%SYS`) | `action` (`list`, `get`, `create`, `modify`, `delete`, `test`), `name?`, `settings?`, `cursor?` | destructive |
+
+### X.509 Certificate Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_x509_manage` | List/inspect/import/delete IRIS X.509 certificate credentials (`%SYS.X509Credentials` in `%SYS`) | `action` (`list`, `get`, `import`, `delete`), `alias?`, `certificate?`, `privateKey?`, `privateKeyPassword?`, `namespace?`, `cursor?` | destructive |
+
+### Auditing Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_audit_manage` | Manage auditing configuration and the audit log: status, enable/disable, per-event configuration, view/export/purge the log (`%SYS.Audit*` in `%SYS`) | `action` (`status`, `enable`, `disable`, `configureEvent`, `view`, `purge`, `export`), `source?`, `type?`, `event?`, filter/confirm params | destructive |
+
+> **Note:** `iris_audit_manage` configures auditing and manages the audit *log*. It is distinct from `@iris-mcp/ops`'s read-only `iris_audit_events`, which only queries audit events.
+
+> **Governance defaults (service / LDAP / X.509 / audit):** the **write** actions of these tools are classified `write` and are **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_service_manage:enable`/`:disable`/`:set`, `iris_ldap_manage:create`/`:modify`/`:delete`, `iris_x509_manage:import`/`:delete`, and `iris_audit_manage:enable`/`:disable`/`:configureEvent`/`:purge`/`:export`. Their **read** actions are **enabled by default** — `:list`/`:get`/`:test`/`:status`/`:view`. (`iris_resource_manage:grant`/`:revoke` follow the same rule; see the SQL-privilege governance note above.)
 
 ---
 
@@ -802,6 +846,32 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 </details>
 
 <details>
+<summary><strong>iris_oauth_manage</strong> -- Create an OAuth2 server definition</summary>
+
+**Input:**
+```json
+{
+  "action": "create",
+  "entity": "server",
+  "issuerURL": "https://auth.example.com/oauth2",
+  "supportedScopes": "openid profile email",
+  "customizationRoles": "%DB_IRISSYS"
+}
+```
+
+`supportedScopes` and `customizationRoles` are **required** by IRIS for a server definition; `customizationNamespace` defaults to the request namespace when omitted. The issuer URL is parsed into the server's endpoint (host/port/prefix/SSL).
+
+**Output:**
+```json
+{
+  "action": "created",
+  "entity": "server",
+  "issuerEndpoint": "https://auth.example.com/oauth2"
+}
+```
+</details>
+
+<details>
 <summary><strong>iris_oauth_manage</strong> -- OIDC discovery</summary>
 
 **Input:**
@@ -815,11 +885,17 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 **Output:**
 ```json
 {
-  "issuer": "https://accounts.google.com",
-  "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-  "token_endpoint": "https://oauth2.googleapis.com/token"
+  "action": "discovered",
+  "issuerURL": "https://accounts.google.com",
+  "configuration": {
+    "issuerEndpoint": "https://accounts.google.com",
+    "authorizationEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenEndpoint": "https://oauth2.googleapis.com/token"
+  }
 }
 ```
+
+> Discovery requires an outbound TLS connection to the issuer, which needs a configured SSL/TLS client configuration on the IRIS instance.
 </details>
 
 <details>
@@ -830,12 +906,23 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 {}
 ```
 
-**Output:**
+**Output:** (a configured server; empty arrays when none exist)
 ```json
 {
-  "servers": [],
+  "servers": [
+    {
+      "id": "singleton",
+      "issuerEndpoint": "https://auth.example.com/oauth2",
+      "description": "Example authorization server",
+      "supportedScopes": ["email", "openid", "profile"],
+      "accessTokenInterval": 3600,
+      "authorizationCodeInterval": 60,
+      "refreshTokenInterval": 86400,
+      "signingAlgorithm": "RS256"
+    }
+  ],
   "clients": [],
-  "serverCount": 0,
+  "serverCount": 1,
   "clientCount": 0
 }
 ```
@@ -848,7 +935,9 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 **Security note:** Most admin tools operate in the `%SYS` namespace on the IRIS server, regardless of the configured default namespace. This is because IRIS security and configuration classes (`Config.*`, `Security.*`) only exist in `%SYS`.
 
 The following tools **do not** accept a user-specified `namespace` parameter (they always execute in `%SYS`):
-- All namespace, database, mapping, user, role, resource, permission, SSL, and OAuth tools
+- All namespace, database, mapping, user, role, resource (security-resource actions), permission, SSL, OAuth, service, LDAP, X.509, and audit tools
+
+**Exception — SQL privileges:** `iris_resource_manage`'s `grant` / `revoke` / `listPrivileges` actions execute in the **target namespace** (the optional `namespace?` parameter, defaulting to the configured default), because SQL object privileges are namespace-scoped.
 
 The `iris_webapp_list` tool optionally accepts a `namespace` parameter to filter web applications by namespace.
 

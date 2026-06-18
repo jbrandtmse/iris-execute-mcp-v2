@@ -140,6 +140,60 @@ To use a different server, swap the package name in `args`:
 
 ---
 
+## Multiple Servers & Governance (optional)
+
+Two optional environment variables let a single server target several IRIS instances and restrict tool actions per instance:
+
+| Variable | Purpose |
+|----------|---------|
+| `IRIS_PROFILES` | JSON map of named IRIS instances. Each profile may set `host`, `port`, `username`, `password`, `namespace`, `https`; omitted fields inherit from the `default` profile (your `IRIS_*` vars). Tools take an optional `server` parameter (profile name) to pick the instance. |
+| `IRIS_GOVERNANCE` | JSON policy that enables/disables tool actions, optionally per profile. Effective policy = `profile.explicit ?? global.explicit ?? defaultSeed` (existing + new-read enabled, new-write disabled). Blocked calls return a `GOVERNANCE_DISABLED` error. |
+
+Both are **optional** — omit them for a single-server, fully-enabled install. See the [suite README](../../README.md#multiple-servers--governance) for the full model and worked examples.
+
+> **Escaping matters.** The *value* of `IRIS_PROFILES` / `IRIS_GOVERNANCE` is a JSON string that lives inside `.cursor/mcp.json`, so every inner `"` must be escaped as `\"`. The block below is already correctly escaped — copy it as-is and edit the values.
+
+```json
+{
+  "mcpServers": {
+    "iris-admin-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/admin"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_HTTPS": "false",
+        "IRIS_PROFILES": "{\"prod\":{\"host\":\"iris-prod.example.com\",\"port\":443,\"username\":\"svc_mcp\",\"password\":\"prod-password\",\"namespace\":\"HSCUSTOM\",\"https\":true},\"stage\":{\"host\":\"iris-stage.example.com\",\"namespace\":\"USER\"}}",
+        "IRIS_GOVERNANCE": "{\"global\":{\"iris_backup_manage:run\":true},\"profiles\":{\"prod\":{\"iris_backup_manage:run\":false,\"iris_database_manage:delete\":false}}}"
+      }
+    }
+  }
+}
+```
+
+Un-escaped, the two values above are simply:
+
+```jsonc
+// IRIS_PROFILES
+{
+  "prod":  { "host": "iris-prod.example.com",  "port": 443,   "username": "svc_mcp", "password": "prod-password", "namespace": "HSCUSTOM", "https": true },
+  "stage": { "host": "iris-stage.example.com", "namespace": "USER" }   // inherits port/username/password/https from default
+}
+
+// IRIS_GOVERNANCE — enable iris_backup_manage:run everywhere except the prod profile
+{
+  "global":   { "iris_backup_manage:run": true },
+  "profiles": { "prod": { "iris_backup_manage:run": false, "iris_database_manage:delete": false } }
+}
+```
+
+With this config, `iris_global_list({ server: "prod" })` runs against the prod instance, while `iris_backup_manage({ action: "run", server: "prod" })` is blocked. Omit `server` and the call uses the `default` profile from your `IRIS_*` vars — exactly as before.
+
+---
+
 ## Setting Environment Variables
 
 The recommended approach is to include `env` values directly in the JSON config (shown above). Cursor passes them to the spawned process.

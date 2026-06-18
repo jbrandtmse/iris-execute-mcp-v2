@@ -1,6 +1,6 @@
 # @iris-mcp/ops
 
-**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, journals, mirrors, audit events, database integrity, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
+**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, process control, journals, mirrors, audit events, database integrity, database maintenance operations, backups, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -32,6 +32,10 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
 ---
 
@@ -116,6 +120,7 @@ All servers use the same environment variables:
 |------|-------------|----------------|-------------|
 | `iris_jobs_list` | List all running IRIS jobs/processes | *(none)* | readOnly, idempotent |
 | `iris_locks_list` | List all current system locks | *(none)* | readOnly, idempotent |
+| `iris_process_manage` | Inspect one process by PID, or terminate/suspend/resume it (control actions opt-in via governance, default-disabled; self/critical jobs refused) | `action`, `pid`, `namespace?` | destructive |
 
 ### Infrastructure Tools
 
@@ -125,6 +130,8 @@ All servers use the same environment variables:
 | `iris_mirror_status` | Mirror configuration and membership status | *(none)* | readOnly, idempotent |
 | `iris_audit_events` | Audit log events with filters | `beginDate?`, `endDate?`, `username?`, `eventType?`, `maxRows?` | readOnly, idempotent |
 | `iris_database_check` | Database status (mounted, encrypted, size) | `name?` | readOnly, idempotent |
+| `iris_database_action` | Runtime database maintenance: mount/dismount/compact/defragment/truncate/expandVolume by directory (all mutating, opt-in via governance, default-disabled) | `action`, `directory`, `readonly?`, `percentFull?`, `targetSize?`, `newVolDir?`, `initialSize?`, `namespace?` | destructive |
+| `iris_backup_manage` | Run a user-defined backup task, freeze/thaw the instance, or list backup history (write actions opt-in via governance, default-disabled; restore not supported) | `action`, `taskName?`, `backupType?`, `jobbackup?`, `device?`, `logFile?`, `description?`, `username?`, `password?`, `namespace?` | destructive |
 | `iris_license_info` | License type, capacity, usage, expiration | *(none)* | readOnly, idempotent |
 | `iris_ecp_status` | ECP connection status | *(none)* | readOnly, idempotent |
 
@@ -606,9 +613,14 @@ alongside the existing `availableLocales` enumeration and `localeCount`:
 
 Most operations tools are **system-level** and do not require a namespace parameter. They operate across the entire IRIS instance.
 
-**Tools that accept the `namespace` parameter:**
+**Tools where `namespace` has a real effect:**
 - `iris_metrics_interop` -- optionally filter interop metrics to a single namespace
 - `iris_task_manage` -- specify the execution namespace for a new task
+
+**Tools that accept `namespace` but IGNORE it** (the operation is `%SYS`-scoped; the param is retained only for backward compatibility and has no effect):
+- `iris_process_manage` -- process inspection/control runs against the system-wide process table
+- `iris_database_action` -- `SYS.Database` keys on the directory path and runs in `%SYS`
+- `iris_backup_manage` -- backup/freeze/thaw are instance-wide via `Backup.General` in `%SYS`
 
 **Tools that do NOT accept `namespace`** (system-wide scope):
 - `iris_metrics_system`, `iris_metrics_alerts`, `iris_alerts_manage`

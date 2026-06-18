@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution and analysis, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -32,6 +32,10 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
 ---
 
@@ -108,10 +112,10 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
-| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` | idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | idempotent |
 
 ### Package Browsing Tools
@@ -140,13 +144,16 @@ Add to your Cursor MCP settings:
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import) |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import), not idempotent |
 
 ### SQL Tools
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
+| `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), or currently-running statements (`running`) | `action`, `query?`, `filter?`, `maxRows?`, `namespace?` | readOnly, idempotent |
+
+> **Governance defaults:** all four `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
 
 ### Server Tools
 
@@ -393,11 +400,13 @@ Files are written to `C:/dev/iris-export/MyApp/Service.cls`, `C:/dev/iris-export
 ```json
 {
   "packages": [
-    { "name": "MyApp.Services", "count": 12 },
-    { "name": "MyApp.Utils", "count": 4 },
-    { "name": "MyApp.Tests", "count": 8 }
+    { "name": "MyApp.Services", "docCount": 12, "depth": 2 },
+    { "name": "MyApp.Utils", "docCount": 4, "depth": 2 },
+    { "name": "MyApp.Tests", "docCount": 8, "depth": 2 }
   ],
   "count": 3,
+  "namespace": "USER",
+  "depth": 2,
   "totalDocs": 24
 }
 ```
@@ -506,7 +515,7 @@ files. Pass an explicit `files` value to narrow the search.
 
 Returns the `.1.int` routine (or `.int` for `.mac`/`.int` sources) IRIS generates during compilation — the fully macro-expanded form IRIS actually executes at runtime. Useful when you need to see what `$$$` macros expand to (e.g., what `$$$OK` or `$$$ThrowOnError` resolves to in a specific class's context), or to inspect compiled output without running code.
 
-Pass the **bare class/routine name** (no `.cls` extension). The tool auto-resolves by trying candidate document paths in order: `<name>.1.int`, `<name>.int`, `<name>.mac`. The first 2xx response wins; `candidatesTried` reports which paths were attempted. If all candidates return 404 the tool returns a `compile-first` hint.
+Pass the **bare class/routine name** (no `.cls` extension). The tool auto-resolves by trying candidate document paths in order: `<name>.1.int`, then `<name>.int` (the `.mac` source itself is intentionally NOT a candidate — the macro-expanded intermediate is what this tool returns). The first 2xx response wins; `candidatesTried` reports which paths were attempted. If all candidates return 404 the tool returns a `compile-first` hint.
 
 **Input:**
 ```json
@@ -590,6 +599,28 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
     ["MyApp.Utils", ""]
   ],
   "rowCount": 2
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_sql_analyze</strong> -- Show a query plan</summary>
+
+**Input:**
+```json
+{
+  "action": "explain",
+  "query": "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH 'Ens'"
+}
+```
+
+`explain` returns the query plan text; `indexUsage` additionally parses the maps/indexes named in the plan; `stats` reads cached-statement statistics (`INFORMATION_SCHEMA.STATEMENTS`); `running` lists currently-executing statements (`INFORMATION_SCHEMA.CURRENT_STATEMENTS`). `query` is required for `explain`/`indexUsage`.
+
+**Output:**
+```json
+{
+  "action": "explain",
+  "plan": "<plans>\n <plan>\n   ...\n   Read master map %Dictionary.ClassDefinition.Master ...\n </plan>\n</plans>"
 }
 ```
 </details>
@@ -785,7 +816,7 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 24 tools in this package accept the `namespace` parameter** except:
+**All 25 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.

@@ -8,9 +8,12 @@
  * array.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import type { ZodObject } from "zod";
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
@@ -19,6 +22,15 @@ import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
 import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
+import type { ProfileRegistry, IrisProfile } from "./profiles.js";
+import {
+  ProfileClientRegistry,
+  ProfileResolutionError,
+  buildProfileRegistry,
+  loadProfileRegistry,
+  resolveProfile,
+  DEFAULT_PROFILE_NAME,
+} from "./profiles.js";
 import type {
   ToolDefinition,
   ToolContext,
@@ -26,9 +38,93 @@ import type {
   ToolScope,
   PaginateResult,
 } from "./tool-types.js";
+import type { GovernanceConfig, MutatesLookup } from "./governance.js";
+import {
+  parseGovernanceConfig,
+  buildMutatesLookup,
+  unwrapActionOptions,
+  assertGovernanceClassification,
+  effective,
+  getEffectivePolicy,
+} from "./governance.js";
+import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * URI scheme for the advisory governance resource (Epic 14, architecture
+ * decision D6). `iris-governance://default` is the static default/global-policy
+ * resource (appears in `resources/list`); `iris-governance://{profile}` is the
+ * per-profile template (appears in `resources/templates/list` and serves
+ * `resources/read`). Both render the {@link getEffectivePolicy} map as JSON.
+ *
+ * The resource is ADVISORY ONLY (AC 14.5.4): it lets a client preview which
+ * actions a profile permits, but the authoritative boundary is the call-time
+ * enforcement gate in {@link McpServerBase.handleToolCall} (D5). No code path
+ * depends on a client ever reading this resource.
+ */
+const GOVERNANCE_URI_SCHEME = "iris-governance";
+/** Static resource name + URI for the default/global policy (D6). */
+const GOVERNANCE_DEFAULT_RESOURCE_NAME = "iris-governance-default";
+const GOVERNANCE_DEFAULT_URI = `${GOVERNANCE_URI_SCHEME}://${DEFAULT_PROFILE_NAME}`;
+/** Template resource name + URI pattern for the per-profile policy (D6). */
+const GOVERNANCE_TEMPLATE_RESOURCE_NAME = "iris-governance-profile";
+const GOVERNANCE_TEMPLATE_URI = `${GOVERNANCE_URI_SCHEME}://{profile}`;
+
+/**
+ * The framework `server` parameter, injected into every tool's input schema at
+ * registration (architecture decision D2). Defined once here so the description
+ * is identical across all current and future tools and on all five servers, and
+ * so future tools inherit it automatically — never hand-add it per tool.
+ *
+ * The value is the name of a profile from `IRIS_PROFILES`; omitting it selects
+ * the reserved `default` profile (today's single-server behavior). The field is
+ * optional, so adding it to a tool's advertised `inputSchema` is additive and
+ * non-breaking per JSON-Schema/MCP semantics (the Epic 14 back-compat gate).
+ */
+const SERVER_PARAM_FIELD = {
+  server: z
+    .string()
+    .optional()
+    .describe(
+      "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+    ),
+} as const;
+
+/**
+ * Extend a tool's input schema with the shared {@link SERVER_PARAM_FIELD} so the
+ * `server` parameter is advertised and validated centrally (architecture
+ * decision D2). The returned schema is used both for the SDK-advertised
+ * `inputSchema` (so clients see `server`) and for validation in
+ * {@link McpServerBase.handleToolCall} (so Zod captures `server` instead of
+ * stripping it as an unknown key).
+ *
+ * `server` is a name reserved by the framework (D2). If a tool's own input
+ * schema already declares a `server` field, `.extend()` would silently replace
+ * it and {@link McpServerBase.handleToolCall} would then strip it before the
+ * handler — so the tool would silently lose its own argument. We fail fast at
+ * registration instead, naming the offending tool, so the collision is caught
+ * in development rather than mis-routing calls in production.
+ *
+ * @throws {Error} When `inputSchema` already declares a `server` field.
+ */
+export function withServerParam(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inputSchema: ZodObject<any>,
+  toolName?: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): ZodObject<any> {
+  if (Object.prototype.hasOwnProperty.call(inputSchema.shape, "server")) {
+    throw new Error(
+      `Tool ${toolName ?? "(unknown)"} declares a reserved input field "server". ` +
+        `"server" is injected centrally by the framework (architecture decision D2) ` +
+        `to select the connection profile; a tool must not define its own "server" field. ` +
+        `Rename the tool's parameter.`,
+    );
+  }
+  return inputSchema.extend(SERVER_PARAM_FIELD);
+}
 
 /** Options accepted by the {@link McpServerBase} constructor. */
 export interface McpServerBaseOptions {
@@ -150,9 +246,96 @@ export function buildToolContext(
 export class McpServerBase {
   private readonly mcpServer: McpServer;
   private readonly tools: Map<string, ToolDefinition> = new Map();
+  /**
+   * Per-tool input schema extended with the shared `server` parameter (D2).
+   * Keyed by tool name. {@link handleToolCall} validates against THIS schema
+   * (not the tool's original `inputSchema`) so Zod captures `server` rather than
+   * stripping it as an unknown key; `server` is then read and removed before the
+   * handler is invoked, keeping handlers byte-for-byte unchanged.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly extendedSchemas: Map<string, ZodObject<any>> = new Map();
+  /**
+   * The default profile's connection config (the `IRIS_*`-derived config).
+   * Retained under its original name so existing single-server behavior — and
+   * the `handleToolCall` default path — is byte-for-byte unchanged.
+   */
   private config: IrisConnectionConfig | undefined;
-  private http: IrisHttpClient | undefined;
+  /**
+   * Profile registry (Epic 14, architecture decision D1/D7). Always contains
+   * the reserved `default` profile; additional profiles come from `IRIS_PROFILES`.
+   */
+  private profiles: ProfileRegistry | undefined;
+  /**
+   * Per-profile {@link IrisHttpClient} registry (architecture decision D1).
+   * Replaces the former single `this.http`: each profile gets its own client so
+   * session/cookie/CSRF state never bleeds across profiles. The default
+   * profile's client is created eagerly in {@link start}; non-default profiles
+   * are created lazily on first {@link getOrCreateClient}.
+   */
+  private clients: ProfileClientRegistry | undefined;
+  /**
+   * Per-profile connection metadata: the negotiated Atelier version and whether
+   * the one-time custom-REST bootstrap has been attempted (D8). Keyed by
+   * profile name. The default profile's entry is populated eagerly in
+   * {@link start}; non-default entries are populated on first touch.
+   */
+  private readonly profileMeta: Map<
+    string,
+    { atelierVersion: number; bootstrapAttempted: boolean }
+  > = new Map();
+  /**
+   * In-flight first-touch establishment Promises, keyed by profile name
+   * (AC 14.2.7 — routed Story 14.1 CR MED #1). When a profile is being
+   * established for the first time, its establishment Promise is cached here so
+   * concurrent first-touch calls for the SAME profile await ONE shared
+   * establishment (and so `attemptProfileBootstrap` runs at most once per
+   * profile). The entry is cleared once establishment settles (success OR
+   * failure) so a failed first touch is retryable.
+   */
+  private readonly establishing: Map<
+    string,
+    Promise<{ client: IrisHttpClient; atelierVersion: number }>
+  > = new Map();
+  /** Negotiated Atelier version for the default profile (unchanged back-compat field). */
   private atelierVersion = 1;
+
+  /**
+   * Parsed `IRIS_GOVERNANCE` policy (Epic 14, architecture decisions D5/D7).
+   * Drives the call-time enforcement gate in {@link handleToolCall}.
+   *
+   * Defaults to `{}` (an empty config) so a server that is constructed but never
+   * {@link start}ed — and the window before `start()` parses the env — is a SAFE
+   * pass-through: under an empty config every baseline action resolves enabled
+   * (the back-compat gate). {@link start} replaces this with the parsed
+   * `IRIS_GOVERNANCE`, which fails fast (naming the var) on malformed input.
+   */
+  private governanceConfig: GovernanceConfig = {};
+  /**
+   * Key → mutation-class lookup for the registered tools (architecture decision
+   * D4), built from each {@link ToolDefinition.mutates}. Consumed by the gate's
+   * {@link effective} call so a NEW write action defaults disabled and a NEW read
+   * action defaults enabled. Built once in the constructor — the tool set is known
+   * at construction — so the gate has it even before {@link start} (when the
+   * empty `governanceConfig` already makes the gate a pass-through anyway).
+   */
+  private mutatesLookup: MutatesLookup = new Map();
+
+  /**
+   * Every governance key this server's advisory resource reports on (Epic 14,
+   * architecture decisions D4/D6): the union of {@link GOVERNANCE_BASELINE} and
+   * this server's own registered tool/action keys, computed with the SAME logic
+   * as {@link computeGovernanceKey} / the baseline generator so the resource's
+   * keys line up exactly with the enforcement gate's. Passed as `allKeys` to
+   * {@link getEffectivePolicy} when the `iris-governance://{profile}` resource is
+   * read. Rebuilt whenever the tool set changes ({@link rebuildGovernedKeys}).
+   *
+   * Including the full baseline (not just this server's keys) means the resource
+   * reports a complete, consistent policy view across the suite — a client can
+   * read any one server's resource and see the effective enablement of every
+   * grandfathered action, plus this server's new actions.
+   */
+  private governedKeys: Set<string> = new Set();
 
   /** Page size for tools/list pagination. */
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
@@ -160,7 +343,18 @@ export class McpServerBase {
   constructor(private readonly options: McpServerBaseOptions) {
     this.mcpServer = new McpServer(
       { name: options.name, version: options.version },
-      { capabilities: { tools: { listChanged: true } } },
+      {
+        // `resources` is declared explicitly here per D6 so the `initialize`
+        // result advertises it. The SDK ALSO calls registerCapabilities with the
+        // identical `resources: { listChanged: true }` when registerResource runs
+        // (mcp.js setResourceRequestHandlers); registerCapabilities merges, so the
+        // two are idempotent and do not conflict. Declaring it up front guarantees
+        // the capability is present even before any transport/registration timing.
+        capabilities: {
+          tools: { listChanged: true },
+          resources: { listChanged: true },
+        },
+      },
     );
 
     if (options.config) {
@@ -171,6 +365,201 @@ export class McpServerBase {
     for (const tool of options.tools) {
       this.registerTool(tool);
     }
+
+    // Build the governance mutates lookup (D4) from the registered tools. The
+    // tool set is fully known at construction, so this is cheap and lets the
+    // enforcement gate classify NEW actions even before start() parses
+    // IRIS_GOVERNANCE. (governanceConfig stays `{}` until start(), so the gate
+    // is a pure pass-through in the meantime — see the field doc.) Built from the
+    // live registry (not options.tools) so addTools/removeTools can rebuild it
+    // and keep a dynamically-added governed tool's key classified.
+    this.rebuildMutatesLookup();
+    // Compute the governance key universe the advisory resource reports on (D6),
+    // also from the live registry so addTools/removeTools keep it in sync.
+    this.rebuildGovernedKeys();
+    // Fail fast if a NEW (non-baseline) governed key lacks a `mutates` class
+    // (AC 15.0.3). Dormant on today's all-baseline surface; the safety net for
+    // Epic 15+ write tools. Runs after BOTH rebuilds so it reads current state.
+    this.assertGovernanceClassified();
+
+    // Register the advisory governance resource (D6): a static default-policy
+    // resource + a per-profile template. Registered at construction (like tools)
+    // so the resource handlers + the `resources` capability are wired before any
+    // transport connects. The read callbacks close over `this`, so they read the
+    // governance config / governed-key set as they are AT READ TIME — by which
+    // point start() has parsed IRIS_GOVERNANCE. sendResourceListChanged() is a
+    // no-op until a transport attaches, so this is safe pre-connect.
+    this.registerGovernanceResource();
+  }
+
+  /**
+   * Rebuild {@link mutatesLookup} from the live tool registry (architecture
+   * decision D4). Called at construction and whenever the tool set changes
+   * ({@link addTools} / {@link removeTools}) so a dynamically-added governed
+   * tool's `mutates` metadata is reflected in the enforcement gate's seed.
+   */
+  private rebuildMutatesLookup(): void {
+    this.mutatesLookup = buildMutatesLookup(this.tools.values());
+  }
+
+  /**
+   * Rebuild {@link governedKeys} (the advisory resource's key universe, D6) from
+   * the live tool registry: the union of {@link GOVERNANCE_BASELINE} and every
+   * registered tool/action key. Keys are computed with the SAME rule the gate
+   * and the baseline generator use — `tool:action` for a tool whose input schema
+   * declares an `action` ZodEnum (one key per enum value), the bare `tool` name
+   * otherwise — so the resource's reported keys align exactly with the gate.
+   * Called at construction and on every {@link addTools} / {@link removeTools}.
+   */
+  private rebuildGovernedKeys(): void {
+    const keys = new Set<string>(GOVERNANCE_BASELINE);
+    for (const tool of this.tools.values()) {
+      // Use the SHARED unwrap helper (Story 15.0 AC 15.0.1) so this key universe
+      // lines up exactly with computeGovernanceKey and the baseline generator —
+      // including a future wrapped (`.optional()`/`.default()`/`.nullable()`)
+      // action enum, which is peeled to its inner ZodEnum here too.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const actionField = (tool.inputSchema as any)?.shape?.action;
+      const options = unwrapActionOptions(actionField);
+      if (Array.isArray(options) && options.length > 0) {
+        for (const value of options) {
+          keys.add(`${tool.name}:${String(value)}`);
+        }
+      } else {
+        keys.add(tool.name);
+      }
+    }
+    this.governedKeys = keys;
+  }
+
+  /**
+   * Fail fast (Story 15.0 AC 15.0.3) if any governed key in this server's key
+   * universe is NEW (absent from {@link GOVERNANCE_BASELINE}) yet carries no
+   * `mutates` classification — which would otherwise let the default seed treat
+   * it as a read and ship a write enabled-by-default. Catches "added a new write
+   * tool but forgot `mutates`" at registration rather than silently mis-seeding.
+   *
+   * Dormant on today's surface: every current key is a baseline member, so this
+   * only activates once Epic 15+ genuinely-new tools land. Called after every
+   * {@link rebuildMutatesLookup} + {@link rebuildGovernedKeys} pair (construction
+   * and dynamic add/remove) so the lookup and key universe it reads are current.
+   */
+  private assertGovernanceClassified(): void {
+    assertGovernanceClassification(this.governedKeys, this.mutatesLookup);
+  }
+
+  // ── Advisory governance resource (D6) ──────────────────────────────
+
+  /**
+   * Compute the effective governance policy for a profile as a JSON-serialized
+   * {@link ReadResourceResult} (architecture decision D6). Shared by the static
+   * default resource and the per-profile template read callbacks.
+   *
+   * Resolves the profile name against the registry FIRST so an unknown profile
+   * surfaces a structured {@link McpError} (mapped from {@link ProfileResolutionError})
+   * rather than silently returning a default-shaped map or crashing the server.
+   * The default profile always resolves (it is reserved), so the static
+   * `iris-governance://default` resource never errors on resolution.
+   *
+   * @param profileName - The profile whose effective policy to report.
+   * @param uri         - The resource URI (echoed into the result `contents`).
+   * @throws {McpError} (InvalidParams) when `profileName` is not a registered profile.
+   */
+  private buildGovernancePolicyResult(
+    profileName: string,
+    uri: string,
+  ): ReadResourceResult {
+    // Resolve against the registry so an unknown profile is a clean resource
+    // error. When the registry is not yet built (server constructed but not
+    // start()ed), fall back to validating just the reserved default — the only
+    // profile guaranteed to exist pre-start.
+    if (this.profiles) {
+      try {
+        resolveProfile(this.profiles, profileName);
+      } catch (error: unknown) {
+        if (error instanceof ProfileResolutionError) {
+          throw new McpError(ErrorCode.InvalidParams, error.message);
+        }
+        throw error;
+      }
+    } else if (profileName !== DEFAULT_PROFILE_NAME) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Unknown server profile "${profileName}". The server is not yet initialised; only "${DEFAULT_PROFILE_NAME}" is available.`,
+      );
+    }
+
+    const policy = getEffectivePolicy(
+      profileName,
+      this.governanceConfig,
+      this.governedKeys,
+      this.mutatesLookup,
+    );
+
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(policy),
+        },
+      ],
+    };
+  }
+
+  /**
+   * Register the advisory governance resource (architecture decision D6 — the
+   * minimal, single-resource-type provider; NOT a generalized ResourceDefinition
+   * framework, which is deferred until a second resource exists). Two pieces:
+   *
+   * - A STATIC resource `iris-governance://default` for the default/global
+   *   policy, so `resources/list` advertises a concrete entry.
+   * - A `ResourceTemplate` `iris-governance://{profile}` for any profile, serving
+   *   `resources/read` and listed under `resources/templates/list`. Its `list`
+   *   callback is `undefined` (D6 minimal — the template is for parameterized
+   *   read, not enumeration of every profile); the SDK requires the field to be
+   *   passed explicitly even when undefined.
+   *
+   * Registering either resource auto-wires the SDK's `resources/list`,
+   * `resources/templates/list`, and `resources/read` handlers and (re)advertises
+   * the `resources` capability (already declared in the constructor).
+   */
+  private registerGovernanceResource(): void {
+    // Static default/global policy resource → resources/list.
+    this.mcpServer.registerResource(
+      GOVERNANCE_DEFAULT_RESOURCE_NAME,
+      GOVERNANCE_DEFAULT_URI,
+      {
+        title: "IRIS governance policy (default profile)",
+        description:
+          "Advisory: the effective enabled/disabled action map for the default " +
+          "server profile. The call-time enforcement gate is authoritative; this " +
+          "resource is a read-only preview.",
+        mimeType: "application/json",
+      },
+      (uri: URL): ReadResourceResult =>
+        this.buildGovernancePolicyResult(DEFAULT_PROFILE_NAME, uri.toString()),
+    );
+
+    // Per-profile policy template → resources/templates/list + resources/read.
+    this.mcpServer.registerResource(
+      GOVERNANCE_TEMPLATE_RESOURCE_NAME,
+      new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, { list: undefined }),
+      {
+        title: "IRIS governance policy (per profile)",
+        description:
+          "Advisory: the effective enabled/disabled action map for a named " +
+          "server profile (iris-governance://<profile>). The call-time " +
+          "enforcement gate is authoritative; this resource is a read-only preview.",
+        mimeType: "application/json",
+      },
+      (uri: URL, variables: Record<string, unknown>): ReadResourceResult => {
+        // The URI template binds {profile}; it may surface as string | string[].
+        const raw = variables.profile;
+        const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
+        return this.buildGovernancePolicyResult(profileName, uri.toString());
+      },
+    );
   }
 
   // ── Tool registration ──────────────────────────────────────────────
@@ -185,10 +574,20 @@ export class McpServerBase {
   private registerTool(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
 
+    // Centrally inject the framework `server` parameter into the tool's input
+    // schema (architecture decision D2). The EXTENDED schema is what we advertise
+    // and what handleToolCall validates against; it is stored so the two stay in
+    // lock-step. Injecting here (once, for every tool) — rather than hand-adding
+    // `server` per tool — gives uniform coverage and makes future tools inherit
+    // it for free. outputSchema is untouched (additive, back-compat).
+    const extendedInputSchema = withServerParam(tool.inputSchema, tool.name);
+    this.extendedSchemas.set(tool.name, extendedInputSchema);
+
     // The MCP SDK's registerTool accepts a ZodRawShapeCompat (Record<string, AnySchema>).
-    // ZodObject.shape in Zod v4 gives us exactly that.
+    // ZodObject.shape in Zod v4 gives us exactly that. Advertise the EXTENDED
+    // shape so clients see the optional `server` field.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputShape = tool.inputSchema.shape as any;
+    const inputShape = extendedInputSchema.shape as any;
 
     // Convert outputSchema Zod shape for the SDK (mirrors inputSchema pattern)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -216,6 +615,62 @@ export class McpServerBase {
   }
 
   /**
+   * Compute the governance key for a call (architecture decision D4).
+   *
+   * - **Multi-action tool** — when the tool's input schema declares an `action`
+   *   ZodEnum (i.e. `inputSchema.shape.action.options` is a non-empty array), the
+   *   key is `tool:action`, reading the validated `action` value.
+   * - **Single-operation tool** — otherwise the key is the bare tool name.
+   *
+   * This MUST mirror, exactly, how `scripts/gen-governance-baseline.mjs`
+   * enumerated keys (`inputSchema.shape.action.options`, guarded by
+   * `Array.isArray && length > 0`). Aligning the gate's runtime key with the
+   * generated baseline's keys is what makes a governed action resolve against the
+   * correct baseline / policy entry — if the gate computed `tool` while the
+   * baseline holds `tool:action` (or vice-versa), the cascade would miss and the
+   * effective policy would be wrong. The companion baseline-alignment test pins
+   * this equivalence.
+   *
+   * @param tool          - The tool definition (its schema declares the `action` enum, if any).
+   * @param validatedArgs - The Zod-validated args (with `server` already stripped).
+   * @returns The governance key (`tool` or `tool:action`).
+   */
+  private computeGovernanceKey(
+    tool: ToolDefinition,
+    validatedArgs: Record<string, unknown>,
+  ): string {
+    // Read the schema's `action` field exactly as the generator does, via the
+    // SHARED `unwrapActionOptions` helper (Story 15.0 AC 15.0.1) so the gate and
+    // `scripts/gen-governance-baseline.mjs` stay in lock-step: a bare ZodEnum
+    // exposes `.options` directly, and a wrapped enum (`.optional()`/`.default()`
+    // /`.nullable()`) is peeled to its inner ZodEnum first. A ZodString / absent
+    // field has no options, so the bare-tool branch is taken. Typed loosely
+    // because the SDK schema shape is `ZodObject<any>`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const actionField = (tool.inputSchema as any)?.shape?.action;
+    const options = unwrapActionOptions(actionField);
+    if (
+      Array.isArray(options) &&
+      options.length > 0 &&
+      // AC 15.0.2 (generalized): only compose `tool:action` when the validated
+      // `action` is an ACTUAL member of the (unwrapped) enum options — i.e. a key
+      // the baseline generator could itself produce. A bare `action !== undefined`
+      // guard caught the omitted/`undefined` case but NOT a `.nullable()` enum's
+      // `null` (which built the never-matching `tool:null`) nor any other
+      // non-member value; both would resolve through the seed instead of the
+      // per-action policy — a per-action write deny silently bypassed (fail-open).
+      // Membership keeps the gate key in lock-step with the generated baseline and
+      // falls back to the bare-tool key for an absent/null/non-member action.
+      options.includes(validatedArgs.action)
+    ) {
+      // Multi-action tool with a concrete, in-enum action value: the governance
+      // key includes the chosen action.
+      return `${tool.name}:${String(validatedArgs.action)}`;
+    }
+    return tool.name;
+  }
+
+  /**
    * Handle a tool call: validate arguments, build context, invoke handler.
    *
    * On Zod validation failure, returns a result with `isError: true`
@@ -226,8 +681,33 @@ export class McpServerBase {
     tool: ToolDefinition,
     rawArgs: unknown,
   ): Promise<CallToolResult> {
-    // Validate arguments via Zod
-    const parseResult = tool.inputSchema.safeParse(rawArgs);
+    // Validate arguments via Zod against the EXTENDED schema (the original
+    // inputSchema + the framework `server` field). Validating against the
+    // extended schema is what lets Zod capture `server`; parsing with the
+    // unextended `tool.inputSchema` would strip `server` as an unknown key
+    // before we could read it (architecture decision D2).
+    //
+    // The extended schema MUST exist: registerTool populates it for every tool
+    // before the SDK callback can fire, and removeTools deletes the SDK callback
+    // alongside the schema. If it is ever missing, falling back to the unextended
+    // schema would SILENTLY strip `server` and mis-route the call to the default
+    // profile — so we fail fast with a structured error instead.
+    const extendedSchema = this.extendedSchemas.get(tool.name);
+    if (!extendedSchema) {
+      logger.error(
+        `Tool ${tool.name}: missing extended input schema (internal invariant violated).`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Internal error: tool "${tool.name}" is not fully registered (missing extended schema).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const parseResult = extendedSchema.safeParse(rawArgs);
     if (!parseResult.success) {
       const issues = parseResult.error.issues as Array<{
         path: PropertyKey[];
@@ -252,10 +732,16 @@ export class McpServerBase {
       };
     }
 
-    const validatedArgs = parseResult.data;
+    // Separate the framework `server` parameter from the tool's own args, then
+    // STRIP it so the handler never sees it (D2 — handlers stay byte-for-byte
+    // unchanged). `server` is the only key the extended schema adds, so removing
+    // it yields exactly the args the original inputSchema produced.
+    const { server, ...validatedArgs } = parseResult.data as {
+      server?: string;
+    } & Record<string, unknown>;
 
     // Build tool context with namespace resolution
-    if (!this.config || !this.http) {
+    if (!this.config || !this.clients || !this.profiles) {
       return {
         content: [
           {
@@ -267,11 +753,116 @@ export class McpServerBase {
       };
     }
 
+    // Resolve the `server` profile name → profile (architecture decision D2).
+    // Omitted/empty `server` resolves to the reserved `default` profile, whose
+    // client + version were established eagerly in start() — byte-for-byte
+    // today's behavior (the back-compat gate). An unknown profile name surfaces
+    // a structured `isError` result (naming the bad profile + valid names)
+    // rather than throwing out of the SDK handler.
+    let profile: IrisProfile;
+    try {
+      profile = resolveProfile(this.profiles, server);
+    } catch (error: unknown) {
+      if (error instanceof ProfileResolutionError) {
+        logger.warn(
+          `Tool ${tool.name}: ${error.message}`,
+        );
+        return {
+          content: [{ type: "text" as const, text: error.message }],
+          isError: true,
+        };
+      }
+      throw error;
+    }
+
+    // ── Governance enforcement gate (architecture decision D5) ─────────
+    //
+    // The ONE chokepoint. Ordering per D5: validate (Zod, above) → resolve
+    // `server`→profile (above) → extract action + evaluate policy (here) →
+    // deny-or-proceed → build context + invoke (below). It sits AFTER profile
+    // resolution and BEFORE getOrCreateClient, so a denied call neither
+    // establishes the profile's connection (no health-check / bootstrap) nor
+    // reaches the handler — enforcement is uniform and un-bypassable across all
+    // five servers from this single point.
+    //
+    // Enforcement is CALL-TIME by necessity (AC 14.4.3): the governing profile is
+    // selected per-call via `server`, so per-profile policy cannot be evaluated at
+    // advertise/registration time. Every tool therefore stays in `tools/list`
+    // (advertise-time is untouched); the policy is applied here, when the target
+    // profile is known.
+    //
+    // Back-compat (AC 14.4.4): with no IRIS_GOVERNANCE, `governanceConfig` is `{}`
+    // and every key in the generated baseline resolves enabled, so this gate is a
+    // pure pass-through — today's behavior, byte-for-byte.
+    const governanceKey = this.computeGovernanceKey(tool, validatedArgs);
+    if (
+      !effective(
+        governanceKey,
+        profile.name,
+        this.governanceConfig,
+        this.mutatesLookup,
+      )
+    ) {
+      // Disabled action (AC 14.4.2): structured denial. Human-readable text +
+      // a machine-readable code in structuredContent; the handler is NEVER
+      // invoked and the connection is NOT established.
+      logger.warn(
+        `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}".`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
+          },
+        ],
+        structuredContent: {
+          code: "GOVERNANCE_DISABLED",
+          action: governanceKey,
+          server: profile.name,
+        },
+        isError: true,
+      };
+    }
+
+    // Get-or-create the resolved profile's client (health-check + version
+    // negotiation on first touch of a non-default profile, then cached). The
+    // default profile returns its eagerly-established client + version. Custom
+    // REST servers pass needsCustomRest so the one-time per-profile bootstrap is
+    // attempted on first custom-REST touch (D8). A first-touch failure surfaces
+    // as a structured isError result, not a thrown error out of the SDK handler.
+    let client: IrisHttpClient;
+    let atelierVersion: number;
+    try {
+      ({ client, atelierVersion } = await this.getOrCreateClient(
+        profile.name,
+        this.options.needsCustomRest ?? false,
+      ));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `Tool ${tool.name}: failed to establish profile "${profile.name}": ${message}`,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Could not connect to server profile "${profile.name}": ${message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Build context from the RESOLVED PROFILE so that namespace precedence
+    // (AC 14.2.5) falls out naturally: resolveNamespace(override) returns
+    // `override ?? profile.namespace`. `server` selects the instance/profile;
+    // a per-call `namespace` still overrides the namespace within it.
     const ctx = buildToolContext(
       tool.scope,
-      this.config,
-      this.http,
-      this.atelierVersion,
+      profile,
+      client,
+      atelierVersion,
     );
 
     try {
@@ -308,6 +899,15 @@ export class McpServerBase {
     for (const tool of tools) {
       this.registerTool(tool);
     }
+    // Keep the governance mutates lookup in sync with the live tool set (D4) so
+    // a newly-added governed tool's `mutates` classification is enforced.
+    this.rebuildMutatesLookup();
+    // Keep the advisory resource's key universe in sync too (D6), so a newly
+    // added tool's keys appear in the effective-policy map.
+    this.rebuildGovernedKeys();
+    // Fail fast if a dynamically-added NEW governed key lacks a `mutates` class
+    // (AC 15.0.3) — same safety net as construction.
+    this.assertGovernanceClassified();
     this.mcpServer.sendToolListChanged();
     logger.info(`Added ${tools.length} tool(s) and notified clients`);
   }
@@ -320,6 +920,8 @@ export class McpServerBase {
     let removedCount = 0;
     for (const name of names) {
       if (this.tools.delete(name)) {
+        // Drop the extended-schema entry too, so it does not leak after removal.
+        this.extendedSchemas.delete(name);
         // Remove from the SDK's internal registry so the tool is no
         // longer callable or listed.  The SDK does not expose a public
         // unregister API, so we delete from the internal map directly.
@@ -332,6 +934,17 @@ export class McpServerBase {
       }
     }
     if (removedCount > 0) {
+      // Rebuild the governance mutates lookup so a removed governed tool's key
+      // no longer carries a stale classification (D4).
+      this.rebuildMutatesLookup();
+      // Rebuild the advisory resource's key universe too (D6). Note baseline
+      // keys remain (the resource always reports the full grandfathered set);
+      // only this server's own non-baseline keys drop out.
+      this.rebuildGovernedKeys();
+      // Re-assert classification after removal (AC 15.0.3): removing a tool
+      // cannot introduce an unclassified key, but keeping the call alongside the
+      // rebuild pair makes the invariant uniform across every mutation path.
+      this.assertGovernanceClassified();
       this.mcpServer.sendToolListChanged();
     }
     logger.info(`Removed ${removedCount} tool(s) and notified clients`);
@@ -367,26 +980,53 @@ export class McpServerBase {
    * Start the MCP server with the specified transport.
    *
    * Startup sequence:
-   * 1. Load config (if not provided)
-   * 2. Create {@link IrisHttpClient}
+   * 1. Load config + build the profile registry (if not provided)
+   * 2. Eagerly create the default profile's {@link IrisHttpClient}
    * 3. Health check via `HEAD /api/atelier/`
    * 4. Negotiate Atelier API version
-   * 5. Connect transport
+   * 5. Bootstrap custom REST service for the default profile (if needed)
+   * 6. Connect transport
+   *
+   * Non-default profiles (from `IRIS_PROFILES`) are NOT established here — they
+   * are created lazily on first use via {@link getOrCreateClient} (architecture
+   * decision D1/D8), so startup cost and behavior for single-server installs is
+   * unchanged.
    *
    * @param transport - `"stdio"` (default) or `"http"`.
    */
   async start(transport: "stdio" | "http" = "stdio"): Promise<void> {
-    // 1. Load config
+    // 1. Load config + build the profile registry.
+    //    loadConfig is preserved for the default profile's config so existing
+    //    single-server behavior is byte-for-byte unchanged.
     if (!this.config) {
       this.config = loadConfig();
     }
+    if (!this.profiles) {
+      // When a config was injected (e.g. tests), derive the registry from it so
+      // the default profile reflects the injected config; otherwise read the
+      // environment centrally (which also parses IRIS_PROFILES).
+      this.profiles = this.options.config
+        ? buildProfileRegistry(this.config)
+        : loadProfileRegistry();
+    }
+    this.clients = new ProfileClientRegistry(this.profiles);
 
-    // 2. Create HTTP client (use config.timeout as server-level default)
-    this.http = new IrisHttpClient(this.config, this.config.timeout);
+    // Parse the governance policy centrally (architecture decisions D5/D7),
+    // mirroring loadProfileRegistry(): read IRIS_GOVERNANCE once at startup.
+    // parseGovernanceConfig fails fast (naming IRIS_GOVERNANCE) on malformed
+    // input, so a misconfigured policy is caught at boot rather than mis-enforced
+    // per call. Absent/empty IRIS_GOVERNANCE ⇒ `{}` ⇒ the enforcement gate is a
+    // pure pass-through (every baseline action enabled — the back-compat gate).
+    this.governanceConfig = parseGovernanceConfig();
 
-    // 3. Health check
+    // 2. Eagerly create the default profile's HTTP client (preserves today's
+    //    bootstrap/health-check/negotiation for the default profile exactly).
+    const defaultClient = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
+
+    // 3. Health check (default profile). A failure here is fatal at startup,
+    //    exactly as before — the default profile must be reachable.
     try {
-      await checkHealth(this.http);
+      await checkHealth(defaultClient);
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -395,9 +1035,9 @@ export class McpServerBase {
       return; // Guard: prevent continued execution when process.exit is mocked
     }
 
-    // 4. Negotiate Atelier version
+    // 4. Negotiate Atelier version (default profile).
     try {
-      this.atelierVersion = await negotiateVersion(this.http);
+      this.atelierVersion = await negotiateVersion(defaultClient);
     } catch {
       logger.warn("Version negotiation failed, defaulting to v1");
       this.atelierVersion = 1;
@@ -407,11 +1047,11 @@ export class McpServerBase {
       `${this.options.name} v${this.options.version} starting with Atelier API v${this.atelierVersion}`,
     );
 
-    // 4.5. Bootstrap custom REST service if needed
+    // 4.5. Bootstrap custom REST service if needed (default profile).
     if (this.options.needsCustomRest) {
       try {
         const result = await bootstrap(
-          this.http,
+          defaultClient,
           this.config,
           this.atelierVersion,
         );
@@ -432,6 +1072,19 @@ export class McpServerBase {
       }
     }
 
+    // Record the default profile's metadata (negotiated version + bootstrap
+    // attempted) so getOrCreateClient short-circuits re-establishing it.
+    // `bootstrapAttempted` reflects whether bootstrap ACTUALLY ran above —
+    // it is true only when this server needs the custom-REST service. If it
+    // were hard-coded true on a `needsCustomRest: false` server, a later
+    // getOrCreateClient(DEFAULT_PROFILE_NAME, true) (the seam Story 14.2 wires)
+    // would wrongly skip the default profile's first-use bootstrap, matching
+    // the non-default path which seeds `bootstrapAttempted: false`.
+    this.profileMeta.set(DEFAULT_PROFILE_NAME, {
+      atelierVersion: this.atelierVersion,
+      bootstrapAttempted: this.options.needsCustomRest === true,
+    });
+
     // 5. Connect transport
     if (transport === "stdio") {
       const stdioTransport = new StdioServerTransport();
@@ -447,6 +1100,173 @@ export class McpServerBase {
           "Use stdio transport or implement HTTP setup in the server package.",
       );
       throw new Error("HTTP transport not yet implemented");
+    }
+  }
+
+  // ── Per-profile client establishment (D1/D8) ───────────────────────
+
+  /**
+   * Get the established {@link IrisHttpClient} for a profile, creating and
+   * establishing it lazily on first use (architecture decisions D1/D8).
+   *
+   * - **Default profile:** created and established eagerly in {@link start};
+   *   this method returns the cached client + negotiated version without
+   *   re-establishing it (byte-for-byte today's behavior).
+   * - **Non-default profile:** on first call, creates the profile's own client,
+   *   runs the health check and Atelier-version negotiation, then caches the
+   *   result so the one-time negotiation latency is paid at most once. A
+   *   health-check failure is surfaced as a thrown error (NOT `process.exit`) —
+   *   only the default profile's startup failure is fatal.
+   * - **Lazy bootstrap (D8):** when `needsBootstrap` is true (a custom-REST
+   *   tool's first call against this profile), the existing auto-bootstrap flow
+   *   is attempted once per profile. On failure it surfaces the existing
+   *   structured remediation report as a warning rather than a silent no-op.
+   *   Atelier-only tools pass `needsBootstrap: false` and never trigger it.
+   * - **Concurrency (AC 14.2.7):** the first-touch establishment Promise is
+   *   cached per profile in {@link establishing}, so two concurrent first-touch
+   *   calls for the same profile await ONE shared establishment and bootstrap is
+   *   attempted at most once. The cache entry clears once establishment settles
+   *   (success OR failure).
+   * - **First-touch failure (AC 14.2.8):** on a non-default health-check
+   *   rejection, the cached (un-established) client is `destroy()`-ed and
+   *   dropped so the failure is retryable — the next call re-creates a fresh
+   *   client and re-attempts establishment; no un-established client lingers.
+   *
+   * This method is the seam {@link handleToolCall} calls once it resolves the
+   * per-call `server` parameter to a profile (architecture decision D2).
+   *
+   * @param profileName    - A registered profile name.
+   * @param needsBootstrap - Whether to attempt the one-time custom-REST bootstrap.
+   * @returns The profile's established client and its negotiated Atelier version.
+   * @throws {ProfileResolutionError} When `profileName` is not registered.
+   * @throws {Error} When a non-default profile fails its health check.
+   */
+  async getOrCreateClient(
+    profileName: string,
+    needsBootstrap: boolean = this.options.needsCustomRest ?? false,
+  ): Promise<{ client: IrisHttpClient; atelierVersion: number }> {
+    if (!this.clients || !this.profiles) {
+      throw new Error(
+        "Server not initialised: profile registry not built. Call start() first.",
+      );
+    }
+
+    const profile: IrisProfile = resolveProfile(this.profiles, profileName);
+    const existingMeta = this.profileMeta.get(profile.name);
+
+    // Fast path: the profile is already established AND no first-touch async
+    // work is needed (either no bootstrap requested, or it was already
+    // attempted). Returns synchronously — the default profile's hot path stays
+    // byte-for-byte today's behavior. `getOrCreate` returns the cached client.
+    if (existingMeta && (!needsBootstrap || existingMeta.bootstrapAttempted)) {
+      return {
+        client: this.clients.getOrCreate(profile.name),
+        atelierVersion: existingMeta.atelierVersion,
+      };
+    }
+
+    // Async work is needed: either first-touch establishment, or the first
+    // custom-REST bootstrap of an already-established client. Coalesce through a
+    // single in-flight Promise per profile so concurrent callers share one
+    // establishment + at-most-once bootstrap (AC 14.2.7).
+    const inFlight = this.establishing.get(profile.name);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const establishPromise = this.establishProfile(profile, needsBootstrap);
+    this.establishing.set(profile.name, establishPromise);
+    try {
+      return await establishPromise;
+    } finally {
+      // Clear the in-flight entry once it settles (success OR failure) so a
+      // failed first touch is retryable on the next call (AC 14.2.8).
+      this.establishing.delete(profile.name);
+    }
+  }
+
+  /**
+   * Perform the async establishment work for a profile (health check +
+   * version negotiation on first touch, plus the optional one-time bootstrap).
+   * Always invoked through {@link getOrCreateClient}'s in-flight coalescing, so
+   * it runs at most once concurrently per profile.
+   *
+   * On a non-default first-touch health-check failure, the cached client is
+   * destroyed and dropped (AC 14.2.8) before the error is re-thrown, so no
+   * un-established client lingers and the next call retries cleanly.
+   */
+  private async establishProfile(
+    profile: IrisProfile,
+    needsBootstrap: boolean,
+  ): Promise<{ client: IrisHttpClient; atelierVersion: number }> {
+    // clients/profiles are guaranteed defined by the getOrCreateClient guard.
+    const registry = this.clients as ProfileClientRegistry;
+    const client = registry.getOrCreate(profile.name);
+    let meta = this.profileMeta.get(profile.name);
+
+    // First touch (no meta yet): health check + version negotiation.
+    if (!meta) {
+      try {
+        await checkHealth(client);
+      } catch (error: unknown) {
+        // Drop the un-established client so the failure is retryable; no session
+        // was established on a failed health check, so there is nothing to leak
+        // beyond the cached (unusable) client instance itself (AC 14.2.8).
+        registry.drop(profile.name);
+        throw error;
+      }
+
+      let atelierVersion: number;
+      try {
+        atelierVersion = await negotiateVersion(client);
+      } catch {
+        logger.warn(
+          `Version negotiation failed for profile "${profile.name}", defaulting to v1`,
+        );
+        atelierVersion = 1;
+      }
+
+      meta = { atelierVersion, bootstrapAttempted: false };
+      this.profileMeta.set(profile.name, meta);
+    }
+
+    // Optional one-time bootstrap (first custom-REST use of this profile).
+    if (needsBootstrap && !meta.bootstrapAttempted) {
+      await this.attemptProfileBootstrap(profile, client, meta.atelierVersion);
+      meta.bootstrapAttempted = true;
+    }
+
+    return { client, atelierVersion: meta.atelierVersion };
+  }
+
+  /**
+   * Attempt the one-time custom-REST bootstrap for a profile (D8).
+   *
+   * Reuses the existing {@link bootstrap} orchestration. On failure it logs the
+   * existing structured "which steps succeeded / failed + manual remediation"
+   * report (never a silent no-op), matching the default profile's own startup
+   * bootstrap behavior.
+   */
+  private async attemptProfileBootstrap(
+    profile: IrisProfile,
+    client: IrisHttpClient,
+    atelierVersion: number,
+  ): Promise<void> {
+    try {
+      const result = await bootstrap(client, profile, atelierVersion);
+      if (result.errors.length > 0) {
+        logger.warn(
+          `Bootstrap for profile "${profile.name}" completed with errors: ${result.errors.join("; ")}`,
+        );
+      }
+      if (result.manualInstructions) {
+        logger.warn(result.manualInstructions);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Bootstrap failed for profile "${profile.name}": ${message}. Custom REST tools may not work against this profile.`,
+      );
     }
   }
 

@@ -9,6 +9,7 @@ import {
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { IrisHttpClient } from "../http-client.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -59,6 +60,9 @@ function makeSysInfoTool(): ToolDefinition {
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true },
     scope: "SYS",
+    // Non-baseline synthetic fixture: declare a `mutates` class so it satisfies
+    // the Story 15.0 registration assertion (every non-baseline key must classify).
+    mutates: "read",
     handler: async (_args, ctx) => ({
       content: [
         { type: "text" as const, text: `ns=${ctx.resolveNamespace()}` },
@@ -126,6 +130,67 @@ describe("server-base", () => {
     it("should return undefined for unknown tool names", () => {
       const server = new McpServerBase(makeServerOpts());
       expect(server.getTool("nonexistent")).toBeUndefined();
+    });
+  });
+
+  // ── Story 15.0 AC 15.0.3 / 15.0.6(b) — registration classification gate ──
+  //
+  // Every NON-baseline tool/action key MUST declare `mutates`. The
+  // registration-time assertion throws (naming the key) for an unclassified new
+  // tool — read OR write — and is exempt for baseline/grandfathered tools.
+  describe("registration classification assertion (Story 15.0 AC 15.0.3)", () => {
+    /** A NEW (non-baseline) tool with NO `mutates` declared. */
+    function makeUnclassifiedTool(name: string): ToolDefinition {
+      return {
+        name,
+        title: name,
+        description: "A new tool that forgot to classify mutates.",
+        inputSchema: z.object({}),
+        annotations: {},
+        scope: "NONE",
+        handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      };
+    }
+
+    it("THROWS at construction for a new non-baseline tool missing `mutates`", () => {
+      expect(
+        () =>
+          new McpServerBase(
+            makeServerOpts([makeUnclassifiedTool("iris_unclassified_new")]),
+          ),
+      ).toThrow(/iris_unclassified_new/);
+    });
+
+    it("THROWS at construction whether the forgotten tool is read- or write-like", () => {
+      // The gate is classification-presence, not class-value: a destructive
+      // annotation does NOT exempt it — `mutates` must be declared explicitly.
+      const writeLike: ToolDefinition = {
+        ...makeUnclassifiedTool("iris_destructive_new"),
+        annotations: { destructiveHint: true, readOnlyHint: false },
+      };
+      expect(() => new McpServerBase(makeServerOpts([writeLike]))).toThrow(
+        /iris_destructive_new/,
+      );
+    });
+
+    it("does NOT throw when the new tool declares `mutates`", () => {
+      const classified: ToolDefinition = {
+        ...makeUnclassifiedTool("iris_classified_new"),
+        mutates: "read",
+      };
+      expect(() => new McpServerBase(makeServerOpts([classified]))).not.toThrow();
+    });
+
+    it("does NOT throw for a baseline tool that omits `mutates` (grandfathered)", () => {
+      // `iris_doc_get` is a real baseline key → exempt from classification.
+      expect(() => new McpServerBase(makeServerOpts([makeGetDocTool()]))).not.toThrow();
+    });
+
+    it("THROWS via addTools() for a dynamically-added unclassified tool", () => {
+      const server = new McpServerBase(makeServerOpts([]));
+      expect(() =>
+        server.addTools([makeUnclassifiedTool("iris_added_unclassified")]),
+      ).toThrow(/iris_added_unclassified/);
     });
   });
 
@@ -537,6 +602,8 @@ describe("server-base", () => {
         outputSchema,
         annotations: { readOnlyHint: true },
         scope: "NONE",
+        // Non-baseline synthetic fixture → must classify (Story 15.0 AC 15.0.3).
+        mutates: "read",
         handler: async () => ({
           content: [{ type: "text" as const, text: "ok" }],
           structuredContent: { result: "hello", count: 1 },
@@ -585,6 +652,8 @@ describe("server-base", () => {
         inputSchema: z.object({}),
         annotations: {},
         scope: "NONE",
+        // Non-baseline synthetic fixture → must classify (Story 15.0 AC 15.0.3).
+        mutates: "read",
         handler: async () => ({
           content: [{ type: "text" as const, text: "ok" }],
         }),
@@ -592,6 +661,150 @@ describe("server-base", () => {
       const server = new McpServerBase(makeServerOpts([tool]));
       const registered = server.getTool("iris_test");
       expect(registered?.annotations).toEqual({});
+    });
+  });
+
+  // ── Per-profile client registry (Epic 14, AC 14.1.4 / 14.1.7) ──────
+  //
+  // The single `this.http` was replaced by a per-profile ProfileClientRegistry
+  // (architecture decision D1). The default profile is established eagerly in
+  // start(); non-default profiles are established lazily on first
+  // getOrCreateClient (D1/D8). handleToolCall stays on the default profile
+  // (per-call `server` selection is Story 14.2 / D2).
+  describe("per-profile client registry (AC 14.1.4 / 14.1.7)", () => {
+    let fetchMock: ReturnType<typeof vi.fn>;
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let exitMock: any;
+    const savedEnv = {
+      IRIS_USERNAME: process.env.IRIS_USERNAME,
+      IRIS_PASSWORD: process.env.IRIS_PASSWORD,
+      IRIS_HOST: process.env.IRIS_HOST,
+      IRIS_PROFILES: process.env.IRIS_PROFILES,
+    };
+
+    /** Atelier version-negotiation response body. */
+    function versionResponse(): Response {
+      return new Response(
+        JSON.stringify({
+          status: { errors: [] },
+          console: [],
+          result: { version: "8.0.0" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    beforeEach(() => {
+      fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+      exitMock = vi
+        .spyOn(process, "exit")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation((() => {}) as any);
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      exitMock.mockRestore();
+      // Restore env we may have mutated.
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+
+    it("establishes the default profile eagerly in start() and reuses that client", async () => {
+      // Health check + version negotiation succeed.
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      fetchMock.mockResolvedValueOnce(versionResponse());
+
+      const server = new McpServerBase(makeServerOpts([], makeConfig()));
+      await server.start("stdio");
+
+      // getOrCreateClient("default") returns the eagerly-created client and does
+      // NOT issue more fetches (no re-negotiation).
+      const callsAfterStart = fetchMock.mock.calls.length;
+      const { client, atelierVersion } = await server.getOrCreateClient(
+        "default",
+        false,
+      );
+      expect(client).toBeInstanceOf(IrisHttpClient);
+      expect(atelierVersion).toBe(8); // negotiated major version from "8.0.0"
+      expect(fetchMock.mock.calls.length).toBe(callsAfterStart);
+    });
+
+    it("lazily establishes a non-default profile with its own isolated client", async () => {
+      process.env.IRIS_USERNAME = "u";
+      process.env.IRIS_PASSWORD = "p";
+      process.env.IRIS_HOST = "default.example.com";
+      process.env.IRIS_PROFILES = JSON.stringify({
+        other: { host: "other.example.com" },
+      });
+
+      // start(): default profile health check + negotiation.
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      fetchMock.mockResolvedValueOnce(versionResponse());
+
+      // No injected config → start() uses loadProfileRegistry() (reads env).
+      const server = new McpServerBase(makeServerOpts([]));
+      await server.start("stdio");
+
+      const defaultClient = await server.getOrCreateClient("default", false);
+
+      // First touch of "other": its own health check + negotiation.
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      fetchMock.mockResolvedValueOnce(versionResponse());
+
+      const otherClient = await server.getOrCreateClient("other", false);
+
+      // Distinct instances → session isolation across profiles.
+      expect(otherClient.client).toBeInstanceOf(IrisHttpClient);
+      expect(otherClient.client).not.toBe(defaultClient.client);
+
+      // The "other" profile's request targeted its own host.
+      const otherHealthCall = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes("other.example.com"),
+      );
+      expect(otherHealthCall).toBeDefined();
+
+      // Second touch of "other" returns the cached client without new fetches.
+      const callsBeforeRepeat = fetchMock.mock.calls.length;
+      const otherAgain = await server.getOrCreateClient("other", false);
+      expect(otherAgain.client).toBe(otherClient.client);
+      expect(fetchMock.mock.calls.length).toBe(callsBeforeRepeat);
+    });
+
+    it("getOrCreateClient throws a structured error for an unknown profile", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      fetchMock.mockResolvedValueOnce(versionResponse());
+
+      const server = new McpServerBase(makeServerOpts([], makeConfig()));
+      await server.start("stdio");
+
+      await expect(server.getOrCreateClient("nope", false)).rejects.toThrow(
+        /Unknown server profile "nope"/,
+      );
+    });
+
+    it("handleToolCall still resolves the default profile client (back-compat)", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+      fetchMock.mockResolvedValueOnce(versionResponse());
+
+      const tool = makeGetDocTool();
+      const server = new McpServerBase(makeServerOpts([tool], makeConfig()));
+      await server.start("stdio");
+
+      // Invoke the SDK-registered callback (the path handleToolCall drives).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sdkTools = (server.server as any)._registeredTools;
+      const entry = sdkTools["iris_doc_get"];
+      const callback = entry.callback ?? entry.handler ?? entry.cb;
+      const result = await callback({ name: "Foo.cls" });
+
+      expect(result.isError).toBeFalsy();
+      // Default profile namespace resolution still works (HSCUSTOM from config).
+      expect(result.content[0].text).toContain("HSCUSTOM");
     });
   });
 });

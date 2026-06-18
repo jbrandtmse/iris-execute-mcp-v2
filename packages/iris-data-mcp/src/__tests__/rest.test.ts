@@ -349,6 +349,51 @@ describe("iris_rest_manage", () => {
     expect(swagger).not.toHaveProperty("paths");
   });
 
+  // Regression (bug fix): the IRIS Mgmnt API `get` returns the swagger spec at
+  // the TOP LEVEL of the result (keys like swagger/info/paths/basePath), NOT
+  // nested under a `swaggerSpec` field. The summary path previously only read
+  // `result.swaggerSpec`, so it returned `swaggerSpec: null` for every real
+  // spec-first app. This asserts the top-level shape is summarized correctly and
+  // name/namespace fall back to the request args.
+  it("bugfix: get summary extracts a TOP-LEVEL swagger spec (real Mgmnt shape)", async () => {
+    const topLevelSpec = {
+      swagger: "2.0",
+      basePath: "/csp/myapp/api/v1",
+      info: {
+        title: "My App API",
+        version: "1.0.0",
+        description: "Top-level spec, not nested",
+      },
+      paths: {
+        "/a": { get: {} },
+        "/b": { get: {}, post: {} },
+        "/c": { delete: {} },
+      },
+      definitions: { Item: {}, Error: {} },
+    };
+    mockHttp.get.mockResolvedValue(envelope(topLevelSpec));
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/myapp", fullSpec: false },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    // name/namespace fall back to the request args (spec body has none of its own)
+    expect(structured.name).toBe("/api/myapp");
+    expect(structured.namespace).toBe("USER");
+    const swagger = structured.swaggerSpec as Record<string, unknown>;
+    // The bug produced swaggerSpec === null here; now it must be summarized.
+    expect(swagger).not.toBeNull();
+    expect(swagger).toHaveProperty("basePath", "/csp/myapp/api/v1");
+    expect(swagger).toHaveProperty("pathCount", 3);
+    expect(swagger).toHaveProperty("definitionCount", 2);
+    expect(swagger).toHaveProperty("title", "My App API");
+    expect(swagger).toHaveProperty("version", "1.0.0");
+    expect(swagger).not.toHaveProperty("paths");
+  });
+
   // ── delete action ─────────────────────────────────────────
 
   it("should delete REST application via DELETE", async () => {

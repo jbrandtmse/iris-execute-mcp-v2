@@ -102,14 +102,17 @@ export const oauthManageTool: ToolDefinition = {
       .optional()
       .describe(
         "Namespace containing customization classes for the server (server create). " +
-          "Required by IRIS OAuth2.Server.Configuration — defaults to empty string if omitted.",
+          "Required by IRIS OAuth2.Server.Configuration; when omitted it defaults to the " +
+          "request's target namespace.",
       ),
     customizationRoles: z
       .string()
       .optional()
       .describe(
         "Comma-separated roles granted to customization classes (server create). " +
-          "Required by IRIS OAuth2.Server.Configuration — defaults to empty string if omitted.",
+          "REQUIRED by IRIS OAuth2.Server.Configuration (min length 1) and has no safe default — " +
+          "omitting it makes server creation fail with a 'property required' error. " +
+          "Also note 'supportedScopes' is required for server creation.",
       ),
   }),
   annotations: {
@@ -183,9 +186,12 @@ export const oauthManageTool: ToolDefinition = {
       body.refreshTokenInterval = refreshTokenInterval;
     if (signingAlgorithm !== undefined)
       body.signingAlgorithm = signingAlgorithm;
-    // FEAT-1: forward customizationNamespace and customizationRoles
-    // (required by OAuth2.Server.Configuration; send empty string when not provided
-    //  for create so IRIS does not error with "Property required")
+    // FEAT-1: forward customizationNamespace and customizationRoles, both Required
+    // by OAuth2.Server.Configuration. Send empty string when omitted: the handler
+    // defaults an empty customizationNamespace to the request namespace, while an
+    // empty customizationRoles is left unset and surfaces IRIS's clean "property
+    // required" error (it grants roles to customization code, so there is no safe
+    // default to invent here).
     if (action === "create" && entity === "server") {
       body.customizationNamespace = customizationNamespace ?? "";
       body.customizationRoles = customizationRoles ?? "";

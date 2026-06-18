@@ -33,6 +33,10 @@ All servers use the same environment variables:
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
 
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
+
 ---
 
 ## MCP Client Configuration
@@ -114,8 +118,11 @@ All servers use the same environment variables:
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_item` | Enable, disable, get, or set config item settings | `action`, `itemName`, `settings?`, `namespace?` | -- |
+| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
+| `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
+
+> **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. (A just-`add`-ed config item is not visible to an immediate `get`/`set` until the next add/remove syncs the config extent from the production class — see the `iris_production_item` examples below.)
 
 ### Production Monitoring Tools
 
@@ -287,6 +294,68 @@ All five actions (`start`, `stop`, `restart`, `update`, `recover`) are verified 
     "FilePath": "/data/incoming",
     "FileSpec": "*.txt"
   }
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_production_item</strong> -- Add a config item with an arbitrary adapter setting</summary>
+
+**Input:**
+```json
+{
+  "action": "add",
+  "production": "MyApp.FHIRProduction",
+  "itemName": "MyApp.Service.FileIn",
+  "className": "EnsLib.File.PassthroughService",
+  "settings": {
+    "comment": "inbound file feed",
+    "FilePath": "/data/incoming"
+  }
+}
+```
+
+Property keys (`poolSize`, `enabled`, `comment`, `category`, `className`) map to `Ens.Config.Item` properties; any other key (e.g. `FilePath`) routes to an `Ens.Config.Setting` (Target `Adapter` by default; suffix a key with `@Host` or `@Adapter` to force the target). Use `"action": "remove"` with `itemName` (and `production`) to remove an item.
+
+**Output:**
+```json
+{
+  "action": "added",
+  "itemName": "MyApp.Service.FileIn",
+  "production": "MyApp.FHIRProduction",
+  "className": "EnsLib.File.PassthroughService",
+  "updatedSettings": ["comment", "FilePath"]
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_default_settings_manage</strong> -- Set a System Default Setting</summary>
+
+**Input:**
+```json
+{
+  "action": "set",
+  "production": "MyApp.FHIRProduction",
+  "item": "MyApp.Service.FileIn",
+  "hostClass": "EnsLib.File.PassthroughService",
+  "setting": "FilePath",
+  "value": "/data/incoming",
+  "deployable": true
+}
+```
+
+Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` (= applies to all) when omitted. `list` and `get` are read actions; `set` and `delete` are write actions, opt-in under tool governance (disabled by default).
+
+**Output:**
+```json
+{
+  "action": "set",
+  "production": "MyApp.FHIRProduction",
+  "item": "MyApp.Service.FileIn",
+  "hostClass": "EnsLib.File.PassthroughService",
+  "setting": "FilePath",
+  "value": "/data/incoming"
 }
 ```
 </details>
@@ -608,7 +677,7 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 19 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 20 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, and monitoring tools
@@ -631,6 +700,8 @@ All 19 interoperability tools operate in the context of a specific IRIS namespac
 | `Production not found` | No production configured in the namespace | Use `iris_production_manage` to create one, or check the namespace |
 | `Production must be stopped` | Attempting to delete a running production | Stop the production first with `iris_production_control` |
 | `Config item not found` | Invalid item name | Check item names with `iris_production_status` (detail=true) |
+| `Host class 'X' does not exist or is not compiled` | `iris_production_item` `add` with a `className` that is not a compiled class (surrounding whitespace is trimmed before this check) | Compile the host class first, or correct the `className` |
+| `Config item 'X' already exists in production 'Y'` | `iris_production_item` `add` with a duplicate item name in the target production | Use a unique `itemName`, or `remove` the existing item first |
 | `at least one of sessionId or headerId is required` | Missing filter for message trace | Provide either `sessionId` or `headerId` |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 

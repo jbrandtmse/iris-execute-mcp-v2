@@ -615,6 +615,34 @@ FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MV
 
 - FR110: Developer can retrieve the compiled-intermediate routine for a class by its bare name, without needing to know IRIS's generation-numbering or extension conventions. The tool resolves the class name to a candidate list (`.1.int`, `.int`) and returns the content of the first candidate that exists, reporting which candidate resolved. On all-candidates-404, returns a structured hint suggesting compilation. Fails fast on authentication or network errors (does not exhaust the candidate list on auth failure). Surfaces the macro-expanded form IRIS actually executes at runtime — distinct from `iris_macro_info` which returns individual macro definitions and source locations, and from `iris_doc_get` which requires a fully-qualified doc name with extension.
 
+### Multi-Server Profiles & Tool Governance (Epic 14 Addition — 2026-06-15)
+
+- FR111: Operator can define multiple named IRIS server profiles (host, port, username, password, namespace, HTTPS) via an `IRIS_PROFILES` JSON environment variable. The existing `IRIS_*` variables define the default profile, preserving backward compatibility (no `IRIS_PROFILES` set → single default server, today's behavior).
+- FR112: AI client can target a specific server profile per tool call via an optional `server` parameter present on every tool; omitting it uses the default profile. The `server` parameter carries only the profile name — credentials never appear in tool arguments.
+- FR113: Operator can govern tool availability at the subfunction (action) level via an `IRIS_GOVERNANCE` JSON environment variable, resolved as a two-layer cascade `profile.explicit ?? global.explicit ?? defaultSeed`. The default seed enables all existing actions and all new read actions, and disables all new write/change actions.
+- FR114: Server enforces governance at call time, rejecting a disabled action with a structured error identifying the action and the target profile. All tools remain advertised (enforcement is per-call because the governing profile is selected per-call).
+- FR115: AI client can read the effective governance policy for a given profile via an MCP resource (`iris-governance://{profile}`), advisory only — enforcement does not depend on the client reading it.
+
+### Security & Admin Tools (Epic 15 Addition — 2026-06-15)
+
+- FR116: Administrator can list IRIS services, enable/disable them, and configure their authentication settings (`Security.Services`).
+- FR117: Administrator can list, get, create, modify, delete, and test LDAP configurations (`Security.LDAPConfigs`).
+- FR118: Administrator can list, get, import, and delete X.509 certificate credentials (`%SYS.X509Credentials`).
+- FR119: Administrator can enable/disable auditing, configure audit events, and view/purge/export the audit log (`Security.Events` + `%SYS.Audit`).
+- FR120: Administrator can grant and revoke column-level and schema-level SQL privileges (`iris_resource_manage` enhancement).
+
+### Operations Tools (Epic 16 Addition — 2026-06-15)
+
+- FR121: Operator can inspect process detail (stack/variables) and terminate/suspend/resume processes (`%SYS.ProcessQuery` + `SYS.Process`).
+- FR122: Operator can mount/dismount databases and run compact/defragment/truncate/expand-volume operations (`SYS.Database`).
+- FR123: Operator can run full/incremental/cumulative backups, freeze/thaw the system for external backup, and list backup history (`Backup.General`).
+
+### Interop & Dev Tools (Epic 17 Addition — 2026-06-15)
+
+- FR124: Integration engineer can list/get/set/delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`).
+- FR125: Integration engineer can add and remove production config items and set arbitrary host/adapter settings (`iris_production_item` enhancement).
+- FR126: Developer can analyze SQL — show execution plan, runtime statistics, index usage, and list currently-running statements (`iris_sql_analyze`).
+
 ## Non-Functional Requirements
 
 ### Performance
@@ -630,6 +658,8 @@ FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MV
 - Credentials (IRIS username/password) must never be logged, included in error messages, or exposed in tool responses
 - All HTTP communication to IRIS must support HTTPS (TLS) when configured
 - The MCP server must not escalate privileges beyond what the connected IRIS user has — IRIS's own permission model is the authority
+- **Backward compatibility (hard constraint, Epics 14–17):** all added features are strictly additive. With no `IRIS_PROFILES` and no `IRIS_GOVERNANCE` configured, every server behaves byte-for-byte as it did before — the default profile is synthesized from the existing `IRIS_*` variables, and the governance default seed leaves every previously-available tool action enabled. New `server` parameters are optional; new tools and new write actions are opt-in. No existing tool name, parameter, default, or output shape may change. This is a release gate — the suite has live users.
+- **Governance is additive:** governance only adds the *ability* to restrict actions (opt-in) plus default-off for *newly-introduced* write actions; it never disables a capability users have today.
 - Tool annotations must accurately reflect destructive potential — `destructiveHint: true` for all tools that can delete or modify data
 - The custom REST service must validate all inputs (type, range, format, and required fields) against the tool's inputSchema before passing to IRIS system classes
 - The custom REST service must not expose internal IRIS error details (stack traces, global references) to external callers

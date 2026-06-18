@@ -33,6 +33,10 @@ All servers use the same environment variables:
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
 
+### Multiple servers & the `server` parameter
+
+Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
+
 ---
 
 ## MCP Client Configuration
@@ -141,20 +145,25 @@ In addition to the standard prerequisites, the DocDB tools require the `%Service
 
 **`iris_rest_manage` get action — `fullSpec` parameter:**
 
-When `action:"get"`, the `swaggerSpec` field can be a large JSON document (50 KB+). By default (`fullSpec:false`) the tool returns a compact summary:
+When `action:"get"`, the OpenAPI spec can be a large JSON document (50 KB+). By default (`fullSpec:false`) the tool returns a compact envelope in which the full spec is replaced by a `swaggerSpec` summary (and `name`/`namespace` fall back to the requested application path and resolved namespace when the spec body carries none):
 
 ```json
 {
-  "title": "My REST API",
-  "version": "1.0",
-  "description": "...",
-  "basePath": "/api/myapp",
-  "pathCount": 12,
-  "definitionCount": 5
+  "name": "/api/myapp",
+  "dispatchClass": null,
+  "namespace": "USER",
+  "swaggerSpec": {
+    "basePath": "/api/myapp",
+    "pathCount": 12,
+    "definitionCount": 5,
+    "description": "...",
+    "title": "My REST API",
+    "version": "1.0"
+  }
 }
 ```
 
-Pass `fullSpec:true` to receive the complete OpenAPI spec object.
+Pass `fullSpec:true` to receive the complete OpenAPI spec object (returned as-is). When the application has no resolvable spec, `swaggerSpec` is `null`.
 
 ---
 
@@ -479,7 +488,7 @@ companion spec class, so `swaggerSpec` is `null` for them.
 `scope: "all"` fetches both spec-first (via IRIS Management API) and legacy
 (via ExecuteMCPv2 webapp endpoint) in parallel and returns the deduplicated union.
 
-> **Note:** The former `scope:"all"` (pre-v0.5) only returned hand-written classes. That behavior is now `scope:"legacy"`. Update any existing calls accordingly.
+> **Note:** The former `scope:"all"` (pre-release, before the Story 12.5 rename) only returned hand-written classes. That behavior is now `scope:"legacy"`. Update any existing calls accordingly.
 </details>
 
 <details>

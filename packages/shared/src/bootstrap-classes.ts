@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "8f0cf75be984";
+export const BOOTSTRAP_VERSION = "daeb5f0bd525";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "8f0cf75be984";
+Parameter BOOTSTRAPVERSION = "daeb5f0bd525";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3507,7 +3507,12 @@ ClassMethod OAuthList() As %Status
 
         ; List OAuth2 server definitions via SQL
         Set tStatement = ##class(%SQL.Statement).%New()
-        Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2.Server.Configuration")
+        ; SQL table is OAuth2_Server.Configuration — the package dots (OAuth2.Server)
+        ; collapse to an underscore in the SQL schema name. The two-dot form
+        ; "OAuth2.Server.Configuration" is invalid SQL, so %Prepare failed and the
+        ; handler silently returned an empty server list (the "table may not exist"
+        ; fallback below) — meaning servers were NEVER listed. (Bug fix.)
+        Set tSC = tStatement.%Prepare("SELECT ID, IssuerEndpoint, Description, SupportedScopes, AccessTokenInterval, AuthorizationCodeInterval, RefreshTokenInterval, SigningAlgorithm FROM OAuth2_Server.Configuration")
         If $$$ISERR(tSC) {
             ; Table may not exist - return empty results
             Set $NAMESPACE = tOrigNS
@@ -3524,15 +3529,42 @@ ClassMethod OAuthList() As %Status
 
         If tRS.%SQLCODE '< 0 {
             While tRS.%Next() {
+                Set tId = tRS.%Get("ID")
                 Set tEntry = {}
-                Do tEntry.%Set("id", tRS.%Get("ID"))
-                Do tEntry.%Set("issuerEndpoint", tRS.%Get("IssuerEndpoint"))
-                Do tEntry.%Set("description", tRS.%Get("Description"))
-                Do tEntry.%Set("supportedScopes", tRS.%Get("SupportedScopes"))
-                Do tEntry.%Set("accessTokenInterval", +tRS.%Get("AccessTokenInterval"), "number")
-                Do tEntry.%Set("authorizationCodeInterval", +tRS.%Get("AuthorizationCodeInterval"), "number")
-                Do tEntry.%Set("refreshTokenInterval", +tRS.%Get("RefreshTokenInterval"), "number")
-                Do tEntry.%Set("signingAlgorithm", tRS.%Get("SigningAlgorithm"))
+                Do tEntry.%Set("id", tId)
+                ; IssuerEndpoint (an OAuth2.Endpoint %SerialObject) and SupportedScopes
+                ; (an array collection) serialize as opaque $List bytes when read as raw
+                ; SQL columns. Open the object and read logical values via accessors:
+                ; IssuerEndpoint.GetServerURL() reconstructs the URL, and SupportedScopes
+                ; is enumerated into a JSON array of scope names.
+                Set tCfg = ##class(OAuth2.Server.Configuration).%OpenId(tId)
+                If $IsObject(tCfg) {
+                    Set tIssuer = ""
+                    If $IsObject(tCfg.IssuerEndpoint) Set tIssuer = tCfg.IssuerEndpoint.GetServerURL()
+                    Do tEntry.%Set("issuerEndpoint", tIssuer)
+                    Do tEntry.%Set("description", tCfg.Description)
+                    Set tScopeArr = []
+                    Set tScopeKey = ""
+                    For {
+                        Set tScopeDesc = tCfg.SupportedScopes.GetNext(.tScopeKey)
+                        If tScopeKey = "" Quit
+                        Do tScopeArr.%Push(tScopeKey)
+                    }
+                    Do tEntry.%Set("supportedScopes", tScopeArr)
+                    Do tEntry.%Set("accessTokenInterval", +tCfg.AccessTokenInterval, "number")
+                    Do tEntry.%Set("authorizationCodeInterval", +tCfg.AuthorizationCodeInterval, "number")
+                    Do tEntry.%Set("refreshTokenInterval", +tCfg.RefreshTokenInterval, "number")
+                    Do tEntry.%Set("signingAlgorithm", tCfg.SigningAlgorithm)
+                } Else {
+                    ; Fallback to raw SQL values if the object cannot be opened.
+                    Do tEntry.%Set("issuerEndpoint", tRS.%Get("IssuerEndpoint"))
+                    Do tEntry.%Set("description", tRS.%Get("Description"))
+                    Do tEntry.%Set("supportedScopes", tRS.%Get("SupportedScopes"))
+                    Do tEntry.%Set("accessTokenInterval", +tRS.%Get("AccessTokenInterval"), "number")
+                    Do tEntry.%Set("authorizationCodeInterval", +tRS.%Get("AuthorizationCodeInterval"), "number")
+                    Do tEntry.%Set("refreshTokenInterval", +tRS.%Get("RefreshTokenInterval"), "number")
+                    Do tEntry.%Set("signingAlgorithm", tRS.%Get("SigningAlgorithm"))
+                }
                 Do tServers.%Push(tEntry)
             }
         }
@@ -3675,9 +3707,50 @@ ClassMethod OAuthManage() As %Status
                     }
 
                     Set tConfig = ##class(OAuth2.Server.Configuration).%New()
-                    Set tConfig.IssuerEndpoint = tIssuerURL
+                    ; IssuerEndpoint is an OAuth2.Endpoint (%SerialObject) — NOT a string.
+                    ; A scalar assignment (Set tConfig.IssuerEndpoint = tIssuerURL) silently
+                    ; produced an endpoint with empty Host/Prefix, so the issuer URL was lost
+                    ; (GetServerURL then returned just "https://"). Parse the URL into the
+                    ; Host/Port/Prefix/UseSSL sub-properties the way the IRIS portal does.
+                    Do ##class(%Net.URLParser).Decompose(tIssuerURL, .tUrlParts)
+                    Set tConfig.IssuerEndpoint.Host = $Get(tUrlParts("host"))
+                    Set tConfig.IssuerEndpoint.Port = $Get(tUrlParts("port"))
+                    Set tEndpointPrefix = $Get(tUrlParts("path"))
+                    If $Extract(tEndpointPrefix, 1) = "/" Set tEndpointPrefix = $Extract(tEndpointPrefix, 2, *)
+                    Set tConfig.IssuerEndpoint.Prefix = tEndpointPrefix
+                    Set tConfig.IssuerEndpoint.UseSSL = ($ZConvert($Get(tUrlParts("scheme")), "L") '= "http")
                     If tBody.%IsDefined("description") Set tConfig.Description = tBody.%Get("description")
-                    If tBody.%IsDefined("supportedScopes") Set tConfig.SupportedScopes = tBody.%Get("supportedScopes")
+                    ; SupportedScopes is an "array Of %String" (Required) keyed by scope
+                    ; name with the scope's description as the value. It is a COLLECTION,
+                    ; so it must be populated member-by-member — a scalar/array assignment
+                    ; (Set tConfig.SupportedScopes = <value>) fails with <METHOD DOES NOT
+                    ; EXIST>SupportedScopesSet *GetNext on the collection setter. The MCP TS
+                    ; layer sends scopes as a JSON array; a direct REST caller may send a
+                    ; space-/comma-separated string. Handle both.
+                    Set tScopes = tBody.%Get("supportedScopes")
+                    If $IsObject(tScopes) {
+                        Set tScopeIter = tScopes.%GetIterator()
+                        While tScopeIter.%GetNext(.tScopeKey, .tScopeVal) {
+                            Set tScopeVal = $ZStrip(tScopeVal, "<>W")
+                            If tScopeVal '= "" Do tConfig.SupportedScopes.SetAt(tScopeVal, tScopeVal)
+                        }
+                    } ElseIf tScopes '= "" {
+                        Set tScopes = $Translate(tScopes, ",", " ")
+                        For tScopeIdx = 1:1:$Length(tScopes, " ") {
+                            Set tScope = $ZStrip($Piece(tScopes, " ", tScopeIdx), "<>W")
+                            If tScope '= "" Do tConfig.SupportedScopes.SetAt(tScope, tScope)
+                        }
+                    }
+                    ; CustomizationNamespace and CustomizationRoles are also Required by
+                    ; OAuth2.Server.Configuration but were never set (so %Save always failed
+                    ; even once the scopes crash was fixed). Wire them from the body.
+                    ; CustomizationNamespace defaults to the request namespace when omitted;
+                    ; CustomizationRoles has no safe default (it grants roles to customization
+                    ; code), so an omitted/empty value surfaces the clean IRIS "required" error.
+                    Set tCustNS = tBody.%Get("customizationNamespace")
+                    If tCustNS = "" Set tCustNS = tOrigNS
+                    Set tConfig.CustomizationNamespace = tCustNS
+                    If (tBody.%Get("customizationRoles") '= "") Set tConfig.CustomizationRoles = tBody.%Get("customizationRoles")
                     If tBody.%IsDefined("accessTokenInterval") Set tConfig.AccessTokenInterval = +tBody.%Get("accessTokenInterval")
                     If tBody.%IsDefined("authorizationCodeInterval") Set tConfig.AuthorizationCodeInterval = +tBody.%Get("authorizationCodeInterval")
                     If tBody.%IsDefined("refreshTokenInterval") Set tConfig.RefreshTokenInterval = +tBody.%Get("refreshTokenInterval")
@@ -3745,7 +3818,10 @@ ClassMethod OAuthManage() As %Status
                 }
 
                 If tEntity = "server" {
-                    Set tSC = ##class(OAuth2.Server.Configuration).Delete(tName)
+                    ; OAuth2.Server.Configuration is a singleton; its Delete() takes NO
+                    ; arguments. Passing tName threw <PARAMETER> (server delete was broken).
+                    ; The 'name' param is accepted for API symmetry but not needed here.
+                    Set tSC = ##class(OAuth2.Server.Configuration).Delete()
                 }
                 ElseIf tEntity = "client" {
                     Set tSC = ##class(OAuth2.Client).Delete(tName)
@@ -3765,6 +3841,1344 @@ ClassMethod OAuthManage() As %Status
         Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()
         ; CRITICAL: Sanitize error to avoid leaking secrets
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List IRIS services, or get a single service's properties.
+/// <p>Backed by <class>Security.Services</class> in <code>%SYS</code>
+/// (Story 15.1). With no <code>name</code> query parameter, returns a JSON
+/// array of services from the <code>Security.Services:List</code> query
+/// (ROWSPEC: Name, Enabled, Public, Description, EnabledBoolean). With a
+/// <code>name</code> query parameter, calls
+/// <method>Security.Services.Get</method> and returns that service's
+/// properties (<code>enabled</code>, <code>description</code>,
+/// <code>autheEnabled</code>, <code>clientSystems</code>). Avoids the
+/// <code>Capabilities</code>/<code>AutheEnabledCapabilities</code> Internal
+/// properties (Rule #4).</p>
+ClassMethod ServiceList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?name= query parameter selects single-service get vs list
+        Set tName = $Get(%request.Data("name", 1))
+
+        ; Switch to %SYS for Security.Services operations
+        Set $NAMESPACE = "%SYS"
+
+        If tName '= "" {
+            ; Single service get
+            Kill tProps
+            Set tSC = ##class(Security.Services).Get(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tEntry = {}
+            ; Security.Services.Get uses pName as the lookup key and does NOT
+            ; populate tProps("Name") — echo the input directly.
+            Do tEntry.%Set("name", tName)
+            Do tEntry.%Set("enabled", +$Get(tProps("Enabled")), "boolean")
+            Do tEntry.%Set("description", $Get(tProps("Description")))
+            Do tEntry.%Set("autheEnabled", +$Get(tProps("AutheEnabled")))
+            Do tEntry.%Set("clientSystems", $Get(tProps("ClientSystems")))
+            ; AVOID Capabilities / AutheEnabledCapabilities (Internal — Rule #4)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all services
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("Security.Services:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ROWSPEC: Name, Enabled, Public, Description, EnabledBoolean
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("enabled", +tRS.Get("EnabledBoolean"), "boolean")
+            Do tEntry.%Set("public", tRS.Get("Public"))
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Enable, disable, or update settings for an IRIS service.
+/// <p>Reads a JSON body with <code>action</code>
+/// (enable|disable|set) and <code>name</code> (the service, e.g.
+/// <code>%Service_SQL</code>). For <code>enable</code>/<code>disable</code>,
+/// sets the <code>Enabled</code> property. For <code>set</code>, applies the
+/// provided <code>settings</code> fields (<code>enabled</code>,
+/// <code>autheEnabled</code>, <code>description</code>,
+/// <code>clientSystems</code>) via <method>Security.Services.Modify</method>.
+/// Only provided fields are modified. Avoids the
+/// <code>Capabilities</code>/<code>AutheEnabledCapabilities</code> Internal
+/// properties (Rule #4). Errors propagate via
+/// <method>SanitizeError</method> (Rule #9), preserving the real IRIS error
+/// text (e.g. service-does-not-exist).</p>
+ClassMethod ServiceManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "set") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, set")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security.Services operations
+        Set $NAMESPACE = "%SYS"
+
+        Kill tProps
+        If tAction = "enable" {
+            Set tProps("Enabled") = 1
+        }
+        ElseIf tAction = "disable" {
+            Set tProps("Enabled") = 0
+        }
+        Else {
+            ; set — apply only provided settings fields
+            Set tSettings = tBody.%Get("settings")
+            If $IsObject(tSettings) {
+                If tSettings.%IsDefined("enabled") Set tProps("Enabled") = +tSettings.%Get("enabled")
+                If tSettings.%IsDefined("autheEnabled") Set tProps("AutheEnabled") = +tSettings.%Get("autheEnabled")
+                If tSettings.%IsDefined("description") Set tProps("Description") = tSettings.%Get("description")
+                If tSettings.%IsDefined("clientSystems") Set tProps("ClientSystems") = tSettings.%Get("clientSystems")
+            }
+            ; A 'set' with no recognized settings field would issue a no-op Modify
+            ; that reports success — reject it so callers are not told a
+            ; do-nothing call succeeded. (Defense in depth: a direct REST caller
+            ; bypasses the TypeScript-layer guard.)
+            If '$Data(tProps) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "The 'set' action requires at least one settings field: enabled, autheEnabled, description, or clientSystems")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        Set tSC = ##class(Security.Services).Modify(tName, .tProps)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("name", tName)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List LDAP configurations, get a single config, or run a config-validity test.
+/// <p>Backed by <class>Security.LDAPConfigs</class> in <code>%SYS</code>
+/// (Story 15.2). Routing on the GET query parameters:</p>
+/// <ul>
+///   <li>No <code>name</code> &rarr; list all configs from the
+///       <code>Security.LDAPConfigs:List</code> query (ROWSPEC:
+///       <code>Name, LDAP Enabled, Description, LDAPCACertFile</code>).</li>
+///   <li><code>name</code> only &rarr; single config get via
+///       <method>Security.LDAPConfigs.Get</method>, returning the config's
+///       properties.</li>
+///   <li><code>name</code> + <code>test=1</code> &rarr; a non-mutating
+///       <b>config-validity check</b> (AC 15.2.5): the config exists, its
+///       required fields (<code>LDAPBaseDN</code>,
+///       <code>LDAPBaseDNForGroups</code>, <code>LDAPSearchUsername</code>) are
+///       populated, and its host names are syntactically valid. IRIS exposes no
+///       high-level LDAP connection-test API (only <class>%SYS.LDAP</class>
+///       primitives), so this is NOT a live bind to the LDAP server.</li>
+/// </ul>
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is NEVER included in any
+/// response (NFR6 / Rule #9 / AC 15.2.4) — it is omitted from the property
+/// mapping entirely. Avoids the <code>LDAPDomainName</code> Deprecated/Internal
+/// property (Rule #4).</p>
+ClassMethod LdapList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?name= selects single-config get; ?test=1 selects validity test
+        Set tName = $Get(%request.Data("name", 1))
+        Set tIsTest = (+$Get(%request.Data("test", 1)) = 1)
+
+        ; Switch to %SYS for Security.LDAPConfigs operations
+        Set $NAMESPACE = "%SYS"
+
+        If tName '= "" {
+            ; Single config get / validity test
+            Kill tProps
+            Set tSC = ##class(Security.LDAPConfigs).Get(tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            If tIsTest {
+                ; Config-validity check (AC 15.2.5) — non-mutating, no live bind.
+                Set tEntry = ..BuildLdapValidity(tName, .tProps)
+                Do ..RenderResponseBody($$$OK, , tEntry)
+                Quit
+            }
+
+            Set tEntry = ..BuildLdapEntry(tName, .tProps)
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all LDAP configurations
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("Security.LDAPConfigs:List")
+        Set tSC = tRS.Execute("*")
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ROWSPEC: Name, LDAP Enabled, Description, LDAPCACertFile
+            ; (no password column — safe to surface directly)
+            Set tEntry = {}
+            Do tEntry.%Set("name", tRS.Get("Name"))
+            Do tEntry.%Set("enabled", +tRS.Get("LDAP Enabled"), "boolean")
+            Do tEntry.%Set("description", tRS.Get("Description"))
+            Do tEntry.%Set("ldapCACertFile", tRS.Get("LDAPCACertFile"))
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Build a password-redacted JSON object for a single LDAP config from a
+/// <method>Security.LDAPConfigs.Get</method> properties array.
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is deliberately NOT read
+/// from <var>pProps</var> — it is never surfaced (AC 15.2.4). The bind username
+/// is non-secret and IS returned.</p>
+ClassMethod BuildLdapEntry(pName As %String, ByRef pProps As %String) As %DynamicObject [ Internal ]
+{
+    Set tEntry = {}
+    ; Get() uses pName as the lookup key and does NOT populate tProps("Name").
+    Do tEntry.%Set("name", pName)
+    Do tEntry.%Set("description", $Get(pProps("Description")))
+    Do tEntry.%Set("ldapBaseDN", $Get(pProps("LDAPBaseDN")))
+    Do tEntry.%Set("ldapBaseDNForGroups", $Get(pProps("LDAPBaseDNForGroups")))
+    Do tEntry.%Set("ldapHostNames", $Get(pProps("LDAPHostNames")))
+    Do tEntry.%Set("ldapSearchUsername", $Get(pProps("LDAPSearchUsername")))
+    Do tEntry.%Set("ldapClientTimeout", +$Get(pProps("LDAPClientTimeout")))
+    Do tEntry.%Set("ldapServerTimeout", +$Get(pProps("LDAPServerTimeout")))
+    Do tEntry.%Set("ldapUniqueDNIdentifier", $Get(pProps("LDAPUniqueDNIdentifier")))
+    Do tEntry.%Set("ldapFlags", +$Get(pProps("LDAPFlags")))
+    Do tEntry.%Set("ldapCACertFile", $Get(pProps("LDAPCACertFile")))
+    ; CRITICAL: NEVER include LDAPSearchPassword (AC 15.2.4 / Rule #9).
+    ; AVOID LDAPDomainName (Deprecated, Internal — Rule #4).
+    Quit tEntry
+}
+
+/// Build the config-validity result for the scoped-down <code>test</code>
+/// action (AC 15.2.5). Non-mutating; no live LDAP bind. Checks that the config
+/// exists (caller already confirmed via a successful Get), its required fields
+/// are populated, and host names are syntactically present.
+ClassMethod BuildLdapValidity(pName As %String, ByRef pProps As %String) As %DynamicObject [ Internal ]
+{
+    Set tIssues = []
+    Set tBaseDN = $Get(pProps("LDAPBaseDN"))
+    Set tBaseDNGroups = $Get(pProps("LDAPBaseDNForGroups"))
+    Set tSearchUser = $Get(pProps("LDAPSearchUsername"))
+    Set tHosts = $Get(pProps("LDAPHostNames"))
+
+    If tBaseDN = "" Do tIssues.%Push("LDAPBaseDN is not set")
+    If tBaseDNGroups = "" Do tIssues.%Push("LDAPBaseDNForGroups is not set")
+    If tSearchUser = "" Do tIssues.%Push("LDAPSearchUsername is not set")
+    ; Host names: required to reach the server. Each space-separated token may
+    ; carry an optional :port suffix; the port (if present) must be numeric.
+    If tHosts = "" {
+        Do tIssues.%Push("LDAPHostNames is not set")
+    } Else {
+        For tI = 1:1:$Length(tHosts, " ") {
+            Set tHost = $Piece(tHosts, " ", tI)
+            If tHost = "" Continue
+            If tHost [ ":" {
+                Set tPort = $Piece(tHost, ":", 2)
+                If (tPort = "") || ('(tPort ? 1.N)) {
+                    Do tIssues.%Push("Host '"_tHost_"' has an invalid port")
+                }
+            }
+        }
+    }
+
+    Set tValid = (tIssues.%Size() = 0)
+    Set tEntry = {}
+    Do tEntry.%Set("action", "test")
+    Do tEntry.%Set("name", pName)
+    Do tEntry.%Set("valid", tValid, "boolean")
+    Do tEntry.%Set("checkType", "config-validity")
+    Do tEntry.%Set("note", "IRIS exposes no high-level LDAP connection-test API; this is a non-mutating config-validity check, not a live bind.")
+    Do tEntry.%Set("issues", tIssues)
+    Quit tEntry
+}
+
+/// Create, modify, or delete an LDAP configuration.
+/// <p>Reads a JSON body with <code>action</code> (create|modify|delete),
+/// <code>name</code> (the LDAP config name), and an optional
+/// <code>settings</code> object (config fields for create/modify). Dispatches
+/// to <class>Security.LDAPConfigs</class> in <code>%SYS</code> via
+/// <method>Create</method>/<method>Modify</method>/<method>Delete</method>
+/// (each takes a <code>Properties</code> array, except <code>Delete</code>
+/// which takes the name).</p>
+/// <p><b>CRITICAL</b>: <code>LDAPSearchPassword</code> is accepted in the
+/// settings body but NEVER echoed in responses or error messages (AC 15.2.4 /
+/// Rule #9). Errors propagate via <method>SanitizeError</method>, preserving the
+/// real IRIS error text (e.g. config-does-not-exist).</p>
+ClassMethod LdapManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "create") && (tAction '= "modify") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: create, modify, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to %SYS for Security.LDAPConfigs operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "delete" {
+            Set tSC = ##class(Security.LDAPConfigs).Delete(tName)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "name": (tName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; create / modify — build the Properties array from settings fields.
+        ; Only provided fields are set; others retain server-side defaults
+        ; (create) or existing values (modify).
+        Kill tProps
+        Set tSettings = tBody.%Get("settings")
+        If $IsObject(tSettings) {
+            If tSettings.%IsDefined("description") Set tProps("Description") = tSettings.%Get("description")
+            If tSettings.%IsDefined("ldapBaseDN") Set tProps("LDAPBaseDN") = tSettings.%Get("ldapBaseDN")
+            If tSettings.%IsDefined("ldapBaseDNForGroups") Set tProps("LDAPBaseDNForGroups") = tSettings.%Get("ldapBaseDNForGroups")
+            If tSettings.%IsDefined("ldapHostNames") Set tProps("LDAPHostNames") = tSettings.%Get("ldapHostNames")
+            If tSettings.%IsDefined("ldapSearchUsername") Set tProps("LDAPSearchUsername") = tSettings.%Get("ldapSearchUsername")
+            ; Password is write-only: accepted, applied, never echoed back.
+            If tSettings.%IsDefined("ldapSearchPassword") Set tProps("LDAPSearchPassword") = tSettings.%Get("ldapSearchPassword")
+            If tSettings.%IsDefined("ldapClientTimeout") Set tProps("LDAPClientTimeout") = +tSettings.%Get("ldapClientTimeout")
+            If tSettings.%IsDefined("ldapServerTimeout") Set tProps("LDAPServerTimeout") = +tSettings.%Get("ldapServerTimeout")
+            If tSettings.%IsDefined("ldapUniqueDNIdentifier") Set tProps("LDAPUniqueDNIdentifier") = tSettings.%Get("ldapUniqueDNIdentifier")
+            If tSettings.%IsDefined("ldapFlags") Set tProps("LDAPFlags") = +tSettings.%Get("ldapFlags")
+            If tSettings.%IsDefined("ldapCACertFile") Set tProps("LDAPCACertFile") = tSettings.%Get("ldapCACertFile")
+        }
+
+        ; A create/modify with no recognized settings field would be a no-op —
+        ; reject so callers are not told a do-nothing call succeeded. (Defense in
+        ; depth: a direct REST caller bypasses the TypeScript-layer guard.)
+        If '$Data(tProps) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "The '"_tAction_"' action requires at least one settings field")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        If tAction = "create" {
+            Set tSC = ##class(Security.LDAPConfigs).Create(tName, .tProps)
+            Set tVerb = "created"
+        }
+        Else {
+            Set tSC = ##class(Security.LDAPConfigs).Modify(tName, .tProps)
+            Set tVerb = "modified"
+        }
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; CRITICAL: Never include the search password in the response.
+        Set tResult = {}
+        Do tResult.%Set("action", tVerb)
+        Do tResult.%Set("name", tName)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List X.509 certificate credentials, or get one credential's public metadata.
+/// <p>Backed by <class>%SYS.X509Credentials</class> in <code>%SYS</code>
+/// (Story 15.3). With no <code>alias</code> query parameter, returns a JSON
+/// array of credentials (alias + <code>hasPrivateKey</code> + safe public
+/// certificate fields). With an <code>alias</code> query parameter, returns
+/// that one credential's public metadata.</p>
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3)</b>: private-key material is NEVER
+/// returned. This handler reads ONLY the safe public properties off the opened
+/// object (<code>SubjectDN</code>, <code>IssuerDN</code>,
+/// <code>SerialNumber</code>, <code>Thumbprint</code>,
+/// <code>SubjectKeyIdentifier</code>, <code>ValidityNotBefore/After</code>) plus
+/// the <code>HasPrivateKey</code> presence boolean. It deliberately does NOT
+/// call <method>%SYS.X509Credentials.GetProperties</method>, which populates the
+/// secret <code>PrivateKey</code> / <code>PrivateKeyPassword</code> entries.</p>
+ClassMethod X509List() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Optional ?alias= selects single-credential get
+        Set tAlias = $Get(%request.Data("alias", 1))
+
+        ; Switch to %SYS for %SYS.X509Credentials operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAlias '= "" {
+            ; Single credential get — open and read only safe public fields.
+            ; NOTE: %SYS.X509Credentials.Exists returns a truthy %Status (NOT 0)
+            ; when the caller lacks %Admin_Secure:USE, and leaves tCred unset. So
+            ; do NOT trust the boolean return alone — require BOTH a loaded object
+            ; AND an OK status before reading. Otherwise a permission failure would
+            ; be misread as "exists" and crash on the unset OREF.
+            Set tExists = ##class(%SYS.X509Credentials).Exists(tAlias, .tCred, .tStatus)
+            If ('tExists) || $$$ISERR($Get(tStatus, $$$OK)) || '$IsObject($Get(tCred)) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError($Get(tStatus, $$$ERROR($$$GeneralError, "X.509 credential '"_tAlias_"' does not exist"))))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tEntry = ..BuildX509Entry(tCred)
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody($$$OK, , tEntry)
+            Quit
+        }
+
+        ; List all credentials. Use the ListDetails query for alias +
+        ; HasPrivateKey, then open each to read the safe public cert metadata.
+        Set tResult = []
+        Set tRS = ##class(%ResultSet).%New("%SYS.X509Credentials:ListDetails")
+        Set tSC = tRS.Execute()
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        While tRS.Next() {
+            ; ListDetails ROWSPEC: Alias, OwnerList, PeerNames, HasPrivateKey, CAFile
+            Set tRowAlias = tRS.Get("Alias")
+            Set tCred = ##class(%SYS.X509Credentials).%OpenId(tRowAlias)
+            If $IsObject(tCred) {
+                Set tEntry = ..BuildX509Entry(tCred)
+            } Else {
+                ; Fall back to the query row's safe fields if open fails.
+                Set tEntry = {}
+                Do tEntry.%Set("alias", tRowAlias)
+                Do tEntry.%Set("hasPrivateKey", +tRS.Get("HasPrivateKey"), "boolean")
+            }
+            Do tResult.%Push(tEntry)
+        }
+        Do tRS.Close()
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        ; Close the result set if an exception fired mid-iteration (the success
+        ; path closes it; the catch must too, or the cursor leaks per error).
+        If $IsObject($Get(tRS)) { Do tRS.Close() }
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Build a private-key-free JSON metadata object for one opened
+/// <class>%SYS.X509Credentials</class> object.
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3)</b>: reads ONLY safe public properties.
+/// It NEVER reads <code>PrivateKey</code>, <code>PrivateKeyPassword</code>,
+/// <code>PrivateKeyExport</code>, or <code>PrivateKeyPasswordExport</code> —
+/// only the <code>HasPrivateKey</code> presence boolean is surfaced. Binary
+/// fields (Thumbprint, SubjectKeyIdentifier) are hex-encoded for safe JSON
+/// transport.</p>
+ClassMethod BuildX509Entry(pCred As %SYS.X509Credentials) As %DynamicObject [ Internal ]
+{
+    Set tEntry = {}
+    Do tEntry.%Set("alias", pCred.Alias)
+    Do tEntry.%Set("hasPrivateKey", +pCred.HasPrivateKey, "boolean")
+    Do tEntry.%Set("subjectDN", pCred.SubjectDN)
+    Do tEntry.%Set("issuerDN", pCred.IssuerDN)
+    Do tEntry.%Set("serialNumber", pCred.SerialNumber)
+    ; Binary fields → hex strings (BinaryToHexString is a class method on
+    ; %SYS.X509Credentials). Guard empties so we emit "" rather than throwing.
+    If pCred.Thumbprint '= "" {
+        Do tEntry.%Set("thumbprint", ##class(%SYS.X509Credentials).BinaryToHexString(pCred.Thumbprint))
+    } Else {
+        Do tEntry.%Set("thumbprint", "")
+    }
+    If pCred.SubjectKeyIdentifier '= "" {
+        Do tEntry.%Set("subjectKeyIdentifier", ##class(%SYS.X509Credentials).BinaryToHexString(pCred.SubjectKeyIdentifier))
+    } Else {
+        Do tEntry.%Set("subjectKeyIdentifier", "")
+    }
+    Do tEntry.%Set("notBefore", pCred.ValidityNotBefore)
+    Do tEntry.%Set("notAfter", pCred.ValidityNotAfter)
+    Do tEntry.%Set("peerNames", pCred.PeerNames)
+    Do tEntry.%Set("caFile", pCred.CAFile)
+    ; CRITICAL: NEVER read PrivateKey / PrivateKeyPassword / *Export props.
+    Quit tEntry
+}
+
+/// Import (create) or delete an X.509 certificate credential.
+/// <p>Reads a JSON body with <code>action</code> (import|delete) and
+/// <code>alias</code> (the unique credential key).</p>
+/// <ul>
+///   <li><b>import</b>: requires a base64-encoded <code>certificate</code>
+///       (DER bytes, or a PEM certificate body). The native file-based
+///       <method>%SYS.X509Credentials.Import</method> reads a server-side XML
+///       export file (not agent-friendly), so a single credential is created via
+///       object-create + <method>Save</method> — base64-decode the certificate
+///       into the <code>Certificate</code> property (whose setter auto-derives
+///       Thumbprint/Subject/Issuer/Serial/SubjectKeyIdentifier), then save. An
+///       OPTIONAL base64 <code>privateKey</code> (+ optional
+///       <code>privateKeyPassword</code>) may be supplied write-only.</li>
+///   <li><b>delete</b>: removes the credential via
+///       <method>%SYS.X509Credentials.Delete</method>.</li>
+/// </ul>
+/// <p><b>SECURITY-CRITICAL (AC 15.3.3 / AC 15.3.7)</b>: a supplied private key /
+/// password is accepted IN only — it is NEVER echoed in the response. Errors
+/// propagate via <method>SanitizeError</method> (Rule #9), preserving the real
+/// IRIS error text without leaking any key/password material.</p>
+ClassMethod X509Manage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters (before namespace switch)
+        Set tAction = tBody.%Get("action")
+        Set tAlias = tBody.%Get("alias")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAlias, "alias")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        ; Validate action value
+        If (tAction '= "import") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: import, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; For import, the certificate is required — validate before switching NS.
+        If tAction = "import" {
+            Set tCertB64 = tBody.%Get("certificate")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tCertB64, "certificate")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Switch to %SYS for %SYS.X509Credentials operations
+        Set $NAMESPACE = "%SYS"
+
+        If tAction = "delete" {
+            Set tSC = ##class(%SYS.X509Credentials).Delete(tAlias)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "deleted", "alias": (tAlias)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; import — construct a credential from the base64 certificate + Save.
+        ; Alias is the IdKey, so a %New()+Save() targeting an existing alias would
+        ; SILENTLY OVERWRITE the existing credential (including its stored private
+        ; key) with a success response. Guard against that data-loss: reject an
+        ; import onto an alias that already exists, so create-vs-overwrite is
+        ; explicit. (Exists also surfaces a permission failure cleanly here.)
+        If ##class(%SYS.X509Credentials).Exists(tAlias) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "X.509 credential '"_tAlias_"' already exists; delete it first to replace it")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; The Certificate setter auto-derives Thumbprint/Subject/Issuer/Serial/
+        ; SubjectKeyIdentifier. A supplied private key/password is set write-only.
+        Set tCred = ##class(%SYS.X509Credentials).%New()
+        Set tCred.Alias = tAlias
+        ; Accept either raw base64 of DER bytes, or a PEM body — Base64Decode of
+        ; the supplied string yields the binary certificate either way (the PEM
+        ; armor lines, if present, must be stripped by the caller).
+        Set tCred.Certificate = $System.Encryption.Base64Decode(tCertB64)
+        Set tPrivKeyB64 = tBody.%Get("privateKey")
+        If tPrivKeyB64 '= "" {
+            ; PrivateKey is PEM-encoded text; decode the base64 wrapper to it.
+            Set tCred.PrivateKey = $System.Encryption.Base64Decode(tPrivKeyB64)
+            Set tPwd = tBody.%Get("privateKeyPassword")
+            If tPwd '= "" Set tCred.PrivateKeyPassword = tPwd
+        }
+        Set tSC = tCred.Save()
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) {
+            ; SanitizeError preserves the %Status text. The status text here is
+            ; about the certificate/alias, never the private key value (Rule #9).
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; CRITICAL: the response echoes ONLY the alias — never the private key.
+        Set tResult = {}
+        Do tResult.%Set("action", "imported")
+        Do tResult.%Set("alias", tAlias)
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Audit status (GET) and audit-log view (GET) for <code>iris_audit_manage</code>.
+/// <p>Story 15.4. Backed by <class>Security.System</class> /
+/// <class>Security.Events</class> (audit configuration) and <class>%SYS.Audit</class>
+/// (the audit log), all in <code>%SYS</code>. Routing on the
+/// <code>?action=</code> query parameter:</p>
+/// <ul>
+///   <li>No <code>action</code> (or <code>action=status</code>) &rarr; instance
+///       auditing on/off (<method>Security.System.Get</method> &rarr;
+///       <code>AuditEnabled</code>) plus a per-event summary from the public
+///       <code>Security.Events:List</code> query (ROWSPEC
+///       <code>Source,Type,Name,Description,Enabled,Total,Written,Lost</code>).</li>
+///   <li><code>action=view</code> &rarr; recent audit-log records via the public
+///       <code>%SYS.Audit:List</code> query with optional filters
+///       (<code>begin</code>, <code>end</code>, <code>user</code>,
+///       <code>event</code>, <code>source</code>, <code>type</code>) and a
+///       <code>maxRows</code> cap (default 100, max 1000). This is the same
+///       audit-log read offered by the read-only <code>iris_audit_events</code>
+///       tool, with richer filters.</li>
+/// </ul>
+ClassMethod AuditStatus() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tAction = $Get(%request.Data("action", 1), "status")
+
+        If tAction = "view" {
+            ; -- audit-log view (filtered) --
+            Set tBegin = $Get(%request.Data("begin", 1))
+            Set tEnd = $Get(%request.Data("end", 1))
+            Set tUser = $Get(%request.Data("user", 1), "*")
+            Set tEvent = $Get(%request.Data("event", 1), "*")
+            Set tSource = $Get(%request.Data("source", 1), "*")
+            Set tType = $Get(%request.Data("type", 1), "*")
+            Set tMaxRows = +$Get(%request.Data("maxRows", 1), 100)
+            If tMaxRows < 1 Set tMaxRows = 100
+            If tMaxRows > 1000 Set tMaxRows = 1000
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            Set $NAMESPACE = "%SYS"
+            Set tResult = {}
+            Set tEvents = []
+            Set tRS = ##class(%ResultSet).%New("%SYS.Audit:List")
+            If $IsObject(tRS) {
+                ; List Execute params: BeginDateTime, EndDateTime, EventSources,
+                ; EventTypes, Events, Usernames
+                Set tSC2 = tRS.Execute(tBegin, tEnd, tSource, tType, tEvent, tUser)
+                If $$$ISOK(tSC2) {
+                    Set tRowCount = 0
+                    While tRS.Next() && (tRowCount < tMaxRows) {
+                        Set tEvt = {}
+                        Do tEvt.%Set("timestamp", tRS.Get("TimeStamp"))
+                        Do tEvt.%Set("username", tRS.Get("Username"))
+                        Do tEvt.%Set("eventSource", tRS.Get("EventSource"))
+                        Do tEvt.%Set("eventType", tRS.Get("EventType"))
+                        Do tEvt.%Set("event", tRS.Get("Event"))
+                        Do tEvt.%Set("description", tRS.Get("Description"))
+                        Do tEvt.%Set("clientIPAddress", tRS.Get("ClientIPAddress"))
+                        Do tEvt.%Set("namespace", tRS.Get("Namespace"))
+                        Do tEvents.%Push(tEvt)
+                        Set tRowCount = tRowCount + 1
+                    }
+                }
+                Do tRS.Close()
+            }
+            Do tResult.%Set("events", tEvents)
+            Do tResult.%Set("count", tEvents.%Size(), "number")
+            Do tResult.%Set("maxRows", tMaxRows, "number")
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; -- status: instance auditing on/off + per-event summary --
+        Set $NAMESPACE = "%SYS"
+        Set tResult = {}
+
+        Kill tSysProps
+        Set tSC2 = ##class(Security.System).Get($$$SystemSecurityName, .tSysProps)
+        If $$$ISERR(tSC2) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC2))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; AuditEnabled is a BooleanYN ("Yes"/"No" display, 1/0 logical) — coerce.
+        Set tEnabledRaw = $Get(tSysProps("AuditEnabled"))
+        Set tAuditOn = ((tEnabledRaw = 1) || (tEnabledRaw = "Yes") || (tEnabledRaw = "Y"))
+        Do tResult.%Set("auditEnabled", +tAuditOn, "boolean")
+
+        ; Per-event summary via the public Security.Events:List query.
+        Set tEventsArr = []
+        Set tRS = ##class(%ResultSet).%New("Security.Events:List")
+        If $IsObject(tRS) {
+            Set tSC2 = tRS.Execute("*", "*", "*")
+            If $$$ISOK(tSC2) {
+                While tRS.Next() {
+                    Set tEvt = {}
+                    Do tEvt.%Set("source", tRS.Get("Source"))
+                    Do tEvt.%Set("type", tRS.Get("Type"))
+                    Do tEvt.%Set("name", tRS.Get("Name"))
+                    Do tEvt.%Set("description", tRS.Get("Description"))
+                    Do tEvt.%Set("enabled", tRS.Get("Enabled"))
+                    Do tEvt.%Set("total", +tRS.Get("Total"), "number")
+                    Do tEvt.%Set("written", +tRS.Get("Written"), "number")
+                    Do tEvt.%Set("lost", +tRS.Get("Lost"), "number")
+                    Do tEventsArr.%Push(tEvt)
+                }
+            }
+            Do tRS.Close()
+        }
+        Do tResult.%Set("events", tEventsArr)
+        Do tResult.%Set("eventCount", tEventsArr.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        If $IsObject($Get(tRS)) { Do tRS.Close() }
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Mutating audit actions (POST) for <code>iris_audit_manage</code>: enable,
+/// disable, configureEvent, purge, export.
+/// <p>Story 15.4. Reads a JSON body with <code>action</code> and per-action
+/// parameters. Each mutating action is opt-in under tool governance.</p>
+/// <ul>
+///   <li><b>enable</b>/<b>disable</b>: turn instance auditing on/off via
+///       <method>Security.System.Modify</method> setting
+///       <code>AuditEnabled</code>.</li>
+///   <li><b>configureEvent</b>: enable/disable one audit event via
+///       <method>Security.Events.Modify</method> (requires
+///       <code>source</code>, <code>type</code>, <code>name</code>,
+///       <code>enabled</code>).</li>
+///   <li><b>purge</b>: delete a BOUNDED range of audit-log records via
+///       <method>%SYS.Audit.Delete</method>. DESTRUCTIVE — requires
+///       <code>confirm=true</code> AND at least one bound
+///       (<code>begin</code>/<code>end</code>/<code>user</code>/<code>event</code>/<code>source</code>/<code>type</code>);
+///       returns the count deleted. Never an unbounded wipe.</li>
+///   <li><b>export</b>: write matching audit-log records to a server-side file
+///       via <method>%SYS.Audit.Export</method>. The caller supplies a bare
+///       <code>fileName</code> (no path separators / <code>..</code>); the file
+///       is written into a fixed audit-export directory under the manager
+///       directory. Returns the resolved location + count.</li>
+/// </ul>
+ClassMethod AuditManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "configureEvent") && (tAction '= "purge") && (tAction '= "export") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, configureEvent, purge, export")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── enable / disable instance auditing ─────────────────────
+        If (tAction = "enable") || (tAction = "disable") {
+            Set $NAMESPACE = "%SYS"
+            Kill tProps
+            Set tProps("AuditEnabled") = $Case(tAction, "enable": 1, : 0)
+            Set tSC = ##class(Security.System).Modify($$$SystemSecurityName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", tAction)
+            Do tResult.%Set("auditEnabled", $Case(tAction, "enable": 1, : 0), "boolean")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── configureEvent ─────────────────────────────────────────
+        If tAction = "configureEvent" {
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            Set tName = tBody.%Get("name")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSource, "source")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tType, "type")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tName, "name")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            If 'tBody.%IsDefined("enabled") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'enabled' is required for configureEvent")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tEnabled = +tBody.%Get("enabled")
+
+            Set $NAMESPACE = "%SYS"
+            Kill tProps
+            Set tProps("Enabled") = tEnabled
+            Set tSC = ##class(Security.Events).Modify(tSource, tType, tName, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "configureEvent")
+            Do tResult.%Set("source", tSource)
+            Do tResult.%Set("type", tType)
+            Do tResult.%Set("name", tName)
+            Do tResult.%Set("enabled", tEnabled, "boolean")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── purge (DESTRUCTIVE, bounded) ───────────────────────────
+        If tAction = "purge" {
+            ; Confirmation gate (defense in depth — a direct REST caller bypasses
+            ; the TypeScript-layer guard).
+            If '(tBody.%IsDefined("confirm") && (+tBody.%Get("confirm") = 1)) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'confirm' must be true to purge audit-log records")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tBegin = tBody.%Get("begin")
+            Set tEnd = tBody.%Get("end")
+            Set tUser = tBody.%Get("user")
+            Set tEvent = tBody.%Get("event")
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            ; Bounded scope: at least one MEANINGFUL filter, or refuse (no silent
+            ; full wipe). A "*" value is the match-all wildcard, NOT a bound — it
+            ; must not satisfy the gate, otherwise {confirm:true, source:"*"} (or
+            ; any wildcard-only scope) would delete the entire audit log. Empty
+            ; begin/end are unbounded on that axis; any non-empty begin/end is a
+            ; real (date) bound.
+            Set tHasBound = 0
+            If (tBegin '= "") Set tHasBound = 1
+            If (tEnd '= "") Set tHasBound = 1
+            If (tUser '= "") && (tUser '= "*") Set tHasBound = 1
+            If (tEvent '= "") && (tEvent '= "*") Set tHasBound = 1
+            If (tSource '= "") && (tSource '= "*") Set tHasBound = 1
+            If (tType '= "") && (tType '= "*") Set tHasBound = 1
+            If 'tHasBound {
+                Set tSC = $$$ERROR($$$GeneralError, "Purge requires a bounded scope: supply at least one of begin, end, or a non-wildcard user, event, source, or type")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Map empties to the wildcard the API expects.
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            Set $NAMESPACE = "%SYS"
+            Set tNumDeleted = 0
+            ; Delete(.NumDeleted, Begin, End, EventSources, EventTypes, Events, Usernames, SystemIDs)
+            Set tSC = ##class(%SYS.Audit).Delete(.tNumDeleted, tBegin, tEnd, tSource, tType, tEvent, tUser)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "purge")
+            Do tResult.%Set("deleted", +tNumDeleted, "number")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── export (server-side file, path-controlled) ─────────────
+        If tAction = "export" {
+            Set tFileName = tBody.%Get("fileName")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tFileName, "fileName")
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            ; Path control: the caller supplies a BARE name — reject any path
+            ; separator or parent-dir traversal so the write stays inside the
+            ; fixed audit-export directory (no arbitrary path from caller input).
+            If (tFileName [ "/") || (tFileName [ "\\") || (tFileName [ "..") || (tFileName [ ":") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'fileName' must be a bare file name with no path separators or '..' traversal")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tBegin = tBody.%Get("begin")
+            Set tEnd = tBody.%Get("end")
+            Set tUser = tBody.%Get("user")
+            Set tEvent = tBody.%Get("event")
+            Set tSource = tBody.%Get("source")
+            Set tType = tBody.%Get("type")
+            If tUser = "" Set tUser = "*"
+            If tEvent = "" Set tEvent = "*"
+            If tSource = "" Set tSource = "*"
+            If tType = "" Set tType = "*"
+
+            ; Build the controlled output path under the manager directory.
+            Set tDir = ##class(%File).NormalizeDirectory($System.Util.ManagerDirectory() _ "auditexport")
+            Do ##class(%File).CreateDirectoryChain(tDir)
+            Set tFullPath = ##class(%File).NormalizeFilename(tFileName, tDir)
+            ; Containment re-check (defense in depth): do not trust the character
+            ; blacklist alone — confirm the resolved path still lives inside tDir.
+            If $Extract(tFullPath, 1, $Length(tDir)) '= tDir {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'fileName' resolved outside the audit-export directory")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set $NAMESPACE = "%SYS"
+            Set tNumExported = 0
+            ; Export(FileName, .NumExported, Flags, Begin, End, EventSources, EventTypes, Events, Usernames)
+            Set tSC = ##class(%SYS.Audit).Export(tFullPath, .tNumExported, 0, tBegin, tEnd, tSource, tType, tEvent, tUser)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Set tResult = {}
+            Do tResult.%Set("action", "export")
+            Do tResult.%Set("location", tFullPath)
+            Do tResult.%Set("exported", +tNumExported, "number")
+            Do tResult.%Set("success", 1, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Grant or revoke SQL object privileges (schema / table / column level).
+/// <p>Reads a JSON body with <code>action</code> (grant|revoke),
+/// <code>target</code> (a schema, <code>schema.table</code>, or
+/// <code>schema.table(col1,col2)</code>), <code>privilege</code> (one or more
+/// of SELECT,INSERT,UPDATE,DELETE,REFERENCES — comma-delimited or "*"),
+/// <code>grantee</code> (a SQL user or role, comma-delimited list allowed),
+/// and an optional <code>namespace</code> (defaults to the request namespace —
+/// SQL privileges are namespace-scoped, NOT %SYS-scoped).</p>
+/// <p>Backed by <method>%SQL.Manager.API.SaveObjPriv</method> — the same API
+/// the System Management Portal SchemaPriv/ColumnPriv dialogs use. A
+/// <code>target</code> of <code>schema.table(cols)</code> maps to a
+/// column-level grant by passing the column list as the
+/// <code>fields</code> argument; <code>schema.table</code> is a whole-table
+/// grant; a bare <code>schema</code> is a schema-level grant (type 5).</p>
+/// <p>This is ADDITIVE to the existing resource tool — the
+/// <method>ResourceManage</method>/<method>ResourceList</method> handlers are
+/// unchanged. Privileges are SQL object permissions, distinct from IRIS
+/// security resources.</p>
+ClassMethod SqlPrivilegeManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Extract and validate parameters
+        Set tAction = tBody.%Get("action")
+        Set tTarget = tBody.%Get("target")
+        Set tPrivilege = tBody.%Get("privilege")
+        Set tGrantee = tBody.%Get("grantee")
+        Set tReqNS = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTarget, "target")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPrivilege, "privilege")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "grant") && (tAction '= "revoke") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: grant, revoke")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Parse target into objectType + object name + optional column list.
+        ;  - "schema"                  -> type 5 (schema)
+        ;  - "schema.table"            -> type 1 (table)
+        ;  - "schema.table(c1,c2)"     -> type 1 + column fields
+        Set tColumns = ""
+        Set tObjName = tTarget
+        Set tParen = $Find(tTarget, "(")
+        If tParen > 0 {
+            Set tObjName = $Extract(tTarget, 1, tParen - 2)
+            Set tColPart = $Extract(tTarget, tParen, *)
+            ; Strip trailing ")"
+            If $Extract(tColPart, *) = ")" Set tColPart = $Extract(tColPart, 1, *-1)
+            Set tColumns = tColPart
+        }
+        Set tObjName = $ZStrip(tObjName, "<>W")
+        If tObjName = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'target' is missing an object name")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; A column list is only valid for a table/view target (must contain a ".").
+        If (tColumns '= "") && (tObjName '[ ".") {
+            Set tSC = $$$ERROR($$$GeneralError, "Column-level privileges require a 'schema.table(columns)' target")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Type: schema (no ".") -> 5, else table -> 1.
+        Set tType = $Select(tObjName [ ".": 1, 1: 5)
+
+        ; Map privilege keywords to %SQL.Manager.API action letters.
+        ; "*" means all actions.
+        Set tActs = ""
+        If tPrivilege = "*" {
+            Set tActs = "*"
+        }
+        Else {
+            For tI = 1:1:$Length(tPrivilege, ",") {
+                Set tP = $ZConvert($ZStrip($Piece(tPrivilege, ",", tI), "<>W"), "U")
+                If tP = "" Continue
+                Set tLetter = $Case(tP, "SELECT":"s", "INSERT":"i", "UPDATE":"u", "DELETE":"d", "REFERENCES":"r", "ALTER":"a", :"")
+                If tLetter = "" {
+                    Set tSC = $$$ERROR($$$GeneralError, "Invalid privilege '"_tP_"' — expected one or more of SELECT, INSERT, UPDATE, DELETE, REFERENCES (or *)")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    ; Leave tSC as the error so the guard below exits the method
+                    ; (single response only — do NOT reset to $$$OK here, or a
+                    ; valid privilege preceding the invalid one would fall through
+                    ; to SaveObjPriv + a second render).
+                    Quit
+                }
+                Set tActs(tLetter) = ""
+            }
+            If $$$ISERR(tSC) {
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tLetter = ""
+            For  Set tLetter = $Order(tActs(tLetter)) Quit:tLetter=""  Set tActs = tActs_tLetter
+            If tActs = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'privilege' did not resolve to any action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        ; Build column fields $LIST (empty for whole-object).
+        Set tFields = ""
+        If tColumns '= "" {
+            Set tFields = ""
+            For tI = 1:1:$Length(tColumns, ",") {
+                Set tCol = $ZStrip($Piece(tColumns, ",", tI), "<>W")
+                If tCol '= "" Set tFields = tFields_$ListBuild(tCol)
+            }
+        }
+
+        ; SQL privileges are namespace-scoped. Switch to the requested namespace
+        ; (default = the request namespace).
+        If tReqNS '= "" {
+            If '##class(%SYS.Namespace).Exists(tReqNS) {
+                Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tReqNS
+        }
+
+        Set tRevoke = $Case(tAction, "grant":0, :1)
+        Set SQLCODE = 0
+        Set tErrMsg = ""
+        ; SaveObjPriv handles only ONE action letter at a time when "*" is not
+        ; used; loop the resolved letters. With "*" pass it through directly.
+        If tActs = "*" {
+            Do ##class(%SQL.Manager.API).SaveObjPriv("*", tType, tObjName, tGrantee, 0, tRevoke, .SQLCODE, .tErrMsg, $Username, .tFields)
+        }
+        Else {
+            For tI = 1:1:$Length(tActs) {
+                Set tOneAct = $Extract(tActs, tI)
+                Set SQLCODE = 0, tErrMsg = ""
+                Do ##class(%SQL.Manager.API).SaveObjPriv(tOneAct, tType, tObjName, tGrantee, 0, tRevoke, .SQLCODE, .tErrMsg, $Username, .tFields)
+                If SQLCODE < 0 Quit
+            }
+        }
+        Set $NAMESPACE = tOrigNS
+
+        If SQLCODE < 0 {
+            ; Preserve the real SQL error text + SQLCODE (Rule #9).
+            Set tDetail = "SQLCODE "_SQLCODE
+            If tErrMsg '= "" Set tDetail = tDetail_": "_tErrMsg
+            Set tSC = $$$ERROR($$$GeneralError, "SQL privilege "_tAction_" failed ("_tDetail_")")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("target", tTarget)
+        Do tResult.%Set("privilege", tPrivilege)
+        Do tResult.%Set("grantee", tGrantee)
+        Do tResult.%Set("level", $Select(tColumns'="":"column", tType=5:"schema", 1:"table"))
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// List the current SQL privileges granted to a target (user or role).
+/// <p>Read action for <code>iris_resource_manage:listPrivileges</code>. Reads
+/// query parameters: <code>grantee</code> (required — the user or role),
+/// optional <code>target</code> (a <code>schema.table</code> to scope a
+/// COLUMN-level listing), <code>system</code> (1 to include system objects),
+/// and <code>namespace</code> (defaults to the request namespace).</p>
+/// <p>Without <code>target</code>: returns object-level privileges via
+/// <query>%SQL.Manager.CatalogPriv:UserPrivs</query> (TYPE, NAME, PRIVILEGE,
+/// GRANTED_BY, GRANT_OPTION, GRANTED_VIA, HAS_COLUMN_PRIV). With a
+/// <code>schema.table</code> target: returns column-level privileges via
+/// <query>%SQL.Manager.CatalogPriv:UserColumnPrivs</query> (COLUMN_NAME,
+/// PRIVILEGE, GRANTED_BY, GRANT_OPTION, GRANTED_VIA).</p>
+ClassMethod SqlPrivilegeList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tGrantee = $Get(%request.Data("grantee", 1))
+        Set tTarget = $Get(%request.Data("target", 1))
+        Set tSystem = +$Get(%request.Data("system", 1))
+        Set tReqNS = $Get(%request.Data("namespace", 1))
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If tReqNS '= "" {
+            If '##class(%SYS.Namespace).Exists(tReqNS) {
+                Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tReqNS
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("grantee", tGrantee)
+        Set tPrivs = []
+
+        If tTarget '= "" {
+            ; Column-level listing for a specific schema.table
+            Set tSchema = $Piece(tTarget, ".", 1)
+            Set tTable = $Piece(tTarget, ".", 2, *)
+            Do tResult.%Set("target", tTarget)
+            Do tResult.%Set("level", "column")
+            Set tRS = ##class(%ResultSet).%New("%SQL.Manager.CatalogPriv:UserColumnPrivs")
+            Set tSC = tRS.Execute(tGrantee, tSchema, tTable, tSystem)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            While tRS.Next() {
+                Set tRow = {}
+                Do tRow.%Set("column", tRS.Get("COLUMN_NAME"))
+                Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
+                Do tRow.%Set("grantedBy", tRS.Get("GRANTED_BY"))
+                Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
+                Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
+                Do tPrivs.%Push(tRow)
+            }
+            Do tRS.Close()
+        }
+        Else {
+            ; Object-level listing (tables/views/procedures/schemas)
+            Do tResult.%Set("level", "object")
+            Set tRS = ##class(%ResultSet).%New("%SQL.Manager.CatalogPriv:UserPrivs")
+            Set tSC = tRS.Execute(tGrantee, tSystem)
+            If $$$ISERR(tSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            While tRS.Next() {
+                Set tRow = {}
+                Do tRow.%Set("type", tRS.Get("TYPE"))
+                Do tRow.%Set("name", tRS.Get("NAME"))
+                Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
+                Do tRow.%Set("grantedBy", tRS.Get("GRANTED_BY"))
+                Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
+                Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
+                Do tRow.%Set("hasColumnPriv", +tRS.Get("HAS_COLUMN_PRIV"), "boolean")
+                Do tPrivs.%Push(tRow)
+            }
+            Do tRS.Close()
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do tResult.%Set("privileges", tPrivs)
+        Do tResult.%Set("count", tPrivs.%Size())
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
         Set tSC = $$$OK
     }
@@ -4096,10 +5510,15 @@ ClassMethod ProductionStatus() As %Status
     Quit $$$OK
 }
 
-/// Enable, disable, get, or set settings for an individual production config item.
-/// <p>Accepts a JSON body with <code>action</code> ("enable", "disable", "get", "set"),
-/// <code>itemName</code> (the config item name), optional <code>settings</code> (for set),
-/// and optional <code>namespace</code>.</p>
+/// Add, remove, enable, disable, get, or set settings for an individual production config item.
+/// <p>Accepts a JSON body with <code>action</code> ("add", "remove", "enable", "disable", "get", "set"),
+/// <code>itemName</code> (the config item name), optional <code>className</code> (Required for add),
+/// optional <code>production</code> (target production for add/remove; defaults to the active production),
+/// optional <code>settings</code> (for add/set), and optional <code>namespace</code>.</p>
+/// <p>For <code>set</code>/<code>add</code>, the property keys poolSize/enabled/comment/category/className map
+/// to <class>Ens.Config.Item</class> properties; any other key is routed to an <class>Ens.Config.Setting</class>
+/// on the item (Target Adapter by default; a key may carry a <code>@Host</code>/<code>@Adapter</code> suffix to
+/// force the target).</p>
 ClassMethod ItemManage() As %Status
 {
     Set tSC = $$$OK
@@ -4126,8 +5545,8 @@ ClassMethod ItemManage() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tItemName, "itemName")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "get") && (tAction '= "set") {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, get, set")
+        If (tAction '= "enable") && (tAction '= "disable") && (tAction '= "get") && (tAction '= "set") && (tAction '= "add") && (tAction '= "remove") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: enable, disable, get, set, add, remove")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
@@ -4219,7 +5638,11 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
-            ; Apply settings from the JSON object
+            ; Apply settings from the JSON object.
+            ; The 5 working property keys map to Ens.Config.Item properties EXACTLY
+            ; as before (back-compat gate). Any OTHER key (incl. adapterClassName,
+            ; which is NOT a settable property) routes to an Ens.Config.Setting on
+            ; the item's Settings list (additive: error -> success per 17-0 framing B).
             Set tUpdated = []
             Set tIter = tSettings.%GetIterator()
             While tIter.%GetNext(.tKey, .tValue) {
@@ -4228,8 +5651,12 @@ ClassMethod ItemManage() As %Status
                 ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
-                ElseIf tKey = "adapterClassName" { Set tItem.AdapterClassName = tValue Do tUpdated.%Push(tKey) }
+                ; CR 17.2-1: propagate the helper's %Status — a failed setting
+                ; application must surface as an error, not be reported as updated.
+                Else { Set tApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Do tUpdated.%Push(tKey) }
             }
+            ; Stop after a setting-application failure inside the iterator.
+            If $$$ISERR($Get(tApplySC, $$$OK)) Quit
 
             Set tSC = tItem.%Save()
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -4242,6 +5669,171 @@ ClassMethod ItemManage() As %Status
             Set tResult = {"action": "set", "itemName": (tItemName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
+        ElseIf tAction = "add" {
+            ; Resolve target production: explicit 'production' or the active one.
+            Set tProdName = tBody.%Get("production")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for add")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tClassName = tBody.%Get("className")
+            ; CR 18.0-1 (whitespace half): strip surrounding whitespace so a stray
+            ; leading/trailing space in the className does not produce a confusing
+            ; "does not exist or is not compiled" rejection, and so the stored item
+            ; ClassName is clean. An all-whitespace value collapses to "" and is then
+            ; caught by ValidateRequired below.
+            Set tClassName = $ZStrip(tClassName, "<>W")
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
+            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            ; CR 17.2-3: reject a host className that does not exist / is not compiled.
+            ; SaveToClass would otherwise swallow an OnConfigChange <METHOD DOES NOT
+            ; EXIST> and persist a broken item. %Dictionary.CompiledClass.%ExistsId
+            ; is true only for a successfully-compiled class (stricter than ClassDefinition).
+            If '##class(%Dictionary.CompiledClass).%ExistsId(tClassName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' does not exist or is not compiled")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Sync the config-object extent from the production class XData (source of
+            ; truth) before opening — SaveToClass writes the class, not the extent, so
+            ; an unsynced %OpenId would see a stale item list (live-verified Story 17.2).
+            ; CR 17.2-5: check the LoadFromClass %Status — a silent failure here would
+            ; leave a stale/half-loaded extent for the subsequent %OpenId / dup check.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; CR 17.2-3: reject a duplicate item Name in the production — the
+            ; (Production,Name) index is not unique, so add is otherwise non-idempotent.
+            Set tDup = tProd.FindItemByConfigName(tItemName)
+            If $IsObject(tDup) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' already exists in production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tItem = ##class(Ens.Config.Item).%New()
+            Set tItem.Name = tItemName
+            Set tItem.ClassName = tClassName
+
+            ; Optional settings on the new item (same routing as 'set').
+            Set tUpdated = []
+            Set tAddApplySC = $$$OK
+            Set tSettings = tBody.%Get("settings")
+            If $IsObject(tSettings) {
+                Set tIter = tSettings.%GetIterator()
+                While tIter.%GetNext(.tKey, .tValue) {
+                    If tKey = "poolSize" { Set tItem.PoolSize = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
+                    ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                    ; CR 17.2-1: propagate the helper's %Status instead of swallowing it.
+                    Else { Set tAddApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tAddApplySC) Quit  Do tUpdated.%Push(tKey) }
+                }
+            }
+            ; Surface a setting-application failure before persisting the new item.
+            If $$$ISERR(tAddApplySC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tAddApplySC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Do tProd.Items.Insert(tItem)
+            Set tSC = tProd.SaveToClass(tItem)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tClassName), "updatedSettings": (tUpdated)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "remove" {
+            ; Resolve target production: explicit 'production' or the active one.
+            Set tProdName = tBody.%Get("production")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for remove")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            ; Sync the config-object extent from the production class XData before
+            ; opening (see add branch) so FindItemByConfigName sees the current items.
+            ; CR 17.2-5: check the LoadFromClass %Status — a silent failure would
+            ; leave a stale/half-loaded extent for the FindItemByConfigName lookup.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            If '$IsObject(tItem) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Do tProd.RemoveItem(tItem)
+            Set tSC = tProd.SaveToClass()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "removed", "itemName": (tItemName), "production": (tProdName)}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
     }
     Catch ex {
         Set $NAMESPACE = tOrigNS
@@ -4249,6 +5841,57 @@ ClassMethod ItemManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Apply an arbitrary host/adapter setting to a config item via Ens.Config.Setting.
+/// <p>Used by ItemManage add/set for any key that is not one of the 5 recognized
+/// Ens.Config.Item property keys. The setting Target defaults to "Adapter"; a key may
+/// carry a trailing <code>@Host</code> or <code>@Adapter</code> suffix to force the target.
+/// The item is NOT saved here — the caller saves and refreshes the production.</p>
+ClassMethod ApplyArbitrarySetting(pItem As Ens.Config.Item, pKey As %String, pValue As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Set tTarget = "Adapter"
+        Set tName = pKey
+        ; CR 17.2-2: scan the LAST '@' (not $Find's first '@'), so a setting whose
+        ; own name embeds '@' parses correctly. A trailing '@<suffix>' segment
+        ; forces the setting Target, but ONLY for the validated Host/Adapter targets.
+        Set tAt = 0
+        For tI = 1:1:$Length(pKey) {
+            If $Extract(pKey, tI) = "@" Set tAt = tI
+        }
+        If tAt > 0 {
+            Set tSuffix = $Extract(pKey, tAt + 1, *)
+            Set tBase = $Extract(pKey, 1, tAt - 1)
+            ; Reject an unknown suffix instead of silently folding it into the name
+            ; with the default Adapter target — a typo'd/unknown suffix would
+            ; otherwise be reported as a successful update against the wrong key.
+            If (tSuffix '= "Host") && (tSuffix '= "Adapter") {
+                Set tSC = $$$ERROR($$$GeneralError, "Setting key '"_pKey_"' has an unknown '@' target suffix '"_tSuffix_"'; expected '@Host' or '@Adapter'")
+                Quit
+            }
+            ; Reject a leading '@' (empty setting Name before the suffix).
+            If tBase = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Setting key '"_pKey_"' has an empty name before the '@"_tSuffix_"' target suffix")
+                Quit
+            }
+            Set tTarget = tSuffix
+            Set tName = tBase
+        }
+        Set tSetting = pItem.FindSettingByName(tName, tTarget)
+        If '$IsObject(tSetting) {
+            Set tSetting = ##class(Ens.Config.Setting).%New()
+            Set tSetting.Target = tTarget
+            Set tSetting.Name = tName
+            Do pItem.Settings.Insert(tSetting)
+        }
+        Set tSetting.Value = pValue
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Get or set the auto-start production configuration.
@@ -5569,6 +7212,292 @@ ClassMethod LookupTransfer() As %Status
     Quit $$$OK
 }
 
+/// List Interoperability System Default Settings (<class>Ens.Config.DefaultSettings</class>).
+/// <p>Returns all default-setting rows, optionally filtered by any of the four key
+/// dimensions (<code>production</code>, <code>item</code>, <code>hostClass</code>,
+/// <code>setting</code>) supplied as query parameters. Each row is the
+/// production/item/host-class/setting tuple plus its value, description, and
+/// deployable flag.</p>
+/// <p>Query parameters: <code>production</code>, <code>item</code>, <code>hostClass</code>,
+/// <code>setting</code> (filters), <code>namespace</code> (target namespace).</p>
+ClassMethod DefaultSettingsList() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tProduction = $Get(%request.Data("production",1))
+        Set tItem = $Get(%request.Data("item",1))
+        Set tHostClass = $Get(%request.Data("hostClass",1))
+        Set tSetting = $Get(%request.Data("setting",1))
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Build parameterized SQL with optional key-dimension filters.
+        ; Description is named explicitly (not part of EnumerateSettings ROWSPEC).
+        Set tSQL = "SELECT ID, ProductionName, ItemName, HostClassName, SettingName, SettingValue, Description, Deployable FROM Ens_Config.DefaultSettings"
+        Set tWhere = ""
+        Set tParamCount = 0
+        If tProduction '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ProductionName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tProduction
+        }
+        If tItem '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ItemName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tItem
+        }
+        If tHostClass '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" HostClassName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tHostClass
+        }
+        If tSetting '= "" {
+            Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" SettingName = ?"
+            Set tParamCount = tParamCount + 1, tParams(tParamCount) = tSetting
+        }
+        If tWhere '= "" { Set tSQL = tSQL_" WHERE"_tWhere }
+        Set tSQL = tSQL_" ORDER BY ProductionName, ItemName, HostClassName, SettingName"
+
+        ; Execute SQL based on parameter count
+        If tParamCount = 0 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL)
+        }
+        ElseIf tParamCount = 1 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1))
+        }
+        ElseIf tParamCount = 2 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2))
+        }
+        ElseIf tParamCount = 3 {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2), tParams(3))
+        }
+        Else {
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tParams(1), tParams(2), tParams(3), tParams(4))
+        }
+
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set $NAMESPACE = tOrigNS
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tSettings = []
+        While tRS.%Next() {
+            Set tRow = {}
+            Do tRow.%Set("id", tRS.ID, "number")
+            Do tRow.%Set("production", tRS.ProductionName)
+            Do tRow.%Set("item", tRS.ItemName)
+            Do tRow.%Set("hostClass", tRS.HostClassName)
+            Do tRow.%Set("setting", tRS.SettingName)
+            Do tRow.%Set("value", tRS.SettingValue)
+            If tRS.Description '= "" {
+                Do tRow.%Set("description", tRS.Description)
+            }
+            Do tRow.%Set("deployable", tRS.Deployable, "boolean")
+            Do tSettings.%Push(tRow)
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("settings", tSettings)
+        Do tResult.%Set("count", tSettings.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Get, set, or delete a single Interoperability System Default Setting
+/// (<class>Ens.Config.DefaultSettings</class>).
+/// <p>Accepts a JSON body with <code>action</code> ("get", "set", "delete"),
+/// the key tuple <code>production</code>/<code>item</code>/<code>hostClass</code>/<code>setting</code>
+/// (each defaulting to <code>"*"</code> when omitted, matching the class
+/// <code>InitialExpression</code>), <code>value</code> (for set), optional
+/// <code>description</code> and <code>deployable</code> (for set), and optional
+/// <code>namespace</code>.</p>
+/// <p>The IdKey is the 4-tuple joined with <code>||</code>. <method>%Save()</method>
+/// and <method>%DeleteId()</method> auto-update the production mod flags via the
+/// class's <code>%OnAfterSave</code>/<code>%OnAfterDelete</code> hooks — no manual
+/// production recompile is required.</p>
+ClassMethod DefaultSettingsManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate required parameters
+        Set tAction = tBody.%Get("action")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        If (tAction '= "get") && (tAction '= "set") && (tAction '= "delete") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: get, set, delete")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Resolve the 4-tuple key; each slot defaults to "*" (the InitialExpression).
+        Set tProduction = tBody.%Get("production")
+        Set:tProduction="" tProduction = "*"
+        Set tItem = tBody.%Get("item")
+        Set:tItem="" tItem = "*"
+        Set tHostClass = tBody.%Get("hostClass")
+        Set:tHostClass="" tHostClass = "*"
+        Set tSetting = tBody.%Get("setting")
+        Set:tSetting="" tSetting = "*"
+
+        ; Reject any key slot containing the "||" IdKey delimiter. The IdKey is the
+        ; 4-tuple joined with "||", so an embedded "||" would split tId into the wrong
+        ; subscripts and resolve/modify a DIFFERENT row than the caller named (silent
+        ; wrong-row get/set/delete). Guard before assembling tId.
+        If (tProduction["||") || (tItem["||") || (tHostClass["||") || (tSetting["||") {
+            Set tSC = $$$ERROR($$$GeneralError, "Key slot values may not contain the '||' delimiter")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tId = tProduction_"||"_tItem_"||"_tHostClass_"||"_tSetting
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        If tAction = "get" {
+            If '##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set $NAMESPACE = tOrigNS
+                Set tResult = {}
+                Do tResult.%Set("action", "get")
+                Do tResult.%Set("found", 0, "boolean")
+                Do tResult.%Set("production", tProduction)
+                Do tResult.%Set("item", tItem)
+                Do tResult.%Set("hostClass", tHostClass)
+                Do tResult.%Set("setting", tSetting)
+                Do ..RenderResponseBody($$$OK, , tResult)
+                Quit
+            }
+            Set tObj = ##class(Ens.Config.DefaultSettings).%OpenId(tId)
+            If '$IsObject(tObj) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open default setting '"_tId_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", "get")
+            Do tResult.%Set("found", 1, "boolean")
+            Do tResult.%Set("production", tObj.ProductionName)
+            Do tResult.%Set("item", tObj.ItemName)
+            Do tResult.%Set("hostClass", tObj.HostClassName)
+            Do tResult.%Set("setting", tObj.SettingName)
+            Do tResult.%Set("value", tObj.SettingValue)
+            If tObj.Description '= "" {
+                Do tResult.%Set("description", tObj.Description)
+            }
+            Do tResult.%Set("deployable", tObj.Deployable, "boolean")
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "set" {
+            ; value is required for set
+            If 'tBody.%IsDefined("value") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'value' is required for set action")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tValue = tBody.%Get("value")
+
+            If ##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set tObj = ##class(Ens.Config.DefaultSettings).%OpenId(tId)
+            } Else {
+                Set tObj = ##class(Ens.Config.DefaultSettings).%New()
+                Set tObj.ProductionName = tProduction, tObj.ItemName = tItem
+                Set tObj.HostClassName = tHostClass, tObj.SettingName = tSetting
+            }
+            If '$IsObject(tObj) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open or create default setting '"_tId_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tObj.SettingValue = tValue
+            If tBody.%IsDefined("description") { Set tObj.Description = tBody.%Get("description") }
+            If tBody.%IsDefined("deployable") { Set tObj.Deployable = +tBody.%Get("deployable") }
+
+            ; %OnAfterSave auto-updates production mod flags — NO manual recompile.
+            Set tSC = tObj.%Save()
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "set")
+            Do tResult.%Set("production", tProduction)
+            Do tResult.%Set("item", tItem)
+            Do tResult.%Set("hostClass", tHostClass)
+            Do tResult.%Set("setting", tSetting)
+            Do tResult.%Set("value", tValue)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "delete" {
+            If '##class(Ens.Config.DefaultSettings).%ExistsId(tId) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Default setting '"_tId_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; %OnAfterDelete auto-updates production mod flags.
+            Set tSC = ##class(Ens.Config.DefaultSettings).%DeleteId(tId)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {}
+            Do tResult.%Set("action", "deleted")
+            Do tResult.%Set("production", tProduction)
+            Do tResult.%Set("item", tItem)
+            Do tResult.%Set("hostClass", tHostClass)
+            Do tResult.%Set("setting", tSetting)
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 }`,
   ],
   [
@@ -6255,6 +8184,163 @@ ClassMethod DatabaseCheck() As %Status
     Quit $$$OK
 }
 
+/// Run a runtime database-maintenance operation via <code>SYS.Database</code> class methods.
+/// <p>Accepts a JSON body <code>{action, directory, ...params}</code> where
+/// <code>action</code> is one of:
+/// <ul>
+///   <li><code>mount</code> — <code>SYS.Database.MountDatabase(dir, readonly)</code></li>
+///   <li><code>dismount</code> — <code>SYS.Database.DismountDatabase(dir)</code> (destructive: takes the DB offline)</li>
+///   <li><code>compact</code> — <code>SYS.Database.CompactDatabase(dir, percentFull, .MbProcessed, .MbCompressed)</code></li>
+///   <li><code>defragment</code> — <code>SYS.Database.Defragment(dir)</code></li>
+///   <li><code>truncate</code> — <code>SYS.Database.ReturnUnusedSpace(dir, targetSize, .ReturnSize)</code> (destructive: shrinks the .DAT, returns trailing free space to the OS)</li>
+///   <li><code>expandVolume</code> — <code>SYS.Database.NewVolume(dir, newVolDir, initialSize)</code> (adds a new volume to a multi-volume database)</li>
+/// </ul></p>
+/// <p>These operations are <b>SYNCHRONOUS</b> — IRIS exposes no native async/queue API
+/// for them. <code>compact</code>, <code>defragment</code>, and <code>truncate</code>
+/// can run for a while on large databases and the request blocks until they finish.
+/// No fabricated started/queued status is returned.</p>
+/// <p><b>Guard:</b> <code>directory</code> is required, and the database must exist
+/// (checked via <code>SYS.Database.%ExistsId</code>) before any action runs; a missing
+/// or unknown directory yields a clean error envelope rather than an opaque
+/// <code>&lt;...&gt;</code> crash. Any non-OK <code>%Status</code> from the underlying
+/// API (e.g. a DB in use, locked, or unmounted) is propagated through
+/// <method>SanitizeError</method>.</p>
+/// <p>This tool covers RUNTIME operations only. Database CONFIG (create / modify /
+/// delete) lives in the admin <code>iris_database_manage</code> tool (Config.Databases).</p>
+ClassMethod DatabaseAction() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; action (required)
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate action enum via EXACT membership (NOT a substring test).
+        If (tAction'="mount")&&(tAction'="dismount")&&(tAction'="compact")&&(tAction'="defragment")&&(tAction'="truncate")&&(tAction'="expandVolume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: mount, dismount, compact, defragment, truncate, expandVolume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; directory (required for every action — the SYS.Database APIs key on it)
+        Set tDirectory = tBody.%Get("directory")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tDirectory, "directory")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read action-specific params (defaults applied; "" coerces via +)
+        Set tReadonly = +tBody.%Get("readonly")
+        Set tPercentFull = 90
+        If tBody.%IsDefined("percentFull") Set tPercentFull = +tBody.%Get("percentFull")
+        Set tTargetSize = +tBody.%Get("targetSize")
+        Set tNewVolDir = tBody.%Get("newVolDir")
+        Set tInitialSize = +tBody.%Get("initialSize")
+
+        Set $NAMESPACE = "%SYS"
+
+        ; ── Guard: confirm the database exists before any operation ──
+        ; SYS.Database is keyed on its directory. A missing / unknown directory
+        ; produces a clean refusal here rather than an opaque <...> crash inside
+        ; the maintenance API (defense in depth; the API %Status is the backstop).
+        If '##class(SYS.Database).%ExistsId(tDirectory) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Database directory '"_tDirectory_"' does not exist or is not a configured IRIS database.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; expandVolume additionally requires newVolDir (validate after NS guard so the
+        ; directory-exists check runs first, then restore NS for the error envelope).
+        If (tAction = "expandVolume") && (tNewVolDir = "") {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "The 'expandVolume' action requires 'newVolDir' (the directory for the new volume).")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Dispatch to the matching SYS.Database class method ──
+        Set tActionSC = $$$OK
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("directory", tDirectory)
+
+        If tAction = "mount" {
+            Set tActionSC = ##class(SYS.Database).MountDatabase(tDirectory, tReadonly)
+            Do tResult.%Set("readonly", tReadonly, "boolean")
+        }
+        ElseIf tAction = "dismount" {
+            Set tActionSC = ##class(SYS.Database).DismountDatabase(tDirectory)
+        }
+        ElseIf tAction = "compact" {
+            Set tMbProcessed = 0
+            Set tMbCompressed = 0
+            Set tActionSC = ##class(SYS.Database).CompactDatabase(tDirectory, tPercentFull, .tMbProcessed, .tMbCompressed)
+            Do tResult.%Set("percentFull", +tPercentFull, "number")
+            Do tResult.%Set("mbProcessed", +tMbProcessed, "number")
+            Do tResult.%Set("mbCompressed", +tMbCompressed, "number")
+        }
+        ElseIf tAction = "defragment" {
+            Set tActionSC = ##class(SYS.Database).Defragment(tDirectory)
+        }
+        ElseIf tAction = "truncate" {
+            Set tReturnSize = 0
+            Set tActionSC = ##class(SYS.Database).ReturnUnusedSpace(tDirectory, tTargetSize, .tReturnSize)
+            Do tResult.%Set("targetSize", +tTargetSize, "number")
+            Do tResult.%Set("returnSize", +tReturnSize, "number")
+        }
+        ElseIf tAction = "expandVolume" {
+            Set tActionSC = ##class(SYS.Database).NewVolume(tDirectory, tNewVolDir, tInitialSize)
+            Do tResult.%Set("newVolDir", tNewVolDir)
+            Do tResult.%Set("initialSize", +tInitialSize, "number")
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        ; Propagate the underlying API %Status on failure (Rule #9) — gives the
+        ; caller the real reason (DB in use, locked, unmounted, insufficient space).
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// Return license information in JSON format.
 /// <p>Queries <code>$SYSTEM.License</code> class methods for license type,
 /// capacity, current usage, and expiration. Converts <code>$Horolog</code>
@@ -6395,6 +8481,437 @@ ClassMethod ECPStatus() As %Status
         }
 
         Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Return detail for a single IRIS process in JSON format.
+/// <p>Queries <code>%SYS.ProcessQuery</code> in the <b>%SYS</b> namespace for the
+/// process identified by the <code>pid</code> query parameter. Returns process
+/// state, routine, namespace, user, resource counters, and the
+/// <code>canBeTerminated</code> / <code>canBeSuspended</code> flags that gate the
+/// control actions in <method>ProcessManage</method>.</p>
+/// <p>Stack/variable inspection is intentionally NOT exposed: <code>%SYS.ProcessQuery</code>
+/// only surfaces a process's own stack via mailbox-message methods that require
+/// the target to cooperate; the read view here reports the state-level detail that
+/// the Management Portal ProcessDetails page shows without that overhead.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>pid</code> — Process ID to inspect (required)</li>
+/// </ul></p>
+ClassMethod ProcessGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate pid BEFORE switching namespace (Utils lives in HSCUSTOM)
+        Set tPid = $Get(%request.Data("pid",1))
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once so the string-keyed lookups
+        ; and the numeric isCurrentProcess check below can never disagree.
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm the process exists before reporting detail
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tProc = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid)
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("pid", +tProc.Pid, "number")
+        Do tResult.%Set("namespace", tProc.NameSpace)
+        Do tResult.%Set("routine", tProc.Routine)
+        Do tResult.%Set("state", tProc.State)
+        Do tResult.%Set("userName", tProc.UserName)
+        Do tResult.%Set("clientIPAddress", tProc.ClientIPAddress)
+        Do tResult.%Set("device", tProc.CurrentDevice)
+        Do tResult.%Set("jobType", +tProc.JobType, "number")
+        Do tResult.%Set("commandsExecuted", +tProc.CommandsExecuted, "number")
+        Do tResult.%Set("globalReferences", +tProc.GlobalReferences, "number")
+        Do tResult.%Set("inTransaction", +tProc.InTransaction, "number")
+        Do tResult.%Set("cpuTime", +tProc.CPUTime, "number")
+        Do tResult.%Set("memoryUsedKB", +tProc.MemoryUsed, "number")
+        Do tResult.%Set("priority", +tProc.Priority, "number")
+        Do tResult.%Set("roles", tProc.Roles)
+        Do tResult.%Set("canBeTerminated", +tProc.CanBeTerminated, "boolean")
+        Do tResult.%Set("canBeSuspended", +tProc.CanBeSuspended, "boolean")
+        Do tResult.%Set("canBeExamined", +tProc.CanBeExamined, "boolean")
+        ; isCurrentProcess: true if this is the calling (REST handler) process
+        Do tResult.%Set("isCurrentProcess", (+tProc.Pid = +$Job), "boolean")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Terminate, suspend, or resume an IRIS process.
+/// <p>Accepts a JSON body <code>{action, pid}</code> where <code>action</code> is one
+/// of <code>terminate</code>, <code>suspend</code>, or <code>resume</code>. Opens the
+/// target via <code>##class(SYS.Process).%OpenId(pid)</code> in the <b>%SYS</b>
+/// namespace and calls the corresponding instance method.</p>
+/// <p><b>Self / critical-process guard (defense in depth):</b> a control action is
+/// REFUSED — changing nothing — when:
+/// <ul>
+///   <li>The target is the calling process (<code>pid = $JOB</code>), for any action;</li>
+///   <li>The action is <code>terminate</code> and <code>%SYS.ProcessQuery.CanBeTerminated</code>
+///       is false (a critical system job);</li>
+///   <li>The action is <code>suspend</code> and <code>%SYS.ProcessQuery.CanBeSuspended</code>
+///       is false.</li>
+/// </ul>
+/// The guard is enforced here in the handler so it holds even on a direct REST call,
+/// independent of any TS-layer pre-check. A refusal returns
+/// <code>{action, pid, refused:true, reason}</code> with HTTP 200 (an explanatory
+/// result, not a server error).</p>
+ClassMethod ProcessManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = tBody.%Get("pid")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tPid, "pid")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        ; Coerce pid to its canonical numeric form once, then use it everywhere
+        ; (existence check, opens, guard, response) so the string-keyed lookups and
+        ; the numeric self-guard can never disagree (e.g. " 01234" vs 1234).
+        If '$ISVALIDNUM(tPid) || (tPid '= +tPid) || (+tPid <= 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid pid '"_tPid_"'. pid must be a positive integer.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tPid = +tPid
+
+        ; Validate action enum via EXACT membership (NOT a substring contains test):
+        ; a substring test would accept a comma-injected value like "terminate,suspend"
+        ; which would then route to Resume() via the Else fall-through below.
+        If (tAction '= "terminate") && (tAction '= "suspend") && (tAction '= "resume") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported control actions: terminate, suspend, resume.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = "%SYS"
+
+        ; Confirm target exists
+        If '##class(%SYS.ProcessQuery).%ExistsId(tPid) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Process "_tPid_" does not exist")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── Self / critical-process guard (AC 16.1.4) ──
+        ; Refuse BEFORE invoking any control method; a refusal changes nothing.
+        Set tRefused = 0
+        Set tReason = ""
+        If (+tPid = +$Job) {
+            Set tRefused = 1
+            Set tReason = "Refused: cannot "_tAction_" the calling process (PID "_tPid_" = $JOB). This is the process serving the request."
+        }
+        Else {
+            ; Read the can-be-* flags via %SYS.ProcessQuery (no mailbox overhead).
+            ; Fail CLOSED: if the query object cannot be opened (e.g. the process
+            ; exited between the %ExistsId check above and here), refuse rather than
+            ; fall through to the control method with the guard un-applied.
+            Set tQ = ##class(%SYS.ProcessQuery).%OpenId(tPid)
+            If '$IsObject(tQ) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" could not be inspected for the "_tAction_" safety check (it may have just exited); no control action was taken."
+            }
+            ElseIf (tAction = "terminate") && ('+tQ.CanBeTerminated) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be terminated (CanBeTerminated=0 - critical/protected system job)."
+            }
+            ElseIf (tAction = "suspend") && ('+tQ.CanBeSuspended) {
+                Set tRefused = 1
+                Set tReason = "Refused: process "_tPid_" cannot be suspended (CanBeSuspended=0 - critical/protected system job)."
+            }
+        }
+
+        If tRefused {
+            Set $NAMESPACE = tOrigNS
+            Set tResult = {}
+            Do tResult.%Set("action", tAction)
+            Do tResult.%Set("pid", +tPid, "number")
+            Do tResult.%Set("refused", 1, "boolean")
+            Do tResult.%Set("reason", tReason)
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
+        ; ── Execute the control action ──
+        Set tProc = ##class(SYS.Process).%OpenId(tPid)
+        If '$IsObject(tProc) {
+            Set $NAMESPACE = tOrigNS
+            Set tSC = $$$ERROR($$$GeneralError, "Unable to open process "_tPid_" for control")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Dispatch by EXACT action match (resume reached only when tAction="resume",
+        ; never as a catch-all Else — the enum was already validated above).
+        Set tActionSC = $$$OK
+        If tAction = "terminate" {
+            Set tActionSC = tProc.Terminate()
+        }
+        ElseIf tAction = "suspend" {
+            Set tActionSC = tProc.Suspend()
+        }
+        ElseIf tAction = "resume" {
+            Set tActionSC = tProc.Resume()
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("pid", +tPid, "number")
+        Do tResult.%Set("refused", 0, "boolean")
+        Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Run / freeze / thaw a backup, or list backup history (Story 16.3).
+/// <p>Backed by <code>Backup.General</code> in <code>%SYS</code>:
+/// <ul>
+/// <li><b>run</b> &rarr; <code>StartTask(taskName, jobbackup, quietflag)</code> — runs a
+/// USER-DEFINED backup task BY NAME. Live-probe (Rule #16) confirmed there are no
+/// predefined/shipped task names; the operator defines the task (name + database
+/// list + type) in the Management Portal first, and the backup TYPE is a property of
+/// that definition (so <code>backupType</code> here is informational only, not used to
+/// pick the task). Requires <code>taskName</code>.</li>
+/// <li><b>freeze</b> &rarr; <code>ExternalFreeze(LogFile, Text, ...)</code> — quiesces ALL
+/// database writes instance-wide until a thaw. DISRUPTIVE.</li>
+/// <li><b>thaw</b> &rarr; <code>ExternalThaw(LogFile, Username, Password)</code> — resumes
+/// writes after a freeze.</li>
+/// <li><b>listHistory</b> (read) &rarr; walks <code>^SYS("BUHISTORY", hindex, ...)</code>
+/// most-recent-first, returning timestamp / type / status / device / log / description.</li>
+/// </ul>
+/// <b>restore is NOT supported via this tool</b> (Rule #16, AC 16.3.3): IRIS restore is
+/// interactive (<code>^DBREST</code> / <code>CLUMENU^JRNRESTO</code>) and not cleanly
+/// scriptable through <code>Backup.General</code>. An <code>action="restore"</code> request
+/// is rejected here with a clear message rather than crashing — use the IRIS restore
+/// utility / Management Portal restore instead.</p>
+ClassMethod BackupManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read + validate body BEFORE namespace switch (Utils is in HSCUSTOM, not %SYS)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; action (required)
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; ── restore guard (AC 16.3.3): defend the server even though restore is
+        ; not in the tool's enum — refuse cleanly, never crash. ──
+        If tAction = "restore" {
+            Set tSC = $$$ERROR($$$GeneralError, "Restore is not supported via this tool. IRIS restore is interactive (^DBREST / CLUMENU^JRNRESTO) and not cleanly scriptable via Backup.General; use the IRIS restore utility or the Management Portal restore instead.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate action enum via EXACT membership (NOT a substring test).
+        If (tAction'="run")&&(tAction'="freeze")&&(tAction'="thaw")&&(tAction'="listHistory") {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid action '"_tAction_"'. Supported actions: run, freeze, thaw, listHistory. (restore is not supported — use the IRIS restore utility.)")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Read params (defaults applied; "" coerces via +)
+        Set tTaskName = tBody.%Get("taskName")
+        Set tBackupType = tBody.%Get("backupType")
+        Set tJobBackup = +tBody.%Get("jobbackup")
+        Set tDevice = tBody.%Get("device")
+        Set tLogFile = tBody.%Get("logFile")
+        Set tDescription = tBody.%Get("description")
+        Set tUsername = tBody.%Get("username")
+        Set tPassword = tBody.%Get("password")
+
+        ; run requires taskName (validate before NS switch — Utils is in HSCUSTOM)
+        If tAction = "run" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTaskName, "taskName")
+            If $$$ISERR(tSC) {
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        Set $NAMESPACE = "%SYS"
+
+        Set tActionSC = $$$OK
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+
+        If tAction = "listHistory" {
+            ; Walk ^SYS("BUHISTORY", hindex, ...) most-recent-first. The hindex is
+            ; date*1000000+time ($HOROLOG parts); the "0" index node is skipped by
+            ; reverse $Order from "" (numeric keys are all positive).
+            Set tEntries = []
+            Set tCount = 0
+            Set tMax = 50
+            Set tKey = $Order(^SYS("BUHISTORY", ""), -1)
+            While (tKey '= "") && (tCount < tMax) {
+                ; Only treat canonical positive-integer subscripts as history index
+                ; nodes. This skips the "0" metadata node (LOGNOTPURGED, etc.) AND
+                ; defends against any non-numeric / non-canonical subscript a corrupt
+                ; or foreign-written global might carry (which would otherwise feed
+                ; garbage to $ZDateTime below).
+                If (tKey = +tKey) && (tKey = (tKey \\ 1)) && (+tKey > 0) {
+                    Set tEntry = {}
+                    ; Decode hindex = days*1000000 + seconds back to a $HOROLOG string.
+                    ; Guard the timestamp render: a node whose seconds part is out of
+                    ; $HOROLOG range (>=86400) or otherwise illegal must degrade this
+                    ; ONE entry's timestamp gracefully, never abort the whole listing.
+                    Set tHoro = (tKey \\ 1000000) _ "," _ (tKey # 1000000)
+                    Set tTimestamp = ""
+                    Try {
+                        Set tTimestamp = $ZDateTime(tHoro, 3)
+                    } Catch tTSErr {
+                        Set tTimestamp = ""
+                    }
+                    Do tEntry.%Set("timestamp", tTimestamp)
+                    Do tEntry.%Set("type", $Get(^SYS("BUHISTORY", tKey, "TYPE")))
+                    Do tEntry.%Set("status", $Get(^SYS("BUHISTORY", tKey, "STATUS")))
+                    Do tEntry.%Set("device", $Get(^SYS("BUHISTORY", tKey, "DEVICE")))
+                    Do tEntry.%Set("logFile", $Get(^SYS("BUHISTORY", tKey, "LOG")))
+                    Do tEntry.%Set("description", $Get(^SYS("BUHISTORY", tKey, "DESC")))
+                    Do tEntry.%Set("list", $Get(^SYS("BUHISTORY", tKey, "LIST")))
+                    Do tEntries.%Push(tEntry)
+                    Set tCount = tCount + 1
+                }
+                Set tKey = $Order(^SYS("BUHISTORY", tKey), -1)
+            }
+            Do tResult.%Set("entries", tEntries)
+            Do tResult.%Set("count", tCount, "number")
+        }
+        ElseIf tAction = "run" {
+            ; StartTask(taskname, jobbackup, quietflag) — quietflag=1 keeps output
+            ; off the principal device (we have none in a REST context).
+            Set tActionSC = ##class(Backup.General).StartTask(tTaskName, tJobBackup, 1)
+            Do tResult.%Set("taskName", tTaskName)
+            Do tResult.%Set("jobbackup", +tJobBackup, "boolean")
+            If tBackupType '= "" Do tResult.%Set("backupType", tBackupType)
+        }
+        ElseIf tAction = "freeze" {
+            ; ExternalFreeze(LogFile, Text, SwitchJournalFile=1, TimeOut=10, ...)
+            Set tActionSC = ##class(Backup.General).ExternalFreeze(tLogFile, tDescription)
+            If tLogFile '= "" Do tResult.%Set("logFile", tLogFile)
+        }
+        ElseIf tAction = "thaw" {
+            ; ExternalThaw(LogFile, Username, Password)
+            Set tActionSC = ##class(Backup.General).ExternalThaw(tLogFile, tUsername, tPassword)
+            If tLogFile '= "" Do tResult.%Set("logFile", tLogFile)
+        }
+
+        Set $NAMESPACE = tOrigNS
+
+        ; Propagate the underlying API %Status on failure (Rule #9).
+        If $$$ISERR(tActionSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tActionSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Do tResult.%Set("success", 1, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
@@ -7355,6 +9872,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
   <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
 
+  <!-- Epic 15 (Story 15.5): SQL object privileges (schema/table/column grant/revoke/list) -->
+  <Route Url="/security/sqlprivilege" Method="GET" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeList" />
+  <Route Url="/security/sqlprivilege" Method="POST" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeManage" />
+
   <!-- Epic 4: Security / Permission Check -->
   <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />
 
@@ -7372,6 +9893,22 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/oauth" Method="GET" Call="ExecuteMCPv2.REST.Security:OAuthList" />
   <Route Url="/security/oauth" Method="POST" Call="ExecuteMCPv2.REST.Security:OAuthManage" />
 
+  <!-- Epic 15: Security / Service Configuration Management -->
+  <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
+  <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
+
+  <!-- Epic 15: Security / LDAP Configuration Management -->
+  <Route Url="/security/ldap" Method="GET" Call="ExecuteMCPv2.REST.Security:LdapList" />
+  <Route Url="/security/ldap" Method="POST" Call="ExecuteMCPv2.REST.Security:LdapManage" />
+
+  <!-- Epic 15: Security / X.509 Certificate Credentials Management -->
+  <Route Url="/security/x509" Method="GET" Call="ExecuteMCPv2.REST.Security:X509List" />
+  <Route Url="/security/x509" Method="POST" Call="ExecuteMCPv2.REST.Security:X509Manage" />
+
+  <!-- Epic 15: Auditing Configuration & Audit Log Management -->
+  <Route Url="/security/audit" Method="GET" Call="ExecuteMCPv2.REST.Security:AuditStatus" />
+  <Route Url="/security/audit" Method="POST" Call="ExecuteMCPv2.REST.Security:AuditManage" />
+
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />
   <Route Url="/interop/production/summary" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionSummary" />
@@ -7379,6 +9916,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/control" Method="POST" Call="ExecuteMCPv2.REST.Interop:ProductionControl" />
   <Route Url="/interop/production/item" Method="POST" Call="ExecuteMCPv2.REST.Interop:ItemManage" />
   <Route Url="/interop/production/autostart" Method="POST" Call="ExecuteMCPv2.REST.Interop:AutoStart" />
+
+  <!-- Epic 17 (Story 17.1): System Default Settings (Ens.Config.DefaultSettings) -->
+  <Route Url="/interop/defaultsettings" Method="GET" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsList" />
+  <Route Url="/interop/defaultsettings" Method="POST" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsManage" />
 
   <!-- Epic 5: Production Monitoring -->
   <Route Url="/interop/production/logs" Method="GET" Call="ExecuteMCPv2.REST.Interop:EventLog" />
@@ -7405,11 +9946,15 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/alerts/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:AlertsManage" />
   <Route Url="/monitor/interop" Method="GET" Call="ExecuteMCPv2.REST.Monitor:InteropMetrics" />
   <Route Url="/monitor/jobs" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JobsList" />
+  <Route Url="/monitor/process" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ProcessGet" />
+  <Route Url="/monitor/process/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:ProcessManage" />
   <Route Url="/monitor/locks" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LocksList" />
   <Route Url="/monitor/journal" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JournalInfo" />
   <Route Url="/monitor/mirror" Method="GET" Call="ExecuteMCPv2.REST.Monitor:MirrorStatus" />
   <Route Url="/monitor/audit" Method="GET" Call="ExecuteMCPv2.REST.Monitor:AuditEvents" />
   <Route Url="/monitor/database" Method="GET" Call="ExecuteMCPv2.REST.Monitor:DatabaseCheck" />
+  <Route Url="/monitor/database/action" Method="POST" Call="ExecuteMCPv2.REST.Monitor:DatabaseAction" />
+  <Route Url="/monitor/backup/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:BackupManage" />
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 

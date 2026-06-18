@@ -66,6 +66,35 @@ export interface ToolDefinition {
   annotations: ToolAnnotations;
   /** Namespace scope governing how namespace is resolved. */
   scope: ToolScope;
+  /**
+   * Mutation classification for tool governance (Epic 14, architecture decision D4).
+   *
+   * Declares whether a tool's operations read or write IRIS state, so the
+   * governance engine ({@link ../governance.js}) can apply the safe default
+   * seed: new `read` actions enabled, new `write`/`change` actions disabled.
+   *
+   * Two forms, matching the governance-key model (`tool` vs `tool:action`):
+   * - **Scalar** (`'read' | 'write'`) — a single-operation tool with no
+   *   `action` enum. The governance key is the bare tool {@link name}.
+   * - **Per-action map** (`Record<actionValue, 'read' | 'write'>`) — a
+   *   multi-action tool whose `inputSchema` has an `action` enum. Each key is
+   *   an enum value; the governance key is `name:action`.
+   *
+   * **Required for every NEW (non-baseline) tool; grandfathered tools omit it
+   * (Story 15.0 AC 15.0.3).** Every tool/action key that is NOT a member of the
+   * generated governance baseline (`governance-baseline.ts`) MUST declare
+   * `mutates` — `'read'` or `'write'` (or a per-action map). A registration-time
+   * assertion (`assertGovernanceClassification`, invoked from
+   * {@link ./server-base.js | McpServerBase}) throws, naming the offending key,
+   * if a non-baseline key reaches registration without a classification —
+   * catching a forgotten classification for reads AND writes before it can
+   * mis-seed the policy.
+   *
+   * Every tool that PREDATES governance is exempt: it omits `mutates` and is
+   * treated as pre-existing (enabled) via baseline membership, NOT via this
+   * field. Do NOT retro-classify existing (baseline) tools.
+   */
+  mutates?: "read" | "write" | Record<string, "read" | "write">;
   /** Async handler invoked when the tool is called. */
   handler: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }

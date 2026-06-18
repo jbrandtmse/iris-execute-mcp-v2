@@ -12,7 +12,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 ---
 
-## `@iris-mcp/dev` — Development Tools (24)
+## `@iris-mcp/dev` — Development Tools (25)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -40,12 +40,15 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 22 | `iris_package_list` | 🟦 Atelier | `GET /docnames/{cat}/{type}` (client-side rollup) |
 | 23 | `iris_doc_export` | 🟦 Atelier | `GET /docnames/{cat}/{type}` + `GET /doc/{name}` (bulk) |
 | 24 | `iris_routine_intermediate` | 🟦 Atelier | `GET /doc/{name}` (candidate fallback) |
+| 25 | `iris_sql_analyze` | 🟦 Atelier | `POST /action/query` (`EXPLAIN` + `INFORMATION_SCHEMA` views) |
 
-**Mix:** 18 Atelier · 6 ExecuteMCPv2 · 0 other
+**Mix:** 19 Atelier · 6 ExecuteMCPv2 · 0 other
+
+> **Epic 17 (2026-06-16) — governance defaults:** added `iris_sql_analyze` (`explain`/`stats`/`indexUsage`/`running`). All four actions are governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled). The tool is Atelier/SQL-only (no ObjectScript handler, no bootstrap contribution).
 
 ---
 
-## `@iris-mcp/admin` — Administration (22)
+## `@iris-mcp/admin` — Administration (26)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -61,7 +64,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 10 | `iris_user_password` | 🟥 ExecuteMCPv2 | `/security/user/password` |
 | 11 | `iris_role_manage` | 🟥 ExecuteMCPv2 | `/security/role` |
 | 12 | `iris_role_list` | 🟥 ExecuteMCPv2 | `/security/role` |
-| 13 | `iris_resource_manage` | 🟥 ExecuteMCPv2 | `/security/resource` |
+| 13 | `iris_resource_manage` | 🟥 ExecuteMCPv2 | `/security/resource` (create/modify/delete) + `/security/sqlprivilege` (grant/revoke/listPrivileges) |
 | 14 | `iris_resource_list` | 🟥 ExecuteMCPv2 | `/security/resource` |
 | 15 | `iris_permission_check` | 🟥 ExecuteMCPv2 | `/security/permission` |
 | 16 | `iris_webapp_manage` | 🟥 ExecuteMCPv2 | `/security/webapp` |
@@ -71,8 +74,14 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 20 | `iris_ssl_list` | 🟥 ExecuteMCPv2 | `/security/ssl` |
 | 21 | `iris_oauth_manage` | 🟥 ExecuteMCPv2 | `/security/oauth` |
 | 22 | `iris_oauth_list` | 🟥 ExecuteMCPv2 | `/security/oauth` |
+| 23 | `iris_service_manage` | 🟥 ExecuteMCPv2 | `/security/service` |
+| 24 | `iris_ldap_manage` | 🟥 ExecuteMCPv2 | `/security/ldap` |
+| 25 | `iris_x509_manage` | 🟥 ExecuteMCPv2 | `/security/x509` |
+| 26 | `iris_audit_manage` | 🟥 ExecuteMCPv2 | `/security/audit` |
 
-**Mix:** 0 Atelier · 22 ExecuteMCPv2 · 0 other — **fully custom**. Atelier has no security or namespace management endpoints, which is why every one of these needs ObjectScript handlers.
+**Mix:** 0 Atelier · 26 ExecuteMCPv2 · 0 other — **fully custom**. Atelier has no security or namespace management endpoints, which is why every one of these needs ObjectScript handlers.
+
+> **Epic 15 (2026-06-16):** added `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_audit_manage`, and extended `iris_resource_manage` with SQL object-privilege actions (`grant`/`revoke`/`listPrivileges`) backed by `/security/sqlprivilege`. The privilege extension adds governance keys but no new tool, so admin went 22 → 26 (4 new tools). Write actions (`grant`/`revoke` and the new service/ldap/x509/audit mutations) are governance-classified `write` (default-disabled under an `IRIS_GOVERNANCE` policy); reads (`list`/`get`/`status`/`test`/`listPrivileges`) are enabled by default.
 
 ### Fields returned — Security list/read tools
 
@@ -114,7 +123,7 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/interop` — Interoperability (19)
+## `@iris-mcp/interop` — Interoperability (20)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -122,7 +131,7 @@ their Zod schemas but silently dropped them server-side.
 | 2 | `iris_production_control` | 🟥 ExecuteMCPv2 | `/interop/production/control` |
 | 3 | `iris_production_status` | 🟥 ExecuteMCPv2 | `/interop/production/status` |
 | 4 | `iris_production_summary` | 🟥 ExecuteMCPv2 | `/interop/production/summary` |
-| 5 | `iris_production_item` | 🟥 ExecuteMCPv2 | `/interop/production/item` |
+| 5 | `iris_production_item` | 🟥 ExecuteMCPv2 | `/interop/production/item` (add/remove + arbitrary host/adapter settings) |
 | 6 | `iris_production_autostart` | 🟥 ExecuteMCPv2 | `/interop/production/autostart` |
 | 7 | `iris_production_logs` | 🟥 ExecuteMCPv2 | `/interop/production/logs` |
 | 8 | `iris_production_queues` | 🟥 ExecuteMCPv2 | `/interop/production/queues` |
@@ -137,12 +146,15 @@ their Zod schemas but silently dropped them server-side.
 | 17 | `iris_transform_list` | 🟥 ExecuteMCPv2 | `/interop/transform` |
 | 18 | `iris_transform_test` | 🟥 ExecuteMCPv2 | `/interop/transform/test` |
 | 19 | `iris_interop_rest` | 🟥 ExecuteMCPv2 | `/interop/rest` |
+| 20 | `iris_default_settings_manage` | 🟥 ExecuteMCPv2 | `/interop/defaultsettings` |
 
-**Mix:** 0 Atelier · 19 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
+**Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
+
+> **Epic 17 (2026-06-16) — governance defaults:** added `iris_default_settings_manage` (`list`/`get`/`set`/`delete`) and extended `iris_production_item` with `add`/`remove` actions plus arbitrary host/adapter settings (interop stays 19 → 20: one new tool; `iris_production_item` is enhanced in place). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_default_settings_manage:set`/`:delete` and `iris_production_item:add`/`:remove`. Reads/pre-existing actions are **enabled by default**: `iris_default_settings_manage:list`/`:get` and the original `iris_production_item:enable`/`:disable`/`:get`/`:set` (the latter four are pre-governance baseline keys). *Epic 18 (2026-06-17) hardened the new add/arbitrary-settings surface — bad-className/duplicate-name/unknown-`@`-suffix inputs are now rejected before any write — without changing these governance defaults.*
 
 ---
 
-## `@iris-mcp/ops` — Operations & Monitoring (17)
+## `@iris-mcp/ops` — Operations & Monitoring (20)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -163,8 +175,13 @@ their Zod schemas but silently dropped them server-side.
 | 15 | `iris_task_run` | 🟥 ExecuteMCPv2 | `/task/run` |
 | 16 | `iris_task_history` | 🟥 ExecuteMCPv2 | `/task/history` |
 | 17 | `iris_config_manage` | 🟥 ExecuteMCPv2 | `/system/config` |
+| 18 | `iris_process_manage` | 🟥 ExecuteMCPv2 | `/monitor/process` + `/monitor/process/manage` |
+| 19 | `iris_database_action` | 🟥 ExecuteMCPv2 | `/monitor/database/action` |
+| 20 | `iris_backup_manage` | 🟥 ExecuteMCPv2 | `/monitor/backup/manage` |
 
-**Mix:** 0 Atelier · 17 ExecuteMCPv2 · 0 other — **fully custom**.
+**Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**.
+
+> **Epic 16 (2026-06-16) — governance defaults:** added `iris_process_manage`, `iris_database_action`, and `iris_backup_manage` (ops 17 → 20). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_process_manage:terminate`/`:suspend`/`:resume`; **all six** `iris_database_action` actions (`mount`/`dismount`/`compact`/`defragment`/`truncate`/`expandVolume`); and `iris_backup_manage:run`/`:freeze`/`:thaw`. Reads are **enabled by default**: `iris_process_manage:get` and `iris_backup_manage:listHistory`. (`iris_backup_manage` has no `restore` action — IRIS restore is interactive with no scriptable classmethod; see the `iris-ops` README.)
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
 
@@ -239,7 +256,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 88-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 98-tool total.
 
 ---
 
@@ -247,12 +264,12 @@ were silently returning stale or per-process data.
 
 | Server | Atelier | ExecuteMCPv2 | Other | Total |
 |---|:---:|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 18 | 6 | 0 | **24** |
-| `@iris-mcp/admin` | 0 | 22 | 0 | **22** |
-| `@iris-mcp/interop` | 0 | 19 | 0 | **19** |
-| `@iris-mcp/ops` | 0 | 16 | 0 | **16** |
+| `@iris-mcp/dev` | 19 | 6 | 0 | **25** |
+| `@iris-mcp/admin` | 0 | 26 | 0 | **26** |
+| `@iris-mcp/interop` | 0 | 20 | 0 | **20** |
+| `@iris-mcp/ops` | 0 | 20 | 0 | **20** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** |
-| **Total** | **18** | **65** | **5** | **88** |
+| **Total** | **19** | **74** | **5** | **98** |
 
 ---
 
@@ -260,11 +277,11 @@ were silently returning stale or per-process data.
 
 ### Only `@iris-mcp/dev` is partially portable without the custom REST
 
-18 of the 24 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 6 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`) would fail but the rest would work.
+19 of the 25 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 6 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`) would fail but the rest would work.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 65 of the 88 tools (74% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 74 of the 98 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -278,7 +295,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 65 of 88 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 74 of 98 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

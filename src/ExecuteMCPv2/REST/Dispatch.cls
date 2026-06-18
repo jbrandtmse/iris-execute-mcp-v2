@@ -59,6 +59,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/resource" Method="GET" Call="ExecuteMCPv2.REST.Security:ResourceList" />
   <Route Url="/security/resource" Method="POST" Call="ExecuteMCPv2.REST.Security:ResourceManage" />
 
+  <!-- Epic 15 (Story 15.5): SQL object privileges (schema/table/column grant/revoke/list) -->
+  <Route Url="/security/sqlprivilege" Method="GET" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeList" />
+  <Route Url="/security/sqlprivilege" Method="POST" Call="ExecuteMCPv2.REST.Security:SqlPrivilegeManage" />
+
   <!-- Epic 4: Security / Permission Check -->
   <Route Url="/security/permission" Method="POST" Call="ExecuteMCPv2.REST.Security:PermissionCheck" />
 
@@ -76,6 +80,22 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/oauth" Method="GET" Call="ExecuteMCPv2.REST.Security:OAuthList" />
   <Route Url="/security/oauth" Method="POST" Call="ExecuteMCPv2.REST.Security:OAuthManage" />
 
+  <!-- Epic 15: Security / Service Configuration Management -->
+  <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
+  <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
+
+  <!-- Epic 15: Security / LDAP Configuration Management -->
+  <Route Url="/security/ldap" Method="GET" Call="ExecuteMCPv2.REST.Security:LdapList" />
+  <Route Url="/security/ldap" Method="POST" Call="ExecuteMCPv2.REST.Security:LdapManage" />
+
+  <!-- Epic 15: Security / X.509 Certificate Credentials Management -->
+  <Route Url="/security/x509" Method="GET" Call="ExecuteMCPv2.REST.Security:X509List" />
+  <Route Url="/security/x509" Method="POST" Call="ExecuteMCPv2.REST.Security:X509Manage" />
+
+  <!-- Epic 15: Auditing Configuration & Audit Log Management -->
+  <Route Url="/security/audit" Method="GET" Call="ExecuteMCPv2.REST.Security:AuditStatus" />
+  <Route Url="/security/audit" Method="POST" Call="ExecuteMCPv2.REST.Security:AuditManage" />
+
   <!-- Epic 5: Interoperability Management -->
   <Route Url="/interop/production/status" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionStatus" />
   <Route Url="/interop/production/summary" Method="GET" Call="ExecuteMCPv2.REST.Interop:ProductionSummary" />
@@ -83,6 +103,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/control" Method="POST" Call="ExecuteMCPv2.REST.Interop:ProductionControl" />
   <Route Url="/interop/production/item" Method="POST" Call="ExecuteMCPv2.REST.Interop:ItemManage" />
   <Route Url="/interop/production/autostart" Method="POST" Call="ExecuteMCPv2.REST.Interop:AutoStart" />
+
+  <!-- Epic 17 (Story 17.1): System Default Settings (Ens.Config.DefaultSettings) -->
+  <Route Url="/interop/defaultsettings" Method="GET" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsList" />
+  <Route Url="/interop/defaultsettings" Method="POST" Call="ExecuteMCPv2.REST.Interop:DefaultSettingsManage" />
 
   <!-- Epic 5: Production Monitoring -->
   <Route Url="/interop/production/logs" Method="GET" Call="ExecuteMCPv2.REST.Interop:EventLog" />
@@ -109,11 +133,15 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/monitor/alerts/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:AlertsManage" />
   <Route Url="/monitor/interop" Method="GET" Call="ExecuteMCPv2.REST.Monitor:InteropMetrics" />
   <Route Url="/monitor/jobs" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JobsList" />
+  <Route Url="/monitor/process" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ProcessGet" />
+  <Route Url="/monitor/process/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:ProcessManage" />
   <Route Url="/monitor/locks" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LocksList" />
   <Route Url="/monitor/journal" Method="GET" Call="ExecuteMCPv2.REST.Monitor:JournalInfo" />
   <Route Url="/monitor/mirror" Method="GET" Call="ExecuteMCPv2.REST.Monitor:MirrorStatus" />
   <Route Url="/monitor/audit" Method="GET" Call="ExecuteMCPv2.REST.Monitor:AuditEvents" />
   <Route Url="/monitor/database" Method="GET" Call="ExecuteMCPv2.REST.Monitor:DatabaseCheck" />
+  <Route Url="/monitor/database/action" Method="POST" Call="ExecuteMCPv2.REST.Monitor:DatabaseAction" />
+  <Route Url="/monitor/backup/manage" Method="POST" Call="ExecuteMCPv2.REST.Monitor:BackupManage" />
   <Route Url="/monitor/license" Method="GET" Call="ExecuteMCPv2.REST.Monitor:LicenseInfo" />
   <Route Url="/monitor/ecp" Method="GET" Call="ExecuteMCPv2.REST.Monitor:ECPStatus" />
 
