@@ -152,6 +152,8 @@ Two optional environment variables let a single server target several IRIS insta
 Both are **optional** — omit them for a single-server, fully-enabled install. See the [suite README](../../README.md#multiple-servers--governance) for the full model and worked examples.
 
 > **Escaping matters.** The *value* of `IRIS_PROFILES` / `IRIS_GOVERNANCE` is a JSON string that lives inside the JSON config file, so every inner `"` must be escaped as `\"`. The block below is already correctly escaped — copy it as-is and edit the values.
+>
+> **Programmatic config updates:** if you write the config file with a JSON serializer (Python `json.dump`, Node `JSON.stringify`, etc.), pass `IRIS_PROFILES`/`IRIS_GOVERNANCE` as a plain string — the serializer escapes the inner quotes automatically. Do **not** pre-escape the string yourself; that produces double-escaped output (`\\"`) and the server will fail to parse the value at startup.
 
 ```json
 {
