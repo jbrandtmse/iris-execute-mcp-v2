@@ -643,6 +643,9 @@ FR106 and FR107 (XDebug sessions and terminal WebSocket) are deferred to post-MV
 - FR125: Integration engineer can add and remove production config items and set arbitrary host/adapter settings (`iris_production_item` enhancement).
 - FR126: Developer can analyze SQL — show execution plan, runtime statistics, index usage, and list currently-running statements (`iris_sql_analyze`).
 
+**Epic 19 — Server & Governance Discovery (added 2026-06-18)**
+- FR127: AI client can call a single read tool to discover, for the server it is connected to: (a) the full roster of configured server profiles with each profile's connection metadata **excluding the password** (name, host, port, username, namespace, https, baseUrl, timeout, and which is the default), and (b) the effective governance policy (enabled/disabled action map) for a given profile. The tool is present on every server in the suite, is enabled by default (a `read` action), and its description instructs the client to call it **before** invoking other tools to learn available profiles and governance. With no `IRIS_PROFILES`/`IRIS_GOVERNANCE` set, it reports the single `default` profile and the default-seed policy (today's behavior).
+
 ## Non-Functional Requirements
 
 ### Performance

@@ -1,5 +1,5 @@
 # generated: 2026-04-05
-# last_updated: 2026-06-17 (Epic 18 kickoff via /epic-cycle 18 — minimal cleanup epic; epic-18 in-progress, Story 18.0 backlog)
+# last_updated: 2026-06-18 (Epic 19 added via bmad-correct-course — server/governance discovery tool; epic-19 + 19-0 backlog. See sprint-change-proposal-2026-06-18.md)
 # project: iris-execute-mcp-v2
 # project_key: NOKEY
 # tracking_system: file-system
@@ -258,3 +258,9 @@ development_status:
   epic-18: done
   18-0-epic-17-deferred-cleanup: done
   epic-18-retrospective: done
+
+  # Epic 19: Server & Governance Discovery
+  # Added 2026-06-18 via bmad-correct-course. See sprint-change-proposal-2026-06-18.md.
+  # TypeScript-only (shared). No BOOTSTRAP_VERSION bump. Built on Epic 14. Strictly additive.
+  epic-19: backlog
+  19-0-server-and-governance-discovery-tool: backlog
