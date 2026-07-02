@@ -42,6 +42,7 @@ import type { GovernanceConfig, MutatesLookup } from "./governance.js";
 import {
   parseGovernanceConfig,
   buildMutatesLookup,
+  buildDefaultEnabledWrites,
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
@@ -328,6 +329,22 @@ export class McpServerBase {
   private mutatesLookup: MutatesLookup = new Map();
 
   /**
+   * "Write, default-enabled" key set (Epic 20, architecture decision F2), built
+   * from each {@link ToolDefinition.defaultEnabled}. A `write` key in this set
+   * seeds ENABLED under an empty `IRIS_GOVERNANCE` (instead of the default-disabled
+   * seed a new write gets), while remaining truthfully `mutates: "write"`. Threaded
+   * into {@link getEffectivePolicy} (the resource + discovery tool) and
+   * {@link effective} (the call-time gate) so all three agree (no drift).
+   *
+   * Default-empty and rebuilt alongside {@link mutatesLookup} in
+   * {@link rebuildMutatesLookup}: with no tool opting in, this is empty and the
+   * governance seed is byte-for-byte today's (Rule #19 back-compat gate). An
+   * operator can still disable a default-enabled write via an explicit
+   * `IRIS_GOVERNANCE` `false` (the cascade honors explicit overrides).
+   */
+  private defaultEnabledWrites: ReadonlySet<string> = new Set();
+
+  /**
    * Every governance key this server's advisory resource reports on (Epic 14,
    * architecture decisions D4/D6): the union of {@link GOVERNANCE_BASELINE} and
    * this server's own registered tool/action keys, computed with the SAME logic
@@ -430,6 +447,10 @@ export class McpServerBase {
    */
   private rebuildMutatesLookup(): void {
     this.mutatesLookup = buildMutatesLookup(this.tools.values());
+    // Rebuild the "write, default-enabled" set (F2) from the same live registry,
+    // so a dynamically-added tool declaring `defaultEnabled` is reflected in the
+    // gate/resource/discovery seed alongside its `mutates` classification.
+    this.defaultEnabledWrites = buildDefaultEnabledWrites(this.tools.values());
   }
 
   /**
@@ -524,6 +545,8 @@ export class McpServerBase {
       this.governanceConfig,
       this.governedKeys,
       this.mutatesLookup,
+      GOVERNANCE_BASELINE,
+      this.defaultEnabledWrites,
     );
 
     return {
@@ -867,6 +890,8 @@ export class McpServerBase {
         profile.name,
         this.governanceConfig,
         this.mutatesLookup,
+        GOVERNANCE_BASELINE,
+        this.defaultEnabledWrites,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
@@ -912,6 +937,7 @@ export class McpServerBase {
           this.governanceConfig,
           this.governedKeys,
           this.mutatesLookup,
+          this.defaultEnabledWrites,
         );
         return {
           content: [

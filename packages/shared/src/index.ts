@@ -63,6 +63,7 @@ export {
 export {
   parseGovernanceConfig,
   buildMutatesLookup,
+  buildDefaultEnabledWrites,
   unwrapActionOptions,
   assertGovernanceClassification,
   defaultSeed,

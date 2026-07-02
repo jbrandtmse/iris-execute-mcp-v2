@@ -89,13 +89,22 @@ export const productionControlTool: ToolDefinition = {
   name: "iris_production_control",
   title: "Control Production",
   description:
-    "Start, stop, restart, update, or recover an Interoperability production. " +
+    "Start, stop, restart, update, recover, or clean an Interoperability production. " +
     "'start' and 'restart' require the production name. 'stop' halts the current production. " +
     "'update' applies configuration changes to a running production. " +
-    "'recover' attempts to restart a troubled production.",
+    "'recover' attempts to restart a troubled production. " +
+    "'clean' clears a STOPPED production's stale runtime state (queues, job-status, " +
+    "suspended messages) to unwedge a production that 'recover' cannot fix. " +
+    "For a troubled production, prefer 'recover' first; use 'clean' only as a LAST RESORT " +
+    "when 'recover' does not resolve the problem. By default 'clean' touches only transient " +
+    "runtime state; set killAppData:true (with confirm:true) to ALSO wipe persistent " +
+    "^Ens.AppData business state.\n\n" +
+    "The 'clean' action is a write but is ENABLED by default under tool governance " +
+    "(like the grandfathered lifecycle actions); an operator can disable it via an " +
+    "explicit IRIS_GOVERNANCE override.",
   inputSchema: z.object({
     action: z
-      .enum(["start", "stop", "restart", "update", "recover"])
+      .enum(["start", "stop", "restart", "update", "recover", "clean"])
       .describe("Lifecycle action to perform on the production"),
     name: z
       .string()
@@ -108,7 +117,25 @@ export const productionControlTool: ToolDefinition = {
     force: z
       .boolean()
       .optional()
-      .describe("Force stop/recover on timeout (default: false)"),
+      .describe("Force stop on timeout (default: false)"),
+    killAppData: z
+      .boolean()
+      .optional()
+      .describe(
+        "(clean only) When true, ALSO wipe the persistent ^Ens.AppData business " +
+          "state — HL7 sequence numbers, file/FTP done-file tables (wiping these " +
+          "causes re-ingestion of already-processed files → DUPLICATE messages), " +
+          "and RecordMap/X12 batch + control-number state. DESTRUCTIVE and " +
+          "irreversible; requires confirm:true. When false/omitted, only transient " +
+          "runtime state is cleared (default: false).",
+      ),
+    confirm: z
+      .boolean()
+      .optional()
+      .describe(
+        "(clean only) Must be true to permit a killAppData persistent wipe. " +
+          "killAppData:true without confirm:true is refused and changes nothing.",
+      ),
     namespace: z
       .string()
       .optional()
@@ -129,12 +156,26 @@ export const productionControlTool: ToolDefinition = {
     openWorldHint: false,
   },
   scope: "NS",
+  // Governance (Epic 20, decision F2 — frozen-foundation model): the 5 existing
+  // lifecycle actions (start/stop/restart/update/recover) are in the frozen
+  // baseline (1e62c5ad5bf7) → grandfathered, so they are NOT declared here. The
+  // NEW 'clean' key is absent from the baseline → it MUST be classified; it is a
+  // write (destructiveHint stays true). But unlike the item add/remove writes,
+  // 'clean' ships ENABLED by default via `defaultEnabled` — a recovery operation
+  // an operator expects available — while remaining truthfully `mutates: "write"`.
+  // An operator can still disable it via an explicit IRIS_GOVERNANCE false.
+  mutates: {
+    clean: "write",
+  },
+  defaultEnabled: ["clean"],
   handler: async (args, ctx) => {
-    const { action, name, timeout, force, namespace } = args as {
+    const { action, name, timeout, force, killAppData, confirm, namespace } = args as {
       action: string;
       name?: string;
       timeout?: number;
       force?: boolean;
+      killAppData?: boolean;
+      confirm?: boolean;
       namespace?: string;
     };
 
@@ -143,6 +184,8 @@ export const productionControlTool: ToolDefinition = {
     if (name) body.name = name;
     if (timeout !== undefined) body.timeout = timeout;
     if (force !== undefined) body.force = force;
+    if (killAppData !== undefined) body.killAppData = killAppData;
+    if (confirm !== undefined) body.confirm = confirm;
 
     const path = `${BASE_URL}/interop/production/control`;
 

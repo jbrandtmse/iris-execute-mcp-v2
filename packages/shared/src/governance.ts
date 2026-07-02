@@ -313,6 +313,78 @@ export function buildMutatesLookup(
 }
 
 /**
+ * Build the set of governance keys that are `write` actions but should default
+ * to **enabled** (Epic 20, architecture decision F2), from each tool's
+ * {@link ToolDefinition.defaultEnabled} list.
+ *
+ * For every tool that declares `defaultEnabled: [action, ...]`, this collects
+ * `tool.name:action` for each listed action. The result is threaded (optional,
+ * default-empty) through {@link defaultSeed}; a `write` key present in the set
+ * seeds to `true` rather than `false`.
+ *
+ * Reserved action names are rejected (mirroring the {@link buildMutatesLookup}
+ * guard). A tool omitting `defaultEnabled` (every tool but the F2 opt-ins)
+ * contributes nothing, so with no opt-in the returned set is empty and the seed
+ * is byte-for-byte today's (Rule #19 back-compat gate).
+ *
+ * **Cross-validation (fail-fast).** Each listed action MUST be declared as a
+ * `"write"` in the SAME tool's per-action {@link ToolDefinition.mutates} record.
+ * `defaultEnabled` only makes sense for a per-action `write` (the marker's whole
+ * job is to flip a `write` key's seed from disabled to enabled). Without this
+ * check a typo or drift between the two lists (`defaultEnabled: ["clena"]` while
+ * `mutates: { clean: "write" }`) would silently emit an inert `tool:clena` key —
+ * matching no real write — leaving the intended write DEFAULT-DISABLED with no
+ * error, quietly defeating the F2 opt-in (Story 20.0 review, findings #1/#2). We
+ * therefore throw when the action is absent from `mutates`, is classified
+ * `"read"`, or the tool uses the scalar `mutates` form (a scalar-write tool's
+ * governance key is the bare tool name with no action, so an action-keyed
+ * `defaultEnabled` cannot address it — the per-action form is required).
+ *
+ * @param tools - Tool definitions to introspect (any iterable).
+ * @returns A read-only set of `tool:action` keys that are writes-but-enabled-by-default.
+ * @throws {Error} If a `defaultEnabled` action is reserved, or is not a per-action
+ *   `"write"` in the same tool's `mutates` map.
+ */
+export function buildDefaultEnabledWrites(
+  tools: Iterable<ToolDefinition>,
+): ReadonlySet<string> {
+  const set = new Set<string>();
+  for (const tool of tools) {
+    const list = tool.defaultEnabled;
+    if (list === undefined) continue;
+    const m = tool.mutates;
+    for (const action of list) {
+      if (RESERVED_KEYS.has(action)) {
+        throw new Error(
+          `Tool "${tool.name}" declares a reserved \`defaultEnabled\` action key "${action}". ` +
+            `Reserved keys (${[...RESERVED_KEYS].join(", ")}) cannot be used as action names.`,
+        );
+      }
+      // Fail-fast: the action must be a per-action `write` in this tool's
+      // `mutates`. A scalar `mutates` (or missing/read classification) means the
+      // marker would be inert — surface it at registration instead of silently
+      // shipping the write default-disabled.
+      if (m === undefined || typeof m === "string") {
+        throw new Error(
+          `Tool "${tool.name}" lists \`defaultEnabled: ["${action}"]\` but does not declare a ` +
+            `per-action \`mutates\` record. \`defaultEnabled\` requires \`mutates: { "${action}": "write" }\` ` +
+            `on the same tool (a scalar \`mutates\` cannot be addressed by an action-keyed \`defaultEnabled\`).`,
+        );
+      }
+      if (m[action] !== "write") {
+        throw new Error(
+          `Tool "${tool.name}" lists \`defaultEnabled: ["${action}"]\` but its \`mutates\` does not ` +
+            `classify "${action}" as "write" (found ${m[action] === undefined ? "no entry" : `"${m[action]}"`}). ` +
+            `\`defaultEnabled\` may only flip a truthful \`write\` action to enabled-by-default.`,
+        );
+      }
+      set.add(`${tool.name}:${action}`);
+    }
+  }
+  return set;
+}
+
+/**
  * Throw a clear error if `value` is not exactly `"read"` or `"write"` (Story
  * 15.0 AC 15.0.4). Because the {@link ToolDefinition.mutates} type is erased at
  * runtime, an authoring typo would otherwise flow through unvalidated and be
@@ -393,21 +465,35 @@ export function assertGovernanceClassification(
  * only as a belt-and-braces default for direct/synthetic callers of this pure
  * function (e.g. unit tests).
  *
- * @param key           - The governance key (`tool` or `tool:action`).
- * @param mutatesLookup - Key → mutation class for new actions.
- * @param baseline      - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * **"Write, default-enabled" override (Epic 20, decision F2).** A new `write` key
+ * that is present in `defaultEnabledWrites` seeds to `true` instead of `false` —
+ * the one lever to ship a truthful write enabled-by-default without touching the
+ * frozen baseline. The parameter is OPTIONAL and DEFAULT-EMPTY: with the empty
+ * set (no tool opts in) this function is byte-for-byte its pre-F2 behavior
+ * (Rule #19 back-compat gate).
+ *
+ * @param key                - The governance key (`tool` or `tool:action`).
+ * @param mutatesLookup      - Key → mutation class for new actions.
+ * @param baseline           - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @param defaultEnabledWrites - Write keys that should seed enabled (F2); default empty.
  * @returns `true` if enabled by default, `false` if disabled by default.
  */
 export function defaultSeed(
   key: string,
   mutatesLookup: MutatesLookup,
   baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
+  defaultEnabledWrites: ReadonlySet<string> = new Set(),
 ): boolean {
   if (baseline.has(key)) {
     return true;
   }
-  // New action: disabled only when explicitly classified as a write/mutation.
-  return mutatesLookup.get(key) === "write" ? false : true;
+  // New action: disabled only when explicitly classified as a write/mutation…
+  if (mutatesLookup.get(key) === "write") {
+    // …unless it opts into "write, default-enabled" (F2): a truthful write that
+    // ships enabled while an operator can still disable it via IRIS_GOVERNANCE.
+    return defaultEnabledWrites.has(key);
+  }
+  return true;
 }
 
 /**
@@ -419,11 +505,12 @@ export function defaultSeed(
  * global layer is honored as "disabled", never treated as "unset" (which `||`
  * would wrongly do).
  *
- * @param key           - The governance key.
- * @param profile       - The profile name whose overrides take top priority.
- * @param config        - Parsed {@link GovernanceConfig}.
- * @param mutatesLookup - Key → mutation class for new actions.
- * @param baseline      - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @param key                - The governance key.
+ * @param profile            - The profile name whose overrides take top priority.
+ * @param config             - Parsed {@link GovernanceConfig}.
+ * @param mutatesLookup      - Key → mutation class for new actions.
+ * @param baseline           - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
  * @returns `true` if the action is enabled for the profile, else `false`.
  */
 export function effective(
@@ -432,6 +519,7 @@ export function effective(
   config: GovernanceConfig,
   mutatesLookup: MutatesLookup,
   baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
+  defaultEnabledWrites: ReadonlySet<string> = new Set(),
 ): boolean {
   // Resolve the profile's layer as an own property only — a `profile` named
   // after a prototype member (e.g. "constructor") must not read the inherited
@@ -445,7 +533,7 @@ export function effective(
   return (
     ownBool(profileLayer, key) ??
     ownBool(config.global, key) ??
-    defaultSeed(key, mutatesLookup, baseline)
+    defaultSeed(key, mutatesLookup, baseline, defaultEnabledWrites)
   );
 }
 
@@ -463,6 +551,7 @@ export function effective(
  * @param allKeys        - Every known governance key (baseline ∪ registered keys).
  * @param mutatesLookup  - Key → mutation class for new actions.
  * @param baseline       - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
  * @returns A `Record<key, boolean>` of effective enablement for the profile.
  */
 export function getEffectivePolicy(
@@ -471,6 +560,7 @@ export function getEffectivePolicy(
   allKeys: Iterable<string>,
   mutatesLookup: MutatesLookup,
   baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
+  defaultEnabledWrites: ReadonlySet<string> = new Set(),
 ): Record<string, boolean> {
   const policy: Record<string, boolean> = {};
   for (const key of allKeys) {
@@ -479,7 +569,14 @@ export function getEffectivePolicy(
     // silently no-op'ing the assignment — preserving the 1-key-per-allKeys
     // invariant the enforcement layer (Story 14.4) relies on.
     Object.defineProperty(policy, key, {
-      value: effective(key, profile, config, mutatesLookup, baseline),
+      value: effective(
+        key,
+        profile,
+        config,
+        mutatesLookup,
+        baseline,
+        defaultEnabledWrites,
+      ),
       enumerable: true,
       writable: true,
       configurable: true,

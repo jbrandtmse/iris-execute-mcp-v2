@@ -5,6 +5,7 @@ import { createHash } from "crypto";
 import {
   parseGovernanceConfig,
   buildMutatesLookup,
+  buildDefaultEnabledWrites,
   defaultSeed,
   effective,
   getEffectivePolicy,
@@ -608,5 +609,254 @@ describe("governance baseline drift check", () => {
     const arr = [...GOVERNANCE_BASELINE];
     const sorted = [...arr].sort();
     expect(arr).toEqual(sorted);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// "Write, default-enabled" mechanism (Epic 20, architecture decision F2).
+//
+// A new orthogonal marker (`defaultEnabled`) lets a truthful `write` action
+// seed to ENABLED without misclassifying it as a read and without touching
+// the frozen baseline. Threaded as an OPTIONAL, DEFAULT-EMPTY param through
+// defaultSeed/effective/getEffectivePolicy — empty set ⇒ byte-for-byte the
+// pre-F2 seed (AC 20.0.5a back-compat gate).
+// ════════════════════════════════════════════════════════════════════
+
+/** A minimal ToolDefinition fixture for buildDefaultEnabledWrites. */
+function fixtureTool(
+  name: string,
+  extra: Partial<ToolDefinition>,
+): ToolDefinition {
+  return {
+    name,
+    title: name,
+    description: name,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    inputSchema: {} as any,
+    annotations: {},
+    scope: "NS",
+    handler: async () => ({ content: [{ type: "text", text: "" }] }),
+    ...extra,
+  };
+}
+
+describe("buildDefaultEnabledWrites (F2)", () => {
+  it("returns an empty set when no tool declares defaultEnabled", () => {
+    const set = buildDefaultEnabledWrites([
+      fixtureTool("iris_a", { mutates: "read" }),
+      fixtureTool("iris_b_manage", { mutates: { create: "write" } }),
+    ]);
+    expect(set.size).toBe(0);
+  });
+
+  it("collects tool:action keys for each declared defaultEnabled action", () => {
+    const set = buildDefaultEnabledWrites([
+      fixtureTool("iris_production_control", {
+        mutates: { clean: "write" },
+        defaultEnabled: ["clean"],
+      }),
+      fixtureTool("iris_multi", {
+        mutates: { a: "write", b: "write" },
+        defaultEnabled: ["a", "b"],
+      }),
+    ]);
+    expect([...set].sort()).toEqual([
+      "iris_multi:a",
+      "iris_multi:b",
+      "iris_production_control:clean",
+    ]);
+  });
+
+  it("throws on a reserved defaultEnabled action key", () => {
+    expect(() =>
+      buildDefaultEnabledWrites([
+        fixtureTool("iris_x", { defaultEnabled: ["__proto__"] }),
+      ]),
+    ).toThrow(/reserved/);
+  });
+
+  // Story 20.0 review (findings #1/#2): fail-fast cross-validation so a typo or
+  // drift between `defaultEnabled` and `mutates` cannot silently ship the intended
+  // write default-DISABLED (an inert `tool:action` key matching no real write).
+
+  it("throws when a defaultEnabled action is absent from mutates (drift/typo)", () => {
+    expect(() =>
+      buildDefaultEnabledWrites([
+        fixtureTool("iris_production_control", {
+          mutates: { clean: "write" },
+          defaultEnabled: ["clena"], // typo — not in mutates
+        }),
+      ]),
+    ).toThrow(/does not\s+classify "clena" as "write"|no entry/);
+  });
+
+  it("throws when a defaultEnabled action is classified read, not write", () => {
+    expect(() =>
+      buildDefaultEnabledWrites([
+        fixtureTool("iris_x", {
+          mutates: { peek: "read" },
+          defaultEnabled: ["peek"],
+        }),
+      ]),
+    ).toThrow(/"write"/);
+  });
+
+  it("throws when defaultEnabled is used with a scalar mutates (unaddressable)", () => {
+    expect(() =>
+      buildDefaultEnabledWrites([
+        fixtureTool("iris_scalar", {
+          mutates: "write",
+          defaultEnabled: ["go"],
+        }),
+      ]),
+    ).toThrow(/per-action `mutates` record/);
+  });
+
+  it("throws when defaultEnabled is used with no mutates at all", () => {
+    expect(() =>
+      buildDefaultEnabledWrites([
+        fixtureTool("iris_nomutates", { defaultEnabled: ["go"] }),
+      ]),
+    ).toThrow(/per-action `mutates` record/);
+  });
+});
+
+describe("defaultSeed with defaultEnabledWrites (F2)", () => {
+  const mutates: MutatesLookup = new Map<string, "read" | "write">([
+    ["iris_production_control:clean", "write"],
+    ["iris_other_manage:delete", "write"],
+  ]);
+  const baseline: ReadonlySet<string> = new Set();
+
+  it("a write in the set seeds ENABLED", () => {
+    const set = new Set(["iris_production_control:clean"]);
+    expect(
+      defaultSeed("iris_production_control:clean", mutates, baseline, set),
+    ).toBe(true);
+  });
+
+  it("a write NOT in the set still seeds DISABLED", () => {
+    const set = new Set(["iris_production_control:clean"]);
+    expect(defaultSeed("iris_other_manage:delete", mutates, baseline, set)).toBe(
+      false,
+    );
+  });
+
+  it("empty set ⇒ byte-for-byte pre-F2 seed (writes disabled)", () => {
+    // No 4th arg AND explicit empty set must both give the pre-F2 result.
+    expect(defaultSeed("iris_production_control:clean", mutates, baseline)).toBe(
+      false,
+    );
+    expect(
+      defaultSeed(
+        "iris_production_control:clean",
+        mutates,
+        baseline,
+        new Set(),
+      ),
+    ).toBe(false);
+  });
+
+  it("the set never enables a NON-write (read stays enabled; not gated by the set)", () => {
+    const readMutates: MutatesLookup = new Map([["iris_r:read", "read"]]);
+    // A read key that is (nonsensically) in the set: it is already enabled as a
+    // read, and the set only flips WRITES, so behavior is unchanged.
+    expect(
+      defaultSeed("iris_r:read", readMutates, baseline, new Set(["iris_r:read"])),
+    ).toBe(true);
+  });
+});
+
+describe("F2 back-compat: empty set is byte-for-byte across the cascade (AC 20.0.5a)", () => {
+  it("effective() with empty set == effective() without the param", () => {
+    for (const key of SYNTH_ALL_KEYS) {
+      const withParam = effective(
+        key,
+        "default",
+        EMPTY_CONFIG,
+        SYNTH_MUTATES,
+        SYNTH_BASELINE,
+        new Set(),
+      );
+      const without = effective(
+        key,
+        "default",
+        EMPTY_CONFIG,
+        SYNTH_MUTATES,
+        SYNTH_BASELINE,
+      );
+      expect(withParam).toBe(without);
+    }
+  });
+
+  it("getEffectivePolicy() with empty set deep-equals the no-param policy", () => {
+    const withParam = getEffectivePolicy(
+      "default",
+      EMPTY_CONFIG,
+      SYNTH_ALL_KEYS,
+      SYNTH_MUTATES,
+      SYNTH_BASELINE,
+      new Set(),
+    );
+    const without = getEffectivePolicy(
+      "default",
+      EMPTY_CONFIG,
+      SYNTH_ALL_KEYS,
+      SYNTH_MUTATES,
+      SYNTH_BASELINE,
+    );
+    expect(withParam).toEqual(without);
+    // And the synthetic new write is still DISABLED (nothing opted in).
+    expect(withParam["iris_new_tool:write"]).toBe(false);
+  });
+});
+
+describe("F2 all-other-writes-still-disabled sweep (AC 20.0.5a)", () => {
+  // A synthetic world with THREE new writes; only ONE opts into defaultEnabled.
+  const mutates: MutatesLookup = new Map<string, "read" | "write">([
+    ["iris_p_control:clean", "write"],
+    ["iris_p_item:add", "write"],
+    ["iris_p_item:remove", "write"],
+    ["iris_p_read:get", "read"],
+  ]);
+  const baseline: ReadonlySet<string> = new Set(["iris_grandfathered:go"]);
+  const allKeys = [
+    "iris_grandfathered:go",
+    "iris_p_control:clean",
+    "iris_p_item:add",
+    "iris_p_item:remove",
+    "iris_p_read:get",
+  ];
+  const defaultEnabledWrites = new Set(["iris_p_control:clean"]);
+
+  it("exactly the opted-in write flips to enabled; every OTHER write stays disabled", () => {
+    const policy = getEffectivePolicy(
+      "default",
+      EMPTY_CONFIG,
+      allKeys,
+      mutates,
+      baseline,
+      defaultEnabledWrites,
+    );
+    // The one opted-in write: enabled.
+    expect(policy["iris_p_control:clean"]).toBe(true);
+    // Every OTHER write: still disabled (the sweep).
+    expect(policy["iris_p_item:add"]).toBe(false);
+    expect(policy["iris_p_item:remove"]).toBe(false);
+    // Grandfathered + reads: enabled as always.
+    expect(policy["iris_grandfathered:go"]).toBe(true);
+    expect(policy["iris_p_read:get"]).toBe(true);
+  });
+
+  it("an explicit false override still disables the opted-in write (cascade wins)", () => {
+    const policy = getEffectivePolicy(
+      "default",
+      { global: { "iris_p_control:clean": false } },
+      allKeys,
+      mutates,
+      baseline,
+      defaultEnabledWrites,
+    );
+    expect(policy["iris_p_control:clean"]).toBe(false);
   });
 });
