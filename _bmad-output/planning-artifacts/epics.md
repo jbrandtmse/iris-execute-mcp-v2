@@ -3690,3 +3690,53 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - Reuse `profiles.ts` for the roster and `getEffectivePolicy` (`governance.ts`) for policy; do not duplicate either.
 - Redaction is the one safety-critical line: construct the output by **allow-listing** non-secret fields, not by deleting `password` from a spread (so a future field addition can't accidentally leak).
 - Lead per-story smoke (Rule #22 / #26): drive the built artifact / live server, confirm the roster excludes the password and the policy matches the resource.
+
+## Epic 20: Production Recovery / Clean (added 2026-06-30)
+
+**Goal**: Give integration engineers a way to recover a production wedged in a *non-running* bad state — stale runtime/queue/job-status globals that the soft `recover` action cannot fix — by adding a guarded `clean` action to `iris_production_control` backed by `Ens.Director.CleanProduction()`. See [sprint-change-proposal-2026-06-30.md](./sprint-change-proposal-2026-06-30.md).
+
+**Scope**: One new `clean` action on the existing `iris_production_control` tool — ObjectScript handler (`ExecuteMCPv2.REST.Interop.ProductionControl`) + TS schema (`production.ts`) — **plus** an additive extension to the Epic 14 governance foundation (`@iris-mcp/shared`: `tool-types.ts` + `governance.ts` + `server-base.ts` wiring) providing a "write, default-enabled" mechanism (decision F2). **BOOTSTRAP_VERSION bump required** (Rule #24). Also fixes a latent `recover` defect (extra arg to no-arg `RecoverProduction()`). **Strictly additive** — existing actions/outputs unchanged; `clean` is truthfully `mutates: "write"` but **enabled by default** via the new mechanism (the destructive `^Ens.AppData` wipe remains double-gated and off by default); absent the new marker, every other write stays default-disabled (byte-for-byte today's governance behavior).
+
+**Functional Requirements (new)**: FR128.
+
+**Stories**:
+- 20.0 Production `clean` action (+ governance "write, default-enabled" foundation extension + `recover` arg fix) + bootstrap bump + docs
+
+**Out of scope (deferred)**:
+- Auto-detecting the bad state and auto-cleaning — operator-initiated only.
+- A standalone repair/diagnostics tool — `clean` lives in the existing lifecycle tool.
+- Cleaning *across* namespaces in one call — single-namespace per call (consistent with the rest of `iris_production_control`).
+
+### Story 20.0: Production `clean` Action
+
+**As an** integration engineer, **I want** a `clean` action on `iris_production_control` that clears a stopped production's stale runtime state (and, only on explicit double-confirmation, its persistent app data), **so that** I can recover a wedged production that `recover` cannot fix — without manually killing globals at the terminal.
+
+**Acceptance Criteria**:
+- **AC 20.0.1** — `iris_production_control` accepts a new `action: "clean"`. The handler validates `clean` as an allowed action and routes it to `##class(Ens.Director).CleanProduction(tKillAppData)`; the success result is `{"action":"cleaned","killAppData":<0|1>}`.
+- **AC 20.0.1a** — Preferred-action guidance: the tool **description** states that `recover` is the **preferred** first response to a troubled production and `clean` is a **last resort for when `recover` does not resolve the problem**. The shared MCP server **`instructions`** field carries the same guidance so capable clients surface it at connect time.
+- **AC 20.0.2** — Default behavior (`killAppData` omitted/false) passes `pKillAppDataToo=0`: only transient runtime state is cleared (`^IRIS.Temp.EnsRuntimeAppData`, `$$$EnsRuntime`, `$$$EnsQueue`, job-status/request, suspended). `^Ens.AppData` is **not** touched.
+- **AC 20.0.3** — The destructive persistent wipe (`killAppData:true`) is **double-gated**: it proceeds only when `confirm:true` is also supplied. `killAppData:true` without `confirm:true` is **refused** with a clear error naming the consequence, and changes nothing (live-verified per Rule #26).
+- **AC 20.0.4** — The running-guard is honored: cleaning a running production returns `CleanProduction`'s native refusal ("Cannot clean Production '…' while it is running") via the standard `SanitizeError` envelope — no opaque `<…>` crash.
+- **AC 20.0.5** — Governance (decision F2): `iris_production_control:clean` is classified **truthfully** `mutates:"write"` and marked **default-enabled** via the new `defaultEnabled` mechanism, so it resolves **enabled** under empty `IRIS_GOVERNANCE`. It is a new non-baseline key and does **not** modify the frozen baseline (`1e62c5ad5bf7`); `assertGovernanceClassification` passes (it carries `mutates`). The Epic 19 discovery tool and the D6 `iris-governance://` resource both report `clean` enabled (shared `getEffectivePolicy` — no drift). An operator can still disable it via an explicit `IRIS_GOVERNANCE` override (cascade honors explicit `false`).
+- **AC 20.0.5a** — Foundation back-compat (Rule #19, capstone-style): with **no** action opting into `defaultEnabled` (the default-empty set), `defaultSeed`/`effective`/`getEffectivePolicy` are byte-for-byte unchanged and **every** existing `write` key still resolves **default-disabled**. A test sweeps the governed write keys and asserts all-disabled under empty config, and asserts `clean` is the only write flipped to enabled by the new marker. The foundation change is exercised on a representative real server (not only the pure functions).
+- **AC 20.0.6** — Latent-bug fix: the `recover` action calls `RecoverProduction()` with **no** argument; live-verify `recover` works against a Troubled production before and after.
+- **AC 20.0.7** — Back-compat (Rule #19): the 5 existing actions' request bodies and output shapes are unchanged (mechanical assertion — full-object `toEqual` on a representative call per action, or equivalent). No existing tool/schema changed beyond the additive `clean`/`killAppData`/`confirm` fields.
+- **AC 20.0.8** — BOOTSTRAP_VERSION: regenerate `bootstrap-classes.ts` and record the from→to hash (Rule #24); `bootstrap.test.ts` green; `bootstrap-classes.ts` not hand-edited (Rule #18).
+- **AC 20.0.9** — Tests: `clean` default (no app-data wipe) routing + result shape; `killAppData:true` without `confirm` rejected; `killAppData:true,confirm:true` passes `pKillAppDataToo=1`; running-guard error envelope; governance — `clean` resolves **enabled** by default through the real `handleToolCall` gate, an explicit `IRIS_GOVERNANCE` `false` still disables it, and the all-other-writes-still-disabled sweep (AC 20.0.5a); `recover` no-arg regression.
+- **AC 20.0.10** — Docs rollup is a **required, in-scope deliverable of this story** (not a follow-up). Update README and **all linked documentation** so every place that lists `iris_production_control`'s actions includes `clean`. Concretely, this story MUST update:
+  - **`packages/iris-interop-mcp/README.md`** — add `clean` to the `iris_production_control` action list + its `<details>`/usage block; document `killAppData`+`confirm` with the `^Ens.AppData` data-loss warning; state `recover` preferred / `clean` last-resort.
+  - **Root `README.md`** + **`packages/iris-mcp-all/README.md`** — reflect the new action where the interop tools are described.
+  - **`tool_support.md`** — update the `iris_production_control` row/action enumeration to include `clean`.
+  - **`docs/migration-v1-v2.md`** and **`docs/tool-annotation-audit.md`** — update wherever `iris_production_control` actions are listed.
+  - **Governance docs section** (wherever D3/D6 governance behavior is documented) — document the new `defaultEnabled` "write, default-enabled" mechanism (F2) and that `clean` is a **write but enabled by default** (note *why*: recovery tools should be available out of the box) while still operator-disablable via `IRIS_GOVERNANCE`.
+  - **`CHANGELOG.md`** — new entry covering the `clean` action, the F2 governance mechanism, and the `recover` arg fix.
+  - **Completeness check:** grep the repo for the action enum (`start`/`stop`/`restart`/`update`/`recover`) across `*.md` and ensure no user-facing list of `iris_production_control` actions is left without `clean` (Rule #30). **Tool count unchanged** (new action, not new tool) — do not bump per-server tool counts.
+
+**Implementation Notes**:
+- **Governance F2 mechanism** — implement the "write, default-enabled" extension as the minimal additive change: a `defaultEnabled` marker on `ToolDefinition`, a collector + optional default-empty `defaultEnabledWrites` set threaded through `defaultSeed`/`effective`/`getEffectivePolicy`, wired at the `server-base.ts` call sites. Confirm final naming with the architect (decision F2). Do **not** touch the frozen baseline or misclassify `clean` as a read.
+- **Description / instructions wording** — `clean`'s description and the shared `instructions` field must say `recover` is preferred and `clean` is the last resort when `recover` doesn't work (AC 20.0.1a).
+- Reuse the existing namespace save/restore + `SanitizeError` + single-`RenderResponseBody` patterns already in `ProductionControl` (Rules #7, namespace-save-restore — no `New $NAMESPACE`).
+- `CleanProduction` is `[ Internal ]` (Rule #4) — acceptable (Portal uses it); record the dependency in a code comment so an IRIS-upgrade audit re-verifies.
+- The `clean` branch maps `killAppData` → `pKillAppDataToo`; the default `clean` passes `0` (transient state only). Per §2 of the change proposal, the `killAppData` description must name HL7 sequence numbers, done-file re-ingestion, and batch/control state.
+- Lead per-story smoke (Rule #22/#26): live-HTTP against the deployed route — confirm default `clean` succeeds on a stopped production, the `killAppData`-without-`confirm` path is **refused** (no change), and `recover` works post-fix.
+- Keep the existing `.refine()` name-requiredness intact; `clean` does not require `name`.

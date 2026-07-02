@@ -1,5 +1,6 @@
 # generated: 2026-04-05
-# last_updated: 2026-06-18 (Epic 19 added via bmad-correct-course — server/governance discovery tool; epic-19 + 19-0 backlog. See sprint-change-proposal-2026-06-18.md)
+# last_updated: 2026-06-30 (Epic 20 added via bmad-correct-course — iris_production_control 'clean' action via Ens.Director.CleanProduction() + governance "write, default-enabled" foundation extension (F2) + recover arg-bug fix; epic-20 + 20-0 backlog. See sprint-change-proposal-2026-06-30.md)
+# prior last_updated: 2026-06-18 (Epic 19 added via bmad-correct-course — server/governance discovery tool. See sprint-change-proposal-2026-06-18.md)
 # project: iris-execute-mcp-v2
 # project_key: NOKEY
 # tracking_system: file-system
@@ -265,3 +266,13 @@ development_status:
   epic-19: done
   19-0-server-and-governance-discovery-tool: done
   epic-19-retrospective: done
+
+  # Epic 20: Production Recovery / Clean (iris-interop-mcp)
+  # Added 2026-06-30 via bmad-correct-course. See sprint-change-proposal-2026-06-30.md.
+  # ObjectScript touched (Interop.cls) → BOOTSTRAP_VERSION bump required (Rule #24).
+  # Also extends Epic 14 governance foundation: new "write, default-enabled" mechanism (decision F2, additive).
+  # New iris_production_control:clean key = mutates:write but default-ENABLED via defaultEnabled marker; frozen baseline 1e62c5ad5bf7 untouched.
+  # Also fixes latent recover bug (extra arg to no-arg Ens.Director.RecoverProduction()).
+  epic-20: backlog
+  20-0-production-clean-action: backlog
+  epic-20-retrospective: optional
