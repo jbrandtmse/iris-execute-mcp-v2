@@ -1,5 +1,6 @@
 # generated: 2026-04-05
-# last_updated: 2026-06-30 (Epic 20 added via bmad-correct-course — iris_production_control 'clean' action via Ens.Director.CleanProduction() + governance "write, default-enabled" foundation extension (F2) + recover arg-bug fix; epic-20 + 20-0 backlog. See sprint-change-proposal-2026-06-30.md)
+# last_updated: 2026-07-02 (Epic 21 added via bmad-correct-course — iris_message_diagram: Mermaid sequence diagram from an Interop message trace; clean-room ObjectScript library ExecuteMCPv2.Diagram.* + thin REST endpoint + thin TS tool; 2 stories (21.0 core, 21.1 episode compression + dedup + docs), both backlog. See sprint-change-proposal-2026-07-02.md)
+# prior last_updated: 2026-06-30 (Epic 20 added via bmad-correct-course — iris_production_control 'clean' action via Ens.Director.CleanProduction() + governance "write, default-enabled" foundation extension (F2) + recover arg-bug fix; epic-20 + 20-0 backlog. See sprint-change-proposal-2026-06-30.md)
 # prior last_updated: 2026-06-18 (Epic 19 added via bmad-correct-course — server/governance discovery tool. See sprint-change-proposal-2026-06-18.md)
 # project: iris-execute-mcp-v2
 # project_key: NOKEY
@@ -276,3 +277,14 @@ development_status:
   epic-20: done
   20-0-production-clean-action: done
   epic-20-retrospective: done
+
+  # Epic 21: Message Trace Sequence Diagram (iris-interop-mcp)
+  # Added 2026-07-02 via bmad-correct-course. See sprint-change-proposal-2026-07-02.md.
+  # Clean-room reimplementation of stakeholder-owned ../DiagramTool/ functionality — reference consulted for spec ONLY (proposal §6), no code/sample-data embedded (decision G2).
+  # Library = ObjectScript ExecuteMCPv2.Diagram.* under src/ExecuteMCPv2/ (stakeholder-directed; rides existing bootstrap, no new package mappings, no new npm package).
+  # ObjectScript touched in BOTH stories → BOOTSTRAP_VERSION bump per story (Rule #24).
+  # New iris_message_diagram key = mutates:read → default-enabled (Rule #28); frozen baseline 1e62c5ad5bf7 untouched (Rules #23/#25).
+  epic-21: backlog
+  21-0-message-diagram-core: backlog
+  21-1-episode-compression-dedup-and-docs: backlog
+  epic-21-retrospective: optional
