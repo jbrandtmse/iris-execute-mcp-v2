@@ -129,7 +129,9 @@ Method IsValidId(pId As %String) As %Boolean
 /// <code>%%</code> comments, <code>participant &lt;id&gt; [as &lt;label&gt;]</code>,
 /// <code>&lt;id&gt;-&gt;&gt;&lt;id&gt;: &lt;label&gt;</code> /
 /// <code>&lt;id&gt;--&gt;&gt;&lt;id&gt;: &lt;label&gt;</code> arrows, and balanced
-/// <code>loop N times … end</code> blocks (2-space body indent, no nesting in 21.0).
+/// <code>loop N times [&lt;label&gt;] … end</code> blocks with 2-space indentation per
+/// NESTING level (Story 21.1 extension: episode loops may carry a label after "times"
+/// and nest pair loops one level deeper; <code>end</code> closes at its loop's depth).
 /// Returns "" when every line conforms, else "line &lt;n&gt;: &lt;reason&gt;".
 Method ValidateMermaid(pMermaid As %String) As %String
 {
@@ -148,7 +150,9 @@ Method ValidateMermaid(pMermaid As %String) As %String
     Quit tErr
 }
 
-/// Validate ONE diagram line against the G3 subset; tracks loop nesting via pDepth.
+/// Validate ONE diagram line against the G3 subset; tracks loop nesting via pDepth
+/// (Story 21.1: arbitrary nesting depth, indent = 2 spaces per level, optional loop
+/// label after "times" for episode loops).
 Method ValidateLine(pRaw As %String, pLineNo As %Integer, ByRef pDepth As %Integer) As %String
 {
     If pRaw [ $Char(13) Quit "line "_pLineNo_": contains a carriage return"
@@ -159,20 +163,18 @@ Method ValidateLine(pRaw As %String, pLineNo As %Integer, ByRef pDepth As %Integ
     Set tLine = $Extract(pRaw, tIndent + 1, *)
     If tLine = "" Quit "line "_pLineNo_": blank line"
     If tLine = "end" {
-        If pDepth '= 1 Quit "line "_pLineNo_": 'end' without an open loop"
-        If tIndent '= 0 Quit "line "_pLineNo_": 'end' must not be indented"
-        Set pDepth = 0
+        If pDepth < 1 Quit "line "_pLineNo_": 'end' without an open loop"
+        If tIndent '= ((pDepth - 1) * 2) Quit "line "_pLineNo_": 'end' must close at its loop's indent depth"
+        Set pDepth = pDepth - 1
         Quit ""
     }
-    If (pDepth = 0) && (tIndent '= 0) Quit "line "_pLineNo_": unexpected indentation outside a loop"
-    If (pDepth = 1) && (tIndent '= 2) Quit "line "_pLineNo_": loop body must be indented exactly 2 spaces"
+    If tIndent '= (pDepth * 2) Quit "line "_pLineNo_": indentation must be exactly 2 spaces per nesting level"
     If $Extract(tLine, 1, 2) = "%%" Quit ""
     If $Extract(tLine, 1, 5) = "loop " {
-        If pDepth '= 0 Quit "line "_pLineNo_": nested loop not allowed in the 21.0 subset"
-        If ($Length(tLine, " ") '= 3) || ($Piece(tLine, " ", 3) '= "times") Quit "line "_pLineNo_": malformed loop header"
         Set tN = $Piece(tLine, " ", 2)
-        If (tN '= +tN) || (+tN < 2) Quit "line "_pLineNo_": loop count must be an integer >= 2"
-        Set pDepth = 1
+        If ($Piece(tLine, " ", 3) '= "times") || (tN '= +tN) || (+tN < 2) Quit "line "_pLineNo_": malformed loop header"
+        If ($Length(tLine, " ") > 3) && ($Piece(tLine, " ", 4, *) = "") Quit "line "_pLineNo_": empty loop label"
+        Set pDepth = pDepth + 1
         Quit ""
     }
     If $Extract(tLine, 1, 12) = "participant " {
@@ -408,6 +410,41 @@ Method TestApplyFailureShape() As %Status
     Do $$$AssertEquals(tWarnings.%Size(), 1, "Failure mirrored into structured warnings")
     Do $$$AssertTrue(tWarnings.%Get(0) [ "kaboom", "Structured warning keeps the sanitized text")
     Do $$$AssertTrue('(tWarnings.%Get(0) [ "^"), "Structured warning has no caret-global reference")
+    Quit $$$OK
+}
+
+/// Story 21.1 end-to-end: two identical multi-hop episodes (each wrapping three
+/// identical inner pairs) collapse to a NESTED loop diagram — episode loop at depth 0,
+/// pair loop at depth 1, legs at depth 2 — and the nested output conforms to the
+/// extended G3 grammar (ValidateMermaid nesting rules).
+Method TestRunEpisodeNestedViaFacade() As %Status
+{
+    Set tSession = ..#SESSIONBASE + 10
+    Set tSec = 0
+    For tIter = 1:1:2 {
+        Set tSec = tSec + 1
+        Set tRQ = ..InsertHeader(tSession, 1, 2, "Demo.Service", "Demo.Process", "Demo.Msg.Outer", ..FixtureTime(tSec))
+        For tJ = 1:1:3 {
+            Set tSec = tSec + 1
+            Set tIR = ..InsertHeader(tSession, 1, 2, "Demo.Process", "Demo.Operation", "Demo.Msg.Inner", ..FixtureTime(tSec))
+            Set tSec = tSec + 1
+            Do ..InsertHeader(tSession, 2, 2, "Demo.Operation", "Demo.Process", "Demo.Msg.InnerResp", ..FixtureTime(tSec), 0, "", tIR)
+        }
+        Set tSec = tSec + 1
+        Do ..InsertHeader(tSession, 2, 2, "Demo.Process", "Demo.Service", "Demo.Msg.OuterResp", ..FixtureTime(tSec), 0, "", tRQ)
+    }
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(..MakeIdList(tSession), , .tResult)
+    Do $$$AssertStatusOK(tSC, "Run should succeed for the nested-episode trace")
+    Set tDiag = tResult.%Get("diagrams").%Get(0)
+    Do $$$AssertEquals(tDiag.%Get("messageCount"), 16, "All sixteen rows loaded")
+    Set tMermaid = tDiag.%Get("mermaid")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 6), "loop 2 times Demo.Msg.Outer", "Episode loop at depth 0 with representative label")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 7), "  Demo.Service->>Demo.Process: Demo.Msg.Outer", "Outer request at depth 1")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 8), "  loop 3 times", "Pair loop nested at depth 1")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 9), "    Demo.Process->>Demo.Operation: Demo.Msg.Inner", "Pair legs at depth 2")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 11), "  end", "Nested loop closes at depth 1")
+    Do $$$AssertEquals(..MermaidLine(tMermaid, 13), "end", "Episode loop closes at depth 0")
+    Do $$$AssertEquals(..ValidateMermaid(tMermaid), "", "Nested diagram conforms to the extended G3 grammar")
     Quit $$$OK
 }
 

@@ -141,7 +141,43 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_logs` | Query event log entries | `type?`, `itemName?`, `count?`, `namespace?` | readOnly, idempotent |
 | `iris_production_queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
 | `iris_production_messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
+| `iris_message_diagram` | Mermaid sequence diagram from a message-trace session (Visual Trace as renderable text) | `sessionIds`, `labelMode?`, `maxRows?`, `dedup?`, `namespace?` | readOnly, idempotent |
 | `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
+
+#### `iris_message_diagram` — Message Trace Sequence Diagram
+
+Generates one Mermaid `sequenceDiagram` per requested session — the Management Portal's Visual Trace as renderable text. Config items become participants, `Invocation` maps to arrow style (sync `->>` for Inproc, async `-->>` for Queue), requests are correlated to their responses, errored messages are flagged with an ` [ERROR]` label suffix plus a sanitized `%%` comment, and each diagram opens with a session-metadata header. Two compression tiers keep large traces readable: contiguous identical request/response **pairs** and contiguous identical multi-hop **episodes** each collapse into `loop N times` blocks (episode loops nest pair loops). Anomalies (unpaired messages, correlation conflicts, unknown invocations, errors) surface both as `%%` comments and in the structured `warnings[]` array — generation never fails a call. Use [`iris_production_messages`](#production-monitoring-tools) when you want the raw message rows instead.
+
+> **Governance default:** `iris_message_diagram` is a pure **read** (`mutates: "read"`) and is **enabled by default** under `IRIS_GOVERNANCE`.
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `sessionIds` | *(required)* | 1–20 positive integer session IDs; one diagram per session |
+| `labelMode` | `full` | Arrow label style: `full` = full message body class name; `short` = last dotted segment |
+| `maxRows` | `2000` | Per-session cap on loaded message rows (max 10000); the diagram is flagged `truncated` when hit |
+| `dedup` | `true` | Collapse identical flows across the requested sessions: a session whose diagram matches an earlier one (session-metadata header normalized) keeps its own entry and reports `dedupOf` = the first session ID with that flow; pass `false` to render every session independently |
+| `namespace` | server default | Target namespace for the `Ens.MessageHeader` query |
+
+**Example output** (a session where a repeated 2-hop episode was compressed):
+
+```mermaid
+sequenceDiagram
+%% Session 12345: 13 messages, 2026-07-02 10:00:01 .. 2026-07-02 10:00:14
+participant MyApp.Service.FileIn
+participant MyApp.Process.Router
+participant MyApp.Operation.Send
+loop 3 times MyApp.Msg.Order
+  MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order
+  MyApp.Process.Router-->>MyApp.Operation.Send: MyApp.Msg.Dispatch
+  MyApp.Operation.Send-->>MyApp.Process.Router: MyApp.Msg.DispatchResp
+  MyApp.Process.Router->>MyApp.Service.FileIn: MyApp.Msg.OrderResp
+end
+MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order [ERROR]
+%% Unpaired request: message 90412 (MyApp.Service.FileIn -> MyApp.Process.Router) has no matching response
+%% Error on message 90412: connection refused
+```
 
 ### Credential Tools
 
@@ -463,6 +499,30 @@ Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` 
 </details>
 
 <details>
+<summary><strong>iris_message_diagram</strong> -- Diagram a message trace</summary>
+
+**Input:**
+```json
+{
+  "sessionIds": [12345, 12346],
+  "labelMode": "short",
+  "dedup": true
+}
+```
+
+**Output** (`structuredContent`; `content` carries one summary line + fenced ```` ```mermaid ```` block per session):
+```json
+{
+  "diagrams": [
+    { "sessionId": 12345, "mermaid": "sequenceDiagram\n%% Session 12345: ...", "messageCount": 14, "warnings": [], "truncated": false },
+    { "sessionId": 12346, "mermaid": "sequenceDiagram\n%% Session 12346: ...", "messageCount": 14, "warnings": [], "truncated": false, "dedupOf": 12345 }
+  ],
+  "count": 2
+}
+```
+</details>
+
+<details>
 <summary><strong>iris_production_adapters</strong> -- List adapters</summary>
 
 **Input:**
@@ -699,10 +759,10 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 20 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 21 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
-- All production lifecycle, item, and monitoring tools
+- All production lifecycle, item, monitoring, and diagram tools
 - All credential, lookup, rule, transform, and REST tools
 
 `iris_production_summary` does **not** accept a namespace parameter -- it iterates all namespaces automatically and returns a cross-namespace view.

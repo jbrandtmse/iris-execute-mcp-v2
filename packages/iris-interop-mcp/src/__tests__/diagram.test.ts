@@ -2,10 +2,11 @@
  * Tests for `iris_message_diagram` (Epic 21, Story 21.0 — AC 21.0.7/21.0.9/21.0.12).
  *
  * Mocked-HTTP unit tests covering: request wiring (CSV sessionIds, Rule #10
- * wire-explicit labelMode/maxRows defaults, namespace default + explicit),
+ * wire-explicit labelMode/maxRows/dedup defaults, namespace default + explicit),
  * the decision-G3 output contract (one summary + fenced ```mermaid block per
  * session in `content`; the endpoint result OBJECT verbatim in
- * `structuredContent`), Zod schema rejections, and the IrisApiError envelope.
+ * `structuredContent`; Story 21.1 `dedupOf` summary surfacing), Zod schema
+ * rejections, and the IrisApiError envelope.
  *
  * Also carries the AC 21.0.9 back-compat gate (Rule #19, mechanical):
  * a full-object `toEqual` snapshot proving `iris_production_messages`' request
@@ -56,7 +57,7 @@ describe("iris_message_diagram", () => {
 
     const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
     expect(calledPath).toBe(
-      "/api/executemcp/v2/interop/production/messages/diagram?namespace=USER&sessionIds=12%2C34&labelMode=full&maxRows=2000",
+      "/api/executemcp/v2/interop/production/messages/diagram?namespace=USER&sessionIds=12%2C34&labelMode=full&maxRows=2000&dedup=true",
     );
   });
 
@@ -73,6 +74,15 @@ describe("iris_message_diagram", () => {
     expect(calledPath).toContain("sessionIds=7");
     expect(calledPath).toContain("labelMode=short");
     expect(calledPath).toContain("maxRows=500");
+  });
+
+  it("should send dedup=false on the wire when explicitly disabled (Story 21.1)", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ diagrams: [], count: 0 }));
+
+    await messageDiagramTool.handler({ sessionIds: [7], dedup: false }, ctx);
+
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("dedup=false");
   });
 
   // ── output contract (decision G3) ──────────────────────────────
@@ -151,6 +161,55 @@ describe("iris_message_diagram", () => {
     expect(text.startsWith("Session 9: 1 message\n")).toBe(true);
   });
 
+  it("should surface dedupOf in the summary line (Story 21.1)", async () => {
+    const result = {
+      diagrams: [sampleDiagram(12), sampleDiagram(34, { dedupOf: 12 })],
+      count: 2,
+    };
+    mockHttp.get.mockResolvedValue(envelope(result));
+
+    const toolResult = await messageDiagramTool.handler({ sessionIds: [12, 34] }, ctx);
+
+    const first = toolResult.content[0]?.text as string;
+    const second = toolResult.content[1]?.text as string;
+    expect(first.startsWith("Session 12: 2 messages\n")).toBe(true);
+    expect(second.startsWith("Session 34: 2 messages (duplicate of session 12)")).toBe(true);
+    // structuredContent stays the endpoint result object verbatim, dedupOf included.
+    expect(toolResult.structuredContent).toEqual(result);
+  });
+
+  it("should send explicit dedup=true on the wire and omit the duplicate-of note when flows differ (Story 21.1 QA)", async () => {
+    // Two genuinely different flows: the endpoint returns no dedupOf on either entry.
+    const other = sampleDiagram(34, {
+      mermaid:
+        "sequenceDiagram\n" +
+        "%% Session 34: 1 message, 2026-07-02 11:00:01 .. 2026-07-02 11:00:01\n" +
+        "participant Demo.Service\n" +
+        "participant Demo.Other\n" +
+        "Demo.Service->>Demo.Other: Demo.Msg.Different",
+      messageCount: 1,
+    });
+    const result = { diagrams: [sampleDiagram(12), other], count: 2 };
+    mockHttp.get.mockResolvedValue(envelope(result));
+
+    const toolResult = await messageDiagramTool.handler(
+      { sessionIds: [12, 34], dedup: true },
+      ctx,
+    );
+
+    // Rule #10: an EXPLICIT true is sent on the wire too (not only the omitted default).
+    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
+    expect(calledPath).toContain("dedup=true");
+    // No entry carries dedupOf -> no "duplicate of" note in any summary line.
+    const first = toolResult.content[0]?.text as string;
+    const second = toolResult.content[1]?.text as string;
+    expect(first).not.toContain("duplicate of");
+    expect(second).not.toContain("duplicate of");
+    expect(second.startsWith("Session 34: 1 message\n")).toBe(true);
+    // structuredContent stays verbatim — no dedupOf key materializes client-side.
+    expect(toolResult.structuredContent).toEqual(result);
+  });
+
   // ── Zod schema ─────────────────────────────────────────────────
 
   it("should reject an empty sessionIds array", () => {
@@ -190,6 +249,21 @@ describe("iris_message_diagram", () => {
   it("should accept a minimal valid input", () => {
     const parsed = messageDiagramTool.inputSchema.safeParse({ sessionIds: [1] });
     expect(parsed.success).toBe(true);
+  });
+
+  it("should accept boolean dedup and reject non-boolean dedup (Story 21.1)", () => {
+    expect(
+      messageDiagramTool.inputSchema.safeParse({ sessionIds: [1], dedup: true }).success,
+    ).toBe(true);
+    expect(
+      messageDiagramTool.inputSchema.safeParse({ sessionIds: [1], dedup: false }).success,
+    ).toBe(true);
+    expect(
+      messageDiagramTool.inputSchema.safeParse({ sessionIds: [1], dedup: "yes" }).success,
+    ).toBe(false);
+    expect(
+      messageDiagramTool.inputSchema.safeParse({ sessionIds: [1], dedup: 1 }).success,
+    ).toBe(false);
   });
 
   // ── error handling ─────────────────────────────────────────────

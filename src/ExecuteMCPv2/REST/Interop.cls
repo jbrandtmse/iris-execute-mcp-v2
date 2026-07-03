@@ -1065,15 +1065,18 @@ ClassMethod MessageTrace() As %Status
     Quit $$$OK
 }
 
-/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Story 21.0).
+/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Stories
+/// 21.0/21.1).
 /// <p>Thin handler: validates the request, delegates to the
 /// <class>ExecuteMCPv2.Diagram.Generate</class> facade, and renders
-/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>.</p>
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated, dedupOf? }], count }</code>.</p>
 /// <p>Query parameters:
 /// <ul>
 ///   <li><code>sessionIds</code> — comma-separated list of 1-20 positive integer session IDs (required)</li>
 ///   <li><code>labelMode</code> — "full" (default) or "short" (last dotted segment of the body class)</li>
 ///   <li><code>maxRows</code> — per-session row cap (default 2000, max 10000)</li>
+///   <li><code>dedup</code> — cross-session dedup of identical flows: 1/true (default) or 0/false;
+///       a duplicate session's entry reports <code>dedupOf</code> = the first session id with the same flow</li>
 ///   <li><code>namespace</code> — target namespace for Ens.* operations</li>
 /// </ul></p>
 ClassMethod MessageDiagram() As %Status
@@ -1087,6 +1090,7 @@ ClassMethod MessageDiagram() As %Status
         Set tMaxRows = +$Get(%request.Data("maxRows",1), 2000) \ 1
         If tMaxRows < 1 Set tMaxRows = 2000
         If tMaxRows > 10000 Set tMaxRows = 10000
+        Set tDedupRaw = $ZConvert($Get(%request.Data("dedup",1)), "L")
         Set tNamespace = $Get(%request.Data("namespace",1))
 
         ; Validate labelMode
@@ -1095,6 +1099,19 @@ ClassMethod MessageDiagram() As %Status
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
+        }
+
+        ; Validate dedup (Story 21.1): 0/1/true/false, default true when omitted
+        Set tDedup = 1
+        If tDedupRaw '= "" {
+            If (tDedupRaw = "0") || (tDedupRaw = "false") {
+                Set tDedup = 0
+            } ElseIf (tDedupRaw '= "1") && (tDedupRaw '= "true") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'dedup' must be one of: 0, 1, true, false")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
         }
 
         ; Validate sessionIds: CSV of 1-20 positive canonical integers
@@ -1138,6 +1155,7 @@ ClassMethod MessageDiagram() As %Status
         Set tOptions = {}
         Do tOptions.%Set("labelMode", tLabelMode)
         Do tOptions.%Set("maxRows", tMaxRows, "number")
+        Do tOptions.%Set("dedup", tDedup, "boolean")
         Set tResult = ""
         Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(tSessionIds, tOptions, .tResult)
         If $$$ISERR(tSC) {

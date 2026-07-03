@@ -11,8 +11,11 @@
 ///       a mismatch emits a conflict warning but still pairs by order. The response arrow
 ///       is FORCED sync.</li>
 ///   <li><b>Queue pairing</b> — primary: the Response whose CorrespondingMessageId equals
-///       the request ID; fallback: equal ReturnQueueName + reversed endpoints + empty
-///       CorrId. Both legs render async; a queued pair is NEVER reclassified to sync.</li>
+///       the request ID; fallback: equal <b>non-empty</b> ReturnQueueName + reversed
+///       endpoints + empty CorrId (improvement I3, Story 21.1 — empty==empty does NOT
+///       pair, so a one-way async request stays unpaired-with-warning instead of silently
+///       false-pairing with a later CorrId-less response-typed row). Both legs render
+///       async; a queued pair is NEVER reclassified to sync.</li>
 ///   <li><b>Unpaired</b> requests warn; unpaired responses are emitted standalone (own
 ///       Src→Dst direction) with a warning — never dropped.</li>
 ///   <li><b>Arrows</b> — Inproc → sync <code>-&gt;&gt;</code>, Queue → async
@@ -67,8 +70,12 @@ ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String =
                         Quit
                     }
                 }
-                ; Queue fallback: equal ReturnQueueName + reversed endpoints + empty CorrId
-                If tMatch = 0 {
+                ; Queue fallback: equal NON-EMPTY ReturnQueueName + reversed endpoints +
+                ; empty CorrId. I3 (Story 21.1, resolves CR 21.0-1, proposal §6.2 [I3]):
+                ; the fallback fires only when BOTH ReturnQueueName values are non-empty
+                ; and equal — ""=="" trivially satisfied equality and silently false-paired
+                ; a one-way async request with a later CorrId-less response-typed row.
+                If (tMatch = 0) && (tReq.ReturnQueue '= "") {
                     For tJ = tI + 1:1:tN {
                         If tEffType(tJ) '= "Response" Continue
                         If $Get(tUsed(tJ)) Continue
@@ -131,7 +138,18 @@ ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String =
             Set tRE.Dst = tEv.Target
             Set tRE.IsError = ''tEv.IsError
             Set tRE.PairId = +$Get(tPairIdOf(tI))
-            Set tRE.Role = $Get(tRoleOf(tI))
+            ; Role reflects the EFFECTIVE type for every arrow — paired legs keep their
+            ; pairing role; unpaired arrows carry "req"/"resp" too (PairId=0 still marks
+            ; them unpaired). The Story 21.1 episode tier needs the request/response
+            ; distinction for its depth stack; the pair tier gates on PairId>0 so this
+            ; is invisible to it.
+            Set tRE.Role = $Select(tEffType(tI) = "Response": "resp", 1: "req")
+            ; Trace-utility classifier (Story 21.1, §6.3): prefix match on the ORIGINAL
+            ; body class (label mode cannot break it). The loader already excludes the
+            ; exact HS.Util.Trace.Request class at SQL level; this catches sibling
+            ; trace-utility classes that ARE loaded. Trace events are excluded from
+            ; episode signatures but retained in rendered bodies.
+            Set tRE.IsTrace = ($Extract(tEv.BodyClass, 1, 14) = "HS.Util.Trace.")
 
             ; label (mode applied here so compression signatures see the rendered label)
             Set tLabel = tEv.BodyClass

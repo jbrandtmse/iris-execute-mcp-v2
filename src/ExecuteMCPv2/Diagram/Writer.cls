@@ -18,6 +18,10 @@
 ///       warnings render as <code>%%</code> comments after the arrow line.</li>
 ///   <li><b>Single-line discipline</b> — every emitted label/comment has CR/LF/TAB
 ///       collapsed to spaces (a newline inside a label or comment breaks Mermaid).</li>
+///   <li><b>Nesting (Story 21.1)</b> — episode loops render as
+///       <code>loop N times &lt;representative label&gt;</code> blocks whose bodies are
+///       indented 2 spaces per nesting level; pair-loops render INSIDE episode loops;
+///       <code>end</code> lines close blocks at their opening depth.</li>
 /// </ul>
 Class ExecuteMCPv2.Diagram.Writer Extends %RegisteredObject
 {
@@ -50,19 +54,9 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
         }
 
         ; ── participant registry: first-appearance order over the compressed stream ──
+        ; (recurses into episodeloop bodies — Story 21.1 nesting)
         Set tPartCount = 0
-        For tI = 1:1:tN {
-            Set tEv = pRenderEvents.GetAt(tI)
-            If tEv.Kind = "arrow" {
-                Do ..RegisterParticipant(tEv.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-            } ElseIf tEv.Kind = "pairloop" {
-                Do ..RegisterParticipant(tEv.Req.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Req.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Resp.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Resp.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-            }
-        }
+        Do ..RegisterFromEvents(pRenderEvents, .tIdOf, .tTaken, .tOrder, .tPartCount)
         For tI = 1:1:tPartCount {
             Set tName = tOrder(tI)
             Set tId = tIdOf("n"_tName)
@@ -74,26 +68,8 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
             }
         }
 
-        ; ── body ─────────────────────────────────────────────────────────────
-        For tI = 1:1:tN {
-            Set tEv = pRenderEvents.GetAt(tI)
-            If tEv.Kind = "arrow" {
-                Set tOut = tOut_..ArrowLine(tEv, .tIdOf, "")_tNL
-                For tW = 1:1:tEv.Warnings.Count() {
-                    Set tOut = tOut_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
-                }
-            } ElseIf tEv.Kind = "pairloop" {
-                Set tOut = tOut_"loop "_(+tEv.Count)_" times"_tNL
-                Set tOut = tOut_..ArrowLine(tEv.Req, .tIdOf, "  ")_tNL
-                Set tOut = tOut_..ArrowLine(tEv.Resp, .tIdOf, "  ")_tNL
-                ; loop-level warnings are the deduped merge of all compressed iterations;
-                ; the leg events' own warning lists are NOT re-rendered (they were merged)
-                For tW = 1:1:tEv.Warnings.Count() {
-                    Set tOut = tOut_"  %% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
-                }
-                Set tOut = tOut_"end"_tNL
-            }
-        }
+        ; ── body (recursive: episode loops nest pair loops, 2 spaces per level) ──
+        Set tOut = tOut_..RenderBody(pRenderEvents, 0, .tIdOf)
 
         ; drop the final trailing newline for a tidy payload
         If $Extract(tOut, *) = tNL Set tOut = $Extract(tOut, 1, *-1)
@@ -102,6 +78,77 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
         Set tSC = ex.AsStatus()
     }
     Quit tSC
+}
+
+/// Walk a render-event list (recursing into episodeloop bodies) and register every
+/// participant in first-appearance order (Story 21.1 — the registry must see names
+/// nested inside episode loops exactly where they first render).
+ClassMethod RegisterFromEvents(pEvents As %Library.ListOfObjects, ByRef pIdOf, ByRef pTaken, ByRef pOrder, ByRef pCount) As %Status [ Internal ]
+{
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If tEv.Kind = "arrow" {
+            Do ..RegisterParticipant(tEv.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+        } ElseIf tEv.Kind = "pairloop" {
+            Do ..RegisterParticipant(tEv.Req.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Req.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Resp.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Resp.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+        } ElseIf tEv.Kind = "episodeloop" {
+            Do ..RegisterFromEvents(tEv.Body, .pIdOf, .pTaken, .pOrder, .pCount)
+        }
+    }
+    Quit $$$OK
+}
+
+/// Render a render-event list at the given nesting depth (indent = 2 spaces per level).
+/// <p>Arrows render at the current depth with their warnings as <code>%%</code> comments
+/// at the same depth. A pairloop opens <code>loop N times</code> at the current depth
+/// with its legs and deduped warnings one level deeper. An episodeloop (Story 21.1)
+/// opens <code>loop N times &lt;representative label&gt;</code> at the current depth,
+/// recursively renders its body one level deeper (pair-loops render INSIDE episode
+/// loops), then emits the loop-level warning EXTRAS (deduped from compressed iterations
+/// 2..N — §6.4 item 8) before the closing <code>end</code>.</p>
+/// <p>Every emitted chunk ends with a newline; the caller trims the final one.</p>
+ClassMethod RenderBody(pEvents As %Library.ListOfObjects, pDepth As %Integer, ByRef pIdOf) As %String [ Internal ]
+{
+    Set tNL = $Char(10)
+    Set tIndent = $Justify("", pDepth * 2)
+    Set tInner = $Justify("", (pDepth + 1) * 2)
+    Set tOut = ""
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If tEv.Kind = "arrow" {
+            Set tOut = tOut_..ArrowLine(tEv, .pIdOf, tIndent)_tNL
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tIndent_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+        } ElseIf tEv.Kind = "pairloop" {
+            Set tOut = tOut_tIndent_"loop "_(+tEv.Count)_" times"_tNL
+            Set tOut = tOut_..ArrowLine(tEv.Req, .pIdOf, tInner)_tNL
+            Set tOut = tOut_..ArrowLine(tEv.Resp, .pIdOf, tInner)_tNL
+            ; loop-level warnings are the deduped merge of all compressed iterations;
+            ; the leg events' own warning lists are NOT re-rendered (they were merged)
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tInner_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+            Set tOut = tOut_tIndent_"end"_tNL
+        } ElseIf tEv.Kind = "episodeloop" {
+            Set tLabel = ..SingleLine(tEv.Label)
+            Set tOut = tOut_tIndent_"loop "_(+tEv.Count)_" times"_$Select(tLabel = "": "", 1: " "_tLabel)_tNL
+            Set tOut = tOut_..RenderBody(tEv.Body, pDepth + 1, .pIdOf)
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tInner_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+            Set tOut = tOut_tIndent_"end"_tNL
+        }
+    }
+    Quit tOut
 }
 
 /// Register a participant name (first-appearance order, collision-suffixed ids).

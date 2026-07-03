@@ -81,7 +81,8 @@ Method TestAsyncQueueRoundTrip() As %Status
     Quit $$$OK
 }
 
-/// Queue fallback pairing: equal ReturnQueueName + reversed endpoints + empty CorrId.
+/// Queue fallback pairing: equal NON-EMPTY ReturnQueueName + reversed endpoints + empty
+/// CorrId still pairs (improvement I3 keeps the legitimate fallback intact).
 Method TestQueueFallbackPairing() As %Status
 {
     Set tEvents = ##class(%Library.ListOfObjects).%New()
@@ -93,6 +94,47 @@ Method TestQueueFallbackPairing() As %Status
     Do $$$AssertEquals(tRender.GetAt(1).PairId, tRender.GetAt(2).PairId, "Fallback pair legs share PairId")
     Do $$$AssertEquals(tRender.GetAt(2).Arrow, "-->>", "Fallback-paired response stays async")
     Do $$$AssertEquals(tRender.GetAt(1).Warnings.Count(), 0, "No warnings for the fallback pair request")
+    Quit $$$OK
+}
+
+/// Improvement I3 (Story 21.1, proposal §6.2 [I3], resolves CR 21.0-1): the Queue
+/// fallback fires only when BOTH ReturnQueueName values are non-empty — a one-way async
+/// request (empty ReturnQueue) plus a later CorrId-less reverse response-typed row must
+/// stay UNPAIRED, with BOTH warnings emitted (not silently false-paired into a loopable
+/// pair).
+Method TestQueueEmptyReturnQueueNoFalsePair() As %Status
+{
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    Do tEvents.Insert(..MakeEvent(160, "Request", "Queue", "Demo.Process", "Demo.Operation", "Demo.Msg.OneWay"))
+    Do tEvents.Insert(..MakeEvent(161, "Response", "Queue", "Demo.Operation", "Demo.Process", "Demo.Msg.Late"))
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Correlator).Correlate(tEvents, "full", .tRender)
+    Do $$$AssertStatusOK(tSC, "Correlate should succeed")
+    Do $$$AssertEquals(tRender.GetAt(1).PairId, 0, "One-way request stays unpaired (I3)")
+    Do $$$AssertEquals(tRender.GetAt(2).PairId, 0, "CorrId-less reverse response stays unpaired (I3)")
+    Do $$$AssertTrue(..HasWarning(tRender.GetAt(1), "Unpaired request"), "Unpaired-request warning emitted")
+    Do $$$AssertTrue(..HasWarning(tRender.GetAt(2), "Unpaired response"), "Unpaired-response warning emitted")
+    Quit $$$OK
+}
+
+/// I3 boundary: one side empty, the other non-empty never pairs; and the CorrId-primary
+/// Queue path is untouched by the guard (empty ReturnQueues still pair via CorrId).
+Method TestQueueFallbackI3Boundaries() As %Status
+{
+    ; request carries a queue name, the response does not -> no fallback pair
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    Do tEvents.Insert(..MakeEvent(170, "Request", "Queue", "Demo.Process", "Demo.Operation", "Demo.Msg.Req", "", "QDemo"))
+    Do tEvents.Insert(..MakeEvent(171, "Response", "Queue", "Demo.Operation", "Demo.Process", "Demo.Msg.Resp"))
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Correlator).Correlate(tEvents, "full", .tRender)
+    Do $$$AssertStatusOK(tSC, "Correlate should succeed")
+    Do $$$AssertEquals(tRender.GetAt(1).PairId, 0, "Mismatched (non-empty vs empty) queues do not pair")
+    ; CorrId primary still pairs even with BOTH ReturnQueues empty (guard is fallback-only)
+    Set tEvents2 = ##class(%Library.ListOfObjects).%New()
+    Do tEvents2.Insert(..MakeEvent(180, "Request", "Queue", "Demo.Process", "Demo.Operation", "Demo.Msg.Req"))
+    Do tEvents2.Insert(..MakeEvent(181, "Response", "Queue", "Demo.Operation", "Demo.Process", "Demo.Msg.Resp", 180))
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Correlator).Correlate(tEvents2, "full", .tRender2)
+    Do $$$AssertStatusOK(tSC, "Correlate should succeed")
+    Do $$$AssertTrue(tRender2.GetAt(1).PairId > 0, "CorrId-primary pairing unaffected by the I3 guard")
+    Do $$$AssertEquals(tRender2.GetAt(1).PairId, tRender2.GetAt(2).PairId, "CorrId pair legs share PairId")
     Quit $$$OK
 }
 

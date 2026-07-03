@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5bd5579c25c1";
+export const BOOTSTRAP_VERSION = "1040c6dcfce3";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5bd5579c25c1";
+Parameter BOOTSTRAPVERSION = "1040c6dcfce3";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -506,8 +506,8 @@ Property ErrorText As %String(MAXLEN = "");
     "ExecuteMCPv2.Diagram.RenderEvent.cls",
     `/// One entry in the ordered render-event stream that flows
 /// <class>ExecuteMCPv2.Diagram.Correlator</class> → <class>ExecuteMCPv2.Diagram.Compressor</class>
-/// → <class>ExecuteMCPv2.Diagram.Writer</class> (Epic 21, Story 21.0).
-/// <p><property>Kind</property> discriminates two shapes:</p>
+/// → <class>ExecuteMCPv2.Diagram.Writer</class> (Epic 21, Stories 21.0/21.1).
+/// <p><property>Kind</property> discriminates three shapes:</p>
 /// <ul>
 ///   <li><code>"arrow"</code> — one rendered message arrow. Uses <property>Src</property>,
 ///       <property>Dst</property>, <property>Label</property>, <property>Arrow</property>,
@@ -516,14 +516,20 @@ Property ErrorText As %String(MAXLEN = "");
 ///   <li><code>"pairloop"</code> — a synthetic pair-level loop block produced by the
 ///       compressor: <property>Count</property> iterations of the request/response legs
 ///       referenced by <property>Req</property> and <property>Resp</property>.</li>
+///   <li><code>"episodeloop"</code> — a synthetic episode-level loop block (Story 21.1,
+///       §6.3): <property>Count</property> iterations of the multi-hop episode whose
+///       representative body events live in <property>Body</property>;
+///       <property>Label</property> carries the representative loop label.</li>
 /// </ul>
 /// <p><property>Warnings</property> carries the anomaly texts attached to this event;
 /// they are emitted both as <code>%%</code> Mermaid comments and mirrored into the
-/// structured <code>warnings[]</code> array (decision G3 best-effort contract).</p>
+/// structured <code>warnings[]</code> array (decision G3 best-effort contract). For an
+/// episodeloop the list carries the deduped EXTRAS from compressed iterations 2..N —
+/// texts not already present on the representative body's events (§6.4 item 8).</p>
 Class ExecuteMCPv2.Diagram.RenderEvent Extends %RegisteredObject
 {
 
-/// Event shape discriminator: <code>"arrow"</code> or <code>"pairloop"</code>.
+/// Event shape discriminator: <code>"arrow"</code>, <code>"pairloop"</code>, or <code>"episodeloop"</code>.
 Property Kind As %String(MAXLEN = 16) [ InitialExpression = "arrow" ];
 
 /// Source config item name (arrow kind).
@@ -548,10 +554,21 @@ Property IsError As %Boolean [ InitialExpression = 0 ];
 /// <p>The request leg and its response leg share the same positive PairId.</p>
 Property PairId As %Integer [ InitialExpression = 0 ];
 
-/// Pairing role of an arrow event: <code>"req"</code>, <code>"resp"</code>, or <code>""</code> (unpaired).
+/// Role of an arrow event, set from the EFFECTIVE type for every correlator-emitted
+/// arrow (Story 21.1): <code>"req"</code> or <code>"resp"</code>. Unpairedness is
+/// signaled by <property>PairId</property> = 0, NOT by an empty Role — the episode
+/// tier's depth stack needs the request/response distinction on unpaired arrows too,
+/// while the pair tier gates on <code>PairId &gt; 0</code>. <code>""</code> occurs only
+/// on synthetic non-arrow kinds (pairloop/episodeloop).
 Property Role As %String(MAXLEN = 8);
 
-/// Iteration count (pairloop kind).
+/// Trace-utility event flag (Story 21.1, §6.3): true when the ORIGINAL body class starts
+/// with <code>HS.Util.Trace.</code>. Trace events are excluded from episode signatures
+/// but retained in rendered bodies; between-episode trace events attach to the previous
+/// episode (§6.4 item 5).
+Property IsTrace As %Boolean [ InitialExpression = 0 ];
+
+/// Iteration count (pairloop and episodeloop kinds).
 Property Count As %Integer [ InitialExpression = 0 ];
 
 /// Representative request leg (pairloop kind).
@@ -559,6 +576,10 @@ Property Req As ExecuteMCPv2.Diagram.RenderEvent;
 
 /// Representative response leg (pairloop kind).
 Property Resp As ExecuteMCPv2.Diagram.RenderEvent;
+
+/// Representative episode body (episodeloop kind): the first compressed iteration's
+/// ordered events (arrows and pair-loops — pair-loops render INSIDE episode loops).
+Property Body As list Of ExecuteMCPv2.Diagram.RenderEvent;
 
 /// Anomaly/warning texts for this event (deduped merge of all iterations for a pairloop).
 Property Warnings As list Of %String(MAXLEN = "");
@@ -751,8 +772,11 @@ ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
 ///       a mismatch emits a conflict warning but still pairs by order. The response arrow
 ///       is FORCED sync.</li>
 ///   <li><b>Queue pairing</b> — primary: the Response whose CorrespondingMessageId equals
-///       the request ID; fallback: equal ReturnQueueName + reversed endpoints + empty
-///       CorrId. Both legs render async; a queued pair is NEVER reclassified to sync.</li>
+///       the request ID; fallback: equal <b>non-empty</b> ReturnQueueName + reversed
+///       endpoints + empty CorrId (improvement I3, Story 21.1 — empty==empty does NOT
+///       pair, so a one-way async request stays unpaired-with-warning instead of silently
+///       false-pairing with a later CorrId-less response-typed row). Both legs render
+///       async; a queued pair is NEVER reclassified to sync.</li>
 ///   <li><b>Unpaired</b> requests warn; unpaired responses are emitted standalone (own
 ///       Src→Dst direction) with a warning — never dropped.</li>
 ///   <li><b>Arrows</b> — Inproc → sync <code>-&gt;&gt;</code>, Queue → async
@@ -807,8 +831,12 @@ ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String =
                         Quit
                     }
                 }
-                ; Queue fallback: equal ReturnQueueName + reversed endpoints + empty CorrId
-                If tMatch = 0 {
+                ; Queue fallback: equal NON-EMPTY ReturnQueueName + reversed endpoints +
+                ; empty CorrId. I3 (Story 21.1, resolves CR 21.0-1, proposal §6.2 [I3]):
+                ; the fallback fires only when BOTH ReturnQueueName values are non-empty
+                ; and equal — ""=="" trivially satisfied equality and silently false-paired
+                ; a one-way async request with a later CorrId-less response-typed row.
+                If (tMatch = 0) && (tReq.ReturnQueue '= "") {
                     For tJ = tI + 1:1:tN {
                         If tEffType(tJ) '= "Response" Continue
                         If $Get(tUsed(tJ)) Continue
@@ -871,7 +899,18 @@ ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String =
             Set tRE.Dst = tEv.Target
             Set tRE.IsError = ''tEv.IsError
             Set tRE.PairId = +$Get(tPairIdOf(tI))
-            Set tRE.Role = $Get(tRoleOf(tI))
+            ; Role reflects the EFFECTIVE type for every arrow — paired legs keep their
+            ; pairing role; unpaired arrows carry "req"/"resp" too (PairId=0 still marks
+            ; them unpaired). The Story 21.1 episode tier needs the request/response
+            ; distinction for its depth stack; the pair tier gates on PairId>0 so this
+            ; is invisible to it.
+            Set tRE.Role = $Select(tEffType(tI) = "Response": "resp", 1: "req")
+            ; Trace-utility classifier (Story 21.1, §6.3): prefix match on the ORIGINAL
+            ; body class (label mode cannot break it). The loader already excludes the
+            ; exact HS.Util.Trace.Request class at SQL level; this catches sibling
+            ; trace-utility classes that ARE loaded. Trace events are excluded from
+            ; episode signatures but retained in rendered bodies.
+            Set tRE.IsTrace = ($Extract(tEv.BodyClass, 1, 14) = "HS.Util.Trace.")
 
             ; label (mode applied here so compression signatures see the rendered label)
             Set tLabel = tEv.BodyClass
@@ -922,22 +961,33 @@ ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String =
   ],
   [
     "ExecuteMCPv2.Diagram.Compressor.cls",
-    `/// Pair-level loop compressor for the message-trace sequence-diagram library
-/// (Epic 21, Story 21.0). Pure in-memory — no SQL, no IRIS state.
-/// <p>Implements the §6.3 pair tier of sprint-change-proposal-2026-07-02.md: a Request
-/// arrow IMMEDIATELY followed by its paired Response arrow forms a pair unit; contiguous
-/// pair units with identical signatures and count &gt; 1 collapse to one synthetic
-/// <code>pairloop</code> render event carrying the count and both legs.</p>
-/// <p>The pair signature is
+    `/// Two-tier loop compressor for the message-trace sequence-diagram library
+/// (Epic 21, Stories 21.0/21.1). Pure in-memory — no SQL, no IRIS state.
+/// <p><b>Pair tier</b> (<method>Compress</method>, Story 21.0 — §6.3 of
+/// sprint-change-proposal-2026-07-02.md): a Request arrow IMMEDIATELY followed by its
+/// paired Response arrow forms a pair unit; contiguous pair units with identical
+/// signatures and count &gt; 1 collapse to one synthetic <code>pairloop</code> render
+/// event carrying the count and both legs. The pair signature is
 /// <code>reqSrc|reqDst|reqLabel|reqArrow|reqIsError||respSrc|respDst|respLabel|respArrow|respIsError</code>
 /// — arrow inclusion keeps Inproc/Queue pairs distinct, and per improvement I1 BOTH legs'
 /// error state joins the signature so an errored pair never merges into a clean loop
-/// (§6.4 item 11).</p>
-/// <p>Warnings from compressed pairs are deduped (exact text match, first-seen order)
-/// and retained on the loop event (§6.4 item 8).</p>
-/// <p>Episode-level compression (depth-stack tier) is Story 21.1 — this class is the
-/// seam: it consumes and produces the same ordered render-event stream, so the episode
-/// tier can slot in after the pair tier without reshaping the pipeline.</p>
+/// (§6.4 item 11). Warnings from compressed pairs are deduped (exact text match,
+/// first-seen order) and retained on the loop event (§6.4 item 8).</p>
+/// <p><b>Episode tier</b> (<method>CompressEpisodes</method>, Story 21.1 — §6.3): groups
+/// the pair-compressed stream into multi-hop "episodes" via a depth stack over sync
+/// calls (a sync request pushes a frame, its response pops it; a paired async request
+/// opens a queue-rooted frame — §6.4 item 6). Abandoned frames are unwound per §6.4
+/// item 4: a new request whose source is not the top sync frame's destination pops it,
+/// and a response answering a deeper frame unwinds to it. Episode signatures are built
+/// from business events only (trace-utility events are excluded from signatures but
+/// retained in bodies, and between-episode trace events attach to the previous episode —
+/// §6.4 item 5); a pair-loop contributes its fragments plus <code>LOOPCOUNT=N</code>
+/// (§6.4 item 3) and error state joins the signature (I1). Contiguous identical-signature
+/// episodes with count &gt; 1 collapse to one <code>episodeloop</code> event wrapping the
+/// representative body. Envelope-wrapper flows (§6.4 item 7) are handled by peeling an
+/// outer sync wrapper pair whose response is the final event. When no repetition exists
+/// the tier is a pure pass-through — the emitted stream (and therefore the diagram text)
+/// is unchanged (Story 21.1 byte-for-byte gate).</p>
 Class ExecuteMCPv2.Diagram.Compressor Extends %RegisteredObject
 {
 
@@ -1032,6 +1082,264 @@ ClassMethod PairSignature(pReq As ExecuteMCPv2.Diagram.RenderEvent, pResp As Exe
     Quit pReq.Src_"|"_pReq.Dst_"|"_pReq.Label_"|"_pReq.Arrow_"|"_(''pReq.IsError)_"||"_pResp.Src_"|"_pResp.Dst_"|"_pResp.Label_"|"_pResp.Arrow_"|"_(''pResp.IsError)
 }
 
+/// Episode-level compression (Story 21.1, §6.3): compress contiguous identical-signature
+/// multi-hop episodes in the PAIR-COMPRESSED render-event stream into
+/// <code>episodeloop</code> events. A stream with no repeating episodes passes through
+/// UNCHANGED (the Story 21.1 byte-for-byte back-compat gate).
+/// <p>§6.4 item 7 — envelope-wrapper flows: an outer sync wrapper request whose response
+/// arrives at the very end would keep the depth stack non-empty for the whole stream
+/// (one giant episode, no repetition detected). Simplified general rule (dev decision,
+/// recorded in the Story 21.1 Dev Agent Record — the reference used a domain naming
+/// heuristic): when the FIRST event is a paired sync request arrow AND the LAST event is
+/// its paired response, peel the wrapper pair and run episode detection on the events
+/// between them (equivalent to starting episode detection at depth 2). Applied once —
+/// no recursive peeling.</p>
+ClassMethod CompressEpisodes(pRenderEvents As %Library.ListOfObjects, Output pCompressed As %Library.ListOfObjects) As %Status
+{
+    Set tSC = $$$OK
+    Set pCompressed = ##class(%Library.ListOfObjects).%New()
+    Try {
+        Set tN = 0
+        If $IsObject(pRenderEvents) Set tN = pRenderEvents.Count()
+        If tN = 0 Quit
+
+        ; §6.4 item 7: envelope-wrapper peel (see class comment above)
+        Set tWrapped = 0
+        Set tFirst = pRenderEvents.GetAt(1)
+        If (tN >= 4) && (tFirst.Kind = "arrow") && (tFirst.Role = "req") && (tFirst.Arrow = "->>") && (tFirst.PairId > 0) {
+            Set tLast = pRenderEvents.GetAt(tN)
+            If (tLast.Kind = "arrow") && (tLast.Role = "resp") && (tLast.PairId = tFirst.PairId) {
+                Set tWrapped = 1
+            }
+        }
+        If tWrapped {
+            Set tMiddle = ##class(%Library.ListOfObjects).%New()
+            For tI = 2:1:tN - 1 {
+                Do tMiddle.Insert(pRenderEvents.GetAt(tI))
+            }
+            Set tSC = ..EpisodeCore(tMiddle, .tInner)
+            If $$$ISERR(tSC) Quit
+            Do pCompressed.Insert(tFirst)
+            For tI = 1:1:tInner.Count() {
+                Do pCompressed.Insert(tInner.GetAt(tI))
+            }
+            Do pCompressed.Insert(pRenderEvents.GetAt(tN))
+        } Else {
+            Set tSC = ..EpisodeCore(pRenderEvents, .pCompressed)
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Core episode detection + collapse over one render-event stream (no wrapper peel).
+/// <p>Phase 1 groups events into episodes with a depth stack over sync calls: a sync
+/// request pushes a frame (destination + PairId), its response pops it; a PAIRED async
+/// request opens a queue-rooted frame (§6.4 item 6 — its known response closes it).
+/// Unwind rules (§6.4 item 4): a new request whose source is not the top SYNC frame's
+/// destination pops abandoned sync frames (known-paired queue frames are never unwound
+/// this way); a response answering a deeper frame unwinds to that frame. A new episode
+/// roots whenever a request-shaped event (request arrow or pair-loop) arrives at depth 0;
+/// responses and trace-utility events never open a boundary — they attach to the current
+/// episode (§6.4 item 5 keeps between-episode trace events from breaking contiguity).</p>
+/// <p>Phase 2 collapses contiguous runs of identical-signature episodes (count &gt; 1,
+/// non-empty signature) into one <code>episodeloop</code> event: the FIRST iteration is
+/// the representative body; warning texts from iterations 2..N that are not already on
+/// the representative body are deduped onto the loop event (§6.4 item 8).</p>
+ClassMethod EpisodeCore(pRenderEvents As %Library.ListOfObjects, Output pCompressed As %Library.ListOfObjects) As %Status [ Internal ]
+{
+    Set tSC = $$$OK
+    Set pCompressed = ##class(%Library.ListOfObjects).%New()
+    Try {
+        Set tN = 0
+        If $IsObject(pRenderEvents) Set tN = pRenderEvents.Count()
+
+        ; ── Phase 1: group events into episodes via the sync-call depth stack ──
+        ; tFrame(level) = $LB(destination, pairId, isSync); tEp(i) = event list
+        Set tEpCount = 0
+        Set tCur = 0
+        Set tDepth = 0
+        For tI = 1:1:tN {
+            Set tEv = pRenderEvents.GetAt(tI)
+
+            ; trace-utility events: attach to the current/previous episode — no episode
+            ; boundary, no stack effect (§6.4 item 5)
+            If ..IsTraceEvent(tEv) {
+                If tCur = 0 {
+                    Set tEpCount = tEpCount + 1
+                    Set tEp(tEpCount) = ##class(%Library.ListOfObjects).%New()
+                    Set tCur = tEpCount
+                }
+                Do tEp(tCur).Insert(tEv)
+                Continue
+            }
+
+            ; response arrows: pop the frame they answer (unwinding deeper-frame answers,
+            ; §6.4 item 4); unmatched responses attach without a depth change. A response
+            ; never opens an episode boundary.
+            If (tEv.Kind = "arrow") && (tEv.Role = "resp") {
+                If tEv.PairId > 0 {
+                    Set tFound = 0
+                    For tK = tDepth:-1:1 {
+                        If $List(tFrame(tK), 2) = tEv.PairId {
+                            Set tFound = tK
+                            Quit
+                        }
+                    }
+                    If tFound > 0 Set tDepth = tFound - 1
+                }
+                If tCur = 0 {
+                    Set tEpCount = tEpCount + 1
+                    Set tEp(tEpCount) = ##class(%Library.ListOfObjects).%New()
+                    Set tCur = tEpCount
+                }
+                Do tEp(tCur).Insert(tEv)
+                Continue
+            }
+
+            ; request-shaped event: a request arrow or a self-contained pair-loop.
+            ; §6.4 item 4 rule A: unwind abandoned SYNC frames whose destination is not
+            ; this request's source (a known-paired queue frame is never unwound — its
+            ; response is coming, §6.4 item 6).
+            If tEv.Kind = "arrow" {
+                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tEv.Src '= $List(tFrame(tDepth), 1)) {
+                    Set tDepth = tDepth - 1
+                }
+            }
+            If (tDepth = 0) || (tCur = 0) {
+                Set tEpCount = tEpCount + 1
+                Set tEp(tEpCount) = ##class(%Library.ListOfObjects).%New()
+                Set tCur = tEpCount
+            }
+            Do tEp(tCur).Insert(tEv)
+            If tEv.Kind = "arrow" {
+                If tEv.Arrow = "->>" {
+                    ; a sync request pushes (paired or not — abandonment is unwound later)
+                    Set tDepth = tDepth + 1
+                    Set tFrame(tDepth) = $ListBuild(tEv.Dst, +tEv.PairId, 1)
+                } ElseIf tEv.PairId > 0 {
+                    ; §6.4 item 6: an async request with a KNOWN paired response opens a
+                    ; queue-rooted frame that closes when that response is consumed
+                    Set tDepth = tDepth + 1
+                    Set tFrame(tDepth) = $ListBuild(tEv.Dst, +tEv.PairId, 0)
+                }
+            }
+        }
+
+        ; ── Phase 2: collapse contiguous identical-signature episodes (§6.3) ──
+        For tI = 1:1:tEpCount {
+            Set tSig(tI) = ..EpisodeSignature(tEp(tI))
+        }
+        Set tI = 1
+        While tI <= tEpCount {
+            Set tRun = 1
+            If tSig(tI) '= "" {
+                While ((tI + tRun) <= tEpCount) && (tSig(tI + tRun) = tSig(tI)) {
+                    Set tRun = tRun + 1
+                }
+            }
+            If tRun = 1 {
+                ; non-repeating episode: pure pass-through, original order preserved
+                For tJ = 1:1:tEp(tI).Count() {
+                    Do pCompressed.Insert(tEp(tI).GetAt(tJ))
+                }
+                Set tI = tI + 1
+                Continue
+            }
+            ; collapse the run: first iteration = representative body; deduped warning
+            ; EXTRAS from iterations 2..N ride the loop event (§6.4 item 8)
+            Set tLoop = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+            Set tLoop.Kind = "episodeloop"
+            Set tLoop.Count = tRun
+            Set tLoop.Label = ..RepresentativeLabel(tEp(tI))
+            Kill tSeen
+            For tJ = 1:1:tEp(tI).Count() {
+                Set tBodyEv = tEp(tI).GetAt(tJ)
+                Do tLoop.Body.Insert(tBodyEv)
+                For tW = 1:1:tBodyEv.Warnings.Count() {
+                    Set tSeen(tBodyEv.Warnings.GetAt(tW)) = 1
+                }
+            }
+            For tP = tI + 1:1:tI + tRun - 1 {
+                For tJ = 1:1:tEp(tP).Count() {
+                    Set tBodyEv = tEp(tP).GetAt(tJ)
+                    For tW = 1:1:tBodyEv.Warnings.Count() {
+                        Set tText = tBodyEv.Warnings.GetAt(tW)
+                        If '$Data(tSeen(tText)) {
+                            Set tSeen(tText) = 1
+                            Do tLoop.Warnings.Insert(tText)
+                        }
+                    }
+                }
+            }
+            Do pCompressed.Insert(tLoop)
+            Set tI = tI + tRun
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Build the episode signature from BUSINESS events only (§6.3): trace-utility events
+/// are skipped; an arrow contributes <code>A(src|dst|label|arrow|isError)</code> — the
+/// arrow style stands in for the raw Invocation value (§6.3: invocation excluded, arrow
+/// substitutes) and the I1 error state is included; a pair-loop contributes its full
+/// pair signature plus <code>LOOPCOUNT=N</code> so different iteration counts never
+/// merge (§6.4 item 3). An all-trace (or empty) episode yields "" and is never merged.
+ClassMethod EpisodeSignature(pEvents As %Library.ListOfObjects) As %String [ Internal ]
+{
+    Set tSig = ""
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If ..IsTraceEvent(tEv) Continue
+        If tEv.Kind = "pairloop" {
+            Set tFrag = "L("_..PairSignature(tEv.Req, tEv.Resp)_"|LOOPCOUNT="_(+tEv.Count)_")"
+        } Else {
+            Set tFrag = "A("_tEv.Src_"|"_tEv.Dst_"|"_tEv.Label_"|"_tEv.Arrow_"|"_(''tEv.IsError)_")"
+        }
+        Set tSig = tSig_$Select(tSig = "": "", 1: "##")_tFrag
+    }
+    Quit tSig
+}
+
+/// True when the event is a trace-utility event: an arrow flagged by the correlator's
+/// <code>HS.Util.Trace.</code> body-class prefix classifier, or a pair-loop whose BOTH
+/// legs are trace events.
+ClassMethod IsTraceEvent(pEv As ExecuteMCPv2.Diagram.RenderEvent) As %Boolean [ Internal ]
+{
+    If pEv.Kind = "pairloop" {
+        Quit ($IsObject(pEv.Req) && pEv.Req.IsTrace && $IsObject(pEv.Resp) && pEv.Resp.IsTrace)
+    }
+    Quit ''pEv.IsTrace
+}
+
+/// Representative label for an episode loop (dev decision, recorded in the Story 21.1
+/// Dev Agent Record): the label of the episode's FIRST business event — the opening
+/// request's label (a pair-loop contributes its request leg's label). Falls back to
+/// "episode" when the episode has no business events.
+ClassMethod RepresentativeLabel(pEvents As %Library.ListOfObjects) As %String [ Internal ]
+{
+    Set tLabel = ""
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If ..IsTraceEvent(tEv) Continue
+        If tEv.Kind = "pairloop" {
+            Set tLabel = tEv.Req.Label
+        } Else {
+            Set tLabel = tEv.Label
+        }
+        Quit
+    }
+    If tLabel = "" Set tLabel = "episode"
+    Quit tLabel
+}
+
 }`,
   ],
   [
@@ -1056,6 +1364,10 @@ ClassMethod PairSignature(pReq As ExecuteMCPv2.Diagram.RenderEvent, pResp As Exe
 ///       warnings render as <code>%%</code> comments after the arrow line.</li>
 ///   <li><b>Single-line discipline</b> — every emitted label/comment has CR/LF/TAB
 ///       collapsed to spaces (a newline inside a label or comment breaks Mermaid).</li>
+///   <li><b>Nesting (Story 21.1)</b> — episode loops render as
+///       <code>loop N times &lt;representative label&gt;</code> blocks whose bodies are
+///       indented 2 spaces per nesting level; pair-loops render INSIDE episode loops;
+///       <code>end</code> lines close blocks at their opening depth.</li>
 /// </ul>
 Class ExecuteMCPv2.Diagram.Writer Extends %RegisteredObject
 {
@@ -1088,19 +1400,9 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
         }
 
         ; ── participant registry: first-appearance order over the compressed stream ──
+        ; (recurses into episodeloop bodies — Story 21.1 nesting)
         Set tPartCount = 0
-        For tI = 1:1:tN {
-            Set tEv = pRenderEvents.GetAt(tI)
-            If tEv.Kind = "arrow" {
-                Do ..RegisterParticipant(tEv.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-            } ElseIf tEv.Kind = "pairloop" {
-                Do ..RegisterParticipant(tEv.Req.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Req.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Resp.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
-                Do ..RegisterParticipant(tEv.Resp.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
-            }
-        }
+        Do ..RegisterFromEvents(pRenderEvents, .tIdOf, .tTaken, .tOrder, .tPartCount)
         For tI = 1:1:tPartCount {
             Set tName = tOrder(tI)
             Set tId = tIdOf("n"_tName)
@@ -1112,26 +1414,8 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
             }
         }
 
-        ; ── body ─────────────────────────────────────────────────────────────
-        For tI = 1:1:tN {
-            Set tEv = pRenderEvents.GetAt(tI)
-            If tEv.Kind = "arrow" {
-                Set tOut = tOut_..ArrowLine(tEv, .tIdOf, "")_tNL
-                For tW = 1:1:tEv.Warnings.Count() {
-                    Set tOut = tOut_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
-                }
-            } ElseIf tEv.Kind = "pairloop" {
-                Set tOut = tOut_"loop "_(+tEv.Count)_" times"_tNL
-                Set tOut = tOut_..ArrowLine(tEv.Req, .tIdOf, "  ")_tNL
-                Set tOut = tOut_..ArrowLine(tEv.Resp, .tIdOf, "  ")_tNL
-                ; loop-level warnings are the deduped merge of all compressed iterations;
-                ; the leg events' own warning lists are NOT re-rendered (they were merged)
-                For tW = 1:1:tEv.Warnings.Count() {
-                    Set tOut = tOut_"  %% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
-                }
-                Set tOut = tOut_"end"_tNL
-            }
-        }
+        ; ── body (recursive: episode loops nest pair loops, 2 spaces per level) ──
+        Set tOut = tOut_..RenderBody(pRenderEvents, 0, .tIdOf)
 
         ; drop the final trailing newline for a tidy payload
         If $Extract(tOut, *) = tNL Set tOut = $Extract(tOut, 1, *-1)
@@ -1140,6 +1424,77 @@ ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime A
         Set tSC = ex.AsStatus()
     }
     Quit tSC
+}
+
+/// Walk a render-event list (recursing into episodeloop bodies) and register every
+/// participant in first-appearance order (Story 21.1 — the registry must see names
+/// nested inside episode loops exactly where they first render).
+ClassMethod RegisterFromEvents(pEvents As %Library.ListOfObjects, ByRef pIdOf, ByRef pTaken, ByRef pOrder, ByRef pCount) As %Status [ Internal ]
+{
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If tEv.Kind = "arrow" {
+            Do ..RegisterParticipant(tEv.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+        } ElseIf tEv.Kind = "pairloop" {
+            Do ..RegisterParticipant(tEv.Req.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Req.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Resp.Src, .pIdOf, .pTaken, .pOrder, .pCount)
+            Do ..RegisterParticipant(tEv.Resp.Dst, .pIdOf, .pTaken, .pOrder, .pCount)
+        } ElseIf tEv.Kind = "episodeloop" {
+            Do ..RegisterFromEvents(tEv.Body, .pIdOf, .pTaken, .pOrder, .pCount)
+        }
+    }
+    Quit $$$OK
+}
+
+/// Render a render-event list at the given nesting depth (indent = 2 spaces per level).
+/// <p>Arrows render at the current depth with their warnings as <code>%%</code> comments
+/// at the same depth. A pairloop opens <code>loop N times</code> at the current depth
+/// with its legs and deduped warnings one level deeper. An episodeloop (Story 21.1)
+/// opens <code>loop N times &lt;representative label&gt;</code> at the current depth,
+/// recursively renders its body one level deeper (pair-loops render INSIDE episode
+/// loops), then emits the loop-level warning EXTRAS (deduped from compressed iterations
+/// 2..N — §6.4 item 8) before the closing <code>end</code>.</p>
+/// <p>Every emitted chunk ends with a newline; the caller trims the final one.</p>
+ClassMethod RenderBody(pEvents As %Library.ListOfObjects, pDepth As %Integer, ByRef pIdOf) As %String [ Internal ]
+{
+    Set tNL = $Char(10)
+    Set tIndent = $Justify("", pDepth * 2)
+    Set tInner = $Justify("", (pDepth + 1) * 2)
+    Set tOut = ""
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tEv = pEvents.GetAt(tI)
+        If tEv.Kind = "arrow" {
+            Set tOut = tOut_..ArrowLine(tEv, .pIdOf, tIndent)_tNL
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tIndent_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+        } ElseIf tEv.Kind = "pairloop" {
+            Set tOut = tOut_tIndent_"loop "_(+tEv.Count)_" times"_tNL
+            Set tOut = tOut_..ArrowLine(tEv.Req, .pIdOf, tInner)_tNL
+            Set tOut = tOut_..ArrowLine(tEv.Resp, .pIdOf, tInner)_tNL
+            ; loop-level warnings are the deduped merge of all compressed iterations;
+            ; the leg events' own warning lists are NOT re-rendered (they were merged)
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tInner_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+            Set tOut = tOut_tIndent_"end"_tNL
+        } ElseIf tEv.Kind = "episodeloop" {
+            Set tLabel = ..SingleLine(tEv.Label)
+            Set tOut = tOut_tIndent_"loop "_(+tEv.Count)_" times"_$Select(tLabel = "": "", 1: " "_tLabel)_tNL
+            Set tOut = tOut_..RenderBody(tEv.Body, pDepth + 1, .pIdOf)
+            For tW = 1:1:tEv.Warnings.Count() {
+                Set tOut = tOut_tInner_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+            }
+            Set tOut = tOut_tIndent_"end"_tNL
+        }
+    }
+    Quit tOut
 }
 
 /// Register a participant name (first-appearance order, collision-suffixed ids).
@@ -1218,21 +1573,26 @@ ClassMethod SingleLine(pText As %String) As %String [ Internal ]
   ],
   [
     "ExecuteMCPv2.Diagram.Generate.cls",
-    `/// Callable facade for the message-trace sequence-diagram library (Epic 21, Story 21.0;
-/// architecture decision G1). Callable independently of REST.
+    `/// Callable facade for the message-trace sequence-diagram library (Epic 21, Stories
+/// 21.0/21.1; architecture decision G1). Callable independently of REST.
 /// <p>For each requested session: <class>ExecuteMCPv2.Diagram.Loader</class> →
 /// <class>ExecuteMCPv2.Diagram.Correlator</class> →
-/// <class>ExecuteMCPv2.Diagram.Compressor</class> →
+/// <class>ExecuteMCPv2.Diagram.Compressor</class> (pair tier, then episode tier) →
 /// <class>ExecuteMCPv2.Diagram.Writer</class>, producing
-/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated, dedupOf? }], count }</code>
 /// (decision G3 output contract). Sessions are processed one at a time — no
 /// cross-session SQL.</p>
+/// <p><b>Cross-session dedup</b> (Story 21.1, §6.3 — default ON, disable via the
+/// <code>dedup</code> option): after per-session generation, diagrams are compared with
+/// the full I2 <code>%% Session …</code> metadata header line normalized (improvement
+/// I2 interplay — session id, message count AND time span all differ between
+/// otherwise-identical flows); a later session whose normalized text matches an earlier
+/// one keeps its own entry (sessionId, mermaid, messageCount, warnings, truncated) and
+/// additionally reports <code>dedupOf</code> = the first session id carrying that flow.</p>
 /// <p>Best-effort contract: per-session anomalies surface as structured warnings and
 /// <code>%%</code> comments; a per-session hard failure (e.g. Ens.MessageHeader absent in
 /// a non-interoperability namespace) becomes a comment-only diagram plus a warning rather
 /// than failing the call.</p>
-/// <p>NOTE for Story 21.1: keep this class/method name stable — episode-level compression
-/// and cross-session dedup slot into the per-session pipeline below.</p>
 Class ExecuteMCPv2.Diagram.Generate Extends %RegisteredObject
 {
 
@@ -1240,7 +1600,8 @@ Class ExecuteMCPv2.Diagram.Generate Extends %RegisteredObject
 /// <p><var>pSessionIds</var> — <class>%Library.ListOfDataTypes</class> of session ids.</p>
 /// <p><var>pOptions</var> — optional <class>%DynamicObject</class>:
 /// <code>labelMode</code> (<code>"full"</code> default / <code>"short"</code> = last dotted
-/// segment) and <code>maxRows</code> (default 2000, max 10000).</p>
+/// segment), <code>maxRows</code> (default 2000, max 10000), and <code>dedup</code>
+/// (boolean, default true — cross-session dedup via <code>dedupOf</code>).</p>
 /// <p><var>pResult</var> — <code>{ diagrams: [...], count: n }</code>.</p>
 ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObject = "", Output pResult As %DynamicObject) As %Status
 {
@@ -1250,6 +1611,7 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
         ; resolve options (Rule #15: no $Get() around method calls — %IsDefined + %Get)
         Set tLabelMode = "full"
         Set tMaxRows = 2000
+        Set tDedup = 1
         If $IsObject(pOptions) {
             If pOptions.%IsDefined("labelMode") {
                 Set tMode = pOptions.%Get("labelMode")
@@ -1258,6 +1620,24 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
             If pOptions.%IsDefined("maxRows") {
                 Set tMax = +pOptions.%Get("maxRows") \\ 1
                 If tMax > 0 Set tMaxRows = tMax
+            }
+            If pOptions.%IsDefined("dedup") {
+                ; JSON booleans arrive as 1/0 (%GetTypeOf "boolean"); numbers and the
+                ; "true"/"false"/"0"/"1" strings are accepted defensively. Anything else
+                ; (JSON null, junk strings like "yes") KEEPS the documented default (ON)
+                ; instead of silently disabling dedup via numeric coercion (''"yes" = 0)
+                ; — CR 21.1-A review fix.
+                Set tVal = pOptions.%Get("dedup")
+                Set tType = pOptions.%GetTypeOf("dedup")
+                If (tType = "boolean") || (tType = "number") {
+                    Set tDedup = ''tVal
+                } ElseIf $ZConvert(tVal, "L") = "true" {
+                    Set tDedup = 1
+                } ElseIf $ZConvert(tVal, "L") = "false" {
+                    Set tDedup = 0
+                } ElseIf (tVal = "0") || (tVal = "1") {
+                    Set tDedup = +tVal
+                }
             }
         }
         If tMaxRows > 10000 Set tMaxRows = 10000
@@ -1271,6 +1651,32 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
             Do tDiagrams.%Push(tDiag)
         }
 
+        ; ── cross-session dedup (Story 21.1, §6.3; §6.4 item 9) ──────────────
+        ; Exact full-text comparison of the header-normalized diagrams (request order;
+        ; at most 20 sessions per call, so the linear scan is trivial). Empty sessions
+        ; normalize identical and DO dedup — an empty/blank key never errors (item 9).
+        If tDedup && (tDiagrams.%Size() > 1) {
+            Set tKept = 0
+            For tI = 0:1:tDiagrams.%Size() - 1 {
+                Set tDiag = tDiagrams.%Get(tI)
+                Set tNorm = ..NormalizeForDedup(tDiag.%Get("mermaid"))
+                Set tFirstId = ""
+                For tJ = 1:1:tKept {
+                    If tNormText(tJ) = tNorm {
+                        Set tFirstId = tNormFirst(tJ)
+                        Quit
+                    }
+                }
+                If tFirstId '= "" {
+                    Do tDiag.%Set("dedupOf", +tFirstId, "number")
+                } Else {
+                    Set tKept = tKept + 1
+                    Set tNormText(tKept) = tNorm
+                    Set tNormFirst(tKept) = tDiag.%Get("sessionId")
+                }
+            }
+        }
+
         Set pResult = {}
         Do pResult.%Set("diagrams", tDiagrams)
         Do pResult.%Set("count", tDiagrams.%Size(), "number")
@@ -1280,9 +1686,23 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
     Quit tSC
 }
 
-/// Run the Load → Correlate → Compress → Write pipeline for ONE session and return its
-/// diagram object. Never throws to the caller: any hard failure is converted into a
-/// comment-only diagram + warning (best-effort contract, decision G3).
+/// Normalize one diagram text for cross-session comparison (improvement I2 interplay):
+/// the ENTIRE <code>%% Session …</code> line-2 header (session id, message count, time
+/// span — or the failure-shape header) is replaced with a fixed token so two sessions
+/// carrying the same flow compare equal. Everything else must match byte-for-byte.
+ClassMethod NormalizeForDedup(pMermaid As %String) As %String [ Internal ]
+{
+    Set tNL = $Char(10)
+    If $Extract($Piece(pMermaid, tNL, 2), 1, 11) = "%% Session " {
+        Set $Piece(pMermaid, tNL, 2) = "%% Session #"
+    }
+    Quit pMermaid
+}
+
+/// Run the Load → Correlate → Compress (pair tier, then episode tier) → Write pipeline
+/// for ONE session and return its diagram object. Never throws to the caller: any hard
+/// failure is converted into a comment-only diagram + warning (best-effort contract,
+/// decision G3).
 ClassMethod GenerateOne(pSessionId As %String, pLabelMode As %String = "full", pMaxRows As %Integer = 2000) As %DynamicObject [ Internal ]
 {
     Set tDiag = {}
@@ -1291,7 +1711,8 @@ ClassMethod GenerateOne(pSessionId As %String, pLabelMode As %String = "full", p
 
         Set tSC = ##class(ExecuteMCPv2.Diagram.Loader).LoadSession(pSessionId, pMaxRows, .tEvents, .tTruncated)
         If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Correlator).Correlate(tEvents, pLabelMode, .tRender)
-        If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Compressor).Compress(tRender, .tCompressed)
+        If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Compressor).Compress(tRender, .tPairCompressed)
+        If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Compressor).CompressEpisodes(tPairCompressed, .tCompressed)
         If $$$ISOK(tSC) {
             Set tMsgCount = tEvents.Count()
             Set tFirst = ""
@@ -1308,14 +1729,11 @@ ClassMethod GenerateOne(pSessionId As %String, pLabelMode As %String = "full", p
         }
 
         ; structured warnings = every event's warnings over the compressed stream, in
-        ; order (pairloop events already carry the deduped merge of their iterations)
+        ; order (pairloop events already carry the deduped merge of their iterations;
+        ; episodeloop events recurse into their body, then contribute their own deduped
+        ; extras — §6.4 item 8: warnings survive both compression tiers)
         Set tWarnings = []
-        For tI = 1:1:tCompressed.Count() {
-            Set tRE = tCompressed.GetAt(tI)
-            For tW = 1:1:tRE.Warnings.Count() {
-                Do tWarnings.%Push(tRE.Warnings.GetAt(tW))
-            }
-        }
+        Do ..CollectWarnings(tCompressed, tWarnings)
 
         Do tDiag.%Set("mermaid", tMermaid)
         Do tDiag.%Set("messageCount", tMsgCount, "number")
@@ -1325,6 +1743,26 @@ ClassMethod GenerateOne(pSessionId As %String, pLabelMode As %String = "full", p
         Do ..ApplyFailure(tDiag, pSessionId, ex.AsStatus())
     }
     Quit tDiag
+}
+
+/// Collect every event's warnings over a render-event list, in order, recursing into
+/// episodeloop bodies (Story 21.1). Pairloop events contribute their own deduped merge;
+/// an episodeloop contributes its representative body's warnings first (render order)
+/// and then its own deduped extras from compressed iterations 2..N (§6.4 item 8).
+ClassMethod CollectWarnings(pEvents As %Library.ListOfObjects, pWarnings As %Library.DynamicArray) As %Status [ Internal ]
+{
+    Set tN = 0
+    If $IsObject(pEvents) Set tN = pEvents.Count()
+    For tI = 1:1:tN {
+        Set tRE = pEvents.GetAt(tI)
+        If tRE.Kind = "episodeloop" {
+            Do ..CollectWarnings(tRE.Body, pWarnings)
+        }
+        For tW = 1:1:tRE.Warnings.Count() {
+            Do pWarnings.%Push(tRE.Warnings.GetAt(tW))
+        }
+    }
+    Quit $$$OK
 }
 
 /// Fill <var>pDiag</var> with the comment-only failure shape for a per-session hard
@@ -7176,15 +7614,18 @@ ClassMethod MessageTrace() As %Status
     Quit $$$OK
 }
 
-/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Story 21.0).
+/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Stories
+/// 21.0/21.1).
 /// <p>Thin handler: validates the request, delegates to the
 /// <class>ExecuteMCPv2.Diagram.Generate</class> facade, and renders
-/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>.</p>
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated, dedupOf? }], count }</code>.</p>
 /// <p>Query parameters:
 /// <ul>
 ///   <li><code>sessionIds</code> — comma-separated list of 1-20 positive integer session IDs (required)</li>
 ///   <li><code>labelMode</code> — "full" (default) or "short" (last dotted segment of the body class)</li>
 ///   <li><code>maxRows</code> — per-session row cap (default 2000, max 10000)</li>
+///   <li><code>dedup</code> — cross-session dedup of identical flows: 1/true (default) or 0/false;
+///       a duplicate session's entry reports <code>dedupOf</code> = the first session id with the same flow</li>
 ///   <li><code>namespace</code> — target namespace for Ens.* operations</li>
 /// </ul></p>
 ClassMethod MessageDiagram() As %Status
@@ -7198,6 +7639,7 @@ ClassMethod MessageDiagram() As %Status
         Set tMaxRows = +$Get(%request.Data("maxRows",1), 2000) \\ 1
         If tMaxRows < 1 Set tMaxRows = 2000
         If tMaxRows > 10000 Set tMaxRows = 10000
+        Set tDedupRaw = $ZConvert($Get(%request.Data("dedup",1)), "L")
         Set tNamespace = $Get(%request.Data("namespace",1))
 
         ; Validate labelMode
@@ -7206,6 +7648,19 @@ ClassMethod MessageDiagram() As %Status
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
+        }
+
+        ; Validate dedup (Story 21.1): 0/1/true/false, default true when omitted
+        Set tDedup = 1
+        If tDedupRaw '= "" {
+            If (tDedupRaw = "0") || (tDedupRaw = "false") {
+                Set tDedup = 0
+            } ElseIf (tDedupRaw '= "1") && (tDedupRaw '= "true") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'dedup' must be one of: 0, 1, true, false")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
         }
 
         ; Validate sessionIds: CSV of 1-20 positive canonical integers
@@ -7249,6 +7704,7 @@ ClassMethod MessageDiagram() As %Status
         Set tOptions = {}
         Do tOptions.%Set("labelMode", tLabelMode)
         Do tOptions.%Set("maxRows", tMaxRows, "number")
+        Do tOptions.%Set("dedup", tDedup, "boolean")
         Set tResult = ""
         Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(tSessionIds, tOptions, .tResult)
         If $$$ISERR(tSC) {

@@ -25,6 +25,8 @@ interface DiagramEntry {
   messageCount: number;
   warnings: string[];
   truncated: boolean;
+  /** First session id carrying the same flow (cross-session dedup, Story 21.1). */
+  dedupOf?: number;
 }
 
 /** Endpoint result shape: `{ diagrams, count }`. */
@@ -42,6 +44,7 @@ function renderDiagramText(d: DiagramEntry): string {
       `${d.warnings.length} warning${d.warnings.length === 1 ? "" : "s"}`,
     );
   }
+  if (d.dedupOf !== undefined) extras.push(`duplicate of session ${d.dedupOf}`);
   const suffix = extras.length > 0 ? ` (${extras.join(", ")})` : "";
   const noun = d.messageCount === 1 ? "message" : "messages";
   return `Session ${d.sessionId}: ${d.messageCount} ${noun}${suffix}\n\`\`\`mermaid\n${d.mermaid}\n\`\`\``;
@@ -84,6 +87,16 @@ export const messageDiagramTool: ToolDefinition = {
         "Per-session cap on loaded message rows (default: 2000, max: 10000); " +
           "the diagram is flagged truncated when the cap is hit",
       ),
+    dedup: z
+      .boolean()
+      .optional()
+      .describe(
+        "Collapse identical flows across the requested sessions (default: true): " +
+          "a session whose diagram matches an earlier one (session metadata header " +
+          "normalized) keeps its own entry and reports dedupOf = the first session " +
+          "id with that flow. Pass false to compare nothing and render every " +
+          "session independently.",
+      ),
     namespace: z
       .string()
       .optional()
@@ -98,10 +111,11 @@ export const messageDiagramTool: ToolDefinition = {
   scope: "NS",
   mutates: "read",
   handler: async (args, ctx) => {
-    const { sessionIds, labelMode, maxRows, namespace } = args as {
+    const { sessionIds, labelMode, maxRows, dedup, namespace } = args as {
       sessionIds: number[];
       labelMode?: "full" | "short";
       maxRows?: number;
+      dedup?: boolean;
       namespace?: string;
     };
 
@@ -112,6 +126,7 @@ export const messageDiagramTool: ToolDefinition = {
     // Rule #10: send the documented defaults explicitly on the wire.
     params.set("labelMode", labelMode ?? "full");
     params.set("maxRows", String(maxRows ?? 2000));
+    params.set("dedup", String(dedup ?? true));
 
     const path = `${BASE_URL}/interop/production/messages/diagram?${params}`;
 
