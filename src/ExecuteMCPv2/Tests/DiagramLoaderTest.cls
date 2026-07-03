@@ -238,6 +238,14 @@ Method TestCleanStatusTextUnwrapsUnresolvedBoilerplate() As %Status
     ; a '#' deep inside long text is not a prefix (length gate)
     Set tLong = "The report for widget batch number sign #12345 came back: all good"
     Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tLong), tLong, "Long text with an interior # is not treated as a prefix")
+    ; locale-word normalization on RESOLVED renderings (Rule #13: GetErrorText picks
+    ; the message-table language per worker process — same session must render the
+    ; same text on every worker)
+    Set tArabicResolved = "خطأ <Ens>ErrGeneral: Injected file publish failure for OrderId=ORD-000240 (sample error mode partialSuccess)"
+    Set tEnglishResolved = "ERROR <Ens>ErrGeneral: Injected file publish failure for OrderId=ORD-000240 (sample error mode partialSuccess)"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tArabicResolved), tEnglishResolved, "Arabic locale word on a resolved rendering normalizes to ERROR")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("ERROR #5001: "_tArabicResolved), tEnglishResolved, "Stacked re-wrap prefix + Arabic resolved word both normalize")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("خطأ فادح: something"), "خطأ فادح: something", "Arabic word NOT followed by a bracket code is left alone")
     ; plain text with no shapes at all -> unchanged
     Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("just a message"), "just a message", "Plain text unchanged")
     Quit $$$OK

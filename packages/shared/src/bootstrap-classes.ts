@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5ece56d776a2";
+export const BOOTSTRAP_VERSION = "c3cc801cfead";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5ece56d776a2";
+Parameter BOOTSTRAPVERSION = "c3cc801cfead";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -798,6 +798,15 @@ ClassMethod CleanStatusText(pText As %String) As %String [ Internal ]
                 Set tText = "ERROR "_tCode_": "_tParams
             }
         }
+    }
+    ; normalize the locale word on RESOLVED renderings ("خطأ <Ens>ErrGeneral: …" →
+    ; "ERROR <Ens>ErrGeneral: …"): GetErrorText picks the message-table language per
+    ; worker process (Rule #13 — English and Arabic tables are both loaded on this
+    ; project's instances), which otherwise makes the SAME session's diagram text vary
+    ; across REST workers (observed live 2026-07-03). Mirrors the two-variant list the
+    ; Rule #8 prefix handling uses; the bracket code itself is never touched.
+    If ($Extract(tText, 1, 4) = "خطأ ") && ($Extract(tText, 5) = "<") {
+        Set tText = "ERROR "_$Extract(tText, 5, *)
     }
     Quit tText
 }
