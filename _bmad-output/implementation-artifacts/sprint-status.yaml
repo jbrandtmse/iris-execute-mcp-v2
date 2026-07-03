@@ -288,7 +288,19 @@ development_status:
   # Library = ObjectScript ExecuteMCPv2.Diagram.* under src/ExecuteMCPv2/ (stakeholder-directed; rides existing bootstrap, no new package mappings, no new npm package).
   # ObjectScript touched in BOTH stories → BOOTSTRAP_VERSION bump per story (Rule #24).
   # New iris_message_diagram key = mutates:read → default-enabled (Rule #28); frozen baseline 1e62c5ad5bf7 untouched (Rules #23/#25).
-  epic-21: in-progress
+  # (fixed 2026-07-03 via bmad-correct-course session: was stale 'in-progress' — all stories + retro done, cycle-close commit 77a6ff9)
+  epic-21: done
   21-0-message-diagram-core: done
   21-1-episode-compression-dedup-and-docs: done
   epic-21-retrospective: done
+
+  # Epic 22: ObjectScript LOC Counter & Deferred-Work Cleanup (iris-dev-mcp + suite-wide hardening)
+  # Added 2026-07-03 via bmad-correct-course. See sprint-change-proposal-2026-07-03.md.
+  # 22.0: native-ObjectScript LOC counter (research: technical-objectscript-loc-counter-2026-07-03.md, decisions D1–D7 ratified).
+  #       New LOC library under src/ExecuteMCPv2/ + thin REST endpoint + iris_loc_count on @iris-mcp/dev.
+  #       ObjectScript touched → BOOTSTRAP_VERSION bump (Rule #24). New key mutates:read → default-enabled (Rule #28); baseline 1e62c5ad5bf7 untouched.
+  # 22.1: deferred-work ledger burn-down — 14 items + Epic 20 retro Action #2 → TERMINAL dispositions (Epic 21 retro directive: no re-deferral).
+  epic-22: backlog
+  22-0-loc-counter-tool: backlog
+  22-1-deferred-work-burn-down: backlog
+  epic-22-retrospective: backlog
