@@ -95,6 +95,36 @@ export interface ToolDefinition {
    * field. Do NOT retro-classify existing (baseline) tools.
    */
   mutates?: "read" | "write" | Record<string, "read" | "write">;
+  /**
+   * "Write, default-enabled" governance override (Epic 20, architecture decision F2).
+   *
+   * A list of `action` values that are truthfully `write` (they still appear in
+   * {@link mutates} as `"write"`, and `annotations.destructiveHint` stays honest)
+   * yet should resolve to **enabled** under an empty `IRIS_GOVERNANCE`, instead of
+   * the default-disabled seed a new write would otherwise get.
+   *
+   * This is the ONLY lever to ship a new write enabled-by-default WITHOUT
+   * mislabelling it as a read and WITHOUT touching the frozen governance baseline
+   * (`governance-baseline.ts`, `1e62c5ad5bf7` — Rule #23/#25). It feeds a
+   * `defaultEnabledWrites` set threaded (optional, default-empty) through
+   * {@link ../governance.js | defaultSeed/effective/getEffectivePolicy}; a write key
+   * present in that set seeds to `true`.
+   *
+   * Strictly additive: with NO tool declaring `defaultEnabled` (the default-empty
+   * set), the governance seed is byte-for-byte today's — every new write still
+   * defaults to disabled (Rule #19). An operator can still disable a
+   * default-enabled write via an explicit `IRIS_GOVERNANCE` `false` (the cascade
+   * honors explicit overrides at either layer).
+   *
+   * Requires the per-action {@link mutates} record form: each listed action MUST
+   * be declared `"write"` in the same tool's `mutates` map (`mutates: { clean:
+   * "write" }` + `defaultEnabled: ["clean"]`, matching `iris_production_control:clean`,
+   * the first user). `buildDefaultEnabledWrites` fail-fasts at registration if a
+   * listed action is missing from `mutates`, classified `"read"`, or the tool uses
+   * the scalar `mutates` form — a scalar-write tool's governance key is the bare
+   * tool name with no action, so an action-keyed `defaultEnabled` cannot address it.
+   */
+  defaultEnabled?: string[];
   /** Async handler invoked when the tool is called. */
   handler: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }

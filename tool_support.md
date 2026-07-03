@@ -128,7 +128,7 @@ their Zod schemas but silently dropped them server-side.
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
 | 1 | `iris_production_manage` | 🟥 ExecuteMCPv2 | `/interop/production` |
-| 2 | `iris_production_control` | 🟥 ExecuteMCPv2 | `/interop/production/control` |
+| 2 | `iris_production_control` | 🟥 ExecuteMCPv2 | `/interop/production/control` (start/stop/restart/update/recover/clean) |
 | 3 | `iris_production_status` | 🟥 ExecuteMCPv2 | `/interop/production/status` |
 | 4 | `iris_production_summary` | 🟥 ExecuteMCPv2 | `/interop/production/summary` |
 | 5 | `iris_production_item` | 🟥 ExecuteMCPv2 | `/interop/production/item` (add/remove + arbitrary host/adapter settings) |
@@ -151,6 +151,8 @@ their Zod schemas but silently dropped them server-side.
 **Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_default_settings_manage` (`list`/`get`/`set`/`delete`) and extended `iris_production_item` with `add`/`remove` actions plus arbitrary host/adapter settings (interop stays 19 → 20: one new tool; `iris_production_item` is enhanced in place). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_default_settings_manage:set`/`:delete` and `iris_production_item:add`/`:remove`. Reads/pre-existing actions are **enabled by default**: `iris_default_settings_manage:list`/`:get` and the original `iris_production_item:enable`/`:disable`/`:get`/`:set` (the latter four are pre-governance baseline keys). *Epic 18 (2026-06-17) hardened the new add/arbitrary-settings surface — bad-className/duplicate-name/unknown-`@`-suffix inputs are now rejected before any write — without changing these governance defaults.*
+>
+> **Epic 20 (2026-06-30) — governance defaults:** added a `clean` action to `iris_production_control` (interop stays 20 — new action, not new tool) mapping to `Ens.Director.CleanProduction`, to unwedge a stopped production that `recover` cannot fix; its `killAppData` persistent-wipe is double-gated behind `confirm:true`. `clean` is classified `write` but is **enabled by default** — the new `defaultEnabled` governance mechanism (decision F2) ships a truthful write enabled-by-default without touching the frozen baseline — because it is a recovery operation an operator expects available; it can still be disabled with an explicit `IRIS_GOVERNANCE` `{"global":{"iris_production_control:clean":false}}` override. The same change fixes a latent bug where `recover` passed an argument to the no-arg `RecoverProduction()`.
 
 ---
 

@@ -132,14 +132,21 @@ ClassMethod ProductionManage() As %Status
     Quit $$$OK
 }
 
-/// Start, stop, restart, update, or recover a production.
+/// Start, stop, restart, update, recover, or clean a production.
 /// <p>Accepts a JSON body with <code>action</code> and optional parameters:
 /// <ul>
 ///   <li><code>name</code> — production class name (required for start/restart)</li>
 ///   <li><code>timeout</code> — seconds to wait for stop (default 120)</li>
-///   <li><code>force</code> — force stop/recover on timeout (default false)</li>
+///   <li><code>force</code> — force stop on timeout (default false)</li>
+///   <li><code>killAppData</code> — (clean action only) when true, also wipe the
+///       persistent <code>^Ens.AppData</code> business state (HL7 sequence numbers,
+///       file/FTP done-file tables, batch/control state). Requires <code>confirm</code>.</li>
+///   <li><code>confirm</code> — (clean action only) must be true to permit a
+///       <code>killAppData</code> persistent wipe; the wipe is refused otherwise.</li>
 ///   <li><code>namespace</code> — target namespace for the production</li>
 /// </ul></p>
+/// <p><b>recover</b> is the preferred first response to a troubled production;
+/// <b>clean</b> is a last resort for when recover does not resolve the problem.</p>
 ClassMethod ProductionControl() As %Status
 {
     Set tSC = $$$OK
@@ -160,8 +167,8 @@ ClassMethod ProductionControl() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-        If (tAction '= "start") && (tAction '= "stop") && (tAction '= "restart") && (tAction '= "update") && (tAction '= "recover") {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: start, stop, restart, update, recover")
+        If (tAction '= "start") && (tAction '= "stop") && (tAction '= "restart") && (tAction '= "update") && (tAction '= "recover") && (tAction '= "clean") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: start, stop, restart, update, recover, clean")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
@@ -231,11 +238,44 @@ ClassMethod ProductionControl() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "recover" {
-            Set tSC = ##class(Ens.Director).RecoverProduction(tForce)
+            ; RecoverProduction() takes NO arguments — it acts only on a Troubled
+            ; production and suspends the runtime. The prior call passed tForce,
+            ; which raised <PARAMETER> at runtime (Story 20.0 AC 20.0.6 latent-bug fix).
+            Set tSC = ##class(Ens.Director).RecoverProduction()
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {"action": "recovered"}
+            Do ..RenderResponseBody($$$OK, , tResult)
+        }
+        ElseIf tAction = "clean" {
+            ; Last resort for a wedged production (recover is the preferred first
+            ; response). Depends on ##class(Ens.Director).CleanProduction — an
+            ; [ Internal ] method (Rule #4): re-verify its signature/running-guard +
+            ; ^Ens.AppData semantics on IRIS upgrade. See the Epic 20 change proposal.
+            ; killAppData=1 additionally wipes the PERSISTENT ^Ens.AppData (HL7
+            ; sequence numbers, file/FTP done-file tables, batch/control state) →
+            ; duplicate re-ingestion of already-processed data. That destructive
+            ; wipe is double-gated behind confirm=true (Rule #26).
+            Set tKillAppData = +tBody.%Get("killAppData")
+            If tKillAppData && ('+tBody.%Get("confirm")) {
+                Set $NAMESPACE = tOrigNS
+                ; NOTE: do not embed a bare caret-global (Ens.AppData) in this text —
+                ; SanitizeError strips caret-global references, silently blanking it.
+                ; Name the consequence descriptively instead (AC 20.0.3).
+                Set tSC = $$$ERROR($$$GeneralError, "killAppData wipes the persistent Ens.AppData business state (HL7 sequence numbers, file/FTP done-file tables, batch/control-number state) and can cause duplicate re-ingestion of already-processed data; it requires confirm:true. No changes were made.")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; CleanProduction refuses while the production is running (surfaced via
+            ; SanitizeError); takes neither timeout nor force.
+            Set tSC = ##class(Ens.Director).CleanProduction(tKillAppData)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+            Set tResult = {"action": "cleaned", "killAppData": (tKillAppData)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }

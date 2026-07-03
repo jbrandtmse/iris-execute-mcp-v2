@@ -2,6 +2,21 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-06-30]
+
+### Added — Epic 20: Production `clean` action + "write, default-enabled" governance (`@iris-mcp/interop` + `@iris-mcp/shared`)
+
+A new `clean` action on `iris_production_control`, plus a shared-foundation governance extension to ship it enabled-by-default while keeping its classification truthful. **Strictly additive** — the 5 existing lifecycle actions' request bodies + output shapes are byte-for-byte unchanged (full-object `toEqual`, Rule #19), and with no tool opting into the new `defaultEnabled` marker every other new write still default-disables (byte-for-byte the pre-F2 governance seed). The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged**. **Tool count unchanged** (`clean` is a new action, not a new tool; interop stays **20**). `BOOTSTRAP_VERSION` **`daeb5f0bd525` → `5376735fabab`** (`ExecuteMCPv2.REST.Interop` handler).
+
+- **`iris_production_control` gains `clean`** ([packages/iris-interop-mcp/src/tools/production.ts](packages/iris-interop-mcp/src/tools/production.ts), `ExecuteMCPv2.REST.Interop:ProductionControl` via `/interop/production/control`) — maps to `Ens.Director.CleanProduction(pKillAppDataToo)` (an `[ Internal ]` IRIS method the Management Portal's director UI uses). Clears a **stopped** production's stale runtime state (queues, job-status, suspended messages) to unwedge a production `recover` cannot fix; `recover` is the **preferred** first response and `clean` is a **last resort** (surfaced in the tool description and the MCP server `instructions` field). By default (`killAppData` omitted/false) only transient runtime state is cleared. Setting `killAppData: true` **also** wipes the persistent `^Ens.AppData` business state (HL7 sequence numbers, file/FTP done-file tables → duplicate re-ingestion, RecordMap/X12 batch/control state); this destructive wipe is **double-gated** — refused unless `confirm: true` is also supplied (changes nothing otherwise, live-verified per Rule #26). `CleanProduction`'s running-guard is preserved (refusal surfaced via `SanitizeError`, no opaque `<…>` crash). Governance: `clean` is truthfully `mutates: "write"` (destructive hint stays true) but **enabled by default** via the new `defaultEnabled` mechanism; an operator can still disable it with an explicit `IRIS_GOVERNANCE` `{"global":{"iris_production_control:clean":false}}` override.
+- **"Write, default-enabled" governance mechanism** ([packages/shared/src/tool-types.ts](packages/shared/src/tool-types.ts), [packages/shared/src/governance.ts](packages/shared/src/governance.ts), architecture decision **F2**) — a new optional `defaultEnabled?: string[]` marker on `ToolDefinition` feeds a `defaultEnabledWrites` set, threaded as an **optional, default-empty** parameter through `defaultSeed`/`effective`/`getEffectivePolicy` (and the discovery tool + governance resource, so all three agree — no drift). A `write` key in that set seeds to `true`. Lets a truthful write ship enabled-by-default **without** mislabelling it as a read and **without** touching the frozen baseline. Empty set ⇒ byte-for-byte today's seed.
+
+### Fixed — Epic 20: latent `recover` argument bug
+
+- **`iris_production_control` action `recover`** previously called `Ens.Director.RecoverProduction(tForce)` — but `RecoverProduction()` takes **no arguments**, so the extra arg raised `<PARAMETER>` at runtime. Corrected to the no-arg call ([src/ExecuteMCPv2/REST/Interop.cls](src/ExecuteMCPv2/REST/Interop.cls)); live-verified against a Troubled production before/after.
+
+Documentation: [`packages/iris-interop-mcp/README.md`](packages/iris-interop-mcp/README.md) (control-tool row + `killAppData`/`confirm` params + `clean` detail + governance-defaults note), the root [README](README.md) (new "Write, default-enabled" governance subsection documenting the `defaultEnabled` mechanism + `clean`), [`tool_support.md`](tool_support.md) (control endpoint action annotation + Epic 20 governance-defaults note; tool count unchanged at 20), and [`docs/tool-annotation-audit.md`](docs/tool-annotation-audit.md) (control Notes updated).
+
 ## [Pre-release — 2026-06-18]
 
 ### Added — Epic 19: Server & Governance Discovery (`@iris-mcp/shared`, all servers)
