@@ -11,7 +11,10 @@
 /// <code>dedup</code> option): after per-session generation, diagrams are compared with
 /// the full I2 <code>%% Session …</code> metadata header line normalized (improvement
 /// I2 interplay — session id, message count AND time span all differ between
-/// otherwise-identical flows); a later session whose normalized text matches an earlier
+/// otherwise-identical flows) AND per-message row-id tokens in <code>%%</code> warning
+/// comments masked (post-epic smoke fix 2026-07-03 — anomaly warnings name each
+/// session's own message ids, which otherwise blocked dedup on virtually every real
+/// trace); a later session whose normalized text matches an earlier
 /// one keeps its own entry (sessionId, mermaid, messageCount, warnings, truncated) and
 /// additionally reports <code>dedupOf</code> = the first session id carrying that flow.</p>
 /// <p>Best-effort contract: per-session anomalies surface as structured warnings and
@@ -113,15 +116,53 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
 
 /// Normalize one diagram text for cross-session comparison (improvement I2 interplay):
 /// the ENTIRE <code>%% Session …</code> line-2 header (session id, message count, time
-/// span — or the failure-shape header) is replaced with a fixed token so two sessions
-/// carrying the same flow compare equal. Everything else must match byte-for-byte.
+/// span — or the failure-shape header) is replaced with a fixed token, and per-message
+/// row-id tokens (<code>message 28</code>) inside <code>%%</code> COMMENT lines are
+/// masked to <code>message #</code> — anomaly warnings embed each session's own row ids,
+/// which otherwise keeps structurally-identical flows from ever comparing equal (smoke
+/// finding 2026-07-03: real Ensemble sessions almost always carry an unpaired-request
+/// warning naming their first message, so dedup never fired on live traces).
+/// Arrow/participant lines are never touched, and the RENDERED diagrams keep their real
+/// ids — masking applies to the comparison only. Everything else must match byte-for-byte.
 ClassMethod NormalizeForDedup(pMermaid As %String) As %String [ Internal ]
 {
     Set tNL = $Char(10)
     If $Extract($Piece(pMermaid, tNL, 2), 1, 11) = "%% Session " {
         Set $Piece(pMermaid, tNL, 2) = "%% Session #"
     }
-    Quit pMermaid
+    Set tOut = ""
+    For tI = 1:1:$Length(pMermaid, tNL) {
+        Set tLine = $Piece(pMermaid, tNL, tI)
+        If $Extract($ZStrip(tLine, "<W"), 1, 2) = "%%" Set tLine = ..MaskMessageIds(tLine)
+        Set tOut = tOut_$Select(tI > 1: tNL, 1: "")_tLine
+    }
+    Quit tOut
+}
+
+/// Replace every <code>message &lt;digits&gt;</code> token in one comment line with
+/// <code>message #</code> (dedup-comparison masking — see
+/// <method>NormalizeForDedup</method>). Payload text (config names, body classes, error
+/// details such as order ids) is deliberately NOT masked: diagrams that differ in real
+/// content must never false-dedup.
+ClassMethod MaskMessageIds(pLine As %String) As %String [ Internal ]
+{
+    Set tOut = ""
+    Set tPos = 1
+    While 1 {
+        Set tIdx = $Find(pLine, "message ", tPos)
+        If tIdx = 0 {
+            Set tOut = tOut_$Extract(pLine, tPos, *)
+            Quit
+        }
+        Set tOut = tOut_$Extract(pLine, tPos, tIdx - 1)
+        Set tJ = tIdx
+        While $Extract(pLine, tJ) ? 1N {
+            Set tJ = tJ + 1
+        }
+        If tJ > tIdx Set tOut = tOut_"#"
+        Set tPos = tJ
+    }
+    Quit tOut
 }
 
 /// Run the Load → Correlate → Compress (pair tier, then episode tier) → Write pipeline
@@ -200,13 +241,9 @@ ClassMethod ApplyFailure(pDiag As %DynamicObject, pSessionId As %String, pStatus
         Set tText = ""
         Try {
             Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pStatus)
-            Set tText = $System.Status.GetErrorText(tSafe)
-            ; Rule #8: strip the single "ERROR #N: " (or locale-variant) prefix
-            ; GetErrorText re-adds on the re-wrapped status (CR 21.0 review).
-            Set tColon = $Find(tText, ": ")
-            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
-                Set tText = $Extract(tText, tColon, *)
-            }
+            ; Rule #8 prefix strip + unresolved-message-table boilerplate unwrap —
+            ; shared with the I1 per-message summaries (CleanStatusText).
+            Set tText = ##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText($System.Status.GetErrorText(tSafe))
         } Catch exInner {
             Set tText = ""
         }

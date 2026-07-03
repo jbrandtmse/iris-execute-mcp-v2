@@ -93,9 +93,9 @@ export const messageDiagramTool: ToolDefinition = {
       .describe(
         "Collapse identical flows across the requested sessions (default: true): " +
           "a session whose diagram matches an earlier one (session metadata header " +
-          "normalized) keeps its own entry and reports dedupOf = the first session " +
-          "id with that flow. Pass false to compare nothing and render every " +
-          "session independently.",
+          "and per-message row-id tokens in warning comments normalized) keeps its " +
+          "own entry and reports dedupOf = the first session id with that flow. " +
+          "Pass false to compare nothing and render every session independently.",
       ),
     namespace: z
       .string()

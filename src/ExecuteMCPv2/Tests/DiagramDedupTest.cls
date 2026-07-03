@@ -213,4 +213,58 @@ Method TestDedupEmptyIdList() As %Status
     Quit $$$OK
 }
 
+/// Post-epic smoke fix (2026-07-03): two DIFFERENT sessions carrying the same flow with
+/// anomaly warnings (each warning names its own message row id) must still dedup — the
+/// row-id tokens are masked for the comparison. This is the exact real-data shape that
+/// kept dedup inert (every async service-initiated session carries an unpaired-request
+/// warning naming its first message). The rendered diagrams keep their real ids.
+Method TestDedupFiresAcrossSessionsWithIdBearingWarnings() As %Status
+{
+    Set tA = ..#SESSIONBASE + 11
+    Set tB = ..#SESSIONBASE + 12
+    ; one unpaired async request each -> "%% Unpaired request: message <id> ..." comment
+    Do ..InsertHeader(tA, 1, 1, "Demo.Service", "Demo.Sink", "Demo.Msg.OneWay", "2026-07-02 11:01:01")
+    Do ..InsertHeader(tB, 1, 1, "Demo.Service", "Demo.Sink", "Demo.Msg.OneWay", "2026-07-02 11:22:01")
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(..MakeIdList(tA, tB), , .tResult)
+    Do $$$AssertStatusOK(tSC, "Run should succeed")
+    Set tD0 = tResult.%Get("diagrams").%Get(0)
+    Set tD1 = tResult.%Get("diagrams").%Get(1)
+    Do $$$AssertEquals(tD1.%Get("dedupOf"), tA, "Same flow dedups even though warnings embed different message ids")
+    Do $$$AssertTrue(tD0.%Get("warnings").%Get(0) [ "Unpaired request", "First entry keeps its warning")
+    Do $$$AssertTrue(tD1.%Get("warnings").%Get(0) [ "Unpaired request", "Duplicate entry keeps its warning")
+    ; rendered diagrams keep their REAL row ids (masking is comparison-only)
+    Do $$$AssertTrue(tD0.%Get("mermaid") '[ "message #", "Rendered diagram keeps real ids (no mask leakage)")
+    Quit $$$OK
+}
+
+/// Direct unit coverage of the comparison normalizer: row-id tokens are masked ONLY in
+/// comment lines; payload differences and arrow-line text never mask, so genuinely
+/// different diagrams can never false-dedup.
+Method TestNormalizeForDedupMasksOnlyCommentIds() As %Status
+{
+    Set tNL = $Char(10)
+    ; identical flows differing only by message ids inside %% comments -> equal
+    Set tX = "sequenceDiagram"_tNL_"%% Session 2: 7 messages, t1 .. t2"_tNL_"A-->>B: Req"_tNL_"%% Unpaired request: message 2 (A -> B) has no matching response"
+    Set tY = "sequenceDiagram"_tNL_"%% Session 3: 7 messages, t3 .. t4"_tNL_"A-->>B: Req"_tNL_"%% Unpaired request: message 3 (A -> B) has no matching response"
+    Set tNX = ##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tX)
+    Set tNY = ##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tY)
+    Do $$$AssertEquals(tNX, tNY, "Texts differing only by comment message ids normalize equal")
+    ; indented comment (inside a loop body) is masked too
+    Set tI1 = "sequenceDiagram"_tNL_"%% Session 5: 1 messages, t .. t"_tNL_"  %% Error on message 28: boom"
+    Set tI2 = "sequenceDiagram"_tNL_"%% Session 6: 1 messages, t .. t"_tNL_"  %% Error on message 41: boom"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tI1), ##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tI2), "Indented comment ids are masked")
+    ; payload differences inside comments are NOT masked -> stay different
+    Set tP1 = "sequenceDiagram"_tNL_"%% Session 5: 1 messages, t .. t"_tNL_"%% Error on message 28: failure for OrderId=ORD-1"
+    Set tP2 = "sequenceDiagram"_tNL_"%% Session 6: 1 messages, t .. t"_tNL_"%% Error on message 28: failure for OrderId=ORD-2"
+    Do $$$AssertNotEquals(##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tP1), ##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tP2), "Payload differences (order ids) never mask")
+    ; "message <n>" in an ARROW line is not a comment -> untouched
+    Set tA1 = "sequenceDiagram"_tNL_"%% Session 7: 1 messages, t .. t"_tNL_"A-->>B: process message 5 now"
+    Set tA2 = "sequenceDiagram"_tNL_"%% Session 8: 1 messages, t .. t"_tNL_"A-->>B: process message 6 now"
+    Do $$$AssertNotEquals(##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tA1), ##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tA2), "Arrow-line text is never masked")
+    ; "message " with no digits after it is left alone (no spurious #)
+    Set tE = "sequenceDiagram"_tNL_"%% Session 9: 1 messages, t .. t"_tNL_"%% message ends the line: message "
+    Do $$$AssertTrue(##class(ExecuteMCPv2.Diagram.Generate).NormalizeForDedup(tE) '[ "message #", "No digits after the token -> no mask inserted")
+    Quit $$$OK
+}
+
 }

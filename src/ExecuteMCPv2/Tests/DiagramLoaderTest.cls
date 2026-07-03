@@ -213,4 +213,34 @@ Method TestErrorGenericWhenStatusOk() As %Status
     Quit $$$OK
 }
 
+/// Post-epic smoke fix (2026-07-03): CleanStatusText strips word-code prefixes and
+/// rebuilds the kernel's unresolved-message-table boilerplate into the resolved shape,
+/// so I1 summaries read identically whether or not the namespace maps the error-domain
+/// message tables. Direct unit tests with crafted GetErrorText renderings.
+Method TestCleanStatusTextUnwrapsUnresolvedBoilerplate() As %Status
+{
+    ; numeric prefix strip (pre-existing Rule #8 shape) still works
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("ERROR #5001: boom"), "boom", "Numeric code prefix stripped")
+    ; word-code prefix + boilerplate (the SADEMO shape) rebuilds to the resolved form,
+    ; nested parens preserved
+    Set tRaw = "ERROR #ErrGeneral: Unknown status code: <Ens>ErrGeneral (Injected SQL persist failure for OrderId=ORD-000004 (sample error mode))"
+    Set tWant = "ERROR <Ens>ErrGeneral: Injected SQL persist failure for OrderId=ORD-000004 (sample error mode)"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tRaw), tWant, "Word-code prefix stripped and boilerplate unwrapped to the resolved shape")
+    ; the exact LIVE shape: Utils re-wrap prefix STACKED on the word-code prefix
+    ; (GetErrorText(SanitizeError(status)) on a namespace without Ens message tables)
+    Set tStacked = "ERROR #5001: "_tRaw
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tStacked), tWant, "Stacked re-wrap + word-code prefixes both stripped before the unwrap")
+    ; already-resolved form (bracket code, no '#') passes through untouched
+    Set tResolved = "ERROR <Ens>ErrGeneral: Injected file publish failure for OrderId=ORD-000240 (sample error mode partialSuccess)"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tResolved), tResolved, "Resolved form is untouched (bracket tokens never stripped, Rule #8)")
+    ; boilerplate without params has nothing to unwrap -> unchanged after prefix strip
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("ERROR #ErrGeneral: Unknown status code: <Ens>ErrGeneral"), "Unknown status code: <Ens>ErrGeneral", "No-params boilerplate left as-is")
+    ; a '#' deep inside long text is not a prefix (length gate)
+    Set tLong = "The report for widget batch number sign #12345 came back: all good"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText(tLong), tLong, "Long text with an interior # is not treated as a prefix")
+    ; plain text with no shapes at all -> unchanged
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText("just a message"), "just a message", "Plain text unchanged")
+    Quit $$$OK
+}
+
 }

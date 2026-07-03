@@ -147,14 +147,7 @@ ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
     Try {
         If (pErrorStatus '= "") && $System.Status.IsError(pErrorStatus) {
             Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pErrorStatus)
-            Set tText = $System.Status.GetErrorText(tSafe)
-            ; Rule #8: GetErrorText on the re-wrapped status re-adds a single
-            ; "ERROR #N: " (or locale-variant) prefix — strip it once so the I1
-            ; summary is a clean human-readable one-liner (CR 21.0 review).
-            Set tColon = $Find(tText, ": ")
-            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
-                Set tText = $Extract(tText, tColon, *)
-            }
+            Set tText = ..CleanStatusText($System.Status.GetErrorText(tSafe))
         }
     } Catch ex {
         Set tText = ""
@@ -162,6 +155,60 @@ ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
     Set tText = $ZStrip($Translate(tText, $Char(13, 10, 9), "   "), "<>W")
     If $Length(tText) > 200 Set tText = $Extract(tText, 1, 197)_"..."
     If tText = "" Set tText = "message reported error"
+    Quit tText
+}
+
+/// Clean one <code>GetErrorText</code> rendering into a human-readable summary line
+/// (shared by <method>SanitizeErrorText</method> and
+/// <method>ExecuteMCPv2.Diagram.Generate:ApplyFailure</method>).
+/// <p>Two transformations, both no-ops when their shape is absent:</p>
+/// <ul>
+///   <li><b>Prefix strip</b> (Rule #8 shape): up to three leading
+///       <code>&lt;word&gt; #&lt;code&gt;: </code> prefixes are removed — numeric codes
+///       (<code>ERROR #5001: </code>, the <class>ExecuteMCPv2.Utils</class> re-wrap) AND
+///       word codes (<code>ERROR #ErrGeneral: </code> / locale variants like
+///       <code>خطأ #ErrGeneral: </code>, which stack INSIDE the re-wrap when the error
+///       domain's message table cannot be resolved — smoke finding 2026-07-03, SADEMO
+///       namespace without Ens message-table mappings). Each strip is length-gated so a
+///       <code>#</code> deep inside legitimate text is never mistaken for a prefix.
+///       Bracket tokens (<code>&lt;Ens&gt;ErrGeneral</code>) are NEVER stripped — they
+///       are legitimate error info (Rule #8).</li>
+///   <li><b>Boilerplate unwrap</b>: the kernel's unresolved-message-table rendering
+///       <code>Unknown status code: &lt;domain&gt;Code (params)</code> is rebuilt into the
+///       resolved shape <code>ERROR &lt;domain&gt;Code: params</code>, so I1 error summaries
+///       read identically whether or not the namespace has the error-domain message
+///       tables mapped. Nested parentheses inside the params are preserved (first
+///       <code>" ("</code> to LAST <code>")"</code>).</li>
+/// </ul>
+ClassMethod CleanStatusText(pText As %String) As %String [ Internal ]
+{
+    Set tText = pText
+    ; strip up to three stacked leading "<word> #<code>: " prefixes; <code> is alphanumeric
+    For tStrip = 1:1:3 {
+        Set tColon = $Find(tText, ": ")
+        Quit:(tColon = 0)||(tColon > 44)
+        Quit:'($Extract(tText, 1, tColon - 3) ? .E1"#"1.AN)
+        Set tText = $Extract(tText, tColon, *)
+    }
+    ; unwrap "Unknown status code: <code> (params)" -> "ERROR <code>: params"
+    If $Extract(tText, 1, 21) = "Unknown status code: " {
+        Set tRest = $Extract(tText, 22, *)
+        Set tParen = $Find(tRest, " (")
+        Set tClose = 0
+        For tI = $Length(tRest):-1:1 {
+            If $Extract(tRest, tI) = ")" {
+                Set tClose = tI
+                Quit
+            }
+        }
+        If (tParen > 0) && (tClose >= tParen) {
+            Set tCode = $Extract(tRest, 1, tParen - 3)
+            Set tParams = $Extract(tRest, tParen, tClose - 1)
+            If (tCode '= "") && (tParams '= "") {
+                Set tText = "ERROR "_tCode_": "_tParams
+            }
+        }
+    }
     Quit tText
 }
 

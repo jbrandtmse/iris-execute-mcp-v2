@@ -157,7 +157,7 @@ Generates one Mermaid `sequenceDiagram` per requested session — the Management
 | `sessionIds` | *(required)* | 1–20 positive integer session IDs; one diagram per session |
 | `labelMode` | `full` | Arrow label style: `full` = full message body class name; `short` = last dotted segment |
 | `maxRows` | `2000` | Per-session cap on loaded message rows (max 10000); the diagram is flagged `truncated` when hit |
-| `dedup` | `true` | Collapse identical flows across the requested sessions: a session whose diagram matches an earlier one (session-metadata header normalized) keeps its own entry and reports `dedupOf` = the first session ID with that flow; pass `false` to render every session independently |
+| `dedup` | `true` | Collapse identical flows across the requested sessions: a session whose diagram matches an earlier one (session-metadata header and per-message row-id tokens in warning comments normalized) keeps its own entry and reports `dedupOf` = the first session ID with that flow; pass `false` to render every session independently |
 | `namespace` | server default | Target namespace for the `Ens.MessageHeader` query |
 
 **Example output** (a session where a repeated 2-hop episode was compressed):

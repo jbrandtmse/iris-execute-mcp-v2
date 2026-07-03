@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "1040c6dcfce3";
+export const BOOTSTRAP_VERSION = "5ece56d776a2";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "1040c6dcfce3";
+Parameter BOOTSTRAPVERSION = "5ece56d776a2";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -737,14 +737,7 @@ ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
     Try {
         If (pErrorStatus '= "") && $System.Status.IsError(pErrorStatus) {
             Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pErrorStatus)
-            Set tText = $System.Status.GetErrorText(tSafe)
-            ; Rule #8: GetErrorText on the re-wrapped status re-adds a single
-            ; "ERROR #N: " (or locale-variant) prefix — strip it once so the I1
-            ; summary is a clean human-readable one-liner (CR 21.0 review).
-            Set tColon = $Find(tText, ": ")
-            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
-                Set tText = $Extract(tText, tColon, *)
-            }
+            Set tText = ..CleanStatusText($System.Status.GetErrorText(tSafe))
         }
     } Catch ex {
         Set tText = ""
@@ -752,6 +745,60 @@ ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
     Set tText = $ZStrip($Translate(tText, $Char(13, 10, 9), "   "), "<>W")
     If $Length(tText) > 200 Set tText = $Extract(tText, 1, 197)_"..."
     If tText = "" Set tText = "message reported error"
+    Quit tText
+}
+
+/// Clean one <code>GetErrorText</code> rendering into a human-readable summary line
+/// (shared by <method>SanitizeErrorText</method> and
+/// <method>ExecuteMCPv2.Diagram.Generate:ApplyFailure</method>).
+/// <p>Two transformations, both no-ops when their shape is absent:</p>
+/// <ul>
+///   <li><b>Prefix strip</b> (Rule #8 shape): up to three leading
+///       <code>&lt;word&gt; #&lt;code&gt;: </code> prefixes are removed — numeric codes
+///       (<code>ERROR #5001: </code>, the <class>ExecuteMCPv2.Utils</class> re-wrap) AND
+///       word codes (<code>ERROR #ErrGeneral: </code> / locale variants like
+///       <code>خطأ #ErrGeneral: </code>, which stack INSIDE the re-wrap when the error
+///       domain's message table cannot be resolved — smoke finding 2026-07-03, SADEMO
+///       namespace without Ens message-table mappings). Each strip is length-gated so a
+///       <code>#</code> deep inside legitimate text is never mistaken for a prefix.
+///       Bracket tokens (<code>&lt;Ens&gt;ErrGeneral</code>) are NEVER stripped — they
+///       are legitimate error info (Rule #8).</li>
+///   <li><b>Boilerplate unwrap</b>: the kernel's unresolved-message-table rendering
+///       <code>Unknown status code: &lt;domain&gt;Code (params)</code> is rebuilt into the
+///       resolved shape <code>ERROR &lt;domain&gt;Code: params</code>, so I1 error summaries
+///       read identically whether or not the namespace has the error-domain message
+///       tables mapped. Nested parentheses inside the params are preserved (first
+///       <code>" ("</code> to LAST <code>")"</code>).</li>
+/// </ul>
+ClassMethod CleanStatusText(pText As %String) As %String [ Internal ]
+{
+    Set tText = pText
+    ; strip up to three stacked leading "<word> #<code>: " prefixes; <code> is alphanumeric
+    For tStrip = 1:1:3 {
+        Set tColon = $Find(tText, ": ")
+        Quit:(tColon = 0)||(tColon > 44)
+        Quit:'($Extract(tText, 1, tColon - 3) ? .E1"#"1.AN)
+        Set tText = $Extract(tText, tColon, *)
+    }
+    ; unwrap "Unknown status code: <code> (params)" -> "ERROR <code>: params"
+    If $Extract(tText, 1, 21) = "Unknown status code: " {
+        Set tRest = $Extract(tText, 22, *)
+        Set tParen = $Find(tRest, " (")
+        Set tClose = 0
+        For tI = $Length(tRest):-1:1 {
+            If $Extract(tRest, tI) = ")" {
+                Set tClose = tI
+                Quit
+            }
+        }
+        If (tParen > 0) && (tClose >= tParen) {
+            Set tCode = $Extract(tRest, 1, tParen - 3)
+            Set tParams = $Extract(tRest, tParen, tClose - 1)
+            If (tCode '= "") && (tParams '= "") {
+                Set tText = "ERROR "_tCode_": "_tParams
+            }
+        }
+    }
     Quit tText
 }
 
@@ -1586,7 +1633,10 @@ ClassMethod SingleLine(pText As %String) As %String [ Internal ]
 /// <code>dedup</code> option): after per-session generation, diagrams are compared with
 /// the full I2 <code>%% Session …</code> metadata header line normalized (improvement
 /// I2 interplay — session id, message count AND time span all differ between
-/// otherwise-identical flows); a later session whose normalized text matches an earlier
+/// otherwise-identical flows) AND per-message row-id tokens in <code>%%</code> warning
+/// comments masked (post-epic smoke fix 2026-07-03 — anomaly warnings name each
+/// session's own message ids, which otherwise blocked dedup on virtually every real
+/// trace); a later session whose normalized text matches an earlier
 /// one keeps its own entry (sessionId, mermaid, messageCount, warnings, truncated) and
 /// additionally reports <code>dedupOf</code> = the first session id carrying that flow.</p>
 /// <p>Best-effort contract: per-session anomalies surface as structured warnings and
@@ -1688,15 +1738,53 @@ ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObj
 
 /// Normalize one diagram text for cross-session comparison (improvement I2 interplay):
 /// the ENTIRE <code>%% Session …</code> line-2 header (session id, message count, time
-/// span — or the failure-shape header) is replaced with a fixed token so two sessions
-/// carrying the same flow compare equal. Everything else must match byte-for-byte.
+/// span — or the failure-shape header) is replaced with a fixed token, and per-message
+/// row-id tokens (<code>message 28</code>) inside <code>%%</code> COMMENT lines are
+/// masked to <code>message #</code> — anomaly warnings embed each session's own row ids,
+/// which otherwise keeps structurally-identical flows from ever comparing equal (smoke
+/// finding 2026-07-03: real Ensemble sessions almost always carry an unpaired-request
+/// warning naming their first message, so dedup never fired on live traces).
+/// Arrow/participant lines are never touched, and the RENDERED diagrams keep their real
+/// ids — masking applies to the comparison only. Everything else must match byte-for-byte.
 ClassMethod NormalizeForDedup(pMermaid As %String) As %String [ Internal ]
 {
     Set tNL = $Char(10)
     If $Extract($Piece(pMermaid, tNL, 2), 1, 11) = "%% Session " {
         Set $Piece(pMermaid, tNL, 2) = "%% Session #"
     }
-    Quit pMermaid
+    Set tOut = ""
+    For tI = 1:1:$Length(pMermaid, tNL) {
+        Set tLine = $Piece(pMermaid, tNL, tI)
+        If $Extract($ZStrip(tLine, "<W"), 1, 2) = "%%" Set tLine = ..MaskMessageIds(tLine)
+        Set tOut = tOut_$Select(tI > 1: tNL, 1: "")_tLine
+    }
+    Quit tOut
+}
+
+/// Replace every <code>message &lt;digits&gt;</code> token in one comment line with
+/// <code>message #</code> (dedup-comparison masking — see
+/// <method>NormalizeForDedup</method>). Payload text (config names, body classes, error
+/// details such as order ids) is deliberately NOT masked: diagrams that differ in real
+/// content must never false-dedup.
+ClassMethod MaskMessageIds(pLine As %String) As %String [ Internal ]
+{
+    Set tOut = ""
+    Set tPos = 1
+    While 1 {
+        Set tIdx = $Find(pLine, "message ", tPos)
+        If tIdx = 0 {
+            Set tOut = tOut_$Extract(pLine, tPos, *)
+            Quit
+        }
+        Set tOut = tOut_$Extract(pLine, tPos, tIdx - 1)
+        Set tJ = tIdx
+        While $Extract(pLine, tJ) ? 1N {
+            Set tJ = tJ + 1
+        }
+        If tJ > tIdx Set tOut = tOut_"#"
+        Set tPos = tJ
+    }
+    Quit tOut
 }
 
 /// Run the Load → Correlate → Compress (pair tier, then episode tier) → Write pipeline
@@ -1775,13 +1863,9 @@ ClassMethod ApplyFailure(pDiag As %DynamicObject, pSessionId As %String, pStatus
         Set tText = ""
         Try {
             Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pStatus)
-            Set tText = $System.Status.GetErrorText(tSafe)
-            ; Rule #8: strip the single "ERROR #N: " (or locale-variant) prefix
-            ; GetErrorText re-adds on the re-wrapped status (CR 21.0 review).
-            Set tColon = $Find(tText, ": ")
-            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
-                Set tText = $Extract(tText, tColon, *)
-            }
+            ; Rule #8 prefix strip + unresolved-message-table boilerplate unwrap —
+            ; shared with the I1 per-message summaries (CleanStatusText).
+            Set tText = ##class(ExecuteMCPv2.Diagram.Loader).CleanStatusText($System.Status.GetErrorText(tSafe))
         } Catch exInner {
             Set tText = ""
         }
