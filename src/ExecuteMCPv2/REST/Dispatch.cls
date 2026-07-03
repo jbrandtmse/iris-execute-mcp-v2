@@ -112,6 +112,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/logs" Method="GET" Call="ExecuteMCPv2.REST.Interop:EventLog" />
   <Route Url="/interop/production/queues" Method="GET" Call="ExecuteMCPv2.REST.Interop:QueueStatus" />
   <Route Url="/interop/production/messages" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageTrace" />
+  <Route Url="/interop/production/messages/diagram" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageDiagram" />
   <Route Url="/interop/production/adapters" Method="GET" Call="ExecuteMCPv2.REST.Interop:AdapterList" />
 
   <!-- Epic 5: Credentials and Lookup Tables -->

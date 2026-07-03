@@ -801,7 +801,7 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot = 18
+      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot = 25
       // (no configure, no mapping)
       const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
@@ -869,7 +869,7 @@ describe("bootstrap", () => {
       });
       expect(configureCalls.length).toBe(1);
 
-      // 1 CSRF + 1 probe SQL + 13 PUTs + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot = 20
+      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot = 27
       const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
@@ -1023,14 +1023,21 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 13 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(13);
+    it("should contain exactly 20 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(20);
     });
 
     it("should contain all required class names", () => {
       const expected = [
         "ExecuteMCPv2.Utils.cls",
         "ExecuteMCPv2.Setup.cls",
+        "ExecuteMCPv2.Diagram.Event.cls",
+        "ExecuteMCPv2.Diagram.RenderEvent.cls",
+        "ExecuteMCPv2.Diagram.Loader.cls",
+        "ExecuteMCPv2.Diagram.Correlator.cls",
+        "ExecuteMCPv2.Diagram.Compressor.cls",
+        "ExecuteMCPv2.Diagram.Writer.cls",
+        "ExecuteMCPv2.Diagram.Generate.cls",
         "ExecuteMCPv2.REST.Global.cls",
         "ExecuteMCPv2.REST.Command.cls",
         "ExecuteMCPv2.REST.UnitTest.cls",
@@ -1070,7 +1077,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(13);
+      expect(classes.length).toBe(20);
     });
 
     it("should return classes in compilation order", () => {
@@ -1171,6 +1178,13 @@ describe("bootstrap", () => {
     const classPaths: ReadonlyArray<readonly [string, string]> = [
       ["ExecuteMCPv2.Utils.cls", "src/ExecuteMCPv2/Utils.cls"],
       ["ExecuteMCPv2.Setup.cls", "src/ExecuteMCPv2/Setup.cls"],
+      ["ExecuteMCPv2.Diagram.Event.cls", "src/ExecuteMCPv2/Diagram/Event.cls"],
+      ["ExecuteMCPv2.Diagram.RenderEvent.cls", "src/ExecuteMCPv2/Diagram/RenderEvent.cls"],
+      ["ExecuteMCPv2.Diagram.Loader.cls", "src/ExecuteMCPv2/Diagram/Loader.cls"],
+      ["ExecuteMCPv2.Diagram.Correlator.cls", "src/ExecuteMCPv2/Diagram/Correlator.cls"],
+      ["ExecuteMCPv2.Diagram.Compressor.cls", "src/ExecuteMCPv2/Diagram/Compressor.cls"],
+      ["ExecuteMCPv2.Diagram.Writer.cls", "src/ExecuteMCPv2/Diagram/Writer.cls"],
+      ["ExecuteMCPv2.Diagram.Generate.cls", "src/ExecuteMCPv2/Diagram/Generate.cls"],
       ["ExecuteMCPv2.REST.Global.cls", "src/ExecuteMCPv2/REST/Global.cls"],
       ["ExecuteMCPv2.REST.Command.cls", "src/ExecuteMCPv2/REST/Command.cls"],
       ["ExecuteMCPv2.REST.UnitTest.cls", "src/ExecuteMCPv2/REST/UnitTest.cls"],

@@ -14,11 +14,11 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 |---------|--------|------:|-------------|
 | [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 25 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 20 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms |
+| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 21 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **98 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **99 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -296,6 +296,7 @@ Per the default-seed rule above, the **new write actions** added after governanc
 | ops | `iris_backup_manage` | `run`, `freeze`, `thaw` | `listHistory` |
 | interop | `iris_default_settings_manage` | `set`, `delete` | `list`, `get` |
 | interop | `iris_production_item` | `add`, `remove` (new) | `enable`, `disable`, `get`, `set` (pre-governance baseline) |
+| interop | `iris_message_diagram` | — (flat read tool, no actions) | whole tool (message-trace Mermaid diagrams, Epic 21) |
 | dev | `iris_sql_analyze` | — (all four actions are reads) | `explain`, `stats`, `indexUsage`, `running` |
 
 Every **pre-governance** tool action (everything shipped before the governance layer) stays enabled by default. The authoritative per-tool catalog with endpoints and governance notes is [`tool_support.md`](tool_support.md).
@@ -340,7 +341,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(25)    │ │(26)    │ │(20)    │ │(20)    │ │(7)     │
+     │(25)    │ │(26)    │ │(21)    │ │(20)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘
