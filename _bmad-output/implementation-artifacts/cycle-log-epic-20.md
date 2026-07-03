@@ -10,3 +10,5 @@
 2026-07-02T20:25:19Z	Story 20.0	cr_complete	spawn_at=2026-07-02T20:18:00Z model=claude-opus-4-8 resolved=2 deferred=1 dismissed=3 high=0 med=2 low=1 clarifications=0 closing_sections_present=true note=F2_defaultEnabled_crossvalidation_failfast
 2026-07-02T20:26:55Z	Story 20.0	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP_HSCUSTOM:killAppData-noconfirm-refused+recover-noarg-ok+clean-default-ok+guard-intact model=claude-opus-4-8
 2026-07-02T20:26:58Z	Story 20.0	committed	sha=7aca352 submodules=
+2026-07-03T03:25:37Z	Epic 20	epic_merged_to_feature	repos=. feature_sha=75c56df merge_sha=75c56df submodules=
+2026-07-03T03:25:37Z	Epic 20	epic_summary	stories=1 total_high=0 total_med=2 total_low=1 total_smoke_defects=0 rework_events=0 rules_codified=2 bootstrap=daeb5f0bd525->5376735fabab baseline=1e62c5ad5bf7-frozen
