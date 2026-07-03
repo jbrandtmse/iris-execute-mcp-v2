@@ -22,3 +22,5 @@
 2026-07-03T10:17:53Z	Story 21.1	smoke_complete	method=api result=pass iterations=3 defects_caught=1 evidence=namespace-walkthrough(9-namespaces:only-HSCUSTOM+SADEMO-have-data);defect=per-worker-locale-word-on-resolved-error-renderings(Rule13);fixed-CleanStatusText-normalization;20-session-HSCUSTOM-sweep-RENDER_OK-all-20,dedup-9of20,0-arabic-words model=claude-fable-5 bootstrap=5ece56d776a2->c3cc801cfead
 2026-07-03T10:18:04Z	Story 21.1	committed	sha=3469628 submodules= note=locale_word_normalization
 2026-07-03T21:55:44Z	Epic 21	retrospective_complete	model=claude-sonnet-5 rules_codified=2 (Rule34_cross_namespace_smoke,Rule35_iris_execute_tests_partial_snapshot) rules_total=33->35 ledger_open=14 ledger_directive=include_in_next_epic evidence=_bmad-output/implementation-artifacts/epic-21-retro-2026-07-03.md
+2026-07-03T21:56:48Z	Epic 21	epic_merged_to_feature	repos=. feature_sha=5054913 merge_sha=5054913 submodules=
+2026-07-03T21:56:48Z	Epic 21	epic_summary	stories=2 total_high=0 total_med=2 total_low=6 total_smoke_defects=3 rework_events=0 rules_codified=2 bootstrap=5376735fabab->c3cc801cfead baseline=1e62c5ad5bf7-frozen ledger_open=14
