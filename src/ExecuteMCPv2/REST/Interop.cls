@@ -1065,6 +1065,99 @@ ClassMethod MessageTrace() As %Status
     Quit $$$OK
 }
 
+/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Story 21.0).
+/// <p>Thin handler: validates the request, delegates to the
+/// <class>ExecuteMCPv2.Diagram.Generate</class> facade, and renders
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>sessionIds</code> — comma-separated list of 1-20 positive integer session IDs (required)</li>
+///   <li><code>labelMode</code> — "full" (default) or "short" (last dotted segment of the body class)</li>
+///   <li><code>maxRows</code> — per-session row cap (default 2000, max 10000)</li>
+///   <li><code>namespace</code> — target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod MessageDiagram() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSessionIdsCsv = $Get(%request.Data("sessionIds",1))
+        Set tLabelMode = $Get(%request.Data("labelMode",1))
+        If tLabelMode = "" Set tLabelMode = "full"
+        Set tMaxRows = +$Get(%request.Data("maxRows",1), 2000) \ 1
+        If tMaxRows < 1 Set tMaxRows = 2000
+        If tMaxRows > 10000 Set tMaxRows = 10000
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Validate labelMode
+        If (tLabelMode '= "full") && (tLabelMode '= "short") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'labelMode' must be 'full' or 'short'")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate sessionIds: CSV of 1-20 positive canonical integers
+        If tSessionIdsCsv = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "Required parameter 'sessionIds' is missing or empty")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tIdCount = $Length(tSessionIdsCsv, ",")
+        If tIdCount > 20 {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must contain between 1 and 20 session IDs")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tSessionIds = ##class(%Library.ListOfDataTypes).%New()
+        Set tValid = 1
+        For tI = 1:1:tIdCount {
+            Set tPiece = $ZStrip($Piece(tSessionIdsCsv, ",", tI), "<>W")
+            If (tPiece = "") || (tPiece '= +tPiece) || (+tPiece '= (+tPiece \ 1)) || (+tPiece <= 0) {
+                Set tValid = 0
+                Quit
+            }
+            Do tSessionIds.Insert(+tPiece)
+        }
+        If 'tValid {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must be a comma-separated list of positive integers")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Delegate to the diagram library facade
+        Set tOptions = {}
+        Do tOptions.%Set("labelMode", tLabelMode)
+        Do tOptions.%Set("maxRows", tMaxRows, "number")
+        Set tResult = ""
+        Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(tSessionIds, tOptions, .tResult)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// List available adapter types grouped by category.
 /// <p>Queries <code>%Dictionary.ClassDefinition</code> to find adapter classes
 /// that extend <code>Ens.InboundAdapter</code> or <code>Ens.OutboundAdapter</code>.

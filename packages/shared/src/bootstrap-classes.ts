@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 13 production classes as string literals, keyed by their
+ * Contains all 20 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5376735fabab";
+export const BOOTSTRAP_VERSION = "5bd5579c25c1";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5376735fabab";
+Parameter BOOTSTRAPVERSION = "5bd5579c25c1";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -442,6 +442,926 @@ ClassMethod EnsureUnitTestRoot() As %String [ SqlProc ]
 ClassMethod GetBootstrapVersion() As %String [ SqlProc ]
 {
     Quit ..#BOOTSTRAPVERSION
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Event.cls",
+    `/// In-memory model of one loaded <class>Ens.MessageHeader</class> row for the
+/// message-trace sequence-diagram library (Epic 21, Story 21.0).
+/// <p>Instances are produced by <class>ExecuteMCPv2.Diagram.Loader</class> with all
+/// values NORMALIZED at load time:</p>
+/// <ul>
+///   <li><property>Type</property> — logical <code>"Request"</code> / <code>"Response"</code> / <code>""</code> (unknown, e.g. Terminate)</li>
+///   <li><property>Invocation</property> — logical <code>"Inproc"</code> / <code>"Queue"</code> / <code>""</code> (unknown)</li>
+///   <li><property>ErrorText</property> — pre-sanitized one-line error summary (never raw <code>%Status</code> internals)</li>
+/// </ul>
+/// <p>Clean-room implementation per architecture decision G2 — written fresh against
+/// sprint-change-proposal-2026-07-02.md §6; no reference-tool code consulted.</p>
+Class ExecuteMCPv2.Diagram.Event Extends %RegisteredObject
+{
+
+/// <class>Ens.MessageHeader</class> row ID.
+Property Id As %Integer;
+
+/// Normalized invocation style: <code>"Inproc"</code>, <code>"Queue"</code>, or <code>""</code> when unknown.
+Property Invocation As %String(MAXLEN = 16);
+
+/// Message body class name (<code>MessageBodyClassName</code>); <code>""</code> when the header is bodyless (NULL).
+Property BodyClass As %String(MAXLEN = "");
+
+/// Session this message belongs to.
+Property SessionId As %Integer;
+
+/// Source config item name (<code>SourceConfigName</code>).
+Property Source As %String(MAXLEN = "");
+
+/// Target config item name (<code>TargetConfigName</code>).
+Property Target As %String(MAXLEN = "");
+
+/// Queue name where responses should be sent (<code>ReturnQueueName</code>) — async correlation fallback.
+Property ReturnQueue As %String(MAXLEN = "");
+
+/// Corresponding request/response ID; <code>""</code> when not set.
+Property CorrId As %String(MAXLEN = 32);
+
+/// UTC timestamp string (logical <code>Ens.DataType.UTC</code> value) — ordering + metadata header only.
+Property TimeCreated As %String(MAXLEN = 64);
+
+/// Normalized message type: <code>"Request"</code>, <code>"Response"</code>, or <code>""</code> when unknown.
+Property Type As %String(MAXLEN = 16);
+
+/// Whether the message reported an error (<code>IsError</code>) — improvement I1.
+Property IsError As %Boolean [ InitialExpression = 0 ];
+
+/// Sanitized one-line error summary derived from <code>ErrorStatus</code> at load time.
+/// <p>Empty when <property>IsError</property> is 0. Never contains raw IRIS internals,
+/// caret-global references, or line breaks (Rule #33 discipline applied by the loader).</p>
+Property ErrorText As %String(MAXLEN = "");
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.RenderEvent.cls",
+    `/// One entry in the ordered render-event stream that flows
+/// <class>ExecuteMCPv2.Diagram.Correlator</class> → <class>ExecuteMCPv2.Diagram.Compressor</class>
+/// → <class>ExecuteMCPv2.Diagram.Writer</class> (Epic 21, Story 21.0).
+/// <p><property>Kind</property> discriminates two shapes:</p>
+/// <ul>
+///   <li><code>"arrow"</code> — one rendered message arrow. Uses <property>Src</property>,
+///       <property>Dst</property>, <property>Label</property>, <property>Arrow</property>,
+///       <property>IsError</property>, plus the pairing metadata
+///       (<property>PairId</property>/<property>Role</property>) the compressor needs.</li>
+///   <li><code>"pairloop"</code> — a synthetic pair-level loop block produced by the
+///       compressor: <property>Count</property> iterations of the request/response legs
+///       referenced by <property>Req</property> and <property>Resp</property>.</li>
+/// </ul>
+/// <p><property>Warnings</property> carries the anomaly texts attached to this event;
+/// they are emitted both as <code>%%</code> Mermaid comments and mirrored into the
+/// structured <code>warnings[]</code> array (decision G3 best-effort contract).</p>
+Class ExecuteMCPv2.Diagram.RenderEvent Extends %RegisteredObject
+{
+
+/// Event shape discriminator: <code>"arrow"</code> or <code>"pairloop"</code>.
+Property Kind As %String(MAXLEN = 16) [ InitialExpression = "arrow" ];
+
+/// Source config item name (arrow kind).
+Property Src As %String(MAXLEN = "");
+
+/// Destination config item name (arrow kind).
+Property Dst As %String(MAXLEN = "");
+
+/// Display label (label mode already applied; <code>"(no body)"</code> for bodyless headers).
+/// <p>The <code> [ERROR]</code> suffix is NOT part of the label — the writer appends it
+/// from <property>IsError</property> at emission time.</p>
+Property Label As %String(MAXLEN = "");
+
+/// Mermaid arrow literal: sync <code>"->>"</code> or async <code>"-->>"</code>.
+Property Arrow As %String(MAXLEN = 8) [ InitialExpression = "->>" ];
+
+/// Improvement I1 — errored message flag. Participates in the pair signature so an
+/// errored pair never merges into a clean loop.
+Property IsError As %Boolean [ InitialExpression = 0 ];
+
+/// Correlation pair identifier; 0 when this arrow is unpaired.
+/// <p>The request leg and its response leg share the same positive PairId.</p>
+Property PairId As %Integer [ InitialExpression = 0 ];
+
+/// Pairing role of an arrow event: <code>"req"</code>, <code>"resp"</code>, or <code>""</code> (unpaired).
+Property Role As %String(MAXLEN = 8);
+
+/// Iteration count (pairloop kind).
+Property Count As %Integer [ InitialExpression = 0 ];
+
+/// Representative request leg (pairloop kind).
+Property Req As ExecuteMCPv2.Diagram.RenderEvent;
+
+/// Representative response leg (pairloop kind).
+Property Resp As ExecuteMCPv2.Diagram.RenderEvent;
+
+/// Anomaly/warning texts for this event (deduped merge of all iterations for a pairloop).
+Property Warnings As list Of %String(MAXLEN = "");
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Loader.cls",
+    `/// Trace loader for the message-trace sequence-diagram library (Epic 21, Story 21.0).
+/// <p>Implements the §6.1 data contract of sprint-change-proposal-2026-07-02.md: one
+/// read-only dynamic-SQL query over <class>Ens.MessageHeader</class> selecting the
+/// 12-column projection (ID, Invocation, MessageBodyClassName, SessionId,
+/// SourceConfigName, TargetConfigName, ReturnQueueName, CorrespondingMessageId,
+/// TimeCreated, Type, IsError, ErrorStatus) with:</p>
+/// <ul>
+///   <li>the NULL-safe trace filter <code>(MessageBodyClassName IS NULL OR
+///       MessageBodyClassName &lt;&gt; 'HS.Util.Trace.Request')</code> — a bare
+///       <code>&lt;&gt;</code> drops bodyless headers under SQL three-valued logic;</li>
+///   <li>deterministic ordering <code>ORDER BY TimeCreated, ID</code> with an
+///       <code>ORDER BY ID</code> fallback when the primary sort reports a SQLCODE error;</li>
+///   <li>a <code>maxRows</code> cap (default 2000, max 10000) with a truncated flag;</li>
+///   <li>normalization of <code>Type</code>/<code>Invocation</code> enums and sanitization
+///       of <code>ErrorStatus</code> into a one-line summary at load (improvement I1).</li>
+/// </ul>
+/// <p>Dynamic <class>%SQL.Statement</class> with <code>?</code> parameters is used
+/// deliberately (story Amendment A1): embedded SQL would add a compile-time schema
+/// dependency on <class>Ens.MessageHeader</class>, which does not exist in
+/// non-interoperability namespaces the bootstrap deploys to.</p>
+Class ExecuteMCPv2.Diagram.Loader Extends %RegisteredObject
+{
+
+/// Load one session's message headers as normalized
+/// <class>ExecuteMCPv2.Diagram.Event</class> instances.
+/// <p><var>pSessionId</var> must be a positive canonical integer; any other value
+/// (empty, junk, zero, negative, fractional) yields an EMPTY list with an OK status —
+/// per §6.1 an invalid session id is not an error.</p>
+/// <p><var>pMaxRows</var> defaults to 2000 and is clamped to 1..10000. When the session
+/// has more rows than the cap, <var>pTruncated</var> is set and the extra rows dropped.</p>
+ClassMethod LoadSession(pSessionId As %String = "", pMaxRows As %Integer = 2000, Output pEvents As %Library.ListOfObjects, Output pTruncated As %Boolean) As %Status
+{
+    Set tSC = $$$OK
+    Set pTruncated = 0
+    Set pEvents = ##class(%Library.ListOfObjects).%New()
+    Try {
+        ; Invalid / non-positive / non-integer sessionId -> empty result, not an error (§6.1)
+        If (pSessionId = "") || (pSessionId '= +pSessionId) || (+pSessionId <= 0) || (+pSessionId '= (+pSessionId \\ 1)) {
+            Quit
+        }
+        Set tMax = +pMaxRows \\ 1
+        If tMax < 1 Set tMax = 2000
+        If tMax > 10000 Set tMax = 10000
+
+        ; Primary ordering: TimeCreated with ID tiebreak; fallback: ID only (§6.1 determinism)
+        Set tSC = ..RunQuery(pSessionId, tMax, 1, .pEvents, .pTruncated)
+        If $$$ISERR(tSC) {
+            Set tSC = ..RunQuery(pSessionId, tMax, 2, .pEvents, .pTruncated)
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Internal query runner. <var>pOrderMode</var> 1 = <code>ORDER BY TimeCreated, ID</code>
+/// (primary), 2 = <code>ORDER BY ID</code> (fallback). Exposed as its own method so the
+/// fallback path can be exercised directly by unit tests (§6.4 item 2).
+ClassMethod RunQuery(pSessionId As %String, pMaxRows As %Integer, pOrderMode As %Integer = 1, Output pEvents As %Library.ListOfObjects, Output pTruncated As %Boolean) As %Status
+{
+    Set tSC = $$$OK
+    Set pTruncated = 0
+    Set pEvents = ##class(%Library.ListOfObjects).%New()
+    Try {
+        Set tList = ##class(%Library.ListOfObjects).%New()
+        ; SELECT TOP maxRows+1 so truncation is detectable without a second query
+        Set tSQL = "SELECT TOP "_(pMaxRows + 1)_" ID, Invocation, MessageBodyClassName, SessionId, SourceConfigName, TargetConfigName, ReturnQueueName, CorrespondingMessageId, TimeCreated, Type, IsError, ErrorStatus"
+        Set tSQL = tSQL_" FROM Ens.MessageHeader WHERE SessionId = ?"
+        ; NULL-safe trace filter: bodyless headers (NULL MessageBodyClassName) MUST be retained (§6.4 item 1)
+        Set tSQL = tSQL_" AND (MessageBodyClassName IS NULL OR MessageBodyClassName <> 'HS.Util.Trace.Request')"
+        If pOrderMode = 1 {
+            Set tSQL = tSQL_" ORDER BY TimeCreated, ID"
+        } Else {
+            Set tSQL = tSQL_" ORDER BY ID"
+        }
+
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, +pSessionId)
+        If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+            Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
+            Set tSC = $$$ERROR($$$GeneralError, tMsg)
+            Quit
+        }
+
+        While tRS.%Next() {
+            Set tEv = ##class(ExecuteMCPv2.Diagram.Event).%New()
+            Set tEv.Id = tRS.ID
+            Set tEv.SessionId = tRS.SessionId
+            Set tEv.Source = tRS.SourceConfigName
+            Set tEv.Target = tRS.TargetConfigName
+            Set tEv.ReturnQueue = tRS.ReturnQueueName
+            Set tEv.BodyClass = tRS.MessageBodyClassName
+            Set tEv.TimeCreated = tRS.TimeCreated
+            Set tCorr = tRS.CorrespondingMessageId
+            Set tEv.CorrId = $Select(tCorr = "": "", 1: +tCorr)
+            ; Type: 1=Request, 2=Response, 3=Terminate ($$$eMessageType* — EnsConstants.inc:78-80).
+            ; Literal values are used instead of the macros so this class compiles in
+            ; namespaces without ENSLIB include-file mappings (bootstrap deploys everywhere;
+            ; story Amendment A1 rationale). String forms accepted defensively (§6.2).
+            Set tRawType = tRS.Type
+            If (tRawType = 1) || (tRawType = "Request") {
+                Set tEv.Type = "Request"
+            } ElseIf (tRawType = 2) || (tRawType = "Response") {
+                Set tEv.Type = "Response"
+            } Else {
+                Set tEv.Type = ""
+            }
+            ; Invocation: 1=Queue, 2=InProc ($$$eMessageInvocation* — EnsConstants.inc:84-85).
+            Set tRawInv = tRS.Invocation
+            If (tRawInv = 2) || ($ZConvert(tRawInv, "U") = "INPROC") {
+                Set tEv.Invocation = "Inproc"
+            } ElseIf (tRawInv = 1) || ($ZConvert(tRawInv, "U") = "QUEUE") {
+                Set tEv.Invocation = "Queue"
+            } Else {
+                Set tEv.Invocation = ""
+            }
+            ; Improvement I1: sanitize ErrorStatus into a one-line summary at load
+            Set tEv.IsError = ''tRS.IsError
+            Set tEv.ErrorText = ""
+            If tEv.IsError Set tEv.ErrorText = ..SanitizeErrorText(tRS.ErrorStatus)
+            Do tList.Insert(tEv)
+        }
+        If tRS.%SQLCODE < 0 {
+            Set tSC = $$$ERROR($$$GeneralError, "SQL fetch error: "_tRS.%Message)
+            Quit
+        }
+
+        If tList.Count() > pMaxRows {
+            Set pTruncated = 1
+            Do tList.RemoveAt(pMaxRows + 1)
+        }
+        Set pEvents = tList
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Convert an <code>ErrorStatus</code> <class>%Status</class> value into a sanitized,
+/// single-line, length-capped summary (improvement I1, Rule #33 discipline).
+/// <p>Delegates to <method>ExecuteMCPv2.Utils:SanitizeError</method> (strips caret-global
+/// and routine references), collapses CR/LF/TAB to spaces, caps at ~200 characters, and
+/// falls back to a generic <code>"message reported error"</code> when the status carries
+/// no usable text (e.g. IsError=1 with an OK/empty ErrorStatus).</p>
+ClassMethod SanitizeErrorText(pErrorStatus As %Status) As %String [ Internal ]
+{
+    Set tText = ""
+    Try {
+        If (pErrorStatus '= "") && $System.Status.IsError(pErrorStatus) {
+            Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pErrorStatus)
+            Set tText = $System.Status.GetErrorText(tSafe)
+            ; Rule #8: GetErrorText on the re-wrapped status re-adds a single
+            ; "ERROR #N: " (or locale-variant) prefix — strip it once so the I1
+            ; summary is a clean human-readable one-liner (CR 21.0 review).
+            Set tColon = $Find(tText, ": ")
+            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
+                Set tText = $Extract(tText, tColon, *)
+            }
+        }
+    } Catch ex {
+        Set tText = ""
+    }
+    Set tText = $ZStrip($Translate(tText, $Char(13, 10, 9), "   "), "<>W")
+    If $Length(tText) > 200 Set tText = $Extract(tText, 1, 197)_"..."
+    If tText = "" Set tText = "message reported error"
+    Quit tText
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Correlator.cls",
+    `/// Request/response correlator for the message-trace sequence-diagram library
+/// (Epic 21, Story 21.0). Pure in-memory — no SQL, no IRIS state.
+/// <p>Implements the §6.2 correlation and rendering rules of
+/// sprint-change-proposal-2026-07-02.md:</p>
+/// <ul>
+///   <li><b>Type resolution</b> — normalized <code>Type</code> wins; otherwise a row with
+///       <code>CorrespondingMessageId</code> set is a Response, else a Request (Terminate
+///       and other unknown types flow through this heuristic — never dropped).</li>
+///   <li><b>Inproc pairing</b> — forward-only scan: for each Request, the first unused
+///       Response with REVERSED endpoints. <code>CorrespondingMessageId</code> confirms —
+///       a mismatch emits a conflict warning but still pairs by order. The response arrow
+///       is FORCED sync.</li>
+///   <li><b>Queue pairing</b> — primary: the Response whose CorrespondingMessageId equals
+///       the request ID; fallback: equal ReturnQueueName + reversed endpoints + empty
+///       CorrId. Both legs render async; a queued pair is NEVER reclassified to sync.</li>
+///   <li><b>Unpaired</b> requests warn; unpaired responses are emitted standalone (own
+///       Src→Dst direction) with a warning — never dropped.</li>
+///   <li><b>Arrows</b> — Inproc → sync <code>-&gt;&gt;</code>, Queue → async
+///       <code>--&gt;&gt;</code>, unknown → warning + default sync.</li>
+///   <li><b>Labels</b> — full body class name by default; <code>short</code> mode keeps the
+///       last dotted segment; bodyless headers render <code>(no body)</code>.</li>
+///   <li><b>I1</b> — an errored message attaches a sanitized one-line error warning.</li>
+/// </ul>
+/// <p>Best-effort contract: anomalies become warnings on the render events; this method
+/// never fails a generation because of trace-shape anomalies.</p>
+Class ExecuteMCPv2.Diagram.Correlator Extends %RegisteredObject
+{
+
+/// Correlate an ordered <class>ExecuteMCPv2.Diagram.Event</class> list into the ordered
+/// arrow render-event stream (one arrow per message, original row order preserved), with
+/// pairing metadata (<property>PairId</property>/<property>Role</property>) for the
+/// compressor and anomaly warnings attached per event.
+ClassMethod Correlate(pEvents As %Library.ListOfObjects, pLabelMode As %String = "full", Output pRenderEvents As %Library.ListOfObjects) As %Status
+{
+    Set tSC = $$$OK
+    Set pRenderEvents = ##class(%Library.ListOfObjects).%New()
+    Try {
+        Set tN = 0
+        If $IsObject(pEvents) Set tN = pEvents.Count()
+
+        ; ── Phase 1: effective type resolution (§6.2) ───────────────────────
+        For tI = 1:1:tN {
+            Set tEv = pEvents.GetAt(tI)
+            If (tEv.Type = "Request") || (tEv.Type = "Response") {
+                Set tEffType(tI) = tEv.Type
+            } ElseIf tEv.CorrId '= "" {
+                Set tEffType(tI) = "Response"
+            } Else {
+                Set tEffType(tI) = "Request"
+            }
+        }
+
+        ; ── Phase 2: forward-only pairing ───────────────────────────────────
+        Set tPairCount = 0
+        For tI = 1:1:tN {
+            If tEffType(tI) '= "Request" Continue
+            Set tReq = pEvents.GetAt(tI)
+            Set tMatch = 0
+            If tReq.Invocation = "Queue" {
+                ; Queue primary: Response whose CorrId = request ID
+                For tJ = tI + 1:1:tN {
+                    If tEffType(tJ) '= "Response" Continue
+                    If $Get(tUsed(tJ)) Continue
+                    Set tResp = pEvents.GetAt(tJ)
+                    If (tResp.CorrId '= "") && (+tResp.CorrId = +tReq.Id) {
+                        Set tMatch = tJ
+                        Quit
+                    }
+                }
+                ; Queue fallback: equal ReturnQueueName + reversed endpoints + empty CorrId
+                If tMatch = 0 {
+                    For tJ = tI + 1:1:tN {
+                        If tEffType(tJ) '= "Response" Continue
+                        If $Get(tUsed(tJ)) Continue
+                        Set tResp = pEvents.GetAt(tJ)
+                        If (tResp.CorrId = "") && (tResp.ReturnQueue = tReq.ReturnQueue) && (tResp.Source = tReq.Target) && (tResp.Target = tReq.Source) {
+                            Set tMatch = tJ
+                            Quit
+                        }
+                    }
+                }
+                If tMatch > 0 {
+                    Set tUsed(tMatch) = 1
+                    Set tPairCount = tPairCount + 1
+                    Set tPairIdOf(tI) = tPairCount
+                    Set tPairIdOf(tMatch) = tPairCount
+                    Set tRoleOf(tI) = "req"
+                    Set tRoleOf(tMatch) = "resp"
+                    ; a queued pair is never reclassified to sync (§6.2)
+                    Set tRespStyle(tMatch) = "-->>"
+                } Else {
+                    Set tUnpairedReq(tI) = "Unpaired request: message "_tReq.Id_" ("_tReq.Source_" -> "_tReq.Target_") has no matching response"
+                }
+            } Else {
+                ; Inproc (and unknown-invocation) pairing: first unused Response with reversed endpoints
+                For tJ = tI + 1:1:tN {
+                    If tEffType(tJ) '= "Response" Continue
+                    If $Get(tUsed(tJ)) Continue
+                    Set tResp = pEvents.GetAt(tJ)
+                    If (tResp.Source = tReq.Target) && (tResp.Target = tReq.Source) {
+                        Set tMatch = tJ
+                        Quit
+                    }
+                }
+                If tMatch > 0 {
+                    Set tResp = pEvents.GetAt(tMatch)
+                    Set tUsed(tMatch) = 1
+                    Set tPairCount = tPairCount + 1
+                    Set tPairIdOf(tI) = tPairCount
+                    Set tPairIdOf(tMatch) = tPairCount
+                    Set tRoleOf(tI) = "req"
+                    Set tRoleOf(tMatch) = "resp"
+                    ; the response arrow of an Inproc pair is forced sync (§6.2)
+                    Set tRespStyle(tMatch) = "->>"
+                    ; CorrespondingMessageId confirms; mismatch warns but still pairs by order
+                    If (tResp.CorrId '= "") && (+tResp.CorrId '= +tReq.Id) {
+                        Set tConflictWarn(tMatch) = "Correlation conflict: response "_tResp.Id_" paired with request "_tReq.Id_" by order, but its CorrespondingMessageId is "_tResp.CorrId
+                    }
+                } Else {
+                    Set tUnpairedReq(tI) = "Unpaired request: message "_tReq.Id_" ("_tReq.Source_" -> "_tReq.Target_") has no matching response"
+                }
+            }
+        }
+
+        ; ── Phase 3: emit one arrow render event per message, original order ─
+        For tI = 1:1:tN {
+            Set tEv = pEvents.GetAt(tI)
+            Set tRE = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+            Set tRE.Kind = "arrow"
+            Set tRE.Src = tEv.Source
+            Set tRE.Dst = tEv.Target
+            Set tRE.IsError = ''tEv.IsError
+            Set tRE.PairId = +$Get(tPairIdOf(tI))
+            Set tRE.Role = $Get(tRoleOf(tI))
+
+            ; label (mode applied here so compression signatures see the rendered label)
+            Set tLabel = tEv.BodyClass
+            If tLabel = "" {
+                Set tLabel = "(no body)"
+            } ElseIf pLabelMode = "short" {
+                Set tLabel = $Piece(tLabel, ".", $Length(tLabel, "."))
+            }
+            Set tRE.Label = tLabel
+
+            ; arrow style: paired responses use the pair-forced style; everything else
+            ; renders per its own Invocation (unknown -> warn + default sync)
+            If (tEffType(tI) = "Response") && ($Get(tRespStyle(tI)) '= "") {
+                Set tRE.Arrow = tRespStyle(tI)
+            } ElseIf tEv.Invocation = "Inproc" {
+                Set tRE.Arrow = "->>"
+            } ElseIf tEv.Invocation = "Queue" {
+                Set tRE.Arrow = "-->>"
+            } Else {
+                Set tRE.Arrow = "->>"
+                Do tRE.Warnings.Insert("Unknown invocation on message "_tEv.Id_"; defaulting to sync arrow")
+            }
+
+            ; unpaired response emitted standalone (own Src->Dst), never dropped (§6.2)
+            If (tEffType(tI) = "Response") && (tRE.PairId = 0) {
+                Do tRE.Warnings.Insert("Unpaired response: message "_tEv.Id_" ("_tEv.Source_" -> "_tEv.Target_") emitted standalone")
+            }
+            ; unpaired request warning
+            If $Get(tUnpairedReq(tI)) '= "" Do tRE.Warnings.Insert(tUnpairedReq(tI))
+            ; correlation-conflict warning (attached to the response leg)
+            If $Get(tConflictWarn(tI)) '= "" Do tRE.Warnings.Insert(tConflictWarn(tI))
+            ; improvement I1: errored message -> sanitized one-line error warning
+            If tRE.IsError {
+                Set tErrText = tEv.ErrorText
+                If tErrText = "" Set tErrText = "message reported error"
+                Do tRE.Warnings.Insert("Error on message "_tEv.Id_": "_tErrText)
+            }
+
+            Do pRenderEvents.Insert(tRE)
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Compressor.cls",
+    `/// Pair-level loop compressor for the message-trace sequence-diagram library
+/// (Epic 21, Story 21.0). Pure in-memory — no SQL, no IRIS state.
+/// <p>Implements the §6.3 pair tier of sprint-change-proposal-2026-07-02.md: a Request
+/// arrow IMMEDIATELY followed by its paired Response arrow forms a pair unit; contiguous
+/// pair units with identical signatures and count &gt; 1 collapse to one synthetic
+/// <code>pairloop</code> render event carrying the count and both legs.</p>
+/// <p>The pair signature is
+/// <code>reqSrc|reqDst|reqLabel|reqArrow|reqIsError||respSrc|respDst|respLabel|respArrow|respIsError</code>
+/// — arrow inclusion keeps Inproc/Queue pairs distinct, and per improvement I1 BOTH legs'
+/// error state joins the signature so an errored pair never merges into a clean loop
+/// (§6.4 item 11).</p>
+/// <p>Warnings from compressed pairs are deduped (exact text match, first-seen order)
+/// and retained on the loop event (§6.4 item 8).</p>
+/// <p>Episode-level compression (depth-stack tier) is Story 21.1 — this class is the
+/// seam: it consumes and produces the same ordered render-event stream, so the episode
+/// tier can slot in after the pair tier without reshaping the pipeline.</p>
+Class ExecuteMCPv2.Diagram.Compressor Extends %RegisteredObject
+{
+
+/// Compress contiguous identical request/response pairs in the ordered render-event
+/// stream into <code>pairloop</code> events. Events that are not part of an adjacent
+/// pair (unpaired arrows, pairs whose response does not immediately follow) pass
+/// through unchanged.
+ClassMethod Compress(pRenderEvents As %Library.ListOfObjects, Output pCompressed As %Library.ListOfObjects) As %Status
+{
+    Set tSC = $$$OK
+    Set pCompressed = ##class(%Library.ListOfObjects).%New()
+    Try {
+        Set tN = 0
+        If $IsObject(pRenderEvents) Set tN = pRenderEvents.Count()
+        Set tI = 1
+        While tI <= tN {
+            Set tEv = pRenderEvents.GetAt(tI)
+
+            ; a pair unit is a req-role arrow immediately followed by its resp-role arrow
+            Set tIsPairStart = 0
+            If (tEv.Kind = "arrow") && (tEv.Role = "req") && (tEv.PairId > 0) && (tI < tN) {
+                Set tNext = pRenderEvents.GetAt(tI + 1)
+                If (tNext.Kind = "arrow") && (tNext.PairId = tEv.PairId) {
+                    Set tIsPairStart = 1
+                }
+            }
+            If 'tIsPairStart {
+                Do pCompressed.Insert(tEv)
+                Set tI = tI + 1
+                Continue
+            }
+
+            ; count contiguous pair units with an identical signature
+            Set tSig = ..PairSignature(tEv, tNext)
+            Set tCount = 1
+            Set tK = tI + 2
+            While tK < tN {
+                Set tR1 = pRenderEvents.GetAt(tK)
+                Quit:'((tR1.Kind = "arrow") && (tR1.Role = "req") && (tR1.PairId > 0))
+                Set tR2 = pRenderEvents.GetAt(tK + 1)
+                Quit:'((tR2.Kind = "arrow") && (tR2.PairId = tR1.PairId))
+                Quit:(..PairSignature(tR1, tR2) '= tSig)
+                Set tCount = tCount + 1
+                Set tK = tK + 2
+            }
+
+            If tCount = 1 {
+                Do pCompressed.Insert(tEv)
+                Do pCompressed.Insert(tNext)
+                Set tI = tI + 2
+                Continue
+            }
+
+            ; collapse to a synthetic loop event; merge + dedupe warnings from ALL iterations
+            Set tLoop = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+            Set tLoop.Kind = "pairloop"
+            Set tLoop.Count = tCount
+            Set tLoop.Req = tEv
+            Set tLoop.Resp = tNext
+            Kill tSeen
+            For tP = 0:1:(tCount - 1) {
+                Set tReqEv = pRenderEvents.GetAt(tI + (tP * 2))
+                Set tRespEv = pRenderEvents.GetAt(tI + (tP * 2) + 1)
+                For tW = 1:1:tReqEv.Warnings.Count() {
+                    Set tText = tReqEv.Warnings.GetAt(tW)
+                    If '$Data(tSeen(tText)) {
+                        Set tSeen(tText) = 1
+                        Do tLoop.Warnings.Insert(tText)
+                    }
+                }
+                For tW = 1:1:tRespEv.Warnings.Count() {
+                    Set tText = tRespEv.Warnings.GetAt(tW)
+                    If '$Data(tSeen(tText)) {
+                        Set tSeen(tText) = 1
+                        Do tLoop.Warnings.Insert(tText)
+                    }
+                }
+            }
+            Do pCompressed.Insert(tLoop)
+            Set tI = tI + (tCount * 2)
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Build the pair signature for one request/response pair unit (§6.3 + improvement I1:
+/// both legs' error state participates so an errored pair never merges into a clean loop).
+ClassMethod PairSignature(pReq As ExecuteMCPv2.Diagram.RenderEvent, pResp As ExecuteMCPv2.Diagram.RenderEvent) As %String
+{
+    Quit pReq.Src_"|"_pReq.Dst_"|"_pReq.Label_"|"_pReq.Arrow_"|"_(''pReq.IsError)_"||"_pResp.Src_"|"_pResp.Dst_"|"_pResp.Label_"|"_pResp.Arrow_"|"_(''pResp.IsError)
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Writer.cls",
+    `/// Mermaid emitter for the message-trace sequence-diagram library (Epic 21, Story 21.0).
+/// <p>Emits ONLY the decision-G3 Mermaid subset: <code>sequenceDiagram</code>,
+/// <code>participant &lt;id&gt; [as &lt;label&gt;]</code>, sync <code>-&gt;&gt;</code> /
+/// async <code>--&gt;&gt;</code> arrows, <code>loop N times … end</code> blocks, and
+/// <code>%%</code> comments. No autonumber, activate, Note, or alt/opt.</p>
+/// <p>Per §6.2 of sprint-change-proposal-2026-07-02.md:</p>
+/// <ul>
+///   <li><b>I2</b> — each diagram opens with <code>%% Session &lt;id&gt;: &lt;n&gt; messages,
+///       &lt;first TimeCreated&gt; .. &lt;last TimeCreated&gt;</code>; an empty session yields a
+///       minimal valid diagram plus <code>%% No data available</code>.</li>
+///   <li><b>Participants</b> — first-appearance order over the COMPRESSED stream; IDs keep
+///       <code>[A-Za-z0-9_.]</code> (other characters become <code>_</code>, empty becomes
+///       <code>P</code>); collisions get <code>_2</code>/<code>_3</code>… suffixes; the
+///       <code>as &lt;label&gt;</code> clause is emitted only when the label differs from the
+///       id (every participant is still declared so Mermaid preserves first-appearance
+///       column order).</li>
+///   <li><b>I1</b> — an errored arrow's label gets an <code> [ERROR]</code> suffix and its
+///       warnings render as <code>%%</code> comments after the arrow line.</li>
+///   <li><b>Single-line discipline</b> — every emitted label/comment has CR/LF/TAB
+///       collapsed to spaces (a newline inside a label or comment breaks Mermaid).</li>
+/// </ul>
+Class ExecuteMCPv2.Diagram.Writer Extends %RegisteredObject
+{
+
+/// Render the compressed render-event stream as one Mermaid <code>sequenceDiagram</code>.
+/// <p><var>pFirstTime</var>/<var>pLastTime</var> feed the I2 metadata header and are the
+/// TimeCreated values of the first/last LOADED message (pre-compression);
+/// <var>pMessageCount</var> is the loaded (post-filter, post-truncation) row count.</p>
+ClassMethod Write(pSessionId As %String, pMessageCount As %Integer, pFirstTime As %String, pLastTime As %String, pRenderEvents As %Library.ListOfObjects, Output pMermaid As %String) As %Status
+{
+    Set tSC = $$$OK
+    Set pMermaid = ""
+    Try {
+        Set tNL = $Char(10)
+        Set tOut = "sequenceDiagram"_tNL
+
+        ; I2 session metadata header
+        Set tHeader = "%% Session "_(+pSessionId)_": "_(+pMessageCount)_" messages"
+        If (+pMessageCount > 0) && (pFirstTime '= "") {
+            Set tHeader = tHeader_", "_..SingleLine(pFirstTime)_" .. "_..SingleLine(pLastTime)
+        }
+        Set tOut = tOut_tHeader_tNL
+
+        Set tN = 0
+        If $IsObject(pRenderEvents) Set tN = pRenderEvents.Count()
+        If tN = 0 {
+            Set tOut = tOut_"%% No data available"
+            Set pMermaid = tOut
+            Quit
+        }
+
+        ; ── participant registry: first-appearance order over the compressed stream ──
+        Set tPartCount = 0
+        For tI = 1:1:tN {
+            Set tEv = pRenderEvents.GetAt(tI)
+            If tEv.Kind = "arrow" {
+                Do ..RegisterParticipant(tEv.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
+                Do ..RegisterParticipant(tEv.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
+            } ElseIf tEv.Kind = "pairloop" {
+                Do ..RegisterParticipant(tEv.Req.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
+                Do ..RegisterParticipant(tEv.Req.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
+                Do ..RegisterParticipant(tEv.Resp.Src, .tIdOf, .tTaken, .tOrder, .tPartCount)
+                Do ..RegisterParticipant(tEv.Resp.Dst, .tIdOf, .tTaken, .tOrder, .tPartCount)
+            }
+        }
+        For tI = 1:1:tPartCount {
+            Set tName = tOrder(tI)
+            Set tId = tIdOf("n"_tName)
+            Set tLabel = ..SingleLine(tName)
+            If (tLabel = tId) || (tLabel = "") {
+                Set tOut = tOut_"participant "_tId_tNL
+            } Else {
+                Set tOut = tOut_"participant "_tId_" as "_tLabel_tNL
+            }
+        }
+
+        ; ── body ─────────────────────────────────────────────────────────────
+        For tI = 1:1:tN {
+            Set tEv = pRenderEvents.GetAt(tI)
+            If tEv.Kind = "arrow" {
+                Set tOut = tOut_..ArrowLine(tEv, .tIdOf, "")_tNL
+                For tW = 1:1:tEv.Warnings.Count() {
+                    Set tOut = tOut_"%% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+                }
+            } ElseIf tEv.Kind = "pairloop" {
+                Set tOut = tOut_"loop "_(+tEv.Count)_" times"_tNL
+                Set tOut = tOut_..ArrowLine(tEv.Req, .tIdOf, "  ")_tNL
+                Set tOut = tOut_..ArrowLine(tEv.Resp, .tIdOf, "  ")_tNL
+                ; loop-level warnings are the deduped merge of all compressed iterations;
+                ; the leg events' own warning lists are NOT re-rendered (they were merged)
+                For tW = 1:1:tEv.Warnings.Count() {
+                    Set tOut = tOut_"  %% "_..SingleLine(tEv.Warnings.GetAt(tW))_tNL
+                }
+                Set tOut = tOut_"end"_tNL
+            }
+        }
+
+        ; drop the final trailing newline for a tidy payload
+        If $Extract(tOut, *) = tNL Set tOut = $Extract(tOut, 1, *-1)
+        Set pMermaid = tOut
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Register a participant name (first-appearance order, collision-suffixed ids).
+/// <p><var>pIdOf</var> maps <code>"n"_name</code> → id (the "n" prefix keeps an empty
+/// participant name from becoming an illegal empty subscript); <var>pTaken</var> tracks
+/// claimed ids; <var>pOrder(seq)</var> records first-appearance order.</p>
+ClassMethod RegisterParticipant(pName As %String, ByRef pIdOf, ByRef pTaken, ByRef pOrder, ByRef pCount) As %Status [ Internal ]
+{
+    If $Data(pIdOf("n"_pName)) Quit $$$OK
+    Set tBase = ..SanitizeId(pName)
+    Set tId = tBase
+    Set tSuffix = 2
+    While $Data(pTaken(tId)) {
+        Set tId = tBase_"_"_tSuffix
+        Set tSuffix = tSuffix + 1
+    }
+    Set pTaken(tId) = 1
+    Set pIdOf("n"_pName) = tId
+    Set pCount = pCount + 1
+    Set pOrder(pCount) = pName
+    Quit $$$OK
+}
+
+/// Format one arrow line: <code>&lt;srcId&gt;-&gt;&gt;&lt;dstId&gt;: &lt;label&gt;</code>,
+/// with the improvement-I1 <code> [ERROR]</code> suffix when the event is errored.
+/// <p>A label that collapses to empty after single-line stripping (e.g. whitespace-only
+/// body class, or a short-mode segment that reduced to "") falls back to the
+/// <code>(no body)</code> placeholder so the emitted arrow always carries a label
+/// (CR 21.0 review — the G3 grammar requires a non-empty arrow label).</p>
+ClassMethod ArrowLine(pEv As ExecuteMCPv2.Diagram.RenderEvent, ByRef pIdOf, pIndent As %String = "") As %String [ Internal ]
+{
+    Set tLabel = ..SingleLine(pEv.Label)
+    If tLabel = "" Set tLabel = "(no body)"
+    If pEv.IsError Set tLabel = tLabel_" [ERROR]"
+    Quit pIndent_$Get(pIdOf("n"_pEv.Src))_pEv.Arrow_$Get(pIdOf("n"_pEv.Dst))_": "_tLabel
+}
+
+/// Sanitize a participant name into a Mermaid-safe id: keep <code>[A-Za-z0-9_.]</code>
+/// (strict ASCII), replace anything else with <code>_</code>; an empty result becomes
+/// <code>P</code> (§6.2).
+ClassMethod SanitizeId(pName As %String) As %String [ Internal ]
+{
+    Set tId = ""
+    For tJ = 1:1:$Length(pName) {
+        Set tCode = $Ascii(pName, tJ)
+        If ((tCode >= 65) && (tCode <= 90)) || ((tCode >= 97) && (tCode <= 122)) || ((tCode >= 48) && (tCode <= 57)) || (tCode = 95) || (tCode = 46) {
+            Set tId = tId_$Char(tCode)
+        } Else {
+            Set tId = tId_"_"
+        }
+    }
+    If tId = "" Set tId = "P"
+    ; Mermaid sequenceDiagram statement keywords cannot serve as bare participant ids:
+    ; a config item literally named "end" (or "loop", "alt", ...) would terminate the
+    ; emitted loop blocks or be lexed as a statement keyword at line start, breaking the
+    ; whole diagram. Suffix such ids with "_" — the original name still displays via the
+    ; as-label because id != label then forces the as clause (CR 21.0 review).
+    If $ListFind($ListFromString("end,loop,alt,opt,par,and,else,rect,break,critical,option,box,participant,actor,activate,deactivate,note,over,autonumber,title,sequencediagram,create,destroy,links,link,properties,details"), $ZConvert(tId, "L")) {
+        Set tId = tId_"_"
+    }
+    Quit tId
+}
+
+/// Collapse CR/LF/TAB to single spaces, trim outer whitespace, and escape semicolons —
+/// a newline inside a label or <code>%%</code> comment breaks Mermaid (single-line
+/// discipline), and Mermaid sequenceDiagram treats a raw <code>;</code> as a statement
+/// separator ("use #59; to include a semicolon" per the Mermaid docs), so a config name
+/// or error text containing <code>;</code> would split the line into junk statements
+/// (CR 21.0 review). <code>#59;</code> renders back as <code>;</code>.
+ClassMethod SingleLine(pText As %String) As %String [ Internal ]
+{
+    Quit $Replace($ZStrip($Translate(pText, $Char(13, 10, 9), "   "), "<>W"), ";", "#59;")
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Diagram.Generate.cls",
+    `/// Callable facade for the message-trace sequence-diagram library (Epic 21, Story 21.0;
+/// architecture decision G1). Callable independently of REST.
+/// <p>For each requested session: <class>ExecuteMCPv2.Diagram.Loader</class> →
+/// <class>ExecuteMCPv2.Diagram.Correlator</class> →
+/// <class>ExecuteMCPv2.Diagram.Compressor</class> →
+/// <class>ExecuteMCPv2.Diagram.Writer</class>, producing
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>
+/// (decision G3 output contract). Sessions are processed one at a time — no
+/// cross-session SQL.</p>
+/// <p>Best-effort contract: per-session anomalies surface as structured warnings and
+/// <code>%%</code> comments; a per-session hard failure (e.g. Ens.MessageHeader absent in
+/// a non-interoperability namespace) becomes a comment-only diagram plus a warning rather
+/// than failing the call.</p>
+/// <p>NOTE for Story 21.1: keep this class/method name stable — episode-level compression
+/// and cross-session dedup slot into the per-session pipeline below.</p>
+Class ExecuteMCPv2.Diagram.Generate Extends %RegisteredObject
+{
+
+/// Generate one Mermaid sequence diagram per session id.
+/// <p><var>pSessionIds</var> — <class>%Library.ListOfDataTypes</class> of session ids.</p>
+/// <p><var>pOptions</var> — optional <class>%DynamicObject</class>:
+/// <code>labelMode</code> (<code>"full"</code> default / <code>"short"</code> = last dotted
+/// segment) and <code>maxRows</code> (default 2000, max 10000).</p>
+/// <p><var>pResult</var> — <code>{ diagrams: [...], count: n }</code>.</p>
+ClassMethod Run(pSessionIds As %Library.ListOfDataTypes, pOptions As %DynamicObject = "", Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Try {
+        ; resolve options (Rule #15: no $Get() around method calls — %IsDefined + %Get)
+        Set tLabelMode = "full"
+        Set tMaxRows = 2000
+        If $IsObject(pOptions) {
+            If pOptions.%IsDefined("labelMode") {
+                Set tMode = pOptions.%Get("labelMode")
+                If (tMode = "full") || (tMode = "short") Set tLabelMode = tMode
+            }
+            If pOptions.%IsDefined("maxRows") {
+                Set tMax = +pOptions.%Get("maxRows") \\ 1
+                If tMax > 0 Set tMaxRows = tMax
+            }
+        }
+        If tMaxRows > 10000 Set tMaxRows = 10000
+
+        Set tDiagrams = []
+        Set tCount = 0
+        If $IsObject(pSessionIds) Set tCount = pSessionIds.Count()
+        For tI = 1:1:tCount {
+            Set tSessionId = pSessionIds.GetAt(tI)
+            Set tDiag = ..GenerateOne(tSessionId, tLabelMode, tMaxRows)
+            Do tDiagrams.%Push(tDiag)
+        }
+
+        Set pResult = {}
+        Do pResult.%Set("diagrams", tDiagrams)
+        Do pResult.%Set("count", tDiagrams.%Size(), "number")
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Run the Load → Correlate → Compress → Write pipeline for ONE session and return its
+/// diagram object. Never throws to the caller: any hard failure is converted into a
+/// comment-only diagram + warning (best-effort contract, decision G3).
+ClassMethod GenerateOne(pSessionId As %String, pLabelMode As %String = "full", pMaxRows As %Integer = 2000) As %DynamicObject [ Internal ]
+{
+    Set tDiag = {}
+    Try {
+        Do tDiag.%Set("sessionId", +pSessionId, "number")
+
+        Set tSC = ##class(ExecuteMCPv2.Diagram.Loader).LoadSession(pSessionId, pMaxRows, .tEvents, .tTruncated)
+        If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Correlator).Correlate(tEvents, pLabelMode, .tRender)
+        If $$$ISOK(tSC) Set tSC = ##class(ExecuteMCPv2.Diagram.Compressor).Compress(tRender, .tCompressed)
+        If $$$ISOK(tSC) {
+            Set tMsgCount = tEvents.Count()
+            Set tFirst = ""
+            Set tLast = ""
+            If tMsgCount > 0 {
+                Set tFirst = tEvents.GetAt(1).TimeCreated
+                Set tLast = tEvents.GetAt(tMsgCount).TimeCreated
+            }
+            Set tSC = ##class(ExecuteMCPv2.Diagram.Writer).Write(pSessionId, tMsgCount, tFirst, tLast, tCompressed, .tMermaid)
+        }
+        If $$$ISERR(tSC) {
+            Do ..ApplyFailure(tDiag, pSessionId, tSC)
+            Quit
+        }
+
+        ; structured warnings = every event's warnings over the compressed stream, in
+        ; order (pairloop events already carry the deduped merge of their iterations)
+        Set tWarnings = []
+        For tI = 1:1:tCompressed.Count() {
+            Set tRE = tCompressed.GetAt(tI)
+            For tW = 1:1:tRE.Warnings.Count() {
+                Do tWarnings.%Push(tRE.Warnings.GetAt(tW))
+            }
+        }
+
+        Do tDiag.%Set("mermaid", tMermaid)
+        Do tDiag.%Set("messageCount", tMsgCount, "number")
+        Do tDiag.%Set("warnings", tWarnings)
+        Do tDiag.%Set("truncated", ''tTruncated, "boolean")
+    } Catch ex {
+        Do ..ApplyFailure(tDiag, pSessionId, ex.AsStatus())
+    }
+    Quit tDiag
+}
+
+/// Fill <var>pDiag</var> with the comment-only failure shape for a per-session hard
+/// failure. Error text passes through <method>ExecuteMCPv2.Utils:SanitizeError</method>
+/// (Rule #33 — no caret-globals or internals leak into comments/warnings).
+ClassMethod ApplyFailure(pDiag As %DynamicObject, pSessionId As %String, pStatus As %Status) As %Status [ Internal ]
+{
+    Set tSC = $$$OK
+    Try {
+        Set tText = ""
+        Try {
+            Set tSafe = ##class(ExecuteMCPv2.Utils).SanitizeError(pStatus)
+            Set tText = $System.Status.GetErrorText(tSafe)
+            ; Rule #8: strip the single "ERROR #N: " (or locale-variant) prefix
+            ; GetErrorText re-adds on the re-wrapped status (CR 21.0 review).
+            Set tColon = $Find(tText, ": ")
+            If (tColon > 0) && ($Extract(tText, 1, tColon - 3) ? .E1"#"1.N) {
+                Set tText = $Extract(tText, tColon, *)
+            }
+        } Catch exInner {
+            Set tText = ""
+        }
+        Set tText = $ZStrip($Translate(tText, $Char(13, 10, 9), "   "), "<>W")
+        If tText = "" Set tText = "diagram generation failed"
+        Set tNL = $Char(10)
+        Set tMermaid = "sequenceDiagram"_tNL_"%% Session "_(+pSessionId)_": generation failed"_tNL_"%% "_tText
+        Do pDiag.%Set("sessionId", +pSessionId, "number")
+        Do pDiag.%Set("mermaid", tMermaid)
+        Do pDiag.%Set("messageCount", 0, "number")
+        Set tWarnings = []
+        Do tWarnings.%Push("Generation failed for session "_(+pSessionId)_": "_tText)
+        Do pDiag.%Set("warnings", tWarnings)
+        Do pDiag.%Set("truncated", 0, "boolean")
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 }`,
@@ -6256,6 +7176,99 @@ ClassMethod MessageTrace() As %Status
     Quit $$$OK
 }
 
+/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Story 21.0).
+/// <p>Thin handler: validates the request, delegates to the
+/// <class>ExecuteMCPv2.Diagram.Generate</class> facade, and renders
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated }], count }</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>sessionIds</code> — comma-separated list of 1-20 positive integer session IDs (required)</li>
+///   <li><code>labelMode</code> — "full" (default) or "short" (last dotted segment of the body class)</li>
+///   <li><code>maxRows</code> — per-session row cap (default 2000, max 10000)</li>
+///   <li><code>namespace</code> — target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod MessageDiagram() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSessionIdsCsv = $Get(%request.Data("sessionIds",1))
+        Set tLabelMode = $Get(%request.Data("labelMode",1))
+        If tLabelMode = "" Set tLabelMode = "full"
+        Set tMaxRows = +$Get(%request.Data("maxRows",1), 2000) \\ 1
+        If tMaxRows < 1 Set tMaxRows = 2000
+        If tMaxRows > 10000 Set tMaxRows = 10000
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Validate labelMode
+        If (tLabelMode '= "full") && (tLabelMode '= "short") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'labelMode' must be 'full' or 'short'")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate sessionIds: CSV of 1-20 positive canonical integers
+        If tSessionIdsCsv = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "Required parameter 'sessionIds' is missing or empty")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tIdCount = $Length(tSessionIdsCsv, ",")
+        If tIdCount > 20 {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must contain between 1 and 20 session IDs")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tSessionIds = ##class(%Library.ListOfDataTypes).%New()
+        Set tValid = 1
+        For tI = 1:1:tIdCount {
+            Set tPiece = $ZStrip($Piece(tSessionIdsCsv, ",", tI), "<>W")
+            If (tPiece = "") || (tPiece '= +tPiece) || (+tPiece '= (+tPiece \\ 1)) || (+tPiece <= 0) {
+                Set tValid = 0
+                Quit
+            }
+            Do tSessionIds.Insert(+tPiece)
+        }
+        If 'tValid {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must be a comma-separated list of positive integers")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Delegate to the diagram library facade
+        Set tOptions = {}
+        Do tOptions.%Set("labelMode", tLabelMode)
+        Do tOptions.%Set("maxRows", tMaxRows, "number")
+        Set tResult = ""
+        Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(tSessionIds, tOptions, .tResult)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// List available adapter types grouped by category.
 /// <p>Queries <code>%Dictionary.ClassDefinition</code> to find adapter classes
 /// that extend <code>Ens.InboundAdapter</code> or <code>Ens.OutboundAdapter</code>.
@@ -9965,6 +10978,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/logs" Method="GET" Call="ExecuteMCPv2.REST.Interop:EventLog" />
   <Route Url="/interop/production/queues" Method="GET" Call="ExecuteMCPv2.REST.Interop:QueueStatus" />
   <Route Url="/interop/production/messages" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageTrace" />
+  <Route Url="/interop/production/messages/diagram" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageDiagram" />
   <Route Url="/interop/production/adapters" Method="GET" Call="ExecuteMCPv2.REST.Interop:AdapterList" />
 
   <!-- Epic 5: Credentials and Lookup Tables -->

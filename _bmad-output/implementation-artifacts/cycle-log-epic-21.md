@@ -1,0 +1,11 @@
+﻿2026-07-03T04:20:55Z	Epic 21	feature_branch_created	repos=. ticket=NONE description=message-diagram root=origin/main
+2026-07-03T04:20:55Z	Epic 21	epic_branch_created	repos=. from=7ffced6
+2026-07-03T04:20:55Z	Epic 21	epic_branch_checked_out	repos=. head=7ffced6
+2026-07-03T04:22:21Z	Epic 21	sprint_planning_complete	model=claude-fable-5 stories=2 keys=158 result=noop_current
+2026-07-03T04:22:47Z	Epic 21	retro_review_complete	source_retro=_bmad-output/implementation-artifacts/epic-20-retro-2026-07-02.md included=0 deferred=11 dropped=0 note=feature_epic_no_colliding_x0 model=claude-fable-5
+2026-07-03T04:31:37Z	Story 21.0	story_created	path=_bmad-output/implementation-artifacts/21-0-message-diagram-core.md model=claude-fable-5 amendments=A1_dynamic_sql,A2_bootstrap_array,A3_tests_package
+2026-07-03T05:14:29Z	Story 21.0	dev_complete	spawn_at=2026-07-03T04:23:00Z model=claude-fable-5 files=17 tests_added=6 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true bootstrap=5376735fabab->10de5167a283 os_tests=46 ts_tests=23
+2026-07-03T05:14:29Z	Story 21.0	adr_verifications_complete	tool=none acs=G1,G2,G3 result=none_required evidence=epic21-adrs-are-architectural-not-agent-time-tooling;G2-provenance-verified-by-code-review-per-AC21.0.10 model=claude-fable-5
+2026-07-03T05:31:47Z	Story 21.0	qa_complete	spawn_at=2026-07-03T05:07:00Z model=claude-fable-5 tests_added=17 first_run_failures=0 clarifications=0 closing_sections_present=true note=facade_e2e+g3_grammar_validator+ts_matrix;os_56_interop_264_shared_551
+2026-07-03T06:02:50Z	Story 21.0	cr_complete	spawn_at=2026-07-03T05:26:00Z model=claude-fable-5 resolved=8 deferred=2 dismissed=9 high=0 med=2 low=8 clarifications=0 closing_sections_present=true bootstrap=10de5167a283->5bd5579c25c1 note=mermaid_semicolon_escape_MED_fixed;CR21.0-1_returnqueue_fallback_deferred
+2026-07-03T06:05:48Z	Story 21.0	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=scratchpad/smoke-21-0-render.png+smoke-21-0.json;real-sessions-80512+80569-rendered-in-mermaid11-RENDER_OK-svgs=2;error-flag-live;trace-row-excluded-2rows-1msg;unknown-session-empty-path;rejections-invalid-csv+21ids-clean-envelopes;synthetic-session-990000901-cleaned-0-remaining model=claude-fable-5

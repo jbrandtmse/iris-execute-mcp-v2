@@ -7,7 +7,8 @@
  * production item / auto-start tools from Story 5.3,
  * production monitoring tools (logs, queues, messages, adapters) from Story 5.4,
  * credential / lookup table tools from Story 5.5,
- * and rules, transforms, and REST API tools from Story 5.6.
+ * rules, transforms, and REST API tools from Story 5.6,
+ * and the message-trace sequence-diagram tool from Story 21.0.
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -49,6 +50,9 @@ import {
 import {
   defaultSettingsManageTool,
 } from "./defaultSettings.js";
+import {
+  messageDiagramTool,
+} from "./diagram.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -72,4 +76,5 @@ export const tools: ToolDefinition[] = [
   transformTestTool,
   interopRestTool,
   defaultSettingsManageTool,
+  messageDiagramTool,
 ];
