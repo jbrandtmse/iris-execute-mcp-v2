@@ -563,6 +563,10 @@ The `/epic-cycle 20` retro-review gate read `epic-19-retro-2026-06-18.md` (Actio
 - **[CR 16.2-3 / LOW]** compact/truncate ByRef pre-init-0 vs failure indistinguishable — success path never renders on failure; invisible to caller. No action.
 - **[CR 17.1-2 / 17.1-3 / LOW]** empty-slot→`*` coercion / `deployable` direct-REST coercion — documented deliberate-caller paths; MCP callers safe via Zod. No action.
 
+## Epic 21 retrospective (2026-07-03) — ledger INCLUDED in next epic, not re-deferred
+
+The Epic 21 retrospective (`epic-21-retro-2026-07-03.md`) closed with a firm Project Lead directive: after three consecutive feature epics (19 → 20 → 21) re-deferring this ledger at each retro-review gate, **the next epic to be planned WILL include this ledger as in-scope cleanup work** — not merely triage-and-defer it again. The ledger stands at **14 open items** as of this retro: the 11 items re-deferred below (Epic 21 kickoff, 2026-07-02) plus CR 21.0-2 (correlator O(n²)), CR 21.1-1 (rule-A pairloop grouping asymmetry), and CR 21.1-2 (Src=Dst self-call depth-stack growth) — all added during Epic 21's code reviews, all LOW severity, none blocking. (CR 21.0-1 does NOT carry forward — it was resolved same-epic as improvement I3, Story 21.1.) Whichever epic is planned next should open its retro-review gate against this note rather than re-triaging from scratch.
+
 ## Epic 21 retro-review gate (2026-07-02) — re-defer all; no colliding Story X.0
 
 Epic 21 (Message Trace Sequence Diagram) is a focused two-story **feature** epic: Story 21.0 (diagram library core + endpoint + tool) already occupies the `21.0` slot and Story 21.1 (episode compression + dedup + docs) completes it — mirroring the Epic 19/20 single-feature-epic shape.
