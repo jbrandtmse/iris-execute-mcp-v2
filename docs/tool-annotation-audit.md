@@ -83,7 +83,7 @@
 | Tool Name | Action Pattern | readOnly | destructive | idempotent | openWorld | Notes |
 |-----------|---------------|----------|-------------|------------|-----------|-------|
 | iris.production.manage | manage | false | true | false | false | Has delete |
-| iris.production.control | control | false | true | false | false | **CORRECTED**: stop/restart is destructive |
+| iris.production.control | control | false | true | false | false | **CORRECTED**: stop/restart is destructive. Epic 20 adds `clean` (governed `write`, default-enabled via `defaultEnabled`); `killAppData` wipe double-gated by `confirm`. |
 | iris.production.status | status | true | false | true | false | |
 | iris.production.summary | summary | true | false | true | false | |
 | iris.production.item | item | false | false | false | false | Mixed: get/set/enable/disable |

@@ -120,7 +120,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_production_manage` | Create or delete a production | `action`, `name`, `namespace?` | destructive |
-| `iris_production_control` | Start, stop, restart, update, or recover | `action`, `name?`, `timeout?`, `force?`, `namespace?` | -- |
+| `iris_production_control` | Start, stop, restart, update, recover, or clean | `action`, `name?`, `timeout?`, `force?`, `killAppData?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
 | `iris_production_summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
 
@@ -132,7 +132,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
 | `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
 
-> **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. (A just-`add`-ed config item is not visible to an immediate `get`/`set` until the next add/remove syncs the config extent from the production class — see the `iris_production_item` examples below.)
+> **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. **Exception — `iris_production_control:clean`** is a new `write` that is nonetheless **enabled by default** (via the `defaultEnabled` marker, Epic 20 decision F2) because it is a recovery operation an operator expects available; it can still be disabled with an explicit `IRIS_GOVERNANCE` override. (A just-`add`-ed config item is not visible to an immediate `get`/`set` until the next add/remove syncs the config extent from the production class — see the `iris_production_item` examples below.)
 
 ### Production Monitoring Tools
 
@@ -219,7 +219,11 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 <details>
 <summary><strong>iris_production_control</strong> -- Start a production</summary>
 
-All five actions (`start`, `stop`, `restart`, `update`, `recover`) are verified to work. `start` and `restart` require `name`; `stop`, `update`, and `recover` do not.
+Six actions (`start`, `stop`, `restart`, `update`, `recover`, `clean`) are verified to work. `start` and `restart` require `name`; the others do not.
+
+`clean` clears a **stopped** production's stale runtime state (queues, job-status, suspended messages) to unwedge a production that `recover` cannot fix. For a troubled production, prefer `recover` first; use `clean` only as a **last resort**. By default `clean` touches only transient runtime state; setting `killAppData: true` (with `confirm: true`) **also** wipes the persistent `^Ens.AppData` business state — HL7 sequence numbers, file/FTP done-file tables (→ duplicate re-ingestion), and RecordMap/X12 batch/control state. `killAppData: true` without `confirm: true` is refused and changes nothing.
+
+**Governance:** `start`/`stop`/`restart`/`update`/`recover` are grandfathered (always enabled). `clean` is a **write but enabled by default** (via the `defaultEnabled` marker, Epic 20 decision F2) — a recovery operation an operator expects available — while remaining truthfully `mutates: "write"`. An operator can still disable it with an explicit `IRIS_GOVERNANCE` override (e.g. `{"global":{"iris_production_control:clean":false}}`).
 
 **Input:**
 ```json
@@ -236,6 +240,14 @@ All five actions (`start`, `stop`, `restart`, `update`, `recover`) are verified 
   "name": "MyApp.Production",
   "status": "Running"
 }
+```
+
+**Clean (transient-only) input/output:**
+```json
+{ "action": "clean" }
+```
+```json
+{ "action": "cleaned", "killAppData": 0 }
 ```
 </details>
 

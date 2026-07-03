@@ -55,7 +55,15 @@ export const SERVER_DISCOVERY_INSTRUCTIONS =
   `server profiles (non-secret connection metadata) and the effective governance ` +
   `policy (which actions are enabled/disabled) before invoking other tools. This ` +
   `lets you pick the right \`server\` profile for each call and avoid actions that ` +
-  `governance has disabled.`;
+  `governance has disabled.\n\n` +
+  // Production recovery guidance (Epic 20, decision F1 / AC 20.0.1a). Generic
+  // across all five servers (like the call-first guidance above); a client that
+  // does not expose the interop tools simply ignores it.
+  `When a production is troubled or wedged, prefer \`iris_production_control\` ` +
+  `action \`recover\` as the FIRST response. Use action \`clean\` only as a LAST ` +
+  `RESORT when \`recover\` does not resolve the problem, and reserve its ` +
+  `\`killAppData\` option (which wipes persistent business state) for cases where ` +
+  `you accept that data loss.`;
 
 /**
  * A single roster entry: a profile's NON-SECRET connection metadata.
@@ -134,6 +142,9 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  * @param config       - Parsed governance config.
  * @param governedKeys - The full governance key universe (baseline ∪ registered).
  * @param mutatesLookup- Key → mutation class for new actions.
+ * @param defaultEnabledWrites - Write keys that seed enabled (Epic 20 F2); default empty.
+ *   Threaded so discovery reports the SAME effective policy as the gate/resource —
+ *   e.g. `iris_production_control:clean` shows enabled (AC 20.0.5 non-drift).
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -143,6 +154,7 @@ export function computeServerDiscovery(
   config: GovernanceConfig,
   governedKeys: Iterable<string>,
   mutatesLookup: MutatesLookup,
+  defaultEnabledWrites: ReadonlySet<string> = new Set(),
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -165,7 +177,14 @@ export function computeServerDiscovery(
       // every configured profile appears in the output (no silent loss / no
       // prototype mutation). buildProfileRegistry admits any non-empty name.
       Object.defineProperty(policies, name, {
-        value: getEffectivePolicy(name, config, governedKeys, mutatesLookup),
+        value: getEffectivePolicy(
+          name,
+          config,
+          governedKeys,
+          mutatesLookup,
+          undefined,
+          defaultEnabledWrites,
+        ),
         enumerable: true,
         writable: true,
         configurable: true,
@@ -183,6 +202,8 @@ export function computeServerDiscovery(
         config,
         governedKeys,
         mutatesLookup,
+        undefined,
+        defaultEnabledWrites,
       ),
     };
   }
