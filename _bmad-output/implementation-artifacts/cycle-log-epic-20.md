@@ -9,3 +9,4 @@
 2026-07-02T20:15:32Z	Story 20.0	qa_complete	spawn_at=2026-07-02T20:09:30Z model=claude-opus-4-8 tests_added=4 first_run_failures=0 clarifications=0 closing_sections_present=true note=e2e_real_mcpserverbase_nondrift+capstone_mutation_tested
 2026-07-02T20:25:19Z	Story 20.0	cr_complete	spawn_at=2026-07-02T20:18:00Z model=claude-opus-4-8 resolved=2 deferred=1 dismissed=3 high=0 med=2 low=1 clarifications=0 closing_sections_present=true note=F2_defaultEnabled_crossvalidation_failfast
 2026-07-02T20:26:55Z	Story 20.0	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live-HTTP_HSCUSTOM:killAppData-noconfirm-refused+recover-noarg-ok+clean-default-ok+guard-intact model=claude-opus-4-8
+2026-07-02T20:26:58Z	Story 20.0	committed	sha=7aca352 submodules=
