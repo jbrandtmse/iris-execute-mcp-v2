@@ -12,7 +12,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 ---
 
-## `@iris-mcp/dev` — Development Tools (25)
+## `@iris-mcp/dev` — Development Tools (26)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -41,10 +41,13 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 23 | `iris_doc_export` | 🟦 Atelier | `GET /docnames/{cat}/{type}` + `GET /doc/{name}` (bulk) |
 | 24 | `iris_routine_intermediate` | 🟦 Atelier | `GET /doc/{name}` (candidate fallback) |
 | 25 | `iris_sql_analyze` | 🟦 Atelier | `POST /action/query` (`EXPLAIN` + `INFORMATION_SCHEMA` views) |
+| 26 | `iris_loc_count` | 🟥 ExecuteMCPv2 | `GET /dev/loc` (`ExecuteMCPv2.Loc.*` library) |
 
-**Mix:** 19 Atelier · 6 ExecuteMCPv2 · 0 other
+**Mix:** 19 Atelier · 7 ExecuteMCPv2 · 0 other
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_sql_analyze` (`explain`/`stats`/`indexUsage`/`running`). All four actions are governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled). The tool is Atelier/SQL-only (no ObjectScript handler, no bootstrap contribution).
+
+> **Epic 22 (2026-07-03) — governance defaults:** added `iris_loc_count` (namespace lines-of-code counter over CLS/MAC/INT/INC via `StudioOpenDialog` + `GetTextAsArray`). The tool is governance-classified `read` (scalar) and therefore **enabled by default** — reads resolve enabled under the default seed; the frozen governance baseline is untouched. `spec` is required (whole-namespace scans need an explicit `*`); compiler-generated documents are excluded unless `includeGenerated` is set; wildcard scans exclude `%`-prefixed system documents (name them explicitly to count them), and overlapping spec parts (an exact name before a wildcard that also matches it) can drop documents — an IRIS `StudioOpenDialog` spec quirk (CR 22.0-4). Backed by the `ExecuteMCPv2.Loc.{Classifier,Scanner,Generate}` library + `ExecuteMCPv2.REST.Loc` handler (bootstrap contribution — 4 new embedded classes).
 
 ---
 
@@ -261,7 +264,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 99-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 100-tool total.
 
 ---
 
@@ -283,12 +286,12 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 | Server | Atelier | ExecuteMCPv2 | Other | Package total | Advertised (+1 framework) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 19 | 6 | 0 | **25** | **26** |
+| `@iris-mcp/dev` | 19 | 7 | 0 | **26** | **27** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
 | `@iris-mcp/interop` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/ops` | 0 | 20 | 0 | **20** | **21** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **19** | **75** | **5** | **99** | **104** |
+| **Total** | **19** | **76** | **5** | **100** | **105** |
 
 ---
 
@@ -296,11 +299,11 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Only `@iris-mcp/dev` is partially portable without the custom REST
 
-19 of the 25 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 6 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`) would fail but the rest would work.
+19 of the 26 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 7 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`, `iris_loc_count`) would fail but the rest would work.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 75 of the 99 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 76 of the 100 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -314,7 +317,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 75 of 99 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 76 of 100 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

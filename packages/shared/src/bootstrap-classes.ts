@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 20 production classes as string literals, keyed by their
+ * Contains all 24 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "c3cc801cfead";
+export const BOOTSTRAP_VERSION = "919124293f66";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "c3cc801cfead";
+Parameter BOOTSTRAPVERSION = "919124293f66";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1893,6 +1893,641 @@ ClassMethod ApplyFailure(pDiag As %DynamicObject, pSessionId As %String, pStatus
         Set tSC = ex.AsStatus()
     }
     Quit tSC
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Loc.Classifier.cls",
+    `/// <p>Stateful line classifier for the ObjectScript LOC counter (Epic 22, Story 22.0;
+/// decisions D3/D4 in the 2026-07-03 research report). A <b>pure function of
+/// (line array + per-document metadata)</b> — no REST, no live document access —
+/// so synthetic fixtures can drive it directly.</p>
+/// <p>Faithful port of the reference <code>cos_loc_counter.sh</code> AWK state machine:
+/// every raw line lands in exactly ONE of five buckets (blank / sourceCode /
+/// sourceComment / testCode / testComment). Comment syntaxes: leading <code>//</code>
+/// (covers <code>///</code>), <code>;</code>, <code>#;</code>, <code>##;</code>,
+/// stateful <code>/* ... */</code> blocks, and leading <code>#</code> inside embedded
+/// python method bodies. Preprocessor directives (<code>#Define</code>/<code>#Dim</code>/
+/// <code>#Include</code>/<code>#If...</code>) are CODE. String literals are masked
+/// before any marker detection (<code>""</code> escapes honored). XData/Storage block
+/// lines count as code (deliberate, documented carry-over from the reference tool).</p>
+/// <p>Test bucketing (decision D3 — hybrid): the caller supplies the file-level
+/// <var>pIsTest</var> flag (resolved via <code>%IsA</code> upstream) and a
+/// method-name→python map (resolved via <class>%Dictionary.CompiledMethod</class>
+/// upstream); this class keeps the reference tool's <code>Test*</code>/lifecycle
+/// method-name detection and brace-depth scoping over the masked line.</p>
+Class ExecuteMCPv2.Loc.Classifier Extends %RegisteredObject
+{
+
+/// Classify one document's lines into the five buckets.
+/// <p><var>pLines</var> — integer-subscripted line array: <code>pLines(0)</code> = line
+/// count, <code>pLines(1..n)</code> = raw lines (the shape returned by
+/// <method>%Atelier.v1.Utils.TextServices:GetTextAsArray</method>).</p>
+/// <p><var>pIsTest</var> — file-level test flag: when 1 the ENTIRE document is
+/// test-bucketed (including <code>///</code> doc lines above the Class line).</p>
+/// <p><var>pPyMethods</var> — set of embedded-python method names:
+/// <code>pPyMethods(name)=1</code> (built from <class>%Dictionary.CompiledMethod</class>
+/// by the scanner; empty for routines/includes or uncompiled classes).</p>
+/// <p><var>pCounts</var> — output buckets: <code>pCounts("blank")</code>,
+/// <code>("sourceCode")</code>, <code>("sourceComment")</code>, <code>("testCode")</code>,
+/// <code>("testComment")</code>, <code>("total")</code>.</p>
+ClassMethod ClassifyDoc(ByRef pLines, pIsTest As %Boolean = 0, ByRef pPyMethods, Output pCounts) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Kill pCounts
+        Set pCounts("blank") = 0
+        Set pCounts("sourceCode") = 0
+        Set pCounts("sourceComment") = 0
+        Set pCounts("testCode") = 0
+        Set pCounts("testComment") = 0
+        Set pCounts("total") = 0
+
+        ; per-document state (mirrors the reference AWK FNR==1 reset)
+        Set tInBlock = 0    ; inside a /* ... */ block comment spanning lines
+        Set tMActive = 0    ; inside a method-scoped state (test method or python)
+        Set tMTest = 0      ; ...that method is a Test*/lifecycle method
+        Set tMPy = 0        ; ...that method is [ Language = python ]
+        Set tMStarted = 0   ; method opening brace has been seen
+        Set tMDepth = 0     ; current brace depth within the tracked method
+
+        Set tTab = $Char(9)
+        Set tTotal = +$Get(pLines(0))
+        For tI = 1:1:tTotal {
+            Set pCounts("total") = pCounts("total") + 1
+            Set tLine = $Get(pLines(tI))
+            ; tolerate CRLF line endings (strip one trailing CR)
+            If $Extract(tLine, *) = $Char(13) Set tLine = $Extract(tLine, 1, *-1)
+
+            ; -- 1. Blank line: empty or whitespace-only ------------------------
+            If $Translate(tLine, " "_tTab) = "" {
+                Set pCounts("blank") = pCounts("blank") + 1
+                Continue
+            }
+
+            ; -- 2. Continuation of a multi-line /* ... */ block comment --------
+            If tInBlock {
+                Set tP = $Find(tLine, "*/")
+                If tP = 0 {
+                    ; still inside the block
+                    Do ..AddComment(.pCounts, pIsTest || tMTest)
+                    Continue
+                }
+                Set tInBlock = 0
+                Set tLine = $Extract(tLine, tP, *)
+                If $Translate(tLine, " "_tTab) = "" {
+                    Do ..AddComment(.pCounts, pIsTest || tMTest)
+                    Continue
+                }
+                ; non-blank remainder after */ — fall through and classify it as a
+                ; fresh line (it may be code, another comment, or open a new block)
+            }
+
+            ; -- 3. Neutralize string literals ----------------------------------
+            Set tS = ..MaskStrings(tLine)
+
+            ; -- 4. Leading single-line comment check ---------------------------
+            ; // (covers ///), ; (legacy MUMPS), #; and ##; (preprocessor comments
+            ; — but NOT #Define/#Dim/...), # only inside a python method body
+            Set tT = ..StripLeading(tS)
+            If ($Extract(tT, 1, 2) = "//") || ($Extract(tT, 1) = ";") || ($Extract(tT, 1, 2) = "#;") || ($Extract(tT, 1, 3) = "##;") || (tMPy && ($Extract(tT, 1) = "#")) {
+                Do ..AddComment(.pCounts, pIsTest || tMTest)
+                Continue
+            }
+
+            ; -- 5. Method-scoped state detection (only outside an active method)
+            ; The signature line itself is classified under the NEW state, so a
+            ; "Method TestFoo()" line counts as test code.
+            If 'tMActive {
+                Set tName = ..MethodSignatureName(tS, .tAfterName)
+                If tName '= "" {
+                    Set tIsTm = 0
+                    If 'pIsTest && ..IsTestMethodName(tName) {
+                        ; the name must be followed by optional spaces/tabs then "("
+                        If $Extract(..StripLeading(tAfterName), 1) = "(" Set tIsTm = 1
+                    }
+                    ; decision D3: python resolved via the dictionary-built map, not
+                    ; a signature regex — the signature line still triggers scope entry
+                    Set tIsPm = ($Get(pPyMethods(tName)) = 1)
+                    If tIsTm || tIsPm {
+                        Set tMActive = 1
+                        Set tMTest = tIsTm
+                        Set tMPy = tIsPm
+                        Set tMStarted = 0
+                        Set tMDepth = 0
+                    }
+                }
+            }
+
+            ; -- 6. Strip inline comments, scanning left-to-right ---------------
+            ; A // encountered first comments out any /* after it (and vice versa:
+            ; a /* ... */ pair may hide a //), so the scan must respect order.
+            Set tEntering = 0
+            While 1 {
+                Set tPs = $Find(tS, "//")
+                Set tPb = $Find(tS, "/*")
+                If (tPb > 0) && ((tPs = 0) || (tPb < tPs)) {
+                    Set tRest = $Extract(tS, tPb, *)
+                    Set tQ = $Find(tRest, "*/")
+                    If tQ > 0 {
+                        ; complete inline /* ... */ — excise and keep scanning
+                        Set tS = $Extract(tS, 1, tPb - 3)_" "_$Extract(tRest, tQ, *)
+                        Continue
+                    }
+                    ; unterminated /* — block comment begins on this line
+                    Set tS = $Extract(tS, 1, tPb - 3)
+                    Set tEntering = 1
+                    Quit
+                } ElseIf tPs > 0 {
+                    ; trailing // comment — everything after it is dead
+                    Set tS = $Extract(tS, 1, tPs - 3)
+                    Quit
+                } Else {
+                    Quit
+                }
+            }
+            Set tInBlock = tEntering
+
+            ; -- 7. Final classification ----------------------------------------
+            If $Translate(tS, " "_tTab) = "" {
+                ; nothing but comment text remained (e.g. a line that is only
+                ; "/* opening" or "/* a */ // b") — comment line
+                Do ..AddComment(.pCounts, pIsTest || tMTest)
+            } Else {
+                Do ..AddCode(.pCounts, pIsTest || tMTest)
+            }
+
+            ; -- 8. Update method-scope brace depth (comments/strings already gone)
+            If tMActive {
+                Set tOpen = $Length(tS) - $Length($Translate(tS, "{"))
+                If tOpen > 0 {
+                    Set tMDepth = tMDepth + tOpen
+                    Set tMStarted = 1
+                }
+                Set tClose = $Length(tS) - $Length($Translate(tS, "}"))
+                Set tMDepth = tMDepth - tClose
+                ; Method ends when we have seen the opening brace and depth returns
+                ; to 0. The closing-brace line itself was already classified (as
+                ; test/python), which is the desired behavior: the brace belongs to
+                ; the method.
+                If tMStarted && (tMDepth <= 0) {
+                    Set tMActive = 0
+                    Set tMTest = 0
+                    Set tMPy = 0
+                }
+            }
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Route one CODE line to the test or source tally (reference <code>add_code()</code>).
+ClassMethod AddCode(ByRef pCounts, pIsTestScope As %Boolean) [ Internal ]
+{
+    Set tKey = $Select(pIsTestScope: "testCode", 1: "sourceCode")
+    Set pCounts(tKey) = pCounts(tKey) + 1
+}
+
+/// Route one COMMENT line to the test or source tally (reference <code>add_comment()</code>).
+ClassMethod AddComment(ByRef pCounts, pIsTestScope As %Boolean) [ Internal ]
+{
+    Set tKey = $Select(pIsTestScope: "testComment", 1: "sourceComment")
+    Set pCounts(tKey) = pCounts(tKey) + 1
+}
+
+/// Mask every complete ObjectScript string literal (<code>"..."</code> with
+/// <code>""</code> as the escaped-quote sequence) with an empty-string token
+/// <code>""</code>, so comment markers and braces inside literals never match.
+/// A manual character scan mirrors the reference tool's
+/// <code>gsub(/"([^"]|"")*"/, "\\"\\"", s)</code> with POSIX leftmost-LONGEST
+/// semantics (CR 22.0-1): when the greedy escape-pair scan runs off the end of
+/// the line, the literal is re-closed at the LAST quote that yields a valid
+/// parse — the regex backtracks, so <code>"x""</code> masks as the literal
+/// <code>"x"</code> plus a dangling quote. Only a literal with NO valid close
+/// at all (a truly unterminated <code>"abc</code>) is left untouched, matching
+/// the regex's no-match behavior (reference-verified fixtures).
+ClassMethod MaskStrings(pLine As %String) As %String
+{
+    Set tOut = ""
+    Set tLen = $Length(pLine)
+    Set tI = 1
+    While tI <= tLen {
+        Set tCh = $Extract(pLine, tI)
+        If tCh '= """" {
+            Set tOut = tOut_tCh
+            Set tI = tI + 1
+            Continue
+        }
+        ; opening quote — find the literal's end, honoring "" escapes; remember
+        ; the last quote where a "" pair could instead CLOSE the literal
+        Set tJ = tI + 1
+        Set tClosed = 0
+        Set tLastPairClose = 0
+        While tJ <= tLen {
+            If $Extract(pLine, tJ) = """" {
+                If $Extract(pLine, tJ + 1) = """" {
+                    Set tLastPairClose = tJ
+                    Set tJ = tJ + 2
+                } Else {
+                    Set tClosed = 1
+                    Quit
+                }
+            } Else {
+                Set tJ = tJ + 1
+            }
+        }
+        If 'tClosed && (tLastPairClose > 0) {
+            ; greedy scan ran off the line — backtrack: the regex's longest
+            ; valid match closes at the last pair-start quote
+            Set tClosed = 1
+            Set tJ = tLastPairClose
+        }
+        If tClosed {
+            Set tOut = tOut_""""""
+            Set tI = tJ + 1
+        } Else {
+            ; no valid close anywhere — leave the remainder untouched (regex
+            ; no-match parity)
+            Set tOut = tOut_$Extract(pLine, tI, *)
+            Set tI = tLen + 1
+        }
+    }
+    Quit tOut
+}
+
+/// Strip leading spaces and tabs (exact parity with the reference tool's
+/// <code>sub(/^[ \\t]+/, "", t)</code> — no other whitespace classes).
+ClassMethod StripLeading(pS As %String) As %String
+{
+    Set tI = 1
+    Set tTab = $Char(9)
+    While ($Extract(pS, tI) = " ") || ($Extract(pS, tI) = tTab) {
+        Set tI = tI + 1
+    }
+    Quit $Extract(pS, tI, *)
+}
+
+/// If the masked line is a method signature (<code>^[ \\t]*(ClassMethod|Method)[ \\t]+</code>),
+/// return the method name (maximal run of <code>[A-Za-z0-9_%]</code> after the keyword)
+/// and set <var>pAfterName</var> to the text following the name. Returns "" when the
+/// line is not a method signature.
+ClassMethod MethodSignatureName(pS As %String, Output pAfterName As %String) As %String
+{
+    Set pAfterName = ""
+    Set tT = ..StripLeading(pS)
+    Set tTab = $Char(9)
+    Set tRest = ""
+    If ($Extract(tT, 1, 11) = "ClassMethod") && (($Extract(tT, 12) = " ") || ($Extract(tT, 12) = tTab)) {
+        Set tRest = $Extract(tT, 12, *)
+    } ElseIf ($Extract(tT, 1, 6) = "Method") && (($Extract(tT, 7) = " ") || ($Extract(tT, 7) = tTab)) {
+        Set tRest = $Extract(tT, 7, *)
+    } Else {
+        Quit ""
+    }
+    Set tRest = ..StripLeading(tRest)
+    ; extract the maximal run of name characters ([A-Za-z0-9_%])
+    Set tName = ""
+    Set tI = 1
+    While tI <= $Length(tRest) {
+        Set tC = $Ascii(tRest, tI)
+        If ((tC >= 48) && (tC <= 57)) || ((tC >= 65) && (tC <= 90)) || ((tC >= 97) && (tC <= 122)) || (tC = 95) || (tC = 37) {
+            Set tName = tName_$Char(tC)
+            Set tI = tI + 1
+        } Else {
+            Quit
+        }
+    }
+    If tName = "" Quit ""
+    Set pAfterName = $Extract(tRest, $Length(tName) + 1, *)
+    Quit tName
+}
+
+/// True when <var>pName</var> matches the reference tool's test-method name pattern:
+/// <code>Test[A-Za-z0-9_]*</code> or a %UnitTest lifecycle method name.
+ClassMethod IsTestMethodName(pName As %String) As %Boolean
+{
+    If (pName = "OnBeforeAllTests") || (pName = "OnAfterAllTests") || (pName = "OnBeforeOneTest") || (pName = "OnAfterOneTest") Quit 1
+    If $Extract(pName, 1, 4) '= "Test" Quit 0
+    ; the tail must be [A-Za-z0-9_]* (no % — parity with the reference regex)
+    Set tTail = $Extract(pName, 5, *)
+    Set tOk = 1
+    For tI = 1:1:$Length(tTail) {
+        Set tC = $Ascii(tTail, tI)
+        If ((tC >= 48) && (tC <= 57)) || ((tC >= 65) && (tC <= 90)) || ((tC >= 97) && (tC <= 122)) || (tC = 95) {
+            Continue
+        }
+        Set tOk = 0
+        Quit
+    }
+    Quit tOk
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Loc.Scanner.cls",
+    `/// <p>Document enumeration + source retrieval for the ObjectScript LOC counter
+/// (Epic 22, Story 22.0; decisions D1/D2/D7). Enumerates the CURRENT namespace's
+/// document dictionary via the <code>%RoutineMgr:StudioOpenDialog</code> query and
+/// retrieves source text via
+/// <method>%Atelier.v1.Utils.TextServices:GetTextAsArray</method> (pFlags=0 = UDL
+/// text — probe-verified; pFlags=1 returns the XML export format).</p>
+/// <p>Only CLS/MAC/INT/INC documents are scanned; other document types matched by a
+/// broad spec (CSP, HL7 schemas, ...) are skipped. Generated documents (e.g. the
+/// <code>.int</code> code produced by class compilation) are excluded unless
+/// <var>pIncludeGenerated</var> is set (decision D7 — they would double-count their
+/// source class/routine).</p>
+Class ExecuteMCPv2.Loc.Scanner Extends %RegisteredObject
+{
+
+/// Enumerate documents in the current namespace matching <var>pSpec</var>
+/// (comma-delimited, <code>*</code>/<code>?</code> wildcards — e.g.
+/// <code>MyPkg.*.cls,*.mac</code>), filtered to CLS/MAC/INT/INC.
+/// <p>Positional query args (probe-verified against the irislib signature):
+/// <code>Execute(Spec, Dir=1, OrderBy=1, SystemFiles=0, Flat=1, NotStudio=0,
+/// ShowGenerated)</code>.</p>
+/// <p><var>pDocs</var> — output: <code>pDocs</code> = count, <code>pDocs(1..n)</code>
+/// = full document names including the type suffix (e.g. <code>Pkg.Cls.cls</code>).</p>
+ClassMethod EnumerateDocs(pSpec As %String, pIncludeGenerated As %Boolean = 0, Output pDocs) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Kill pDocs
+        Set pDocs = 0
+        Set tRS = ##class(%ResultSet).%New("%RoutineMgr:StudioOpenDialog")
+        Set tSC = tRS.Execute(pSpec, 1, 1, 0, 1, 0, +pIncludeGenerated)
+        If $$$ISERR(tSC) Quit
+        ; CR 22.0-5: capture Next's status — a mid-stream query error must
+        ; propagate, not read as a silent end-of-results undercount
+        Set tSCNext = $$$OK
+        While tRS.Next(.tSCNext) {
+            Set tName = tRS.Get("Name")
+            Set tExt = $ZConvert($Piece(tName, ".", *), "L")
+            If (tExt '= "cls") && (tExt '= "mac") && (tExt '= "int") && (tExt '= "inc") Continue
+            Set pDocs = pDocs + 1
+            Set pDocs(pDocs) = tName
+        }
+        If $$$ISERR(tSCNext) Set tSC = tSCNext
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Build the per-class metadata for one CLS document (decision D3):
+/// <p><var>pIsTest</var> — 1 when the compiled class is a transitive
+/// <class>%UnitTest.TestCase</class> subclass (via <code>$CLASSMETHOD %IsA</code>;
+/// probe-verified to throw <CLASS DOES NOT EXIST> for saved-but-uncompiled or
+/// nonexistent classes — those fall back to not-test).</p>
+/// <p><var>pPyMethods</var> — set of embedded-python method names
+/// (<code>pPyMethods(name)=1</code>), built by iterating
+/// <class>%Dictionary.CompiledClass</class>.Methods (flattened, includes inherited);
+/// empty when the class is not compiled.</p>
+ClassMethod BuildClassMetadata(pClassName As %String, Output pIsTest As %Boolean, ByRef pPyMethods) As %Status
+{
+    Set tSC = $$$OK
+    Set pIsTest = 0
+    ; CR 22.0-3: reset the accumulator — a caller reusing one ByRef array across
+    ; documents must not inherit the previous class's python-method names
+    Kill pPyMethods
+    Try {
+        Try {
+            Set pIsTest = +$CLASSMETHOD(pClassName, "%IsA", "%UnitTest.TestCase")
+        } Catch exIsA {
+            ; uncompiled or nonexistent class — fall back to not-test
+            Set pIsTest = 0
+        }
+        Set tCC = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        If $IsObject(tCC) {
+            For tI = 1:1:tCC.Methods.Count() {
+                Set tMethod = tCC.Methods.GetAt(tI)
+                If tMethod.Language = "python" Set pPyMethods(tMethod.Name) = 1
+            }
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Scan ONE document: retrieve its source lines, resolve per-document metadata
+/// (CLS only — routines/includes are never file-level test and have no python map;
+/// documented delta from the reference tool's <code>/tests/</code>-directory rule,
+/// which has no namespace equivalent), and classify every line.
+/// <p><var>pCounts</var> — the five buckets + total (see
+/// <method>ExecuteMCPv2.Loc.Classifier:ClassifyDoc</method>).</p>
+/// <p><var>pIsTest</var> — the file-level test flag resolved for this document.</p>
+ClassMethod ScanDoc(pDocName As %String, Output pCounts, Output pIsTest As %Boolean) As %Status
+{
+    Set tSC = $$$OK
+    Set pIsTest = 0
+    Try {
+        Set tSC = ##class(%Atelier.v1.Utils.TextServices).GetTextAsArray(pDocName, 0, .tLines)
+        If $$$ISERR(tSC) Quit
+        Set tExt = $ZConvert($Piece(pDocName, ".", *), "L")
+        If tExt = "cls" {
+            Set tClassName = $Piece(pDocName, ".", 1, $Length(pDocName, ".") - 1)
+            Set tSC = ..BuildClassMetadata(tClassName, .pIsTest, .tPyMethods)
+            If $$$ISERR(tSC) Quit
+        }
+        Set tSC = ##class(ExecuteMCPv2.Loc.Classifier).ClassifyDoc(.tLines, pIsTest, .tPyMethods, .pCounts)
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Loc.Generate.cls",
+    `/// <p>Callable facade for the ObjectScript LOC counter library (Epic 22, Story 22.0;
+/// decisions D1-D5/D7 in the 2026-07-03 research report). Callable independently of
+/// REST — mirrors <class>ExecuteMCPv2.Diagram.Generate</class>.</p>
+/// <p>Pipeline per call: <class>ExecuteMCPv2.Loc.Scanner</class> enumeration
+/// (StudioOpenDialog, required caller-supplied spec — decision D2) → per-document
+/// source retrieval + metadata → <class>ExecuteMCPv2.Loc.Classifier</class> line
+/// buckets → aggregate metrics + percentages (D4) + capped top-N largest documents
+/// (D5).</p>
+/// <p>The aggregation invariant <code>blank + sourceCode + sourceComment + testCode
+/// + testComment = totalLines</code> is enforced per document AND in the aggregate as
+/// a hard error (the reference tool only warned on stderr).</p>
+Class ExecuteMCPv2.Loc.Generate Extends %RegisteredObject
+{
+
+/// Count lines of code for every CLS/MAC/INT/INC document matching <var>pSpec</var>.
+/// <p><var>pNamespace</var> — target namespace ("" = current). Switched with explicit
+/// save/restore (never <code>New $NAMESPACE</code>); the catch path restores first.</p>
+/// <p><var>pSpec</var> — REQUIRED document spec (comma-delimited,
+/// <code>*</code>/<code>?</code> wildcards; e.g. <code>MyPkg.*.cls,*.mac</code>).
+/// Whole-namespace scans require an explicit <code>*</code> (decision D2).</p>
+/// <p><var>pOptions</var> — optional <class>%DynamicObject</class>:
+/// <code>includeGenerated</code> (boolean, default false — decision D7) and
+/// <code>topN</code> (default 20; numeric values are clamped to 1..100 —
+/// decision D5; non-numeric junk keeps the default, and the REST layer rejects
+/// junk before it reaches this facade).</p>
+/// <p><var>pResult</var> — <code>{ filesParsed, totalLines, blankLines, sourceCodeLoc,
+/// sourceCommentLoc, testCodeLoc, testCommentLoc, codePct, sourceCodePct, testCodePct,
+/// commentPct, whitespacePct, topDocuments: [{name, type, totalLines, codeLoc,
+/// commentLoc, isTest}], truncatedTopN }</code>.</p>
+ClassMethod Count(pNamespace As %String = "", pSpec As %String = "", pOptions As %DynamicObject = "", Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(pSpec, "spec")
+        If $$$ISERR(tSC) Quit
+
+        ; resolve options (Rule #15: no $Get() around method calls — %IsDefined + %Get)
+        Set tIncludeGenerated = 0
+        Set tTopN = 20
+        If $IsObject(pOptions) {
+            If pOptions.%IsDefined("includeGenerated") {
+                ; boolean coercion pattern (CR 21.1-A): booleans/numbers coerce; the
+                ; "true"/"false"/"0"/"1" strings are accepted; junk keeps the default
+                Set tVal = pOptions.%Get("includeGenerated")
+                Set tType = pOptions.%GetTypeOf("includeGenerated")
+                If (tType = "boolean") || (tType = "number") {
+                    Set tIncludeGenerated = ''tVal
+                } ElseIf $ZConvert(tVal, "L") = "true" {
+                    Set tIncludeGenerated = 1
+                } ElseIf $ZConvert(tVal, "L") = "false" {
+                    Set tIncludeGenerated = 0
+                } ElseIf (tVal = "0") || (tVal = "1") {
+                    Set tIncludeGenerated = +tVal
+                }
+            }
+            If pOptions.%IsDefined("topN") {
+                ; CR 22.0-2: a present NUMERIC value clamps into 1..100 (matching
+                ; the documented contract and the REST layer's 0->1 clamp);
+                ; non-numeric junk keeps the default 20
+                Set tRawN = pOptions.%Get("topN")
+                If (pOptions.%GetTypeOf("topN") = "number") || (tRawN ? 1.N) {
+                    Set tN = +tRawN \\ 1
+                    If tN < 1 Set tN = 1
+                    Set tTopN = tN
+                }
+            }
+        }
+        If tTopN > 100 Set tTopN = 100
+
+        ; switch to the target namespace (restored below and in the catch path)
+        If (pNamespace '= "") && (pNamespace '= tOrigNS) {
+            Set $NAMESPACE = pNamespace
+        }
+
+        Set tSC = ##class(ExecuteMCPv2.Loc.Scanner).EnumerateDocs(pSpec, tIncludeGenerated, .tDocs)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Quit
+        }
+
+        Set tFiles = 0
+        Set tTotal = 0
+        Set tBlank = 0
+        Set tSrcCode = 0
+        Set tSrcComment = 0
+        Set tTestCode = 0
+        Set tTestComment = 0
+        For tI = 1:1:+$Get(tDocs) {
+            Set tDocName = tDocs(tI)
+            Set tSC = ##class(ExecuteMCPv2.Loc.Scanner).ScanDoc(tDocName, .tCounts, .tIsTest)
+            If $$$ISERR(tSC) Quit
+            Set tFiles = tFiles + 1
+            Set tDocTotal = tCounts("total")
+            Set tDocCode = tCounts("sourceCode") + tCounts("testCode")
+            Set tDocComment = tCounts("sourceComment") + tCounts("testComment")
+            ; per-document bucket-sum invariant (hard error, not a warning)
+            Set tDocSum = tCounts("blank") + tDocCode + tDocComment
+            If tDocSum '= tDocTotal {
+                Set tSC = $$$ERROR($$$GeneralError, "LOC bucket sum ("_tDocSum_") does not equal total lines ("_tDocTotal_") for document '"_tDocName_"'")
+                Quit
+            }
+            Set tTotal = tTotal + tDocTotal
+            Set tBlank = tBlank + tCounts("blank")
+            Set tSrcCode = tSrcCode + tCounts("sourceCode")
+            Set tSrcComment = tSrcComment + tCounts("sourceComment")
+            Set tTestCode = tTestCode + tCounts("testCode")
+            Set tTestComment = tTestComment + tCounts("testComment")
+            ; track per-document data for the top-N list (decision D5): negative
+            ; totalLines subscript sorts largest-first; insertion sequence breaks ties
+            Set tDocData(tI) = $ListBuild(tDocName, $ZConvert($Piece(tDocName, ".", *), "L"), tDocTotal, tDocCode, tDocComment, +tIsTest)
+            Set tSort(-tDocTotal, tI) = ""
+        }
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Quit
+        }
+
+        ; aggregate bucket-sum invariant
+        Set tSum = tBlank + tSrcCode + tSrcComment + tTestCode + tTestComment
+        If tSum '= tTotal {
+            Set tSC = $$$ERROR($$$GeneralError, "LOC aggregate bucket sum ("_tSum_") does not equal total lines ("_tTotal_")")
+            Set $NAMESPACE = tOrigNS
+            Quit
+        }
+
+        ; top-N largest documents (decision D5)
+        Set tTopDocs = []
+        Set tEmitted = 0
+        Set tNegTotal = ""
+        For {
+            Set tNegTotal = $Order(tSort(tNegTotal))
+            Quit:tNegTotal=""
+            Set tSeq = ""
+            For {
+                Set tSeq = $Order(tSort(tNegTotal, tSeq))
+                Quit:tSeq=""
+                If tEmitted < tTopN {
+                    Set tData = tDocData(tSeq)
+                    Set tDoc = {}
+                    Do tDoc.%Set("name", $List(tData, 1))
+                    Do tDoc.%Set("type", $List(tData, 2))
+                    Do tDoc.%Set("totalLines", $List(tData, 3), "number")
+                    Do tDoc.%Set("codeLoc", $List(tData, 4), "number")
+                    Do tDoc.%Set("commentLoc", $List(tData, 5), "number")
+                    Do tDoc.%Set("isTest", $List(tData, 6), "boolean")
+                    Do tTopDocs.%Push(tDoc)
+                    Set tEmitted = tEmitted + 1
+                }
+            }
+            Quit:tEmitted>=tTopN
+        }
+
+        Set pResult = {}
+        Do pResult.%Set("filesParsed", tFiles, "number")
+        Do pResult.%Set("totalLines", tTotal, "number")
+        Do pResult.%Set("blankLines", tBlank, "number")
+        Do pResult.%Set("sourceCodeLoc", tSrcCode, "number")
+        Do pResult.%Set("sourceCommentLoc", tSrcComment, "number")
+        Do pResult.%Set("testCodeLoc", tTestCode, "number")
+        Do pResult.%Set("testCommentLoc", tTestComment, "number")
+        ; percentages (decision D4 — reference CSV keys in camelCase, one decimal)
+        Do pResult.%Set("codePct", ..Pct(tSrcCode + tTestCode, tTotal), "number")
+        Do pResult.%Set("sourceCodePct", ..Pct(tSrcCode, tTotal), "number")
+        Do pResult.%Set("testCodePct", ..Pct(tTestCode, tTotal), "number")
+        Do pResult.%Set("commentPct", ..Pct(tSrcComment + tTestComment, tTotal), "number")
+        Do pResult.%Set("whitespacePct", ..Pct(tBlank, tTotal), "number")
+        Do pResult.%Set("topDocuments", tTopDocs)
+        Do pResult.%Set("truncatedTopN", (tFiles > tTopN), "boolean")
+
+        Set $NAMESPACE = tOrigNS
+    } Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// One-decimal percentage: <code>100 * pNum / pDen</code>, 0 when <var>pDen</var> is 0.
+ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
+{
+    If pDen = 0 Quit 0
+    Quit +$Justify(100 * pNum / pDen, 0, 1)
 }
 
 }`,
@@ -9103,6 +9738,107 @@ ClassMethod DefaultSettingsManage() As %Status
 }`,
   ],
   [
+    "ExecuteMCPv2.REST.Loc.cls",
+    `/// <p>REST handler for developer tooling endpoints (Epic 22, Story 22.0).</p>
+/// <p>Thin surface over the <class>ExecuteMCPv2.Loc.Generate</class> facade:
+/// validate → delegate → render. Follows the project handler conventions
+/// (Rules #7/#8/#9/#33): explicit namespace save/restore (never
+/// <code>New $NAMESPACE</code>; the catch path restores first), exactly one
+/// <method>RenderResponseBody</method> per request path, and
+/// <method>ExecuteMCPv2.Utils:SanitizeError</method> on every error status.</p>
+Class ExecuteMCPv2.REST.Loc Extends %Atelier.REST
+{
+
+/// Count lines of code for the documents matching a caller-supplied spec.
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>spec</code> — REQUIRED document spec (comma-delimited,
+///       <code>*</code>/<code>?</code> wildcards; e.g.
+///       <code>MyPkg.*.cls,*.mac</code>). Whole-namespace scans require an
+///       explicit <code>*</code> (decision D2).</li>
+///   <li><code>namespace</code> — target namespace (default: current)</li>
+///   <li><code>includeGenerated</code> — 0/1/true/false (default 0; decision D7)</li>
+///   <li><code>topN</code> — top-N largest documents in the response
+///       (default 20, clamped to 1..100; decision D5)</li>
+/// </ul></p>
+ClassMethod LocCount() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSpec = $ZStrip($Get(%request.Data("spec",1)), "<>W")
+        Set tNamespace = $Get(%request.Data("namespace",1))
+        Set tIncludeGeneratedRaw = $ZConvert($Get(%request.Data("includeGenerated",1)), "L")
+        Set tTopNRaw = $Get(%request.Data("topN",1))
+
+        ; spec is REQUIRED (decision D2 — no implicit whole-namespace scan)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSpec, "spec")
+        If $$$ISERR(tSC) {
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; includeGenerated: 0/1/true/false, default false when omitted
+        Set tIncludeGenerated = 0
+        If tIncludeGeneratedRaw '= "" {
+            If (tIncludeGeneratedRaw = "1") || (tIncludeGeneratedRaw = "true") {
+                Set tIncludeGenerated = 1
+            } ElseIf (tIncludeGeneratedRaw '= "0") && (tIncludeGeneratedRaw '= "false") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'includeGenerated' must be one of: 0, 1, true, false")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        ; topN: positive integer, default 20, clamped to 1..100
+        Set tTopN = 20
+        If tTopNRaw '= "" {
+            If tTopNRaw '? 1.N {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'topN' must be a positive integer")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tTopN = +tTopNRaw
+            If tTopN < 1 Set tTopN = 1
+            If tTopN > 100 Set tTopN = 100
+        }
+
+        ; switch to the target namespace (explicit save/restore — Rule #7)
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; delegate to the LOC library facade
+        Set tOptions = {}
+        Do tOptions.%Set("includeGenerated", tIncludeGenerated, "boolean")
+        Do tOptions.%Set("topN", tTopN, "number")
+        Set tResult = ""
+        Set tSC = ##class(ExecuteMCPv2.Loc.Generate).Count(tNamespace, tSpec, tOptions, .tResult)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Monitor.cls",
     `/// REST handler for system monitoring and metrics.
 /// <p>Provides system metrics, alert information, and interoperability
@@ -11574,6 +12310,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/analytics/mdx" Method="POST" Call="ExecuteMCPv2.REST.Analytics:ExecuteMDX" />
   <Route Url="/analytics/cubes" Method="GET" Call="ExecuteMCPv2.REST.Analytics:CubeList" />
   <Route Url="/analytics/cubes" Method="POST" Call="ExecuteMCPv2.REST.Analytics:CubeAction" />
+
+  <!-- Epic 22: Dev tools -->
+  <Route Url="/dev/loc" Method="GET" Call="ExecuteMCPv2.REST.Loc:LocCount" />
 </Routes>
 }
 

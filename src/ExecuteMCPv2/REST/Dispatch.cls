@@ -159,6 +159,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/analytics/mdx" Method="POST" Call="ExecuteMCPv2.REST.Analytics:ExecuteMDX" />
   <Route Url="/analytics/cubes" Method="GET" Call="ExecuteMCPv2.REST.Analytics:CubeList" />
   <Route Url="/analytics/cubes" Method="POST" Call="ExecuteMCPv2.REST.Analytics:CubeAction" />
+
+  <!-- Epic 22: Dev tools -->
+  <Route Url="/dev/loc" Method="GET" Call="ExecuteMCPv2.REST.Loc:LocCount" />
 </Routes>
 }
 

@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution and analysis, globals management, code execution, unit testing, package browsing, and bulk export via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution and analysis, globals management, code execution, unit testing, package browsing, bulk export, and lines-of-code analysis via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -188,6 +188,14 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
 | `iris_execute_classmethod` | Invoke a class method with arguments | `className`, `methodName`, `args?`, `namespace?` | -- |
 | `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
+
+### Code Metrics Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_loc_count` | Count lines of code in the namespace's ObjectScript documents (CLS/MAC/INT/INC): blank / source code / source comment / test code / test comment buckets, percentages, and the top-N largest documents. `spec` is REQUIRED (whole-namespace scans need an explicit `*` and risk the ~60s gateway timeout); compiler-generated documents are excluded by default | `spec`, `namespace?`, `includeGenerated?`, `topN?`, `format?` | readOnly, idempotent |
+
+> **Governance defaults:** `iris_loc_count` is classified `read` and is therefore **enabled by default** — it is not gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
 
 ---
 
@@ -636,6 +644,44 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
 </details>
 
 <details>
+<summary><strong>iris_loc_count</strong> -- Count lines of code</summary>
+
+**Input:**
+```json
+{
+  "spec": "MyApp.*.cls,*.mac",
+  "topN": 5
+}
+```
+
+`spec` is REQUIRED (comma-delimited, `*`/`?` wildcards) — a whole-namespace scan needs an explicit `"*"` and risks the ~60s gateway timeout on large namespaces. Compiler-generated documents (e.g. the `.int` code generated from a class) are excluded by default; pass `includeGenerated: true` to count them. System (`%`-prefixed) documents are excluded from wildcard scans — name them explicitly (e.g. `%Z*.cls`) to count them — and spec parts should not overlap: an exact document name listed before a wildcard part that also matches it can drop documents (an IRIS `StudioOpenDialog` spec quirk). `format: "csv"` renders `metric,value` rows instead of the ASCII table (client-side only — `structuredContent` always carries the full object).
+
+**Output (`structuredContent`):**
+```json
+{
+  "filesParsed": 44,
+  "totalLines": 16215,
+  "blankLines": 1413,
+  "sourceCodeLoc": 8677,
+  "sourceCommentLoc": 2463,
+  "testCodeLoc": 2997,
+  "testCommentLoc": 665,
+  "codePct": 72.0,
+  "sourceCodePct": 53.5,
+  "testCodePct": 18.5,
+  "commentPct": 19.3,
+  "whitespacePct": 8.7,
+  "topDocuments": [
+    { "name": "MyApp.REST.Api.cls", "type": "cls", "totalLines": 3186, "codeLoc": 2283, "commentLoc": 634, "isTest": false }
+  ],
+  "truncatedTopN": true
+}
+```
+
+The `content` text renders the reference `cos_loc_counter.sh` ASCII metrics table (or its CSV rows with `format: "csv"`).
+</details>
+
+<details>
 <summary><strong>iris_server_info</strong> -- Get server info</summary>
 
 **Input:**
@@ -826,7 +872,7 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 25 tools in this package accept the `namespace` parameter** except:
+**All 26 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter.
