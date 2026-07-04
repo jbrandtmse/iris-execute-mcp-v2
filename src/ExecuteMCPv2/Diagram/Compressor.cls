@@ -173,11 +173,14 @@ ClassMethod CompressEpisodes(pRenderEvents As %Library.ListOfObjects, Output pCo
 /// Core episode detection + collapse over one render-event stream (no wrapper peel).
 /// <p>Phase 1 groups events into episodes with a depth stack over sync calls: a sync
 /// request pushes a frame (destination + PairId), its response pops it; a PAIRED async
-/// request opens a queue-rooted frame (§6.4 item 6 — its known response closes it).
-/// Unwind rules (§6.4 item 4): a new request whose source is not the top SYNC frame's
-/// destination pops abandoned sync frames (known-paired queue frames are never unwound
-/// this way); a response answering a deeper frame unwinds to that frame. A new episode
-/// roots whenever a request-shaped event (request arrow or pair-loop) arrives at depth 0;
+/// request opens a queue-rooted frame (§6.4 item 6 — its known response closes it). An
+/// UNPAIRED sync SELF-call (Src=Dst, PairId=0) does NOT push a frame — rule A could never
+/// unwind it and no response pops it, so pushing would grow the stack unbounded (CR 21.1-2).
+/// Unwind rules (§6.4 item 4): a new request-shaped event (request arrow OR pair-loop)
+/// whose source — the arrow's Src, or a pair-loop's REQUEST-leg Src (CR 21.1-1) — is not
+/// the top SYNC frame's destination pops abandoned sync frames (known-paired queue frames
+/// are never unwound this way); a response answering a deeper frame unwinds to that frame.
+/// A new episode roots whenever a request-shaped event (request arrow or pair-loop) arrives at depth 0;
 /// responses and trace-utility events never open a boundary — they attach to the current
 /// episode (§6.4 item 5 keeps between-episode trace events from breaking contiguity).</p>
 /// <p>Phase 2 collapses contiguous runs of identical-signature episodes (count &gt; 1,
@@ -238,9 +241,19 @@ ClassMethod EpisodeCore(pRenderEvents As %Library.ListOfObjects, Output pCompres
             ; request-shaped event: a request arrow or a self-contained pair-loop.
             ; §6.4 item 4 rule A: unwind abandoned SYNC frames whose destination is not
             ; this request's source (a known-paired queue frame is never unwound — its
-            ; response is coming, §6.4 item 6).
+            ; response is coming, §6.4 item 6). CR 21.1-1: a pair-loop is request-shaped
+            ; too, so it ALSO unwinds abandoned sync frames — on its REQUEST leg's source
+            ; (tEv.Req.Src). This makes the same semantic traffic get the SAME episode
+            ; grouping whether or not the pair tier collapsed it into a pairloop
+            ; ([reqLost, singlePair] and [reqLost, pairloop] both split into two episodes).
+            Set tReqSrc = ""
             If tEv.Kind = "arrow" {
-                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tEv.Src '= $List(tFrame(tDepth), 1)) {
+                Set tReqSrc = tEv.Src
+            } ElseIf (tEv.Kind = "pairloop") && $IsObject(tEv.Req) {
+                Set tReqSrc = tEv.Req.Src
+            }
+            If (tEv.Kind = "arrow") || (tEv.Kind = "pairloop") {
+                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tReqSrc '= $List(tFrame(tDepth), 1)) {
                     Set tDepth = tDepth - 1
                 }
             }
@@ -252,9 +265,17 @@ ClassMethod EpisodeCore(pRenderEvents As %Library.ListOfObjects, Output pCompres
             Do tEp(tCur).Insert(tEv)
             If tEv.Kind = "arrow" {
                 If tEv.Arrow = "->>" {
-                    ; a sync request pushes (paired or not — abandonment is unwound later)
-                    Set tDepth = tDepth + 1
-                    Set tFrame(tDepth) = $ListBuild(tEv.Dst, +tEv.PairId, 1)
+                    ; a sync request pushes (paired or not — abandonment is unwound later),
+                    ; EXCEPT an unpaired self-call (Src=Dst, PairId=0): rule A compares the
+                    ; next request's source to the frame destination, which for a self-call
+                    ; equals its own source — so the frame would never unwind (nor be popped:
+                    ; no response), growing the stack unbounded and gluing every repeated
+                    ; self-call into one episode (CR 21.1-2). Skip the push for that shape;
+                    ; a paired self-call (PairId>0) still pushes — its response pops it.
+                    If '((tEv.Src = tEv.Dst) && (+tEv.PairId = 0)) {
+                        Set tDepth = tDepth + 1
+                        Set tFrame(tDepth) = $ListBuild(tEv.Dst, +tEv.PairId, 1)
+                    }
                 } ElseIf tEv.PairId > 0 {
                     ; §6.4 item 6: an async request with a KNOWN paired response opens a
                     ; queue-rooted frame that closes when that response is consumed

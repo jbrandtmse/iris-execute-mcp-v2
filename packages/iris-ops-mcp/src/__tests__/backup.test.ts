@@ -62,6 +62,20 @@ describe("iris_backup_manage", () => {
     expect(desc).toContain("%SYS-scoped");
   });
 
+  // ── device param: accepted-but-ignored (CR 16.3-device) ──
+
+  it("device description states the value has NO EFFECT (task-configured destination)", () => {
+    const shape = (
+      backupManageTool.inputSchema as unknown as {
+        shape: { device: { description?: string } };
+      }
+    ).shape;
+    const desc = shape.device.description ?? "";
+    expect(desc).toContain("NO EFFECT");
+    // The backup destination belongs to the named task definition, not a per-call override.
+    expect(desc).toContain("task");
+  });
+
   it("namespace param is still accepted and forwarded without error (back-compat)", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "listHistory", count: 0, entries: [] }),

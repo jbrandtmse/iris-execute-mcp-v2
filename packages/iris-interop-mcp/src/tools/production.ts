@@ -99,6 +99,9 @@ export const productionControlTool: ToolDefinition = {
     "when 'recover' does not resolve the problem. By default 'clean' touches only transient " +
     "runtime state; set killAppData:true (with confirm:true) to ALSO wipe persistent " +
     "^Ens.AppData business state.\n\n" +
+    "Optional 'timeout' and 'force' apply ONLY to 'stop' and 'restart' (which perform a " +
+    "graceful-then-forced shutdown); they are accepted but IGNORED for 'start', 'update', " +
+    "'recover', and 'clean'.\n\n" +
     "The 'clean' action is a write but is ENABLED by default under tool governance " +
     "(like the grandfathered lifecycle actions); an operator can disable it via an " +
     "explicit IRIS_GOVERNANCE override.",
@@ -113,11 +116,17 @@ export const productionControlTool: ToolDefinition = {
     timeout: z
       .number()
       .optional()
-      .describe("Seconds to wait for stop/restart (default: 120)"),
+      .describe(
+        "Seconds to wait for a graceful stop. Honored ONLY by 'stop' and 'restart'; " +
+          "accepted but ignored for 'start'/'update'/'recover'/'clean' (default: 120).",
+      ),
     force: z
       .boolean()
       .optional()
-      .describe("Force stop on timeout (default: false)"),
+      .describe(
+        "Force stop on timeout. Honored ONLY by 'stop' and 'restart'; accepted but " +
+          "ignored for 'start'/'update'/'recover'/'clean' (default: false).",
+      ),
     killAppData: z
       .boolean()
       .optional()

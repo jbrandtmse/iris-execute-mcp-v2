@@ -552,6 +552,30 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
+            ; CR 18.0-1 (remaining half): reject a compiled-but-not-instantiable host class.
+            ; %ExistsId passes for an [Abstract] host (e.g. Ens.BusinessService) or a
+            ; non-host %Library.* class — both would fail later at production-start /
+            ; OnConfigChange rather than at add time. A valid config-item host must
+            ; (a) extend Ens.Host (the $classmethod "%Extends" idiom Ens.Config.Item itself
+            ; uses on a host className) and (b) be non-abstract (instantiable). Live-probed:
+            ; Ens.BusinessService => abstract, %Stream.GlobalCharacter => not Ens.Host,
+            ; EnsLib.File.PassthroughService => accepted.
+            If '$classmethod(tClassName, "%Extends", "Ens.Host") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
+            If $IsObject(tHostCC) && tHostCC.Abstract {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is abstract and cannot be a production item")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
             If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")

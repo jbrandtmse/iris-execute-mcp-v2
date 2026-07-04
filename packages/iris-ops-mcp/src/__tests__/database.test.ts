@@ -72,6 +72,46 @@ describe("iris_database_action", () => {
     );
   });
 
+  // ── numeric range validation (CR 16.2-2) ──
+
+  it("rejects out-of-range percentFull / negative targetSize / non-positive initialSize", () => {
+    const schema = databaseActionTool.inputSchema as unknown as {
+      safeParse: (v: unknown) => { success: boolean };
+    };
+    // percentFull must be 1-100
+    expect(
+      schema.safeParse({ action: "compact", directory: DIR, percentFull: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ action: "compact", directory: DIR, percentFull: 150 })
+        .success,
+    ).toBe(false);
+    // targetSize must be non-negative; 0 is the documented "return all" default
+    expect(
+      schema.safeParse({ action: "truncate", directory: DIR, targetSize: -1 })
+        .success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ action: "truncate", directory: DIR, targetSize: 0 })
+        .success,
+    ).toBe(true);
+    // initialSize must be positive (a new volume needs a size)
+    expect(
+      schema.safeParse({
+        action: "expandVolume",
+        directory: DIR,
+        newVolDir: "d:\\v2\\",
+        initialSize: 0,
+      }).success,
+    ).toBe(false);
+    // valid values still pass
+    expect(
+      schema.safeParse({ action: "compact", directory: DIR, percentFull: 90 })
+        .success,
+    ).toBe(true);
+  });
+
   it("an empty-string namespace is accepted and dropped from the POST body (accepted-but-ignored)", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "mount", directory: DIR, success: 1 }),

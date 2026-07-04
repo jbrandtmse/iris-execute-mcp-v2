@@ -95,7 +95,13 @@ export const backupManageTool: ToolDefinition = {
     device: z
       .string()
       .optional()
-      .describe("For 'run': optional output device override."),
+      .describe(
+        "For 'run': accepted but has NO EFFECT. The backup destination is a property of " +
+          "the named task definition (Backup.General.StartTask runs a user-defined task " +
+          "BY NAME); a per-call device override is not part of the scriptable API path " +
+          "(StartTask's Device arg is Internal/undocumented), so any value passed here is " +
+          "ignored. Retained for backward compatibility.",
+      ),
     logFile: z
       .string()
       .optional()

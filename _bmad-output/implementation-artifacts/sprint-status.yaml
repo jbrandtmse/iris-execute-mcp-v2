@@ -304,5 +304,5 @@ development_status:
   # 22.1: deferred-work ledger burn-down — 14 items + Epic 20 retro Action #2 → TERMINAL dispositions (Epic 21 retro directive: no re-deferral).
   epic-22: in-progress
   22-0-loc-counter-tool: done
-  22-1-deferred-work-burn-down: backlog
+  22-1-deferred-work-burn-down: review
   epic-22-retrospective: optional

@@ -71,7 +71,8 @@ describe("gen-governance-baseline.mjs --check / footgun guard", () => {
     // Summary lines (visibility for the maintainer / CI log).
     expect(stdout).toContain("frozen foundation keys (committed): 141");
     expect(stdout).toMatch(/OK — every frozen foundation key still exists/);
-  });
+    // 30s: spawns node importing all server dists — slow under parallel `pnpm test` load.
+  }, 30000);
 
   it("--check writes nothing (frozen baseline byte-for-byte unchanged)", () => {
     const before = readFileSync(baselinePath, "utf-8");
@@ -81,7 +82,8 @@ describe("gen-governance-baseline.mjs --check / footgun guard", () => {
     expect(after).toBe(before);
     // The committed frozen hash must be untouched.
     expect(after).toContain('GOVERNANCE_BASELINE_HASH = "1e62c5ad5bf7"');
-  });
+    // 30s: spawns node importing all server dists — slow under parallel `pnpm test` load.
+  }, 30000);
 
   it("the default write path WITHOUT --force refuses (non-zero exit, no write)", () => {
     const before = readFileSync(baselinePath, "utf-8");
@@ -130,7 +132,8 @@ describe("gen-governance-baseline.mjs --check / footgun guard", () => {
     expect(postCount).toBe(liveCount - 141);
     // Growth happened post-Epic-14, and it did NOT cause a failure.
     expect(postCount).toBeGreaterThan(0);
-  });
+    // 30s: spawns node importing all server dists — slow under parallel `pnpm test` load.
+  }, 30000);
 
   // ── Focus (gap note): a "vanished foundation key" scenario (a frozen key
   //    missing from the live surface → exit 1 with the regression guidance) is
