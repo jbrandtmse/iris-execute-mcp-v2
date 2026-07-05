@@ -252,6 +252,29 @@ describe("iris_production_control", () => {
     );
   });
 
+  // CR 20.0-1 — timeout/force honored only by stop/restart; documented per-action so the
+  // advertised contract matches the server (recover/update/start/clean ignore them).
+  it("documents timeout/force as honored only by stop and restart", () => {
+    const shape = (
+      productionControlTool.inputSchema as unknown as {
+        shape: {
+          timeout: { description?: string };
+          force: { description?: string };
+        };
+      }
+    ).shape;
+    const timeoutDesc = shape.timeout.description ?? "";
+    const forceDesc = shape.force.description ?? "";
+    expect(timeoutDesc).toContain("stop");
+    expect(timeoutDesc).toContain("restart");
+    expect(forceDesc).toContain("stop");
+    expect(forceDesc).toContain("restart");
+    // The tool description states the per-action applicability explicitly.
+    expect(productionControlTool.description).toContain(
+      "IGNORED for 'start', 'update', 'recover', and 'clean'",
+    );
+  });
+
   it("should send POST for update action", async () => {
     mockHttp.post.mockResolvedValue(envelope({ action: "updated" }));
 

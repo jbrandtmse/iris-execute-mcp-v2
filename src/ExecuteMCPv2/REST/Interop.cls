@@ -552,6 +552,30 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
+            ; CR 18.0-1 (remaining half): reject a compiled-but-not-instantiable host class.
+            ; %ExistsId passes for an [Abstract] host (e.g. Ens.BusinessService) or a
+            ; non-host %Library.* class — both would fail later at production-start /
+            ; OnConfigChange rather than at add time. A valid config-item host must
+            ; (a) extend Ens.Host (the $classmethod "%Extends" idiom Ens.Config.Item itself
+            ; uses on a host className) and (b) be non-abstract (instantiable). Live-probed:
+            ; Ens.BusinessService => abstract, %Stream.GlobalCharacter => not Ens.Host,
+            ; EnsLib.File.PassthroughService => accepted.
+            If '$classmethod(tClassName, "%Extends", "Ens.Host") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
+            If $IsObject(tHostCC) && tHostCC.Abstract {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is abstract and cannot be a production item")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
             If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
@@ -1053,6 +1077,117 @@ ClassMethod MessageTrace() As %Status
         Set tResult = {}
         Do tResult.%Set("messages", tMessages)
         Do tResult.%Set("count", tMessages.%Size(), "number")
+
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Generate Mermaid sequence diagrams from message-trace sessions (Epic 21, Stories
+/// 21.0/21.1).
+/// <p>Thin handler: validates the request, delegates to the
+/// <class>ExecuteMCPv2.Diagram.Generate</class> facade, and renders
+/// <code>{ diagrams: [{ sessionId, mermaid, messageCount, warnings, truncated, dedupOf? }], count }</code>.</p>
+/// <p>Query parameters:
+/// <ul>
+///   <li><code>sessionIds</code> — comma-separated list of 1-20 positive integer session IDs (required)</li>
+///   <li><code>labelMode</code> — "full" (default) or "short" (last dotted segment of the body class)</li>
+///   <li><code>maxRows</code> — per-session row cap (default 2000, max 10000)</li>
+///   <li><code>dedup</code> — cross-session dedup of identical flows: 1/true (default) or 0/false;
+///       a duplicate session's entry reports <code>dedupOf</code> = the first session id with the same flow</li>
+///   <li><code>namespace</code> — target namespace for Ens.* operations</li>
+/// </ul></p>
+ClassMethod MessageDiagram() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tSessionIdsCsv = $Get(%request.Data("sessionIds",1))
+        Set tLabelMode = $Get(%request.Data("labelMode",1))
+        If tLabelMode = "" Set tLabelMode = "full"
+        Set tMaxRows = +$Get(%request.Data("maxRows",1), 2000) \ 1
+        If tMaxRows < 1 Set tMaxRows = 2000
+        If tMaxRows > 10000 Set tMaxRows = 10000
+        Set tDedupRaw = $ZConvert($Get(%request.Data("dedup",1)), "L")
+        Set tNamespace = $Get(%request.Data("namespace",1))
+
+        ; Validate labelMode
+        If (tLabelMode '= "full") && (tLabelMode '= "short") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'labelMode' must be 'full' or 'short'")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Validate dedup (Story 21.1): 0/1/true/false, default true when omitted
+        Set tDedup = 1
+        If tDedupRaw '= "" {
+            If (tDedupRaw = "0") || (tDedupRaw = "false") {
+                Set tDedup = 0
+            } ElseIf (tDedupRaw '= "1") && (tDedupRaw '= "true") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'dedup' must be one of: 0, 1, true, false")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+        }
+
+        ; Validate sessionIds: CSV of 1-20 positive canonical integers
+        If tSessionIdsCsv = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "Required parameter 'sessionIds' is missing or empty")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tIdCount = $Length(tSessionIdsCsv, ",")
+        If tIdCount > 20 {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must contain between 1 and 20 session IDs")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+        Set tSessionIds = ##class(%Library.ListOfDataTypes).%New()
+        Set tValid = 1
+        For tI = 1:1:tIdCount {
+            Set tPiece = $ZStrip($Piece(tSessionIdsCsv, ",", tI), "<>W")
+            If (tPiece = "") || (tPiece '= +tPiece) || (+tPiece '= (+tPiece \ 1)) || (+tPiece <= 0) {
+                Set tValid = 0
+                Quit
+            }
+            Do tSessionIds.Insert(+tPiece)
+        }
+        If 'tValid {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'sessionIds' must be a comma-separated list of positive integers")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        ; Switch to target namespace for Ens.* operations
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        }
+
+        ; Delegate to the diagram library facade
+        Set tOptions = {}
+        Do tOptions.%Set("labelMode", tLabelMode)
+        Do tOptions.%Set("maxRows", tMaxRows, "number")
+        Do tOptions.%Set("dedup", tDedup, "boolean")
+        Set tResult = ""
+        Set tSC = ##class(ExecuteMCPv2.Diagram.Generate).Run(tSessionIds, tOptions, .tResult)
+        If $$$ISERR(tSC) {
+            Set $NAMESPACE = tOrigNS
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
 
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody($$$OK, , tResult)

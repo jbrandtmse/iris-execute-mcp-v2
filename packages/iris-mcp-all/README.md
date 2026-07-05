@@ -22,13 +22,13 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 25 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 26 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis, lines-of-code metrics |
 | [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 20 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms |
+| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 21 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams |
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **98 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
+> **100 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
 
 ### Discover profiles & policy first
 

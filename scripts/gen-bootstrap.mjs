@@ -7,16 +7,28 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
 // Classes in compilation order: Utils first (no deps), then Setup (depends on Utils),
+// then the Diagram library (models first; facade referenced by REST/Interop.cls),
 // then handlers (depend on Utils), then Dispatch last (references all handlers in UrlMap)
 const classes = [
   { name: 'ExecuteMCPv2.Utils.cls', path: 'src/ExecuteMCPv2/Utils.cls' },
   { name: 'ExecuteMCPv2.Setup.cls', path: 'src/ExecuteMCPv2/Setup.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Event.cls', path: 'src/ExecuteMCPv2/Diagram/Event.cls' },
+  { name: 'ExecuteMCPv2.Diagram.RenderEvent.cls', path: 'src/ExecuteMCPv2/Diagram/RenderEvent.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Loader.cls', path: 'src/ExecuteMCPv2/Diagram/Loader.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Correlator.cls', path: 'src/ExecuteMCPv2/Diagram/Correlator.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Compressor.cls', path: 'src/ExecuteMCPv2/Diagram/Compressor.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Writer.cls', path: 'src/ExecuteMCPv2/Diagram/Writer.cls' },
+  { name: 'ExecuteMCPv2.Diagram.Generate.cls', path: 'src/ExecuteMCPv2/Diagram/Generate.cls' },
+  { name: 'ExecuteMCPv2.Loc.Classifier.cls', path: 'src/ExecuteMCPv2/Loc/Classifier.cls' },
+  { name: 'ExecuteMCPv2.Loc.Scanner.cls', path: 'src/ExecuteMCPv2/Loc/Scanner.cls' },
+  { name: 'ExecuteMCPv2.Loc.Generate.cls', path: 'src/ExecuteMCPv2/Loc/Generate.cls' },
   { name: 'ExecuteMCPv2.REST.Global.cls', path: 'src/ExecuteMCPv2/REST/Global.cls' },
   { name: 'ExecuteMCPv2.REST.Command.cls', path: 'src/ExecuteMCPv2/REST/Command.cls' },
   { name: 'ExecuteMCPv2.REST.UnitTest.cls', path: 'src/ExecuteMCPv2/REST/UnitTest.cls' },
   { name: 'ExecuteMCPv2.REST.Config.cls', path: 'src/ExecuteMCPv2/REST/Config.cls' },
   { name: 'ExecuteMCPv2.REST.Security.cls', path: 'src/ExecuteMCPv2/REST/Security.cls' },
   { name: 'ExecuteMCPv2.REST.Interop.cls', path: 'src/ExecuteMCPv2/REST/Interop.cls' },
+  { name: 'ExecuteMCPv2.REST.Loc.cls', path: 'src/ExecuteMCPv2/REST/Loc.cls' },
   { name: 'ExecuteMCPv2.REST.Monitor.cls', path: 'src/ExecuteMCPv2/REST/Monitor.cls' },
   { name: 'ExecuteMCPv2.REST.Task.cls', path: 'src/ExecuteMCPv2/REST/Task.cls' },
   { name: 'ExecuteMCPv2.REST.SystemConfig.cls', path: 'src/ExecuteMCPv2/REST/SystemConfig.cls' },
