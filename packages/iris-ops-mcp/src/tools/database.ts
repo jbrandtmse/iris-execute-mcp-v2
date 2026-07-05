@@ -89,13 +89,16 @@ export const databaseActionTool: ToolDefinition = {
       .describe("For 'mount': mount the database read-only (default false)"),
     percentFull: z
       .number()
+      .min(1)
+      .max(100)
       .optional()
-      .describe("For 'compact': target percent full for data blocks (default 90)"),
+      .describe("For 'compact': target percent full for data blocks, 1-100 (default 90)"),
     targetSize: z
       .number()
+      .min(0)
       .optional()
       .describe(
-        "For 'truncate': desired resulting .DAT size in MB (default 0 = return all trailing free space)",
+        "For 'truncate': desired resulting .DAT size in MB, non-negative (default 0 = return all trailing free space)",
       ),
     newVolDir: z
       .string()
@@ -103,8 +106,9 @@ export const databaseActionTool: ToolDefinition = {
       .describe("For 'expandVolume': directory for the new volume (required for expandVolume)"),
     initialSize: z
       .number()
+      .min(1)
       .optional()
-      .describe("For 'expandVolume': initial size of the new volume in MB"),
+      .describe("For 'expandVolume': initial size of the new volume in MB (positive)"),
     namespace: z
       .string()
       .optional()

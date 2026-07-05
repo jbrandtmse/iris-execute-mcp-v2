@@ -15,6 +15,17 @@
 ///   <li>A LEADING trace-utility event (before any business episode) forms its own
 ///       never-merged all-trace episode (the tCur=0 branch of EpisodeCore) and does not
 ///       poison the following collapse (§6.4 item 5 interplay).</li>
+///   <li>CR 21.1-1 NEST branch — an abandoned sync request followed by a pairloop whose
+///       request-leg source EQUALS the abandoned frame's destination does NOT unwind: the
+///       pairloop nests into one composite <code>[arrow, pairloop]</code> episode and repeated
+///       composites collapse. This is the COMPLEMENT of DiagramEpisodeTest's split fixture
+///       (where the sources DIFFER and the frame unwinds), so together they cover both sides
+///       of rule A's pairloop branch (<code>tEv.Req.Src '= frameDest</code>).</li>
+///   <li>CR 21.1-2 — a PAIRED self-call (Src=Dst, PairId&gt;0) STILL pushes/pops a frame (the
+///       guard's PairId&gt;0 exception), so a self-call wrapping an inner hop stays ONE episode
+///       and repeats collapse; and a DEEP chain of unpaired self-calls collapses without
+///       growing the stack AND does not absorb the distinct multi-hop episode that follows it
+///       (boundary isolation).</li>
 /// </ul>
 Class ExecuteMCPv2.Tests.DiagramEpisodeEdgeTest Extends %UnitTest.TestCase
 {
@@ -62,6 +73,40 @@ Method AddPing2(pList As %Library.ListOfObjects, pBase As %Integer) As %Status
 {
     Do pList.Insert(..MakeEvent(pBase, "Request", "Inproc", "Demo.Service", "Demo.Other", "Demo.Msg.Ping"))
     Do pList.Insert(..MakeEvent(pBase + 1, "Response", "Inproc", "Demo.Other", "Demo.Service", "Demo.Msg.Pong", pBase))
+    Quit $$$OK
+}
+
+/// Append one "abandoned sync request then <pPairCount> pairs ROOTED AT the abandoned
+/// request's destination" group (CR 21.1-1 nest branch). The leading request
+/// (Demo.Service -> Demo.Gone) has no response, so it opens an abandoned sync frame whose
+/// destination is Demo.Gone; each following pair is Demo.Gone -> Demo.Op and back, so the
+/// pair-loop's REQUEST-leg source (Demo.Gone) EQUALS the abandoned frame's destination.
+/// Rule A must therefore NOT unwind the abandoned frame — the pair-loop NESTS, forming one
+/// composite [arrow, pairloop] episode. (Contrast DiagramEpisodeTest:AddAbandonedGroup,
+/// whose pairs are Demo.Caller -> Demo.Op — a DIFFERENT source that DOES unwind the frame.)
+Method AddContinuedGroup(pList As %Library.ListOfObjects, pBase As %Integer, pPairCount As %Integer) As %Status
+{
+    Do pList.Insert(..MakeEvent(pBase, "Request", "Inproc", "Demo.Service", "Demo.Gone", "Demo.Msg.Lost"))
+    For tI = 0:1:(pPairCount - 1) {
+        Set tReqId = pBase + 1 + (tI * 2)
+        Do pList.Insert(..MakeEvent(tReqId, "Request", "Inproc", "Demo.Gone", "Demo.Op", "Demo.Msg.Ping"))
+        Do pList.Insert(..MakeEvent(tReqId + 1, "Response", "Inproc", "Demo.Op", "Demo.Gone", "Demo.Msg.Pong", tReqId))
+    }
+    Quit $$$OK
+}
+
+/// Append one PAIRED sync self-call (Demo.Loop -> Demo.Loop) that WRAPS one inner sync hop
+/// (Demo.Loop -> Demo.Inner and back), then closes with the self-call's own response
+/// (CR 21.1-2 paired-self-call fixture). The self-call carries a matching response, so the
+/// correlator pairs it (PairId&gt;0) and the episode tier's guard must STILL push its frame
+/// (the guard skips the push only for an UNPAIRED self-call) — otherwise the inner hop would
+/// wrongly root a separate episode instead of nesting.
+Method AddPairedSelfCallWrap(pList As %Library.ListOfObjects, pBase As %Integer) As %Status
+{
+    Do pList.Insert(..MakeEvent(pBase, "Request", "Inproc", "Demo.Loop", "Demo.Loop", "Demo.Msg.Self"))
+    Do pList.Insert(..MakeEvent(pBase + 1, "Request", "Inproc", "Demo.Loop", "Demo.Inner", "Demo.Msg.Step"))
+    Do pList.Insert(..MakeEvent(pBase + 2, "Response", "Inproc", "Demo.Inner", "Demo.Loop", "Demo.Msg.StepResp", pBase + 1))
+    Do pList.Insert(..MakeEvent(pBase + 3, "Response", "Inproc", "Demo.Loop", "Demo.Loop", "Demo.Msg.SelfResp", pBase))
     Quit $$$OK
 }
 
@@ -207,6 +252,104 @@ Method TestLeadingTraceEventDoesNotPoisonCollapse() As %Status
     Do $$$AssertTrue((tTrace > 0) && (tLoop > 0) && (tTrace < tLoop), "Trace arrow renders before the episode loop")
     Do $$$AssertEquals($Extract($Piece(tMermaid, $Char(10), tTrace), 1, 2), "De", "Leading trace arrow is unindented (outside the loop)")
     Do $$$AssertTrue(tMermaid [ "%% Unpaired request: message 3200", "Leading trace event's unpaired warning retained")
+    Quit $$$OK
+}
+
+/// CR 21.1-1 NEST branch (rule-A pairloop, no-unwind side): an abandoned sync request
+/// followed by a pairloop whose request-leg source EQUALS the abandoned frame's destination
+/// does NOT unwind — the pairloop nests into one composite [arrow, pairloop] episode.
+/// [reqLost(Demo.Service->Demo.Gone), pairloop(Demo.Gone->Demo.Op x3)] x3 therefore yields
+/// THREE identical composite episodes that collapse into a single episodeloop. This is the
+/// exact complement of DiagramEpisodeTest:TestAbandonedPairloopGroupsSymmetricWithRawPair,
+/// where the pairloop's source DIFFERS from the frame destination and the frame unwinds
+/// (zero episodeloops) — together the two pin both sides of the CR 21.1-1 branch.
+Method TestAbandonedThenContinuedPairloopFormsCompositeEpisode() As %Status
+{
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    For tG = 0:1:2 { Do ..AddContinuedGroup(tEvents, 4000 + (tG * 100), 3) }
+    Set tSC = ..RunTiers(tEvents, .tStream)
+    Do $$$AssertStatusOK(tSC, "Composite-episode pipeline should succeed")
+    Do $$$AssertEquals(tStream.Count(), 1, "Three identical composite episodes collapse to one event")
+    Set tLoop = tStream.GetAt(1)
+    Do $$$AssertEquals(tLoop.Kind, "episodeloop", "Collapsed event is an episodeloop")
+    Do $$$AssertEquals(tLoop.Count, 3, "Episode loop count is 3")
+    Do $$$AssertEquals(tLoop.Body.Count(), 2, "Composite body is the abandoned arrow + the nested pairloop")
+    Do $$$AssertEquals(tLoop.Body.GetAt(1).Kind, "arrow", "Body[1] is the abandoned request arrow")
+    Do $$$AssertEquals(tLoop.Body.GetAt(1).Dst, "Demo.Gone", "Body[1] targets the abandoned frame's destination")
+    Do $$$AssertEquals(tLoop.Body.GetAt(2).Kind, "pairloop", "Body[2] is the nested pairloop (source matches the abandoned frame's destination)")
+    Do $$$AssertEquals(tLoop.Body.GetAt(2).Req.Src, "Demo.Gone", "The nested pairloop's request leg is rooted at the abandoned frame's destination")
+    Do $$$AssertEquals(tLoop.Label, "Demo.Msg.Lost", "Representative label is the abandoned request's label")
+    Set tMermaid = ..RenderStream(tStream, 21)
+    Do $$$AssertTrue(tMermaid [ ($Char(10)_"loop 3 times Demo.Msg.Lost"_$Char(10)), "Outer episode loop labelled by the abandoned request")
+    Set tOuter = ..FindLine(tMermaid, "loop 3 times Demo.Msg.Lost")
+    Set tAbandoned = ..FindLineAfter(tMermaid, "Demo.Service->>Demo.Gone: Demo.Msg.Lost", tOuter)
+    Set tInner = ..FindLineAfter(tMermaid, "loop 3 times", tAbandoned)
+    Set tLeg = ..FindLineAfter(tMermaid, "Demo.Gone->>Demo.Op: Demo.Msg.Ping", tInner)
+    Do $$$AssertTrue((tOuter > 0) && (tAbandoned > tOuter), "Abandoned arrow renders inside the composite loop")
+    Do $$$AssertTrue((tInner > tAbandoned) && (tLeg > tInner), "Nested pairloop (and its leg) renders after the abandoned arrow, inside the composite loop")
+    Do $$$AssertEquals($Extract($Piece(tMermaid, $Char(10), tLeg), 1, 4), "    ", "Pairloop leg is indented two nesting levels (inside episode + pair loop)")
+    Quit $$$OK
+}
+
+/// CR 21.1-2 PAIRED self-call still pushes (the guard's PairId>0 exception): a paired sync
+/// self-call (Demo.Loop->Demo.Loop) wrapping an inner Demo.Loop->Demo.Inner hop must stay
+/// ONE 4-event episode — the guard skips the push ONLY for an UNPAIRED self-call, so a
+/// paired one keeps nesting the inner hop. Two identical wraps therefore collapse into a
+/// single episodeloop of count 2 with a 4-event body. (Were the guard to wrongly skip the
+/// paired self-call's push, the inner hop would root a separate episode, the wrap would
+/// split into two episodes, and the two groups would NOT collapse.)
+Method TestPairedSelfCallStillPushesFrame() As %Status
+{
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    Do ..AddPairedSelfCallWrap(tEvents, 8100)
+    Do ..AddPairedSelfCallWrap(tEvents, 8110)
+    Set tSC = ..RunTiers(tEvents, .tStream)
+    Do $$$AssertStatusOK(tSC, "Paired-self-call pipeline should succeed")
+    Do $$$AssertEquals(tStream.Count(), 1, "Two identical paired-self-call wraps collapse to one event")
+    Set tLoop = tStream.GetAt(1)
+    Do $$$AssertEquals(tLoop.Kind, "episodeloop", "Collapsed event is an episodeloop")
+    Do $$$AssertEquals(tLoop.Count, 2, "Episode loop count is 2")
+    Do $$$AssertEquals(tLoop.Body.Count(), 4, "Body keeps all four arrows of the wrapping episode (the paired self-call nested the inner hop)")
+    Do $$$AssertEquals(tLoop.Body.GetAt(1).Src, "Demo.Loop", "Body[1] is the self-call request (source)")
+    Do $$$AssertEquals(tLoop.Body.GetAt(1).Dst, "Demo.Loop", "Body[1] is the self-call request (destination equals source)")
+    Do $$$AssertEquals(tLoop.Label, "Demo.Msg.Self", "Representative label is the self-call's label")
+    Set tMermaid = ..RenderStream(tStream, 8)
+    Do $$$AssertTrue(tMermaid [ ($Char(10)_"loop 2 times Demo.Msg.Self"_$Char(10)), "Episode loop labelled by the paired self-call")
+    Do $$$AssertTrue(tMermaid [ ($Char(10)_"  Demo.Loop->>Demo.Inner: Demo.Msg.Step"_$Char(10)), "Inner hop nested inside the wrapping episode loop")
+    Quit $$$OK
+}
+
+/// CR 21.1-2 DEEP chain + boundary isolation: five identical UNPAIRED self-calls
+/// (Demo.Loop->Demo.Loop) collapse into one episodeloop of count 5 (the guard keeps the
+/// depth stack from growing, so each self-call roots its own episode), AND the DISTINCT
+/// multi-hop episode that follows (three AddHop4 episodes) compresses into its OWN separate
+/// episodeloop — the self-calls neither absorb it nor leak a frame across the boundary.
+/// (Without the guard the five self-calls would glue into one non-collapsing episode and
+/// GetAt(1) would be a plain arrow, not an episodeloop.)
+Method TestDeepSelfCallChainCollapsesAndIsolatesNextEpisode() As %Status
+{
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    For tI = 0:1:4 {
+        Do tEvents.Insert(..MakeEvent(8200 + tI, "Request", "Inproc", "Demo.Loop", "Demo.Loop", "Demo.Msg.Self"))
+    }
+    For tI = 0:1:2 {
+        Do ..AddHop4(tEvents, 8210 + (tI * 10))
+    }
+    Set tSC = ..RunTiers(tEvents, .tStream)
+    Do $$$AssertStatusOK(tSC, "Deep-self-call pipeline should succeed")
+    Do $$$AssertEquals(tStream.Count(), 2, "One self-call loop + one distinct multi-hop episode loop")
+    Do $$$AssertEquals(tStream.GetAt(1).Kind, "episodeloop", "Deep self-call chain collapses (the stack did not grow)")
+    Do $$$AssertEquals(tStream.GetAt(1).Count, 5, "All five identical self-calls merged")
+    Do $$$AssertEquals(tStream.GetAt(1).Body.Count(), 1, "Self-call episode body is the single self-call arrow")
+    Do $$$AssertEquals(tStream.GetAt(1).Label, "Demo.Msg.Self", "First loop labelled by the self-call")
+    Do $$$AssertEquals(tStream.GetAt(2).Kind, "episodeloop", "The following distinct episode compresses separately (boundary isolation)")
+    Do $$$AssertEquals(tStream.GetAt(2).Count, 3, "All three following multi-hop episodes merged")
+    Do $$$AssertEquals(tStream.GetAt(2).Body.Count(), 4, "Following episode keeps its four-arrow body")
+    Do $$$AssertEquals(tStream.GetAt(2).Label, "Demo.Msg.Outer", "Second loop labelled by the multi-hop episode's opening request")
+    Set tMermaid = ..RenderStream(tStream, 17)
+    Set tSelf = ..FindLine(tMermaid, "loop 5 times Demo.Msg.Self")
+    Set tOuter = ..FindLineAfter(tMermaid, "loop 3 times Demo.Msg.Outer", tSelf)
+    Do $$$AssertTrue((tSelf > 0) && (tOuter > 0) && (tSelf < tOuter), "Self-call loop renders before the distinct multi-hop episode loop")
     Quit $$$OK
 }
 

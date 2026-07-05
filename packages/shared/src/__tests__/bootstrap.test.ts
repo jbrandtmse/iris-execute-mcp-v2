@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 20 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(20);
+    it("should contain exactly 24 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(24);
     });
 
     it("should contain all required class names", () => {
@@ -1038,12 +1038,16 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.Diagram.Compressor.cls",
         "ExecuteMCPv2.Diagram.Writer.cls",
         "ExecuteMCPv2.Diagram.Generate.cls",
+        "ExecuteMCPv2.Loc.Classifier.cls",
+        "ExecuteMCPv2.Loc.Scanner.cls",
+        "ExecuteMCPv2.Loc.Generate.cls",
         "ExecuteMCPv2.REST.Global.cls",
         "ExecuteMCPv2.REST.Command.cls",
         "ExecuteMCPv2.REST.UnitTest.cls",
         "ExecuteMCPv2.REST.Config.cls",
         "ExecuteMCPv2.REST.Security.cls",
         "ExecuteMCPv2.REST.Interop.cls",
+        "ExecuteMCPv2.REST.Loc.cls",
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Task.cls",
         "ExecuteMCPv2.REST.SystemConfig.cls",
@@ -1077,7 +1081,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(20);
+      expect(classes.length).toBe(24);
     });
 
     it("should return classes in compilation order", () => {
@@ -1185,12 +1189,16 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.Diagram.Compressor.cls", "src/ExecuteMCPv2/Diagram/Compressor.cls"],
       ["ExecuteMCPv2.Diagram.Writer.cls", "src/ExecuteMCPv2/Diagram/Writer.cls"],
       ["ExecuteMCPv2.Diagram.Generate.cls", "src/ExecuteMCPv2/Diagram/Generate.cls"],
+      ["ExecuteMCPv2.Loc.Classifier.cls", "src/ExecuteMCPv2/Loc/Classifier.cls"],
+      ["ExecuteMCPv2.Loc.Scanner.cls", "src/ExecuteMCPv2/Loc/Scanner.cls"],
+      ["ExecuteMCPv2.Loc.Generate.cls", "src/ExecuteMCPv2/Loc/Generate.cls"],
       ["ExecuteMCPv2.REST.Global.cls", "src/ExecuteMCPv2/REST/Global.cls"],
       ["ExecuteMCPv2.REST.Command.cls", "src/ExecuteMCPv2/REST/Command.cls"],
       ["ExecuteMCPv2.REST.UnitTest.cls", "src/ExecuteMCPv2/REST/UnitTest.cls"],
       ["ExecuteMCPv2.REST.Config.cls", "src/ExecuteMCPv2/REST/Config.cls"],
       ["ExecuteMCPv2.REST.Security.cls", "src/ExecuteMCPv2/REST/Security.cls"],
       ["ExecuteMCPv2.REST.Interop.cls", "src/ExecuteMCPv2/REST/Interop.cls"],
+      ["ExecuteMCPv2.REST.Loc.cls", "src/ExecuteMCPv2/REST/Loc.cls"],
       ["ExecuteMCPv2.REST.Monitor.cls", "src/ExecuteMCPv2/REST/Monitor.cls"],
       ["ExecuteMCPv2.REST.Task.cls", "src/ExecuteMCPv2/REST/Task.cls"],
       ["ExecuteMCPv2.REST.SystemConfig.cls", "src/ExecuteMCPv2/REST/SystemConfig.cls"],

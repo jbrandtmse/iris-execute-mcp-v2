@@ -47,6 +47,22 @@ Method AddHop4(pList As %Library.ListOfObjects, pBase As %Integer, pErrorOnInner
     Quit $$$OK
 }
 
+/// Append one "abandoned sync request then <pPairCount> identical single-hop pairs"
+/// group (CR 21.1-1 fixtures). The leading request (Demo.Service -> Demo.Gone) has no
+/// response, so it is an abandoned sync frame; each pair is Demo.Caller -> Demo.Op and
+/// back. With pPairCount=1 the pair does NOT collapse (raw single-pair grouping); with
+/// pPairCount&gt;1 the contiguous pairs collapse into a pairloop (pairloop grouping).
+Method AddAbandonedGroup(pList As %Library.ListOfObjects, pBase As %Integer, pPairCount As %Integer) As %Status
+{
+    Do pList.Insert(..MakeEvent(pBase, "Request", "Inproc", "Demo.Service", "Demo.Gone", "Demo.Msg.Lost"))
+    For tI = 0:1:(pPairCount - 1) {
+        Set tReqId = pBase + 1 + (tI * 2)
+        Do pList.Insert(..MakeEvent(tReqId, "Request", "Inproc", "Demo.Caller", "Demo.Op", "Demo.Msg.Ping"))
+        Do pList.Insert(..MakeEvent(tReqId + 1, "Response", "Inproc", "Demo.Op", "Demo.Caller", "Demo.Msg.Pong", tReqId))
+    }
+    Quit $$$OK
+}
+
 /// Run the full in-memory pipeline: Correlate -> pair tier -> episode tier.
 Method RunTiers(pEvents As %Library.ListOfObjects, Output pStream As %Library.ListOfObjects) As %Status
 {
@@ -365,6 +381,63 @@ Method TestLineCountThreshold() As %Status
     Do $$$AssertTrue(tMermaid [ "loop 200 times Demo.Msg.Hop1", "200 episodes collapse to one loop")
     Set tLines = $Length(tMermaid, $Char(10))
     Do $$$AssertTrue(tLines < 40, "1200-arrow trace emits under 40 lines (got "_tLines_")")
+    Quit $$$OK
+}
+
+/// CR 21.1-1 (episode rule-A pairloop symmetry, stakeholder Option A): an abandoned sync
+/// request followed by a PAIRLOOP must group the SAME way as one followed by a raw single
+/// pair — the abandoned frame unwinds either way, so the traffic never glues into a
+/// composite episode. Repeated [reqLost, pairloop]x3 must therefore NOT collapse into one
+/// episodeloop (the pre-fix asymmetric behavior), staying an alternating arrow/pairloop
+/// stream that matches the raw-single-pair grouping's boundaries (both yield zero
+/// episodeloops — the abandoned request is isolated in its own episode in both).
+Method TestAbandonedPairloopGroupsSymmetricWithRawPair() As %Status
+{
+    ; PAIRLOOP grouping: [abandoned reqLost, then 3 identical pairs] x3. The pair tier
+    ; collapses each group's 3 pairs into a pairloop; CR 21.1-1 makes the pairloop unwind
+    ; the abandoned sync frame (on its request-leg source) so it does NOT glue into a
+    ; composite episode.
+    Set tPL = ##class(%Library.ListOfObjects).%New()
+    For tG = 0:1:2 { Do ..AddAbandonedGroup(tPL, 6000 + (tG * 100), 3) }
+    Set tSC = ..RunTiers(tPL, .tPLStream)
+    Do $$$AssertStatusOK(tSC, "Pairloop-grouping pipeline should succeed")
+    Do $$$AssertEquals(..CountKind(tPLStream, "episodeloop"), 0, "Abandoned request + pairloop does NOT glue into a composite episode loop (CR 21.1-1)")
+    Do $$$AssertEquals(tPLStream.Count(), 6, "Stream stays arrow/pairloop alternating (2 events x 3 groups)")
+    Do $$$AssertEquals(tPLStream.GetAt(1).Kind, "arrow", "Group 1 abandoned request is its own arrow")
+    Do $$$AssertEquals(tPLStream.GetAt(2).Kind, "pairloop", "Group 1 pairs collapse to a pairloop in a SEPARATE episode")
+    Do $$$AssertEquals(tPLStream.GetAt(3).Kind, "arrow", "Group 2 abandoned request stays separate")
+    Do $$$AssertEquals(tPLStream.GetAt(4).Kind, "pairloop", "Group 2 pairloop stays separate")
+
+    ; RAW-single-pair grouping: [abandoned reqLost, then ONE pair] x3 — no pairloop forms
+    ; (the pairs are non-contiguous). The abandoned request already unwinds on the raw
+    ; request arrow; assert the SAME symmetric result (no episode-loop glue).
+    Set tRaw = ##class(%Library.ListOfObjects).%New()
+    For tG = 0:1:2 { Do ..AddAbandonedGroup(tRaw, 7000 + (tG * 100), 1) }
+    Set tSC = ..RunTiers(tRaw, .tRawStream)
+    Do $$$AssertStatusOK(tSC, "Raw-single-pair pipeline should succeed")
+    Do $$$AssertEquals(..CountKind(tRawStream, "episodeloop"), 0, "Raw single-pair grouping ALSO does not glue the abandoned request (symmetric with the pairloop grouping)")
+    Do $$$AssertEquals(tRawStream.Count(), 9, "Raw stream is nine plain arrows (reqLost + req + resp) x 3")
+    Quit $$$OK
+}
+
+/// CR 21.1-2 (Src=Dst self-call depth-stack growth): repeated unanswered sync SELF-calls
+/// (Src=Dst, PairId=0, no response) previously each pushed a frame that rule A could never
+/// unwind (the frame's destination equals its own source) and no response popped — the
+/// depth stack grew linearly and all self-calls glued into ONE episode (defeating
+/// compression). With the self-call push-guard each self-call roots its own episode, so
+/// three identical ones collapse to a single episodeloop.
+Method TestUnpairedSelfCallDoesNotGrowStack() As %Status
+{
+    Set tEvents = ##class(%Library.ListOfObjects).%New()
+    For tI = 0:1:2 {
+        Do tEvents.Insert(..MakeEvent(8000 + tI, "Request", "Inproc", "Demo.Loop", "Demo.Loop", "Demo.Msg.Self"))
+    }
+    Set tSC = ..RunTiers(tEvents, .tStream)
+    Do $$$AssertStatusOK(tSC, "Self-call pipeline should succeed")
+    Do $$$AssertEquals(tStream.Count(), 1, "Three identical self-calls collapse to one event (the stack did not grow)")
+    Do $$$AssertEquals(tStream.GetAt(1).Kind, "episodeloop", "Repeated self-calls compress into an episode loop")
+    Do $$$AssertEquals(tStream.GetAt(1).Count, 3, "Episode loop count is 3")
+    Do $$$AssertEquals(tStream.GetAt(1).Body.Count(), 1, "Representative body is the single self-call arrow")
     Quit $$$OK
 }
 

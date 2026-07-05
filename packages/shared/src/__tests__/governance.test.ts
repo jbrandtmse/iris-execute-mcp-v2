@@ -16,6 +16,13 @@ import {
   GOVERNANCE_BASELINE_HASH,
 } from "../governance-baseline.js";
 import type { ToolDefinition } from "../tool-types.js";
+// Shared key-derivation + drift constants (CR 16.0-1): the drift guard below now uses the
+// SAME per-tool derivation the generator uses, so the two can never disagree.
+import {
+  deriveKeysForTool,
+  SERVER_PACKAGES,
+  VANISHED_HINT,
+} from "../governance-baseline-derivation.js";
 
 // ════════════════════════════════════════════════════════════════════
 // Governance policy engine (Epic 14, Story 14.3 — architecture D3/D4/D7).
@@ -530,21 +537,16 @@ describe("governance baseline drift check", () => {
   // packages/shared/src/__tests__/ → repo root is 4 levels up.
   const repoRoot = resolve(__dirname, "../../../..");
 
-  // MUST stay in sync with scripts/gen-governance-baseline.mjs.
-  const SERVER_PACKAGES = [
-    "iris-dev-mcp",
-    "iris-admin-mcp",
-    "iris-interop-mcp",
-    "iris-ops-mcp",
-    "iris-data-mcp",
-  ];
+  // SERVER_PACKAGES and VANISHED_HINT are imported from the shared derivation module
+  // (single source of truth with the generator — CR 16.0-1; also resolves the former
+  // "SERVER_PACKAGES duplicated across generator + drift test, kept in sync by comment").
 
-  const VANISHED_HINT =
-    "a FROZEN foundation key disappeared from the live tool surface — this is a real " +
-    "back-compat regression (a grandfathered action would lose its enabled-by-default " +
-    "guarantee). Restore the tool/action, do NOT regenerate the frozen baseline.";
-
-  /** Re-derive the live governance keys from the built server dists. */
+  /**
+   * Re-derive the live governance keys from the built server dists using the SHARED
+   * per-tool derivation ({@link deriveKeysForTool}) — the same one the generator uses — so
+   * this drift guard and the CLI `--check` can never diverge on a wrapped/edge action
+   * shape (CR 16.0-1, closing the former bare-`.options`-read lock-step gap).
+   */
   async function deriveBaselineFromDists(): Promise<Set<string>> {
     const keys = new Set<string>();
     for (const pkg of SERVER_PACKAGES) {
@@ -553,12 +555,7 @@ describe("governance baseline drift check", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tools = mod.tools as any[];
       for (const tool of tools) {
-        const options = tool.inputSchema?.shape?.action?.options;
-        if (Array.isArray(options) && options.length > 0) {
-          for (const value of options) keys.add(`${tool.name}:${value}`);
-        } else {
-          keys.add(tool.name);
-        }
+        for (const key of deriveKeysForTool(tool, pkg)) keys.add(key);
       }
     }
     return keys;
@@ -584,7 +581,10 @@ describe("governance baseline drift check", () => {
     const postFoundation = [...fresh].filter((k) => !committed.has(k)).sort();
     // (No assertion on `postFoundation`: it may legitimately be non-empty.)
     void postFoundation;
-  });
+    // 30s timeout: this test dynamically imports all five built server dists (real module
+    // I/O), which can exceed vitest's 5s default under the full parallel `pnpm test` turbo
+    // load (it passes comfortably in isolation).
+  }, 30000);
 
   it("committed GOVERNANCE_BASELINE_HASH matches the SHA-256 of the sorted baseline", () => {
     // Re-compute the hash with the same formula as gen-governance-baseline.mjs

@@ -46,6 +46,17 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 
+// Shared key-derivation + drift helpers (Story 22.1, CR 16.0-1 / CR 16.0-2). The generator
+// and the governance.test.ts drift guard now import the SAME derivation so they can never
+// disagree. Imported from the BUILT shared dist — this generator already runs AFTER
+// `pnpm turbo run build` (it imports the server dists), so the shared dist is present.
+import {
+  deriveKeysForTool,
+  computeBaselineDrift,
+  SERVER_PACKAGES,
+  VANISHED_HINT,
+} from '../packages/shared/dist/governance-baseline-derivation.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
@@ -66,46 +77,10 @@ const FORCE_MODE = argv.includes('--force');
 // dists; the generated `governance-baseline.ts` is STATIC DATA, so
 // @iris-mcp/shared importing it creates NO runtime dependency on the server
 // packages — no cycle.
-const SERVER_PACKAGES = [
-  'iris-dev-mcp',
-  'iris-admin-mcp',
-  'iris-interop-mcp',
-  'iris-ops-mcp',
-  'iris-data-mcp',
-];
-
-// Read the `action` enum's `.options`, peeling any ZodOptional / ZodDefault /
-// ZodNullable wrapper first (Story 15.0 AC 15.0.1).
-//
-// CRITICAL — lock-step: this MUST MIRROR `unwrapActionOptions` in
-// packages/shared/src/governance.ts (the gate side). A bare `z.enum([...])` (and
-// `.describe(...)`) exposes `.options` directly; a wrapped enum
-// (`.optional()`/`.default()`/`.nullable()`) exposes `.options === undefined`,
-// so without unwrapping a future wrapped action enum would collapse to the bare
-// tool key in the baseline while the gate (which DOES unwrap) emits per-action
-// keys — making the two disagree and the cascade miss. If you change the peel
-// logic here, change `unwrapActionOptions` too.
-//
-// NOTE (CR 15.0-5, do not regress): this unwrap is the CORRECT/ROBUST derivation
-// and is used by BOTH the write path and the --check path. The governance.test.ts
-// drift guard reads `tool.inputSchema?.shape?.action?.options` directly (a known
-// deferred lock-step gap, harmless on today's all-bare surface). The --check mode
-// here intentionally keeps the unwrap rather than downgrading to the bare read.
-function unwrapActionOptions(actionField) {
-  let field = actionField;
-  for (let depth = 0; depth < 10 && field != null; depth++) {
-    if (Array.isArray(field.options)) {
-      return field.options;
-    }
-    const inner =
-      typeof field.unwrap === 'function' ? field.unwrap() : field._def?.innerType;
-    if (inner == null || inner === field) {
-      return undefined;
-    }
-    field = inner;
-  }
-  return undefined;
-}
+// SERVER_PACKAGES + the per-tool key derivation (unwrapActionOptions + the fail-fast
+// guards) are imported from the shared `governance-baseline-derivation` module (CR 16.0-1):
+// the generator, the governance.test.ts drift guard, and the runtime gate now all funnel
+// through ONE derivation, so they can never disagree.
 
 // Derive the LIVE governance key set from the built server dists.
 //
@@ -164,51 +139,15 @@ async function deriveLiveKeys() {
     let pkgKeyCount = 0;
     for (const tool of tools) {
       toolCount++;
-      // Guard: a tool MUST have a string `name` and an `inputSchema` (AC 15.0.5).
-      if (typeof tool?.name !== 'string' || tool.name === '') {
-        throw new Error(
-          `gen-governance-baseline: ${pkg} has a tool with a missing/empty "name" ` +
-            `(got ${JSON.stringify(tool?.name)}).`,
-        );
+      // Per-tool key derivation (unwrap + fail-fast guards for missing name/inputSchema,
+      // empty enum, non-string option) is the SHARED helper (CR 16.0-1), so the generator
+      // and the governance.test.ts drift guard can never derive a different surface. The
+      // cross-package duplicate guard (addKey/seen) stays here — it is a build-time
+      // integrity check spanning all packages, not a per-tool concern.
+      for (const key of deriveKeysForTool(tool, pkg)) {
+        addKey(key, pkg, tool.name);
+        pkgKeyCount++;
       }
-      if (tool.inputSchema == null) {
-        throw new Error(
-          `gen-governance-baseline: ${pkg}/${tool.name} is missing "inputSchema".`,
-        );
-      }
-      const actionField = tool.inputSchema?.shape?.action;
-      if (actionField != null) {
-        // The field is present. If it unwraps to a ZodEnum, it MUST be a non-empty
-        // enum of string options; anything else is a malformed shape we refuse to
-        // silently downgrade. (A non-enum `action`, e.g. z.string(), unwraps to
-        // undefined options and is treated as a single-op tool, matching the gate.)
-        const options = unwrapActionOptions(actionField);
-        if (options !== undefined) {
-          if (!Array.isArray(options) || options.length === 0) {
-            throw new Error(
-              `gen-governance-baseline: ${pkg}/${tool.name} declares an EMPTY "action" ` +
-                `enum. A multi-action tool must declare at least one action value.`,
-            );
-          }
-          for (const value of options) {
-            if (typeof value !== 'string') {
-              throw new Error(
-                `gen-governance-baseline: ${pkg}/${tool.name} has a non-string "action" ` +
-                  `enum option (${JSON.stringify(value)}). Action values must be strings.`,
-              );
-            }
-          }
-          // Multi-action tool — one key per enum value.
-          for (const value of options) {
-            addKey(`${tool.name}:${value}`, pkg, tool.name);
-            pkgKeyCount++;
-          }
-          continue;
-        }
-      }
-      // Single-operation tool — bare tool name.
-      addKey(tool.name, pkg, tool.name);
-      pkgKeyCount++;
     }
     perPackage.push({ pkg, tools: tools.length, keys: pkgKeyCount });
   }
@@ -229,11 +168,8 @@ function computeHash(sortedKeys) {
 
 const outPath = resolve(root, 'packages/shared/src/governance-baseline.ts');
 
-// Wording shared with governance.test.ts's VANISHED_HINT for consistency.
-const VANISHED_HINT =
-  'a FROZEN foundation key disappeared from the live tool surface — this is a real ' +
-  'back-compat regression (a grandfathered action would lose its enabled-by-default ' +
-  'guarantee). Restore the tool/action, do NOT regenerate the frozen baseline.';
+// VANISHED_HINT is imported from the shared derivation module (single source of truth,
+// shared with the governance.test.ts drift guard).
 
 // ════════════════════════════════════════════════════════════════════════════
 // --check : no-write one-directional drift verification (AC 16.0.1, 16.0.2).
@@ -283,11 +219,11 @@ if (CHECK_MODE) {
     process.exit(1);
   }
 
-  // ONE-DIRECTIONAL drift (mirrors governance.test.ts):
+  // ONE-DIRECTIONAL drift via the SHARED helper (CR 16.0-2 — the SAME pure comparison the
+  // new governance-baseline-derivation unit test exercises with synthetic sets):
   //   - vanished = committed \ live  → MUST be empty (real regression).
   //   - postFoundation = live \ committed → EXPECTED, allowed (report only).
-  const vanished = [...committed].filter((k) => !liveKeys.has(k)).sort();
-  const postFoundation = [...liveKeys].filter((k) => !committed.has(k)).sort();
+  const { vanished, postFoundation } = computeBaselineDrift(committed, liveKeys);
 
   console.log('gen-governance-baseline --check (no-write drift verification)');
   console.log(`  frozen foundation keys (committed): ${committed.size}`);

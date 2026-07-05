@@ -26,6 +26,16 @@
 /// </ul>
 /// <p>Best-effort contract: anomalies become warnings on the render events; this method
 /// never fails a generation because of trace-shape anomalies.</p>
+/// <p><b>Pairing cost (CR 21.0-2, measured live 2026-07-04).</b> Pairing is an order-based
+/// forward scan (§6.2): each Request scans forward to end-of-list for its Response, and an
+/// unmatched Queue request scans TWICE (CorrId primary + non-empty-ReturnQueue fallback) —
+/// O(n²) with no iteration bound. Measured worst case (all-unpaired Queue requests — the
+/// pathological wedged-production shape): default <code>maxRows=2000</code> &rarr; ~0.14 s
+/// (fast, acceptable); the <code>10000</code> hard cap &rarr; ~4.6 s (opt-in extreme; it
+/// completes with no crash, honoring the best-effort contract). The default keeps realistic
+/// traces fast, so the cap is documented rather than re-architected. If the extreme cap ever
+/// becomes a reported problem, replace the forward scans with index maps (CorrId&rarr;position,
+/// per-endpoint-pair response queues) preserving §6.2 semantics.</p>
 Class ExecuteMCPv2.Diagram.Correlator Extends %RegisteredObject
 {
 
