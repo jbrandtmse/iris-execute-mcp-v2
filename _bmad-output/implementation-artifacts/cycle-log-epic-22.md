@@ -18,3 +18,5 @@
 2026-07-04T06:12:58Z	Story 22.1	committed	sha=9b5e540 submodules=
 2026-07-05T00:49:52Z	Epic 22	retrospective_complete	model=claude-opus-4-8 rules_codified=3 (Rule36_reference_parity_pinning,Rule37_deferred_ledger_burndown_cadence,Rule38_namespace_tool_scope_timeout) rules_total=35->38 epics_contributing=19->20 ledger_open=5_epic22own_only(0_carried) evidence=_bmad-output/implementation-artifacts/epic-22-retro-2026-07-04.md
 2026-07-05T00:50:40Z	Epic 22	retro_committed	sha=23fb2ac
+2026-07-05T00:52:14Z	Epic 22	epic_merged_to_feature	repos=. feature_sha=3263ec6 merge_sha=3263ec6 submodules=
+2026-07-05T00:52:14Z	Epic 22	epic_summary	stories=2 total_high=0 total_med=2 total_low=5_deferred total_smoke_defects=0 rework_events=0 rules_codified=3 bootstrap=c3cc801cfead->e931a96373f0 baseline=1e62c5ad5bf7-frozen ledger_open=5_epic22own_0_carried opus_stage_count=0 fable_stage_count=6
