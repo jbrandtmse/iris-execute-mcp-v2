@@ -17,3 +17,4 @@
 2026-07-04T06:12:17Z	Story 22.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=scratchpad/smoke-22-1.md;CR17.1-1_||reject_result{}+CR18.0-1_abstract+nonhost_reject+concrete_passes_to_prodnotfound;all_clean_envelopes_empty_result_no_caret_globals model=claude-opus-4-8
 2026-07-04T06:12:58Z	Story 22.1	committed	sha=9b5e540 submodules=
 2026-07-05T00:49:52Z	Epic 22	retrospective_complete	model=claude-opus-4-8 rules_codified=3 (Rule36_reference_parity_pinning,Rule37_deferred_ledger_burndown_cadence,Rule38_namespace_tool_scope_timeout) rules_total=35->38 epics_contributing=19->20 ledger_open=5_epic22own_only(0_carried) evidence=_bmad-output/implementation-artifacts/epic-22-retro-2026-07-04.md
+2026-07-05T00:50:40Z	Epic 22	retro_committed	sha=23fb2ac
