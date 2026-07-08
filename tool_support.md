@@ -162,7 +162,7 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/ops` — Operations & Monitoring (20)
+## `@iris-mcp/ops` — Operations & Monitoring (21)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -186,9 +186,12 @@ their Zod schemas but silently dropped them server-side.
 | 18 | `iris_process_manage` | 🟥 ExecuteMCPv2 | `/monitor/process` + `/monitor/process/manage` |
 | 19 | `iris_database_action` | 🟥 ExecuteMCPv2 | `/monitor/database/action` |
 | 20 | `iris_backup_manage` | 🟥 ExecuteMCPv2 | `/monitor/backup/manage` |
+| 21 | `iris_health_check` | 🟥 ExecuteMCPv2 | `/monitor/health` |
 
-**Mix:** 0 Atelier · 20 ExecuteMCPv2 · 0 other — **fully custom**.
+**Mix:** 0 Atelier · 21 ExecuteMCPv2 · 0 other — **fully custom**.
 
+> **Epic 23 (2026-07-07) — composite health check, governance defaults:** added `iris_health_check` (ops 20 → 21) — one round-trip across up to 9 instance areas (`system`, `databases`, `journal`, `mirror`, `locks`, `license`, `ecp`, `alerts`, `interop`) returning a structured verdict (`healthy`/`warning`/`critical`) with a per-area finding. The `memory` area from earlier drafts was DROPPED (Story 23.0 finding — no reliable instance-wide memory-health signal exists in IRIS; it is not folded into `system` or any other area). The ObjectScript endpoint (`ExecuteMCPv2.REST.Health:HealthCheck`, Story 23.1) returns RAW per-area values only; every threshold, per-area level rule, and the overall verdict are computed in TypeScript (architecture.md ADR H5), so threshold tuning is free of a bootstrap bump. The tool is a pure **read** (`mutates: "read"`) and is **enabled by default** under `IRIS_GOVERNANCE`; an `error` finding (a failed probe) counts as `warning` severity for the verdict and never fakes a `critical` result, and a `notApplicable` finding (e.g. no mirror membership, no Interoperability classes in the namespace) never affects the verdict.
+>
 > **Epic 16 (2026-06-16) — governance defaults:** added `iris_process_manage`, `iris_database_action`, and `iris_backup_manage` (ops 17 → 20). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_process_manage:terminate`/`:suspend`/`:resume`; **all six** `iris_database_action` actions (`mount`/`dismount`/`compact`/`defragment`/`truncate`/`expandVolume`); and `iris_backup_manage:run`/`:freeze`/`:thaw`. Reads are **enabled by default**: `iris_process_manage:get` and `iris_backup_manage:listHistory`. (`iris_backup_manage` has no `restore` action — IRIS restore is interactive with no scriptable classmethod; see the `iris-ops` README.)
 
 > Atelier v8 does expose `GET /%SYS/jobs` and `GET /%SYS/cspapps`, but those return limited data and don't cover locks, metrics, tasks, journals, mirrors, audit, or database integrity. The custom REST handler gets all of them uniformly.
@@ -210,6 +213,23 @@ were silently returning stale or per-process data.
   (new in Story 11.3) reports the IRIS instance locale code
   (e.g. `"enuw"`) via `%SYS.NLS.Locale.%New().Name`, with a
   direct-global fallback to `^%SYS("LOCALE","CURRENT")`.
+- **`iris_health_check`** (Epic 23) `structuredContent`:
+  `{verdict, checkedAt, findings, raw}`. `findings[]` is one entry
+  per CHECKED area — `{area, level, metric, value, threshold,
+  explanation}`, `level` one of `ok`/`warning`/`critical`/
+  `notApplicable`/`error`. `raw` mirrors the endpoint's per-area raw
+  values for every checked area (an errored area has no `raw` entry).
+  Optional `areas` (array, default all 9; an empty array is treated
+  as "all", matching the endpoint's own default) restricts which
+  areas are checked; optional `thresholds` overrides any subset of
+  the defaults (`journalPctWarn=80/Crit=92`, `dbFreePctWarn=10/Crit=3`,
+  `licensePctWarn=80/Crit=95`, `lockTablePctWarn=50/Crit=85`) and is
+  never sent to the endpoint — it is applied purely client-side.
+  `journal`/`license`/`lockTable` thresholds are ASCENDING (% full or
+  % used — high is bad); only `dbFreePct` is DESCENDING (% free — low
+  is bad). `system`/`mirror`/`ecp`/`interop` carry no ok/warning
+  threshold in v1 (informational — always `ok`, or `notApplicable`
+  when not configured).
 
 ---
 
@@ -264,7 +284,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 100-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 101-tool total.
 
 ---
 
@@ -289,9 +309,9 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 | `@iris-mcp/dev` | 19 | 7 | 0 | **26** | **27** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
 | `@iris-mcp/interop` | 0 | 21 | 0 | **21** | **22** |
-| `@iris-mcp/ops` | 0 | 20 | 0 | **20** | **21** |
+| `@iris-mcp/ops` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **19** | **76** | **5** | **100** | **105** |
+| **Total** | **19** | **77** | **5** | **101** | **106** |
 
 ---
 
@@ -303,7 +323,7 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 76 of the 100 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 77 of the 101 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -317,7 +337,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 76 of 100 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 77 of 101 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

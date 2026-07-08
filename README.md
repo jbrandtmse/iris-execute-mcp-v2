@@ -15,10 +15,10 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 | [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 26 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis, lines-of-code metrics |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 21 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams |
-| [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 20 | System metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
+| [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **100 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **101 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -33,7 +33,7 @@ Once published, all servers will be installable at once with `npm install -g @ir
 | **ObjectScript developer** | `@iris-mcp/dev` — compile, edit, execute code, run SQL, manage globals |
 | **System administrator** | `@iris-mcp/admin` — manage namespaces, databases, users, roles, web apps, SSL, OAuth |
 | **Integration engineer** | `@iris-mcp/interop` — control productions, configure credentials, manage business rules and transforms |
-| **Operations / SRE** | `@iris-mcp/ops` — monitor metrics, inspect jobs and locks, review journals, audit events, manage tasks |
+| **Operations / SRE** | `@iris-mcp/ops` — check overall instance health in one call (`iris_health_check`), monitor metrics, inspect jobs and locks, review journals, audit events, manage tasks |
 | **Data / BI analyst** | `@iris-mcp/data` — query DocDB collections, run MDX against DeepSee cubes, manage REST APIs |
 | **Full-stack / getting started** | `@iris-mcp/dev` + `@iris-mcp/admin`, or all five servers |
 
@@ -342,7 +342,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(26)    │ │(26)    │ │(21)    │ │(20)    │ │(7)     │
+     │(26)    │ │(26)    │ │(21)    │ │(21)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘

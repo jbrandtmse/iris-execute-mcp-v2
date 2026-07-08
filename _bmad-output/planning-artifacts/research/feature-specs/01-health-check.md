@@ -31,12 +31,26 @@ mutates: "read"
 | `server` | (framework-provided) | `default` | Profile selection — do not add manually |
 
 `thresholds` object (every field optional number):
-`journalPctWarn=80, journalPctCrit=92, dbFreePctWarn=10, dbFreePctCrit=3` (free space BELOW
-these % triggers), `licensePctWarn=80, licensePctCrit=95, lockTablePctWarn=50, lockTablePctCrit=85`.
+`journalPctWarn=80, journalPctCrit=92, dbFreePctWarn=10, dbFreePctCrit=3, licensePctWarn=80,
+licensePctCrit=95, lockTablePctWarn=50, lockTablePctCrit=85`.
 
-**Areas enum:** `memory`, `databases`, `journal`, `mirror`, `locks`, `license`, `ecp`, `alerts`,
+**Direction correction (Story 23.0 finding, AC 23.0.2):** only `dbFreePctWarn`/`dbFreePctCrit` are
+"free space AT-OR-BELOW this % triggers" (descending, `value <= threshold` — the metric IS a free-%, low is bad).
+`journalPctWarn`/`Crit`, `licensePctWarn`/`Crit`, and `lockTablePctWarn`/`Crit` are all
+**"% UTILIZED/FULL AT-OR-ABOVE this % triggers"** (ascending — the metric is a used/full-%, high is
+bad), matching their §3 Dev Notes framing ("% full", "used/max %", "utilization %"). A literal
+"free space below 80%" reading of `journalPctWarn=80` would flip a healthy, mostly-empty journal
+into a false "warning" — live-verified on the dev instance: journal is 29.6% full / 70.4% free
+(healthy under the correct "% full ≥ 80" reading; would incorrectly warn under the free-%-floor
+misreading since 70.4% < 80). TS 23.2 MUST implement journal/license/lockTable as ascending
+(`value >= threshold`) and only dbFreePct as descending (`value <= threshold`).
+
+**Areas enum:** `databases`, `journal`, `mirror`, `locks`, `license`, `ecp`, `alerts`,
 `interop` (production queues, only meaningful on interop-enabled namespaces), `system` (global
-buffer + routine activity sample).
+**reference** + routine activity sample). `memory` is **dropped and NOT surfaced anywhere** (Story
+23.0 finding — no reliable instance-wide "memory health" source exists, see §3 table). `system` does
+NOT report memory/buffer data (`SYS.Stats.Global` = global *references*, not buffers), so read
+"folded into `system`" as "the area is removed," NOT "memory is now covered by `system`".
 
 **Output (`structuredContent`):**
 
@@ -69,23 +83,27 @@ without failing the request.
 
 **Probe sources — reuse the exact system-class calls the existing handlers already make.**
 Before coding, open each existing handler method and copy its data-access pattern (do NOT
-re-derive from docs):
+re-derive from docs). **Story 23.0 resolved every `[PROBE]` below via source read + live probe
+on HSCUSTOM (evidence in `23-0-health-probe-and-thresholds.md` Dev Agent Record).**
 
-| Area | Source of truth (existing code to mirror) | Notes |
+| Area | Pinned source (Story 23.0) | Notes |
 |---|---|---|
-| `system` | `Monitor.cls` metrics handler (`SYS.Stats.Global.Sample()`, `SYS.Stats.Routine.Sample()`) | Instance-wide samplers only — never `$ZU` per-process (Rule #5) |
-| `databases` | `Config.cls` DatabaseList (`Config.Databases` list + `SYS.Database.%OpenId(dir)`) | free % = (MaxSize/Size math as existing tool does); skip unmounted with `notApplicable` |
-| `journal` | existing journal-info handler | % full of journal directory |
-| `mirror` | existing mirror-status handler | `notApplicable` when no mirror configured |
-| `locks` | existing locks handler | lock table utilization % `[PROBE]` — verify which property exposes table usage (likely via `SYS.Lock` or `%SYS.LockQuery`); mirror the existing handler's source |
-| `license` | existing license handler (`$SYSTEM.License`) | current used / max % |
-| `ecp` | existing ECP handler | `notApplicable` when no ECP configured |
-| `alerts` | existing alerts handler (`$SYSTEM.Monitor` state) | count of active alerts; severity ≥ 2 ⇒ warning |
-| `memory` | `[PROBE]` global buffer / shared memory stats | Verify API against `irislib` (`SYS.Stats.*` family) before speccing exact fields; if no reliable instance-wide source exists, fold into `system` and drop `memory` as a separate area |
-| `interop` | existing production-queues logic (Interop.cls) | queue depth > 0 on any item ⇒ include counts; only when namespace is interop-enabled, else `notApplicable` |
+| `system` | `Monitor.cls:SystemMetrics()` — `##class(SYS.Stats.Global).Sample()` (RefLocal+RefPrivate+RefRemote), `##class(SYS.Stats.Routine).Sample().RtnCommands`, `$ZH` (uptime), `%SYS.ProcessQuery` COUNT(*) (process count) | Instance-wide samplers only — never `$ZU` per-process (Rule #5). Unchanged raw shape; absorbs the dropped `memory` area conceptually but adds NO new fields. |
+| `databases` | `Config.cls:DatabaseList()` pattern — `Config.Databases:List` + `Config.Databases.Get(name,.props)` + `##class(SYS.Database).%OpenId(dir)` for `.Size`/`.MaxSize`/`.ExpansionSize` | **Also read `.Mounted`** from the same already-open `SYS.Database` object (Config.cls:DatabaseList doesn't read it today, but sibling handler `Monitor.cls:DatabaseCheck()` already does on the identical object — precedented one-line addition, not new invention). Raw = `{size, maxSize, mounted}` per DB; TS computes `freePct=(maxSize-size)/maxSize*100` only when `maxSize>0`, else `notApplicable` — **live-verified: all 15 databases on the dev instance have `maxSize=0` (IRIS's own "recommended" unlimited setting)**, so `dbFreePct` is `notApplicable` for every DB here; also `notApplicable` when `mounted=0`. |
+| `journal` | `Monitor.cls:JournalInfo()` pattern — `##class(%SYS.Journal.System).GetCurrentFileName/GetPrimaryDirectory/GetAlternateDirectory/GetCurrentFileCount/GetCurrentFileOffset/GetFreeSpace/GetStateString` | **New raw field needed** (the existing handler has no total): `##class(%Library.File).GetDirectorySpace(primaryDirectory, .free, .total, 0)` (Flag=0=bytes) gives a `{free, total}` pair for the primary journal directory's volume. Live-verified `free` from `GetDirectorySpace` is byte-identical to the existing `GetFreeSpace()` value when primary=alternate (true on this instance). `%full = (total-free)/total*100`; threshold is **ascending** (see §2 direction correction) — live reading 29.6% full (healthy). |
+| `mirror` | `Monitor.cls:MirrorStatus()` — `$SYSTEM.Mirror.IsMember/MirrorName/GetMemberType/IsPrimary/IsBackup/IsAsyncMember/GetStatus` | `notApplicable` when `IsMember()=0` — live-verified not a mirror member on the dev instance. |
+| `locks` | **PINNED**: `##class(SYS.Lock).GetLockSpaceInfo()` (namespace `%SYS`) → CSV `"Available,Usable,Used"` (bytes) | Live-verified byte-identical to raw `$zu(156,6)`, which is exactly what InterSystems' own `%Monitor.System.LockTable` sensor (the shipped Lock Table health/alert class) uses internally. `UtilizationPct = Used/(Usable+Used)*100` — the EXACT formula that sensor uses. Do **NOT** use `##class(SYS.Lock).GetMaxLockTableSize()` as the denominator — live-verified it returns a ~1TB-minus-64KB theoretical ceiling (a sentinel, not real capacity), which would make utilization read as permanently ~0%. Live reading: Available=305,653,680 Usable=305,645,056 Used=6,224 → 0.0020% utilized (9 held locks, cross-verified via `iris_locks_list`). The 1st CSV field `Available` is intentionally **UNUSED** (it exceeds `Usable+Used` by a small reserved-overhead margin): reading `%Monitor.System.LockTable.GetSample()` confirms the sensor computes `UsedSpace=$p(lt,",",3)`, `TotalSpace=$p(lt,",",2)+UsedSpace`, i.e. exactly `Used/(Usable+Used)`. Guard `Usable+Used=0` (unexpected/short CSV) ⇒ `notApplicable`. |
+| `license` | `Monitor.cls:LicenseInfo()` — `$SYSTEM.License.KeyCustomerName/KeyLicenseCapacity/KeyExpirationDate/GetConnectionLimit/GetUserLimit/KeyCoresLicensed/KeyCPUsLicensed/CSPUsers` | `licensePct = currentCSPUsers/userLimit*100`. **MUST use `GetUserLimit()` (live=8) as the denominator, NOT `GetConnectionLimit()`** (live=0 on this Community Edition instance — that method is documented as "max connections PER USER", an unrelated per-user cap, NOT overall license capacity; using it as a %-denominator would divide by zero / be semantically wrong). Cross-verified against `SYS.Stats.Dashboard.LicenseCurrentPct=0` (exact match: 0 of 8 used). **Guard: when `userLimit=0` (core-based / unlimited-user licenses) ⇒ `notApplicable`** (same zero-denominator rule as `databases`' `maxSize=0`; do not divide by zero). Note `SYS.Stats.Dashboard.LicenseCurrent`/`LicenseCurrentPct` is IRIS's own authoritative license-usage figure (the Management Portal dashboard value) and needs no denominator — 23.1/23.2 should prefer it if `CSPUsers()` proves to under-count non-CSP consumption under load (see deferred item). |
+| `ecp` | `Monitor.cls:ECPStatus()` — `$SYSTEM.ECP.GetClientIndex("test")` = -1 ⇒ `notApplicable` | Live-verified not configured on the dev instance. |
+| `alerts` | `Monitor.cls:SystemAlerts()` — `$SYSTEM.Monitor.State()` (numeric -1/0/1/2), `$SYSTEM.Monitor.Alerts()` (count), `$SYSTEM.Monitor.GetAlerts()` (raw message array) | **Wording correction**: "severity ≥ 2 ⇒ warning" cannot key off `alerts[].severity` in the existing handler's JSON — that field is a copy of the overall `stateText` STRING, not a genuine per-alert numeric severity (the existing handler sets `tAlert.severity = tStateText` for every entry). Use the top-level numeric `state` field instead — return the raw numeric `state` and have TS map **every non-OK state**: `state=0`⇒ok, `state=1` (Warning)⇒warning, `state=2` (Alert)⇒warning, `state=-1` (Hung)⇒critical. (An earlier draft's "`state >= 2` or `state = -1`" omitted `state=1`=Warning — `SystemAlerts()`/`Monitor.cls:145` defines 1=Warning — which would silently hide an IRIS-flagged warning; 23.2 may refine the Alert-vs-Hung critical split.) `alertCount` is context only. Live-verified: `state=0` ("OK") with `alertCount=4` (nonzero alert history coexists with a healthy current state) — proves `alertCount` alone is not a reliable signal. |
+| `memory` | **DROPPED — NOT an area** (row retained for evidence only; do NOT regenerate the areas enum from this table — it is 9 areas, memory excluded) | Evidence: (1) `SYS.Stats.Dashboard.Sample()` — InterSystems' own System Dashboard data source (doc comment: "contains all of the data that's available on the Dashboard") — has Normal/Warning/Troubled fields for DatabaseSpace/JournalStatus/JournalSpace/LockTable/WriteDaemon but **no memory/buffer field at all**, evidencing IRIS has no standard "memory health" concept. (2) `SYS.Stats.Buffer:Sample` (global buffer pool, live-verified working, NOT `[Internal]`) reports LRU/cache-turnover mechanics where low availability is normal/healthy caching, not exhaustion — would produce false-positive alerts. (3) `SYS.History.SharedMemoryData.Sample()` (shared memory heap) DOES report genuine bytes-used (live-verified ~60% used) but only via a 3-step `%New→Sample→Finalise` dance — direct `Sample()` alone left fields blank (live-verified) — and every method is `[Internal]`-flagged, unlike the non-Internal single-call Rule #5 precedents (`SYS.Stats.Global`/`Routine`). No reliable, uniformly-shaped, non-Internal instance-wide source exists. |
+| `interop` | `Interop.cls:QueueStatus()` — `Ens.Queue:Enumerate` named query (name+count per queue); gate via `##class(Ens.Director).GetProductionStatus(.name,.state)` (that gate is NOT inside `QueueStatus()` itself — it mirrors sibling `Interop.cls:ProductionStatus()` / `Monitor.cls` line 544) | `notApplicable` when `GetProductionStatus()` errors (namespace has no interop classes at all) — NOT when a production simply isn't running. **23.1 must run the gate FIRST and emit a raw `notApplicable` signal (e.g. `interopEnabled:false`) into the areas payload — the missing-Ens-classes case must NOT fall into the per-area `error` catch, or TS maps it to `level:"error"`⇒verdict `warning` and breaks §5 AC 4.** Live-verified: HSCUSTOM with `stateCode=2`/"Stopped" and no active production still returns `Ens.Queue:Enumerate` cleanly (`count=0`, not an error) — a normal "applicable, zero queues" result, distinct from `notApplicable`. |
 
 Threshold evaluation happens in TypeScript (keep ObjectScript dumb: it returns raw values;
 TS applies thresholds → findings → verdict). This keeps threshold changes free of bootstrap bumps.
+**TS MUST guard every percentage against a zero/missing denominator** — `databases` (`maxSize=0`),
+`license` (`userLimit=0`), `locks` (`Usable+Used=0`), `journal` (`total=0`) — yielding
+`notApplicable`, never a divide-by-zero.
 
 **Handler requirements:** standard skeleton per conventions §3 (single render, namespace
 save/restore, SanitizeError, no caret-globals in messages). Response shape:
@@ -93,14 +111,19 @@ save/restore, SanitizeError, no caret-globals in messages). Response shape:
 
 ## 4. Story breakdown
 
-1. **Story 1 — Probe & threshold research (0.5):** For each `[PROBE]` above, read the existing
-   handler source + `irislib` class source; pin exact properties. Cross-check threshold defaults
-   against Management Portal dashboard semantics on the live instance. Deliverable: amended
-   table in this spec (fill every `[PROBE]`), probe classes deleted.
-2. **Story 2 — ObjectScript endpoint (1):** `/monitor/health` handler + `%UnitTest` tests
+1. **Story 1 — Probe & threshold research (0.5): DONE (23-0-health-probe-and-thresholds.md).** For
+   each `[PROBE]` above, read the existing handler source + `irislib` class source; pin exact
+   properties. Cross-check threshold defaults against Management Portal dashboard semantics on the
+   live instance. Deliverable: amended table in this spec (fill every `[PROBE]`), probe classes
+   deleted. Outcome: `locks` pinned to `SYS.Lock.GetLockSpaceInfo()`; `memory` dropped (folded into
+   `system` — no reliable instance-wide source, evidenced in §3); threshold direction corrected in
+   §2 (journal/license/lockTable are ascending %-utilized, only dbFreePct is descending %-free);
+   `databases` needs an added `.Mounted` read and `journal` needs an added
+   `%Library.File.GetDirectorySpace` total — both noted in §3. Areas enum is now 9 (was 10).
+2. **Story 2 (= epic Story 23.1) — ObjectScript endpoint (1):** `/monitor/health` handler + `%UnitTest` tests
    (per-area success, per-area error isolation, area filtering). Deploy loop + bootstrap regen
    per conventions §3.
-3. **Story 3 — TS tool + docs (1):** `packages/iris-ops-mcp/src/tools/health.ts`, threshold/
+3. **Story 3 (= epic Story 23.2) — TS tool + docs (1):** `packages/iris-ops-mcp/src/tools/health.ts`, threshold/
    verdict engine + unit tests (fixture raw payloads → expected findings/verdict, including
    error-isolation and notApplicable cases), registration + count updates, docs rollup
    (conventions §5 — note read/enabled-by-default), live smokes.
