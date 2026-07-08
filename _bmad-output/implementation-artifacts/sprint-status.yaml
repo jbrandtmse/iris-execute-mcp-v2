@@ -51,7 +51,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: 2026-07-08 (Epic 24 complete — all 3 stories done; epic-24 → done. Governance safety presets + SQL caps shipped, live-smoked read-only rejection on HSCUSTOM.)
+last_updated: 2026-07-08 (Epic 24 retrospective done — Rules #43/#44 codified [42→44]; CR 24.2-1 resolved docs-soften, 24.1-1 closed, 24.0-1 routed to Story 25.0.)
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -333,7 +333,7 @@ development_status:
   24-0-baseline-classifications: done
   24-1-preset-engine-and-surfacing: done
   24-2-sql-caps-docs-and-smokes: done
-  epic-24-retrospective: optional
+  epic-24-retrospective: done
 
   # Epic 25: MCP Prompts Capability & Agent Skills Pack (shared + all servers)
   # Added 2026-07-07 via bmad-correct-course. BINDING SPEC: research/feature-specs/03-skills-prompts-pack.md.
