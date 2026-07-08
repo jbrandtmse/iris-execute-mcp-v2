@@ -316,7 +316,7 @@ development_status:
   # Added 2026-07-07 via bmad-correct-course. See sprint-change-proposal-2026-07-07.md. BINDING SPEC: research/feature-specs/01-health-check.md + 00-conventions.md.
   # ObjectScript touched (new /monitor/health) → BOOTSTRAP_VERSION bump in 23.1 (Rule #24). New key iris_health_check mutates:read → default-enabled (Rule #28); frozen baseline 1e62c5ad5bf7 untouched (Rules #23/#25).
   # OS returns raw per-area values (per-area Try/Catch isolation); thresholds→findings→verdict engine lives in TS. Rule #34 second-namespace smoke required. ops 20→21.
-  epic-23: in-progress
+  epic-23: done
   23-0-health-probe-and-thresholds: done
   23-1-health-endpoint-objectscript: done
   23-2-health-tool-and-docs: done

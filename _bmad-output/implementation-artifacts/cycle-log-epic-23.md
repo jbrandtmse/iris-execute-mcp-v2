@@ -23,3 +23,5 @@
 2026-07-08T06:55:42Z	Story 23.2	qa_complete	spawn_at=2026-07-08T06:50:43Z model=claude-sonnet-5 tests_added=2 first_run_failures=0 clarifications=0 closing_sections_present=true note=closed-areas-empty-response-shape+openFailed-verdict-cap-gaps_ops-329-green
 2026-07-08T07:22:36Z	Story 23.2	cr_complete	spawn_at=2026-07-08T06:57:22Z model=claude-opus-4-8 resolved=2 deferred=3 dismissed=3 high=0 med=0 low=2 clarifications=0 status=done closing_sections_present=true note=verdict-engine-correct_server-omission-acceptable-verified_7-prior-CR-items-reconciled-resolved_+6-regression-tests-ops335_baseline-untouched
 2026-07-08T07:24:35Z	Story 23.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=built-evaluate-vs-live-endpoint:verdict-healthy-9-findings_override-journalPctCrit1-flips-critical-31.61pct_error-inject-caps-at-warning_no-memory-area_dev-SADEMO-2nd-ns-smoke-Rule34 model=claude-opus-4-8
+2026-07-08T07:25:25Z	Story 23.2	committed	sha=b7680f9 submodules=
+2026-07-08T07:26:19Z	Epic 23	epic_status_done	stories=3 note=all-done-0-HIGH-across-all-stories_iris_health_check-shipped-ops20to21
