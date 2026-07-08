@@ -6,7 +6,7 @@ Loaded as `persistent_facts` by every BMAD skill on activation. Project-specific
 
 Every story that introduces a service, module, or shared component MUST include at least one Integration AC of the form:
 
-> _Consumer `X` reads from this service/module and produces observable effect `Y`._
+> *Consumer `X` reads from this service/module and produces observable effect `Y`.*
 
 The integration AC must be testable by the consumer's automation tier (unit, integration, E2E, browser-MCP, API smoke), not by inspecting the introducing module's internal state.
 
@@ -26,7 +26,7 @@ A code review MUST NOT approve a story whose code touches a user-facing surface 
 - CLI / library — actual invocation with stdout / stderr / exit-code / produced-file assertions.
 - Service / API — a real HTTP request with status code + response body + side-effect assertions.
 
-This is distinct from the lead's manual per-story smoke, which runs _after_ code review as a separate workflow gate. Rule 3 governs the _test artifacts_ code review can inspect; the manual smoke is a later, independent check.
+This is distinct from the lead's manual per-story smoke, which runs *after* code review as a separate workflow gate. Rule 3 governs the *test artifacts* code review can inspect; the manual smoke is a later, independent check.
 
 Pure non-user-facing stories (build pipeline, internal tooling, refactor) are exempt; note the exemption in the review. Missing real-runtime test evidence on a user-facing story is a HIGH finding.
 
@@ -36,24 +36,20 @@ When invoked under `/epic-cycle`, the skill MUST end its final assistant message
 
 ```markdown
 ## Files Modified
-
 - <full path from repo root>
-  (or "(none)")
+(or "(none)")
 
 ## Tests Added
-
 - <full path from repo root>
-  (or "(none)")
+(or "(none)")
 
 ## Decisions
-
 - <one-line summary>
-  (or "(none)")
+(or "(none)")
 
 ## Issues Encountered
-
 - <one-line summary>
-  (or "(none)")
+(or "(none)")
 ```
 
 The closing summary is part of the agent's normal output. If the agent forgets the sections, the lead reconstructs the file list from `git status --short` — normal extraction.
@@ -97,6 +93,16 @@ Generated tests MUST be discoverable by the project's default test suite — (a)
 
 A test that exists but does not run in the default suite is invisible to CI and to the next story's regression check. Undiscoverable tests are a HIGH finding on subsequent code review.
 
+## Rule 9 — Unattended menu protocol (all skills, under `/epic-cycle`)
+
+BMAD skills contain interactive checkpoints — numbered menus, "halt and wait for confirmation" steps (`bmad-code-review` alone has four on its happy path). When invoked under `/epic-cycle`:
+
+- If the spawn prompt **pre-answers** a checkpoint, take the pre-answered option and continue without waiting for a human.
+- If a checkpoint is **not** pre-answered, it is a genuine decision point — stop and emit `## Clarification Needed` (Rule 4). Never guess, and never sit waiting for input that cannot arrive.
+- **Exception — `/bmad-retrospective`:** deliberately human-in-the-middle even under `/epic-cycle`. Its checkpoints, party-mode dialogue, and WAIT points are NEVER pre-answered, and its `non_interactive` flag is never set. It runs lead-side, so every elicitation reaches the user directly.
+
+Outside `/epic-cycle`, checkpoints elicit the user normally.
+
 ## Project-specific rules (add below as retros surface them)
 
-> Add additional rules here as retrospectives identify durable patterns. Number sequentially after Rule 8. Each rule should state what it applies to, the obligation, and (briefly) why.
+> Add additional rules here as retrospectives identify durable patterns. Number sequentially after Rule 9. Each rule should state what it applies to, the obligation, and (briefly) why.

@@ -25,28 +25,47 @@ If `Agent` is a deferred tool, load its schema via `ToolSearch` with `"select:Ag
 
 **Per Story (executed once per story in the epic):**
 
-1. **Lead** executes `/bmad-create-story` directly (no agent — prevents race-ahead).
-2. Agent: `/bmad-dev-story`.
+1. **Lead** executes `/bmad-create-story` directly (no agent — prevents race-ahead), passing the explicit story ID; never let the skill self-select the "next" story.
+2. Agent: `/bmad-dev-story` (explicit story file path in the spawn prompt).
 3. **Lead** executes any ADR-tooled AC verifications (see "ADR-Aware Execution").
-4. Agent: `/bmad-qa-generate-e2e-tests`.
-5. Agent: `/bmad-code-review`.
+4. Agent: `/bmad-qa-generate-e2e-tests` (scope pre-answered to this story's deliverable).
+5. Agent: `/bmad-code-review`. If the review leaves the story `in-progress` (unresolved high/medium findings), run the Rework Loop (max 3 iterations) before proceeding.
 6. **Lead** performs per-story smoke (see "Per-Story Smoke").
 7. **Lead** commits and pushes — **only to the epic branch** in every affected repo, never to main/master/develop (Rule SC-3 + SC-6).
 
 **End of Epic (executed once per epic after all stories):**
 
-1. **Lead** pauses: "Run a retrospective?" If yes, execute `/bmad-retrospective` in interactive mode (elicitation must reach the user).
-2. **Lead** pauses: "Merge `{TICKET}-epic{N}` into the feature branch and delete the epic branch (local + remote)?" — per Rule SC-4. If yes, execute the merge in each affected repo (submodules-first, parent last).
+1. **Lead** sets `epic-{N}: done` in `sprint-status.yaml` — the one status transition the skills never write (see "Status Ownership") — and logs `epic_status_done`.
+2. **Lead** pauses: "Run a retrospective?" If yes, execute `/bmad-retrospective` fully interactive — the human-in-the-middle exception; see "Retrospective Per Epic".
+3. **Lead** pauses: "Merge `{TICKET}-epic{N}` into the feature branch and delete the epic branch (local + remote)?" — per Rule SC-4. If yes, execute the merge in each affected repo (submodules-first, parent last).
 
 ## Execution Guidelines
 
 Each pipeline-stage task is delegated via the `Agent` tool. Lead-side skills (sprint planning, story creation, retrospective) are invoked directly via the `Skill` tool. If a stage-agent's return is missing closing-summary sections, the lead extracts the file list from `git status --short` against the story's `Files to Modify` table — this is normal extraction.
 
-Automatically resolve all HIGH and MED severity code-review findings using best judgment and the BMAD skill rules. The BMAD skills must be invoked via `Skill`; don't skip steps. `/bmad-retrospective` is the one skill that MUST run in interactive mode — its elicitation must reach the user.
+`/bmad-code-review` triages findings into **decision-needed / patch / defer / dismiss** buckets at **low / medium / high** severity. Under `/epic-cycle` the review agent applies every patch-bucket finding and resolves decision-needed items using best judgment plus the BMAD skill rules; only a genuine user-preference or spec-contradiction question comes back as `## Clarification Needed`. The BMAD skills must be invoked via `Skill`; don't skip steps. `/bmad-retrospective` is the one deliberate human-in-the-middle exception to the autonomous loop — it MUST run in interactive mode, and every one of its elicitation stops must reach the user.
 
 ## Permission Mode (Critical)
 
-All `Agent` tool calls must include `mode: "bypassPermissions"`. Without it the subagent prompts for every file edit and bash command and the pipeline stalls. `bypassPermissions` does NOT auto-answer `AskUserQuestion` — that tool always elicits the human. Therefore `/bmad-retrospective` is lead-only (spawned subagents cannot reliably surface their elicitation).
+All `Agent` tool calls must include `mode: "bypassPermissions"`. Without it the subagent prompts for every file edit and bash command and the pipeline stalls. `bypassPermissions` does NOT auto-answer `AskUserQuestion` — that tool always elicits the human. Therefore `/bmad-retrospective` is lead-only (spawned subagents cannot reliably surface their elicitation). Run unattended cycles only in a trusted/isolated environment; where the harness offers the `auto` permission mode with a configured environment, that is an acceptable safer substitute.
+
+Pipeline-stage subagents must be spawned **synchronously** — never backgrounded. A backgrounded subagent never hands control back in an unattended run and the pipeline stalls (this is why `bmad-dev-auto` mandates synchronous subagent calls). Parallel batches are still synchronous: N `Agent` calls in ONE message resolve together.
+
+## Model Strategy (Critical for cost + quality)
+
+The pipeline runs **efficient implementer + expensive reviewer**: a Sonnet-tier model writes code and tests; an Opus-tier model reviews them. This also satisfies BMAD's own guidance that code review should run in "fresh context, ideally different LLM" than the implementer.
+
+Per-skill model pinning ("skill optimization" — writing `model:` into each SKILL.md's frontmatter) is an **optional, per-project** pass: upstream BMAD v6 ships no `model:` frontmatter, the field is not an officially documented SKILL.md field, and some projects deliberately skip the pass. `/epic-cycle` must behave identically either way, so the command carries the default stage→model map itself:
+
+| Stage | Skill | Model | Why |
+| --- | --- | --- | --- |
+| Dev | `/bmad-dev-story` | `sonnet` | Near-Opus coding quality; the Opus-authored story spec and the Opus review layer carry the hard judgment |
+| QA | `/bmad-qa-generate-e2e-tests` | `sonnet` | Bounded test implementation |
+| Code review | `/bmad-code-review` | `opus` | Adversarial quality gate. The skill instructs its internal review subagents (Blind Hunter, Edge Case Hunter, Acceptance Auditor) to "run at the same model capability as the current session" — the model passed on this spawn propagates to the parallel reviewers, so review MUST NOT run on a lighter model than the implementation. |
+
+On an **unpinned** project the map is the operative source. On a **pinned** project frontmatter resolves first and normally agrees with the map; if a pin disagrees, the pin wins — treat it as a deliberate project re-pin (never "correct" it), and the `model=` telemetry records what actually ran either way.
+
+Lead-run gate skills (sprint planning, story creation, retrospective, ADR verifications, smoke) execute inline on the lead's model — run the lead on an Opus-tier model so story creation, the highest-leverage context-fusion step, gets maximum judgment.
 
 ## Skill Tool Invocation (Critical)
 
@@ -58,10 +77,10 @@ Each pipeline-stage subagent is a single `Agent` tool call. The `Agent` tool ret
 
 For each pipeline stage, the lead:
 
-1. **Resolves the stage skill's declared model.** Before spawning, read the YAML frontmatter of the skill the sub-agent will run — `.claude/skills/<skill-name>/SKILL.md` (or the plugin-namespaced install path if the skill ships in a plugin). If the frontmatter declares a `model:` field (e.g. `opus` / `sonnet` / `haiku`), capture that value to pass through on the spawn. If no `model:` is declared, or the skill file cannot be located, capture nothing and let the sub-agent inherit the lead's model. Attempt this for every stage — do not assume; read the actual frontmatter, because a project may have re-pinned a skill's model. (Typical BMAD defaults at time of writing: `bmad-dev-story` → `sonnet`, `bmad-qa-generate-e2e-tests` → `sonnet`, `bmad-code-review` → `opus`.)
+1. **Resolves the stage's model.** Resolution order: (a) if the stage skill's YAML frontmatter — `.claude/skills/<skill-name>/SKILL.md`, or the plugin-namespaced install path — declares a `model:` field (e.g. `opus` / `sonnet` / `haiku`), that wins (a project may have re-pinned a skill); (b) otherwise use the Model Strategy map above (dev → `sonnet`, qa → `sonnet`, code-review → `opus`); (c) for a stage not in the map, omit the parameter and let the sub-agent inherit the lead's model. Read the actual frontmatter — do not assume. On a vanilla BMAD install (b) is the operative source (upstream v6.10 ships no `model:` frontmatter); projects that ran a model-pinning pass over their skills resolve via (a), and the pins normally agree with the map.
 2. **Spawns** the subagent via `Agent` with:
    - `subagent_type: "general-purpose"` (or a specialized type if configured)
-   - `model: <the skill's declared model from step 1>` — pass this so the stage runs on the model the skill intends, NOT the lead's inherited model. Omit the parameter only when step 1 found no declared model.
+   - `model: <the model resolved in step 1>` — pass this so the stage runs on the model the pipeline intends, NOT the lead's inherited model. Omit the parameter only when step 1 resolved nothing (stage not in the map and no frontmatter declaration).
    - `mode: "bypassPermissions"`
    - `description: <3-5 word task description>`
    - `prompt: <full task — see Spawn Prompt Skeleton below>`
@@ -81,7 +100,7 @@ Every Agent spawn prompt must include, in this order:
 3. The list of files modified by upstream stages (for QA: dev's `## Files Modified`; for code review: dev's + QA's combined list).
 4. The project's ADR registry path (typically `docs/adr/`) as factual context.
 5. The directive: `Use the Skill tool to invoke /<bmad-skill-name>.`
-6. The stage-specific rule block (see below).
+6. The stage-specific rule block (see below) — including its **pre-answered checkpoints**: every interactive menu/halt the skill will hit, with the chosen option, so the agent never waits on input that cannot arrive (Rule 9).
 7. The closing-summary directive — quote the section names inline so the agent has them at hand.
 8. Skill-specific context.
 
@@ -90,12 +109,15 @@ Every Agent spawn prompt must include, in this order:
 **Dev spawn — append:**
 
 ```text
+Implement ONLY the story file at the path above. Do NOT select a different story from sprint-status.yaml, even if it lists an earlier `ready-for-dev` entry. The skill's own status writes are correct — it moves the story `ready-for-dev → in-progress → review` and syncs sprint-status.yaml itself; do not duplicate those writes out-of-band.
+
 Rules for this stage (from skill-rules.md):
 
 - Rule 5 (NFR tripwire): halt and amend the planning artifact in place; do NOT work around with code comments + deferred-work.md.
 - Rule 6 (ADRs): consult the ADR registry for any architectural or methodology decisions referenced in this story's ACs/Dev Notes. Match implementation to ADR commitments.
+- Rule 9 (menus): the skill's own HALT conditions — a new dependency beyond the story spec, 3 consecutive implementation failures, missing required configuration, ambiguous task requirements — are Clarification Needed cases; emit the section and stop.
 
-🚫 Do NOT `git commit` or `git push`. Leave ALL changes uncommitted in the working tree — the lead commits (submodules-first) after the per-story smoke gate. The `bmad-dev-story` skill commits by default; suppress that step. (Epic 3 Story 3.2: the dev skill auto-committed mid-pipeline; this directive prevents the double-commit.)
+🚫 Do NOT `git commit` or `git push`. Leave ALL changes uncommitted in the working tree — the lead commits (submodules-first) after the per-story smoke gate. The v6 `bmad-dev-story` skill is git-read-only (it records `baseline_commit` only), but keep the prohibition explicit: an agent improvising outside the skill has auto-committed mid-pipeline before (Epic 3 Story 3.2), and this directive prevents the double-commit.
 
 End your final message with these sections, in order:
 
@@ -121,6 +143,8 @@ If you cannot make confident progress for ANY reason — ambiguous ACs, missing 
 **QA spawn — append:**
 
 ```text
+Pre-answered checkpoint (Rule 9): the skill's first step asks what to test — answer: the deliverable of Story <id>, i.e. the files listed above. Do not ask; do not broaden scope to unrelated features. If the project has no test framework yet, choose the stack-appropriate default, record the choice in ## Decisions, and proceed.
+
 Rules for this stage (from skill-rules.md):
 
 - Rule 8 (test discoverability): generated tests MUST be discoverable by the project's default test suite — (a) correct naming convention, (b) not excluded by ignore files, (c) not tagged in a way that opts them out of the default run.
@@ -151,18 +175,25 @@ If you cannot make confident progress — same halt + Clarification Needed proto
 **Code-review spawn — append:**
 
 ```text
+Pre-answered checkpoints (Rule 9 — the skill halts at each of these; take the answer below and continue, do not wait for a human):
+
+1. Step-01 context checkpoint ("confirm before reviewing") → confirmed. The review target is Story <id>, story key `<story-key>`; the diff is the uncommitted working tree (`git diff HEAD` plus untracked files). Set {story_key} explicitly so the skill's sprint-status sync works.
+2. Decision-needed findings → resolve each with best judgment against skill-rules.md and the ADR registry. Only a genuine user-preference or spec-contradiction question becomes ## Clarification Needed.
+3. Patch-handling menu → option 1 (apply every patch).
+4. Final next-steps menu → option 3 (done). Do NOT start the next story.
+
 Rules for this stage (from skill-rules.md):
 
-- Rule 3 (real-runtime test evidence): user-facing surface approved without a real-runtime test in the QA suite = HIGH finding. (Distinct from the lead's manual per-story smoke, which is a separate later gate.)
-- Rule 5 (NFR tripwire): unmeasurable NFR worked around with code comments + deferred-work.md instead of planning-artifact amendment = HIGH finding.
-- Rule 6 (ADR violations): for each AC constrained by an Accepted ADR, verify implementation matches. Mismatch = HIGH (not LOW deferrable).
-- Rule 1 (Integration ACs): service-introducing story missing an Integration AC = HIGH finding.
+- Rule 3 (real-runtime test evidence): user-facing surface approved without a real-runtime test in the QA suite = high finding. (Distinct from the lead's manual per-story smoke, which is a separate later gate.)
+- Rule 5 (NFR tripwire): unmeasurable NFR worked around with code comments + deferred-work.md instead of planning-artifact amendment = high finding.
+- Rule 6 (ADR violations): for each AC constrained by an Accepted ADR, verify implementation matches. Mismatch = high (not a low deferrable).
+- Rule 1 (Integration ACs): service-introducing story missing an Integration AC = high finding.
 
-All deferred items (any item not auto-resolved) MUST be added to _bmad-output/implementation-artifacts/deferred-work.md with the originating story ID, severity, issue summary, deferral rationale, and suggested resolution.
+All defer-bucket items MUST be added to _bmad-output/implementation-artifacts/deferred-work.md with the originating story ID, severity, issue summary, deferral rationale, and suggested resolution (the skill's step-04 does this; verify it happened).
 
-🚫 Do NOT `git commit` or `git push`. You MAY edit files to auto-resolve findings and update tracking docs (story Review Findings, deferred-work.md, sprint-status.yaml), but the lead commits everything (submodules-first) after the per-story smoke gate. Do NOT write cycle-log entries — that is the lead's job.
+🚫 Do NOT `git commit` or `git push`. You MAY edit files to apply patches and update tracking docs (story Review Findings, deferred-work.md, sprint-status.yaml), but the lead commits everything (submodules-first) after the per-story smoke gate. Do NOT write cycle-log entries — that is the lead's job.
 
-Auto-resolve HIGH and MED findings inline where reasonable; document the fix in the story file's Review Findings section.
+The skill sets the story's final status itself: `done` when all decision-needed + patch findings are resolved and no high/medium remains; otherwise back to `in-progress`. Do not override that decision.
 
 End your final message with these sections, in order:
 
@@ -175,7 +206,7 @@ End your final message with these sections, in order:
 (or "(none)")
 
 ## Decisions
-- resolved/deferred/dismissed counts + any HIGH fix names
+- final story status (`done` or `in-progress`), resolved/deferred/dismissed counts, any high-severity fix names
 (or "(none)")
 
 ## Issues Encountered
@@ -214,6 +245,8 @@ For each epic in range:
   For each affected repo, lead determines mode by cross-referencing:
     - cycle-log-epic-{N}.md existence + entries
     - sprint-status.yaml story states for this epic
+      (use /bmad-sprint-status with mode=data for the computed snapshot — next story, per-status counts;
+       run mode=validate first if the YAML's integrity is in doubt; do not hand-parse)
     - {TICKET}-epic{N} branch presence locally and on remote
   Modes per repo: FRESH | RESUME | REMOTE_ONLY | LOCAL_ONLY | AMBIGUOUS | INTEGRITY_ERROR
     INTEGRITY_ERROR or AMBIGUOUS → halt and surface to user
@@ -241,19 +274,27 @@ For each epic in range:
 
   For each story (or batch — see Smart Parallelism), starting from the resume point:
     Lead asserts current branch == {TICKET}-epic{N} in every affected repo; halts on mismatch
-    Lead executes /bmad-create-story directly (pipeline gate + Integration AC validation)
+    Lead executes /bmad-create-story directly with the explicit story ID (pipeline gate + Integration AC validation)
     Lead captures story file path
     Lead records spawn_at=<UTC> and model=<id> at each Agent call
 
-    Lead invokes Agent for /bmad-dev-story → reads ## Files Modified → logs dev_complete
+    Lead invokes Agent for /bmad-dev-story (model=sonnet unless re-pinned) → reads ## Files Modified → logs dev_complete
     Lead executes ADR-tooled AC verifications (lead-side, sequential per AC); logs adr_verifications_complete
-    Lead invokes Agent for /bmad-qa-generate-e2e-tests → reads ## Tests Added → logs qa_complete
-    Lead invokes Agent for /bmad-code-review → reads return → logs cr_complete
+    Lead invokes Agent for /bmad-qa-generate-e2e-tests (model=sonnet unless re-pinned) → reads ## Tests Added → logs qa_complete
+    Lead invokes Agent for /bmad-code-review (model=opus unless re-pinned) → reads return → logs cr_complete
+    While review left story in-progress (unresolved high/medium) AND rework iterations < 3:   # see Rework Loop
+      Lead re-spawns /bmad-dev-story (review-continuation; cycle_iteration+1) → logs dev_complete
+      Lead re-runs ADR verifications if rework touched ADR-constrained ACs
+      Lead re-spawns /bmad-code-review → logs cr_complete
+    If still in-progress after 3 iterations: STOP; surface outstanding findings to user
     Lead performs per-story smoke (lead-side); logs smoke_complete
     Lead asserts current branch == {TICKET}-epic{N}; commits + pushes ONLY to {TICKET}-epic{N} (submodules first if applicable)
     Lead logs committed; next story or next batch
 
-  Lead pauses: "Run a retrospective?" → if yes, /bmad-retrospective via Skill tool
+  Lead sets epic-{N}: done in sprint-status.yaml (the skills never write this transition); logs epic_status_done
+  Lead pauses: "Run a retrospective?"   # human-in-the-middle gate — never auto-answered, never times out into a default
+    If yes → /bmad-retrospective via Skill tool, fully interactive (all WAITs reach the user); logs epic_retro_complete
+    If no  → logs epic_retro_skipped reason=user_declined
   Lead pauses: "Merge {TICKET}-epic{N} → feature, delete {TICKET}-epic{N}?" → if yes:
     If ideSync: set objectscript.conn.active = false   # >>> Window B start — wraps the merge branch ops
     For each affected repo, submodules-first then parent:
@@ -292,6 +333,33 @@ If any fails, run sequentially.
 **Resume policy for interrupted batches:** find the earliest incomplete stage across the batch; re-spawn only the agents needed. If ambiguous, fall back to sequential resume.
 
 **Write-ahead rule:** write the cycle log entry for a completed stage BEFORE the next dependent action. For `committed`: write immediately after `git push` returns success. If crashed between push success and log write, inspect `git log --oneline` on resume; if the matching commit exists, write the missing log entry — do NOT re-run the commit.
+
+### Rework Loop (dev ↔ code review, bounded)
+
+`/bmad-code-review` closes the story itself: when every decision-needed + patch finding is resolved and no high/medium severity remains, it sets the story (and sprint-status.yaml) to `done`; otherwise it sets `in-progress` and leaves unchecked `[Review]` items in the story file's Review Findings.
+
+When the review returns `in-progress`:
+
+1. Re-spawn `/bmad-dev-story` for the SAME story file with `cycle_iteration` incremented — its review-continuation mode picks up the unchecked review-finding tasks.
+2. Re-run ADR-tooled verifications if the rework touched ADR-constrained ACs.
+3. Re-spawn `/bmad-code-review`.
+4. **Cap: 3 rework iterations.** Non-convergence after 3 → STOP and surface the outstanding findings to the user (mirrors `bmad-dev-auto`'s bounded review-repair loop). Endless dev↔review ping-pong is a signal the spec is wrong, not the code.
+
+Only a story at `done` proceeds to smoke + commit.
+
+### Status Ownership (who writes sprint-status.yaml)
+
+The BMAD skills own the story-level transitions — the lead must NOT double-write them:
+
+| Transition | Written by |
+| --- | --- |
+| story `backlog → ready-for-dev` (+ epic `backlog → in-progress` on the epic's first story) | `/bmad-create-story` |
+| story `ready-for-dev → in-progress → review` | `/bmad-dev-story` |
+| story `review → done` (or back to `in-progress`) | `/bmad-code-review` |
+| `epic-{N}-retrospective: optional → done` | `/bmad-retrospective` |
+| **epic `in-progress → done`** (after the last story reaches `done`) | **the lead** — the only transition no skill writes; log `epic_status_done` |
+
+Status enum (kebab-case, BMAD v6): story `backlog → ready-for-dev → in-progress → review → done`; epic `backlog → in-progress → done`; legacy aliases `drafted` ≡ `ready-for-dev`, `contexted` ≡ `in-progress`. Never downgrade a status; preserve the YAML's comments and STATUS DEFINITIONS block when editing.
 
 ### Per-Story Smoke (Critical Gate)
 
@@ -390,24 +458,24 @@ The default assumes a JIRA-style tracker. Real projects use JIRA, Linear, GitHub
 
 ```yaml
 # _bmad/custom/branch-naming.yaml
-feature_pattern: 'feature/{TICKET}_{Description}' # template with {TICKET} and {Description}
-epic_pattern: '{TICKET}-epic{N}' # template for epic branch; {TICKET} reused from SC-1, {N} is epic number
-ticket_format: "^([A-Z]+-\\d+|SPIKE|EXPLORE|REFACTOR)$" # regex; tracker IDs OR named exceptions
-ticket_required: true # if false, {TICKET} may be empty
-description_format: '^[a-z][a-z0-9-]{2,60}$' # kebab-case, 3-60 chars, starts with letter
-separator: '_' # between TICKET and Description in the feature template
+feature_pattern: "feature/{TICKET}_{Description}"  # template with {TICKET} and {Description}
+epic_pattern: "{TICKET}-epic{N}"  # template for epic branch; {TICKET} reused from SC-1, {N} is epic number
+ticket_format: "^([A-Z]+-\\d+|SPIKE|EXPLORE|REFACTOR)$"  # regex; tracker IDs OR named exceptions
+ticket_required: true   # if false, {TICKET} may be empty
+description_format: "^[a-z][a-z0-9-]{2,60}$"  # kebab-case, 3-60 chars, starts with letter
+separator: "_"          # between TICKET and Description in the feature template
 ```
 
 **Defaults if no config:**
 
-| Field                | Default                            |
-| -------------------- | ---------------------------------- |
-| `feature_pattern`    | `feature/{TICKET}_{Description}`   |
-| `epic_pattern`       | `{TICKET}-epic{N}`                 |
-| `ticket_format`      | `^[A-Z]+-\d+$` (JIRA/Linear-style) |
-| `ticket_required`    | `true`                             |
-| `description_format` | `^[a-z][a-z0-9-]{2,60}$`           |
-| `separator`          | `_`                                |
+| Field | Default |
+| --- | --- |
+| `feature_pattern` | `feature/{TICKET}_{Description}` |
+| `epic_pattern` | `{TICKET}-epic{N}` |
+| `ticket_format` | `^[A-Z]+-\d+$` (JIRA/Linear-style) |
+| `ticket_required` | `true` |
+| `description_format` | `^[a-z][a-z0-9-]{2,60}$` |
+| `separator` | `_` |
 
 **Validation at the SC-1 user prompt:**
 
@@ -518,17 +586,17 @@ Submodules are independent under this rule too — each submodule's `{TICKET}-ep
 The lead determines mode before running SC-1 / SC-2:
 
 1. Read `_bmad-output/implementation-artifacts/cycle-log-epic-{N}.md`.
-2. Read `_bmad-output/implementation-artifacts/sprint-status.yaml` for this epic's stories.
+2. Get this epic's story states from `sprint-status.yaml` — prefer `/bmad-sprint-status` with `mode=data` (returns next story + per-status counts machine-readably); run `mode=validate` first if the file's integrity is in doubt.
 3. For each affected repo, check whether `{TICKET}-epic{N}` exists locally and on the remote.
 
-| Cycle log       | `{TICKET}-epic{N}` local | `{TICKET}-epic{N}` remote | Mode                | Action                                                                                                                                                                                 |
-| --------------- | ------------------------ | ------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Missing / empty | Missing                  | Missing                   | **FRESH**           | Run SC-1, SC-2. Create branches.                                                                                                                                                       |
-| Missing / empty | Exists                   | Exists                    | **AMBIGUOUS**       | Halt; ask user whether to (a) adopt existing branch and start logging against it (existing commits accepted as-is), (b) start a new epic under different `N`, or (c) inspect manually. |
-| Has entries     | Exists                   | Exists                    | **RESUME**          | Compute resume point from the log.                                                                                                                                                     |
-| Has entries     | Missing                  | Exists                    | **REMOTE_ONLY**     | `git fetch && git checkout {TICKET}-epic{N}`; then RESUME.                                                                                                                             |
-| Has entries     | Exists                   | Missing                   | **LOCAL_ONLY**      | Halt; ask user (remote deletion intentional?).                                                                                                                                         |
-| Has entries     | Missing                  | Missing                   | **INTEGRITY_ERROR** | Halt loudly. Log claims work that branches no longer carry.                                                                                                                            |
+| Cycle log | `{TICKET}-epic{N}` local | `{TICKET}-epic{N}` remote | Mode | Action |
+| --- | --- | --- | --- | --- |
+| Missing / empty | Missing | Missing | **FRESH** | Run SC-1, SC-2. Create branches. |
+| Missing / empty | Exists | Exists | **AMBIGUOUS** | Halt; ask user whether to (a) adopt existing branch and start logging against it (existing commits accepted as-is), (b) start a new epic under different `N`, or (c) inspect manually. |
+| Has entries | Exists | Exists | **RESUME** | Compute resume point from the log. |
+| Has entries | Missing | Exists | **REMOTE_ONLY** | `git fetch && git checkout {TICKET}-epic{N}`; then RESUME. |
+| Has entries | Exists | Missing | **LOCAL_ONLY** | Halt; ask user (remote deletion intentional?). |
+| Has entries | Missing | Missing | **INTEGRITY_ERROR** | Halt loudly. Log claims work that branches no longer carry. |
 
 Detection runs per affected repo. Different repos may legitimately be in different modes (parent RESUME, submodule FRESH).
 
@@ -557,6 +625,12 @@ If Epic A is being resumed and Epic B merged to feature in the interim, Epic A's
 - `retro_review_complete` or `retro_review_skipped` entry → already done, skip.
 - No such entry → run the gate.
 - Entry present but Story X.0 has no `story_created` → treat Story X.0 as the first incomplete story and resume there.
+
+#### Resume across the end-of-epic gates
+
+- Log shows `epic_status_done` but no `epic_retro_*` entry → resume at the retrospective question.
+- `epic_retro_*` present but no `epic_merged_to_feature` / `epic_merge_skipped` → resume at the merge question.
+- Both gates are user decision points; re-asking after a long pause is correct behavior. A run interrupted mid-retrospective resumes by re-asking the retrospective question (the skill's own output artifacts show how far it got); never auto-complete a half-finished retro.
 
 #### Resume across Sprint Planning
 
@@ -590,16 +664,18 @@ Before processing any stories for an epic:
 3. If sprint planning surfaces a blocking issue (story listed in `epics.md` missing from `sprint-status.yaml` or vice versa; status mismatch; schema-validation error), pause and inform the user.
 4. Log `sprint_planning_complete`.
 
-### Retrospective Per Epic (User Decision Point)
+### Retrospective Per Epic (User Decision Point — the human-in-the-middle exception)
+
+The retrospective is the ONE deliberate human-in-the-middle exception to the autonomous loop. Its value is the human's judgment about what just happened — automating it defeats its purpose. Concretely: never spawn it as a subagent, never pre-answer its party-mode elicitation or WAIT points (Rule 9's pre-answer protocol explicitly exempts it), and never set its `non_interactive` flag.
 
 After all stories in an epic complete:
 
 1. Announce: "Epic X is complete. Run a retrospective before moving to the next epic? (yes/no)"
-2. **Wait for the user's response.**
-3. **Yes:** execute `/bmad-retrospective` directly via the `Skill` tool, in interactive mode.
-4. **No:** log skip; continue.
+2. **Wait for the user's response.** If the user is away, the run simply pauses at this gate — resume semantics pick it back up later; do not time out into a default answer.
+3. **Yes:** execute `/bmad-retrospective` directly via the `Skill` tool, fully interactive. Log `epic_retro_complete` when it finishes (the skill itself marks `epic-{N}-retrospective: done` in sprint-status.yaml).
+4. **No:** log `epic_retro_skipped reason=user_declined`; continue.
 
-`AskUserQuestion` always elicits the human regardless of `bypassPermissions`. The lead executes the skill — do NOT spawn an agent for it.
+`AskUserQuestion` always elicits the human regardless of `bypassPermissions`. The lead executes the skill — do NOT spawn an agent for it (spawned subagents cannot reliably surface elicitation).
 
 ### Lead Creates Story Files (Critical Gate)
 
@@ -625,6 +701,15 @@ The **story file path** is the canonical context anchor, passed forward to every
 4. Code reviewer → Commit: lead stages files from the union of dev + QA file lists.
 
 If a return is missing closing sections, fall back to `git status --short` filtered against the story's `Files to Modify` table.
+
+### Lead Context Management (long-run hygiene)
+
+The lead's context window is the scarcest resource in a multi-epic run. Fresh context per stage is the point of the subagent design — both Anthropic's long-horizon-agent guidance and BMAD's own docs ("run each skill in a fresh context window") converge on it. Lead-side rules:
+
+- The cycle log + `sprint-status.yaml` + story files are the durable state — treat them as external memory (write-ahead, then act). Never rely on conversation memory for a resume or gating decision.
+- Do NOT pull stage diffs, full test output, or whole story files into the lead's context; the closing-summary contract exists precisely so stage detail stays in the stage. The lead reads a story file only at gates that require it (Integration AC validation, ADR mapping, smoke planning).
+- After a context compaction/summarization event, re-anchor before the next action: re-read the cycle-log tail, the sprint-status snapshot (`/bmad-sprint-status` `mode=data`), and the current story file path. The write-ahead rule guarantees that is sufficient to continue exactly where the run left off.
+- Budget: one story's pipeline should cost the lead only its gate-skill invocations, spawn prompts, returned closing summaries, and log writes.
 
 ### ADR-Aware Execution (Required)
 
@@ -718,7 +803,9 @@ Per-stage log entries, append-only. File: `_bmad-output/implementation-artifacts
 - `epic_branch_checked_out` — Lead checked out `{TICKET}-epic{N}` (resume or after creation). Metadata: `repos=<paths>` `head=<sha>`.
 - `epic_branch_reopened` — SC-5 recreated after a prior merge. Metadata: `reason=<short>` `from=<feature-sha>`.
 - `sprint_planning_complete` — Sprint planning done.
-- `retro_review_complete` / `retro_review_skipped` — Retro + Story X.0 gate done. Metadata: `source_retro=<path-or-empty>` `included=<N>` `deferred=<N>` `dropped=<N>` for complete; `reason=<short>` for skipped.
+- `retro_review_complete` / `retro_review_skipped` — Retro + Story X.0 gate done (start-of-epic triage of the PREVIOUS epic's retro artifacts). Metadata: `source_retro=<path-or-empty>` `included=<N>` `deferred=<N>` `dropped=<N>` for complete; `reason=<short>` for skipped.
+- `epic_retro_complete` / `epic_retro_skipped` — End-of-epic retrospective gate (the fully interactive, human-in-the-middle run of `/bmad-retrospective` — distinct from `retro_review_*` above). Metadata: `reason=<short>` for skipped.
+- `epic_status_done` — Lead set `epic-{N}: done` in sprint-status.yaml after the last story reached `done`. Metadata: `stories=<N>`.
 - `resume_local_ahead` — Resume check 2 found local ahead of remote; lead pushed. Metadata: `repo=<path>` `pushed_shas=<N>`.
 - `epic_merge_skipped` — User declined SC-4 merge. Metadata: `reason=<short>`.
 - `epic_merged_to_feature` — SC-4 merge completed. Metadata: `repos=<paths>` `feature_sha=<sha>` `merge_sha=<sha>` `submodules=<paths-or-empty>`.
@@ -727,7 +814,7 @@ Per-stage log entries, append-only. File: `_bmad-output/implementation-artifacts
 **Standardized telemetry (on every `*_complete` entry):**
 
 - `spawn_at=<UTC>` — when the lead invoked `Agent` (omit on lead-driven stages).
-- `model=<id>` — which model the agent ran (e.g., `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`). For spawned pipeline stages this is the model resolved from the stage skill's `model:` frontmatter and passed on the `Agent` call (per Agent Invocation Pattern step 1) — or the inherited lead model if the skill declared none. For lead-run gate stages, the lead's model. A run where every stage shows the same model despite the skills declaring different ones is a signal that the `model` parameter was not passed on the spawns.
+- `model=<id>` — which model the agent ran (e.g., `claude-opus-4-8`, `claude-sonnet-5`, `claude-haiku-4-5`). For spawned pipeline stages this is the model resolved per Agent Invocation Pattern step 1 (frontmatter override, else the Model Strategy map) and passed on the `Agent` call. For lead-run gate stages, the lead's model. A run where every stage shows the lead's model is a signal that the `model` parameter was not passed on the spawns — dev/qa should show the Sonnet-tier id and code-review the Opus-tier id unless a project re-pinned them.
 - `cycle_iteration=N` — defaults to 1; increment on re-spawn after downstream rejection or clarification.
 
 **Stage-specific telemetry (when available):**
@@ -747,15 +834,16 @@ Per-stage log entries, append-only. File: `_bmad-output/implementation-artifacts
 2026-05-18T13:55:02Z→Epic 1→feature_branch_created→repos=. ticket=PROJ-1234 description=initial-foundation root=origin/main
 2026-05-18T13:55:10Z→Epic 1→epic_branch_created→repos=. from=a1b2c3d
 2026-05-18T13:55:11Z→Epic 1→epic_branch_checked_out→repos=. head=a1b2c3d
-2026-05-18T13:56:00Z→Epic 1→sprint_planning_complete→model=claude-opus-4-7
+2026-05-18T13:56:00Z→Epic 1→sprint_planning_complete→model=claude-opus-4-8
 2026-05-18T13:56:30Z→Epic 1→retro_review_skipped→reason=no_predecessor_no_deferred_work
-2026-05-18T14:23:11Z→Story 1.5→story_created→path=_bmad-output/implementation-artifacts/story-1.5.md spec_tokens=4820
-2026-05-18T14:24:02Z→Story 1.5→dev_complete→spawn_at=2026-05-18T14:23:30Z model=claude-opus-4-7 files=src/render/render-engine.ts loc_added=412 clarifications=1 cycle_iteration=1 closing_sections_present=true
-2026-05-18T14:25:00Z→Story 1.5→adr_verifications_complete→tool=chrome_devtools_mcp acs=ac5 result=pass evidence=path/to/evidence/ model=claude-opus-4-7
-2026-05-18T14:29:47Z→Story 1.5→qa_complete→spawn_at=2026-05-18T14:25:30Z model=claude-sonnet-4-6 tests=tests/render-engine.test.ts tests_added=14 closing_sections_present=true
-2026-05-18T14:33:18Z→Story 1.5→cr_complete→spawn_at=2026-05-18T14:30:15Z model=claude-opus-4-7 resolved=2 deferred=0 high=1 med=1 low=0 closing_sections_present=true
-2026-05-18T14:34:00Z→Story 1.5→smoke_complete→method=browser result=pass iterations=1 defects_caught=0 evidence=path/to/screens/ model=claude-opus-4-7
+2026-05-18T14:23:11Z→Story 1.5→story_created→path=_bmad-output/implementation-artifacts/1-5-render-engine.md spec_tokens=4820
+2026-05-18T14:24:02Z→Story 1.5→dev_complete→spawn_at=2026-05-18T14:23:30Z model=claude-sonnet-5 files=src/render/render-engine.ts loc_added=412 clarifications=1 cycle_iteration=1 closing_sections_present=true
+2026-05-18T14:25:00Z→Story 1.5→adr_verifications_complete→tool=chrome_devtools_mcp acs=ac5 result=pass evidence=path/to/evidence/ model=claude-opus-4-8
+2026-05-18T14:29:47Z→Story 1.5→qa_complete→spawn_at=2026-05-18T14:25:30Z model=claude-sonnet-5 tests=tests/render-engine.test.ts tests_added=14 closing_sections_present=true
+2026-05-18T14:33:18Z→Story 1.5→cr_complete→spawn_at=2026-05-18T14:30:15Z model=claude-opus-4-8 resolved=2 deferred=0 high=1 med=1 low=0 closing_sections_present=true
+2026-05-18T14:34:00Z→Story 1.5→smoke_complete→method=browser result=pass iterations=1 defects_caught=0 evidence=path/to/screens/ model=claude-opus-4-8
 2026-05-18T14:34:30Z→Story 1.5→committed→sha=abc1234 submodules=
+2026-05-18T17:58:40Z→Epic 1→epic_status_done→stories=6
 2026-05-18T18:02:11Z→Epic 1→epic_merged_to_feature→repos=. feature_sha=def5678 merge_sha=fed8765 submodules=
 ```
 
@@ -810,5 +898,12 @@ Derivable from per-stage entries; a convenience, not a source of truth.
 - **Forgetting submodules need their own `{TICKET}-epic{N}`** — SC-2 applies per repo. Each submodule has its own.
 - **Running parallel epics in a single working directory** — Git allows one HEAD per working tree. Parallel agents use `git worktree add` or separate clones (SC-8).
 - **Auto-resolving merge conflicts at SC-4** — Three-way-merge conflicts at end-of-epic must be surfaced to the user. Git's auto-resolution can silently drop intentional changes.
-- **Spawning pipeline sub-agents without honoring the skill's declared model** — Omitting the `model` parameter on the `Agent` call makes every stage inherit the lead's model instead of the `model:` the skill's frontmatter declares (e.g. dev/qa intend `sonnet`, code-review intends `opus`). Resolve each stage skill's frontmatter `model:` and pass it on the spawn (see Agent Invocation Pattern). Lead-run gate skills are the exception — they run inline on the lead's model by design.
+- **Spawning pipeline sub-agents without passing the resolved model** — Omitting the `model` parameter on the `Agent` call makes every stage inherit the lead's model instead of the pipeline's intent (dev/qa → `sonnet`, code-review → `opus` per the Model Strategy map, unless a skill's frontmatter re-pins it). Resolve per Agent Invocation Pattern step 1 and pass it on the spawn. Lead-run gate skills are the exception — they run inline on the lead's model by design.
+- **Letting a skill's interactive checkpoint block the run** — `bmad-code-review` alone has four happy-path halts (context confirm, decision-needed resolution, patch menu, next-steps menu); `bmad-qa-generate-e2e-tests` opens by asking what to test. Pre-answer every checkpoint in the spawn prompt (Rule 9); an un-pre-answered checkpoint is a Clarification, never a silent wait.
+- **Double-writing story statuses** — The BMAD skills already sync story transitions to sprint-status.yaml (create-story → `ready-for-dev`, dev-story → `in-progress`/`review`, code-review → `done`/`in-progress`). The lead writes only `epic-{N}: done`. Out-of-band status writes desync tracking (see Status Ownership).
+- **Hand-parsing sprint-status.yaml for resume or next-story state** — `/bmad-sprint-status` `mode=data` returns the next story and per-status counts machine-readably; `mode=validate` checks file integrity. Use them.
+- **Letting dev-story self-select its story** — Unpinned, the skill implements the FIRST `ready-for-dev` story in sprint-status.yaml, which under parallel batches or resume may not be the intended one. Always pass the explicit story file path in the spawn prompt.
+- **Backgrounding pipeline subagents** — A backgrounded subagent never hands control back in an unattended run and the pipeline stalls (the reason `bmad-dev-auto` mandates synchronous subagent calls). Spawn stages synchronously; a parallel batch is N `Agent` calls in ONE message, which still resolve together.
+- **Unbounded dev↔review rework** — Endless re-spawn ping-pong on unresolved findings is a signal the spec is wrong, not the code. Cap at 3 rework iterations, then surface to the user (see Rework Loop).
+- **Automating the retrospective** — Spawning `/bmad-retrospective` as a subagent, pre-answering its elicitation or WAIT points, or setting its `non_interactive` flag. The retrospective is the one deliberate human-in-the-middle gate in the loop; its output is only as good as the human answers it collects. (Distinct from the start-of-epic retro-REVIEW gate, which is lead-automated triage of the previous retro's written artifacts and needs no human.)
 - **Mis-scoping or forgetting to restore the IDE file-sync toggle** — On IRIS/ObjectScript projects, disable `objectscript.conn.active` ONLY transiently around each branch-changing git operation (Window A: epic-start branching; Window B: SC-4 merge), and restore it immediately after each window. Do NOT leave the sync disabled for the whole epic — the per-story pipeline (commits/pushes, which don't change branches) must run with the sync ON. Each window's restore is mandatory `try/finally`-style: restore on success, halt, failure, merge conflict, or cancellation; an un-restored toggle leaves the workspace silently disconnected from IRIS (no error — just no sync). Never `git add` the transiently-toggled `.vscode/settings.json` into any commit.
