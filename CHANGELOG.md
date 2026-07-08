@@ -2,6 +2,48 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-08]
+
+### Added — Epic 24: Governance Safety Presets + SQL Resource Caps (`@iris-mcp/shared`)
+
+A one-word "point it at production in read-only mode" safety preset, plus two optional hard caps
+on `iris_sql_execute`. **Strictly additive, TS-only, no new tools/governance keys** — the frozen
+Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged**; suite tool count stays
+**101** (package `index.test.ts` tool-array lengths unchanged everywhere, Rule #31). No
+`BOOTSTRAP_VERSION` change — nothing on the IRIS side is touched.
+
+- **`IRIS_GOVERNANCE_PRESET`** (`"read-only"` | `"full"`, optional) — a new layer in the governance
+  cascade (`profile.explicit ?? global.explicit ?? preset ?? defaultSeed`) that, when set to
+  `"read-only"`, denies every action a tool's `mutates` classification marks `"write"` and allows
+  every `"read"` action, suite-wide, across all five servers — including the `defaultEnabled`
+  writes (Epic 20's `iris_production_control:clean`), which are still denied ("read-only means
+  read-only"). An explicit `IRIS_GOVERNANCE` override at either layer still wins over the preset.
+  A denial caused by the preset (not an explicit `false`) carries `structuredContent.presetApplied:
+  "read-only"` so a client can distinguish the two. Unset (or `"full"`, an explicit alias) is a
+  pure pass-through — byte-for-byte today's behavior (Rule #19). New generated artifact
+  `packages/shared/src/baseline-classifications.ts` (`BASELINE_ACTION_CLASSIFICATIONS`) gives the
+  preset a truthful read/write verdict for all 141 frozen-baseline keys, cross-checked against each
+  tool's own annotations; a completeness test enforces exact key-set parity against the live
+  baseline. The frozen `governance-baseline.ts` itself is never touched (Rules #20/#23/#25).
+- **`IRIS_SQL_MAX_ROWS`** (positive integer, optional) — a hard cap on `iris_sql_execute`'s
+  effective row limit: `effectiveLimit = min(caller_maxRows ?? 1000, IRIS_SQL_MAX_ROWS)`. When the
+  cap actually reduces the caller's requested limit, the response carries `rowsCapped: true`
+  (distinct from the pre-existing `truncated`/`totalAvailable` — both may be present together).
+- **`IRIS_SQL_TIMEOUT`** (positive number of **seconds**, optional) — forwarded as a per-request
+  timeout override to `iris_sql_execute`'s HTTP call (converted to milliseconds internally).
+- **Unset caps are byte-for-byte today's behavior** (Rule #19): with neither env var set,
+  `iris_sql_execute`'s output has no `rowsCapped` field and its `http.post` call carries no timeout
+  option at all (not even an explicit `undefined` third argument) — a mechanical no-op test asserts
+  the call signature is unchanged.
+
+Documentation: [README.md](README.md) (env-var table + new "Read-only mode" marketing subsection
+under "Multiple Servers & Governance" + Backward Compatibility note), the per-client guides
+([`docs/client-config/claude-code.md`](docs/client-config/claude-code.md),
+[`claude-desktop.md`](docs/client-config/claude-desktop.md),
+[`cursor.md`](docs/client-config/cursor.md) — copy-pasteable `env` blocks), and
+[`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md) (SQL caps note on
+`iris_sql_execute` + the read-only-preset-applies-to-all-servers framework note, Rule #31).
+
 ## [Pre-release — 2026-07-07]
 
 ### Added — Epic 23: Composite Health Check (`@iris-mcp/ops`)

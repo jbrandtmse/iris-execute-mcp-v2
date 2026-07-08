@@ -40,6 +40,14 @@ import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 export type MutationClass = "read" | "write";
 
 /**
+ * A governance safety preset (Story 24.1, spec 02 §2.2): `"read-only"` blocks
+ * every write-classified action and enables every read-classified action;
+ * `"full"` is an explicit alias for today's default (pass-through) behavior.
+ * Sourced from `IRIS_GOVERNANCE_PRESET` via {@link parseGovernancePreset}.
+ */
+export type GovernancePreset = "read-only" | "full";
+
+/**
  * A governance policy: a map of governance key → enabled boolean. Used for both
  * the `global` baseline layer and each per-profile override layer.
  */
@@ -70,6 +78,14 @@ export type MutatesLookup = ReadonlyMap<string, MutationClass>;
 /** Fail-fast helper: a clear error naming `IRIS_GOVERNANCE` (mirrors `profilesError`). */
 function governanceError(detail: string): Error {
   return new Error(`IRIS_GOVERNANCE is invalid: ${detail}`);
+}
+
+/** Valid `IRIS_GOVERNANCE_PRESET` values, named in the fail-fast error message. */
+const VALID_PRESETS: readonly GovernancePreset[] = ["read-only", "full"];
+
+/** Fail-fast helper: a clear error naming `IRIS_GOVERNANCE_PRESET` (mirrors `profilesError`). */
+function presetError(detail: string): Error {
+  return new Error(`IRIS_GOVERNANCE_PRESET is invalid: ${detail}`);
 }
 
 /**
@@ -263,6 +279,38 @@ export function parseGovernanceConfig(
   }
 
   return config;
+}
+
+/**
+ * Parse the `IRIS_GOVERNANCE_PRESET` environment variable into a
+ * {@link GovernancePreset} (Story 24.1, spec 02 §2.2).
+ *
+ * Mirrors the `IRIS_PROFILES` fail-fast style ({@link profilesError} in
+ * `profiles.ts`): an unset/empty value returns `undefined` (no preset — the
+ * cascade's `presetSeed` layer becomes a pure pass-through, so this is the
+ * byte-for-byte back-compat state, Rule #19). Any value other than exactly
+ * `"read-only"` or `"full"` **fails fast at startup**, naming the valid values
+ * — a typo (e.g. `"read_only"`) must never silently fall through to "no
+ * preset", which would run in full-access mode when the operator intended
+ * read-only (a safety trap).
+ *
+ * @param env - Environment map (defaults to `process.env`).
+ * @returns The parsed preset, or `undefined` when `IRIS_GOVERNANCE_PRESET` is unset/empty.
+ * @throws {Error} (naming `IRIS_GOVERNANCE_PRESET`) on an unrecognized value.
+ */
+export function parseGovernancePreset(
+  env: Record<string, string | undefined> = process.env,
+): GovernancePreset | undefined {
+  const raw = env.IRIS_GOVERNANCE_PRESET;
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  if (raw === "read-only" || raw === "full") {
+    return raw;
+  }
+  throw presetError(
+    `must be one of: ${VALID_PRESETS.join(", ")}. Received: ${JSON.stringify(raw)}.`,
+  );
 }
 
 /**
@@ -497,13 +545,73 @@ export function defaultSeed(
 }
 
 /**
- * Resolve the effective enablement of one governance key for one profile
- * (architecture decision D4 cascade).
+ * Compute the preset-layer enablement for a single governance key (Story
+ * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers and {@link defaultSeed}
+ * in the cascade: `profile.explicit ?? global.explicit ?? presetSeed(...) ??
+ * defaultSeed(...)`.
  *
- * `effective = profile.explicit(key) ?? global.explicit(key) ?? defaultSeed(key)`.
- * Nullish-coalescing (`??`) is intentional: an explicit `false` at the profile or
- * global layer is honored as "disabled", never treated as "unset" (which `||`
- * would wrongly do).
+ * - `preset` is `undefined` or `"full"` ⇒ pass-through (`undefined` — falls
+ *   through to {@link defaultSeed}). This is what makes an unset (or `"full"`)
+ *   preset byte-for-byte today's behavior (Rule #19 back-compat gate).
+ * - `preset === "read-only"` ⇒ resolve the key's read/write classification —
+ *   `classifications` (typically `BASELINE_ACTION_CLASSIFICATIONS`, for a
+ *   frozen-baseline key) takes priority, falling back to `mutatesLookup` (for a
+ *   new post-baseline key) — then `"read"` ⇒ `true`, `"write"` ⇒ `false`.
+ * - **`defaultEnabled` writes (Epic 20, F2) are STILL `false` under
+ *   `"read-only"`** — this function never consults `defaultEnabledWrites`, so
+ *   read-only truthfully overrides the F2 default-enable (Rule #32 note:
+ *   "read-only means read-only").
+ * - An unclassifiable key (present in neither `classifications` nor
+ *   `mutatesLookup`) fails SAFE — treated as a write ⇒ `false`. This is
+ *   unreachable in a running server (every non-baseline key is required to
+ *   carry `mutates` by {@link assertGovernanceClassification}, and every
+ *   baseline key is required to be in `classifications` by the Story 24.0
+ *   completeness test), but the pure function never lets an unclassifiable key
+ *   through read-only mode regardless.
+ *
+ * @param key             - The governance key (`tool` or `tool:action`).
+ * @param preset          - The active preset, or `undefined` when none is set.
+ * @param mutatesLookup   - Key → mutation class for new (post-baseline) actions.
+ * @param classifications - Key → mutation class for frozen-baseline actions
+ *   (typically `BASELINE_ACTION_CLASSIFICATIONS`); default empty for callers
+ *   with no baseline keys to classify (e.g. synthetic test worlds).
+ * @returns `true`/`false` when `preset === "read-only"`, else `undefined` (pass-through).
+ */
+export function presetSeed(
+  key: string,
+  preset: GovernancePreset | undefined,
+  mutatesLookup: MutatesLookup,
+  classifications: Readonly<Record<string, MutationClass>> = {},
+): boolean | undefined {
+  if (preset === undefined || preset === "full") {
+    return undefined;
+  }
+  // preset === "read-only": resolve the class, failing safe (write) when
+  // unclassifiable. `cls === "read"` is `false` for both "write" and
+  // `undefined`, which is exactly the fail-safe behavior documented above.
+  // `classifications` is a plain object, so read `key` as an OWN property only —
+  // a governance key that collides with an `Object.prototype` member (e.g.
+  // "constructor", "toString") must never resolve to an inherited value. This
+  // mirrors the own-property discipline `ownBool` applies to the explicit
+  // layers; a shadowed lookup would otherwise defeat the `?? mutatesLookup`
+  // fallback and (fail-safe) block the key.
+  const baselineCls = Object.prototype.hasOwnProperty.call(classifications, key)
+    ? classifications[key]
+    : undefined;
+  const cls = baselineCls ?? mutatesLookup.get(key);
+  return cls === "read";
+}
+
+/**
+ * Resolve the effective enablement of one governance key for one profile
+ * (architecture decision D4 cascade; Story 24.1 extends it with the
+ * `presetSeed` layer).
+ *
+ * `effective = profile.explicit(key) ?? global.explicit(key) ??
+ * presetSeed(key) ?? defaultSeed(key)`. Nullish-coalescing (`??`) is
+ * intentional: an explicit `false` at the profile or global layer is honored
+ * as "disabled", never treated as "unset" (which `||` would wrongly do) — and
+ * it is what lets an explicit override beat the preset too (AC 24.1.2/24.1.4).
  *
  * @param key                - The governance key.
  * @param profile            - The profile name whose overrides take top priority.
@@ -511,6 +619,8 @@ export function defaultSeed(
  * @param mutatesLookup      - Key → mutation class for new actions.
  * @param baseline           - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
  * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
+ * @param preset             - Active {@link GovernancePreset} (Story 24.1); default `undefined` (none).
+ * @param classifications    - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
  * @returns `true` if the action is enabled for the profile, else `false`.
  */
 export function effective(
@@ -520,6 +630,8 @@ export function effective(
   mutatesLookup: MutatesLookup,
   baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
+  preset?: GovernancePreset,
+  classifications: Readonly<Record<string, MutationClass>> = {},
 ): boolean {
   // Resolve the profile's layer as an own property only — a `profile` named
   // after a prototype member (e.g. "constructor") must not read the inherited
@@ -533,7 +645,37 @@ export function effective(
   return (
     ownBool(profileLayer, key) ??
     ownBool(config.global, key) ??
+    presetSeed(key, preset, mutatesLookup, classifications) ??
     defaultSeed(key, mutatesLookup, baseline, defaultEnabledWrites)
+  );
+}
+
+/**
+ * Whether an explicit `IRIS_GOVERNANCE` override exists for `key` at either
+ * the profile or global layer (Story 24.1, AC 24.1.4c) — used by the
+ * call-time enforcement gate to distinguish "denied by an explicit `false`"
+ * from "denied by the `presetSeed` layer", so a `GOVERNANCE_DISABLED` denial
+ * can accurately attribute WHY the call was blocked (`presetApplied` is set
+ * only for the latter).
+ *
+ * @param key     - The governance key.
+ * @param profile - The profile name whose overrides take top priority.
+ * @param config  - Parsed {@link GovernanceConfig}.
+ * @returns `true` when either layer carries an explicit boolean for `key`.
+ */
+export function hasExplicitOverride(
+  key: string,
+  profile: string,
+  config: GovernanceConfig,
+): boolean {
+  const profileLayer =
+    config.profiles !== undefined &&
+    Object.prototype.hasOwnProperty.call(config.profiles, profile)
+      ? config.profiles[profile]
+      : undefined;
+  return (
+    ownBool(profileLayer, key) !== undefined ||
+    ownBool(config.global, key) !== undefined
   );
 }
 
@@ -552,6 +694,8 @@ export function effective(
  * @param mutatesLookup  - Key → mutation class for new actions.
  * @param baseline       - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
  * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
+ * @param preset         - Active {@link GovernancePreset} (Story 24.1); default `undefined` (none).
+ * @param classifications - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
  * @returns A `Record<key, boolean>` of effective enablement for the profile.
  */
 export function getEffectivePolicy(
@@ -561,6 +705,8 @@ export function getEffectivePolicy(
   mutatesLookup: MutatesLookup,
   baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
+  preset?: GovernancePreset,
+  classifications: Readonly<Record<string, MutationClass>> = {},
 ): Record<string, boolean> {
   const policy: Record<string, boolean> = {};
   for (const key of allKeys) {
@@ -576,6 +722,8 @@ export function getEffectivePolicy(
         mutatesLookup,
         baseline,
         defaultEnabledWrites,
+        preset,
+        classifications,
       ),
       enumerable: true,
       writable: true,

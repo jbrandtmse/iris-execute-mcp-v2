@@ -38,17 +38,21 @@ import type {
   ToolScope,
   PaginateResult,
 } from "./tool-types.js";
-import type { GovernanceConfig, MutatesLookup } from "./governance.js";
+import type { GovernanceConfig, GovernancePreset, MutatesLookup } from "./governance.js";
 import {
   parseGovernanceConfig,
+  parseGovernancePreset,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
   getEffectivePolicy,
+  presetSeed,
+  hasExplicitOverride,
 } from "./governance.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
+import { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
 import {
   SERVER_DISCOVERY_TOOL_NAME,
   SERVER_DISCOVERY_INSTRUCTIONS,
@@ -319,6 +323,21 @@ export class McpServerBase {
    */
   private governanceConfig: GovernanceConfig = {};
   /**
+   * Active `IRIS_GOVERNANCE_PRESET` (Story 24.1, spec 02 §2.2), or `undefined`
+   * when unset. Threaded (optional, default-`undefined`) into every
+   * {@link getEffectivePolicy}/{@link effective} call site alongside
+   * {@link BASELINE_ACTION_CLASSIFICATIONS}, so the resource, the enforcement
+   * gate, and the discovery tool all agree on the preset's effect.
+   *
+   * Defaults to `undefined` (no preset) so a server constructed but not yet
+   * {@link start}ed — and the window before `start()` parses the env — stays a
+   * pure pass-through, exactly like {@link governanceConfig}'s default `{}`
+   * (the back-compat gate). {@link start} replaces this with the parsed
+   * `IRIS_GOVERNANCE_PRESET`, which fails fast (naming the var + valid values)
+   * on an unrecognized value.
+   */
+  private preset: GovernancePreset | undefined = undefined;
+  /**
    * Key → mutation-class lookup for the registered tools (architecture decision
    * D4), built from each {@link ToolDefinition.mutates}. Consumed by the gate's
    * {@link effective} call so a NEW write action defaults disabled and a NEW read
@@ -547,6 +566,8 @@ export class McpServerBase {
       this.mutatesLookup,
       GOVERNANCE_BASELINE,
       this.defaultEnabledWrites,
+      this.preset,
+      BASELINE_ACTION_CLASSIFICATIONS,
     );
 
     return {
@@ -880,9 +901,11 @@ export class McpServerBase {
     // (advertise-time is untouched); the policy is applied here, when the target
     // profile is known.
     //
-    // Back-compat (AC 14.4.4): with no IRIS_GOVERNANCE, `governanceConfig` is `{}`
-    // and every key in the generated baseline resolves enabled, so this gate is a
-    // pure pass-through — today's behavior, byte-for-byte.
+    // Back-compat (AC 14.4.4): with no IRIS_GOVERNANCE and no
+    // IRIS_GOVERNANCE_PRESET, `governanceConfig` is `{}` and `this.preset` is
+    // `undefined`, so `presetSeed` is a pure pass-through and every key in the
+    // generated baseline resolves enabled — this gate is a pure pass-through,
+    // today's behavior, byte-for-byte (Rule #19).
     const governanceKey = this.computeGovernanceKey(tool, validatedArgs);
     if (
       !effective(
@@ -892,14 +915,39 @@ export class McpServerBase {
         this.mutatesLookup,
         GOVERNANCE_BASELINE,
         this.defaultEnabledWrites,
+        this.preset,
+        BASELINE_ACTION_CLASSIFICATIONS,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
       // a machine-readable code in structuredContent; the handler is NEVER
       // invoked and the connection is NOT established.
+      //
+      // AC 24.1.4c: attribute WHY the call was denied. `presetApplied` is set
+      // ONLY when the `presetSeed` layer (not an explicit IRIS_GOVERNANCE
+      // override at either layer) caused the denial — an explicit `false`
+      // denial must NOT carry it, so operators can tell the two apart.
+      const presetCaused =
+        this.preset !== undefined &&
+        !hasExplicitOverride(governanceKey, profile.name, this.governanceConfig) &&
+        presetSeed(
+          governanceKey,
+          this.preset,
+          this.mutatesLookup,
+          BASELINE_ACTION_CLASSIFICATIONS,
+        ) === false;
       logger.warn(
-        `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}".`,
+        `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}"` +
+          (presetCaused ? ` (preset "${this.preset}").` : "."),
       );
+      const structuredContent: Record<string, unknown> = {
+        code: "GOVERNANCE_DISABLED",
+        action: governanceKey,
+        server: profile.name,
+      };
+      if (presetCaused) {
+        structuredContent.presetApplied = this.preset;
+      }
       return {
         content: [
           {
@@ -907,11 +955,7 @@ export class McpServerBase {
             text: `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
           },
         ],
-        structuredContent: {
-          code: "GOVERNANCE_DISABLED",
-          action: governanceKey,
-          server: profile.name,
-        },
+        structuredContent,
         isError: true,
       };
     }
@@ -938,6 +982,8 @@ export class McpServerBase {
           this.governedKeys,
           this.mutatesLookup,
           this.defaultEnabledWrites,
+          this.preset,
+          BASELINE_ACTION_CLASSIFICATIONS,
         );
         return {
           content: [
@@ -1150,6 +1196,14 @@ export class McpServerBase {
     // per call. Absent/empty IRIS_GOVERNANCE ⇒ `{}` ⇒ the enforcement gate is a
     // pure pass-through (every baseline action enabled — the back-compat gate).
     this.governanceConfig = parseGovernanceConfig();
+
+    // Parse the governance safety preset (Story 24.1, spec 02 §2.2), mirroring
+    // the IRIS_GOVERNANCE parse immediately above. parseGovernancePreset fails
+    // fast (naming IRIS_GOVERNANCE_PRESET + the valid values) on an unrecognized
+    // value, so a typo (e.g. "read_only") is caught at boot rather than silently
+    // running full-access when the operator intended read-only. Absent/empty ⇒
+    // `undefined` ⇒ the presetSeed layer is a pure pass-through (AC 24.1.1).
+    this.preset = parseGovernancePreset();
 
     // 2. Eagerly create the default profile's HTTP client (preserves today's
     //    bootstrap/health-check/negotiation for the default profile exactly).

@@ -215,6 +215,13 @@ function mergeProfile(
     https,
     baseUrl: deriveBaseUrl(host, port, https),
     timeout,
+    // SQL resource caps (Story 24.2) are operator-set, suite-wide safety
+    // controls read from IRIS_SQL_MAX_ROWS/IRIS_SQL_TIMEOUT into the default
+    // config; inherit them into every named profile (like `timeout`) so a
+    // call resolving to a non-default profile is capped too. Conditional
+    // spread preserves the "unset -> field absent" shape (Rule #19).
+    ...(base.sqlMaxRows !== undefined ? { sqlMaxRows: base.sqlMaxRows } : {}),
+    ...(base.sqlTimeoutMs !== undefined ? { sqlTimeoutMs: base.sqlTimeoutMs } : {}),
   };
 }
 
