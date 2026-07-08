@@ -26,3 +26,4 @@
 2026-07-08T07:25:25Z	Story 23.2	committed	sha=b7680f9 submodules=
 2026-07-08T07:26:19Z	Epic 23	epic_status_done	stories=3 note=all-done-0-HIGH-across-all-stories_iris_health_check-shipped-ops20to21
 2026-07-08T13:57:28Z	Epic 23	epic_retro_complete	reason=user_opted_in rules_codified=4 rules=39-bootstrap-dual-roster,40-disposable-webapp-2nd-ns-smoke,41-not-configured-branch-coverage,42-research-story-live-verifiable-contract project_rules=38to42 epics_contributing=20to21 retro_doc=epic-23-retro-2026-07-08.md
+2026-07-08T14:04:39Z	Epic 23	epic_merged_to_feature	repos=. feature_sha=25fd35a merge_sha=25fd35a submodules= note=conflict-free-no-ff_epic23-deleted-local+remote_IDE-sync-off-no-toggle
