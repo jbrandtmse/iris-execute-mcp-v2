@@ -50,7 +50,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: 2026-07-08 (Story 24.0 dev complete — ready-for-dev → review; epic-24 in-progress)
+last_updated: 2026-07-08 (Story 24.1 → done via bmad-code-review — adversarial 3-layer Blind/Edge/Auditor. Acceptance Auditor: all 5 ACs (24.1.1–24.1.5) PASS, 0 findings. 0 HIGH, 0 MEDIUM. 1 LOW patched inline [CR 24.1-P1 — prototype-safe classification lookup in presetSeed: guarded classifications[key] with hasOwnProperty to match the file's own ownBool discipline; fails safe/unreachable in practice but hardened for defense-in-depth]; 1 LOW deferred [CR 24.1-1 — presetApplied not strictly but-for for a new default-disabled write under read-only; in-spec per Task 3's literal presetCaused definition, future-refinement note in deferred-work.md]; 2 dismissed as spec-required [ServerDiscoveryResult.preset always-present + full≠null self-report — both mandated by AC 24.1.4a; Rule #19 byte-for-byte contract governs ENFORCEMENT, proven identical unset vs full]. All 3 getEffectivePolicy/effective/computeServerDiscovery call sites threaded (resource/gate/discovery); presetApplied attribution prototype-safe via hasExplicitOverride+ownBool. Re-verified post-patch: @iris-mcp/shared build clean, 653/653 shared tests green [dev 39 + QA 7 cross-surface, DEFAULT suite per Rule #21], gen:governance-baseline:check exit 0 [141 frozen/194 live/53 post-foundation], governance-baseline.ts git-clean [Rules #23/#25], no new tool/key [Rule #31]. Lead commits after per-story smoke gate.)
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -330,7 +330,7 @@ development_status:
   # Cascade: explicit > presetSeed > defaultSeed (F2 threading pattern); unset preset = byte-for-byte today (Rule #19 capstone, DEFAULT suite); read-only ALSO blocks defaultEnabled writes (Epic 20 clean); unknown preset fails fast at startup.
   epic-24: in-progress
   24-0-baseline-classifications: done
-  24-1-preset-engine-and-surfacing: backlog
+  24-1-preset-engine-and-surfacing: done
   24-2-sql-caps-docs-and-smokes: backlog
   epic-24-retrospective: optional
 
