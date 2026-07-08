@@ -34,6 +34,8 @@ export type {
   ToolResult,
   ToolScope,
   PaginateResult,
+  PromptDefinition,
+  PromptArgumentDefinition,
 } from "./tool-types.js";
 export {
   McpServerBase,

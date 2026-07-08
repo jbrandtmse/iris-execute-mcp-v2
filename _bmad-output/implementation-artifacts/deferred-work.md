@@ -822,3 +822,40 @@ Story 24.2's code review (adversarial three-layer — Blind Hunter / Edge Case H
 - `rowsCapped: true` fires when `cap < requested` even if fewer actual rows exist than the cap (so no row is withheld) — DISMISSED as by-design: AC 24.2.1 defines `rowsCapped` as "the cap actually reduced the caller's requested **limit**" (distinct from `truncated`, which means rows were withheld); the ceiling WAS reduced, and both fields are independently and explicitly tested. Blind/Edge/Auditor all noted it matches the AC wording.
 - `Number()` coercion accepts hex/scientific/whitespace forms (`"0x10"`, `"1e3"`, `" 5 "`) and a whitespace-only value throws instead of no-op'ing — DISMISSED as consistent with the established codebase convention: the pre-existing `IRIS_PORT`/`IRIS_TIMEOUT` validators (`config.ts:64,89`) use the identical `Number()`-based lenient parse; the story explicitly instructed mirroring that pattern. Hardening it here alone would be inconsistent; a suite-wide strict-parse pass would be a separate cross-cutting item.
 - Docs describe the caps as "a hard ceiling on any call" without the non-default-profile caveat (Auditor LOW) — DISMISSED as mooted by CR 24.2-P2: with the caps now propagated to every profile, the docs' "any call" statement is accurate.
+
+---
+
+## Epic 25 retro-review gate (2026-07-08) — triage of the inherited ledger
+
+Source: `epic-24-retro-2026-07-08.md` + this ledger. Epic 25 (MCP Prompts Capability & Agent Skills Pack) is a **TS/content-only feature epic** (`packages/*/src/prompts/`, `scripts/gen-skills.mjs`, `scripts/validate-prompts.mjs`, docs) with three feature stories (25.0 framework plumbing, 25.1 content+generators, 25.2 docs+smoke). No ObjectScript, no bootstrap bump, no new tool/governance key.
+
+| Item | Source | Triage Decision |
+|---|---|---|
+| CR 24.0-1 (preventive `readOnlyHint` cross-check test for `baseline-classifications.ts`) | Epic 24 retro (explicitly routed) | **INCLUDE — folded into Story 25.1 (Rule #16 correction of the retro's "Story 25.0" label).** The Epic 24 retro states "Story 25.0 carries a concrete action: add the `readOnlyHint` cross-check test." Empirical constraint discovered at this gate: the cross-check reads each tool's `annotations.readOnlyHint`, which lives in the **leaf packages** (`iris-dev/admin/interop/ops/data-mcp`). `baseline-classifications.ts` is in `@iris-mcp/shared`, and shared does NOT (and must not — circular) depend on the leaf packages (verified: leaf `package.json` declares `@iris-mcp/shared: workspace:*`; shared has no leaf deps). So the cross-check cannot live in shared's test suite. Its natural home is **Story 25.1's `validate-prompts.mjs` machinery**, which the spec explicitly builds to "import the five packages' tool arrays + framework tool names" — the exact aggregation the cross-check needs. The substance (readOnlyHint cross-check lands in Epic 25) is honored; only the host story moves 25.0→25.1 for a hard dependency-direction reason. Realizes Rule #44 mechanically. Added as an explicit AC/task to the Story 25.1 file at creation; Story 25.0 stays pure framework plumbing. |
+| CR 22.0-D1 (loc-count scan-abort TOCTOU) | Epic 22 | **RE-DEFER.** ObjectScript/dev-tool hardening; Epic 25 (prompts/skills, TS/content) does not touch `ExecuteMCPv2.Loc.*` or `sql.ts`. |
+| CR 22.0-D2 (StudioOpenDialog overlap-order) | Epic 22 | **RE-DEFER.** Same — out of prompts scope. |
+| CR 22.1-1 (pairloop reqsrc unreachable) | Epic 22 | **RE-DEFER.** Message-diagram library; not touched by Epic 25. |
+| CR 22.1-2 (dist-coupling) | Epic 22 | **RE-DEFER.** Not touched by Epic 25. |
+| CR 23.1-3 (Health.cls result-set close hygiene) | Epic 23 | **RE-DEFER.** ObjectScript `Health.cls`; Epic 25 is TS/content-only. |
+| CR 23.1-4 (`HealthCheckParseAreas` status discarded) | Epic 23 | **RE-DEFER.** ObjectScript `Health.cls`; not touched. |
+| CR 23.1-5 (GET repeated `areas` params read first only) | Epic 23 | **RE-DEFER.** ObjectScript `Health.cls`; not touched. |
+| CR 23.2-1 (`server` field omission — needs `ToolContext` framework change) | Epic 23 | **RE-DEFER.** Framework `ToolContext` change; orthogonal to prompts plumbing; no prompt/skill code path exposes it. |
+| CR 23.2-2 (unknown `errors` key dropped by `evaluate()`) | Epic 23 | **RE-DEFER.** `iris-ops-mcp/health.ts`; not touched by Epic 25; near-unreachable. |
+| CR 23.2-3 (missing `result` object → raw `TypeError`) | Epic 23 | **RE-DEFER.** `iris-ops-mcp/health.ts`; not touched by Epic 25; near-unreachable. |
+
+**Rule #37 note:** the Epic-22-own LOW batch (CR 22.0-D1/D2, CR 22.1-1/2) has now been carried through Epic 23 (1st re-deferral) and Epic 24 (2nd); this is the 3rd consecutive re-deferral. This matches the accepted Epics-19/20/21 pattern (three feature epics re-deferred before the Epic-22 burn-down). Under Rule #37, **Epic 26 becomes the burn-down candidate** — the next-planned epic after 3 consecutive re-deferrals must include a dedicated terminal-disposition burn-down story for this ledger. Flagged here for the Epic 26 retro-review gate.
+
+**Gate result:** included=1 (CR 24.0-1 → Story 25.0), deferred=10, dropped=0. No separate cleanup Story X.0 created — the X.0 slot is the feature story `25-0-prompts-framework-plumbing`, and CR 24.0-1 folds into it per the retro's explicit routing.
+
+---
+
+## § story-25.0 — code-review findings deferred (2026-07-08)
+
+Story 25.0 (Prompts Framework Plumbing) code review (bmad-code-review, adversarial three-layer). 0 HIGH. Two MEDIUM + one doc finding patched inline (CR 25.0-1 no-arg omitted-`arguments` render fix; CR 25.0-2 `build` type soundness `Record<string,string|undefined>`; CR 25.0-3 File List). Two LOW deferred:
+
+| Item | Severity | Issue | Deferral rationale | Suggested resolution |
+|---|---|---|---|---|
+| **CR 25.0-4** | LOW | Prompt-registration callback in `McpServerBase.registerPrompt` has no `try/catch`, so a `PromptDefinition.build()` that throws surfaces to the client as an opaque JSON-RPC `-32603` InternalError (raw message), unlike the tool path which contains handler throws in a structured `isError` result (`handleToolCall`). | The primary real trigger — dereferencing an omitted optional argument — is now defanged by CR 25.0-2 (`build` args typed `string | undefined`, forcing defensive handling). `build` functions are project-authored (Story 25.1), not arbitrary client input, and are covered by 25.1's own tests. Adding a prompt-callback error envelope is forward-looking framework hardening beyond 25.0's plumbing scope. | In `registerPrompt`, wrap the `def.build(...)` call in `try/catch` and rethrow as an `McpError(ErrorCode.InternalError, ...)` with a clean, prompt-named message (mirrors the tool path's containment intent). Consider a shared render-guard used by both the no-arg and with-args branches. |
+| **CR 25.0-5** | LOW | Two `PromptDefinition.arguments` entries with the same `name` silently collapse — `argsShape[arg.name] = ...` last-wins — so `prompts/list` advertises only one and the other's `required`/`description` is lost, with no error (contrast the SDK's per-prompt-name duplicate guard the code relies on). | Author-side, low-probability mistake in hand-written prompt content; not reachable from client input. Story 25.1 introduces `validate-prompts.mjs` (a content-lint step in the default suite), which is the natural home for a structural check like this. | Add a duplicate-argument-name check either as a fail-fast throw in `registerPrompt` (naming the prompt + offending arg) or as a `validate-prompts.mjs` rule in Story 25.1. |
+
+Both are Epic-25-own LOW findings (per the Rule #37 burn-down accounting, they belong to the current epic's own batch, not the carried inherited ledger).

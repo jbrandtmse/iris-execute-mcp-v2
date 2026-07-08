@@ -130,6 +130,64 @@ export interface ToolDefinition {
 }
 
 /**
+ * A single argument accepted by a {@link PromptDefinition} (Story 25.0,
+ * spec `03-skills-prompts-pack.md` §2).
+ */
+export interface PromptArgumentDefinition {
+  /** Argument name — becomes a key in the `build(args)` record. */
+  name: string;
+  /** Human-readable description shown to the client (`prompts/list`). */
+  description: string;
+  /**
+   * When true, `prompts/get` fails with a JSON-RPC `InvalidParams` error if
+   * the argument is omitted (enforced by the MCP SDK's own args-schema
+   * validation, not hand-rolled here).
+   */
+  required: boolean;
+}
+
+/**
+ * Complete definition of an MCP **prompt** &mdash; a parameterized, named
+ * workflow instruction discoverable via `prompts/list` and rendered via
+ * `prompts/get` (Story 25.0, spec `03-skills-prompts-pack.md` §2).
+ *
+ * Each server package MAY provide an array of these to the
+ * {@link McpServerBase} constructor via {@link McpServerBaseOptions.prompts},
+ * mirroring how {@link ToolDefinition}s are supplied via `tools`. Unlike
+ * tools, prompts carry NO `mutates` classification and are never subject to
+ * the governance enforcement gate &mdash; they are static, client-rendered
+ * text, not IRIS operations.
+ *
+ * Registering at least one prompt causes the MCP SDK to advertise the
+ * `prompts` capability (`prompts: { listChanged: true }`) automatically; a
+ * server with an empty/absent `prompts` array advertises NO `prompts`
+ * capability at all, so back-compat is exact (Rule #19).
+ */
+export interface PromptDefinition {
+  /** Unique prompt name (kebab-case), e.g. `"diagnose-stuck-production"`. */
+  name: string;
+  /** Human-readable title. */
+  title: string;
+  /** LLM-optimised description of what the prompt does. */
+  description: string;
+  /** Ordered list of arguments the prompt accepts (may be empty). */
+  arguments: PromptArgumentDefinition[];
+  /**
+   * Render the prompt's user-role message text from the (SDK-validated)
+   * arguments. Pure — no IRIS access, no side effects.
+   *
+   * Values are typed `string | undefined`, not `string`: an OPTIONAL argument
+   * the client omits is absent from the validated `args` object (its value is
+   * `undefined`), even though a REQUIRED argument is guaranteed present at
+   * runtime by the SDK's args-schema validation. Authors must therefore handle
+   * omitted optionals defensively (e.g. `args.detail ?? "default"`) — the type
+   * enforces this so a `build` body cannot silently dereference an omitted
+   * optional and throw at render time.
+   */
+  build(args: Record<string, string | undefined>): string;
+}
+
+/**
  * Context object passed to every tool handler.
  *
  * Provides access to the IRIS HTTP client, resolved namespace,
