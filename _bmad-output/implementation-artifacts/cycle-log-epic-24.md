@@ -25,3 +25,5 @@
 2026-07-08T17:52:00Z	Story 24.2	qa_complete	spawn_at=2026-07-08T17:47:00Z model=claude-sonnet-5 tests_added=10 first_run_failures=0 clarifications=0 closing_sections_present=true note=demonstrated-mergeProfile-caps-gap-via-test
 2026-07-08T18:15:00Z	Story 24.2	cr_complete	spawn_at=2026-07-08T17:53:00Z model=claude-opus-4-8 resolved=2 deferred=1 dismissed=3 high=0 med=2 low=1 clarifications=0 closing_sections_present=true note=patched-mergeProfile-caps-propagation+Infinity-timeout
 2026-07-08T18:30:00Z	Story 24.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=built-dist-mcp-stdio-live-HSCUSTOM:read-only-refuses-global_set-GOVERNANCE_DISABLED+presetApplied-no-PUT+read-succeeds+explicit-override-writes-live+IRIS_SQL_MAX_ROWS-rowsCapped model=claude-opus-4-8
+2026-07-08T18:32:00Z	Story 24.2	committed	sha=6b71297 submodules=
+2026-07-08T18:34:00Z	Epic 24	epic_status_done	stories=3

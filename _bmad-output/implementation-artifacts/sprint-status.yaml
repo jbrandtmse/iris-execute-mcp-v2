@@ -51,7 +51,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05
-last_updated: 2026-07-08 (Story 24.2 dev complete — status ready-for-dev → review. `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` optional caps wired into `iris_sql_execute` via `loadConfig`/`IrisConnectionConfig` [fail-fast validation mirroring the existing `timeout` check]; `rowsCapped: true` only when the cap actually clamps the caller's request [distinct from `truncated`/`totalAvailable`, both may coexist]; timeout forwarded to `ctx.http.post` only when set — unset caps proven byte-for-byte today's call signature/output [Rule #19 mechanical no-op test]. 15 new unit tests [9 config.test.ts + 6 sql.test.ts, default suite]. Full docs rollup [Rule #30] across README.md [env-var table + new "Read-only mode" marketing subsection — also folds in Story 24.1's previously-undocumented `IRIS_GOVERNANCE_PRESET`], all 3 client-config guides, `packages/iris-dev-mcp/README.md`, and a new consolidated CHANGELOG.md entry for Epic 24. No new tool/governance key [Rule #31]; frozen baseline `1e62c5ad5bf7` untouched, `gen:governance-baseline:check` exit 0 [141/194/53], `governance-baseline.ts` git-clean. Verified: `pnpm turbo run build` clean [7 packages], `pnpm turbo run test` 12/12 tasks green [shared 661/dev 356/admin 439/ops 335/interop 270, zero regressions], `pnpm turbo run lint type-check` 18/18 green. AC 24.2.3 live rejection smokes left for the lead's per-story smoke gate; built dist verified to read the real `ctx.config.sqlMaxRows`/`sqlTimeoutMs` path end-to-end. Flagged for lead/reviewer [not fixed, out of authorized touch-list]: SQL caps apply only to the `default` profile today — `profiles.ts`'s `mergeProfile()` does not propagate the two new fields to `IRIS_PROFILES` non-default profiles.)
+last_updated: 2026-07-08 (Epic 24 complete — all 3 stories done; epic-24 → done. Governance safety presets + SQL caps shipped, live-smoked read-only rejection on HSCUSTOM.)
 project: iris-execute-mcp-v2
 project_key: NOKEY
 tracking_system: file-system
@@ -329,7 +329,7 @@ development_status:
   # Added 2026-07-07 via bmad-correct-course. BINDING SPEC: research/feature-specs/02-governance-presets.md.
   # TS-only, no bootstrap bump, NO new tools/keys. NEW generated artifact baseline-classifications.ts (complete read/write map of the frozen 141-key baseline; completeness test enforces exact key-set parity; frozen governance-baseline.ts NEVER touched — Rules #20/#23/#25).
   # Cascade: explicit > presetSeed > defaultSeed (F2 threading pattern); unset preset = byte-for-byte today (Rule #19 capstone, DEFAULT suite); read-only ALSO blocks defaultEnabled writes (Epic 20 clean); unknown preset fails fast at startup.
-  epic-24: in-progress
+  epic-24: done
   24-0-baseline-classifications: done
   24-1-preset-engine-and-surfacing: done
   24-2-sql-caps-docs-and-smokes: done
