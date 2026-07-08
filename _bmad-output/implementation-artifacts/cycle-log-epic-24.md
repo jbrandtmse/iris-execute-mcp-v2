@@ -28,3 +28,4 @@
 2026-07-08T18:32:00Z	Story 24.2	committed	sha=6b71297 submodules=
 2026-07-08T18:34:00Z	Epic 24	epic_status_done	stories=3
 2026-07-08T19:05:00Z	Epic 24	epic_retro_complete	source=epic-24-retro-2026-07-08.md rules_codified=43,44 action_items=1
+2026-07-08T19:15:00Z	Epic 24	epic_merged_to_feature	repos=. feature_sha=e3eebba merge_sha=e3eebba submodules= note=conflict-free-no-ff_epic24-deleted-local+remote_IDE-sync-off-no-toggle
