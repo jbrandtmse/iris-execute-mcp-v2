@@ -2,7 +2,12 @@
 
 **Server:** `@iris-mcp/dev` (tools) + `@iris-mcp/shared` (one framework extension) | **Priority:** 5 (moat feature) | **Effort:** ~5 stories (1 epic; Phase 1 = stories 1–2 is independently shippable)
 **Governance:** `iris_env_diff` → `mutates: "read"`; `iris_env_promote` → `{ plan: "read", execute: "write" }`, `execute` **default-disabled**
-**Prereqs:** requires `IRIS_PROFILES` with ≥2 reachable instances for meaningful use AND testing
+**Prereqs:** requires `IRIS_PROFILES` with ≥2 reachable instances for meaningful production use.
+**Test-environment decision (stakeholder, 2026-07-07):** for this project's build/smoke cycle, **two
+profiles on the single dev instance** (same host/port, different default namespaces) is accepted as
+sufficient. The Story-5 capstone runs in that shape and MUST record an explicit residual-risk note
+(no cross-instance / cross-IRIS-version drift coverage — e.g. version-skew normalization is exercised
+only logically, not against real skew). If a second instance becomes available by Story 5, prefer it.
 **Read first:** [`00-conventions.md`](00-conventions.md), `packages/shared/src/profiles.ts`,
 `packages/shared/src/server-base.ts` (how the `server` param resolves to a per-profile client),
 `packages/shared/src/http-client.ts`, `packages/iris-dev-mcp/src/tools/` (doc tools),

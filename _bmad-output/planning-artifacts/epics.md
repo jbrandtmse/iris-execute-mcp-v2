@@ -3873,3 +3873,315 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - Probe-first discipline (Rule #16): several items' "suggested resolutions" embed unverified API claims (StartTask device arg, index collation, ExternalThaw error text) — probe before coding.
 - Batch ObjectScript edits where sensible to minimize bootstrap churn, but the version still moves in-story per change (Rule #24 — no deferred bump).
 - CR 21.1-1's decision point (AC 22.1.4) should be put to the stakeholder early in the story, not discovered at the end.
+
+## Epic 23: Composite Health Check — `iris_health_check` (added 2026-07-07)
+
+**Goal**: One tool call answers "is this IRIS instance healthy?" with a structured verdict (`healthy`/`warning`/`critical`) plus per-area findings and raw values — collapsing the 6+-call diagnostic dance (PRD Journey 5) into the intended *first call* of any AI diagnostic session. First of the seven feature-differentiation epics; see [sprint-change-proposal-2026-07-07.md](./sprint-change-proposal-2026-07-07.md).
+
+**Binding spec**: [research/feature-specs/01-health-check.md](./research/feature-specs/01-health-check.md) + [00-conventions.md](./research/feature-specs/00-conventions.md). The spec's tool contract (§2), probe-source table (§3), and acceptance criteria (§5) are authoritative; ACs below are the distilled epic-level gate.
+
+**Scope**: New read tool `iris_health_check` on `@iris-mcp/ops` (package 20→21) + new ObjectScript route `GET/POST /monitor/health` → `HealthCheck` in `Monitor.cls` (new `Health.cls` only if it would exceed ~400 lines). ObjectScript stays dumb (returns raw per-area values in one round-trip, per-area Try/Catch isolation); the threshold→finding→verdict engine lives in TypeScript (threshold tweaks never bump bootstrap). Areas: `system`, `memory` (probe may fold into `system`), `databases`, `journal`, `mirror`, `locks`, `license`, `ecp`, `alerts`, `interop`. Verdict = worst finding; probe `error` caps at `warning`; `notApplicable` never affects the verdict. Governance `mutates:"read"` → default-enabled (Rule #28). **Strictly additive** (Rule #19). BOOTSTRAP_VERSION bump in Story 23.1 (Rule #24); frozen baseline `1e62c5ad5bf7` untouched (Rules #23/#25).
+
+**Functional Requirements (new)**: FR131.
+
+**Stories**:
+- 23.0 Probe & threshold research (spec §4 story 1)
+- 23.1 ObjectScript `/monitor/health` endpoint + unit tests + bootstrap bump (spec §4 story 2)
+- 23.2 TS tool + verdict engine + docs rollup + live smokes (spec §4 story 3)
+
+**Out of scope**: historical trending / scheduled checks (pairs with Epic 29 later); auto-remediation (findings may NAME the fixing tool, never execute it); per-database deep integrity (exists as `iris_database_check`).
+
+### Story 23.0: Health Probe & Threshold Research
+
+**As a** dev agent, **I want** every `[PROBE]` in spec 01 §3 resolved against live IRIS / `irislib` source, **so that** the endpoint story codes against pinned APIs, not assumptions.
+
+**Acceptance Criteria**:
+- **AC 23.0.1** — Every `[PROBE]` row in spec 01 §3 resolved by reading the existing handler source + `irislib`/`irissys` class source (Rules #2/#16): lock-table utilization source, memory/global-buffer instance-wide source (or documented fold into `system`), and confirmation that each remaining area's data-access pattern mirrors the existing handler exactly (Rule #5: instance-wide `SYS.Stats.*` samplers, never per-process `$ZU`).
+- **AC 23.0.2** — Default thresholds (spec §2 table) cross-checked against Management Portal dashboard semantics on the live instance; deviations documented with rationale.
+- **AC 23.0.3** — Spec 01 §3 table amended in place with pinned properties/methods; all disposable `ExecuteMCPv2.Temp.*` probe classes deleted.
+
+### Story 23.1: ObjectScript `/monitor/health` Endpoint
+
+**As an** operator, **I want** one server-side round-trip that gathers all requested health areas, **so that** the tool is fast and a single failing probe cannot fail the request.
+
+**Acceptance Criteria**:
+- **AC 23.1.1** — New Dispatch route `GET/POST /monitor/health` → handler per conventions §3 (namespace save/restore, single `RenderResponseBody`, `SanitizeError`, no caret-globals — Rules #7/#33); response shape `{areas: {...raw...}, errors: {area: "<sanitized>"}}` with per-area Try/Catch isolation.
+- **AC 23.1.2** — Area filtering honored (requested subset only); non-configured areas (no mirror, no ECP, non-interop namespace) return cleanly distinguishable not-applicable markers, not errors.
+- **AC 23.1.3** — `%UnitTest` coverage: per-area success, per-area error isolation, area filtering (Rule #35 total-count check on every run).
+- **AC 23.1.4** — Deploy loop per conventions §3; `gen:bootstrap` regenerated, BOOTSTRAP_VERSION from→to recorded (Rule #24), `bootstrap.test.ts` green; frozen baseline untouched.
+
+### Story 23.2: `iris_health_check` Tool + Docs + Smokes
+
+**As an** operator, **I want** the TS tool to turn raw probe values into an explained verdict, **so that** "check the health of prod" is one call with actionable findings.
+
+**Acceptance Criteria**:
+- **AC 23.2.1** — Tool per spec §2 contract (scope `NONE`, read annotations, `mutates:"read"`, optional `areas`/`thresholds` params); threshold/verdict engine unit-tested with fixture raw payloads → expected findings/verdict, including error-isolation, threshold-override, and notApplicable cases.
+- **AC 23.2.2** — Spec §5 acceptance criteria 1–8 all pass (no-arg full check < 5s with ≥8 areas; area subset; threshold override flips verdict; notApplicable never affects verdict; probe error ⇒ area `error` + verdict ≤ `warning`; raw always present; governance key enabled by default, explicit `false` blocks).
+- **AC 23.2.3** — ops package count tests 20→21; docs rollup per Rule #30 (read/enabled-by-default stated) across all four surfaces.
+- **AC 23.2.4** — Live smokes (Rules #22/#26/#34): built dist against HSCUSTOM AND a second namespace; verdict areas plausible vs. Management Portal dashboard; conventions §6 definition-of-done complete.
+
+## Epic 24: Governance Safety Presets & SQL Resource Caps (added 2026-07-07)
+
+**Goal**: Collapse the market's #1 trust demand ("read-only mode") to one word: `IRIS_GOVERNANCE_PRESET=read-only` blocks every write-classified action across the suite while explicit `IRIS_GOVERNANCE` keys still override; plus SQL resource caps (`IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`). Headline enabled: *"Point it at production in read-only mode with one environment variable."*
+
+**Binding spec**: [research/feature-specs/02-governance-presets.md](./research/feature-specs/02-governance-presets.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: Pure TS in `@iris-mcp/shared` — no new tools, no ObjectScript, no bootstrap bump. (a) New **generated** artifact `packages/shared/src/baseline-classifications.ts` mapping every frozen-baseline key to `read`/`write` (Rule #20 shape; when in doubt → `write`); the frozen `governance-baseline.ts` is NEVER touched (Rule #23) and the bare generator never run (Rule #25). (b) Cascade extension `profile.explicit ?? global.explicit ?? presetSeed ?? defaultSeed` threaded as optional default-`undefined` params (Epic 20 F2 pattern) — unset preset is **byte-for-byte** today's behavior (Rule #19 mechanical proof). `read-only` also blocks `defaultEnabled` writes (Epic 20's `clean` is blocked); unknown preset fails fast at startup. (c) Surfacing: `iris_server_profiles` reports the preset; the governance resource reflects it; `GOVERNANCE_DISABLED` errors gain `presetApplied`. (d) SQL caps clamp + annotate (`rowsCapped: true`); unset caps are a no-op.
+
+**Functional Requirements (new)**: FR132.
+
+**Stories**:
+- 24.0 Baseline classifications artifact + completeness test (spec §3 story 1)
+- 24.1 Preset engine + cascade + surfacing + capstones (spec §3 story 2)
+- 24.2 SQL caps + docs + live smokes (spec §3 story 3)
+
+**Out of scope**: a `standard` preset (needs a destructiveness taxonomy — defer until read-only ships); per-preset caps bundles; time-boxed write elevation; any change to the frozen baseline or its generator.
+
+### Story 24.0: Baseline Read/Write Classifications
+
+**Acceptance Criteria**:
+- **AC 24.0.1** — `baseline-classifications.ts` covers **exactly** the frozen baseline key set (completeness test: missing or extra keys fail naming the key — Rule #20 mechanical proof); keys enumerated by importing `GOVERNANCE_BASELINE`, never hand-copied; DO-NOT-hand-sync header comment present.
+- **AC 24.0.2** — Classification review pass recorded: every key classified `read` whose action verb is not list/get/view/status/check/history/explain/stats carries a justification comment; execution tools (`iris_execute_command`, `iris_execute_classmethod`, `iris_doc_put`, `iris_global_set`/`kill`, `*_manage` create/modify/delete) are `write`; when in doubt → `write`.
+- **AC 24.0.3** — `gen:governance-baseline:check` exit 0; `governance-baseline.ts` git-clean.
+
+### Story 24.1: Preset Engine & Surfacing
+
+**Acceptance Criteria**:
+- **AC 24.1.1** — Cascade gains `presetSeed` between explicit layers and `defaultSeed`, threaded as optional default-`undefined` parameters through `defaultSeed`/`effective`/`getEffectivePolicy` (F2 pattern); spec §4 AC 1 back-compat capstone: unset preset ⇒ `getEffectivePolicy` deep-equals pre-change snapshot for ALL keys (DEFAULT suite, Rule #21).
+- **AC 24.1.2** — Read-only capstone over the FULL key universe (not samples): every write-classified key `false` (baseline writes + new-tool writes + `defaultEnabled` writes), every read-classified key `true`; explicit `IRIS_GOVERNANCE` overrides beat the preset at both global and profile layers.
+- **AC 24.1.3** — Unknown preset value fails fast at startup naming valid values (mirrors malformed-`IRIS_PROFILES` behavior); `full` behaves as unset.
+- **AC 24.1.4** — `iris_server_profiles` reports `preset`; the `iris-governance://{profile}` resource reflects preset-derived policy (one assertion); preset-caused denials carry `presetApplied` in the structured error.
+
+### Story 24.2: SQL Resource Caps + Docs + Smokes
+
+**Acceptance Criteria**:
+- **AC 24.2.1** — `IRIS_SQL_MAX_ROWS` clamps `iris_sql_execute`'s effective row limit (response notes `rowsCapped: true` when clamped); `IRIS_SQL_TIMEOUT` wired through the tool's existing timeout plumbing (TS path located first, per spec `[PROBE]`); unset caps mechanically proven no-op.
+- **AC 24.2.2** — Docs rollup: README env-var table + governance section, all `docs/client-config/*.md` guides, CHANGELOG — the "point it at prod read-only" story written as a marketing-grade section.
+- **AC 24.2.3** — Live smokes (Rules #22/#26): built dist under `IRIS_GOVERNANCE_PRESET=read-only` — a real `iris_global_set` REFUSED with `GOVERNANCE_DISABLED` + `presetApplied`, a real `iris_global_get` succeeds, an explicit `IRIS_GOVERNANCE` re-enable of one write verified live. Spec §4 ACs 1–9 all pass; conventions §6 complete.
+
+## Epic 25: MCP Prompts Capability & Agent Skills Pack (added 2026-07-07)
+
+**Goal**: Package the suite's expertise as MCP `prompts` (protocol-discoverable, parameterized workflow instructions on all 5 servers) and a generated installable `skills/` directory — the direct answer to iris-agentic-dev's most-praised feature, multiplying the 100-tool surface by teaching clients the *sequences*.
+
+**Binding spec**: [research/feature-specs/03-skills-prompts-pack.md](./research/feature-specs/03-skills-prompts-pack.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: Framework: `PromptDefinition` + optional `prompts` array on `McpServerBase`; capability advertised ONLY when non-empty; `prompts/list` + `prompts/get` wired via the SDK (or direct request handlers mirroring the resources wiring if the installed SDK lacks the registration API — SDK upgrade out of scope). Content: **9 v1 prompts** (list stakeholder-approved 2026-07-07): `check-system-health` [ops], `diagnose-slow-query` [dev], `trace-message-flow` [interop], `provision-project-environment` [admin], `audit-security-posture` [admin], `objectscript-review` [dev], `deploy-and-test-class` [dev], plus two safety-workflow additions approved in the same session — `recover-stuck-production` [interop] (the Epic-20 recover→clean escalation ladder; `killAppData` never suggested without explicit data-loss acceptance) and `run-external-backup` [ops] (freeze → external snapshot → **thaw ALWAYS, even on failure**; never end frozen). Two more are GATED and ship with their features: `resend-failed-messages` (Epic 26, Story 26.3) and `promote-environment-change` (Epic 27, Story 27.4). Single source of truth in `packages/*/src/prompts/`; `scripts/gen-skills.mjs` generates `skills/<name>/SKILL.md` with DO-NOT-EDIT headers + `--check` mode (Rules #18/#25); `scripts/validate-prompts.mjs` asserts every `iris_*` token in prompt/skill bodies is a real tool name, wired into the DEFAULT vitest suite. Prompts are not tools: **no governance keys, no tool-count changes anywhere** (package count tests asserted unchanged; Rule #31-shape docs). TS/content only — no bootstrap bump.
+
+**Functional Requirements (new)**: FR133.
+
+**Stories**:
+- 25.0 Framework prompts plumbing + back-compat (spec §5 story 1)
+- 25.1 Prompt/skill content + generators + validation (spec §5 story 2)
+- 25.2 Docs + live client smoke (spec §5 story 3)
+
+**Out of scope**: prompts embedding live data (schema-aware context injection); Copilot-specific packaging beyond the generic `skills/` layout; the `resend-failed-messages` prompt (Epic 26).
+
+### Story 25.0: Framework `prompts` Capability
+
+**Acceptance Criteria**:
+- **AC 25.0.1** — `PromptDefinition` interface + registration per spec §2; servers with an empty/absent prompt array advertise NO `prompts` capability and behave byte-for-byte unchanged (mechanical capability-snapshot test, Rule #19).
+- **AC 25.0.2** — `prompts/list` returns registered prompts with arguments; `prompts/get` renders `build(args)` output; unknown name → standard JSON-RPC error matching SDK conventions.
+- **AC 25.0.3** — Per-server prompt assignment supported (ops prompts on ops, dev on dev, etc.) with shared/framework prompts possible.
+
+### Story 25.1: Prompt & Skill Content + Generators
+
+**Acceptance Criteria**:
+- **AC 25.1.1** — The 9 non-gated prompts authored per spec §3 table (exact tool names/params, safe ordering, safety notes; `objectscript-review` distilled ≤300 words from `.claude/rules/`; `deploy-and-test-class` encodes the Rule #17 glob-path form AND the Rule #35 total-count check; `check-system-health` uses `iris_health_check` from Epic 23; `recover-stuck-production` encodes recover-FIRST / `clean`-last-resort / never-`killAppData`-without-explicit-data-loss-acceptance; `run-external-backup` encodes the thaw-ALWAYS-even-on-failure guarantee and verifies journaling resumed).
+- **AC 25.1.2** — `gen-skills.mjs` generates `skills/` (YAML frontmatter + body, DO-NOT-EDIT header, `skills/README.md` install guide); `--check` mode passes in CI and fails when a generated skill is hand-edited (Rules #18/#25).
+- **AC 25.1.3** — `validate-prompts.mjs` wired as a default-suite test: every `iris_[a-z0-9_]+` token across all prompt/skill bodies validates against the five packages' tool arrays + framework tool names — a tool rename breaks CI, not users.
+- **AC 25.1.4** — v1 prompt list already stakeholder-approved 2026-07-07 (the 9 above + 2 gated); any addition, rename, or removal during dev is re-flagged for approval (content is a product surface).
+
+### Story 25.2: Docs + Live Client Smoke
+
+**Acceptance Criteria**:
+- **AC 25.2.1** — Docs rollup: suite README "Prompts" section, per-server README prompt tables, CHANGELOG; documented as a framework surface (Rule #31 shape); tool counts asserted UNCHANGED everywhere.
+- **AC 25.2.2** — Live smoke through a real MCP client on built dist: `prompts/list` shows the pack; `prompts/get diagnose-slow-query` renders with an argument; ONE full workflow (`deploy-and-test-class` against a scratch class on live IRIS) executed end-to-end following only the prompt text.
+- **AC 25.2.3** — Spec §6 acceptance criteria 1–7 pass; conventions §6 complete.
+
+## Epic 26: Interop Message Resend / Replay — `iris_message_resend` (added 2026-07-07)
+
+**Goal**: Complete the interop troubleshooting loop (PRD Journey 3): find → diagnose → diagram → **resend**, without leaving the AI session for the Management Portal. Highest-frequency interop write in real production support; no MCP competitor offers it. Ships with the strictest write discipline in the interop server — resend duplicates clinical data flow.
+
+**Binding spec**: [research/feature-specs/04-message-resend.md](./research/feature-specs/04-message-resend.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: New tool `iris_message_resend` on `@iris-mcp/interop` (package 21→22): actions `preview` (read), `resend` (header-ID list, 1–100), `resendFiltered` (bounded filter: required `item` + `from`, window ≤ 7 days, default status `Errored`, `maxMessages` default 100 / **hard cap 500** refuse-not-truncate, **`dryRun` default true**, execute requires `dryRun:false` AND `confirm:true` — Epic 20 double-gate pattern). Governance `mutates: {preview:"read", resend:"write", resendFiltered:"write"}`; writes **default-disabled** — explicitly NOT a `defaultEnabled` candidate (spec §preamble). New Dispatch routes `POST /interop/message/resend` + `/interop/message/resend/preview`; batch enumeration reuses the production-messages query plumbing (no second divergent query); all guards enforced ObjectScript-side before any mutation; per-message Try/Catch (partial failure continues); `horologToIso` reuse (Rule #11). **Story 26.0 is a MANDATORY Rule #16 probe** — the exact `Ens.MessageHeader` resend/resubmit API is unverified until then. BOOTSTRAP_VERSION bump in Story 26.1 (Rule #24); frozen baseline untouched. Story 26.3 also ships the Epic-25-gated `resend-failed-messages` prompt.
+
+**Functional Requirements (new)**: FR134.
+
+**Stories**:
+- 26.0 Resend API probe (spec §2 — mandatory Story 0)
+- 26.1 ObjectScript handlers + guards + tests + bootstrap bump (spec §6 story 1)
+- 26.2 TS tool + governance wiring + tests (spec §6 story 2)
+- 26.3 Docs + live smokes + gated prompt (spec §6 story 3)
+
+**Out of scope (v1)**: edit-and-resend; cross-namespace batch resend; resend scheduling/throttling; automatic root-cause classification.
+
+### Story 26.0: Resend API Probe
+
+**Acceptance Criteria**:
+- **AC 26.0.1** — `irislib/EnsPortal/MessageResend.cls` (+`MessageResendEdit` if present) traced to the underlying `Ens.MessageHeader`/`Ens.MessageHeaderBase` method family; real names, signatures, and return values pinned from source (Rules #2/#16).
+- **AC 26.0.2** — Disposable `ExecuteMCPv2.Temp.ResendProbe` exercised against a scratch production covering spec §2's matrix: resend of completed vs errored message (new-header linkage captured), stopped/absent target item error shape, production-not-running behavior, missing body class behavior.
+- **AC 26.0.3** — Spec §§3–4 amended with pinned signatures + observed semantics (incl. any "production must be running" precondition as a validated error); probe class + scratch artifacts deleted.
+
+### Story 26.1: ObjectScript Resend Handlers & Guards
+
+**Acceptance Criteria**:
+- **AC 26.1.1** — Routes + handlers per conventions §3 (validate ALL inputs before namespace switch; single render; SanitizeError, no caret-globals; per-message Try/Catch so one bad header never aborts the batch).
+- **AC 26.1.2** — Guards enforced before any mutation: numeric header IDs; `resendFiltered` requires `item` + `from`; window > 7 days refused; count > cap refused (naming the found count); missing `confirm`/`dryRun:false` refused — every refusal returns the standard envelope with `result:{}` and mutates nothing.
+- **AC 26.1.3** — `%UnitTest` coverage: all guard refusals, preview shape, and a real single resend + new-header linkage on the scratch production (Rule #35 count check).
+- **AC 26.1.4** — Deploy loop + `gen:bootstrap` + BOOTSTRAP_VERSION from→to recorded (Rule #24); frozen baseline untouched.
+
+### Story 26.2: `iris_message_resend` TS Tool
+
+**Acceptance Criteria**:
+- **AC 26.2.1** — Tool per spec §3 contract (per-action `mutates` map; truthful `destructiveHint:true`); description states each action, the default-disabled status of the writes WITH the `IRIS_GOVERNANCE` enable snippet, the dry-run-first workflow, the caps, and the duplication hazard.
+- **AC 26.2.2** — interop package counts 21→22; governance unit tests: writes default-disabled under empty `IRIS_GOVERNANCE`, policy enable works, `preview` enabled by default (real `handleToolCall` gate).
+- **AC 26.2.3** — Unit tests: schema validation, guard-refusal envelope passthrough, per-header result mapping (partial failure), horolog→ISO conversion.
+
+### Story 26.3: Resend Docs + Smokes + Gated Prompt
+
+**Acceptance Criteria**:
+- **AC 26.3.1** — Docs rollup (Rule #30): duplication hazard + write-actions-default-disabled stated on all four surfaces.
+- **AC 26.3.2** — Live smokes (Rules #26/#34): single resend of a disposable test message on the scratch production with the new header verified via `iris_production_messages`; live refusals — `resendFiltered` without `confirm`, over-cap, unbounded window, governance-disabled write — each verified no-write; second interop-enabled namespace smoke or explicit residual-risk note.
+- **AC 26.3.3** — The `resend-failed-messages` prompt added to the Epic 25 pack (content per spec 03 §3, `gen-skills` regenerated, `validate-prompts` green).
+- **AC 26.3.4** — Spec §7 acceptance criteria 1–9 pass; conventions §6 complete.
+
+## Epic 27: Environment Diff & Promotion — `iris_env_diff` / `iris_env_promote` (added 2026-07-07)
+
+**Goal**: The moat feature — the only one in the set no competitor can copy without first rebuilding multi-instance profiles. Compare two configured profiles (e.g. `stage` vs `prod`) across code and the configuration surfaces that live OUTSIDE git in real IRIS shops (mappings, System Default Settings, web apps, config), then turn the diff into an ordered, gated promotion plan.
+
+**Binding spec**: [research/feature-specs/05-env-diff-promotion.md](./research/feature-specs/05-env-diff-promotion.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: Two new tools on `@iris-mcp/dev` (package 26→28): `iris_env_diff` (`mutates:"read"`; domains `documents`/`mappings`/`defaultSettings`/`webapps`/`config`; `spec` REQUIRED when `documents` included — Rule #38; SDS credential-ish values redacted) and `iris_env_promote` (`{plan:"read", execute:"write"}`, `execute` **default-disabled**; plan ordered mappings→documents→SDS→webapps→config; `onlyInTarget` emitted as warnings, NEVER deletions; execute = allowlisted step indices + `confirm:true` + plan-content-hash freshness + **target-profile governance gate** + halt-on-first-error; reuses the existing tools' HTTP code paths, never reimplements handlers). Framework extension in `@iris-mcp/shared`: `ToolContext.resolveProfileClient(profileName)` reusing the existing per-profile client pool (additive — Rule #19 snapshot). One new ObjectScript endpoint `GET/POST /dev/doc/hashes` (small new `EnvSync.cls`): `{name, hash, timestamp}` per doc matching a required spec; SHA-256 over normalized UDL source (`$SYSTEM.Encryption` method name/args `[PROBE]` before use). BOOTSTRAP_VERSION bump in Story 27.0 (Rule #24); frozen baseline untouched. **Prerequisite (RESOLVED 2026-07-07)**: stakeholder accepted **two profiles on the single dev instance** (same host/port, different default namespaces) for build/smoke; Story 27.4 runs the capstone in that shape and records an explicit residual-risk note (no cross-instance / cross-IRIS-version drift coverage). If a second instance is available by 27.4, prefer it. Story 27.4 also ships the Epic-25-gated `promote-environment-change` prompt.
+
+**Functional Requirements (new)**: FR135.
+
+**Stories**:
+- 27.0 Framework `resolveProfileClient` + doc-hash endpoint + documents diff (spec §5 story 1)
+- 27.1 Remaining diff domains + redaction (spec §5 story 2)
+- 27.2 `promote:plan` generator (spec §5 story 3)
+- 27.3 `promote:execute` + gates (spec §5 story 4)
+- 27.4 Docs + capstone round-trip + rejection smokes (spec §5 story 5)
+
+**Out of scope (v1)**: deletions on target; bidirectional sync; three-way merge; credentials/users/roles promotion (deliberate secrets exclusion, documented); scheduled drift monitoring; compiled-object comparison (source-only by design).
+
+### Story 27.0: Profile Client + Document Hashes + Documents Diff
+
+**Acceptance Criteria**:
+- **AC 27.0.1** — `resolveProfileClient(profileName)` on `ToolContext` reuses the exact per-profile client construction/caching of the `server` param path (extracted, not duplicated); unknown profile throws naming known profiles; back-compat snapshot green (existing tools see no change — Rule #19).
+- **AC 27.0.2** — `$SYSTEM.Encryption` SHA API probed and pinned (Rule #16); `/dev/doc/hashes` endpoint returns `{name, hash, timestamp}` per matching doc; `spec` required (`*` refused with Rule #38 guidance unless `allowWide:true`); timeout risk documented; conventions §3 handler skeleton; `%UnitTest` coverage.
+- **AC 27.0.3** — `iris_env_diff` documents domain works end-to-end across two profiles: `onlyInSource`/`onlyInTarget`/`differs`(+hashes)/`identical` buckets; hash comparison idempotent and timestamp-insensitive under `ignoreTimestamps:true`.
+- **AC 27.0.4** — Bootstrap regen + BOOTSTRAP_VERSION from→to recorded (Rule #24).
+
+### Story 27.1: Remaining Diff Domains + Redaction
+
+**Acceptance Criteria**:
+- **AC 27.1.1** — `mappings` (full tuples incl. subscript-level), `defaultSettings`, `webapps` (curated property subset, instance-specific paths excluded by default), `config` domains implemented against the existing endpoints per profile; unit tests with fixture payloads for every domain's three buckets.
+- **AC 27.1.2** — SDS values whose setting name matches `password`/`secret`/`key` (case-insensitive) reported as `[REDACTED:differs]`/`[REDACTED:identical]` — values never leave the server in diff output (spec §6 AC 6).
+- **AC 27.1.3** — `summary.driftCount`/`identicalCount` roll up across domains; `domains` param filters correctly.
+
+### Story 27.2: `promote:plan` Generator
+
+**Acceptance Criteria**:
+- **AC 27.2.1** — `plan` (read) transforms a prior diff into ordered steps (mappings → documents put+compile batched → defaultSettings → webapps → config), each `{index, domain, operation, subject, detail, direction}`.
+- **AC 27.2.2** — `onlyInTarget` items emitted as `warning` entries; NO delete steps exist anywhere in any plan.
+- **AC 27.2.3** — Plans embed a content hash of their source diff (stale-plan protection input for 27.3); unit tests over ordering, warnings, and hash embedding.
+
+### Story 27.3: `promote:execute` + Gates
+
+**Acceptance Criteria**:
+- **AC 27.3.1** — `execute` runs ONLY the allowlisted `steps` indices in plan order, halt-on-first-error, per-step completed/failed/skipped statuses; implementation calls the SAME HTTP endpoints the existing tools use.
+- **AC 27.3.2** — Refusals, each mutating nothing: missing `confirm:true`; missing/empty `steps` allowlist; plan-hash mismatch vs. supplied diff (stale plan); target profile's governance disabling the underlying write families (refusal names the blocking key).
+- **AC 27.3.3** — Governance: `execute` default-disabled under empty `IRIS_GOVERNANCE` (real-gate unit test); `plan` and `iris_env_diff` read/enabled.
+
+### Story 27.4: Env Docs + Capstone Smokes
+
+**Acceptance Criteria**:
+- **AC 27.4.1** — Docs rollup (Rule #30): `execute` default-disabled prominently; secrets exclusion + no-deletions guarantees documented; dev package counts 26→28.
+- **AC 27.4.2** — Live capstone on two profiles (accepted 2026-07-07 configuration: two profiles on the single dev instance with different default namespaces; use a second instance instead if one is available): seed drift (one class edit, one SDS change, one mapping on source) → diff detects exactly the seeded drift → plan orders it correctly → execute with allowlist promotes it → re-diff shows clean. The smoke record includes the explicit residual-risk note (no cross-instance / cross-IRIS-version coverage in the one-instance shape).
+- **AC 27.4.3** — Live rejection smokes (Rule #26): no-confirm, no-allowlist, stale-plan, governance-disabled execute, wide-spec-without-allowWide — all refused, no-write. Rule #34: diff run against a second namespace pair. Spec §6 ACs 1–9 pass; conventions §6 complete.
+- **AC 27.4.4** — The gated `promote-environment-change` prompt added to the Epic 25 pack (content per spec 03 §3: scoped diff → user-reviewed plan → explicit allowlist → confirmed execute → re-diff verify; `gen-skills` regenerated, `validate-prompts` green).
+
+## Epic 28: SQL Performance Advisor — `iris_sql_analyze` `advise` Action (added 2026-07-07)
+
+**Goal**: The suite's signature-feature candidate — turn the existing plan/stats primitives into an *advisor* that answers "why is this query slow and what do I do about it?" with evidence-cited, confidence-labeled findings. Strictly advisory: recommends, cites, never applies. Market-proven category (Postgres MCP Pro's raison d'être); IRIS has no native index advisor.
+
+**Binding spec**: [research/feature-specs/06-sql-performance-advisor.md](./research/feature-specs/06-sql-performance-advisor.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: New `advise` action on the existing `iris_sql_analyze` (`@iris-mcp/dev`) — no new tool; `advise: "read"` added to the per-action `mutates` map; the four existing actions' behavior byte-for-byte unchanged (Rule #19 snapshot). Split architecture: new ObjectScript route `POST /dev/sql/advise-data` returns raw materials (plan text + index dictionary rows + tune metadata) in one response — note this is the tool's FIRST ObjectScript handler (Epic 17 shipped it Atelier/SQL-only), so it becomes a new bootstrap contributor; the heuristic engine lives in TypeScript (fixture-testable, no bootstrap bump per heuristic tweak). Findings: `full-scan`, `missing-index` (+suggested DDL; never for `%*`/system schemas), `stale-stats`, `unused-index`, `plan-anomaly` — each with evidence, plan excerpt, and confidence; unrecognized plan text → `findings: []` + explicit note, never crash or guess. **Story 28.0 is a MANDATORY Rules #14/#16 probe**; all fixture expectations reference-captured from live plans (Rule #36 — non-negotiable). BOOTSTRAP_VERSION bump in Story 28.1 (Rule #24); frozen baseline untouched.
+
+**Functional Requirements (new)**: FR136.
+
+**Stories**:
+- 28.0 Statistics & plan-marker probe matrix (spec §6 story 0)
+- 28.1 `/dev/sql/advise-data` ObjectScript endpoint + bootstrap bump (spec §6 story 1)
+- 28.2 TS heuristic engine + captured fixtures (spec §6 story 2)
+- 28.3 `advise` surface + docs + smokes (spec §6 story 3)
+
+**Out of scope (v1)**: `applyIndex` write action (future — would be write/default-disabled); cost-based ranking; historical trends; frozen-plan management; parallel-query/sharding advice.
+
+### Story 28.0: Advisor Probe Matrix
+
+**Acceptance Criteria**:
+- **AC 28.0.1** — Plan markers cataloged VERBATIM from live `explain` output over the fixture set (full master-map read, index map read, temp-file build, join strategies) — these strings become the parser's contract; capture IRIS version documented.
+- **AC 28.0.2** — Dictionary surface pinned (table→class mapping + index/column enumeration via `%Dictionary.CompiledIndex`); tune-stats surface pinned (prefer whatever the existing `stats` action reads); statement-workload availability on 2023.1+ Community pinned (`INFORMATION_SCHEMA.STATEMENTS` family — underscore naming per Epic 17 finding).
+- **AC 28.0.3** — Spec §4 heuristics table amended with pinned sources; `ExecuteMCPv2.Test.AdvisorFixture` scratch schema design recorded; probe classes deleted.
+
+### Story 28.1: `/dev/sql/advise-data` Endpoint
+
+**Acceptance Criteria**:
+- **AC 28.1.1** — One consolidated route returns plan text + index dictionary rows + tune metadata for a statement (conventions §3 skeleton; SanitizeError; namespace save/restore); `%UnitTest` shape coverage.
+- **AC 28.1.2** — Deploy loop + `gen:bootstrap` (new class added to the ordered `classes[]` array before `REST/Dispatch.cls`) + BOOTSTRAP_VERSION from→to recorded (Rule #24); frozen baseline untouched.
+
+### Story 28.2: Heuristic Engine (TS)
+
+**Acceptance Criteria**:
+- **AC 28.2.1** — All five findings implemented per spec §4 triggers/evidence requirements; every heuristic has fires-when-should AND does-NOT-fire-when-shouldn't fixture tests.
+- **AC 28.2.2** — ALL expected fixture values reference-captured from the live instance (Rule #36; capture command cited in test comments); fixture set seeded via `ExecuteMCPv2.Test.AdvisorFixture` (missing index fires with correct DDL; properly-indexed case clean; stale-stats fires before TuneTable and clears after).
+- **AC 28.2.3** — Unrecognized/garbage plan text → `findings: []` + explicit "plan format not recognized" note (fuzz-tested); zero findings ever emitted without cited evidence + plan excerpt; no recommendations against `%*`/`INFORMATION_SCHEMA`.
+
+### Story 28.3: `advise` Surface + Docs + Smokes
+
+**Acceptance Criteria**:
+- **AC 28.3.1** — `advise` added to the action enum + `mutates` map (`read`, enabled by default — Rule #28, real-gate governance test); `query` vs `workload` input modes per spec §3 (workload unavailable on platform → clear capability error, never raw); `topN` documented as analysis-breadth scan work (Rule #38).
+- **AC 28.3.2** — Existing four actions byte-for-byte unchanged (snapshot test — Rule #19).
+- **AC 28.3.3** — Docs rollup incl. the advisory disclaimer ("recommendations are heuristic; verify with explain before applying"); live smokes: fixture-table advise on HSCUSTOM AND a second namespace (Rule #34); workload mode (or its capability error) live. Spec §7 ACs 1–7 pass; conventions §6 complete.
+
+## Epic 29: Tool-Call Observability & Session Audit Log (added 2026-07-07)
+
+**Goal**: An opt-in, structured, secrets-free audit trail of every MCP tool call — the PRD's own Post-MVP item, the rarest high-value capability in the MCP market, and the concrete answer to "what did the AI do to prod last Tuesday?" Makes the governance layer *visible*: denials become auditable events.
+
+**Binding spec**: [research/feature-specs/07-observability-audit-log.md](./research/feature-specs/07-observability-audit-log.md) + [00-conventions.md](./research/feature-specs/00-conventions.md).
+
+**Scope**: Pure TS in `@iris-mcp/shared` — no new tools, no governance keys, no bootstrap bump. Config: `IRIS_AUDIT_LOG` (JSONL path; unset = OFF = mechanically-proven no-op, Rule #19), `IRIS_AUDIT_LOG_MAX_MB` (default 50, single-generation rotation), `IRIS_AUDIT_LOG_PARAMS` (default `false` — key names only). Interceptor wraps the existing `handleToolCall` single choke point (where the governance gate lives): entry per call with ts/session-UUID/seq/serverPkg/tool/action/profile/namespace/outcome (`ok`|`error`|`denied` + `denyReason`, `presetApplied` when Epic 24 applies — no hard dependency)/durationMs/paramKeys. **Redaction non-negotiable** (spec §4): recursive key-match value replacement + 2KB truncation BEFORE the write queue; `error` carries the sanitized message only. Writer is fire-and-forget (a failed write NEVER fails or slows a tool call — stderr warning + `droppedEntries` counter); unwritable directory fails fast at STARTUP only. Logging is server **configuration, not a tool** — deliberately NOT bypassable via `IRIS_GOVERNANCE`.
+
+**Functional Requirements (new)**: FR137.
+
+**Stories**:
+- 29.0 Interceptor + writer + redaction + back-compat (spec §6 story 1)
+- 29.1 Outcome fidelity + concurrency (spec §6 story 2)
+- 29.2 Docs + live smokes (spec §6 story 3)
+
+**Out of scope (v1)**: `iris_audit_sessions` query/replay tool (phase 2 — Rule #31 counting implications); IRIS-global sink; OpenTelemetry export; log shipping; client identity beyond process-session.
+
+### Story 29.0: Audit Interceptor + Writer
+
+**Acceptance Criteria**:
+- **AC 29.0.1** — Config parsing + startup fail-fast on unwritable directory (an operator who configured auditing must not run unaudited silently); `sessionStart` header line (session UUID + package + version) on log open.
+- **AC 29.0.2** — Entry format per spec §3; redaction per spec §4 with fuzz tests (nested objects, arrays, key-case variants) + the three-nesting-positions password test asserting ZERO occurrences of the value in the emitted line.
+- **AC 29.0.3** — Queue + rotation (size-check with stat cache; rename to `<path>.1`); post-startup sink failures degrade (never throw into the tool path; `droppedEntries` counter + final flush line).
+- **AC 29.0.4** — Unset `IRIS_AUDIT_LOG` ⇒ mechanical no-op proof: `handleToolCall` output snapshot + assert no fs writes attempted (Rule #19); unit tests with a temp-dir log.
+
+### Story 29.1: Outcome Fidelity + Concurrency
+
+**Acceptance Criteria**:
+- **AC 29.1.1** — `ok`/`error`/`denied` outcomes logged with correct fields; denied entries carry structured `denyReason` (+ `presetApplied` when a preset caused the denial); `error` field is the sanitized message only.
+- **AC 29.1.2** — `action` extracted from args when the tool's schema has an `action` field, else null; `seq` monotonic per session.
+- **AC 29.1.3** — Concurrent calls produce well-formed, non-interleaved JSONL lines (async-ordering test); shutdown flush works.
+
+### Story 29.2: Audit Docs + Smokes
+
+**Acceptance Criteria**:
+- **AC 29.2.1** — Docs rollup: README env vars + a "Compliance & Auditability" section (marketing surface — written well), client-config guides, CHANGELOG; documents that logging is config (not governance-bypassable) and the params-off-by-default posture.
+- **AC 29.2.2** — Live smoke (Rules #22/#26 shape): built dist with `IRIS_AUDIT_LOG` set; real session covering an ok read, a failing call, and a governance-denied write; three entries' fidelity verified; grep for the test password — zero hits; rotation verified with a tiny `IRIS_AUDIT_LOG_MAX_MB`.
+- **AC 29.2.3** — Spec §7 ACs 1–8 pass; conventions §6 complete.

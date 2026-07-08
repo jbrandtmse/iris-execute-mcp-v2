@@ -2,7 +2,7 @@
 
 **Server:** `@iris-mcp/shared` (framework) + per-package prompt content + repo `skills/` dir
 **Priority:** 3 (quick win) | **Effort:** ~3 stories | **Governance:** prompts are not tools — no keys
-**Prereqs:** none (one prompt is gated on Spec 04 — omit it until that ships)
+**Prereqs:** none (two prompts are gated: `resend-failed-messages` on Spec 04, `promote-environment-change` on Spec 05 — omit each until its feature ships)
 **Read first:** [`00-conventions.md`](00-conventions.md), `packages/shared/src/server-base.ts`
 (resources capability wiring — prompts mirror it), MCP SDK prompts docs
 (`@modelcontextprotocol/sdk` — the server class used in server-base.ts), `.claude/rules/iris-objectscript-basics.md`
@@ -45,7 +45,8 @@ export interface PromptDefinition {
 ## 3. Prompt & skill content (the pack)
 
 Each prompt names EXACT tool names/params and safe ordering; every referenced tool must exist
-(validated — §4). Ship v1 with these eight:
+(validated — §4). Ship v1 with these eleven — 9 non-gated + 2 gated (list stakeholder-approved
+2026-07-07; the two ops/interop safety additions were approved in the same session):
 
 | Prompt (server) | Arguments | Workflow it encodes |
 |---|---|---|
@@ -56,7 +57,10 @@ Each prompt names EXACT tool names/params and safe ordering; every referenced to
 | `audit-security-posture` (admin) | `server?` | `iris_user_get` list → `iris_role_list` → `iris_service_manage:list` → `iris_ssl_list` → `iris_audit_manage:status` → report: default passwords, %All holders, insecure services |
 | `objectscript-review` (dev) | none | Distill `.claude/rules/iris-objectscript-basics.md` + testing rules into a ≤300-word pre-write checklist ($$$ macros, Quit-in-try/catch, %OnNew/initvalue, no-underscore names, storage sections untouchable) |
 | `deploy-and-test-class` (dev) | `classOrPackage` | `iris_doc_load` (glob-path form!) → compile errors loop → `iris_execute_tests` → **compare returned total vs expected (Rule #35)** → rerun if short |
+| `recover-stuck-production` (interop) | `production?`, `namespace?` | `iris_production_status` → `iris_production_summary` + `iris_production_queues` (locate stuck/errored items) → `iris_production_logs` for those items → try `iris_production_control:recover` FIRST → re-check status → only if still wedged: `clean` (clears transient runtime state; refuses while running) → NEVER suggest `killAppData` unless the user explicitly accepts persistent business-state loss (confirm double-gate) → verify healthy restart. Encodes the Epic-20 escalation ladder from the server `instructions` field |
+| `run-external-backup` (ops) | `server?` | `iris_journal_info` pre-check → `iris_backup_manage` freeze → verify frozen → PAUSE for the external snapshot (user confirms completion) → `iris_backup_manage` thaw **ALWAYS, even if the snapshot failed** → `iris_journal_info` verify journaling resumed → `iris_backup_manage` history to record the run. Safety notes: freeze suspends writes instance-wide; the workflow must never end with the instance frozen |
 | `resend-failed-messages` (interop) | `item`, `since` | **GATED on Spec 04** — omit from registration until `iris_message_resend` ships |
+| `promote-environment-change` (dev) | `source`, `target`, `spec?` | **GATED on Spec 05** — omit until `iris_env_diff`/`iris_env_promote` ship. `iris_env_diff` (scoped by `spec`) → review drift report + warnings with the user → `iris_env_promote` `plan` → user selects an explicit step allowlist → `execute` with allowlist + `confirm:true` (note it is default-disabled by governance) → re-diff to verify clean. Never act on `onlyInTarget` warnings (no deletion steps exist) |
 
 Skills mirror: `skills/<name>/SKILL.md` per prompt (Claude Code skill format: YAML frontmatter
 `name`, `description`, then the same body). Add `skills/README.md` explaining installation
@@ -76,7 +80,7 @@ Same script validates skills output is in sync with prompt sources (`gen-skills 
 
 1. **Story 1 — Framework plumbing (1):** `PromptDefinition`, registration, capability
    advertisement, `prompts/list`/`get` handlers, back-compat snapshot test, empty-pack no-op.
-2. **Story 2 — Content + generators (1):** author the 7 non-gated prompts, `gen-skills.mjs`
+2. **Story 2 — Content + generators (1):** author the 9 non-gated prompts, `gen-skills.mjs`
    (+`--check`), `validate-prompts.mjs` + default-suite test wiring.
 3. **Story 3 — Docs + smoke (0.5–1):** README/per-server README/CHANGELOG rollup; live smoke:
    built dist through a real MCP client — `prompts/list` shows the pack, `prompts/get
@@ -99,4 +103,4 @@ Same script validates skills output is in sync with prompt sources (`gen-skills 
 
 - Prompts that embed live data (schema-aware context injection — future).
 - Copilot-specific skill packaging beyond the generic `skills/` layout.
-- The `resend-failed-messages` prompt until Spec 04 lands.
+- The `resend-failed-messages` prompt until Spec 04 lands; the `promote-environment-change` prompt until Spec 05 lands (each ships in its feature's closing docs story).
