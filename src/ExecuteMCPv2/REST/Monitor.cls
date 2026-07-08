@@ -1297,7 +1297,13 @@ ClassMethod BackupManage() As %Status
         ; ── restore guard (AC 16.3.3): defend the server even though restore is
         ; not in the tool's enum — refuse cleanly, never crash. ──
         If tAction = "restore" {
-            Set tSC = $$$ERROR($$$GeneralError, "Restore is not supported via this tool. IRIS restore is interactive (^DBREST / CLUMENU^JRNRESTO) and not cleanly scriptable via Backup.General; use the IRIS restore utility or the Management Portal restore instead.")
+            ; De-caret (Rule #33 / CR 22.1-3): SanitizeError strips ANY token
+            ; containing a caret — including CLUMENU^JRNRESTO, whose caret is
+            ; not "leading" but still falls inside a contiguous alnum run and
+            ; gets removed. Both routine names are written WITHOUT carets here
+            ; so they survive SanitizeError; the doc comment above (a
+            ; non-sanitized surface) keeps the caret form.
+            Set tSC = $$$ERROR($$$GeneralError, "Restore is not supported via this tool. IRIS restore is interactive (DBREST / CLUMENU in JRNRESTO) and not cleanly scriptable via Backup.General; use the IRIS restore utility or the Management Portal restore instead.")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
