@@ -1,0 +1,11 @@
+2026-07-08T03:46:20Z	Epic 23	feature_branch_created	repos=. ticket=NONE description=feature-wave-1 root=origin/main
+2026-07-08T03:46:20Z	Epic 23	epic_branch_created	repos=. from=590fa58
+2026-07-08T03:46:20Z	Epic 23	epic_branch_checked_out	repos=. head=590fa58
+2026-07-08T03:46:59Z	Epic 23	sprint_planning_complete	model=claude-fable-5 stories=3 result=validated_current_seeded_by_correct_course_2026-07-07 note=epic23_keys_match_epics_md_no_regen_needed
+2026-07-08T03:53:11Z	Epic 23	retro_review_complete	source_retro=_bmad-output/implementation-artifacts/epic-22-retro-2026-07-04.md included=0 deferred=5 dropped=0 items=CR22.0-D1,CR22.0-D2,CR22.1-1,CR22.1-2,CR22.1-3 note=feature_epic_all-LOW_first-deferral_below-rule37-threshold_no-colliding-story-x0_CR22.1-3-flagged-foldin-23.1
+2026-07-08T03:57:36Z	Story 23.0	story_created	path=_bmad-output/implementation-artifacts/23-0-health-probe-and-thresholds.md model=claude-opus-4-8 integration_ac=n/a-research-story
+2026-07-08T04:22:30Z	Story 23.0	dev_complete	spawn_at=2026-07-08T03:59:10Z model=claude-sonnet-5 files=3 tests_added=0 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true note=spec-pinned-locks-GetLockSpaceInfo_memory-folded-into-system_threshold-direction-bug-caught
+2026-07-08T04:22:30Z	Story 23.0	adr_verifications_complete	tool=none acs=none result=none_required note=research-spec-story_no-ADR-tooled-ACs_live-probe-is-devs-core-work model=claude-opus-4-8
+2026-07-08T04:25:13Z	Story 23.0	qa_complete	spawn_at=2026-07-08T04:23:38Z model=claude-sonnet-5 tests_added=0 first_run_failures=0 clarifications=0 result=none_required closing_sections_present=true note=research-spec-story_no-runtime-surface_verified-vs-story17.0-precedent
+2026-07-08T04:48:44Z	Story 23.0	cr_complete	spawn_at=2026-07-08T04:26:44Z model=claude-opus-4-8 resolved=9 deferred=6 dismissed=3 high=0 med=4 low=5 clarifications=0 status=done closing_sections_present=true note=pins-verified-clean-vs-irislib-and-live-HSCUSTOM_CR23.0-1..6-deferred-to-23.1-23.2
+2026-07-08T04:51:02Z	Story 23.0	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live-%SYS-probe:SYS.Lock.GetLockSpaceInfo-used5424-usable305646688_GetUserLimit8-vs-connLimit0_Temp-classes-empty model=claude-opus-4-8
