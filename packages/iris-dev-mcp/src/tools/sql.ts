@@ -29,8 +29,9 @@ export const sqlExecuteTool: ToolDefinition = {
     "Execute a SQL query against an IRIS namespace and return column names and row data. " +
     "Supports parameterized queries to prevent SQL injection. " +
     "Use maxRows to limit result set size (default: 1000). " +
-    "An operator may set IRIS_SQL_MAX_ROWS (hard cap on the effective row limit — the response " +
-    "carries rowsCapped: true when it clamps the caller's request) and/or IRIS_SQL_TIMEOUT " +
+    "An operator may set IRIS_SQL_MAX_ROWS (a ceiling on the number of rows returned — the response " +
+    "carries rowsCapped: true when it clamps the caller's request; it bounds the returned row count " +
+    "post-fetch, not the server-side result set or transfer) and/or IRIS_SQL_TIMEOUT " +
     "(per-request timeout in seconds) as environment variables; both are opt-in and unset by default.",
   inputSchema: z.object({
     query: z

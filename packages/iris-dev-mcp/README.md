@@ -169,7 +169,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 > **Governance defaults:** all four `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
 >
-> **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a hard cap on `iris_sql_execute`'s effective row limit — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
+> **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 
 ### Server Tools
 
