@@ -76,8 +76,11 @@ All servers use the same environment variables:
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
+| `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |
+| `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer hard cap on `iris_sql_execute`'s effective row limit. Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
+| `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for `iris_sql_execute`'s HTTP call. Omit to use the connection's default `IRIS_TIMEOUT`. |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES` and `IRIS_GOVERNANCE` are both optional and additive. With neither set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_SQL_MAX_ROWS`, and `IRIS_SQL_TIMEOUT` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
 
 ### 3. Configure Your MCP Client
 
@@ -241,6 +244,30 @@ The "existing action" baseline is generated mechanically from the shipped tool c
 
 (the human-readable text reads `action 'iris_backup_manage:run' is disabled by governance policy for server 'prod'`).
 
+### Read-only mode — point it at production with one environment variable
+
+**Point it at production in read-only mode with one environment variable.** Set `IRIS_GOVERNANCE_PRESET=read-only` and every write-classified tool action — across all five servers — is blocked, while every read action keeps working, with zero `IRIS_GOVERNANCE` JSON to write:
+
+```json
+{ "env": { "IRIS_GOVERNANCE_PRESET": "read-only" } }
+```
+
+What it does:
+
+- **Blocks every write.** Any action a tool's `mutates` classification marks `"write"` (deletes, creates, sets, starts/stops, purges, `defaultEnabled` writes like `iris_production_control:clean` included — read-only means read-only, there is no "but this one's safe" exception) is denied.
+- **Allows every read.** Queries, lists, gets, status/health checks, diagnostics — anything classified `"read"` — run exactly as they do today.
+- **Sits UNDER your explicit `IRIS_GOVERNANCE` overrides, never over them.** The cascade is `profile.explicit ?? global.explicit ?? preset ?? defaultSeed`: an explicit `true` in `IRIS_GOVERNANCE` still wins over `read-only` if you deliberately want one specific write enabled even in a read-only deployment (and an explicit `false` still wins too — it just doesn't need to, since the preset already denies it).
+- **Explains itself.** A call blocked *because of* the preset (not an explicit `false`) returns `structuredContent.presetApplied: "read-only"` alongside the standard `GOVERNANCE_DISABLED` denial, so an operator or AI client can tell "blocked by the preset" apart from "blocked by an explicit override" at a glance.
+- **Is opt-in and additive.** `IRIS_GOVERNANCE_PRESET` unset (or set to `"full"`, an explicit alias for today's behavior) is byte-for-byte the pre-preset suite — nothing changes until you set it.
+
+Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_execute` against a large production table: `IRIS_SQL_MAX_ROWS` (a hard ceiling on the row count any call can return — the response carries `rowsCapped: true` when it clamps a caller's request) and `IRIS_SQL_TIMEOUT` (a per-request timeout in seconds). Both are independent of the preset — they apply to `iris_sql_execute` regardless of `IRIS_GOVERNANCE_PRESET` — and both are opt-in (unset = no cap, today's behavior):
+
+```json
+{ "env": { "IRIS_GOVERNANCE_PRESET": "read-only", "IRIS_SQL_MAX_ROWS": "1000", "IRIS_SQL_TIMEOUT": "30" } }
+```
+
+See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
+
 ### Worked example — enable a write action globally, block it on `prod`
 
 Suppose you want the `run` action of `iris_backup_manage` (a write action shipping in a later release — the canonical example) available everywhere **except** the `prod` profile, where backups are managed out-of-band. Set:
@@ -317,6 +344,8 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 **Existing single-server `IRIS_*` setups require no changes.** This is a release-gate promise:
 
 - With **neither** `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, behavior is byte-for-byte identical to before — one instance from your `IRIS_*` vars, every tool enabled.
+- With `IRIS_GOVERNANCE_PRESET` **unset** (the default), the governance cascade's preset layer is a pure pass-through — behavior is unchanged whether or not `IRIS_GOVERNANCE`/`IRIS_PROFILES` are set.
+- With `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` **unset** (the default), `iris_sql_execute` is byte-for-byte today's behavior — no `rowsCapped` field, no per-request timeout override.
 - The `server` parameter is an *optional* addition to each tool's input schema. Calls that omit it are unchanged; existing prompts and automations keep working.
 - No `BOOTSTRAP_VERSION` change is involved — these are TypeScript-layer capabilities; nothing on the IRIS side changes.
 

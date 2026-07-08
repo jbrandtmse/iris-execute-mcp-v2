@@ -17,3 +17,11 @@
 2026-07-08T16:44:00Z	Story 24.1	qa_complete	spawn_at=2026-07-08T16:37:00Z model=claude-sonnet-5 tests_added=7 first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-07-08T17:02:00Z	Story 24.1	cr_complete	spawn_at=2026-07-08T16:45:00Z model=claude-opus-4-8 resolved=1 deferred=1 dismissed=2 high=0 med=0 low=2 clarifications=0 closing_sections_present=true
 2026-07-08T17:10:00Z	Story 24.1	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=built-dist-preset-engine-readonly-blocks-78writes-allows-63reads-full-eq-unset-override-wins-unknown-throws model=claude-opus-4-8
+2026-07-08T17:12:00Z	Story 24.1	committed	sha=b284f61 submodules=
+2026-07-08T17:20:00Z	Story 24.2	story_created	path=_bmad-output/implementation-artifacts/24-2-sql-caps-docs-and-smokes.md
+2026-07-08T17:52:00Z	Story 24.2	dev_complete	spawn_at=2026-07-08T17:21:00Z model=claude-sonnet-5 files=10 tests_added=15 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true note=sql-caps-rowsCapped+timeout-forwarding_rule19-no-explicit-undefined-3rd-arg_docs-rollup-8-surfaces-incl-preset-first-doc-mention_AC24.2.3-left-for-lead-smoke_profiles.ts-non-default-cap-gap-flagged-not-fixed
+2026-07-08T17:45:00Z	Story 24.2	dev_complete	spawn_at=2026-07-08T17:21:00Z model=claude-sonnet-5 files=11 tests_added=15 clarifications=0 cycle_iteration=1 closing_sections_present=true note=flagged-mergeProfile-caps-propagation-gap
+2026-07-08T17:46:00Z	Story 24.2	adr_verifications_complete	result=none_required acs=none
+2026-07-08T17:52:00Z	Story 24.2	qa_complete	spawn_at=2026-07-08T17:47:00Z model=claude-sonnet-5 tests_added=10 first_run_failures=0 clarifications=0 closing_sections_present=true note=demonstrated-mergeProfile-caps-gap-via-test
+2026-07-08T18:15:00Z	Story 24.2	cr_complete	spawn_at=2026-07-08T17:53:00Z model=claude-opus-4-8 resolved=2 deferred=1 dismissed=3 high=0 med=2 low=1 clarifications=0 closing_sections_present=true note=patched-mergeProfile-caps-propagation+Infinity-timeout
+2026-07-08T18:30:00Z	Story 24.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=built-dist-mcp-stdio-live-HSCUSTOM:read-only-refuses-global_set-GOVERNANCE_DISABLED+presetApplied-no-PUT+read-succeeds+explicit-override-writes-live+IRIS_SQL_MAX_ROWS-rowsCapped model=claude-opus-4-8

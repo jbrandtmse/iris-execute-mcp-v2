@@ -9,7 +9,12 @@
  * MCP tool errors with `isError: true`.
  */
 
-import { atelierPath, IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  atelierPath,
+  IrisApiError,
+  type RequestOptions,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Default maximum number of rows returned when maxRows is not specified. */
@@ -23,7 +28,10 @@ export const sqlExecuteTool: ToolDefinition = {
   description:
     "Execute a SQL query against an IRIS namespace and return column names and row data. " +
     "Supports parameterized queries to prevent SQL injection. " +
-    "Use maxRows to limit result set size (default: 1000).",
+    "Use maxRows to limit result set size (default: 1000). " +
+    "An operator may set IRIS_SQL_MAX_ROWS (hard cap on the effective row limit — the response " +
+    "carries rowsCapped: true when it clamps the caller's request) and/or IRIS_SQL_TIMEOUT " +
+    "(per-request timeout in seconds) as environment variables; both are opt-in and unset by default.",
   inputSchema: z.object({
     query: z
       .string()
@@ -66,8 +74,16 @@ export const sqlExecuteTool: ToolDefinition = {
       body.parameters = parameters;
     }
 
+    // IRIS_SQL_TIMEOUT (operator-set, forwarded per-request in ms). Unset ->
+    // no options object is passed to http.post at all, preserving today's
+    // exact call signature (Rule #19 byte-for-byte no-op).
+    const options: RequestOptions | undefined =
+      ctx.config.sqlTimeoutMs !== undefined ? { timeout: ctx.config.sqlTimeoutMs } : undefined;
+
     try {
-      const response = await ctx.http.post(path, body);
+      const response = options
+        ? await ctx.http.post(path, body, options)
+        : await ctx.http.post(path, body);
 
       // The Atelier query response returns result.content as an array of
       // row objects, e.g. [{ Col1: "val", Col2: 42 }, …].
@@ -78,10 +94,16 @@ export const sqlExecuteTool: ToolDefinition = {
       const columns: string[] =
         allRowObjects.length > 0 ? Object.keys(allRowObjects[0] as Record<string, unknown>) : [];
 
-      // Apply maxRows limit
-      const limit = maxRows ?? DEFAULT_MAX_ROWS;
-      const limited = allRowObjects.slice(0, limit);
-      const truncated = allRowObjects.length > limit;
+      // Apply maxRows limit, clamped by the operator-set IRIS_SQL_MAX_ROWS
+      // hard cap when configured (unset -> effectiveLimit === requested,
+      // today's behavior).
+      const requested = maxRows ?? DEFAULT_MAX_ROWS;
+      const cap = ctx.config.sqlMaxRows;
+      const effectiveLimit = cap !== undefined ? Math.min(requested, cap) : requested;
+      const rowsCapped = cap !== undefined && cap < requested;
+
+      const limited = allRowObjects.slice(0, effectiveLimit);
+      const truncated = allRowObjects.length > effectiveLimit;
 
       // Convert row objects to positional arrays for tabular output
       const rows = limited.map((row) => columns.map((col) => row[col]));
@@ -91,6 +113,7 @@ export const sqlExecuteTool: ToolDefinition = {
         rows,
         rowCount: rows.length,
         ...(truncated ? { truncated: true, totalAvailable: allRowObjects.length } : {}),
+        ...(rowsCapped ? { rowsCapped: true } : {}),
       };
 
       return {
