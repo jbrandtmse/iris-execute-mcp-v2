@@ -1,6 +1,6 @@
 # @iris-mcp/ops
 
-**IRIS Operations & Monitoring MCP Server** -- System metrics, jobs, locks, process control, journals, mirrors, audit events, database integrity, database maintenance operations, backups, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
+**IRIS Operations & Monitoring MCP Server** -- Composite health check, system metrics, jobs, locks, process control, journals, mirrors, audit events, database integrity, database maintenance operations, backups, licensing, ECP, task scheduling, system configuration, and alert management via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -115,6 +115,14 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 `iris_server_profiles` is a **read tool, enabled by default**. It reports in-memory config and does not connect to IRIS. Use it to choose the right `server` profile and avoid governance-disabled actions before invoking other tools.
 
+### Health Check Tool
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_health_check` | **Recommended first call of any diagnostic session.** Composite health check across up to 9 instance areas in one round-trip; returns a structured verdict (`healthy`/`warning`/`critical`) with a per-area finding explaining why. | `areas?`, `thresholds?` | readOnly, idempotent |
+
+`iris_health_check` is a **read tool, enabled by default** under `IRIS_GOVERNANCE`. See [Tool Examples](#tool-examples) below for the full contract (areas, thresholds, verdict computation).
+
 ### Metrics & Monitoring Tools
 
 | Tool | Description | Key Parameters | Annotations |
@@ -163,6 +171,90 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 ---
 
 ## Tool Examples
+
+<details>
+<summary><strong>iris_health_check</strong> -- Composite health check (recommended first call)</summary>
+
+Runs a composite health check across up to 9 IRIS instance areas in ONE round-trip and returns
+a structured verdict (`healthy` / `warning` / `critical`) with a per-area finding explaining why.
+Replaces 6+ separate calls (`iris_metrics_system`, `iris_journal_info`, `iris_mirror_status`,
+`iris_locks_list`, `iris_license_info`, `iris_database_check`, `iris_metrics_alerts`,
+`iris_metrics_interop`) with documented, overridable thresholds.
+
+The ObjectScript endpoint (`/monitor/health`, Story 23.1) returns raw per-area values only --
+every threshold, per-area level rule, and the overall verdict are computed here in TypeScript
+(architecture.md ADR H5), so tuning a threshold never needs a bootstrap bump.
+
+**Areas (9):** `system`, `databases`, `journal`, `mirror`, `locks`, `license`, `ecp`, `alerts`,
+`interop`. **`memory` is NOT a valid area** -- it was REMOVED in Story 23.0 (no reliable
+instance-wide memory-health signal exists in IRIS); it is dropped entirely, not folded into
+`system` or any other area, and passing it is rejected by the input schema.
+
+**Threshold-checked areas** (defaults shown; every threshold can be overridden independently):
+
+| Area | Direction | Warn | Crit | Notes |
+|---|---|---:|---:|---|
+| `journal` | ascending (% full) | 80 | 92 | High is bad. |
+| `databases` | **descending** (% free) | 10 | 3 | Low is bad. Per-DB `freePct` computed only for maxSize-configured, mounted databases; unlimited-maxSize or unmounted databases report `notApplicable` (v1 has no volume-level disk-exhaustion signal for those -- see `iris_database_check`). The worst database drives the area's level; the full per-DB breakdown stays in `raw`. |
+| `license` | ascending (% used) | 80 | 95 | Prefers the IRIS-authoritative dashboard figure (`SYS.Stats.Dashboard.LicenseCurrentPct`) over a CSP-user-count fallback. `notApplicable` when no user limit is configured (core/unlimited-user license) and no authoritative figure is available. |
+| `locks` | ascending (% of lock table utilized) | 50 | 85 | `notApplicable` when usable+used is 0. |
+| `alerts` | *(state mapping, no numeric threshold)* | -- | -- | Numeric `$SYSTEM.Monitor` state: `-1` (Hung) = critical, `1` (Warning) / `2` (Alert) = warning, `0` (OK) = ok. |
+
+**Informational areas** (no ok/warning threshold in v1 -- raw values only; always `ok`, or
+`notApplicable` when not configured): `system`, `mirror`, `ecp`, `interop`.
+
+A failed probe for one area yields `level: "error"` for that area only (sanitized message in
+`explanation`) -- every other area stays intact, and an `error` finding counts as `warning`
+severity for the overall verdict (it never escalates the verdict to `critical` by itself).
+A `notApplicable` finding (e.g. no mirror membership, no Interoperability classes in this
+namespace) never affects the verdict.
+
+**Input (no args -- check all 9 areas):**
+```json
+{}
+```
+
+**Input (subset + threshold override):**
+```json
+{
+  "areas": ["journal", "license"],
+  "thresholds": { "journalPctCrit": 95 }
+}
+```
+
+**Output (`structuredContent`):**
+```json
+{
+  "verdict": "warning",
+  "checkedAt": "2026-07-08T12:00:00.000Z",
+  "findings": [
+    {
+      "area": "journal",
+      "level": "warning",
+      "metric": "journalSpacePct",
+      "value": 85.2,
+      "threshold": 80,
+      "explanation": "Journal directory is 85.2% full (warning threshold 80%). Purge or expand journal space."
+    },
+    {
+      "area": "license",
+      "level": "ok",
+      "metric": "licensePct",
+      "value": 12.5,
+      "threshold": 80,
+      "explanation": "License is 12.5% used (IRIS-authoritative dashboard figure) -- ok threshold 80%."
+    }
+  ],
+  "raw": {
+    "journal": { "volumeFreeBytes": 148000000, "volumeTotalBytes": 1000000000, "state": "Open" },
+    "license": { "currentCSPUsers": 1, "userLimit": 8, "licenseCurrent": 1, "licenseCurrentPct": 12.5 }
+  }
+}
+```
+
+`iris_health_check` is a **read tool (`mutates: "read"`), enabled by default** under
+`IRIS_GOVERNANCE`.
+</details>
 
 <details>
 <summary><strong>iris_metrics_system</strong> -- System metrics</summary>

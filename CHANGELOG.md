@@ -2,6 +2,31 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-07]
+
+### Added — Epic 23: Composite Health Check (`@iris-mcp/ops`)
+
+One new read tool, `iris_health_check`, that runs a composite health check across up to 9 IRIS
+instance areas in ONE round-trip and returns a structured verdict (`healthy` / `warning` /
+`critical`) with a per-area finding explaining why — the intended FIRST call of any diagnostic
+session, replacing 6+ separate calls with documented, overridable thresholds. **Strictly
+additive** — every existing tool/schema/output is unchanged (ops package `index.test.ts` count
+20 → 21), and the frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is
+**unchanged** — the new key is a non-baseline **`mutates: "read"` → enabled by default** under
+`IRIS_GOVERNANCE` (an operator can still disable it explicitly). Suite tool count: **100 → 101**
+(ops **20 → 21**; advertised incl. the framework tool **105 → 106**). `BOOTSTRAP_VERSION`
+unchanged in this story (`13b4b5f003ab`, shipped by Story 23.1) — this story is TypeScript-only.
+
+- **`iris_health_check`** ([packages/iris-ops-mcp/src/tools/health.ts](packages/iris-ops-mcp/src/tools/health.ts), `ExecuteMCPv2.REST.Health:HealthCheck` via `GET/POST /monitor/health`) — optional `areas` (subset of the 9 areas; an empty array or omission means all 9), optional `thresholds` (partial overrides of the 8 default warning/critical thresholds, applied purely client-side — never sent to the endpoint). Output `structuredContent`: `{verdict, checkedAt, findings, raw}`; `findings[]` carries one entry per CHECKED area (`{area, level, metric, value, threshold, explanation}`, `level` one of `ok`/`warning`/`critical`/`notApplicable`/`error`).
+- **Server-side raw, client-side judgment** (architecture decision H5, split across Story 23.1 ObjectScript + this story): the endpoint returns per-area raw values only with per-area Try/Catch fault isolation; every threshold, per-area level rule, and the overall verdict are computed here in TypeScript, so a threshold tweak never needs a bootstrap bump. `journal`/`license`/`lockTable` thresholds are ASCENDING (% full or % used — high is bad); only `dbFreePct` is DESCENDING (% free — low is bad; Story 23.0 direction-correction finding). `system`/`mirror`/`ecp`/`interop` are informational in v1 (no ok/warning threshold — always `ok`, or `notApplicable` when not configured; CR 23.0-3).
+- **`memory` area DROPPED, not folded into `system`** (Story 23.0 finding) — no reliable instance-wide memory-health signal exists in IRIS (`SYS.Stats.Buffer` measures cache turnover, not exhaustion; `SYS.History.SharedMemoryData` is `[Internal]`-flagged and inconsistently populated). Passing `areas: ["memory"]` is rejected by the Zod input schema with the full list of the 9 valid areas.
+- **`databases` per-DB aggregation** (CR 23.0-4): the worst-DB (by severity: critical > error/warning > ok, `notApplicable` excluded) drives the area's single finding; the full per-DB breakdown (`{name, size, maxSize, mounted, openFailed}` per database) stays in `raw.databases`. A DB with `maxSize=0` (IRIS's own "unlimited" recommendation) or `mounted=false` reports `notApplicable` — v1 has no volume-level disk-exhaustion signal for those (CR 23.0-1); a genuine `%OpenId` failure (`openFailed=true`, Story 23.1) reports `level: "error"` instead, distinct from the benign `notApplicable` cases.
+- **`license` prefers the IRIS-authoritative figure** (CR 23.0-2): `licenseCurrentPct` (from `SYS.Stats.Dashboard`, emitted by Story 23.1) is used when present; falls back to `currentCSPUsers / userLimit * 100` only when absent, with a `notApplicable` guard when `userLimit=0` (core/unlimited-user license) and no authoritative figure exists.
+- **Error isolation never fakes a critical verdict**: a failed probe for one area yields `level: "error"` for that area only (the endpoint's sanitized message, verbatim) — every other area's finding stays intact, and `error` counts as `warning` severity for the overall verdict (never `critical` on its own). A `notApplicable` finding never affects the verdict either way.
+- **Input validation** (CR 23.0-6 / CR 23.1-1): the Zod `areas` enum is the authoritative validator (the endpoint itself stays permissive by design) — `memory` and any other unknown area name is rejected with the valid-options list; `areas: []` is treated the same as omitting the parameter (all 9 areas); threshold overrides accept any number independently (including inverted or extreme values, e.g. `journalPctCrit: 1`, per AC 3) with `NaN`/non-numeric values already guarded by `z.number()`.
+
+Documentation: [`packages/iris-ops-mcp/README.md`](packages/iris-ops-mcp/README.md) (new "Health Check Tool" reference section + a full `iris_health_check` Tool Examples entry with the threshold table + the **read / enabled-by-default** governance callout), [`tool_support.md`](tool_support.md) (new row + ops → 21 / ExecuteMCPv2-backed 76 → 77 / suite → 101 package / 106 advertised + Epic 23 governance-defaults note + a "Fields returned" entry for the `structuredContent` shape), the root [README](README.md) (ops 20 → 21, 100 → 101 tools, ASCII diagram, and a health-check capability line in both the Servers table and the "Which Server Do I Need?" table).
+
 ## [Pre-release — 2026-07-03]
 
 ### Added — Epic 22: Lines-of-Code Counter (`@iris-mcp/dev`)

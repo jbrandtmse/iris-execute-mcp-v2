@@ -35,7 +35,7 @@ describe("iris-ops-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 20 package tools (+1 framework tool)", () => {
+    it("should create a server instance with 21 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -43,9 +43,10 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      // 20 package tools + the framework `iris_server_profiles` discovery tool
-      // (Epic 19, decision E1 — registered on every server by the shared base).
-      expect(server.toolCount).toBe(21);
+      // 21 package tools (Story 23.2 added iris_health_check, 20 -> 21) + the
+      // framework `iris_server_profiles` discovery tool (Epic 19, decision E1
+      // — registered on every server by the shared base).
+      expect(server.toolCount).toBe(22);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -68,7 +69,7 @@ describe("iris-ops-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names array with 19 entries", () => {
+    it("should return tool names array with 22 entries", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/ops",
         version: "0.0.1",
@@ -76,8 +77,9 @@ describe("iris-ops-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      // 20 package tools + the framework discovery tool (Epic 19, decision E1).
-      expect(names).toHaveLength(21);
+      // 21 package tools (Story 23.2 added iris_health_check) + the framework
+      // discovery tool (Epic 19, decision E1).
+      expect(names).toHaveLength(22);
       expect(names).toContain("iris_server_profiles");
       expect(names).toContain("iris_metrics_system");
       expect(names).toContain("iris_metrics_alerts");
@@ -99,6 +101,7 @@ describe("iris-ops-mcp", () => {
       expect(names).toContain("iris_task_run");
       expect(names).toContain("iris_task_history");
       expect(names).toContain("iris_config_manage");
+      expect(names).toContain("iris_health_check");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {

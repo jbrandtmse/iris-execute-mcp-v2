@@ -13,6 +13,7 @@ import {
   metricsInteropTool,
 } from "./metrics.js";
 import { alertsManageTool } from "./alerts.js";
+import { healthCheckTool } from "./health.js";
 import { jobsListTool, locksListTool } from "./jobs.js";
 import { processManageTool } from "./process.js";
 import {
@@ -57,4 +58,5 @@ export const tools: ToolDefinition[] = [
   taskRunTool,
   taskHistoryTool,
   configManageTool,
+  healthCheckTool,
 ];
