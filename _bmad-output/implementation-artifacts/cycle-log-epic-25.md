@@ -24,3 +24,5 @@
 2026-07-09T00:14:29Z	Story 25.2	qa_complete	spawn_at=2026-07-09T00:14:29Z model=claude-sonnet-5 tests_added=1 first_run_failures=0 clarifications=0 closing_sections_present=true note=doc-rot-sync-guard
 2026-07-09T00:26:53Z	Story 25.2	cr_complete	spawn_at=2026-07-09T00:26:53Z model=claude-opus-4-8 resolved=2 deferred=1 dismissed=2 high=0 med=2 low=1 clarifications=0 closing_sections_present=true note=docs-accurate+guard-hardened
 2026-07-09T00:28:13Z	Story 25.2	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=live-IRIS-HSCUSTOM-deploy-and-test-class-e2e(compile-clean+tests-2of2-total-matches)+prompts-list+get-diagnose-slow-query-render model=claude-opus-4-8
+2026-07-09T00:28:40Z	Story 25.2	committed	sha=8dc2b7a submodules=
+2026-07-09T00:28:58Z	Epic 25	epic_status_done	stories=3
