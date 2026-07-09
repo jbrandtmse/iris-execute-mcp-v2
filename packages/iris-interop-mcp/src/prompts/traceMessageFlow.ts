@@ -8,11 +8,7 @@
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
-
-/** Render `value`, or a bracketed placeholder for the static skills doc when omitted. */
-function arg(value: string | undefined, placeholder: string): string {
-  return value !== undefined && value !== "" ? value : placeholder;
-}
+import { argOrPlaceholder as arg, isArgProvided } from "@iris-mcp/shared";
 
 export const traceMessageFlowPrompt: PromptDefinition = {
   name: "trace-message-flow",
@@ -38,7 +34,7 @@ export const traceMessageFlowPrompt: PromptDefinition = {
     const id = arg(args.sessionOrHeaderId, "<sessionOrHeaderId>");
     const namespace = arg(args.namespace, "<namespace>");
     const namespaceNote =
-      args.namespace !== undefined
+      isArgProvided(args.namespace)
         ? `Target namespace: "${namespace}" — pass \`namespace: "${namespace}"\` on every tool call below.`
         : `No namespace specified — omit \`namespace\` to use the server's configured default on every call below.`;
 

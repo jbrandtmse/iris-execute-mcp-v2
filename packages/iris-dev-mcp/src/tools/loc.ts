@@ -140,7 +140,11 @@ export const locCountTool: ToolDefinition = {
     "are excluded from wildcard scans; name them explicitly (e.g. '%Z*.cls') to count " +
     "them. Use non-overlapping spec parts: an exact document name listed before a " +
     "wildcard part that also matches it can drop documents (an IRIS StudioOpenDialog " +
-    "spec quirk).",
+    "spec quirk). This is an ALL-OR-NOTHING scan: if a matched document is deleted or " +
+    "renamed between enumeration and retrieval (a rare TOCTOU race on a namespace " +
+    "being edited concurrently), the whole call fails with an error naming the " +
+    "vanished document rather than skipping it and returning partial results -- rerun " +
+    "the call once the namespace is quiescent.",
   inputSchema: z.object({
     spec: z
       .string()

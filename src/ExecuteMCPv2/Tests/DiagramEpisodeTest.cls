@@ -441,4 +441,63 @@ Method TestUnpairedSelfCallDoesNotGrowStack() As %Status
     Quit $$$OK
 }
 
+/// CR 22.1-1 (resolved Story 26.4, defense-only guard): a MALFORMED pairloop event whose
+/// REQUEST leg carries an empty <var>Src</var> — a shape the live pipeline's sole pairloop
+/// producer (<method>Compressor:Compress</method>) never emits (confirmed by the Story
+/// 26.4 source-read probe: its <code>tLoop.Req</code> is always a real request-arrow event
+/// with a non-empty <code>Src</code>) — must NOT unwind an open sync frame. Directly
+/// exercises <method>ExecuteMCPv2.Diagram.Compressor:CompressEpisodes</method> with a
+/// hand-built malformed pairloop (bypassing Correlate/Compress, whose real producer can
+/// never emit this shape) to prove the <code>(tReqSrc '= "")</code> guard added to
+/// EpisodeCore's rule-A <code>While</code> condition is load-bearing: reverting it would
+/// make an empty <var>tReqSrc</var> compare unequal to every open frame's destination and
+/// over-unwind, splitting what should be one repeated 2-event episode into four
+/// alternating single-event episodes that never collapse (asserted below: WITH the guard,
+/// two identical [open-request, malformed-pairloop] repetitions collapse to ONE
+/// episodeloop of Count=2; WITHOUT it they would stay four uncollapsed events).
+Method TestMalformedPairloopEmptyReqSrcDoesNotUnwind() As %Status
+{
+    Set tStream = ##class(%Library.ListOfObjects).%New()
+    For tI = 1:1:2 {
+        ; leg 1: a sync push request opens a frame (Demo.Service -> Demo.Loop)
+        Set tReq = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+        Set tReq.Kind = "arrow"
+        Set tReq.Src = "Demo.Service"
+        Set tReq.Dst = "Demo.Loop"
+        Set tReq.Label = "Demo.Msg.Open"
+        Set tReq.Arrow = "->>"
+        Set tReq.Role = "req"
+        Do tStream.Insert(tReq)
+
+        ; leg 2: a malformed pairloop whose Req leg carries an empty Src -- a shape the
+        ; real pairloop producer never emits (see method doc comment above)
+        Set tPReq = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+        Set tPReq.Kind = "arrow"
+        Set tPReq.Src = ""
+        Set tPReq.Dst = "Demo.Op"
+        Set tPReq.Label = "Demo.Msg.Inner"
+        Set tPReq.Arrow = "->>"
+        Set tPReq.Role = "req"
+        Set tPResp = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+        Set tPResp.Kind = "arrow"
+        Set tPResp.Src = "Demo.Op"
+        Set tPResp.Dst = ""
+        Set tPResp.Label = "Demo.Msg.InnerResp"
+        Set tPResp.Arrow = "->>"
+        Set tPResp.Role = "resp"
+        Set tPairloop = ##class(ExecuteMCPv2.Diagram.RenderEvent).%New()
+        Set tPairloop.Kind = "pairloop"
+        Set tPairloop.Count = 2
+        Set tPairloop.Req = tPReq
+        Set tPairloop.Resp = tPResp
+        Do tStream.Insert(tPairloop)
+    }
+    Set tSC = ##class(ExecuteMCPv2.Diagram.Compressor).CompressEpisodes(tStream, .tOut)
+    Do $$$AssertStatusOK(tSC, "CompressEpisodes should succeed on the malformed fixture")
+    Do $$$AssertEquals(tOut.Count(), 1, "The two identical [open, malformed-pairloop] episodes stay grouped and collapse to one episodeloop (guard prevents over-unwind)")
+    Do $$$AssertEquals(tOut.GetAt(1).Kind, "episodeloop", "Collapsed event is an episodeloop")
+    Do $$$AssertEquals(tOut.GetAt(1).Count, 2, "Episode loop count is 2 (both repetitions merged)")
+    Quit $$$OK
+}
+
 }

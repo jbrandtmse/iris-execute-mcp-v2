@@ -28,6 +28,7 @@ import { describe, it, expect } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
+import { recoverStuckProductionPrompt } from "../prompts/recoverStuckProduction.js";
 
 /** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1 + Story 26.3. */
 const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production", "resend-failed-messages"];
@@ -114,5 +115,35 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
     expect(names).not.toContain("promote-environment-change");
+  });
+});
+
+// ── CR 25.1-4 (resolved Story 26.4) ──────────────────────────────────
+// An explicitly-empty-string optional argument must take the SAME
+// "not provided" branch as an omitted one, for BOTH note branches this
+// prompt has (namespace AND production).
+
+describe("recover-stuck-production build() — CR 25.1-4 empty-string alignment", () => {
+  it("an explicit empty-string namespace renders the SAME as an omitted namespace", () => {
+    const omitted = recoverStuckProductionPrompt.build({});
+    const explicitEmpty = recoverStuckProductionPrompt.build({ namespace: "" });
+    expect(explicitEmpty).toBe(omitted);
+    expect(explicitEmpty).toContain("No namespace specified");
+  });
+
+  it("an explicit empty-string production renders the SAME as an omitted production", () => {
+    const omitted = recoverStuckProductionPrompt.build({});
+    const explicitEmpty = recoverStuckProductionPrompt.build({ production: "" });
+    expect(explicitEmpty).toBe(omitted);
+    expect(explicitEmpty).toContain("No production class name given");
+  });
+
+  it("real namespace/production values take the provided branch and are echoed", () => {
+    const result = recoverStuckProductionPrompt.build({
+      namespace: "USER",
+      production: "My.Production",
+    });
+    expect(result).toContain('Target namespace: "USER"');
+    expect(result).toContain("Production: `My.Production`.");
   });
 });

@@ -755,4 +755,22 @@ describe("iris_health_check handler -- error handling", () => {
     mockHttp.get.mockRejectedValue(new Error("network down"));
     await expect(healthCheckTool.handler({}, ctx)).rejects.toThrow("network down");
   });
+
+  // CR 23.2-3: a valid-JSON, HTTP-200 Atelier envelope missing `result`
+  // (server contract drift) must surface as this tool's clean isError
+  // envelope -- never a raw TypeError, and never a false "healthy".
+  it("returns isError:true (not a crash) when the envelope's result is undefined", async () => {
+    mockHttp.get.mockResolvedValue({ status: { errors: [] }, console: [], result: undefined });
+    const result = await healthCheckTool.handler({}, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("no result payload");
+    expect(result.structuredContent).toBeUndefined();
+  });
+
+  it("returns isError:true (not a crash) when the envelope's result is null", async () => {
+    mockHttp.get.mockResolvedValue({ status: { errors: [] }, console: [], result: null });
+    const result = await healthCheckTool.handler({}, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("no result payload");
+  });
 });

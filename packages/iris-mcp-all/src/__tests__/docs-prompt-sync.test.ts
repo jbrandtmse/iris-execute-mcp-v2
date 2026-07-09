@@ -119,4 +119,53 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
     expect(rootReadme).toContain("102 tools");
   });
+
+  // CR 25.2-1 (resolved Story 26.4): the primary drift vectors (rename/add/
+  // remove/mis-attribution) were already mechanically enforced above, but the
+  // human-readable NUMERIC prose (the README's "10 prompts" heading and
+  // tool_support.md's per-server tallies) was not -- a green suite could
+  // coexist with a stale total if a future prompt is added/removed without
+  // updating the prose. These two tests close that gap.
+
+  it("the root README's prompt-count heading matches prompts.length exactly", async () => {
+    const prompts = await loadAllPrompts(root);
+    const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
+    const countRe = new RegExp(`\\b${prompts.length}\\s+prompts\\b`);
+    expect(
+      rootReadme,
+      `README.md does not contain a "${prompts.length} prompts" string matching prompts.length=${prompts.length}`,
+    ).toMatch(countRe);
+  });
+
+  it("tool_support.md's per-server prompt tallies match the registered per-package counts exactly", async () => {
+    const prompts = await loadAllPrompts(root);
+    const toolSupport = readFileSync(resolve(root, "tool_support.md"), "utf-8");
+
+    const shortNameToPkg: Record<string, string> = {
+      ops: "iris-ops-mcp",
+      dev: "iris-dev-mcp",
+      interop: "iris-interop-mcp",
+      admin: "iris-admin-mcp",
+    };
+
+    for (const [shortName, pkg] of Object.entries(shortNameToPkg)) {
+      const expectedCount = prompts.filter((p) => p.pkg === pkg).length;
+      const tallyRe = new RegExp("`" + shortName + "`\\s+(\\d+)");
+      const match = toolSupport.match(tallyRe);
+      expect(match, `tool_support.md missing a \`${shortName}\` N prompt tally`).not.toBeNull();
+      expect(Number(match?.[1]), `tool_support.md \`${shortName}\` prompt tally`).toBe(
+        expectedCount,
+      );
+    }
+
+    // iris-data-mcp ships no prompts in v1 -- asserted via the "none" wording
+    // (not a numeric tally) plus the actual registered count.
+    expect(toolSupport).toMatch(/`data`\s+none/);
+    expect(prompts.filter((p) => p.pkg === "iris-data-mcp")).toHaveLength(0);
+
+    // The sentence's own stated total ("a pack of N **MCP prompts**") must
+    // also match prompts.length.
+    const totalRe = new RegExp(`pack of ${prompts.length}\\s+\\*\\*MCP prompts\\*\\*`);
+    expect(toolSupport).toMatch(totalRe);
+  });
 });

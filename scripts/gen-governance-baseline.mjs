@@ -50,6 +50,11 @@ import { createHash } from 'crypto';
 // and the governance.test.ts drift guard now import the SAME derivation so they can never
 // disagree. Imported from the BUILT shared dist — this generator already runs AFTER
 // `pnpm turbo run build` (it imports the server dists), so the shared dist is present.
+// CR 22.1-2 (resolved Story 26.4): the root package.json now runs a
+// `pregen:governance-baseline[:check]` npm pre-hook (`turbo run build --filter
+// @iris-mcp/shared`) before either script, so this generator can no longer read a
+// STALE `@iris-mcp/shared` dist while `governance.test.ts` (which resolves the TS
+// source) reads current logic — both scripts always see freshly-built derivation code.
 import {
   deriveKeysForTool,
   computeBaselineDrift,

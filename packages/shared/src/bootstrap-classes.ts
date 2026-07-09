@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "1f3afba4ac52";
+export const BOOTSTRAP_VERSION = "e5c18edd00c0";
 
 export interface BootstrapClass {
   name: string;
@@ -248,7 +248,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "1f3afba4ac52";
+Parameter BOOTSTRAPVERSION = "e5c18edd00c0";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1281,8 +1281,17 @@ ClassMethod EpisodeCore(pRenderEvents As %Library.ListOfObjects, Output pCompres
             } ElseIf (tEv.Kind = "pairloop") && $IsObject(tEv.Req) {
                 Set tReqSrc = tEv.Req.Src
             }
+            ; CR 22.1-1 (resolved Story 26.4): require a non-empty tReqSrc before
+            ; unwinding. The sole pairloop producer (Compress, ~line 85) always sets
+            ; .Req to a real request-arrow event with a non-empty Src, so this guard
+            ; is defense-only today (UNREACHABLE via the current pipeline) — but
+            ; without it, an unknowable source (a future pairloop shape whose .Req is
+            ; a non-object, only gated by $IsObject above at tReqSrc assignment) would
+            ; compare "" against every real frame destination and over-unwind the
+            ; ENTIRE abandoned-sync-frame stack instead of conservatively not
+            ; unwinding (matching the pre-CR-21.1-1 "pairloops never unwound" fallback).
             If (tEv.Kind = "arrow") || (tEv.Kind = "pairloop") {
-                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tReqSrc '= $List(tFrame(tDepth), 1)) {
+                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tReqSrc '= "") && (tReqSrc '= $List(tFrame(tDepth), 1)) {
                     Set tDepth = tDepth - 1
                 }
             }
@@ -2282,6 +2291,18 @@ Class ExecuteMCPv2.Loc.Scanner Extends %RegisteredObject
 /// ShowGenerated)</code>.</p>
 /// <p><var>pDocs</var> — output: <code>pDocs</code> = count, <code>pDocs(1..n)</code>
 /// = full document names including the type suffix (e.g. <code>Pkg.Cls.cls</code>).</p>
+/// <p><b>CR 22.0-D2 (closed-by-decision, Story 26.4):</b> a multi-part <var>pSpec</var>
+/// where an exact document name is listed BEFORE an overlapping wildcard part can
+/// silently drop documents. Re-confirmed via source read of
+/// <code>irislib/%Library/RoutineMgr.cls</code>
+/// <method>StudioOpenDialogExecute</method> (~lines 1146-1180): the query re-processes
+/// each comma-delimited spec part into its OWN pattern/index-range tuple and iterates
+/// them independently, so part order and overlap genuinely affect which names are
+/// yielded — this is native <code>%RoutineMgr:StudioOpenDialog</code> behavior, not a
+/// port defect. This method passes <var>pSpec</var> through to the query verbatim
+/// (decision D2 — spec semantics = StudioOpenDialog semantics); callers should use
+/// non-overlapping spec parts (documented in the <code>iris_loc_count</code> tool
+/// description).</p>
 ClassMethod EnumerateDocs(pSpec As %String, pIncludeGenerated As %Boolean = 0, Output pDocs) As %Status
 {
     Set tSC = $$$OK
@@ -2386,6 +2407,17 @@ ClassMethod ScanDoc(pDocName As %String, Output pCounts, Output pIsTest As %Bool
 /// <p>The aggregation invariant <code>blank + sourceCode + sourceComment + testCode
 /// + testComment = totalLines</code> is enforced per document AND in the aggregate as
 /// a hard error (the reference tool only warned on stderr).</p>
+/// <p><b>CR 22.0-D1 (closed-by-decision, Story 26.4):</b> <method>Count</method> is an
+/// ALL-OR-NOTHING facade — a per-document <method>Scanner:ScanDoc</method> failure
+/// (including the rare TOCTOU race where a matched document is deleted/renamed between
+/// <method>Scanner:EnumerateDocs</method> and retrieval) aborts the ENTIRE scan with a
+/// hard error naming the offending document, rather than skipping it and returning
+/// partial results. This is a deliberate design choice, not an oversight: the same
+/// hard-error discipline enforces the bucket-sum invariant above, no incident is
+/// possible on a quiescent namespace, and the error message names the offending
+/// document so the caller can rerun once the namespace is quiescent. See
+/// <code>packages/iris-dev-mcp/src/tools/loc.ts</code>'s <code>iris_loc_count</code>
+/// tool description for the caller-facing statement of this contract.</p>
 Class ExecuteMCPv2.Loc.Generate Extends %RegisteredObject
 {
 
@@ -12016,10 +12048,36 @@ ClassMethod HealthCheck() As %Status
             }
         }
         Else {
-            Set tRequestedCSV = $Get(%request.Data("areas",1))
+            ; CR 23.1-5 (resolved Story 26.4; corrected CR 26.4-R1): loop every
+            ; "areas" query-param occurrence and join with commas. %request.Count
+            ; ("areas") returns the number of values -- the unsubscripted node
+            ; %request.Data("areas") holds NO count (values live only at
+            ; "areas",n), so +$Get(%request.Data("areas")) is always 0 and would
+            ; silently drop the filter (all 9 areas run). A repeated-param client
+            ; (?areas=journal&areas=license) previously only saw the first value.
+            ; The documented comma-separated contract (?areas=journal,license)
+            ; works unchanged (a single value, n=1 -> Count=1).
+            Set tRequestedCSV = ""
+            Set tParamCount = %request.Count("areas")
+            For tParamIdx = 1:1:tParamCount {
+                Set tParamVal = $Get(%request.Data("areas",tParamIdx))
+                If tParamVal '= "" {
+                    Set tRequestedCSV = tRequestedCSV _ $Select(tRequestedCSV="":"",1:",") _ tParamVal
+                }
+            }
         }
 
-        Do ..HealthCheckParseAreas(tRequestedCSV, .tWant)
+        ; CR 23.1-4 (resolved Story 26.4): capture and check the %Status returned
+        ; by HealthCheckParseAreas rather than discarding it -- a future refactor
+        ; of the parse body could fail before populating all 9 tWant subscripts,
+        ; which would otherwise raise an opaque <UNDEFINED> from deep inside the
+        ; area dispatch below instead of a clean, sanitized error envelope.
+        Set tSC3 = ..HealthCheckParseAreas(tRequestedCSV, .tWant)
+        If $$$ISERR(tSC3) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC3
+            Quit
+        }
 
         Set tAreas = {}
         Set tErrors = {}
@@ -12116,6 +12174,10 @@ ClassMethod AreaErrorText(pStatus As %Status) As %String
 ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
+    ; CR 23.1-3 (resolved Story 26.4): tRS declared before Try so BOTH the
+    ; success path and the Catch below can close it -- previously this result
+    ; set was never closed at all (not even on the success path).
+    Set tRS = ""
     Try {
         Set tArea = {}
 
@@ -12141,9 +12203,11 @@ ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObjec
             Set tProcessCount = +tRS.cnt
         }
         Do tArea.%Set("processCount", tProcessCount, "number")
+        Do:$IsObject(tRS) tRS.Close()
 
         Do pAreas.%Set("system", tArea)
     } Catch ex {
+        Do:$IsObject(tRS) tRS.Close()
         Do pErrors.%Set("system", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC
@@ -12160,6 +12224,11 @@ ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObjec
 ClassMethod HealthCheckDatabases(pAreas As %DynamicObject, pErrors As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
+    ; CR 23.1-3 (resolved Story 26.4): tDBRS declared before Try so the Catch
+    ; below can close it -- previously the close only ran on the success path
+    ; (inside the $$$ISOK(tSC2) branch), so an Execute() error OR an exception
+    ; mid-loop skipped it.
+    Set tDBRS = ""
     Try {
         Set tList = []
         Set tDBRS = ##class(%ResultSet).%New("Config.Databases:List")
@@ -12190,12 +12259,13 @@ ClassMethod HealthCheckDatabases(pAreas As %DynamicObject, pErrors As %DynamicOb
                 Do tEntry.%Set("openFailed", tOpenFailed, "boolean")
                 Do tList.%Push(tEntry)
             }
-            Do tDBRS.Close()
             Do pAreas.%Set("databases", tList)
         } Else {
             Do pErrors.%Set("databases", ..AreaErrorText(tSC2))
         }
+        Do:$IsObject(tDBRS) tDBRS.Close()
     } Catch ex {
+        Do:$IsObject(tDBRS) tDBRS.Close()
         Do pErrors.%Set("databases", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC
@@ -12407,6 +12477,9 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
         Quit tSC
     }
 
+    ; CR 23.1-3 (resolved Story 26.4): tQRS declared before Try so the Catch
+    ; below can close it -- previously this result set was never closed at all.
+    Set tQRS = ""
     Try {
         Set tArea = {}
         Do tArea.%Set("interopEnabled", 1, "boolean")
@@ -12429,7 +12502,9 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
         } Else {
             Do pErrors.%Set("interop", ..AreaErrorText(tQSC))
         }
+        Do:$IsObject(tQRS) tQRS.Close()
     } Catch ex {
+        Do:$IsObject(tQRS) tQRS.Close()
         Do pErrors.%Set("interop", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC

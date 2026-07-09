@@ -838,6 +838,22 @@ export const healthCheckTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
+      // CR 23.2-3: a 200 response with a valid Atelier envelope but a missing
+      // `result` (server contract drift) must surface as this tool's clean
+      // `isError` envelope, never a raw TypeError (from dereferencing
+      // `undefined.areas`) or a false "All 0 areas healthy" from a silent
+      // `?? {}` fallback.
+      if (response.result === undefined || response.result === null) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Error checking IRIS health: health endpoint returned no result payload.",
+            },
+          ],
+          isError: true,
+        };
+      }
       const result = response.result as {
         areas?: RawAreas;
         errors?: Record<string, string>;
