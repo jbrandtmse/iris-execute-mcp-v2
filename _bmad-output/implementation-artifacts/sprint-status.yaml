@@ -348,7 +348,7 @@ development_status:
   25-0-prompts-framework-plumbing: done
   25-1-prompt-skill-content-and-generators: done
   25-2-prompts-docs-and-client-smoke: done
-  epic-25-retrospective: optional
+  epic-25-retrospective: done
 
   # Epic 26: Interop Message Resend / Replay — iris_message_resend (iris-interop-mcp)
   # Added 2026-07-07 via bmad-correct-course. BINDING SPEC: research/feature-specs/04-message-resend.md.
