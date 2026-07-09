@@ -18,3 +18,10 @@
 2026-07-09T07:08:21Z	Story 26.1	qa_complete	spawn_at=2026-07-09T07:05Z model=claude-sonnet-5 tests_added=2 unittest=13/13 first_run_failures=0 clarifications=0 closing_sections_present=true note=count_cap_data_dependent+partial_batch_continuation
 2026-07-09T16:23:12Z	Story 26.1	cr_complete	spawn_at=2026-07-09T07:12Z model=claude-opus-4-8 resolved=0 deferred=6 dismissed=2 high=0 med=0 low=6 clarifications=0 closing_sections_present=true status=done note=guards_no_bypass+rule16_confirmed
 2026-07-09T16:23:12Z	Story 26.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=5_destructive_refusals_no_write+preview_read_live model=claude-opus-4-8
+2026-07-09T16:23:24Z	Story 26.1	committed	sha=1e901e4 submodules=
+2026-07-09T16:25:33Z	Story 26.2	story_created	path=_bmad-output/implementation-artifacts/26-2-resend-ts-tool.md kind=ts_tool consumer_of=26.1 counts=21to22
+2026-07-09T16:39:22Z	Story 26.2	dev_complete	spawn_at=2026-07-09T07:40Z model=claude-sonnet-5 files=8 tests=message-resend.test.ts,message-resend-governance.test.ts interop=314/314 shared=686/686 all=34/34 counts=21to22 baseline_check=exit0 clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-07-09T16:39:22Z	Story 26.2	adr_verifications_complete	result=none_required reason=no_docs_adr_registry model=claude-opus-4-8
+2026-07-09T16:41:55Z	Story 26.2	qa_complete	spawn_at=2026-07-09T08:00Z model=claude-sonnet-5 tests_added=4 interop=318/318 first_run_failures=0 clarifications=0 closing_sections_present=true note=odbcToIso_edges+window_refusal_passthrough baseline_check=exit0
+2026-07-09T16:56:00Z	Story 26.2	cr_complete	spawn_at=2026-07-09T08:05Z model=claude-opus-4-8 resolved=1 deferred=1 dismissed=1 high=0 med=0 low=1 clarifications=0 closing_sections_present=true status=done note=governance_truthful+crosscheck_34of34+headerid_patch
+2026-07-09T16:56:00Z	Story 26.2	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=built_dist_advertises_tool_22pkg+mutates_map_correct model=claude-opus-4-8
