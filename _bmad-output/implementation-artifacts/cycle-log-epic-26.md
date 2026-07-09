@@ -42,3 +42,4 @@
 2026-07-09T18:33:20Z	Story 26.4	committed	sha=ad5df0f submodules=
 2026-07-09T18:33:37Z	Epic 26	epic_status_done	stories=5
 2026-07-09T23:10:10Z	Epic 26	epic_retro_complete	retro=epic-26-retro-2026-07-09.md rules_codified=47,48 action_items=1 model=claude-opus-4-8
+2026-07-09T23:10:52Z	Epic 26	epic_merged_to_feature	repos=. feature_sha=2bca856 merge_sha=2bca856 submodules=
