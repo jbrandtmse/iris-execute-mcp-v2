@@ -4013,6 +4013,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 26.1 ObjectScript handlers + guards + tests + bootstrap bump (spec §6 story 1)
 - 26.2 TS tool + governance wiring + tests (spec §6 story 2)
 - 26.3 Docs + live smokes + gated prompt (spec §6 story 3)
+- 26.4 Deferred-work ledger burn-down (Rule #37 — dedicated terminal-disposition cleanup; created at the Epic 26 retro-review gate per the 2026-07-09 binding decision in `deferred-work.md`; runs LAST, after the feature stories)
 
 **Out of scope (v1)**: edit-and-resend; cross-namespace batch resend; resend scheduling/throttling; automatic root-cause classification.
 
@@ -4045,6 +4046,20 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 26.3.2** — Live smokes (Rules #26/#34): single resend of a disposable test message on the scratch production with the new header verified via `iris_production_messages`; live refusals — `resendFiltered` without `confirm`, over-cap, unbounded window, governance-disabled write — each verified no-write; second interop-enabled namespace smoke or explicit residual-risk note.
 - **AC 26.3.3** — The `resend-failed-messages` prompt added to the Epic 25 pack (content per spec 03 §3, `gen-skills` regenerated, `validate-prompts` green).
 - **AC 26.3.4** — Spec §7 acceptance criteria 1–9 pass; conventions §6 complete.
+
+### Story 26.4: Deferred-Work Ledger Burn-Down (Rule #37)
+
+**Context**: Created at the Epic 26 retro-review gate per the BINDING Project-Lead decision (deferred-work.md, 2026-07-09). The Epic-22-own LOW batch has been re-deferred by Epics 23/24/25 (3 consecutive), triggering the Rule #37 ≥3 threshold. This is the dedicated terminal-disposition burn-down. Runs LAST (after 26.0–26.3). Mirrors the Story 22.1 burn-down shape.
+
+**Acceptance Criteria**:
+- **AC 26.4.1** — EVERY carried-open LOW item in the ledger (re-triaged live at the gate; the ~16-item set below) is driven to exactly ONE terminal disposition: **resolved** (code/test/doc fix), **closed-with-evidence** (a live probe/measurement/source read demonstrates no action needed), or **closed-by-decision** (stakeholder explicitly accepts the behavior). **Re-deferral is NOT an allowed outcome** for any carried item. Only Epic-26's OWN new review findings may remain open (AC 22.1.7 shape).
+- **AC 26.4.2** — Probe-first (Rules #16/#37): every item whose suggested resolution embeds an unverified API/behavior claim is verified via live IRIS probe or `irislib`/`irissys` source read BEFORE its disposition; any disposable probe classes are deleted before commit.
+- **AC 26.4.3** — A disposition table (`Item | terminal disposition | evidence`) is recorded in this story AND mirrored into `deferred-work.md`; the ledger visibly closes to ZERO carried-open (only Epic-26-own findings remain).
+- **AC 26.4.4** — Any code fixes keep the frozen governance baseline `1e62c5ad5bf7` untouched (`gen:governance-baseline:check` exit 0); any ObjectScript edits regenerate `bootstrap-classes.ts` + record `BOOTSTRAP_VERSION` from→to (Rule #24, idempotent); full monorepo suite green + lint/type-check clean.
+
+**Carried-open set (re-triaged live at the Epic 26 gate — 16 items):**
+- Inherited Epic-22/23 LOWs: **CR 22.0-D1** (Loc/Generate.cls scan-abort TOCTOU), **CR 22.0-D2** (Loc/Scanner.cls StudioOpenDialog overlap-order), **CR 22.1-1** (Diagram/Compressor.cls pairloop unreachable), **CR 22.1-2** (gen-governance-baseline.mjs dist-coupling), **CR 23.1-3** (Health.cls result-set close hygiene), **CR 23.1-4** (HealthCheckParseAreas status discarded), **CR 23.1-5** (GET repeated `areas` params read first only), **CR 23.2-1** (health.ts `server` field omission — ToolContext), **CR 23.2-2** (health.ts unknown `errors` key dropped), **CR 23.2-3** (health.ts missing `result` → raw TypeError).
+- Epic-25-own LOWs: **CR 25.0-4** (registerPrompt no try/catch), **CR 25.0-5** (duplicate arg-name collapse), **CR 25.1-3** (gen-skills.mjs `--check` stray files), **CR 25.1-4** (arg() empty-string placeholder note-branch), **CR 25.1-6** (all-optional-arg prompts reject omitted `arguments` — SDK limitation), **CR 25.2-1** (prose count numbers not mechanically asserted).
 
 ## Epic 27: Environment Diff & Promotion — `iris_env_diff` / `iris_env_promote` (added 2026-07-07)
 

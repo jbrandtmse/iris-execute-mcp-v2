@@ -54,11 +54,23 @@ NOT report memory/buffer data (`SYS.Stats.Global` = global *references*, not buf
 
 **Output (`structuredContent`):**
 
+> **CR 23.2-1 (closed-by-decision, Story 26.4):** `server` is DROPPED from the
+> v1 output below (was illustrative only). The typed `ToolContext`
+> (`packages/shared/src/tool-types.ts`) exposes only
+> `resolveNamespace/http/atelierVersion/config/paginate`, and `config`'s type
+> `IrisConnectionConfig` carries no profile-name field — the framework only
+> knows the resolved profile name at the `handleToolCall` layer, one level
+> above where a tool handler runs. No other suite tool echoes a synthesized
+> `server` field in its output either. Surfacing it would need a
+> framework-wide `ToolContext` change, out of `iris_health_check`'s scope;
+> `iris_health_check`'s own tests assert nothing about `server`, so this is
+> non-breaking. See `deferred-work.md` CR 23.2-1 for the framework-change
+> option if a future story wants to add it suite-wide.
+
 ```json
 {
   "verdict": "healthy" | "warning" | "critical",
   "checkedAt": "<ISO 8601>",
-  "server": "<profile name>",
   "findings": [
     { "area": "journal", "level": "ok" | "warning" | "critical" | "notApplicable" | "error",
       "metric": "journalSpacePct", "value": 92.4, "threshold": 92,

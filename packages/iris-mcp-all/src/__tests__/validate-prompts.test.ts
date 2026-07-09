@@ -64,16 +64,18 @@ describe("validate-prompts core logic (AC 25.1.3)", () => {
 });
 
 describe("every registered prompt references only real, live tool names (AC 25.1.3)", () => {
-  it("all iris_* tokens across all 9 registered prompts resolve to a real tool", async () => {
+  it("all iris_* tokens across all 10 registered prompts resolve to a real tool", async () => {
     const [prompts, toolNames] = await Promise.all([
       loadAllPrompts(root),
       loadAllToolNames(root),
     ]);
 
-    // Sanity: the v1 pack is exactly 9 non-gated prompts across 4 packages
-    // (Rule per AC 25.1.5 — resend-failed-messages / promote-environment-change
-    // are gated and must NOT be registered yet).
-    expect(prompts).toHaveLength(9);
+    // Sanity: the pack is exactly 10 non-gated prompts across 4 packages —
+    // the 9 v1 stakeholder-approved prompts (AC 25.1.5) plus
+    // `resend-failed-messages`, un-gated in Story 26.3 once
+    // `iris_message_resend` shipped (Story 26.2). `promote-environment-change`
+    // remains gated and must NOT be registered yet.
+    expect(prompts).toHaveLength(10);
 
     const sources = prompts.map(({ pkg, prompt }) => ({
       label: `prompt:${pkg}/${prompt.name}`,
@@ -84,10 +86,10 @@ describe("every registered prompt references only real, live tool names (AC 25.1
     expect(problems).toEqual([]);
   });
 
-  it("the gated prompts (resend-failed-messages, promote-environment-change) are NOT registered", async () => {
+  it("resend-failed-messages IS registered (Story 26.3); promote-environment-change remains gated and is NOT registered", async () => {
     const prompts = await loadAllPrompts(root);
     const names = prompts.map(({ prompt }) => prompt.name);
-    expect(names).not.toContain("resend-failed-messages");
+    expect(names).toContain("resend-failed-messages");
     expect(names).not.toContain("promote-environment-change");
   });
 });

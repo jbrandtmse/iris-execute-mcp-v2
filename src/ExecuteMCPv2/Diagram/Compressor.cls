@@ -252,8 +252,17 @@ ClassMethod EpisodeCore(pRenderEvents As %Library.ListOfObjects, Output pCompres
             } ElseIf (tEv.Kind = "pairloop") && $IsObject(tEv.Req) {
                 Set tReqSrc = tEv.Req.Src
             }
+            ; CR 22.1-1 (resolved Story 26.4): require a non-empty tReqSrc before
+            ; unwinding. The sole pairloop producer (Compress, ~line 85) always sets
+            ; .Req to a real request-arrow event with a non-empty Src, so this guard
+            ; is defense-only today (UNREACHABLE via the current pipeline) — but
+            ; without it, an unknowable source (a future pairloop shape whose .Req is
+            ; a non-object, only gated by $IsObject above at tReqSrc assignment) would
+            ; compare "" against every real frame destination and over-unwind the
+            ; ENTIRE abandoned-sync-frame stack instead of conservatively not
+            ; unwinding (matching the pre-CR-21.1-1 "pairloops never unwound" fallback).
             If (tEv.Kind = "arrow") || (tEv.Kind = "pairloop") {
-                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tReqSrc '= $List(tFrame(tDepth), 1)) {
+                While (tDepth > 0) && ($List(tFrame(tDepth), 3) = 1) && (tReqSrc '= "") && (tReqSrc '= $List(tFrame(tDepth), 1)) {
                     Set tDepth = tDepth - 1
                 }
             }

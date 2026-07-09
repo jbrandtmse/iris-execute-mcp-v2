@@ -22,6 +22,7 @@ import { describe, it, expect } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
+import { diagnoseSlowQueryPrompt } from "../prompts/diagnoseSlowQuery.js";
 
 /** The prompts this package (iris-dev-mcp) owns per Story 25.1 AC 25.1.1. */
 const OWN_PROMPT_NAMES = ["diagnose-slow-query", "objectscript-review", "deploy-and-test-class"];
@@ -93,5 +94,25 @@ describe("iris-dev-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () => {
     for (const foreign of FOREIGN_PROMPT_NAMES) {
       expect(names).not.toContain(foreign);
     }
+  });
+});
+
+// ── CR 25.1-4 (resolved Story 26.4) ──────────────────────────────────
+// An explicitly-empty-string optional argument must take the SAME
+// "not provided" branch as an omitted one (previously it took the
+// "provided" wording yet still rendered the placeholder).
+
+describe("diagnose-slow-query build() — CR 25.1-4 empty-string alignment", () => {
+  it("an explicit empty-string namespace renders the SAME as an omitted namespace", () => {
+    const omitted = diagnoseSlowQueryPrompt.build({ query: "SELECT 1" });
+    const explicitEmpty = diagnoseSlowQueryPrompt.build({ query: "SELECT 1", namespace: "" });
+    expect(explicitEmpty).toBe(omitted);
+    expect(explicitEmpty).toContain("No namespace specified");
+    expect(explicitEmpty).not.toContain('namespace: "<namespace>"');
+  });
+
+  it("a real namespace value takes the provided branch and is echoed", () => {
+    const result = diagnoseSlowQueryPrompt.build({ query: "SELECT 1", namespace: "USER" });
+    expect(result).toContain('Target namespace: "USER"');
   });
 });

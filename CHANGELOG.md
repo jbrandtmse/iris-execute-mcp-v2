@@ -2,6 +2,63 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-09] — Epic 26: Interoperability Message Resend / Replay
+
+### Added — `iris_message_resend` (`@iris-mcp/interop`) + `resend-failed-messages` prompt
+
+Completes the interop troubleshooting loop: the suite could already find, trace, and diagram a
+failed message (Epic 21) but stopped short at "resend it via the Management Portal." This adds a
+resend/replay tool and a matching workflow prompt. Suite tool count: **101 → 102** (interop
+**21 → 22**; advertised incl. the framework tool **106 → 107**).
+
+- **`iris_message_resend`** ([packages/iris-interop-mcp/src/tools/message-resend.ts](packages/iris-interop-mcp/src/tools/message-resend.ts),
+  `ExecuteMCPv2.REST.MessageResend.cls` via `POST /interop/message/resend` +
+  `POST /interop/message/resend/preview`) — three actions built against the pinned
+  `Ens.MessageHeader:ResendDuplicatedMessage` API (Story 26.0 probe, the same call the SMP's own
+  "Resend" button uses — NOT the deprecated `ResubmitMessage`/`ResendMessage` family):
+  - **`preview`** (read) — per header ID (1–100): id, session, source/target item, status, time,
+    body classname (+ existence check — a missing body class does not block resend but is
+    invisible on the header state), a first-~1KB body summary, and a resendability verdict + reason
+    steering toward Request-type `Status=Error` headers (the correct retry target) and flagging
+    Response-type error headers as likely a no-op.
+  - **`resend`** (write) — resend up to 100 explicit `headerIds`. Per-header result
+    `{originalId, newHeaderId?, ok, error?}`; a bad header does not abort the batch.
+  - **`resendFiltered`** (write) — bounded `item` (required) + `status` (default `'Errored'`) +
+    `from`/`to` time-window (required `from`, max 7 days) filter, with a dry-run-first double gate
+    (Epic-20 pattern): `dryRun` defaults `true` and resends NOTHING; executing requires BOTH
+    `dryRun:false` AND `confirm:true`. `maxMessages` caps the batch (default 100, hard cap 500) —
+    over-cap is refused, not truncated-and-executed.
+  - Every dangerous input is rejected ObjectScript-side BEFORE any mutation: numeric header IDs,
+    `item`+`from` required, ≤7-day window, ≤500 count (naming the count found), the confirm double
+    gate, and a `Ens.Director.IsProductionRunning()` precheck (fast, clear refusal instead of N
+    failing resend attempts). **GOVERNANCE:** `preview` is a pure **read, enabled by default**;
+    `resend`/`resendFiltered` are truthfully classified `write` and are **DEFAULT-DISABLED** —
+    unlike `iris_production_control:clean`'s `defaultEnabled` recovery exception (Epic 20), resend
+    deliberately does NOT default-enable, because it duplicates business/clinical data flow
+    downstream rather than recovering a wedged production. Enable via `IRIS_GOVERNANCE`, e.g.
+    `{"global":{"iris_message_resend:resend":true,"iris_message_resend:resendFiltered":true}}`.
+    The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged** — every
+    new key here is non-baseline. **DUPLICATION HAZARD:** resending an already-processed message
+    delivers its data again downstream — always `preview` first.
+- **`resend-failed-messages` prompt** ([packages/iris-interop-mcp/src/prompts/resendFailedMessages.ts](packages/iris-interop-mcp/src/prompts/resendFailedMessages.ts))
+  — the previously-gated prompt (Epic 25 spec `03-skills-prompts-pack.md` §3) now ships: params
+  `item`, `since`; encodes the dry-run-first workflow (preview → review with the user → execute on
+  explicit approval → verify new headers via `iris_production_messages`), and states both the
+  duplication hazard and the default-disabled write status. Suite prompt count: **9 → 10** (interop
+  **2 → 3**); `skills/resend-failed-messages/` regenerated (`pnpm gen:skills`); `promote-environment-change`
+  (dev, Epic 27) remains the sole gated prompt.
+- `BOOTSTRAP_VERSION` **`13b4b5f003ab` → `1f3afba4ac52`** (Story 26.1 — new
+  `ExecuteMCPv2.REST.MessageResend.cls`, 26 embedded classes, added to both bootstrap rosters per
+  Rule #39).
+
+Documentation: root [README.md](README.md) (interop 21 → 22, 101 → 102 tools, ASCII diagram, the
+`iris_message_resend` governance-defaults table row, the "10 prompts" pack + new prompt row),
+[`packages/iris-interop-mcp/README.md`](packages/iris-interop-mcp/README.md) (new
+`iris_message_resend` tool-reference subsection with the duplication hazard + governance snippet,
+new Prompts row, namespace-scoping count), and [`tool_support.md`](tool_support.md) (new row +
+interop → 22 / ExecuteMCPv2-backed 78 → suite → 102 package / 107 advertised + Epic 26
+governance-defaults note + prompt tally 9 → 10).
+
 ## [Pre-release — 2026-07-09]
 
 ### Fixed — `iris_execute_tests` silent result truncation (`@iris-mcp/dev`, HIGH)

@@ -8,11 +8,7 @@
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
-
-/** Render `value`, or a bracketed placeholder for the static skills doc when omitted. */
-function arg(value: string | undefined, placeholder: string): string {
-  return value !== undefined && value !== "" ? value : placeholder;
-}
+import { argOrPlaceholder as arg } from "@iris-mcp/shared";
 
 export const provisionProjectEnvironmentPrompt: PromptDefinition = {
   name: "provision-project-environment",

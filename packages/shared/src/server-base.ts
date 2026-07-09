@@ -730,16 +730,36 @@ export class McpServerBase {
     // from `args` (value `undefined`), so the parameter type is
     // `Record<string, string | undefined>` — matching {@link PromptDefinition.build}
     // and forcing prompt authors (Story 25.1) to handle omitted optionals.
+    //
+    // CR 25.0-4 (resolved Story 26.4): `def.build(...)` is project-authored
+    // (Story 25.1) but not immune to a future bug (e.g. dereferencing an
+    // unexpected shape); a throw here used to surface to the client as an
+    // opaque JSON-RPC `-32603 InternalError` with the raw message, unlike the
+    // tool path's structured `isError` containment. Wrap it and rethrow as a
+    // clean, prompt-named `McpError` so a render bug is diagnosable without
+    // leaking implementation detail differently than the rest of the framework.
     const render = (
       args: Record<string, string | undefined>,
-    ): GetPromptResult => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: { type: "text" as const, text: def.build(args) },
-        },
-      ],
-    });
+    ): GetPromptResult => {
+      let text: string;
+      try {
+        text = def.build(args);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Prompt '${def.name}' failed to render: ${message}`,
+        );
+      }
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: { type: "text" as const, text },
+          },
+        ],
+      };
+    };
 
     // No-argument prompt: register WITHOUT an argsSchema (see the doc comment
     // above — this is what lets a spec-compliant client omit `arguments`
@@ -756,6 +776,18 @@ export class McpServerBase {
 
     const argsShape: Record<string, z.ZodTypeAny> = {};
     for (const arg of def.arguments) {
+      // CR 25.0-5 (resolved Story 26.4): fail fast on a duplicate argument
+      // name within one PromptDefinition. Without this guard,
+      // `argsShape[arg.name] = ...` silently last-wins — `prompts/list`
+      // advertises only one entry and the other's `required`/`description`
+      // is lost with no error, an author-side content mistake that would
+      // otherwise ship silently.
+      if (Object.prototype.hasOwnProperty.call(argsShape, arg.name)) {
+        throw new Error(
+          `Prompt '${def.name}' declares argument '${arg.name}' more than once — ` +
+            `duplicate PromptDefinition.arguments entries are not allowed.`,
+        );
+      }
       // Order matters: `.describe()` must be the OUTERMOST call. Zod v4's
       // `.optional()` returns a NEW wrapper schema whose own `.description`
       // is empty even when the inner schema was `.describe()`d first — the
@@ -766,6 +798,34 @@ export class McpServerBase {
       argsShape[arg.name] = base.describe(arg.description);
     }
 
+    // CR 25.1-6 (closed-by-decision, Story 26.4 — SDK limitation, documented
+    // here rather than worked around): when EVERY declared argument is
+    // optional (e.g. `check-system-health`'s `server?`), a `prompts/get` that
+    // OMITS `arguments` entirely (no key at all, not even `{}`) is rejected
+    // with `-32602 InvalidParams` instead of rendering with every optional
+    // arg absent. Root cause is the SDK itself
+    // (`@modelcontextprotocol/sdk@1.29.0`): `_createRegisteredPrompt` always
+    // stores `objectFromShape(argsSchema)` — a plain `z.object(shape)` — and
+    // the `GetPrompt` handler runs `safeParseAsync(z.object(shape),
+    // request.params.arguments)`, which fails on `undefined` regardless of
+    // whether every property inside the shape is itself `.optional()`. The
+    // SDK offers exactly two mutually-exclusive modes: pass an `argsSchema`
+    // (args ADVERTISED + parsed, but an omitted top-level `arguments` is
+    // refused) or pass none (omission tolerated, but NO arg advertisement and
+    // no args ever reach the callback — the branch above, for genuinely
+    // zero-argument prompts). There is no SDK-supported schema that both
+    // advertises optional args AND tolerates an omitted top-level
+    // `arguments`. Impact is LOW and the failure mode is CLEAN: every
+    // all-optional-argument prompt renders correctly when called with
+    // `arguments: {}` (the normal path for a well-behaved client that builds
+    // an arguments object from the advertised arg list), and the strict
+    // omission case errors with a spec-conformant JSON-RPC error, never a
+    // crash or wrong render. A full fix would bypass `registerPrompt` for
+    // these prompts and register `ListPrompts`/`GetPrompt` handlers directly
+    // on the underlying `Server` (mirroring the D6 governance-resource
+    // wiring) to coerce an omitted `arguments` to `{}` before validation —
+    // deferred as disproportionate framework surgery for a clean-failure edge
+    // case.
     this.mcpServer.registerPrompt(
       def.name,
       {

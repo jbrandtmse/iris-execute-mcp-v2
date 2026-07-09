@@ -295,6 +295,33 @@ describe("Story 25.0 — prompts/get render (AC 25.0.2)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+// CR 25.1-6 (closed-by-decision, Story 26.4) — documented SDK limitation:
+// an ALL-OPTIONAL-argument prompt tolerates `arguments: {}` but rejects a
+// `prompts/get` that omits the `arguments` key ENTIRELY. Pinned here as the
+// accepted/documented behavior (see the `registerPrompt` doc comment), not a
+// regression target.
+// ════════════════════════════════════════════════════════════════════
+
+describe("Story 26.4 — CR 25.1-6: documented SDK limitation for all-optional-arg prompts", () => {
+  it("renders correctly when the optional-args prompt is called with arguments:{}", async () => {
+    const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
+    const result = await callRequest(server, "prompts/get", {
+      name: "fixture-optional-arg",
+      arguments: {},
+    });
+    expect(result.messages[0].content.text).toBe("detail=(none)");
+  });
+
+  it("rejects cleanly (InvalidParams) when `arguments` is omitted ENTIRELY (no key at all)", async () => {
+    const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
+    // No `arguments` key at all -- distinct from `arguments: {}` above.
+    await expect(
+      callRequest(server, "prompts/get", { name: "fixture-optional-arg" }),
+    ).rejects.toMatchObject({ code: -32602 }); // ErrorCode.InvalidParams
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // AC 25.0.3 — per-server (per-instance) prompt assignment / isolation.
 // ════════════════════════════════════════════════════════════════════
 
@@ -340,5 +367,61 @@ describe("Story 25.0 — per-server prompt assignment (AC 25.0.3)", () => {
     expect((listB.prompts as Array<{ name: string }>).map((p) => p.name)).toEqual([
       "fixture-required-arg",
     ]);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// CR 25.0-4 (resolved Story 26.4) — a throwing build() is contained as a
+// clean, prompt-named McpError(InternalError), not an opaque raw -32603.
+// ════════════════════════════════════════════════════════════════════
+
+describe("Story 26.4 — CR 25.0-4: registerPrompt render containment", () => {
+  const throwingPrompt: PromptDefinition = {
+    name: "fixture-throwing",
+    title: "Fixture: Throws",
+    description: "A fixture prompt whose build() always throws.",
+    arguments: [],
+    build: () => {
+      throw new Error("boom from build()");
+    },
+  };
+
+  it("wraps a build() throw as a clean, prompt-named McpError(InternalError)", async () => {
+    const server = new McpServerBase(makeServerOpts([throwingPrompt]));
+    await expect(
+      callRequest(server, "prompts/get", { name: "fixture-throwing", arguments: {} }),
+    ).rejects.toMatchObject({
+      code: -32603, // ErrorCode.InternalError
+      message: expect.stringContaining("fixture-throwing"),
+    });
+    await expect(
+      callRequest(server, "prompts/get", { name: "fixture-throwing", arguments: {} }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("boom from build()"),
+    });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// CR 25.0-5 (resolved Story 26.4) — duplicate PromptDefinition.arguments
+// entries fail fast at registration instead of silently last-winning.
+// ════════════════════════════════════════════════════════════════════
+
+describe("Story 26.4 — CR 25.0-5: duplicate argument-name fail-fast", () => {
+  const duplicateArgPrompt: PromptDefinition = {
+    name: "fixture-dup-arg",
+    title: "Fixture: Duplicate Arg",
+    description: "A fixture prompt with a duplicate argument name.",
+    arguments: [
+      { name: "topic", description: "First.", required: true },
+      { name: "topic", description: "Second (duplicate).", required: false },
+    ],
+    build: (args) => `topic=${args.topic}`,
+  };
+
+  it("throws naming the prompt + the duplicate argument, at construction time", () => {
+    expect(() => new McpServerBase(makeServerOpts([duplicateArgPrompt]))).toThrow(
+      /fixture-dup-arg.*topic/,
+    );
   });
 });

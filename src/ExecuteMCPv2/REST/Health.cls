@@ -67,10 +67,36 @@ ClassMethod HealthCheck() As %Status
             }
         }
         Else {
-            Set tRequestedCSV = $Get(%request.Data("areas",1))
+            ; CR 23.1-5 (resolved Story 26.4; corrected CR 26.4-R1): loop every
+            ; "areas" query-param occurrence and join with commas. %request.Count
+            ; ("areas") returns the number of values -- the unsubscripted node
+            ; %request.Data("areas") holds NO count (values live only at
+            ; "areas",n), so +$Get(%request.Data("areas")) is always 0 and would
+            ; silently drop the filter (all 9 areas run). A repeated-param client
+            ; (?areas=journal&areas=license) previously only saw the first value.
+            ; The documented comma-separated contract (?areas=journal,license)
+            ; works unchanged (a single value, n=1 -> Count=1).
+            Set tRequestedCSV = ""
+            Set tParamCount = %request.Count("areas")
+            For tParamIdx = 1:1:tParamCount {
+                Set tParamVal = $Get(%request.Data("areas",tParamIdx))
+                If tParamVal '= "" {
+                    Set tRequestedCSV = tRequestedCSV _ $Select(tRequestedCSV="":"",1:",") _ tParamVal
+                }
+            }
         }
 
-        Do ..HealthCheckParseAreas(tRequestedCSV, .tWant)
+        ; CR 23.1-4 (resolved Story 26.4): capture and check the %Status returned
+        ; by HealthCheckParseAreas rather than discarding it -- a future refactor
+        ; of the parse body could fail before populating all 9 tWant subscripts,
+        ; which would otherwise raise an opaque <UNDEFINED> from deep inside the
+        ; area dispatch below instead of a clean, sanitized error envelope.
+        Set tSC3 = ..HealthCheckParseAreas(tRequestedCSV, .tWant)
+        If $$$ISERR(tSC3) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC3
+            Quit
+        }
 
         Set tAreas = {}
         Set tErrors = {}
@@ -167,6 +193,10 @@ ClassMethod AreaErrorText(pStatus As %Status) As %String
 ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
+    ; CR 23.1-3 (resolved Story 26.4): tRS declared before Try so BOTH the
+    ; success path and the Catch below can close it -- previously this result
+    ; set was never closed at all (not even on the success path).
+    Set tRS = ""
     Try {
         Set tArea = {}
 
@@ -192,9 +222,11 @@ ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObjec
             Set tProcessCount = +tRS.cnt
         }
         Do tArea.%Set("processCount", tProcessCount, "number")
+        Do:$IsObject(tRS) tRS.Close()
 
         Do pAreas.%Set("system", tArea)
     } Catch ex {
+        Do:$IsObject(tRS) tRS.Close()
         Do pErrors.%Set("system", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC
@@ -211,6 +243,11 @@ ClassMethod HealthCheckSystem(pAreas As %DynamicObject, pErrors As %DynamicObjec
 ClassMethod HealthCheckDatabases(pAreas As %DynamicObject, pErrors As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
+    ; CR 23.1-3 (resolved Story 26.4): tDBRS declared before Try so the Catch
+    ; below can close it -- previously the close only ran on the success path
+    ; (inside the $$$ISOK(tSC2) branch), so an Execute() error OR an exception
+    ; mid-loop skipped it.
+    Set tDBRS = ""
     Try {
         Set tList = []
         Set tDBRS = ##class(%ResultSet).%New("Config.Databases:List")
@@ -241,12 +278,13 @@ ClassMethod HealthCheckDatabases(pAreas As %DynamicObject, pErrors As %DynamicOb
                 Do tEntry.%Set("openFailed", tOpenFailed, "boolean")
                 Do tList.%Push(tEntry)
             }
-            Do tDBRS.Close()
             Do pAreas.%Set("databases", tList)
         } Else {
             Do pErrors.%Set("databases", ..AreaErrorText(tSC2))
         }
+        Do:$IsObject(tDBRS) tDBRS.Close()
     } Catch ex {
+        Do:$IsObject(tDBRS) tDBRS.Close()
         Do pErrors.%Set("databases", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC
@@ -458,6 +496,9 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
         Quit tSC
     }
 
+    ; CR 23.1-3 (resolved Story 26.4): tQRS declared before Try so the Catch
+    ; below can close it -- previously this result set was never closed at all.
+    Set tQRS = ""
     Try {
         Set tArea = {}
         Do tArea.%Set("interopEnabled", 1, "boolean")
@@ -480,7 +521,9 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
         } Else {
             Do pErrors.%Set("interop", ..AreaErrorText(tQSC))
         }
+        Do:$IsObject(tQRS) tQRS.Close()
     } Catch ex {
+        Do:$IsObject(tQRS) tQRS.Close()
         Do pErrors.%Set("interop", ..AreaErrorText(ex.AsStatus()))
     }
     Quit tSC

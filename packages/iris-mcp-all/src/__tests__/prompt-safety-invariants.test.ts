@@ -83,6 +83,53 @@ describe("recover-stuck-production — recover-first / clean-last-resort / killA
   });
 });
 
+describe("resend-failed-messages — dry-run-first workflow + duplication hazard + default-disabled write (Story 26.3)", () => {
+  it("renders the dry-run-first workflow naming both real tools, with dryRun:true preview strictly before dryRun:false/confirm:true execution", async () => {
+    const { pkg, prompt } = await findPrompt("resend-failed-messages");
+    expect(pkg).toBe("iris-interop-mcp");
+    const body = prompt.build({ item: "MyItem", since: "2026-07-01" });
+
+    expect(body).toContain("iris_message_resend");
+    expect(body).toContain("iris_production_messages");
+    expect(body).toContain("DRY-RUN-FIRST");
+
+    const previewIdx = body.indexOf("dryRun: true");
+    const executeIdx = body.indexOf("dryRun: false");
+    const confirmIdx = body.indexOf("confirm: true");
+    expect(previewIdx).toBeGreaterThan(-1);
+    expect(executeIdx).toBeGreaterThan(-1);
+    expect(confirmIdx).toBeGreaterThan(-1);
+    expect(previewIdx).toBeLessThan(executeIdx);
+    expect(executeIdx).toBeLessThan(confirmIdx);
+  });
+
+  it("states the duplication hazard and that resend/resendFiltered are governance-default-disabled writes, with the enable snippet", async () => {
+    const { prompt } = await findPrompt("resend-failed-messages");
+    const body = prompt.build({ item: "MyItem", since: "2026-07-01" });
+
+    expect(body).toContain("DUPLICATION HAZARD");
+    expect(body).toContain("DEFAULT-DISABLED");
+    expect(body).toContain("GOVERNANCE_DISABLED");
+    expect(body).toContain("IRIS_GOVERNANCE");
+  });
+
+  it("both required args interpolate into the rendered body; omitting both renders bracketed placeholders without throwing", async () => {
+    const { prompt } = await findPrompt("resend-failed-messages");
+
+    const filled = prompt.build({
+      item: "SessionAgent.Sample.BS.OrderIngest",
+      since: "2026-07-01T00:00:00Z",
+    });
+    expect(filled).toContain("SessionAgent.Sample.BS.OrderIngest");
+    expect(filled).toContain("2026-07-01T00:00:00Z");
+
+    expect(() => prompt.build({})).not.toThrow();
+    const empty = prompt.build({});
+    expect(empty).toContain("<item>");
+    expect(empty).toContain("<since>");
+  });
+});
+
 describe("run-external-backup — thaw ALWAYS even on failure + journaling-resumed verification", () => {
   it("declares the never-left-frozen safety invariant up front", async () => {
     const { pkg, prompt } = await findPrompt("run-external-backup");

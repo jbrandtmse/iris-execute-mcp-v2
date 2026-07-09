@@ -9,11 +9,7 @@
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
-
-/** Render `value`, or a bracketed placeholder for the static skills doc when omitted. */
-function arg(value: string | undefined, placeholder: string): string {
-  return value !== undefined && value !== "" ? value : placeholder;
-}
+import { argOrPlaceholder as arg, isArgProvided } from "@iris-mcp/shared";
 
 export const auditSecurityPosturePrompt: PromptDefinition = {
   name: "audit-security-posture",
@@ -32,7 +28,7 @@ export const auditSecurityPosturePrompt: PromptDefinition = {
   build: (args) => {
     const server = arg(args.server, "<server>");
     const serverNote =
-      args.server !== undefined
+      isArgProvided(args.server)
         ? `Target server profile: "${server}" — pass \`server: "${server}"\` on every tool call below.`
         : `No server profile specified — omit \`server\` (or pass "${server}") to use the default server on every tool call below.`;
 
