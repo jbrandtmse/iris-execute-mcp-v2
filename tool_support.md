@@ -300,6 +300,12 @@ These tools are provided by the shared framework (`@iris-mcp/shared` `server-bas
 
 ---
 
+## MCP prompts (not tools)
+
+Starting with Epic 25, the suite also ships a pack of 9 **MCP prompts** (`ops` 2, `dev` 3, `interop` 2, `admin` 2; `data` none in v1) — a separate MCP protocol capability (`prompts/list` / `prompts/get`), not tools. Prompts carry no `mutates` classification, no governance key, and are **not counted** in any per-server tool table or the suite-wide rollup below. See the root README's [Workflow Prompts & Agent Skills](README.md#workflow-prompts--agent-skills) section for the full list and the generated [`skills/`](skills/README.md) install pack.
+
+---
+
 ## Suite-wide rollup
 
 Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` array). Every server ALSO advertises the one framework tool `iris_server_profiles` (see "Framework tools" above), so each server's advertised surface is one greater than the package total shown here.

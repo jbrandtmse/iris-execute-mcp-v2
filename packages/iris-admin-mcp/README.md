@@ -220,6 +220,19 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 ---
 
+## Prompts
+
+Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (Epic 25) served via `prompts/list`/`prompts/get`. Prompts are a separate protocol capability from tools — they carry no governance key and do not change this server's tool count.
+
+| Prompt | Description |
+|---|---|
+| `provision-project-environment` | Provisions a new project environment (two databases, a namespace, a user, a web application), verifying each step before the next, with rollback notes. |
+| `audit-security-posture` | Audits users, roles, service authentication settings, SSL/TLS configs, and instance auditing status; reports default passwords, `%All` holders, and insecure services. |
+
+Also installable as [Agent Skills](../../skills/README.md).
+
+---
+
 ## Tool Examples
 
 <details>

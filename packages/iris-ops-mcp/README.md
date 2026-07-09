@@ -170,6 +170,19 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 ---
 
+## Prompts
+
+Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (Epic 25) served via `prompts/list`/`prompts/get`. Prompts are a separate protocol capability from tools — they carry no governance key and do not change this server's tool count.
+
+| Prompt | Description |
+|---|---|
+| `check-system-health` | Runs `iris_health_check`, interprets every non-`ok` finding, and names the fixing tool for each one. |
+| `run-external-backup` | Freezes the instance for an external (OS/SAN-level) snapshot and thaws it safely afterward — thaw always runs, even if the snapshot step failed. |
+
+Also installable as [Agent Skills](../../skills/README.md).
+
+---
+
 ## Tool Examples
 
 <details>
