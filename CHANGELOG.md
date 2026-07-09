@@ -2,6 +2,41 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-09]
+
+### Fixed — `iris_execute_tests` silent result truncation (`@iris-mcp/dev`, HIGH)
+
+`iris_execute_tests` could silently under-report results for slow test classes: `total` and
+`details` were truncated to whichever methods happened to finish before the first non-empty poll,
+with **no error and a green-looking envelope** (a 41-method class reported as `total: 2`;
+reproduced live: a 5-method class with ~1s methods reported `total: 1`). Fast classes returned
+correct full sets, which is why the bug hid in casual use — it bit precisely on the large/slow
+classes whose coverage matters most. Reported externally (FHIR Bridge dev, CPPCON-1214) 2026-07-09;
+this is the long-observed Rule #35 "early partial snapshot" behavior, now root-caused as a defect
+in our own poll loop (not in IRIS, not in the Atelier work queue).
+
+**Root cause** (`packages/iris-dev-mcp/src/tools/execute.ts` poll loop): the Atelier
+`GET /work/{id}` endpoint signals "job still running" with a `Retry-After` header, and each GET
+**drains the results accumulated since the previous GET** (delta semantics — verified live: the
+same run's methods arrived spread across successive drains). The loop accepted the FIRST non-empty
+drain as the final result set, ignoring the `Retry-After` signal it had already computed one line
+above, and discarded everything still arriving.
+
+**Fix**: the poll loop now **accumulates every drain** into a map keyed by `class::method` (which
+also dedupes correctly if an endpoint variant ever returns cumulative sets instead of deltas) and
+finalizes **only when `Retry-After` is absent** (job complete). Notably, the initially proposed
+fix — "wait for completion, then take the terminal poll's result" — was itself insufficient and
+was caught by the live smoke: with delta semantics the terminal drain carries only the *tail* of
+the run (the live check returned `total: 1` again, just a *different* method), so accumulation
+across drains is required, not optional.
+
+Regression tests (mocked, default suite): delta-drain accumulation (fails against both the
+original bug and the insufficient first fix), cumulative-set dedupe, empty-partial keep-polling,
+and empty-terminal completion. Live before/after evidence: pre-fix 1/5 → post-fix 5/5 (class
+level) and 1/1 (method level) against HSCUSTOM. The Rule #35 operational caveat (compare returned
+`total` against the expected count) remains good defense-in-depth, and the
+`deploy-and-test-class` prompt keeps teaching it.
+
 ## [Pre-release — 2026-07-08] — Epic 25
 
 ### Added — Epic 25: MCP Prompts Capability + Agent Skills Pack (`@iris-mcp/shared` + all servers)

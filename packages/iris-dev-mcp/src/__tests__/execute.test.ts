@@ -478,6 +478,146 @@ describe("iris_execute_tests", () => {
     expect(text).toContain("No test classes found");
   });
 
+  // ── Regression: poll-loop truncation (bug 2026-07-09) ──────────
+  //
+  // The Atelier /work/{id} endpoint signals "job still running" with a
+  // Retry-After header (→ envelope.retryafter), and each GET DRAINS the
+  // results accumulated since the previous GET — delta semantics, verified
+  // live 2026-07-09 (a 5-method HANG-1 class delivered its methods spread
+  // across successive drains). Two loop shapes silently truncate:
+  //  (a) pre-fix: accept the FIRST non-empty drain as final (a 41-method
+  //      class reported as total=2 with a green envelope);
+  //  (b) wait-for-completion but keep only the LAST drain (discards every
+  //      earlier drain — same truncation, different subset; caught by the
+  //      live smoke against the first fix attempt).
+  // The correct shape: accumulate EVERY drain (keyed class::method, which
+  // also dedupes if the endpoint ever returns cumulative sets) and finalize
+  // only when retryafter is absent. These tests pin all of it.
+
+  it("accumulates DELTA drains across polls — neither first-drain-only nor last-drain-only (truncation regression)", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-slow" }));
+    // Poll 1: first drain — one method finished, job STILL RUNNING.
+    //   Pre-fix accepted this as final → total=1 (bug shape a).
+    // Poll 2: terminal drain — carries ONLY the remaining two methods
+    //   (delta semantics, as observed live). A last-drain-only loop
+    //   returns total=2 and silently drops TestA (bug shape b).
+    mockHttp.get
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 4000, failures: [] },
+        ],
+        retryafter: "1",
+      })
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 0, duration: 4100, failures: [{ message: "AssertTrue failed" }] },
+          { class: "MyApp.Tests.SlowTest", method: "TestC", status: 1, duration: 3900, failures: [] },
+        ],
+      });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.SlowTest", level: "class" },
+      ctx,
+    );
+
+    // Both polls must have been made — the partial was re-polled, not accepted.
+    expect(mockHttp.get).toHaveBeenCalledTimes(2);
+
+    const structured = result.structuredContent as { total: number; passed: number; failed: number; details: { method: string }[] };
+    expect(structured.total).toBe(3); // bug (a) → 1; bug (b) → 2
+    expect(structured.passed).toBe(2);
+    expect(structured.failed).toBe(1); // the failure arriving AFTER the first drain is visible
+    expect(structured.details.map((d) => d.method).sort()).toEqual(["TestA", "TestB", "TestC"]);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("dedupes by class::method if the endpoint returns CUMULATIVE sets instead of deltas", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-cumulative" }));
+    // Some endpoint variants may repeat already-delivered results on later
+    // polls (cumulative). The accumulator must not double-count TestA.
+    mockHttp.get
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 1000, failures: [] },
+        ],
+        retryafter: "1",
+      })
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 1000, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 1, duration: 1100, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "TestC", status: 1, duration: 900, failures: [] },
+        ],
+      });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.SlowTest", level: "class" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as { total: number; passed: number };
+    expect(structured.total).toBe(3); // NOT 4 — TestA deduped by class::method key
+    expect(structured.passed).toBe(3);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("keeps polling on an EMPTY partial while retryafter is set, then returns the full terminal set", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-slow-2" }));
+    mockHttp.get
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [],
+        retryafter: "1",
+      })
+      .mockResolvedValueOnce({
+        status: { errors: [] },
+        console: [],
+        result: [
+          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 900, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 1, duration: 950, failures: [] },
+        ],
+      });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.SlowTest", level: "class" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(2);
+    const structured = result.structuredContent as { total: number; passed: number };
+    expect(structured.total).toBe(2);
+    expect(structured.passed).toBe(2);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("accepts an EMPTY terminal result (no retryafter) as a completed run with no tests", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-empty" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.EmptyTest", level: "class" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+    const structured = result.structuredContent as { total: number };
+    expect(structured.total).toBe(0);
+    expect(result.isError).toBeUndefined();
+  });
+
   it("should return isError on IrisApiError", async () => {
     mockHttp.post.mockRejectedValue(
       new IrisApiError(

@@ -628,6 +628,8 @@ The generator script should ideally include a header comment like `// DO NOT EDI
 
 **How to apply:** after any `iris_execute_tests` call whose `total` doesn't match the number of test methods expected (e.g. from the file just written), immediately rerun before reporting a stage as green. Prefer per-class `iris_execute_tests` calls when precision matters — the partial-snapshot behavior is most likely at the package level right after a compile.
 
+**ROOT-CAUSED AND FIXED (2026-07-09, external report CPPCON-1214):** the partial snapshot was a defect in OUR poll loop (`packages/iris-dev-mcp/src/tools/execute.ts`), not in IRIS or the Atelier work queue. The Atelier `GET /work/{id}` endpoint signals "still running" via a `Retry-After` header and each GET **drains only the results accumulated since the previous GET** (delta semantics, verified live); the loop accepted the first non-empty drain as final and discarded the rest. Fixed by accumulating every drain (keyed `class::method`, deduping cumulative variants too) and finalizing only when `Retry-After` is absent. Regression-tested (mocked delta/cumulative/empty shapes) + live-verified before/after (1/5 → 5/5). **The count-check discipline above remains as defense-in-depth** — it is cheap, catches any future regression of this class, and is already encoded in the `deploy-and-test-class` prompt (Story 25.1). Notable secondary lesson (Rule #36/#46 shape): the external report's own proposed fix ("take the terminal poll's result") was wrong because it assumed cumulative semantics; only the live slow-class smoke exposed the delta-drain reality — observe, don't assume, even when the observer is the bug reporter.
+
 ---
 
 ## 36. Reference-parity ground-truth pinning — run the reference, don't reason about it
