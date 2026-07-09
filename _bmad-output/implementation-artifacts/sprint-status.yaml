@@ -356,11 +356,13 @@ development_status:
   # mutates {preview:read, resend:write, resendFiltered:write} — writes DEFAULT-DISABLED, deliberately NOT defaultEnabled (resend duplicates clinical data flow).
   # Guards OS-side before any mutation: numeric ids; item+from required; window ≤7d; hard cap 500 refuse-not-truncate; dryRun default true; confirm double-gate (Epic 20 pattern). Live rejection smokes per Rule #26.
   # ObjectScript touched → BOOTSTRAP_VERSION bump in 26.1 (Rule #24). interop 21→22. Story 26.3 also ships the gated resend-failed-messages prompt into the Epic 25 pack.
-  epic-26: backlog
+  epic-26: in-progress
   26-0-resend-api-probe: backlog
   26-1-resend-objectscript-handler: backlog
   26-2-resend-ts-tool: backlog
   26-3-resend-docs-smokes-and-prompt: backlog
+  # 26.4 = Rule #37 dedicated burn-down (created at Epic 26 retro-review gate per BINDING decision 2026-07-09; terminal disposition of all carried-open LOW items; runs LAST after 26.0-26.3).
+  26-4-deferred-work-ledger-burndown: ready-for-dev
   epic-26-retrospective: optional
 
   # Epic 27: Environment Diff & Promotion — iris_env_diff / iris_env_promote (iris-dev-mcp + shared)
