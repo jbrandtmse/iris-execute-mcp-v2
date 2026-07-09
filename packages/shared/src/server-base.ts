@@ -10,7 +10,11 @@
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ReadResourceResult,
+  GetPromptResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { ZodObject } from "zod";
@@ -37,6 +41,7 @@ import type {
   ToolResult,
   ToolScope,
   PaginateResult,
+  PromptDefinition,
 } from "./tool-types.js";
 import type { GovernanceConfig, GovernancePreset, MutatesLookup } from "./governance.js";
 import {
@@ -145,6 +150,14 @@ export interface McpServerBaseOptions {
   version: string;
   /** Tool definitions to register on startup. */
   tools: ToolDefinition[];
+  /**
+   * Prompt definitions to register on startup (Story 25.0, spec
+   * `03-skills-prompts-pack.md` §2). Optional and additive: an empty/absent
+   * array registers no prompts, and the SDK's `prompts` capability is
+   * advertised ONLY when at least one prompt is registered — so a server
+   * with no prompts is byte-for-byte unchanged (Rule #19 back-compat gate).
+   */
+  prompts?: PromptDefinition[];
   /** IRIS connection configuration. When omitted, {@link loadConfig} is used. */
   config?: IrisConnectionConfig;
   /** When true, bootstrap the custom REST service on startup if not already deployed. */
@@ -456,6 +469,25 @@ export class McpServerBase {
     // point start() has parsed IRIS_GOVERNANCE. sendResourceListChanged() is a
     // no-op until a transport attaches, so this is safe pre-connect.
     this.registerGovernanceResource();
+
+    // Register prompts (Story 25.0, framework plumbing for the Agent Skills
+    // Pack). Kept LAST in constructor ordering — after tool/discovery
+    // registration and the governance resource wiring — because prompts are
+    // independent of the governance machinery: they carry no `mutates`
+    // classification and must not perturb the governed-key rebuilds above.
+    //
+    // CRITICAL back-compat (AC 25.0.1): `prompts` is deliberately NOT
+    // pre-declared in the constructor's `capabilities` object above (unlike
+    // `resources`, which IS pre-declared per D6). The MCP SDK's own
+    // `registerPrompt` → `registerCapabilities({ prompts: { listChanged: true } })`
+    // call is what advertises the capability, and it runs ONLY when
+    // `registerPrompt` is actually called. So when `options.prompts` is
+    // empty/absent, this loop never calls it, and the `prompts` key never
+    // appears in the advertised `initialize` capabilities — a no-prompts
+    // server is byte-for-byte unchanged (Rule #19).
+    for (const prompt of options.prompts ?? []) {
+      this.registerPrompt(prompt);
+    }
   }
 
   /**
@@ -657,6 +689,96 @@ export class McpServerBase {
         const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
         return this.buildGovernancePolicyResult(profileName, uri.toString());
       },
+    );
+  }
+
+  // ── Prompt registration (Story 25.0) ───────────────────────────────
+
+  /**
+   * Register a single prompt with the MCP SDK (Story 25.0, spec
+   * `03-skills-prompts-pack.md` §2).
+   *
+   * For a prompt WITH arguments, builds a Zod **raw shape** (a plain object of
+   * Zod types, NOT a `z.object(...)`) from {@link PromptDefinition.arguments} —
+   * each argument becomes `z.string().describe(description)`, wrapped in
+   * `.optional()` when not required — and passes it as `argsSchema` so the SDK
+   * advertises the arguments in `prompts/list` and validates them on
+   * `prompts/get`.
+   *
+   * For a prompt with NO arguments, passes **no** `argsSchema` on purpose. The
+   * MCP wire schema (`GetPromptRequestParamsSchema`) marks `params.arguments`
+   * OPTIONAL, so a spec-compliant client MAY omit it entirely for a no-arg
+   * prompt. Had we passed an empty `argsSchema: {}`, the SDK's `prompts/get`
+   * handler would run `safeParseAsync(z.object({}), request.params.arguments)`,
+   * and an object schema rejects `undefined` — so an omitted `arguments` would
+   * be refused with `InvalidParams`, a spurious error for a legitimate request.
+   * Omitting `argsSchema` makes the SDK wire the no-args callback form
+   * (`cb(extra)`) and skip argument validation, so an omitted `arguments`
+   * renders correctly. (This is the Dev-Notes fallback branch; it matters
+   * because Story 25.1 ships real no-arg prompts, e.g. `objectscript-review`.)
+   *
+   * The callback renders `def.build(args)` as a single **user**-role text
+   * message (spec §2). Unknown-name and missing-required-argument errors are
+   * NOT hand-rolled here — the SDK's own `prompts/get` handler already throws
+   * the correct `McpError(ErrorCode.InvalidParams, ...)` for both cases (see
+   * Dev Notes); a duplicate prompt name is likewise caught by the SDK's own
+   * `Prompt ${name} is already registered` guard in `registerPrompt`.
+   */
+  private registerPrompt(def: PromptDefinition): void {
+    // Shared render: a single user-role text message (spec §2) from the
+    // (SDK-validated) args. An optional argument the client omits is ABSENT
+    // from `args` (value `undefined`), so the parameter type is
+    // `Record<string, string | undefined>` — matching {@link PromptDefinition.build}
+    // and forcing prompt authors (Story 25.1) to handle omitted optionals.
+    const render = (
+      args: Record<string, string | undefined>,
+    ): GetPromptResult => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: { type: "text" as const, text: def.build(args) },
+        },
+      ],
+    });
+
+    // No-argument prompt: register WITHOUT an argsSchema (see the doc comment
+    // above — this is what lets a spec-compliant client omit `arguments`
+    // entirely). The SDK invokes the no-args callback form `cb(extra)`; we
+    // ignore `extra` and render with an empty args object.
+    if (def.arguments.length === 0) {
+      this.mcpServer.registerPrompt(
+        def.name,
+        { title: def.title, description: def.description },
+        (): GetPromptResult => render({}),
+      );
+      return;
+    }
+
+    const argsShape: Record<string, z.ZodTypeAny> = {};
+    for (const arg of def.arguments) {
+      // Order matters: `.describe()` must be the OUTERMOST call. Zod v4's
+      // `.optional()` returns a NEW wrapper schema whose own `.description`
+      // is empty even when the inner schema was `.describe()`d first — the
+      // SDK's `getSchemaDescription` reads `schema.description` off the
+      // schema it was actually given (the raw-shape value), so describing
+      // before wrapping silently drops the description for optional args.
+      const base: z.ZodTypeAny = arg.required ? z.string() : z.string().optional();
+      argsShape[arg.name] = base.describe(arg.description);
+    }
+
+    this.mcpServer.registerPrompt(
+      def.name,
+      {
+        title: def.title,
+        description: def.description,
+        argsSchema: argsShape,
+      },
+      // The SDK's ShapeOutput<Args> generic from a Record<string, ZodTypeAny>
+      // raw shape resolves to a loosely-typed record; `any` here mirrors the
+      // existing `registerTool` callback pattern below.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (args: any): GetPromptResult =>
+        render(args as Record<string, string | undefined>),
     );
   }
 

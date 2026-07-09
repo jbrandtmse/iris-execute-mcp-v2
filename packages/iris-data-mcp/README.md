@@ -177,6 +177,12 @@ Pass `fullSpec:true` to receive the complete OpenAPI spec object (returned as-is
 
 ---
 
+## Prompts
+
+No prompts in v1 (Epic 25). See the [Workflow Prompts & Agent Skills](../../README.md#workflow-prompts--agent-skills) section of the suite README for the prompts shipped by the other four servers.
+
+---
+
 ## Tool Examples
 
 <details>

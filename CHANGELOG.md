@@ -2,6 +2,51 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-08] — Epic 25
+
+### Added — Epic 25: MCP Prompts Capability + Agent Skills Pack (`@iris-mcp/shared` + all servers)
+
+A pack of 9 workflow-shaped **MCP prompts** (parameterized instructions served via the protocol's
+`prompts` capability, teaching a client the correct tool *sequence* for a task), plus a generated,
+installable [`skills/`](skills/README.md) directory for Claude Code/Copilot skill loaders. **Strictly
+additive, TS/content-only** — no ObjectScript, no `BOOTSTRAP_VERSION` change, **no new tool or
+governance key anywhere**, and the frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141
+keys) is **unchanged**. Prompts are a separate MCP protocol capability from tools (Rule #31): every
+package `index.test.ts` tool-array count/`getToolNames`/`toHaveLength` assertion is unchanged, and
+the suite tool count stays **101** (106 advertised, incl. the framework `iris_server_profiles` tool
+on every server).
+
+- **Framework `prompts` capability** (`@iris-mcp/shared`, Story 25.0) — a new `PromptDefinition`
+  type + optional `prompts?: PromptDefinition[]` on `McpServerBaseOptions`, registered in the
+  `McpServerBase` constructor and wired through the MCP SDK's own `prompts/list`/`prompts/get`
+  handlers. A server with no prompts registered advertises **no** `prompts` capability and is
+  byte-for-byte unchanged (mechanical capability-snapshot proof, Rule #19); a server with ≥1 prompt
+  additionally advertises `prompts:{listChanged:true}`.
+- **The v1 pack — 9 prompts, per-server** (Stories 25.1/25.2) — ops: `check-system-health`,
+  `run-external-backup`; dev: `diagnose-slow-query`, `objectscript-review`, `deploy-and-test-class`;
+  interop: `trace-message-flow`, `recover-stuck-production`; admin: `provision-project-environment`,
+  `audit-security-posture`. `@iris-mcp/data` ships no prompts in v1. Two additional prompts are
+  **gated** and intentionally not registered yet: `resend-failed-messages` (interop, ships with
+  Epic 26) and `promote-environment-change` (dev, ships with Epic 27).
+- **`skills/` generator** (`scripts/gen-skills.mjs`, + `--check` mode, Rules #18/#25 shape) —
+  single-sources each prompt's content into `skills/<name>/SKILL.md` (YAML frontmatter + workflow
+  body) and a `skills/README.md` install guide, every output DO-NOT-EDIT-stamped.
+- **Tool-name rot prevention** (`scripts/validate-prompts.mjs`, wired into the default vitest
+  suite) — extracts every `iris_[a-z0-9_]+` token referenced in prompt/skill bodies and asserts it
+  is a real, currently-registered tool name across all five packages + the framework tool, so a
+  future tool rename breaks CI rather than shipping a broken workflow to users.
+- **CR 24.0-1 / Rule #44 `readOnlyHint` cross-check** (folded into Story 25.1, `@iris-mcp/iris-mcp-all`)
+  — a default-suite test that flags any governance-baseline key classified `read` whose owning
+  tool declares `annotations.readOnlyHint: false`, unless justified. Found 15 pre-existing
+  tool-scoped-annotation divergences (all verified safe, none required reclassification);
+  `baseline-classifications.ts` and the frozen `governance-baseline.ts` are both untouched.
+
+Documentation: root [README.md](README.md) (new "Workflow Prompts & Agent Skills" capability
+section), each per-server `packages/<pkg>/README.md` (new "Prompts" section matching the existing
+"Tool Reference" style; `@iris-mcp/data`'s states "No prompts in v1"), and
+[`tool_support.md`](tool_support.md) (a note that prompts are a separate, non-tool MCP capability,
+not counted in any per-server tool table).
+
 ## [Pre-release — 2026-07-08]
 
 ### Added — Epic 24: Governance Safety Presets + SQL Resource Caps (`@iris-mcp/shared`)

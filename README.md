@@ -351,6 +351,37 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 
 ---
 
+## Workflow Prompts & Agent Skills
+
+Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) — parameterized, workflow-shaped instructions that teach an MCP client the *sequence* of tool calls an expert would use for a task, not just the tools themselves. This is a separate MCP protocol capability from tools: prompts are discoverable via `prompts/list` and rendered via `prompts/get`, on any client that supports the [MCP `prompts` capability](https://modelcontextprotocol.io/). A server only advertises `prompts` when it has at least one registered — servers with none behave exactly as before (Rule #19 back-compat).
+
+**Prompts do not change the 101-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
+
+### The v1 pack — 9 prompts, grouped by owning server
+
+| Server | Prompt | What it does |
+|---|---|---|
+| `@iris-mcp/ops` | `check-system-health` | Runs `iris_health_check`, interprets every non-`ok` finding, and names the fixing tool for each one. |
+| `@iris-mcp/ops` | `run-external-backup` | Freezes the instance for an external (OS/SAN-level) snapshot and thaws it safely afterward — thaw always runs, even if the snapshot step failed. |
+| `@iris-mcp/dev` | `diagnose-slow-query` | Runs `iris_sql_analyze` (`explain` → `indexUsage` → `stats`) and recommends a fix — never auto-applies one. |
+| `@iris-mcp/dev` | `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
+| `@iris-mcp/dev` | `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. |
+| `@iris-mcp/interop` | `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
+| `@iris-mcp/interop` | `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
+| `@iris-mcp/admin` | `provision-project-environment` | Provisions a new project environment (two databases, a namespace, a user, a web application), verifying each step before the next, with rollback notes. |
+| `@iris-mcp/admin` | `audit-security-posture` | Audits users, roles, service authentication settings, SSL/TLS configs, and instance auditing status; reports default passwords, `%All` holders, and insecure services. |
+
+`@iris-mcp/data` ships **no prompts in v1**.
+
+Two additional prompts are **gated** on features that haven't shipped yet and are intentionally *not* registered: `resend-failed-messages` (interop, ships with Epic 26) and `promote-environment-change` (dev, ships with Epic 27).
+
+### Using the prompts
+
+- **Via the MCP protocol directly** (recommended when your client supports it): call `prompts/list` on the relevant server to see its prompts, then `prompts/get` with the prompt's `name` and any arguments to render the workflow text.
+- **As installable Agent Skills**: the same content is generated into a repo-root [`skills/`](skills/README.md) directory — one `SKILL.md` per prompt, with YAML frontmatter (`name`, `description`) and the workflow body. Copy the skills you want into your project's `.claude/skills/` directory (see [`skills/README.md`](skills/README.md) for details). Every tool name referenced in a prompt or skill is validated against the live tool catalog in CI, so a renamed or removed tool breaks the build rather than shipping a broken workflow.
+
+---
+
 ## Architecture
 
 All five servers share a common connection layer (`@iris-mcp/shared`) that handles:

@@ -13,6 +13,9 @@
     "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
     "gen:governance-baseline": "node scripts/gen-governance-baseline.mjs",
     "gen:governance-baseline:check": "node scripts/gen-governance-baseline.mjs --check",
+    "gen:skills": "node scripts/gen-skills.mjs",
+    "gen:skills:check": "node scripts/gen-skills.mjs --check",
+    "validate:prompts": "node scripts/validate-prompts.mjs",
     "changeset": "changeset"
   },
   "devDependencies": {

@@ -227,6 +227,19 @@ MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order [ERROR]
 
 ---
 
+## Prompts
+
+Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (Epic 25) served via `prompts/list`/`prompts/get`. Prompts are a separate protocol capability from tools — they carry no governance key and do not change this server's tool count.
+
+| Prompt | Description |
+|---|---|
+| `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
+| `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
+
+Also installable as [Agent Skills](../../skills/README.md).
+
+---
+
 ## Tool Examples
 
 <details>
