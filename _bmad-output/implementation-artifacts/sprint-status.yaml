@@ -363,7 +363,7 @@ development_status:
   # mutates {preview:read, resend:write, resendFiltered:write} — writes DEFAULT-DISABLED, deliberately NOT defaultEnabled (resend duplicates clinical data flow).
   # Guards OS-side before any mutation: numeric ids; item+from required; window ≤7d; hard cap 500 refuse-not-truncate; dryRun default true; confirm double-gate (Epic 20 pattern). Live rejection smokes per Rule #26.
   # ObjectScript touched → BOOTSTRAP_VERSION bump in 26.1 (Rule #24). interop 21→22. Story 26.3 also ships the gated resend-failed-messages prompt into the Epic 25 pack.
-  epic-26: in-progress
+  epic-26: done
   26-0-resend-api-probe: done
   26-1-resend-objectscript-handler: done
   26-2-resend-ts-tool: done
