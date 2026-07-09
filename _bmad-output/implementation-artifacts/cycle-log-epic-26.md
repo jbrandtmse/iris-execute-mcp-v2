@@ -11,3 +11,10 @@
 2026-07-09T06:28:38Z	Story 26.0	qa_complete	spawn_at=2026-07-09T06:26Z model=claude-sonnet-5 tests_added=0 first_run_failures=0 clarifications=0 closing_sections_present=true note=research_story_no_executable_surface summary=tests/26-0-test-summary.md
 2026-07-09T06:33:55Z	Story 26.0	cr_complete	spawn_at=2026-07-09T06:28Z model=claude-opus-4-8 resolved=0 deferred=0 dismissed=0 high=0 med=0 low=0 clarifications=0 closing_sections_present=true status=done note=pin_reverified_vs_source
 2026-07-09T06:33:55Z	Story 26.0	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=ResendDuplicatedMethod_exists=1,ResendProbe_deleted=1 model=claude-opus-4-8
+2026-07-09T06:34:42Z	Story 26.0	committed	sha=aa5e4ee submodules=
+2026-07-09T06:37:27Z	Story 26.1	story_created	path=_bmad-output/implementation-artifacts/26-1-resend-objectscript-handler.md integration_ac=live_unittest_resend consumer=26.2
+2026-07-09T07:04:08Z	Story 26.1	dev_complete	spawn_at=2026-07-09T06:40Z model=claude-sonnet-5 files=7 tests=MessageResendTest.cls unittest=11/11 bootstrap=13b4b5f003ab-to-1f3afba4ac52 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 rule16_discrepancy=MessageTrace_no_filters cycle_iteration=1 closing_sections_present=true
+2026-07-09T07:04:08Z	Story 26.1	adr_verifications_complete	result=none_required reason=no_docs_adr_registry model=claude-opus-4-8
+2026-07-09T07:08:21Z	Story 26.1	qa_complete	spawn_at=2026-07-09T07:05Z model=claude-sonnet-5 tests_added=2 unittest=13/13 first_run_failures=0 clarifications=0 closing_sections_present=true note=count_cap_data_dependent+partial_batch_continuation
+2026-07-09T16:23:12Z	Story 26.1	cr_complete	spawn_at=2026-07-09T07:12Z model=claude-opus-4-8 resolved=0 deferred=6 dismissed=2 high=0 med=0 low=6 clarifications=0 closing_sections_present=true status=done note=guards_no_bypass+rule16_confirmed
+2026-07-09T16:23:12Z	Story 26.1	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=5_destructive_refusals_no_write+preview_read_live model=claude-opus-4-8
