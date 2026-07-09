@@ -25,3 +25,10 @@
 2026-07-09T16:41:55Z	Story 26.2	qa_complete	spawn_at=2026-07-09T08:00Z model=claude-sonnet-5 tests_added=4 interop=318/318 first_run_failures=0 clarifications=0 closing_sections_present=true note=odbcToIso_edges+window_refusal_passthrough baseline_check=exit0
 2026-07-09T16:56:00Z	Story 26.2	cr_complete	spawn_at=2026-07-09T08:05Z model=claude-opus-4-8 resolved=1 deferred=1 dismissed=1 high=0 med=0 low=1 clarifications=0 closing_sections_present=true status=done note=governance_truthful+crosscheck_34of34+headerid_patch
 2026-07-09T16:56:00Z	Story 26.2	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=built_dist_advertises_tool_22pkg+mutates_map_correct model=claude-opus-4-8
+2026-07-09T16:56:03Z	Story 26.2	committed	sha=3f1b5ca submodules=
+2026-07-09T16:58:16Z	Story 26.3	story_created	path=_bmad-output/implementation-artifacts/26-3-resend-docs-smokes-and-prompt.md kind=docs+prompt+smoke prompt=resend-failed-messages
+2026-07-09T17:16:18Z	Story 26.3	dev_complete	spawn_at=2026-07-09T08:30Z model=claude-sonnet-5 files=~13 prompt=resend-failed-messages docs=4surfaces counts=interop21to22+prompts9to10 baseline_check=exit0 bootstrap=unchanged clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-07-09T17:16:18Z	Story 26.3	adr_verifications_complete	result=none_required reason=no_docs_adr_registry model=claude-opus-4-8
+2026-07-09T17:18:32Z	Story 26.3	qa_complete	spawn_at=2026-07-09T08:50Z model=claude-sonnet-5 tests_added=3 all=38 full_suite=13/13_turbo interop=320 first_run_failures=0 clarifications=0 closing_sections_present=true note=prompt_content_pins baseline_check=exit0
+2026-07-09T17:37:26Z	Story 26.3	cr_complete	spawn_at=2026-07-09T09:05Z model=claude-opus-4-8 resolved=3 deferred=0 dismissed=0 high=0 med=0 low=3 clarifications=0 closing_sections_present=true status=done note=rule30_default_state_verified+meta_readme_counts_reconciled
+2026-07-09T17:37:26Z	Story 26.3	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=real_resend_82651to82658_verified+3_refusals_nowrite+overcap_named+sademo_rule34+cleanup_0 model=claude-opus-4-8

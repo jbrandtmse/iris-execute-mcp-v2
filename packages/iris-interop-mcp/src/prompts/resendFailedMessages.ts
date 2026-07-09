@@ -1,0 +1,68 @@
+/**
+ * `resend-failed-messages` prompt (Epic 26, Story 26.3 — spec
+ * `03-skills-prompts-pack.md` §3, gated on Spec 04 until `iris_message_resend`
+ * shipped in Story 26.2).
+ *
+ * Encodes the dry-run-first `iris_message_resend` workflow: preview the
+ * match count with `resendFiltered dryRun:true`, review with the user, then
+ * execute with `dryRun:false, confirm:true` (or a targeted `resend` of
+ * specific header IDs), and verify the new headers via
+ * `iris_production_messages`. Always states the duplication hazard and that
+ * the write actions are governance-default-disabled. Server: iris-interop-mcp.
+ */
+
+import type { PromptDefinition } from "@iris-mcp/shared";
+
+/** Render `value`, or a bracketed placeholder for the static skills doc when omitted. */
+function arg(value: string | undefined, placeholder: string): string {
+  return value !== undefined && value !== "" ? value : placeholder;
+}
+
+export const resendFailedMessagesPrompt: PromptDefinition = {
+  name: "resend-failed-messages",
+  title: "Resend Failed Messages",
+  description:
+    "Resend failed Interoperability messages for a config item using the dry-run-first " +
+    "iris_message_resend workflow — preview the match count before executing, then verify " +
+    "the new headers via iris_production_messages. States the duplication hazard and that " +
+    "resend/resendFiltered are governance-default-disabled writes.",
+  arguments: [
+    {
+      name: "item",
+      description:
+        "Config item name whose failed messages to resend (matches either the source or " +
+        "target config item of candidate messages).",
+      required: true,
+    },
+    {
+      name: "since",
+      description:
+        "Window start — ISO-8601 or ODBC timestamp. The from/to search window may not " +
+        "exceed 7 days.",
+      required: true,
+    },
+  ],
+  build: (args) => {
+    const item = arg(args.item, "<item>");
+    const since = arg(args.since, "<since>");
+
+    return `# Resend Failed Messages
+
+Config item: \`${item}\`
+Window start: \`${since}\`
+
+GOVERNANCE: \`resend\` and \`resendFiltered\` are write actions and are **DEFAULT-DISABLED** under tool governance (their sibling \`preview\` is a read and is enabled by default). If a call is refused with \`GOVERNANCE_DISABLED\`, tell the user the write must be explicitly enabled via \`IRIS_GOVERNANCE\`, e.g.:
+\`{"global": {"iris_message_resend:resendFiltered": true, "iris_message_resend:resend": true}}\`
+Do NOT attempt a workaround — surface the refusal and the enable snippet to the user.
+
+DUPLICATION HAZARD: resending an already-processed message delivers its data again downstream — the target sees a brand-new message, not a correction. Always preview first and confirm with the user that the matched messages are genuinely worth retrying (a failed Request, not a completed message or a Response-type error payload, which is typically a no-op).
+
+**DRY-RUN-FIRST workflow — follow IN ORDER, do not skip ahead:**
+
+1. Call \`iris_message_resend\` with \`action: "resendFiltered"\`, \`item: "${item}"\`, \`from: "${since}"\`, and \`dryRun: true\` (the default) to preview. This returns the match count and a first-20 sample, and resends NOTHING.
+2. Review the preview with the user: how many messages matched, and do the sampled rows look like genuine retry candidates? Narrow the window (\`to\`) or the \`status\` filter (default \`'Errored'\`) if the match set looks wrong, and repeat step 1.
+3. If the match count exceeds \`maxMessages\` (default 100, hard cap 500), the call is refused rather than truncated-and-executed — narrow the \`from\`/\`to\` window or the \`item\` filter and repeat step 1; do not raise \`maxMessages\` past what the user has reviewed.
+4. Only after the user EXPLICITLY approves executing the resend: call \`iris_message_resend\` again with the SAME \`action: "resendFiltered"\` filters, \`dryRun: false\`, AND \`confirm: true\` (both are required together — omitting either is refused with no changes made). For a small, specific set of header IDs instead of a filtered batch, use \`action: "resend"\` with an explicit \`headerIds\` list.
+5. Verify the resend: call \`iris_production_messages\` for the affected session(s), or look up the \`newHeaderId\` values returned in step 4's per-header results, to confirm the new headers were delivered as expected. Report any per-header failures — a bad header does not abort the rest of the batch, so check the summary counts, not just success/failure.`;
+  },
+};

@@ -7,10 +7,11 @@
  * test checks the STRUCTURE every generated skill file must carry: a valid
  * YAML frontmatter block with non-empty `name`/`description` fields, a
  * DO-NOT-EDIT banner (Rule #18) naming the regen command, and that a skill
- * directory exists for EVERY one of the 9 v1 registered prompts (no prompt
- * silently missing its generated skill, no orphaned/stale skill directory
- * left over — `gen-skills.mjs`'s write mode is supposed to remove those, per
- * the story's Task 2).
+ * directory exists for EVERY one of the 10 registered prompts (the original
+ * 9 v1 stakeholder-approved prompts, Story 25.1, plus `resend-failed-messages`
+ * un-gated in Story 26.3 — no prompt silently missing its generated skill,
+ * no orphaned/stale skill directory left over — `gen-skills.mjs`'s write
+ * mode is supposed to remove those, per the story's Task 2).
  *
  * Reads `skills/` directly from disk (repo-committed generated output) —
  * does NOT invoke the generator or require a prior build, unlike the
@@ -29,7 +30,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../../../..");
 const skillsDir = resolve(root, "skills");
 
-/** The 9 stakeholder-approved v1 prompt names (AC 25.1.5) — one skill each. */
+/**
+ * The 9 stakeholder-approved v1 prompt names (AC 25.1.5) plus
+ * `resend-failed-messages`, un-gated in Story 26.3 — one skill each.
+ */
 const EXPECTED_SKILL_NAMES = [
   "check-system-health",
   "run-external-backup",
@@ -40,6 +44,7 @@ const EXPECTED_SKILL_NAMES = [
   "recover-stuck-production",
   "provision-project-environment",
   "audit-security-posture",
+  "resend-failed-messages",
 ];
 
 /**
@@ -103,7 +108,7 @@ describe("generated skills/ directory structure (AC 25.1.2)", () => {
     expect(body.trim().length).toBeGreaterThan(0);
   });
 
-  it("skills/README.md exists with its own DO-NOT-EDIT banner and lists all 9 skills", () => {
+  it("skills/README.md exists with its own DO-NOT-EDIT banner and lists all 10 skills", () => {
     const readmePath = resolve(skillsDir, "README.md");
     expect(existsSync(readmePath)).toBe(true);
     const raw = readFileSync(readmePath, "utf-8");

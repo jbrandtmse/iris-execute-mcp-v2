@@ -17,9 +17,11 @@
  * production content. No live IRIS: prompt/tool registration is fully
  * synchronous and constructor-scoped, so this never calls `start()`.
  *
- * Also confirms the 2 GATED v1-omitted prompts (AC 25.1.5) are absent from
- * THIS server specifically — `resend-failed-messages` is the gated prompt
- * that would (in a future epic) live on iris-interop-mcp.
+ * Also confirms the OTHER server's gated v1-omitted prompt
+ * (`promote-environment-change`, dev-owned) never leaks onto this server.
+ * `resend-failed-messages` was the interop-owned gated prompt (AC 25.1.5) —
+ * it un-gated in Epic 26, Story 26.3 once `iris_message_resend` shipped, and
+ * is now asserted as OWNED (not absent) below.
  */
 
 import { describe, it, expect } from "vitest";
@@ -27,8 +29,8 @@ import { McpServerBase } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
 
-/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1. */
-const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production"];
+/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1 + Story 26.3. */
+const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production", "resend-failed-messages"];
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
@@ -84,7 +86,7 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 2 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 3 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();
@@ -100,10 +102,17 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     }
   });
 
-  it("the gated prompt 'resend-failed-messages' is NOT registered on this server (AC 25.1.5)", async () => {
+  it("the previously-gated prompt 'resend-failed-messages' IS now registered (Story 26.3)", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
-    expect(names).not.toContain("resend-failed-messages");
+    expect(names).toContain("resend-failed-messages");
+  });
+
+  it("the OTHER server's gated prompt 'promote-environment-change' (dev-owned) is NOT registered here", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
+    expect(names).not.toContain("promote-environment-change");
   });
 });
