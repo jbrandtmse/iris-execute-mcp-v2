@@ -27,3 +27,4 @@
 2026-07-09T00:28:40Z	Story 25.2	committed	sha=8dc2b7a submodules=
 2026-07-09T00:28:58Z	Epic 25	epic_status_done	stories=3
 2026-07-09T04:52:22Z	Epic 25	epic_retro_complete	reason=user_opted_in rules_codified=45,46 rules_total=46
+2026-07-09T04:53:12Z	Epic 25	epic_merged_to_feature	repos=. feature_sha=e2a9980 merge_sha=e2a9980 submodules=
