@@ -512,3 +512,70 @@ describe("loadProfileRegistry (central entry point, AC 14.1.1/14.1.2)", () => {
     expect(() => loadProfileRegistry(env)).toThrow("IRIS_PROFILES");
   });
 });
+
+// ════════════════════════════════════════════════════════════════════
+// SQL caps propagation (Story 24.2, CR patch): mergeProfile() inherits the
+// operator-set SQL resource caps (sqlMaxRows/sqlTimeoutMs, read from
+// IRIS_SQL_MAX_ROWS/IRIS_SQL_TIMEOUT into the default config) into every
+// named IRIS_PROFILES entry — exactly like it inherits `timeout` — so a call
+// resolving to a non-default profile is capped too. (Originally flagged by
+// QA as a KNOWN GAP; fixed at the code-review gate because Epic 24's headline
+// "point it at PRODUCTION in read-only mode" commonly targets a NAMED
+// profile, so the caps must apply there.) The conditional spread preserves
+// the "unset -> field absent" shape (Rule #19): with the env vars unset, a
+// named profile carries no sqlMaxRows/sqlTimeoutMs keys at all.
+// ════════════════════════════════════════════════════════════════════
+
+describe("SQL caps propagate to non-default profiles (Story 24.2 CR patch)", () => {
+  it("a named IRIS_PROFILES entry inherits sqlMaxRows/sqlTimeoutMs from the default profile, like every other field", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "250",
+      IRIS_SQL_TIMEOUT: "12",
+      IRIS_PROFILES: JSON.stringify({
+        // Deliberately overrides nothing but host, so every other field
+        // (including the SQL caps) is inherited from the default.
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(defaultConfig.sqlMaxRows).toBe(250);
+    expect(defaultConfig.sqlTimeoutMs).toBe(12_000);
+
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    // Default profile: caps present (built by spreading defaultConfig verbatim).
+    expect(def.sqlMaxRows).toBe(250);
+    expect(def.sqlTimeoutMs).toBe(12_000);
+
+    // Non-default profile: every inherited field matches the default...
+    expect(secondary.port).toBe(defaultConfig.port);
+    expect(secondary.username).toBe(defaultConfig.username);
+    expect(secondary.namespace).toBe(defaultConfig.namespace);
+    expect(secondary.timeout).toBe(defaultConfig.timeout);
+    // ...including the SQL caps (the fix).
+    expect(secondary.sqlMaxRows).toBe(250);
+    expect(secondary.sqlTimeoutMs).toBe(12_000);
+  });
+
+  it("a named profile carries NO sqlMaxRows/sqlTimeoutMs keys when the caps are unset (Rule #19 shape preserved)", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    expect(secondary.sqlMaxRows).toBeUndefined();
+    expect(secondary.sqlTimeoutMs).toBeUndefined();
+    expect(secondary).not.toHaveProperty("sqlMaxRows");
+    expect(secondary).not.toHaveProperty("sqlTimeoutMs");
+  });
+});

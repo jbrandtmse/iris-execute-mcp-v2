@@ -229,36 +229,55 @@ export const executeTestsTool: ToolDefinition = {
       const deadline = Date.now() + TEST_POLL_TIMEOUT;
       let testResults: AtelierTestResult[] | undefined;
 
+      // Accumulate results across polls. The Atelier /work/{id} endpoint
+      // signals "job still running" with a Retry-After header, and each GET
+      // DRAINS the results accumulated since the previous GET (delta
+      // semantics — verified live 2026-07-09: a 5-method class delivered its
+      // methods spread across successive polls, each drain carrying only the
+      // newly-finished ones). Two historical bugs guard this loop's shape:
+      //  - Accepting the FIRST non-empty drain as final truncates the run to
+      //    whichever methods finished before that poll (a 41-method class
+      //    reported as total=2 with a green envelope — silent under-report).
+      //  - Keeping only the LAST drain discards every earlier drain (same
+      //    truncation, different subset).
+      // So: collect EVERY poll's chunk into a map (keyed by class::method —
+      // also correct if the endpoint ever returns cumulative sets, since the
+      // key dedupes repeats), and finalize only when Retry-After is absent.
+      const accumulated = new Map<string, AtelierTestResult>();
+      const resultKey = (r: AtelierTestResult): string =>
+        r.method ? `${r.class}::${r.method}` : `class-summary::${r.class}`;
+
       while (Date.now() < deadline) {
         const pollResp = await ctx.http.get<unknown>(pollPath);
         const pollResult = pollResp.result;
         const pollEnvelope = pollResp as unknown as Record<string, unknown>;
         const hasRetry = !!pollEnvelope.retryafter;
 
-        // Tests finished when result is a non-empty array of TestResult objects
-        if (Array.isArray(pollResult) && pollResult.length > 0) {
-          testResults = pollResult as AtelierTestResult[];
-          break;
+        // Collect whatever this poll carried (a partial drain while running,
+        // or the final drain on the terminal poll). Both array and
+        // { content: [...] } shapes are seen from the endpoint.
+        let chunk: AtelierTestResult[] = [];
+        if (Array.isArray(pollResult)) {
+          chunk = pollResult as AtelierTestResult[];
+        } else {
+          const resultObj = pollResult as Record<string, unknown> | undefined;
+          if (Array.isArray(resultObj?.content)) {
+            chunk = resultObj!.content as AtelierTestResult[];
+          }
+        }
+        for (const r of chunk) {
+          accumulated.set(resultKey(r), r);
         }
 
         if (!hasRetry) {
-          // No retryafter — job completed. Check various result shapes.
-          if (Array.isArray(pollResult)) {
-            // Empty array — tests ran but produced no results
-            testResults = [];
-            break;
-          }
-          const resultObj = pollResult as Record<string, unknown> | undefined;
-          if (Array.isArray(resultObj?.content) && (resultObj!.content as unknown[]).length > 0) {
-            testResults = resultObj!.content as AtelierTestResult[];
-            break;
-          }
-          // Job done with no results — break to avoid infinite loop
-          testResults = [];
+          // No Retry-After → the job has COMPLETED. Everything has been
+          // drained into the accumulator; finalize (may be empty — tests
+          // ran but produced no results).
+          testResults = [...accumulated.values()];
           break;
         }
 
-        // Wait before polling again
+        // Job still running — wait and re-poll for the next drain.
         await new Promise((resolve) => setTimeout(resolve, TEST_POLL_INTERVAL));
       }
 

@@ -133,4 +133,119 @@ describe("loadConfig", () => {
     };
     expect(() => loadConfig(env)).toThrow("IRIS_TIMEOUT");
   });
+
+  // ── IRIS_SQL_MAX_ROWS / IRIS_SQL_TIMEOUT (Story 24.2, AC 24.2.1) ────
+
+  it("should leave sqlMaxRows/sqlTimeoutMs undefined (and absent) when unset — Rule #19 byte-for-byte no-op", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+    };
+    const config = loadConfig(env);
+    expect(config.sqlMaxRows).toBeUndefined();
+    expect(config.sqlTimeoutMs).toBeUndefined();
+    expect(config).not.toHaveProperty("sqlMaxRows");
+    expect(config).not.toHaveProperty("sqlTimeoutMs");
+    expect(config).toEqual({
+      host: "localhost",
+      port: 52773,
+      username: "admin",
+      password: "secret",
+      namespace: "HSCUSTOM",
+      https: false,
+      baseUrl: "http://localhost:52773",
+      timeout: 60_000,
+    });
+  });
+
+  it("should parse IRIS_SQL_MAX_ROWS from env var", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "500",
+    };
+    const config = loadConfig(env);
+    expect(config.sqlMaxRows).toBe(500);
+  });
+
+  it("should throw when IRIS_SQL_MAX_ROWS is not a valid number", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "abc",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_SQL_MAX_ROWS");
+  });
+
+  it("should throw when IRIS_SQL_MAX_ROWS is zero or negative", () => {
+    const envZero = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "0",
+    };
+    expect(() => loadConfig(envZero)).toThrow("IRIS_SQL_MAX_ROWS");
+
+    const envNeg = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "-10",
+    };
+    expect(() => loadConfig(envNeg)).toThrow("IRIS_SQL_MAX_ROWS");
+  });
+
+  it("should throw when IRIS_SQL_MAX_ROWS is not an integer", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_MAX_ROWS: "10.5",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_SQL_MAX_ROWS");
+  });
+
+  it("should parse IRIS_SQL_TIMEOUT (seconds) and convert to milliseconds", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_TIMEOUT: "30",
+    };
+    const config = loadConfig(env);
+    expect(config.sqlTimeoutMs).toBe(30_000);
+  });
+
+  it("should throw when IRIS_SQL_TIMEOUT is not a valid number", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_TIMEOUT: "abc",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_SQL_TIMEOUT");
+  });
+
+  it("should throw when IRIS_SQL_TIMEOUT is zero or negative", () => {
+    const envZero = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_TIMEOUT: "0",
+    };
+    expect(() => loadConfig(envZero)).toThrow("IRIS_SQL_TIMEOUT");
+
+    const envNeg = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_TIMEOUT: "-5",
+    };
+    expect(() => loadConfig(envNeg)).toThrow("IRIS_SQL_TIMEOUT");
+  });
+
+  it("should throw when IRIS_SQL_TIMEOUT is Infinity (a non-finite value must be rejected, not forwarded)", () => {
+    // Number("Infinity") === Infinity, which is > 0 and not NaN; a Number.isNaN
+    // guard would let it through and forward { timeout: Infinity }, which Node's
+    // setTimeout clamps to ~1ms — silently disabling SQL. Number.isFinite rejects it.
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_TIMEOUT: "Infinity",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_SQL_TIMEOUT");
+  });
 });

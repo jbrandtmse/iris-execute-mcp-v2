@@ -193,6 +193,100 @@ describe("iris_sql_execute", () => {
     expect(calledBody).not.toHaveProperty("parameters");
   });
 
+  // ── SQL resource caps (Story 24.2, AC 24.2.1) ────────────────────
+
+  it("should be byte-for-byte unchanged when IRIS_SQL_MAX_ROWS/IRIS_SQL_TIMEOUT are unset (Rule #19 no-op)", async () => {
+    // createMockCtx's default config carries neither sqlMaxRows nor
+    // sqlTimeoutMs, mirroring loadConfig's output when the env vars are unset.
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
+    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+
+    const result = await sqlExecuteTool.handler(
+      { query: "SELECT ID FROM Sample.Person", maxRows: 10 },
+      ctx,
+    );
+
+    // Exactly 2 args — no timeout options object passed at all.
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/action/query",
+      { query: "SELECT ID FROM Sample.Person" },
+    );
+    expect(mockHttp.post.mock.calls[0]).toHaveLength(2);
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured).not.toHaveProperty("rowsCapped");
+    expect(structured.rowCount).toBe(10);
+  });
+
+  it("should set rowsCapped: true and clamp rows when IRIS_SQL_MAX_ROWS is below the caller's requested maxRows", async () => {
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
+    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 5 } };
+
+    const result = await sqlExecuteTool.handler(
+      { query: "SELECT ID FROM Sample.Person", maxRows: 20 },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      rows: unknown[][];
+      rowCount: number;
+      rowsCapped?: boolean;
+      truncated?: boolean;
+      totalAvailable?: number;
+    };
+    expect(structured.rowCount).toBe(5);
+    expect(structured.rows).toHaveLength(5);
+    expect(structured.rowsCapped).toBe(true);
+    // truncated/totalAvailable are distinct and still present (more rows exist).
+    expect(structured.truncated).toBe(true);
+    expect(structured.totalAvailable).toBe(50);
+  });
+
+  it("should NOT set rowsCapped when IRIS_SQL_MAX_ROWS is above the caller's requested maxRows", async () => {
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
+    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 1000 } };
+
+    const result = await sqlExecuteTool.handler(
+      { query: "SELECT ID FROM Sample.Person", maxRows: 20 },
+      ctx,
+    );
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured).not.toHaveProperty("rowsCapped");
+    expect(structured.rowCount).toBe(20);
+  });
+
+  it("should NOT set rowsCapped when IRIS_SQL_MAX_ROWS clamps only the DEFAULT_MAX_ROWS (no explicit maxRows) but does not reduce it below what's requested", async () => {
+    // cap === requested (not < requested) -> rowsCapped must be false per spec.
+    const manyRows = Array.from({ length: 2000 }, (_, i) => ({ ID: i }));
+    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 1000 } };
+
+    const result = await sqlExecuteTool.handler(
+      { query: "SELECT ID FROM Sample.Person" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured).not.toHaveProperty("rowsCapped");
+    expect(structured.rowCount).toBe(1000);
+  });
+
+  it("should forward IRIS_SQL_TIMEOUT as the http.post timeout option (ms)", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ content: [{ ID: 1 }] }));
+    ctx = { ...ctx, config: { ...ctx.config, sqlTimeoutMs: 15_000 } };
+
+    await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/atelier/v7/USER/action/query",
+      { query: "SELECT 1" },
+      { timeout: 15_000 },
+    );
+  });
+
   it("should handle empty result set gracefully", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({

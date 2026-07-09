@@ -37,6 +37,10 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+### Read-only mode (`IRIS_GOVERNANCE_PRESET`)
+
+Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on **this server** with one environment variable — no `IRIS_GOVERNANCE` JSON needed. `IRIS_GOVERNANCE_PRESET` is **framework configuration, not a tool** — it applies identically across all five servers in the suite (`@iris-mcp/dev` included), not something this package registers or exposes. An explicit `IRIS_GOVERNANCE` override still wins over the preset. Omit (or set `"full"`) for today's behavior (opt-in, default off). Details: [Read-only mode](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
+
 ---
 
 ## MCP Client Configuration
@@ -164,6 +168,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), or currently-running statements (`running`) | `action`, `query?`, `filter?`, `maxRows?`, `namespace?` | readOnly, idempotent |
 
 > **Governance defaults:** all four `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
+>
+> **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 
 ### Server Tools
 
@@ -196,6 +202,20 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_loc_count` | Count lines of code in the namespace's ObjectScript documents (CLS/MAC/INT/INC): blank / source code / source comment / test code / test comment buckets, percentages, and the top-N largest documents. `spec` is REQUIRED (whole-namespace scans need an explicit `*` and risk the ~60s gateway timeout); compiler-generated documents are excluded by default | `spec`, `namespace?`, `includeGenerated?`, `topN?`, `format?` | readOnly, idempotent |
 
 > **Governance defaults:** `iris_loc_count` is classified `read` and is therefore **enabled by default** — it is not gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
+
+---
+
+## Prompts
+
+Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (Epic 25) served via `prompts/list`/`prompts/get`. Prompts are a separate protocol capability from tools — they carry no governance key and do not change this server's tool count.
+
+| Prompt | Description |
+|---|---|
+| `diagnose-slow-query` | Runs `iris_sql_analyze` (`explain` → `indexUsage` → `stats`) and recommends a fix — never auto-applies one. |
+| `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
+| `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. |
+
+Also installable as [Agent Skills](../../skills/README.md).
 
 ---
 
@@ -619,6 +639,8 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
   "rowCount": 2
 }
 ```
+
+If the operator has set `IRIS_SQL_MAX_ROWS` lower than the effective request, the output additionally carries `"rowsCapped": true` (e.g. `IRIS_SQL_MAX_ROWS=5` with `maxRows: 10` above would clamp `rowCount` to 5 and add `rowsCapped: true`). Unset, this field never appears.
 </details>
 
 <details>

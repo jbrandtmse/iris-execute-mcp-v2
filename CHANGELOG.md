@@ -2,6 +2,153 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-09]
+
+### Fixed — `iris_execute_tests` silent result truncation (`@iris-mcp/dev`, HIGH)
+
+`iris_execute_tests` could silently under-report results for slow test classes: `total` and
+`details` were truncated to whichever methods happened to finish before the first non-empty poll,
+with **no error and a green-looking envelope** (a 41-method class reported as `total: 2`;
+reproduced live: a 5-method class with ~1s methods reported `total: 1`). Fast classes returned
+correct full sets, which is why the bug hid in casual use — it bit precisely on the large/slow
+classes whose coverage matters most. Reported externally (FHIR Bridge dev, CPPCON-1214) 2026-07-09;
+this is the long-observed Rule #35 "early partial snapshot" behavior, now root-caused as a defect
+in our own poll loop (not in IRIS, not in the Atelier work queue).
+
+**Root cause** (`packages/iris-dev-mcp/src/tools/execute.ts` poll loop): the Atelier
+`GET /work/{id}` endpoint signals "job still running" with a `Retry-After` header, and each GET
+**drains the results accumulated since the previous GET** (delta semantics — verified live: the
+same run's methods arrived spread across successive drains). The loop accepted the FIRST non-empty
+drain as the final result set, ignoring the `Retry-After` signal it had already computed one line
+above, and discarded everything still arriving.
+
+**Fix**: the poll loop now **accumulates every drain** into a map keyed by `class::method` (which
+also dedupes correctly if an endpoint variant ever returns cumulative sets instead of deltas) and
+finalizes **only when `Retry-After` is absent** (job complete). Notably, the initially proposed
+fix — "wait for completion, then take the terminal poll's result" — was itself insufficient and
+was caught by the live smoke: with delta semantics the terminal drain carries only the *tail* of
+the run (the live check returned `total: 1` again, just a *different* method), so accumulation
+across drains is required, not optional.
+
+Regression tests (mocked, default suite): delta-drain accumulation (fails against both the
+original bug and the insufficient first fix), cumulative-set dedupe, empty-partial keep-polling,
+and empty-terminal completion. Live before/after evidence: pre-fix 1/5 → post-fix 5/5 (class
+level) and 1/1 (method level) against HSCUSTOM. The Rule #35 operational caveat (compare returned
+`total` against the expected count) remains good defense-in-depth, and the
+`deploy-and-test-class` prompt keeps teaching it.
+
+## [Pre-release — 2026-07-08] — Epic 25
+
+### Added — Epic 25: MCP Prompts Capability + Agent Skills Pack (`@iris-mcp/shared` + all servers)
+
+A pack of 9 workflow-shaped **MCP prompts** (parameterized instructions served via the protocol's
+`prompts` capability, teaching a client the correct tool *sequence* for a task), plus a generated,
+installable [`skills/`](skills/README.md) directory for Claude Code/Copilot skill loaders. **Strictly
+additive, TS/content-only** — no ObjectScript, no `BOOTSTRAP_VERSION` change, **no new tool or
+governance key anywhere**, and the frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141
+keys) is **unchanged**. Prompts are a separate MCP protocol capability from tools (Rule #31): every
+package `index.test.ts` tool-array count/`getToolNames`/`toHaveLength` assertion is unchanged, and
+the suite tool count stays **101** (106 advertised, incl. the framework `iris_server_profiles` tool
+on every server).
+
+- **Framework `prompts` capability** (`@iris-mcp/shared`, Story 25.0) — a new `PromptDefinition`
+  type + optional `prompts?: PromptDefinition[]` on `McpServerBaseOptions`, registered in the
+  `McpServerBase` constructor and wired through the MCP SDK's own `prompts/list`/`prompts/get`
+  handlers. A server with no prompts registered advertises **no** `prompts` capability and is
+  byte-for-byte unchanged (mechanical capability-snapshot proof, Rule #19); a server with ≥1 prompt
+  additionally advertises `prompts:{listChanged:true}`.
+- **The v1 pack — 9 prompts, per-server** (Stories 25.1/25.2) — ops: `check-system-health`,
+  `run-external-backup`; dev: `diagnose-slow-query`, `objectscript-review`, `deploy-and-test-class`;
+  interop: `trace-message-flow`, `recover-stuck-production`; admin: `provision-project-environment`,
+  `audit-security-posture`. `@iris-mcp/data` ships no prompts in v1. Two additional prompts are
+  **gated** and intentionally not registered yet: `resend-failed-messages` (interop, ships with
+  Epic 26) and `promote-environment-change` (dev, ships with Epic 27).
+- **`skills/` generator** (`scripts/gen-skills.mjs`, + `--check` mode, Rules #18/#25 shape) —
+  single-sources each prompt's content into `skills/<name>/SKILL.md` (YAML frontmatter + workflow
+  body) and a `skills/README.md` install guide, every output DO-NOT-EDIT-stamped.
+- **Tool-name rot prevention** (`scripts/validate-prompts.mjs`, wired into the default vitest
+  suite) — extracts every `iris_[a-z0-9_]+` token referenced in prompt/skill bodies and asserts it
+  is a real, currently-registered tool name across all five packages + the framework tool, so a
+  future tool rename breaks CI rather than shipping a broken workflow to users.
+- **CR 24.0-1 / Rule #44 `readOnlyHint` cross-check** (folded into Story 25.1, `@iris-mcp/iris-mcp-all`)
+  — a default-suite test that flags any governance-baseline key classified `read` whose owning
+  tool declares `annotations.readOnlyHint: false`, unless justified. Found 15 pre-existing
+  tool-scoped-annotation divergences (all verified safe, none required reclassification);
+  `baseline-classifications.ts` and the frozen `governance-baseline.ts` are both untouched.
+
+Documentation: root [README.md](README.md) (new "Workflow Prompts & Agent Skills" capability
+section), each per-server `packages/<pkg>/README.md` (new "Prompts" section matching the existing
+"Tool Reference" style; `@iris-mcp/data`'s states "No prompts in v1"), and
+[`tool_support.md`](tool_support.md) (a note that prompts are a separate, non-tool MCP capability,
+not counted in any per-server tool table).
+
+## [Pre-release — 2026-07-08]
+
+### Added — Epic 24: Governance Safety Presets + SQL Resource Caps (`@iris-mcp/shared`)
+
+A one-word "point it at production in read-only mode" safety preset, plus two optional hard caps
+on `iris_sql_execute`. **Strictly additive, TS-only, no new tools/governance keys** — the frozen
+Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged**; suite tool count stays
+**101** (package `index.test.ts` tool-array lengths unchanged everywhere, Rule #31). No
+`BOOTSTRAP_VERSION` change — nothing on the IRIS side is touched.
+
+- **`IRIS_GOVERNANCE_PRESET`** (`"read-only"` | `"full"`, optional) — a new layer in the governance
+  cascade (`profile.explicit ?? global.explicit ?? preset ?? defaultSeed`) that, when set to
+  `"read-only"`, denies every action a tool's `mutates` classification marks `"write"` and allows
+  every `"read"` action, suite-wide, across all five servers — including the `defaultEnabled`
+  writes (Epic 20's `iris_production_control:clean`), which are still denied ("read-only means
+  read-only"). An explicit `IRIS_GOVERNANCE` override at either layer still wins over the preset.
+  A denial caused by the preset (not an explicit `false`) carries `structuredContent.presetApplied:
+  "read-only"` so a client can distinguish the two. Unset (or `"full"`, an explicit alias) is a
+  pure pass-through — byte-for-byte today's behavior (Rule #19). New generated artifact
+  `packages/shared/src/baseline-classifications.ts` (`BASELINE_ACTION_CLASSIFICATIONS`) gives the
+  preset a truthful read/write verdict for all 141 frozen-baseline keys, cross-checked against each
+  tool's own annotations; a completeness test enforces exact key-set parity against the live
+  baseline. The frozen `governance-baseline.ts` itself is never touched (Rules #20/#23/#25).
+- **`IRIS_SQL_MAX_ROWS`** (positive integer, optional) — a hard cap on `iris_sql_execute`'s
+  effective row limit: `effectiveLimit = min(caller_maxRows ?? 1000, IRIS_SQL_MAX_ROWS)`. When the
+  cap actually reduces the caller's requested limit, the response carries `rowsCapped: true`
+  (distinct from the pre-existing `truncated`/`totalAvailable` — both may be present together).
+- **`IRIS_SQL_TIMEOUT`** (positive number of **seconds**, optional) — forwarded as a per-request
+  timeout override to `iris_sql_execute`'s HTTP call (converted to milliseconds internally).
+- **Unset caps are byte-for-byte today's behavior** (Rule #19): with neither env var set,
+  `iris_sql_execute`'s output has no `rowsCapped` field and its `http.post` call carries no timeout
+  option at all (not even an explicit `undefined` third argument) — a mechanical no-op test asserts
+  the call signature is unchanged.
+
+Documentation: [README.md](README.md) (env-var table + new "Read-only mode" marketing subsection
+under "Multiple Servers & Governance" + Backward Compatibility note), the per-client guides
+([`docs/client-config/claude-code.md`](docs/client-config/claude-code.md),
+[`claude-desktop.md`](docs/client-config/claude-desktop.md),
+[`cursor.md`](docs/client-config/cursor.md) — copy-pasteable `env` blocks), and
+[`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md) (SQL caps note on
+`iris_sql_execute` + the read-only-preset-applies-to-all-servers framework note, Rule #31).
+
+## [Pre-release — 2026-07-07]
+
+### Added — Epic 23: Composite Health Check (`@iris-mcp/ops`)
+
+One new read tool, `iris_health_check`, that runs a composite health check across up to 9 IRIS
+instance areas in ONE round-trip and returns a structured verdict (`healthy` / `warning` /
+`critical`) with a per-area finding explaining why — the intended FIRST call of any diagnostic
+session, replacing 6+ separate calls with documented, overridable thresholds. **Strictly
+additive** — every existing tool/schema/output is unchanged (ops package `index.test.ts` count
+20 → 21), and the frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is
+**unchanged** — the new key is a non-baseline **`mutates: "read"` → enabled by default** under
+`IRIS_GOVERNANCE` (an operator can still disable it explicitly). Suite tool count: **100 → 101**
+(ops **20 → 21**; advertised incl. the framework tool **105 → 106**). `BOOTSTRAP_VERSION`
+unchanged in this story (`13b4b5f003ab`, shipped by Story 23.1) — this story is TypeScript-only.
+
+- **`iris_health_check`** ([packages/iris-ops-mcp/src/tools/health.ts](packages/iris-ops-mcp/src/tools/health.ts), `ExecuteMCPv2.REST.Health:HealthCheck` via `GET/POST /monitor/health`) — optional `areas` (subset of the 9 areas; an empty array or omission means all 9), optional `thresholds` (partial overrides of the 8 default warning/critical thresholds, applied purely client-side — never sent to the endpoint). Output `structuredContent`: `{verdict, checkedAt, findings, raw}`; `findings[]` carries one entry per CHECKED area (`{area, level, metric, value, threshold, explanation}`, `level` one of `ok`/`warning`/`critical`/`notApplicable`/`error`).
+- **Server-side raw, client-side judgment** (architecture decision H5, split across Story 23.1 ObjectScript + this story): the endpoint returns per-area raw values only with per-area Try/Catch fault isolation; every threshold, per-area level rule, and the overall verdict are computed here in TypeScript, so a threshold tweak never needs a bootstrap bump. `journal`/`license`/`lockTable` thresholds are ASCENDING (% full or % used — high is bad); only `dbFreePct` is DESCENDING (% free — low is bad; Story 23.0 direction-correction finding). `system`/`mirror`/`ecp`/`interop` are informational in v1 (no ok/warning threshold — always `ok`, or `notApplicable` when not configured; CR 23.0-3).
+- **`memory` area DROPPED, not folded into `system`** (Story 23.0 finding) — no reliable instance-wide memory-health signal exists in IRIS (`SYS.Stats.Buffer` measures cache turnover, not exhaustion; `SYS.History.SharedMemoryData` is `[Internal]`-flagged and inconsistently populated). Passing `areas: ["memory"]` is rejected by the Zod input schema with the full list of the 9 valid areas.
+- **`databases` per-DB aggregation** (CR 23.0-4): the worst-DB (by severity: critical > error/warning > ok, `notApplicable` excluded) drives the area's single finding; the full per-DB breakdown (`{name, size, maxSize, mounted, openFailed}` per database) stays in `raw.databases`. A DB with `maxSize=0` (IRIS's own "unlimited" recommendation) or `mounted=false` reports `notApplicable` — v1 has no volume-level disk-exhaustion signal for those (CR 23.0-1); a genuine `%OpenId` failure (`openFailed=true`, Story 23.1) reports `level: "error"` instead, distinct from the benign `notApplicable` cases.
+- **`license` prefers the IRIS-authoritative figure** (CR 23.0-2): `licenseCurrentPct` (from `SYS.Stats.Dashboard`, emitted by Story 23.1) is used when present; falls back to `currentCSPUsers / userLimit * 100` only when absent, with a `notApplicable` guard when `userLimit=0` (core/unlimited-user license) and no authoritative figure exists.
+- **Error isolation never fakes a critical verdict**: a failed probe for one area yields `level: "error"` for that area only (the endpoint's sanitized message, verbatim) — every other area's finding stays intact, and `error` counts as `warning` severity for the overall verdict (never `critical` on its own). A `notApplicable` finding never affects the verdict either way.
+- **Input validation** (CR 23.0-6 / CR 23.1-1): the Zod `areas` enum is the authoritative validator (the endpoint itself stays permissive by design) — `memory` and any other unknown area name is rejected with the valid-options list; `areas: []` is treated the same as omitting the parameter (all 9 areas); threshold overrides accept any number independently (including inverted or extreme values, e.g. `journalPctCrit: 1`, per AC 3) with `NaN`/non-numeric values already guarded by `z.number()`.
+
+Documentation: [`packages/iris-ops-mcp/README.md`](packages/iris-ops-mcp/README.md) (new "Health Check Tool" reference section + a full `iris_health_check` Tool Examples entry with the threshold table + the **read / enabled-by-default** governance callout), [`tool_support.md`](tool_support.md) (new row + ops → 21 / ExecuteMCPv2-backed 76 → 77 / suite → 101 package / 106 advertised + Epic 23 governance-defaults note + a "Fields returned" entry for the `structuredContent` shape), the root [README](README.md) (ops 20 → 21, 100 → 101 tools, ASCII diagram, and a health-check capability line in both the Servers table and the "Which Server Do I Need?" table).
+
 ## [Pre-release — 2026-07-03]
 
 ### Added — Epic 22: Lines-of-Code Counter (`@iris-mcp/dev`)

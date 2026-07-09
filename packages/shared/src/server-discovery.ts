@@ -34,7 +34,7 @@
 
 import { z } from "zod";
 
-import type { GovernanceConfig, MutatesLookup } from "./governance.js";
+import type { GovernanceConfig, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
 import { getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -91,6 +91,10 @@ export interface ProfileRosterEntry {
  * - `defaultProfile` — the reserved default profile's name (for client convenience).
  * - `governance` — either a single profile's policy map (when `allProfiles` is
  *   falsy) under `policy`, OR a per-profile map of policy maps under `policies`.
+ * - `preset` — the active `IRIS_GOVERNANCE_PRESET` (Story 24.1, AC 24.1.4a):
+ *   `"read-only"` or `"full"` when explicitly set, else `null` (unset — the
+ *   `governance` policy above already reflects it, since it is computed by the
+ *   SAME {@link getEffectivePolicy} the gate/resource use).
  */
 export interface ServerDiscoveryResult {
   defaultProfile: string;
@@ -103,6 +107,7 @@ export interface ServerDiscoveryResult {
     /** Per-profile effective policy maps (present only when `allProfiles`). */
     policies?: Record<string, Record<string, boolean>>;
   };
+  preset: GovernancePreset | null;
 }
 
 /**
@@ -145,6 +150,10 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  * @param defaultEnabledWrites - Write keys that seed enabled (Epic 20 F2); default empty.
  *   Threaded so discovery reports the SAME effective policy as the gate/resource —
  *   e.g. `iris_production_control:clean` shows enabled (AC 20.0.5 non-drift).
+ * @param preset - Active {@link GovernancePreset} (Story 24.1, AC 24.1.4a); default `undefined`.
+ *   Threaded into every {@link getEffectivePolicy} call below AND surfaced verbatim
+ *   (as `null` when unset) so the reported policy and the `preset` field never drift.
+ * @param classifications - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -155,6 +164,8 @@ export function computeServerDiscovery(
   governedKeys: Iterable<string>,
   mutatesLookup: MutatesLookup,
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
+  preset?: GovernancePreset,
+  classifications: Readonly<Record<string, MutationClass>> = {},
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -184,6 +195,8 @@ export function computeServerDiscovery(
           mutatesLookup,
           undefined,
           defaultEnabledWrites,
+          preset,
+          classifications,
         ),
         enumerable: true,
         writable: true,
@@ -204,6 +217,8 @@ export function computeServerDiscovery(
         mutatesLookup,
         undefined,
         defaultEnabledWrites,
+        preset,
+        classifications,
       ),
     };
   }
@@ -211,6 +226,7 @@ export function computeServerDiscovery(
   return {
     defaultProfile: DEFAULT_PROFILE_NAME,
     profiles: roster,
+    preset: preset ?? null,
     governance,
   };
 }

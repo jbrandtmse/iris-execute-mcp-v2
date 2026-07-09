@@ -195,6 +195,42 @@ With this config, `iris_global_list({ server: "prod" })` runs against the prod i
 
 ---
 
+## Read-only Mode + SQL Resource Caps (optional)
+
+Point a server at production in **read-only mode** with one environment variable — no `IRIS_GOVERNANCE` JSON required:
+
+| Variable | Purpose |
+|----------|---------|
+| `IRIS_GOVERNANCE_PRESET` | `"read-only"` blocks every write-classified tool action (suite-wide) while every read keeps working; `"full"` is an explicit alias for today's behavior. An explicit `IRIS_GOVERNANCE` override still wins over the preset. Omit for today's behavior. |
+| `IRIS_SQL_MAX_ROWS` | Optional positive integer — a hard cap on `iris_sql_execute`'s effective row limit, independent of the preset. The response carries `rowsCapped: true` when it clamps a caller's request. Omit for no cap. |
+| `IRIS_SQL_TIMEOUT` | Optional positive number of **seconds** — a per-request timeout override for `iris_sql_execute`. Omit to use the connection's default timeout. |
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_HTTPS": "false",
+        "IRIS_GOVERNANCE_PRESET": "read-only",
+        "IRIS_SQL_MAX_ROWS": "1000",
+        "IRIS_SQL_TIMEOUT": "30"
+      }
+    }
+  }
+}
+```
+
+All three are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` govern `iris_sql_execute` specifically, which ships on `@iris-mcp/dev`). See the [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable) for the full model.
+
+---
+
 ## Setting Environment Variables
 
 The recommended approach is to put `env` values directly in the JSON config (shown above). Claude Desktop passes them to the spawned process automatically.

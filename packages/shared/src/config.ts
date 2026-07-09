@@ -23,6 +23,19 @@ export interface IrisConnectionConfig {
   baseUrl: string;
   /** Default HTTP request timeout in milliseconds. */
   timeout: number;
+  /**
+   * Optional operator-set hard cap on `iris_sql_execute`'s effective row
+   * limit (`IRIS_SQL_MAX_ROWS`). `undefined` when unset — no cap applied
+   * (today's behavior).
+   */
+  sqlMaxRows?: number;
+  /**
+   * Optional operator-set per-request timeout (in milliseconds, pre-converted
+   * from the `IRIS_SQL_TIMEOUT` env var which is specified in seconds) for
+   * `iris_sql_execute`'s HTTP call. `undefined` when unset — no per-request
+   * timeout override is passed (today's behavior).
+   */
+  sqlTimeoutMs?: number;
 }
 
 /**
@@ -37,8 +50,12 @@ export interface IrisConnectionConfig {
  * | IRIS_NAMESPACE    | HSCUSTOM     |
  * | IRIS_HTTPS        | false        |
  * | IRIS_TIMEOUT      | 60000        |
+ * | IRIS_SQL_MAX_ROWS | *(unset — no cap)*  |
+ * | IRIS_SQL_TIMEOUT  | *(unset — no per-request override)*, seconds |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
+ * @throws {Error} When IRIS_SQL_MAX_ROWS or IRIS_SQL_TIMEOUT is set to a
+ *   non-positive or non-numeric value.
  */
 export function loadConfig(
   env: Record<string, string | undefined> = process.env,
@@ -76,8 +93,51 @@ export function loadConfig(
     );
   }
 
+  // IRIS_SQL_MAX_ROWS: optional positive integer hard cap on iris_sql_execute's
+  // effective row limit. Unset -> sqlMaxRows stays undefined (no cap, today's
+  // behavior).
+  const rawSqlMaxRows = env.IRIS_SQL_MAX_ROWS;
+  let sqlMaxRows: number | undefined;
+  if (rawSqlMaxRows !== undefined && rawSqlMaxRows !== "") {
+    const parsed = Number(rawSqlMaxRows);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new Error(
+        `IRIS_SQL_MAX_ROWS must be a positive integer. Received: "${rawSqlMaxRows}".`,
+      );
+    }
+    sqlMaxRows = parsed;
+  }
+
+  // IRIS_SQL_TIMEOUT: optional positive number of SECONDS forwarded as a
+  // per-request timeout (milliseconds) to iris_sql_execute's HTTP call.
+  // Stored pre-converted to milliseconds on IrisConnectionConfig.sqlTimeoutMs.
+  // Unset -> sqlTimeoutMs stays undefined (no per-request override, today's
+  // behavior).
+  const rawSqlTimeout = env.IRIS_SQL_TIMEOUT;
+  let sqlTimeoutMs: number | undefined;
+  if (rawSqlTimeout !== undefined && rawSqlTimeout !== "") {
+    const parsed = Number(rawSqlTimeout);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(
+        `IRIS_SQL_TIMEOUT must be a positive number of seconds. Received: "${rawSqlTimeout}".`,
+      );
+    }
+    sqlTimeoutMs = parsed * 1000;
+  }
+
   const protocol = https ? "https" : "http";
   const baseUrl = `${protocol}://${host}:${port}`;
 
-  return { host, port, username, password, namespace, https, baseUrl, timeout };
+  return {
+    host,
+    port,
+    username,
+    password,
+    namespace,
+    https,
+    baseUrl,
+    timeout,
+    ...(sqlMaxRows !== undefined ? { sqlMaxRows } : {}),
+    ...(sqlTimeoutMs !== undefined ? { sqlTimeoutMs } : {}),
+  };
 }
