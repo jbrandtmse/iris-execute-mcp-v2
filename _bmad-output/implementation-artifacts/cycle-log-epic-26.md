@@ -39,3 +39,5 @@
 2026-07-09T18:11:10Z	Story 26.4	qa_complete	spawn_at=2026-07-09T09:45Z model=claude-sonnet-5 tests_added=1 note=compressor_guard_mutation_verified full_suite=13/13turbo os=14/14+10/10+15/15 first_run_failures=0 clarifications=0 closing_sections_present=true bootstrap=unchanged_f16c695aa9ef
 2026-07-09T18:32:16Z	Story 26.4	cr_complete	spawn_at=2026-07-09T10:05Z model=claude-opus-4-8 resolved=1 deferred=3 dismissed=3 high=1_fixed med=0 low=3 clarifications=0 closing_sections_present=true status=done note=ledger_audit_PASS_zero_carried_open+CR23.1-5_defective_fix_corrected bootstrap=f16c695aa9ef-to-e5c18edd00c0
 2026-07-09T18:33:17Z	Story 26.4	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=health_areafilter_live_journal_only+comma+repeatedparam+all9 model=claude-opus-4-8
+2026-07-09T18:33:20Z	Story 26.4	committed	sha=ad5df0f submodules=
+2026-07-09T18:33:37Z	Epic 26	epic_status_done	stories=5
