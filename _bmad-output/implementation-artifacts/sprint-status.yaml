@@ -370,7 +370,7 @@ development_status:
   26-3-resend-docs-smokes-and-prompt: done
   # 26.4 = Rule #37 dedicated burn-down (created at Epic 26 retro-review gate per BINDING decision 2026-07-09; terminal disposition of all carried-open LOW items; runs LAST after 26.0-26.3).
   26-4-deferred-work-ledger-burndown: done
-  epic-26-retrospective: optional
+  epic-26-retrospective: done
 
   # Epic 27: Environment Diff & Promotion — iris_env_diff / iris_env_promote (iris-dev-mcp + shared)
   # Added 2026-07-07 via bmad-correct-course. BINDING SPEC: research/feature-specs/05-env-diff-promotion.md.
