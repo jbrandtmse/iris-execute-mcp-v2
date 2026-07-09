@@ -11,6 +11,7 @@
 import { createRequire } from "node:module";
 import { McpServerBase, resolveTransport } from "@iris-mcp/shared";
 import { tools } from "./tools/index.js";
+import { prompts } from "./prompts/index.js";
 
 // Read version from package.json using createRequire (ESM-safe)
 const require = createRequire(import.meta.url);
@@ -20,6 +21,7 @@ const server = new McpServerBase({
   name: "@iris-mcp/interop",
   version: pkg.version,
   tools,
+  prompts,
   needsCustomRest: true,
 });
 

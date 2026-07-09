@@ -3,6 +3,9 @@
   "version": "0.0.2",
   "description": "Meta-package that installs all five IRIS MCP server packages",
   "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@iris-mcp/dev": "workspace:*",
     "@iris-mcp/admin": "workspace:*",
