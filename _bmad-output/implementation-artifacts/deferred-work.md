@@ -961,3 +961,22 @@ Story 26.4's code review (adversarial three-layer — Blind Hunter / Edge Case H
 - **[CR 26.4-3 / LOW] `gen-skills.mjs --check` now flags/removes ANY non-generated file under `skills/`.** The recursive `listAllOnDiskFiles()` (the intended CR 25.1-3 fix) means an incidental `.gitkeep`/`.gitignore`/editor scratch under `skills/` breaks `--check` and is `rmSync`'d in write mode. By-design for a 100%-generated tree with DO-NOT-EDIT headers; scope contained to `skills/`. A mild CI-false-positive/surprising-deletion vector. **Suggested resolution:** an allow-list for intentional non-generated files if any are ever expected under `skills/`. Source: Blind Hunter #3 + Edge Case Hunter #2.
 
 ---
+
+## Epic 27 retro-review gate (2026-07-10)
+
+The `/epic-cycle 27` kickoff retro-review gate read the Epic 26 retrospective (`epic-26-retro-2026-07-09.md`) and this ledger. The inherited ledger stands at **ZERO carried-open** — the Story 26.4 burn-down (Rule #37) drove all previously-carried items terminal. The only open items are Epic-26's **own** review findings, all LOW:
+
+- **CR 26.1-1..6** (Story 26.1 review) — `MessageResend.cls` guard hardening/coverage (dryRun coercion, bare-date `to`, JSON-object `headerIds`, filtered-execute composition test, non-integer `maxMessages`, swallowed fetch-failure).
+- **CR 26.2-1** (Story 26.2 review) — `message-resend.ts` unguarded `result.summary`/`result.dryRun` defensive-consistency (not reachable with the current 26.1 server).
+- **CR 26.4-1..3** (Story 26.4 review) — Compressor `(tReqSrc '= "")` guard also gates the `arrow` branch; CR 23.2-2 closed-with-evidence lacks the in-code doc note; `gen-skills.mjs --check` now flags/removes any non-generated file under `skills/`.
+
+**Decision: RE-DEFER all 10.** Rationale:
+- Epic 27 is a **feature epic** (`iris_env_diff`/`iris_env_promote` on `@iris-mcp/dev` + shared `ToolContext.resolveProfileClient` + a NEW OS `EnvSync.cls` `/dev/doc/hashes` endpoint). Its surface is **disjoint** from every carried item's file (`MessageResend.cls`, `message-resend.ts`, `Compressor.cls`, `health.ts`, `gen-skills.mjs`) — confirmed at kickoff.
+- This is the **1st re-deferral** of this batch, **below Rule #37's ≥3-consecutive threshold** that would mandate a dedicated burn-down story. The Rule #37 burn-down for the prior (inherited) batch already ran in Epic 26 — a second burn-down is NOT created.
+- **No colliding Story X.0** — the 27.0 slot is the feature story `27-0-profile-client-and-documents-diff`, mirroring the Epics 19/20/21/23/24 feature-epic pattern.
+
+Carried into the Epic 28 retro-review gate as the (small, non-growing) Epic-26-own batch. **Re-deferral count for this batch: 1.**
+
+**Operational note (not a dev story):** Epic 26 retro Action #1 — rebuild + reload the running MCP servers so `iris_message_resend` + the `resend-failed-messages` prompt go live at the MCP layer — is Project-Lead-owned operational work. It ALSO gates Epic 27's live MCP-client smoke of the new `iris_env_diff`/`iris_env_promote` tools and the `promote:execute` enable+reload dance (Stories 27.3/27.4); surfaced to the Project Lead as a Clarification/pause when reached (context item 5).
+
+---
