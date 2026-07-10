@@ -12,14 +12,22 @@ import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope
 /**
  * Create a fully mocked {@link IrisHttpClient} with vi.fn() stubs
  * for every HTTP method (get, put, delete, post, head).
+ *
+ * @param namespace - Value returned by the mock's `namespace` accessor
+ *   (mirrors {@link IrisHttpClient}'s real read-only `namespace` getter,
+ *   Story 27.0 cycle 2). Defaults to `"USER"` for consistency with
+ *   {@link createMockCtx}'s default `config.namespace`. Callers that need
+ *   two mocks to represent DIFFERENT profiles (e.g. cross-profile diff
+ *   tools) should pass distinct values.
  */
-export function createMockHttp() {
+export function createMockHttp(namespace = "USER") {
   return {
     get: vi.fn(),
     put: vi.fn(),
     delete: vi.fn(),
     post: vi.fn(),
     head: vi.fn(),
+    namespace,
   } as unknown as IrisHttpClient & {
     get: ReturnType<typeof vi.fn>;
     put: ReturnType<typeof vi.fn>;
@@ -58,6 +66,12 @@ export function createMockCtx(
     paginate<T>(items: T[], _cursor?: string, _pageSize?: number): PaginateResult<T> {
       return { page: items, nextCursor: undefined };
     },
+    // Story 27.0: a working default so any test that never overrides it just
+    // gets the SAME mock http client back regardless of profile name (most
+    // tools never call this). A test that needs per-profile differentiation
+    // (e.g. env-diff.test.ts) overrides `ctx.resolveProfileClient` directly
+    // with its own `vi.fn()`.
+    resolveProfileClient: vi.fn(async (_profileName: string) => mockHttp),
   };
 }
 

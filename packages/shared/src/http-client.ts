@@ -56,6 +56,20 @@ export class IrisHttpClient {
     this.defaultTimeout = defaultTimeout;
   }
 
+  /**
+   * The namespace this client is configured to operate against — the
+   * resolved profile's configured default namespace (Story 27.0 cycle 2).
+   *
+   * Additive, read-only accessor (Rule #19 — a new getter changes no
+   * existing behavior). Lets a caller holding a per-profile client (e.g.
+   * via `ToolContext.resolveProfileClient`) discover that profile's own
+   * default namespace without threading a separate lookup through the
+   * profile registry.
+   */
+  get namespace(): string {
+    return this.config.namespace;
+  }
+
   // ── Public typed methods ──────────────────────────────────────────
 
   async get<T = unknown>(

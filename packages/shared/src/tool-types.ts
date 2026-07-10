@@ -222,6 +222,34 @@ export interface ToolContext {
    * @param pageSize - Items per page (default: server default, typically 50).
    */
   paginate<T>(items: T[], cursor?: string, pageSize?: number): PaginateResult<T>;
+  /**
+   * Resolve a fully-established {@link IrisHttpClient} for a NAMED profile —
+   * the framework primitive that lets one tool call talk to a SECOND IRIS
+   * server profile, beyond the calling profile already available as
+   * {@link http} (Story 27.0, Epic 27 "environment diff/promote" feature).
+   *
+   * Reuses the EXACT establishment path {@link http} itself went through
+   * (health-check + Atelier-version negotiation + the one-time custom-REST
+   * bootstrap) via the same per-profile client registry
+   * ({@link ../profiles.js!ProfileClientRegistry} — architecture decision D1)
+   * — NEVER a raw, un-bootstrapped client. This guarantees a custom-REST call
+   * (e.g. `/dev/doc/hashes`) against the returned client succeeds even when
+   * the target profile has never been the calling (`server`) profile before.
+   *
+   * Async because establishment is async (health-check + version negotiation
+   * + bootstrap are all network calls) — a deliberate, documented divergence
+   * from an illustrative synchronous signature sketch (Rule #47): callers
+   * MUST `await` the returned Promise before issuing requests on the
+   * resolved client.
+   *
+   * @param profileName - A registered profile name (from `IRIS_PROFILES`, or
+   *   the reserved `"default"` profile).
+   * @returns The named profile's established {@link IrisHttpClient}.
+   * @throws `ProfileResolutionError` (from `./profiles.js`) when `profileName`
+   *   is not a registered profile — the error message names every valid
+   *   profile.
+   */
+  resolveProfileClient(profileName: string): Promise<IrisHttpClient>;
 }
 
 /**
