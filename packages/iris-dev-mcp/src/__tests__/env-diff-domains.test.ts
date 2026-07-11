@@ -208,7 +208,7 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
   // ══════════════════════════════════════════════════════════════════
 
   describe("mappings domain", () => {
-    it("buckets onlyInSource/onlyInTarget/differs/identical keyed by (type, namespace, name); database/collation/lockDatabase are the compared value", async () => {
+    it("buckets onlyInSource/onlyInTarget/differs/identical keyed by (type, name); database/collation/lockDatabase are the compared value", async () => {
       sourceHttp.get.mockImplementation(async (path: string) => {
         if (path.includes("/config/mapping/global")) {
           return envelope([
@@ -238,8 +238,8 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
       expect(result.isError).toBeUndefined();
       const sc = result.structuredContent as unknown as FullDomainsSC;
       const d = sc.domains.mappings as MappingsDiffSC;
-      expect(d.onlyInSource).toEqual(["global::HSCUSTOM::OnlySrc"]);
-      expect(d.onlyInTarget).toEqual(["global::HSCUSTOM::OnlyTgt"]);
+      expect(d.onlyInSource).toEqual(["global::OnlySrc"]);
+      expect(d.onlyInTarget).toEqual(["global::OnlyTgt"]);
       expect(d.differs).toEqual([
         {
           type: "global",
@@ -268,17 +268,23 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
       expect(paths.some((p) => p.includes("/config/mapping/package?namespace=HSCUSTOM"))).toBe(true);
     });
 
-    it("keys on (type, namespace, name): a same-named/same-type mapping under each profile's OWN differing default namespace never collides (onlyInSource + onlyInTarget, not differs)", async () => {
+    it("CROSS-NAMESPACE regression (cycle-2 HIGH fix, 2026-07-11): keys on (type, name) ONLY -- namespace is NOT part of the identity. A same-named/same-type mapping under each profile's OWN differing default namespace is IDENTICAL when its value matches (previously a spurious onlyInSource+onlyInTarget artifact -- the lead capstone's 'promote can never go clean' bug), and DIFFERS (never onlyInSource+onlyInTarget) when its value genuinely differs", async () => {
       // No `namespace` override -- source resolves HSCUSTOM, target resolves SADEMO (beforeEach).
       sourceHttp.get.mockImplementation(async (path: string) => {
         if (path.includes("/config/mapping/global")) {
-          return envelope([mappingRow({ name: "Same", namespace: "HSCUSTOM", database: "DB" })]);
+          return envelope([
+            mappingRow({ name: "Same", namespace: "HSCUSTOM", database: "DB" }),
+            mappingRow({ name: "Diff", namespace: "HSCUSTOM", database: "DBA" }),
+          ]);
         }
         return envelope([]);
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path.includes("/config/mapping/global")) {
-          return envelope([mappingRow({ name: "Same", namespace: "SADEMO", database: "DB" })]);
+          return envelope([
+            mappingRow({ name: "Same", namespace: "SADEMO", database: "DB" }),
+            mappingRow({ name: "Diff", namespace: "SADEMO", database: "DBZ" }),
+          ]);
         }
         return envelope([]);
       });
@@ -289,10 +295,20 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
       );
       const sc = result.structuredContent as unknown as FullDomainsSC;
       const d = sc.domains.mappings as MappingsDiffSC;
-      expect(d.differs).toEqual([]);
-      expect(d.identical).toBe(0);
-      expect(d.onlyInSource).toEqual(["global::HSCUSTOM::Same"]);
-      expect(d.onlyInTarget).toEqual(["global::SADEMO::Same"]);
+      // Same (type, name) + same database, different namespace -> IDENTICAL (the fix).
+      expect(d.identical).toBe(1);
+      expect(d.onlyInSource).toEqual([]);
+      expect(d.onlyInTarget).toEqual([]);
+      // Same (type, name) + DIFFERING database, different namespace -> differs (never onlyInSource+onlyInTarget).
+      expect(d.differs).toEqual([
+        {
+          type: "global",
+          namespace: "HSCUSTOM",
+          name: "Diff",
+          sourceValue: { database: "DBA" },
+          targetValue: { database: "DBZ" },
+        },
+      ]);
     });
 
     it("does not read the dead 'subscript' response field -- name-embedded subscripts are the only representation", async () => {
@@ -898,7 +914,7 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
       };
       expect(sc.domains.documents!.onlyInSource).toEqual(["OnlySrc.cls"]);
       expect(sc.domains.documents!.identical).toBe(1);
-      expect((sc.domains.mappings as MappingsDiffSC).onlyInTarget).toEqual(["global::SADEMO::OnlyTgt"]);
+      expect((sc.domains.mappings as MappingsDiffSC).onlyInTarget).toEqual(["global::OnlyTgt"]);
       // documents: drift=1 (onlyInSource), identical=1; mappings: drift=1 (onlyInTarget), identical=0.
       expect(sc.summary.driftCount).toBe(2);
       expect(sc.summary.identicalCount).toBe(1);

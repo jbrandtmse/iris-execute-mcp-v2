@@ -81,7 +81,8 @@ function fourStepDiff(): Record<string, unknown> {
     target: { profile: "target", namespace: "SADEMO" },
     domains: {
       mappings: {
-        onlyInSource: ["global::HSCUSTOM::NewGlobal"],
+        // Cycle-2 HIGH fix (2026-07-11): key is `type::name` -- no namespace segment.
+        onlyInSource: ["global::NewGlobal"],
         onlyInTarget: [],
         differs: [],
         identical: 0,
@@ -544,22 +545,21 @@ describe("iris_env_promote:execute", () => {
       expect(body).toEqual({ action: "set", section: "config", properties: { Maxprocesses: 777 } });
     });
 
-    it("uses the FRESH execute-time source namespace for the re-fetch lookup, NOT the diff-time namespace embedded in the mapping subject", async () => {
-      // The diff's mapping subject embeds "HSCUSTOM" (diff-time). The mock
-      // source client's OWN namespace is also "HSCUSTOM" here -- proving the
-      // lookup key is built from `sourceClient.namespace` at execute time
-      // (which happens to match), not by reading the embedded segment; a
-      // mismatched embedded segment would still resolve correctly since it is
-      // never read for the lookup.
+    it("re-fetches the source mapping via the FRESH execute-time source namespace; the subject itself carries NO namespace at all (cycle-2 HIGH fix, 2026-07-11 -- 'type::name' only, never 'type::namespace::name')", async () => {
+      // Cycle-2 HIGH fix: env-diff.ts's `mappingKey` no longer embeds a
+      // per-side namespace segment (it made the SAME logical mapping key
+      // differently per side whenever source/target resolved to DIFFERENT
+      // namespaces, so a genuinely-identical mapping could never match and
+      // `promote` could never reach "clean" -- the lead capstone's live
+      // finding). The re-fetch below is still namespace-SCOPED (via the
+      // execute-time-resolved `srcNs`, asserted on the request path), just
+      // never via a namespace segment embedded in the subject string.
       const diff = {
         source: { profile: "source", namespace: "HSCUSTOM" },
         target: { profile: "target", namespace: "SADEMO" },
         domains: {
           mappings: {
-            // Deliberately a DIFFERENT (stale) namespace segment than the
-            // execute-time sourceClient.namespace ("HSCUSTOM") to prove it is
-            // discarded, not read, by the dispatch lookup.
-            onlyInSource: ["global::STALE_DIFF_TIME_NS::NewGlobal"],
+            onlyInSource: ["global::NewGlobal"],
             onlyInTarget: [],
             differs: [],
             identical: 0,
@@ -569,14 +569,14 @@ describe("iris_env_promote:execute", () => {
       };
       const plan = await buildPlan(diff);
       const mappingStep = plan.steps[0]!;
-      expect(mappingStep.subject).toBe("global::STALE_DIFF_TIME_NS::NewGlobal");
+      expect(mappingStep.subject).toBe("global::NewGlobal");
 
       sourceHttp.get.mockImplementation(async (path: string) => {
         if (path.includes("/config/mapping/global")) {
           // Only responds correctly when queried with the EXECUTE-TIME
-          // namespace ("HSCUSTOM") -- the fetchMappings map is keyed by
-          // `type::HSCUSTOM::name`, which the dispatch code must reconstruct
-          // using srcNs, not the stale embedded segment.
+          // resolved source namespace ("HSCUSTOM") -- proving the re-fetch is
+          // scoped by `srcNs`, not by anything embedded in the subject.
+          expect(path).toContain("namespace=HSCUSTOM");
           return envelope([{ name: "NewGlobal", type: "global", namespace: "HSCUSTOM", database: "LIVEDB" }]);
         }
         return envelope([]);
@@ -718,7 +718,7 @@ describe("iris_env_promote:execute", () => {
         domains: {
           mappings: {
             onlyInSource: [],
-            onlyInTarget: ["global::HSCUSTOM::TargetOnlyGlobal"],
+            onlyInTarget: ["global::TargetOnlyGlobal"],
             differs: [
               {
                 type: "global",
@@ -735,7 +735,7 @@ describe("iris_env_promote:execute", () => {
       };
       const plan = await buildPlan(diff);
       const updateStep = plan.steps.find((s) => s.operation === "updateMapping")!;
-      expect(updateStep.subject).toBe("global::HSCUSTOM::ChangedGlobal");
+      expect(updateStep.subject).toBe("global::ChangedGlobal");
 
       sourceHttp.get.mockImplementation(async (path: string) => {
         if (path.includes("/config/mapping/global")) {
@@ -1288,7 +1288,7 @@ describe("iris_env_promote:execute", () => {
       const tamperedPlan = {
         ...plan,
         steps: plan.steps.map((s) =>
-          s.operation === "createMapping" ? { ...s, subject: "global::HSCUSTOM::EvilGlobal" } : s,
+          s.operation === "createMapping" ? { ...s, subject: "global::EvilGlobal" } : s,
         ),
       };
 

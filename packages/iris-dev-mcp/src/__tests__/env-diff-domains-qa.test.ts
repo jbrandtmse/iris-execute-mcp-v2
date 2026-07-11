@@ -25,9 +25,12 @@
  *  - per-profile namespace routing for `mappings`/`defaultSettings`: proves
  *    each side's GET call carries ITS OWN resolved namespace on the wire
  *    when `namespace` is omitted. The dev suite proves this for `documents`
- *    (`env-diff.test.ts`) and proves mapping KEY collision-avoidance across
- *    differing namespaces, but never asserts the actual outgoing namespace
- *    query param for the mappings/defaultSettings GET calls;
+ *    (`env-diff.test.ts`) and proves the mapping KEY is `(type, name)` ONLY
+ *    -- namespace is NOT part of the identity, so a genuinely-identical
+ *    mapping under two differing default namespaces reads as `identical`,
+ *    never a spurious per-side collision (cycle-2 HIGH fix, 2026-07-11) --
+ *    but never asserts the actual outgoing namespace query param for the
+ *    mappings/defaultSettings GET calls;
  *  - a full 5-domain roll-up: `summary.driftCount`/`identicalCount` sum
  *    correctly across ALL FIVE domains at once, each with distinct,
  *    deliberately varied per-domain bucket counts (the dev suite's roll-up

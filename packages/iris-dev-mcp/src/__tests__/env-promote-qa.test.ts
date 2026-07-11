@@ -94,8 +94,9 @@ function fiveDomainMixedDiff(): Record<string, unknown> {
     target: { profile: "prod", namespace: "HSCUSTOM" },
     domains: {
       mappings: {
-        onlyInSource: ["global::HSCUSTOM::NewGlobal"],
-        onlyInTarget: ["global::HSCUSTOM::TargetOnlyGlobal"],
+        // Cycle-2 HIGH fix (2026-07-11): key is `type::name` -- no namespace segment.
+        onlyInSource: ["global::NewGlobal"],
+        onlyInTarget: ["global::TargetOnlyGlobal"],
         differs: [
           {
             type: "global",
@@ -194,7 +195,7 @@ describe("iris_env_promote:plan -- QA hardening: no-delete invariant is exhausti
     const warningsSection = text.slice(warningsIdx);
 
     const targetOnlySubjects = [
-      "global::HSCUSTOM::TargetOnlyGlobal",
+      "global::TargetOnlyGlobal",
       "TargetOnlyClass.cls",
       "P||I2||H||TargetOnlySetting",
       "/api/target-only",

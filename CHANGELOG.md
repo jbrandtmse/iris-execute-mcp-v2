@@ -2,6 +2,82 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-10] — Epic 27: Environment Diff & Promotion
+
+### Added — `iris_env_diff` / `iris_env_promote` (`@iris-mcp/dev`) + `promote-environment-change` prompt
+
+The suite's moat feature: cross-profile drift detection and (gated) promotion, covering exactly
+the surfaces that live OUTSIDE git in a real IRIS shop — ObjectScript source, namespace mappings,
+Interoperability System Default Settings, web applications, and system config. Answers "what's
+different between stage and prod?" in one call instead of a manual export/compare dance. Suite
+tool count: **102 → 104** (dev **26 → 28**; advertised incl. the framework tool **107 → 109**).
+
+- **`iris_env_diff`** ([packages/iris-dev-mcp/src/tools/env-diff.ts](packages/iris-dev-mcp/src/tools/env-diff.ts))
+  — compares two configured server profiles (`source`/`target`) across up to five domains:
+  - **`mappings`**, **`defaultSettings`**, **`webapps`**, **`config`** (the DEFAULT `domains` set —
+    no `spec` needed) and **`documents`** (OPT-IN only — requires `spec`, a comma-delimited
+    document spec with `*`/`?` wildcards; a bare `*` is refused unless `allowWide:true`, per Rule
+    #38's timeout guidance) — the `documents` domain being compared by SHA-256 content hash via the
+    new ObjectScript endpoint `POST /dev/doc/hashes` (`ExecuteMCPv2.REST.EnvSync.cls`), while the four
+    config domains use their own read endpoints (see [`tool_support.md`](tool_support.md)).
+  - Each requested domain is fetched/diffed in its OWN try/catch (per-domain error isolation,
+    mirrors `iris_health_check`'s per-area isolation — Epic 23/Rule #41): a domain that hard-errors
+    (e.g. `defaultSettings` against a namespace with no Interoperability schema) is reported in an
+    `errors` map and does NOT abort the other domains; the call is `isError:true` only when EVERY
+    requested domain fails.
+  - System Default Settings values whose setting name looks credential-ish (`password`/`secret`/
+    `key`/`token`/`pwd`/`passphrase`/`credential`/`cert`/`private`/`salt`, case-insensitive) are
+    REDACTED in every diff bucket — the plaintext never leaves the server. `onlyInTarget` entries
+    (in every domain) are always INFORMATIONAL — never a deletion signal, in this or any future
+    version. Pure **read**, **enabled by default**.
+- **`iris_env_promote`** ([packages/iris-dev-mcp/src/tools/env-promote.ts](packages/iris-dev-mcp/src/tools/env-promote.ts))
+  — two actions:
+  - **`plan`** (read, enabled by default) — a pure transform of a prior `iris_env_diff` result into
+    an ordered, numbered promotion plan (dependency order: mappings → documents → defaultSettings
+    → webapps → config), plus a SHA-256 `planHash` of the source diff. Every `onlyInTarget` diff
+    entry becomes a `warning`, never a step — no delete/remove operation exists anywhere in any
+    plan, in this or any future version.
+  - **`execute`** (write, **DEFAULT-DISABLED** — deliberately NOT `defaultEnabled`; promotion is a
+    real environment-mutating write, not a recovery-of-last-resort action like
+    `iris_production_control:clean`) — runs an ALLOWLISTED subset of a plan's steps against
+    `target`, behind FOUR refuse-before-any-write gates, each mutating nothing on failure:
+    (1) `confirm:true`; (2) a non-empty `steps` allowlist whose every index exists in the plan;
+    (3) plan-hash freshness (the SAME `diff` that produced the plan is re-hashed and compared,
+    refusing a stale plan, plus a plan/diff step-consistency re-derivation that refuses a
+    hand-edited plan); (4) the TARGET profile's OWN governance policy must enable every write
+    family the allowlisted steps use — this is what stops a caller on an unrestricted profile from
+    writing into a governance-locked target. Steps run in plan order and HALT ON THE FIRST FAILURE
+    (a partial apply is always reported, never hidden). Every write RE-FETCHES the current value
+    from `source` live at execute time — the plan carries no write data, and a credential value is
+    forwarded to `target` without ever appearing in this tool's own output (success or failure
+    path). `documents` steps are PUT sequentially then compiled in ONE batched call.
+  - Enable via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}`.
+- **Framework**: `ToolContext.resolveProfileClient(profileName)` ([packages/shared](packages/shared))
+  — resolves an `IrisHttpClient` for any named profile (not just the call's own `server`), reusing
+  the exact per-profile client construction/caching the `server` param resolution already uses.
+  Additive; existing tools see no behavioral change (Rule #19 snapshot).
+- **`promote-environment-change` prompt** ([packages/iris-dev-mcp/src/prompts/promoteEnvironmentChange.ts](packages/iris-dev-mcp/src/prompts/promoteEnvironmentChange.ts))
+  — the previously-gated prompt (Epic 25 spec `03-skills-prompts-pack.md` §3) now ships: params
+  `source`, `target`, `spec?`; encodes the review-before-write workflow (scoped diff → review with
+  the user → plan → explicit step allowlist → confirmed execute → re-diff verify), and states the
+  no-deletions guarantee, the secrets-exclusion redaction, and the default-disabled write status.
+  Suite prompt count: **10 → 11** (dev **3 → 4**); `skills/promote-environment-change/` generated
+  (`pnpm gen:skills`) — no gated prompt remains in the pack.
+- The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged** — every
+  new key here (`iris_env_diff`, `iris_env_promote:plan`, `iris_env_promote:execute`) is
+  non-baseline.
+- `BOOTSTRAP_VERSION` **`e5c18edd00c0` → `1e2008753853`** (Story 27.0 — new
+  `ExecuteMCPv2.REST.EnvSync.cls`, added to both bootstrap rosters per Rule #39).
+
+Documentation: root [README.md](README.md) (dev 26 → 28, 102 → 104 tools, ASCII diagram, the
+`iris_env_diff`/`iris_env_promote` governance-defaults table rows plus a dedicated
+`iris_env_promote:execute` safety-model callout, the "11 prompts" pack + new prompt row, the
+now-stale gated-prompt note removed), [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md)
+(new "Environment Tools" reference section with the governance/safety callout, new Prompts row,
+namespace-scoping count), and [`tool_support.md`](tool_support.md) (two new rows + dev → 28 /
+ExecuteMCPv2-backed 78 → 80 / suite → 104 package / 109 advertised + Epic 27 governance-defaults
+note + prompt tally 10 → 11).
+
 ## [Pre-release — 2026-07-09] — Epic 26: Interoperability Message Resend / Replay
 
 ### Added — `iris_message_resend` (`@iris-mcp/interop`) + `resend-failed-messages` prompt

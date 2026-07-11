@@ -64,18 +64,20 @@ describe("validate-prompts core logic (AC 25.1.3)", () => {
 });
 
 describe("every registered prompt references only real, live tool names (AC 25.1.3)", () => {
-  it("all iris_* tokens across all 10 registered prompts resolve to a real tool", async () => {
+  it("all iris_* tokens across all 11 registered prompts resolve to a real tool", async () => {
     const [prompts, toolNames] = await Promise.all([
       loadAllPrompts(root),
       loadAllToolNames(root),
     ]);
 
-    // Sanity: the pack is exactly 10 non-gated prompts across 4 packages —
+    // Sanity: the pack is exactly 11 registered prompts across 4 packages —
     // the 9 v1 stakeholder-approved prompts (AC 25.1.5) plus
     // `resend-failed-messages`, un-gated in Story 26.3 once
-    // `iris_message_resend` shipped (Story 26.2). `promote-environment-change`
-    // remains gated and must NOT be registered yet.
-    expect(prompts).toHaveLength(10);
+    // `iris_message_resend` shipped (Story 26.2), plus
+    // `promote-environment-change`, un-gated in Story 27.4 once
+    // `iris_env_diff`/`iris_env_promote` shipped (Stories 27.0-27.3). Both
+    // gated prompts from the original pack are now registered — none remain.
+    expect(prompts).toHaveLength(11);
 
     const sources = prompts.map(({ pkg, prompt }) => ({
       label: `prompt:${pkg}/${prompt.name}`,
@@ -86,11 +88,11 @@ describe("every registered prompt references only real, live tool names (AC 25.1
     expect(problems).toEqual([]);
   });
 
-  it("resend-failed-messages IS registered (Story 26.3); promote-environment-change remains gated and is NOT registered", async () => {
+  it("resend-failed-messages (Story 26.3) AND promote-environment-change (Story 27.4) are BOTH registered — no gated prompt remains", async () => {
     const prompts = await loadAllPrompts(root);
     const names = prompts.map(({ prompt }) => prompt.name);
     expect(names).toContain("resend-failed-messages");
-    expect(names).not.toContain("promote-environment-change");
+    expect(names).toContain("promote-environment-change");
   });
 });
 

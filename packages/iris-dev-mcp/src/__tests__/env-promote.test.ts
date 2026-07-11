@@ -36,8 +36,9 @@ function fullDriftDiff(): Record<string, unknown> {
     target: { profile: "prod", namespace: "HSCUSTOM" },
     domains: {
       mappings: {
-        onlyInSource: ["global::HSCUSTOM::AAA_New"],
-        onlyInTarget: ["global::HSCUSTOM::OldGlobal"],
+        // Cycle-2 HIGH fix (2026-07-11): key is `type::name` -- no namespace segment.
+        onlyInSource: ["global::AAA_New"],
+        onlyInTarget: ["global::OldGlobal"],
         differs: [
           {
             type: "global",
@@ -147,8 +148,8 @@ describe("iris_env_promote:plan -- ordering (AC 27.2.1)", () => {
     };
     const mappingSteps = structured.steps.filter((s) => s.domain === "mappings");
     expect(mappingSteps.map((s) => s.subject)).toEqual([
-      "global::HSCUSTOM::AAA_New",
-      "global::HSCUSTOM::ZZZ_Changed",
+      "global::AAA_New",
+      "global::ZZZ_Changed",
     ]);
     expect(mappingSteps.map((s) => s.operation)).toEqual(["createMapping", "updateMapping"]);
   });
@@ -178,7 +179,7 @@ describe("iris_env_promote:plan -- onlyInTarget -> warnings, never steps (AC 27.
     ]);
     // Every warning names the correct target-only subject and the uniform detail text.
     expect(structured.warnings.map((w) => w.subject)).toEqual([
-      "global::HSCUSTOM::OldGlobal",
+      "global::OldGlobal",
       "OldClass.cls",
       "MyProd||Item1||HostA||Retries",
       "/api/old",
@@ -206,7 +207,7 @@ describe("iris_env_promote:plan -- onlyInTarget -> warnings, never steps (AC 27.
       source: { profile: "stage", namespace: "HSCUSTOM" },
       target: { profile: "prod", namespace: "HSCUSTOM" },
       domains: {
-        mappings: { onlyInSource: [], onlyInTarget: ["global::HSCUSTOM::OnlyOnTarget"], differs: [], identical: 0 },
+        mappings: { onlyInSource: [], onlyInTarget: ["global::OnlyOnTarget"], differs: [], identical: 0 },
         webapps: { onlyInSource: [], onlyInTarget: ["/api/target-only"], differs: [], identical: 0 },
       },
       summary: { driftCount: 2, identicalCount: 0 },
@@ -283,7 +284,7 @@ describe("iris_env_promote:plan -- per-domain step shape (operation/subject/deta
       index: 1,
       domain: "mappings",
       operation: "createMapping",
-      subject: "global::HSCUSTOM::AAA_New",
+      subject: "global::AAA_New",
       detail: "create global mapping (exists on source only)",
       direction: "sourceToTarget",
     });
@@ -291,7 +292,7 @@ describe("iris_env_promote:plan -- per-domain step shape (operation/subject/deta
       index: 2,
       domain: "mappings",
       operation: "updateMapping",
-      subject: "global::HSCUSTOM::ZZZ_Changed",
+      subject: "global::ZZZ_Changed",
       detail: "update global mapping value (source differs from target)",
       direction: "sourceToTarget",
     });

@@ -47,7 +47,7 @@ const root = resolve(__dirname, "../../../..");
 /** Expected prompt count per owning server package (Story 25.2 AC 25.2.1 / Task 2). */
 const EXPECTED_COUNTS: Record<string, number> = {
   "iris-ops-mcp": 2,
-  "iris-dev-mcp": 3,
+  "iris-dev-mcp": 4,
   "iris-interop-mcp": 3,
   "iris-admin-mcp": 2,
 };
@@ -115,9 +115,13 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("the root README still advertises 102 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+  it("the root README still advertises 104 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+    // The literal count itself moves only when a real TOOL is added/removed
+    // (e.g. Epic 27's iris_env_diff/iris_env_promote, dev 26 -> 28, suite
+    // 102 -> 104) — never when a PROMPT is added/removed (Rule #31). This
+    // test's job is the latter guarantee, not pinning the literal forever.
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
-    expect(rootReadme).toContain("102 tools");
+    expect(rootReadme).toContain("104 tools");
   });
 
   // CR 25.2-1 (resolved Story 26.4): the primary drift vectors (rename/add/

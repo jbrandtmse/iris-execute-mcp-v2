@@ -189,7 +189,11 @@ function shortHash(value: unknown): string {
   return s.length > 0 ? `${s.slice(0, 12)}...` : "?";
 }
 
-/** Extract the leading `type` segment from a `type::namespace::name` mapping key (env-diff.ts `mappingKey`). */
+/**
+ * Extract the leading `type` segment from a `type::name` mapping key
+ * (env-diff.ts `mappingKey`, cycle-2 HIGH fix, 2026-07-11: the key no longer
+ * embeds a per-side `namespace` segment — see `mappingKey`'s doc comment).
+ */
 function mappingTypeFromKey(key: string): string {
   const idx = key.indexOf("::");
   const type = idx === -1 ? "" : key.slice(0, idx);
@@ -223,7 +227,10 @@ function buildMappingsSteps(domain: Record<string, unknown> | undefined): Domain
   }
   for (const raw of records(domain?.differs)) {
     const type = str(raw.type) || "mapping";
-    const subject = `${type}::${str(raw.namespace)}::${str(raw.name)}`;
+    // Cycle-2 HIGH fix (2026-07-11): subject is `type::name` only, matching
+    // env-diff.ts's `mappingKey` -- `raw.namespace` is per-side display info
+    // (see `MappingDiffEntry`), never part of the identity key.
+    const subject = `${type}::${str(raw.name)}`;
     steps.push({
       operation: "updateMapping",
       subject,
@@ -549,20 +556,17 @@ function writeFamilyKeysForOperation(operation: PlanOperation): string[] {
 // ── execute: subject parsing (mappings / defaultSettings) ───────────
 
 /**
- * Parse a mappings `type::namespace::name` subject. The MIDDLE segment (the
- * diff-time source namespace) is intentionally DISCARDED -- writes always
- * target the freshly-resolved TARGET namespace at execute time, never the
- * embedded diff-time value (which may differ if the namespace resolution
- * changed between plan-time and execute-time).
+ * Parse a mappings `type::name` subject (env-diff.ts `mappingKey`, cycle-2
+ * HIGH fix, 2026-07-11: the key no longer embeds a per-side `namespace`
+ * segment -- it never did carry identity, only which side happened to
+ * resolve it). Writes always target the freshly-resolved TARGET namespace at
+ * execute time, resolved independently of anything embedded in the subject.
  */
 function parseMappingSubject(subject: string): { type: string; name: string } | undefined {
-  const firstSep = subject.indexOf("::");
-  if (firstSep === -1) return undefined;
-  const type = subject.slice(0, firstSep);
-  const rest = subject.slice(firstSep + 2);
-  const secondSep = rest.indexOf("::");
-  if (secondSep === -1) return undefined;
-  const name = rest.slice(secondSep + 2);
+  const sep = subject.indexOf("::");
+  if (sep === -1) return undefined;
+  const type = subject.slice(0, sep);
+  const name = subject.slice(sep + 2);
   if (type.length === 0 || name.length === 0) return undefined;
   return { type, name };
 }
@@ -603,7 +607,9 @@ async function dispatchCreateMapping(
   if (!parsed) throw new Error(`Malformed mapping subject '${step.subject}'.`);
   const { type, name } = parsed;
   const sourceMappings = await fetchMappings(sourceClient, srcNs);
-  const entry: MappingEntry | undefined = sourceMappings.get(`${type}::${srcNs}::${name}`);
+  // Cycle-2 HIGH fix (2026-07-11): fetchMappings/mappingKey key by `(type,
+  // name)` only now -- srcNs must NOT be interpolated into the lookup key.
+  const entry: MappingEntry | undefined = sourceMappings.get(`${type}::${name}`);
   if (!entry) {
     throw new Error(
       `Mapping '${name}' (type '${type}') not found on source profile in namespace '${srcNs}' -- ` +
@@ -624,7 +630,9 @@ async function dispatchUpdateMapping(
   if (!parsed) throw new Error(`Malformed mapping subject '${step.subject}'.`);
   const { type, name } = parsed;
   const sourceMappings = await fetchMappings(sourceClient, srcNs);
-  const entry: MappingEntry | undefined = sourceMappings.get(`${type}::${srcNs}::${name}`);
+  // Cycle-2 HIGH fix (2026-07-11): fetchMappings/mappingKey key by `(type,
+  // name)` only now -- srcNs must NOT be interpolated into the lookup key.
+  const entry: MappingEntry | undefined = sourceMappings.get(`${type}::${name}`);
   if (!entry) {
     throw new Error(
       `Mapping '${name}' (type '${type}') not found on source profile in namespace '${srcNs}' -- ` +

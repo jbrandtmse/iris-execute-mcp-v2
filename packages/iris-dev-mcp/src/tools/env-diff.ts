@@ -19,7 +19,9 @@
  *   a `spec` — a bare `iris_env_diff(source, target)` call must not fail just
  *   because `documents` was silently defaulted-in without one.
  * - **mappings** — `GET /config/mapping/{global,routine,package}`: global/
- *   routine/package namespace mappings, keyed by `(type, namespace, name)`.
+ *   routine/package namespace mappings, keyed by `(type, name)` (cycle-2 HIGH
+ *   fix, 2026-07-11: `namespace` is the per-SIDE config namespace being
+ *   compared, not part of the item's identity — see {@link mappingKey}).
  *   Subscript-level mappings are embedded in `name` (e.g. `%SYS("HealthShare")`)
  *   — the server's `subscript` response field is dead and is never read here.
  * - **defaultSettings** — `GET /interop/defaultsettings`: Interoperability
@@ -519,9 +521,20 @@ function accumulateDrift(
 
 const MAPPING_TYPES = ["global", "routine", "package"] as const;
 
-/** Stable per-item key: `(type, namespace, name)` — mirrors the tuple the server itself echoes on each row. */
-function mappingKey(entry: Pick<MappingEntry, "type" | "namespace" | "name">): string {
-  return `${entry.type}::${entry.namespace}::${entry.name}`;
+/**
+ * Stable per-item key: `(type, name)` — deliberately EXCLUDES `namespace`
+ * (cycle-2 HIGH fix, lead capstone finding 2026-07-11). `namespace` is the
+ * per-SIDE config namespace (source resolves its own, target resolves its
+ * own — they are frequently DIFFERENT, e.g. HSCUSTOM vs SADEMO), not part of
+ * the mapping's identity. Keying on it made the same logical mapping produce
+ * a DIFFERENT key on each side, so genuinely identical mappings could never
+ * match and were spuriously reported as `onlyInSource` + `onlyInTarget` drift
+ * that `promote` could never clean up. `name` already embeds any
+ * subscript-level mapping (e.g. `%SYS("HealthShare")`), and `(type, name)` is
+ * unique WITHIN one namespace's mapping list — no collision risk.
+ */
+function mappingKey(entry: Pick<MappingEntry, "type" | "name">): string {
+  return `${entry.type}::${entry.name}`;
 }
 
 function mappingValue(entry: MappingEntry): MappingValue {
