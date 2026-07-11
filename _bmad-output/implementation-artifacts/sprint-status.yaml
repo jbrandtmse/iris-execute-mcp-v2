@@ -386,7 +386,7 @@ development_status:
   # PREREQ RESOLVED 2026-07-07 (stakeholder): two profiles on the single dev instance (different default namespaces) accepted for the 27.4 capstone; 27.4 records the residual-risk note (no cross-instance/cross-version coverage; prefer a second instance if one exists by then) AND ships the gated promote-environment-change prompt (AC 27.4.4).
   # Framework: ToolContext.resolveProfileClient (additive, Rule #19 snapshot). New OS /dev/doc/hashes (EnvSync.cls; $SYSTEM.Encryption SHA API [PROBE]; spec required per Rule #38) → BOOTSTRAP_VERSION bump in 27.0 (Rule #24).
   # iris_env_diff mutates:read; iris_env_promote {plan:read, execute:write} — execute DEFAULT-DISABLED behind steps-allowlist + confirm + plan-hash freshness + TARGET-profile governance gate; onlyInTarget = warnings, NEVER deletions; SDS credential-ish values redacted. dev 26→28.
-  epic-27: in-progress
+  epic-27: done
   27-0-profile-client-and-documents-diff: done
   27-1-diff-domains-and-redaction: done
   27-2-promote-plan: done
