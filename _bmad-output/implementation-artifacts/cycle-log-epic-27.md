@@ -50,3 +50,4 @@
 2026-07-11T13:37:05Z	Story 27.4	committed	sha=0ee8d2f submodules=
 2026-07-11T13:37:05Z	Epic 27	epic_status_done	stories=5
 2026-07-11T17:42:02Z	Epic 27	epic_retro_complete	rules_codified=2(#49_roundtrip_capstone,#50_no_side_dim_in_key) rejected_candidates=1(ns_routing_narrow_oneoff) retro_doc=epic-27-retro-2026-07-11.md live_mcp_smoke=pass(profiles_resolve+execute_disabled_both+14_identical_mappings_cross_ns+onlyInTarget_warning+governance_refusal_zero_writes) epic26_action1=discharged action_items=3
+2026-07-11T17:43:05Z	Epic 27	epic_merged_to_feature	merge_sha=77dff42 target=feature/feature-wave-1 no_ff=true branch_deleted=local+remote files=53 insertions=11206
