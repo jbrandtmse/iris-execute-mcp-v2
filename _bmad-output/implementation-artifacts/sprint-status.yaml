@@ -401,8 +401,8 @@ development_status:
   # MANDATORY Story 28.0 probe (Rules #14/#16): plan markers VERBATIM, %Dictionary.CompiledIndex, TuneTable metadata, INFORMATION_SCHEMA.STATEMENTS availability (underscore names per Epic 17 finding).
   # Split architecture: new OS POST /dev/sql/advise-data (this tool's FIRST OS handler — Epic 17 shipped it Atelier-only) → BOOTSTRAP_VERSION bump in 28.1 (Rule #24); heuristic engine in TS with Rule #36 REFERENCE-CAPTURED fixtures (ExecuteMCPv2.Test.AdvisorFixture scratch schema).
   # advise added to mutates map as read → default-enabled; existing 4 actions byte-for-byte (Rule #19 snapshot); advisory-only, no writes in v1 (applyIndex deferred); never recommend against %*/system schemas; unknown plan → findings:[] + note.
-  epic-28: backlog
-  28-0-advisor-probe-matrix: backlog
+  epic-28: in-progress
+  28-0-advisor-probe-matrix: done
   28-1-advise-data-endpoint: backlog
   28-2-heuristic-engine: backlog
   28-3-advise-tool-docs-smokes: backlog
