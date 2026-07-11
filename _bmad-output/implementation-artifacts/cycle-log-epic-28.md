@@ -33,3 +33,5 @@ Ticketless single-project repo; epic branch `epic28` off `feature/feature-wave-1
 2026-07-11T20:27:45Z	Story 28.3	qa_complete	spawn_at=2026-07-11T21:00:00Z model=claude-sonnet-5 tests_added=3 first_run_failures=0 clarifications=0 cycle_iteration=1 closing_sections_present=true note=573-573-pkg+confidence-order+topN-clamp-gaps-closed
 2026-07-11T20:42:17Z	Story 28.3	cr_complete	spawn_at=2026-07-11T21:05:00Z model=claude-opus-4-8 resolved=2 deferred=3 dismissed=2 high=0 med=1 low=1 clarifications=0 cycle_iteration=1 closing_sections_present=true status=done note=workload-catch-narrowed-MED+topN-hardened+3-gate-tests
 2026-07-11T20:43:59Z	Story 28.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=e2e-built-engine+live-endpoint:HSCUSTOM-missing-index-DDL+SADEMO-ns-routing-Rule34+2table-join-cited+indexed-clean+workload-source-live model=claude-opus-4-8
+2026-07-11T20:44:28Z	Story 28.3	committed	sha=6267b5f submodules=
+2026-07-11T20:44:29Z	Epic 28	epic_status_done	stories=4
