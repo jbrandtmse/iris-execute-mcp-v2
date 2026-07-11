@@ -2,6 +2,30 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
+
+### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
+
+Story 28.1: the **first ObjectScript handler** for the `iris_sql_analyze` tool family (the
+existing four actions are TS/SQL-only via the Atelier `action/query` endpoint — Rule #47
+correction settled in Story 28.0). Given `{ "query": "<sql>", "namespace"?: "<ns>" }`, the new
+`POST /dev/sql/advise-data` route returns in ONE round-trip: the verbatim server-side
+`EXPLAIN <query>` plan text (`##class(%SQL.Statement).%ExecDirect(, "EXPLAIN "_query)` reading
+the first row's `Plan` column — live-confirmed byte-for-byte identical to the existing `explain`
+action's `action/query` call), the enumerated `{schema, table, className}` list of tables the
+plan actually reads (parsed from its `Read master map`/`Read index map` marker lines, alias
+-stripped and deduplicated), and the `%Dictionary.CompiledIndex` rows (grouped per table,
+including the verbatim order-preserving `Properties` string) needed for the Story 28.2 TS
+heuristic engine's `missing-index` leading-subscript check. No separate tune-metadata payload —
+`stale-stats` is read straight off the plan's own `Warning: Table X is not tuned.` block,
+preserved verbatim in `plan` (Story 28.0 finding). This story is a pure PRODUCER: no TS tool
+wiring, no governance key, no consumer ships here — Story 28.2 captures reference fixtures from
+this endpoint's live output, and Story 28.3's `advise` action is the first live caller.
+
+`BOOTSTRAP_VERSION`: `1e2008753853` → `6422caf6ec31` (new bootstrapped class, Rule #24; added to
+both hand-maintained bootstrap rosters per Rule #39). Frozen governance baseline `1e62c5ad5bf7`
+untouched (no governance key added in this story).
+
 ## [Pre-release — 2026-07-10] — Epic 27: Environment Diff & Promotion
 
 ### Added — `iris_env_diff` / `iris_env_promote` (`@iris-mcp/dev`) + `promote-environment-change` prompt

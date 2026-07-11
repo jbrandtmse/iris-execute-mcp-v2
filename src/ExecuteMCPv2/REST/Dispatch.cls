@@ -174,6 +174,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 27 (Story 27.0): Environment Diff - Document Hashes -->
   <Route Url="/dev/doc/hashes" Method="GET" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
   <Route Url="/dev/doc/hashes" Method="POST" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
+
+  <!-- Epic 28 (Story 28.1): SQL Performance Advisor - Data Endpoint -->
+  <Route Url="/dev/sql/advise-data" Method="POST" Call="ExecuteMCPv2.REST.SqlAdvisor:AdviseData" />
 </Routes>
 }
 
