@@ -1077,3 +1077,27 @@ Opus 3-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Au
 
 **DEFERRED (pre-existing, out-of-scope for 27.4's 5 named surfaces; LOW):**
 - **[CR 27.4-1 / LOW — `docs/migration-v1-v2.md` states "100 tools"]** Lines 11 and 29 of the v1→v2 migration guide say "100 tools" ("Single server, 8 tools | 5 servers, 100 tools total"). This has been STALE since before Epic 27 — the suite was already 102 tools at Epic 26, and is now 104. `docs/migration-v1-v2.md` is NOT one of the 5 doc surfaces scoped by AC 27.4.1 (root README, `tool_support.md`, per-server READMEs, CHANGELOG, meta-package README), and the drift predates this epic. Pairs with the known pre-existing `docs/` drift the Epic-14/15 retros already noted (migration-guide dotted names, architecture.md stale counts). **Suggested resolution:** a future docs-sweep story reconciles `docs/migration-v1-v2.md` (and `docs/tool-annotation-audit.md` if similarly stale) to the current 104-tool suite total; consider a mechanical count-in-docs guard (Rule #37 candidate — the README "Default-disabled write actions" table + these migration docs are hand-maintained with no drift-check). Source: Edge Case Hunter (repo-wide stale-count sweep). [`docs/migration-v1-v2.md:11,29`]
+
+---
+
+## Epic 28 retro-review gate (2026-07-11)
+
+The `/epic-cycle 28` kickoff retro-review gate read the Epic 27 retrospective (`epic-27-retro-2026-07-11.md`) and this ledger. Carried-open items entering the gate:
+
+- **Epic-26-own batch (10 LOW):** CR 26.1-1..6, CR 26.2-1, CR 26.4-1..3 — **re-deferral count entering: 1** (Epic 27 re-deferred once).
+- **Epic-27-own items (all LOW):** CR 27.0-1/-2/-4/-5/-6 (EnvSync.cls wide-spec gate, env-diff.ts resolve-phase envelope + empty-namespace edge + SwitchNamespace error text); CR 27.1-4/-5/-7/-8/-9/-10/-11/-12 (env-diff.ts fetcher guards, value-only SDS compare, optional mapping db, Promise.all edges, sequential domains); CR 27.3-1/-2/-3/-4 (env-promote.ts documents-batch skip-reporting, non-atomic updateMapping, webapps modify-vs-create label, empty-namespace misattribution); CR 27.4-1 (pre-existing `docs/migration-v1-v2.md` "100 tools" stale count). The gen-skills CRLF-on-Windows artifact (§27.0 discovery) — **RESOLVED at this gate** by the ride-along `.gitattributes` below.
+
+**Decision: RE-DEFER all carried items.** Rationale:
+- **Epic 28 is a FEATURE epic** — SQL Performance Advisor: a new `advise` action on the existing `iris_sql_analyze` (`@iris-mcp/dev`) + a NEW ObjectScript handler `POST /dev/sql/advise-data` (this tool's first OS handler; bootstrap bump in Story 28.1) + a TS heuristic engine with Rule #36 reference-captured fixtures. Its surface (`iris_sql_analyze` tool + a new advisor OS class + a new heuristic-engine TS module) is **disjoint** from every carried item's file (`MessageResend.cls`, `message-resend.ts`, `Compressor.cls`, `health.ts`, `gen-skills.mjs`, `EnvSync.cls`, `env-diff.ts`, `env-promote.ts`, `docs/migration-v1-v2.md`) — confirmed at kickoff.
+- This is the **2nd re-deferral** of the Epic-26-own batch — **below Rule #37's ≥3-consecutive threshold**. Per the Epic 27 retro §8 Action #2, **a 3rd re-defer at Epic 29 trips the threshold → the Epic 29 plan MUST include a dedicated burn-down story.**
+- **No colliding Story X.0** — the 28.0 slot is the feature story `28-0-advisor-probe-matrix` (a mandatory Rules #14/#16 probe), mirroring the Epics 19/20/21/23/24/27 feature-epic pattern.
+
+**RESOLVED at this gate (Epic 27 retro §8 Action #1, ride-along hygiene):**
+- **[gen-skills `--check` CRLF-on-Windows artifact / LOW → RESOLVED]** Added `.gitattributes` (`* text=auto eol=lf`) at the repo root. `core.autocrlf=true` with no `.gitattributes` was converting the LF-committed `skills/**` blobs to CRLF on a Windows checkout, so `scripts/gen-skills.mjs --check` compared its LF output against the on-disk CRLF file and reported phantom DRIFT. The `.gitattributes` pins LF on checkout, ending the noise repo-wide. Verified: adding it triggered **zero** renormalization churn (`git status` clean apart from the new file) — the repo already stores LF, so this only aligns Windows checkout behavior. Supersedes the narrower deferred fixes (the `skills/** text eol=lf` scope and the gen-skills.mjs CRLF-normalize-before-compare code change), which are now moot.
+
+**Carried into the Epic 29 retro-review gate** as the (small, non-growing) Epic-26-own batch (**re-deferral count after Epic 28: 2**) + the Epic-27-own LOW items. **Rule #37 watch: a re-defer at Epic 29 is the 3rd consecutive for the Epic-26-own batch → plan the burn-down story at Epic 29.**
+
+**Process notes for Epic 28 (from the Epic 27 retro §8):**
+- Rules #49/#50 are in-scope review lenses for any plan-comparison logic in the advisor (the heuristic engine compares plan text against expected markers — Rule #50's item-identity-key discipline and Rule #49's oracle discipline apply).
+- Rule #36 is BINDING: all advisor fixture expectations must be reference-captured from live IRIS plans (capture command cited in test comments), never hand-reasoned.
+- Story 28.0 is a MANDATORY Rules #14/#16 live probe (plan markers VERBATIM, dictionary surface, tune-stats surface, statement-workload availability).
