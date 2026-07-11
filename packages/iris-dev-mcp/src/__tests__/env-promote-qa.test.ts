@@ -11,8 +11,12 @@
  * per-domain step shape (operation/subject/detail/direction); one redaction
  * test (the `[REDACTED:differs]` marker survives, and a generic set of
  * placeholder secrets that were never actually in the diff are absent from
- * `JSON.stringify(structuredContent)`); missing/malformed-`diff` refusal;
- * and the `execute` stub. Governance (plan enabled / execute disabled /
+ * `JSON.stringify(structuredContent)`); missing/malformed-`diff` refusal.
+ * Story 27.3's `execute` action (gates + per-step dispatch, AC
+ * 27.3.1/27.3.2/27.3.3) is covered by the dedicated `env-promote-execute.test.ts`;
+ * this file retains one QA "every optional field supplied, zero HTTP calls"
+ * smoke below, updated for the REAL Gate 3 (stale-plan) refusal now that the
+ * pre-27.3 stub is gone. Governance (plan enabled / execute disabled /
  * registration-doesn't-throw) is fully covered by `env-promote-governance.test.ts`
  * and is NOT duplicated here.
  *
@@ -43,16 +47,17 @@
  *    requested) -- scoped to that one line, since the render's static
  *    ordering-description header always mentions all five domain names
  *    regardless of what's actually present in this particular plan;
- *  - `plan` and the `execute` stub both make ZERO IRIS/HTTP calls -- `plan`
- *    is architecturally a pure transform (`scope: "NONE"`) and `execute` is
- *    a static stub; this is the mechanical proof for that architectural
- *    claim, worth pinning as a regression guard against a future edit
- *    wiring `ctx.http` into either action prematurely.
+ *  - `plan` makes ZERO IRIS/HTTP calls -- a mechanical proof of the
+ *    architectural claim (`scope: "NONE"`, pure transform); and `execute`
+ *    with every optional field populated but a STALE `planHash` refuses at
+ *    Gate 3 before resolving any profile client -- ZERO HTTP calls, proving
+ *    the "refuse-before-any-write" gate ordering holds even when the caller
+ *    supplies a fully-populated, otherwise-well-formed request.
  *
- * Mocked-only, no live IRIS (`plan` is a pure transform; `execute` is a
- * static stub -- neither ever calls `ctx.http`). Plain `*.test.ts` in the
- * DEFAULT vitest suite (Rule 8 / Rule #21 -- not the excluded
- * `*.integration.test.ts` suffix).
+ * Mocked-only, no live IRIS (`plan` is a pure transform; the `execute` test
+ * here only ever reaches Gate 3, which is pure env/hash computation -- no
+ * `ctx.http` call). Plain `*.test.ts` in the DEFAULT vitest suite (Rule 8 /
+ * Rule #21 -- not the excluded `*.integration.test.ts` suffix).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -290,7 +295,7 @@ describe("iris_env_promote:plan -- QA hardening: ordering with a SPARSE domain s
 });
 
 // ══════════════════════════════════════════════════════════════════
-// Zero IRIS calls -- `plan` (pure transform) and `execute` (static stub)
+// Zero IRIS calls -- `plan` (pure transform) and `execute` (gate refusal)
 // ══════════════════════════════════════════════════════════════════
 
 describe("iris_env_promote -- QA hardening: zero IRIS/HTTP calls from either action in this story", () => {
@@ -313,7 +318,7 @@ describe("iris_env_promote -- QA hardening: zero IRIS/HTTP calls from either act
     expect(http.head.mock.calls.length).toBe(callsBefore.head);
   });
 
-  it("'execute' with EVERY optional field supplied at once (plan/steps/confirm/namespace) still just returns the stub refusal -- no ctx.http call, no crash, no partial write attempt", async () => {
+  it("'execute' with EVERY optional field supplied at once (plan/steps/confirm/namespace), but a STALE planHash, refuses at Gate 3 -- no ctx.http call, no crash, no partial write attempt", async () => {
     const http = ctx.http as unknown as Record<"get" | "put" | "post" | "delete" | "head", ReturnType<typeof vi.fn>>;
     const callsBefore = {
       get: http.get.mock.calls.length,
@@ -322,12 +327,22 @@ describe("iris_env_promote -- QA hardening: zero IRIS/HTTP calls from either act
       delete: http.delete.mock.calls.length,
     };
 
+    // Generate a REAL, well-formed plan from a real diff first (so 'plan.steps'
+    // is shaped exactly like a genuine prior 'plan' output, exercising Gates
+    // 1/2 successfully) -- then execute with an intentionally-STALE 'planHash'
+    // substituted in, so ONLY Gate 3 (plan-hash freshness) is what refuses.
+    const diff = fiveDomainMixedDiff();
+    const planResult = await envPromoteTool.handler({ action: "plan", source: "stage", target: "prod", diff }, ctx);
+    const realPlan = planResult.structuredContent as { planHash: string; steps: unknown[] };
+    const stalePlan = { ...realPlan, planHash: "deadbeef".repeat(8) };
+
     const result = await envPromoteTool.handler(
       {
         action: "execute",
         source: "stage",
         target: "prod",
-        plan: { planHash: "deadbeef".repeat(8), steps: [1, 2] },
+        diff,
+        plan: stalePlan as unknown as Record<string, unknown>,
         steps: [1, 2, 3],
         confirm: true,
         namespace: "HSCUSTOM",
@@ -336,7 +351,7 @@ describe("iris_env_promote -- QA hardening: zero IRIS/HTTP calls from either act
     );
 
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("Story 27.3");
+    expect(result.content[0]?.text).toContain("stale plan");
     expect(result.structuredContent).toBeUndefined();
     expect(http.get.mock.calls.length).toBe(callsBefore.get);
     expect(http.put.mock.calls.length).toBe(callsBefore.put);

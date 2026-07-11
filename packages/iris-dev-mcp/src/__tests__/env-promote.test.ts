@@ -8,10 +8,15 @@
  * `ToolContext` type) via `createMockCtx()`, but the handler never touches it
  * for `plan`.
  *
+ * Section (g) retains ONE minimal `execute` smoke (the pre-27.3 stub test,
+ * updated for the real Gate-1/plan-required refusal) -- full `execute` gate
+ * and per-step-dispatch coverage (Story 27.3, AC 27.3.1/27.3.2/27.3.3) lives
+ * in the dedicated `env-promote-execute.test.ts`.
+ *
  * Not named `*.integration.test.ts` (Rule #21) -- runs in the default suite.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { envPromoteTool, computePlanHash } from "../tools/env-promote.js";
 import { createMockCtx } from "./test-helpers.js";
 
@@ -415,17 +420,22 @@ describe("iris_env_promote:plan -- missing/malformed diff refusal", () => {
   });
 });
 
-// ── (g) execute stub ─────────────────────────────────────────────────
+// ── (g) execute -- 'plan' is required (a minimal smoke; full gate/dispatch
+// coverage lives in the dedicated env-promote-execute.test.ts, Story 27.3) ──
 
-describe("iris_env_promote:execute -- Story 27.3 stub", () => {
-  it("returns a clear 'ships in Story 27.3' refusal and never touches diff/plan/steps", async () => {
+describe("iris_env_promote:execute -- 'plan' is required", () => {
+  it("refuses with a clear message and makes ZERO HTTP calls when 'plan' is omitted (confirm/steps alone are not enough)", async () => {
+    const http = ctx.http as unknown as Record<"get" | "put" | "post" | "delete", ReturnType<typeof vi.fn>>;
     const result = await envPromoteTool.handler(
       { action: "execute", source: "stage", target: "prod", steps: [1], confirm: true },
       ctx,
     );
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("Story 27.3");
+    expect(result.content[0]?.text).toContain("'plan' is required");
     expect(result.structuredContent).toBeUndefined();
+    expect(http.get).not.toHaveBeenCalled();
+    expect(http.put).not.toHaveBeenCalled();
+    expect(http.post).not.toHaveBeenCalled();
   });
 });
 

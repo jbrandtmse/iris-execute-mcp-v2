@@ -105,7 +105,13 @@ const DEFAULT_DIFF_DOMAINS: readonly DiffDomain[] = [
 
 // ── /dev/doc/hashes response shape (ExecuteMCPv2.REST.EnvSync) ─────
 
-interface DocHashEntry {
+/**
+ * One `/dev/doc/hashes` row. Exported (Story 27.3, Rule #47) so `execute`
+ * can reuse {@link fetchDocHashes}'s exact source-read logic rather than
+ * duplicating it; `execute` itself re-fetches document CONTENT via the
+ * Atelier `doc/{name}` route (this endpoint returns hashes, not content).
+ */
+export interface DocHashEntry {
   name: string;
   hash: string;
   timestamp: string;
@@ -123,8 +129,12 @@ interface DocHashesResult {
  * intentionally OMITTED from this interface: it is DEAD (never populated —
  * `Config.MapGlobals` has no `Subscript` property; a subscript-level mapping
  * is embedded in `name` instead, e.g. `%SYS("HealthShare")`). Never read it.
+ *
+ * Exported (Story 27.3, Rule #47) so `execute` can re-fetch the authoritative
+ * source-side mapping value via {@link fetchMappings} rather than duplicating
+ * the fetch/shape logic.
  */
-interface MappingEntry {
+export interface MappingEntry {
   name: string;
   type: string;
   namespace: string;
@@ -135,7 +145,12 @@ interface MappingEntry {
 
 // ── /interop/defaultsettings response shape (ExecuteMCPv2.REST.Interop) ──
 
-interface SdsEntry {
+/**
+ * One System Default Settings row. Exported (Story 27.3, Rule #47) so
+ * `execute` can re-fetch the authoritative source-side (UN-redacted) value
+ * via {@link fetchDefaultSettings} at execute time.
+ */
+export interface SdsEntry {
   id: number;
   production: string;
   item: string;
@@ -153,7 +168,12 @@ interface SdsListResult {
 
 // ── /security/webapp response shape (ExecuteMCPv2.REST.Security) ──────
 
-interface WebAppEntry {
+/**
+ * One web application row. Exported (Story 27.3, Rule #47) so `execute` can
+ * re-fetch the authoritative source-side webapp properties via
+ * {@link fetchWebapps} at execute time.
+ */
+export interface WebAppEntry {
   name: string;
   namespace: string;
   dispatchClass: string;
@@ -169,7 +189,12 @@ interface WebAppEntry {
 
 // ── /system/config response shape (ExecuteMCPv2.REST.SystemConfig) ────
 
-interface ConfigProperties {
+/**
+ * The ~11 supported CPF `config`-section properties. Exported (Story 27.3,
+ * Rule #47) so `execute` can re-fetch the authoritative source-side value
+ * via {@link fetchConfig} at execute time.
+ */
+export interface ConfigProperties {
   Maxprocesses: number;
   globals: number;
   routines: number;
@@ -330,8 +355,16 @@ interface EnvDiffResult {
 
 // ── helpers: documents (Story 27.0) ─────────────────────────────────
 
-/** Fetch `{name -> {hash, timestamp}}` from one profile's /dev/doc/hashes endpoint. */
-async function fetchDocHashes(
+/**
+ * Fetch `{name -> {hash, timestamp}}` from one profile's /dev/doc/hashes endpoint.
+ *
+ * Exported (Story 27.3, Task 2 / Rule #47) so a future consumer can reuse this
+ * EXACT source-read logic rather than duplicating it; `iris_env_promote:execute`
+ * (Story 27.3) re-fetches document CONTENT via the Atelier `doc/{name}` route
+ * instead (this endpoint returns hashes, not content), so it does not import
+ * this specific helper, but the fetcher is exported uniformly with its siblings.
+ */
+export async function fetchDocHashes(
   client: IrisHttpClient,
   spec: string,
   namespace: string,
@@ -506,8 +539,13 @@ function mappingValuesEqual(a: MappingValue, b: MappingValue): boolean {
   );
 }
 
-/** Fetch ALL global/routine/package mappings for one profile's namespace, merged into one map. */
-async function fetchMappings(
+/**
+ * Fetch ALL global/routine/package mappings for one profile's namespace, merged
+ * into one map. Exported (Story 27.3, Task 2 / Rule #47) so `execute` reuses this
+ * EXACT source-read logic to re-fetch the authoritative source-side mapping
+ * value at execute time, rather than duplicating it.
+ */
+export async function fetchMappings(
   client: IrisHttpClient,
   namespace: string,
 ): Promise<Map<string, MappingEntry>> {
@@ -592,8 +630,14 @@ function sdsOnlyEntry(entry: SdsEntry): SdsOnlyEntry {
   };
 }
 
-/** Fetch ALL System Default Settings rows for one profile's namespace. */
-async function fetchDefaultSettings(
+/**
+ * Fetch ALL System Default Settings rows for one profile's namespace. Exported
+ * (Story 27.3, Task 2 / Rule #47) so `execute` reuses this EXACT source-read
+ * logic to re-fetch the authoritative, UN-redacted source-side value at
+ * execute time (this raw fetch never applies {@link isCredentialSetting}
+ * redaction — that happens only in `iris_env_diff`'s own diff/render layer).
+ */
+export async function fetchDefaultSettings(
   client: IrisHttpClient,
   namespace: string,
 ): Promise<Map<string, SdsEntry>> {
@@ -682,8 +726,12 @@ function webappValuesEqual(a: WebAppValue, b: WebAppValue): boolean {
  * Fetch ALL web applications, instance-wide (NO namespace filter — webapps
  * are unique by `name` across the whole instance; each row carries its own
  * `namespace` field, which IS part of the compared value subset).
+ *
+ * Exported (Story 27.3, Task 2 / Rule #47) so `execute` reuses this EXACT
+ * source-read logic to re-fetch the authoritative source-side webapp
+ * properties at execute time.
  */
-async function fetchWebapps(client: IrisHttpClient): Promise<Map<string, WebAppEntry>> {
+export async function fetchWebapps(client: IrisHttpClient): Promise<Map<string, WebAppEntry>> {
   const response = await client.get<WebAppEntry[]>(`${BASE_URL}/security/webapp`);
   const map = new Map<string, WebAppEntry>();
   for (const entry of response.result ?? []) {
@@ -712,8 +760,13 @@ function diffWebapps(
 
 // ── helpers: config ───────────────────────────────────────────────────
 
-/** Fetch the ~11 supported `config`-section CPF properties, instance-wide (no namespace concept). */
-async function fetchConfig(client: IrisHttpClient): Promise<ConfigProperties> {
+/**
+ * Fetch the ~11 supported `config`-section CPF properties, instance-wide (no
+ * namespace concept). Exported (Story 27.3, Task 2 / Rule #47) so `execute`
+ * reuses this EXACT source-read logic to re-fetch the authoritative
+ * source-side config value at execute time.
+ */
+export async function fetchConfig(client: IrisHttpClient): Promise<ConfigProperties> {
   const response = await client.post<ConfigGetResult>(`${BASE_URL}/system/config`, {
     action: "get",
     section: "config",
