@@ -12,7 +12,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 ---
 
-## `@iris-mcp/dev` — Development Tools (26)
+## `@iris-mcp/dev` — Development Tools (28)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -42,12 +42,16 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 24 | `iris_routine_intermediate` | 🟦 Atelier | `GET /doc/{name}` (candidate fallback) |
 | 25 | `iris_sql_analyze` | 🟦 Atelier | `POST /action/query` (`EXPLAIN` + `INFORMATION_SCHEMA` views) |
 | 26 | `iris_loc_count` | 🟥 ExecuteMCPv2 | `GET /dev/loc` (`ExecuteMCPv2.Loc.*` library) |
+| 27 | `iris_env_diff` | 🟥 ExecuteMCPv2 | `POST /dev/doc/hashes` + `GET /config/mapping/{type}` + `GET /interop/defaultsettings` + `GET /security/webapp` + `POST /system/config` (per-domain; only requested domains are fetched) |
+| 28 | `iris_env_promote` | 🟥 ExecuteMCPv2 | `plan`: pure transform, no IRIS connection; `execute`: the same per-domain endpoints as `iris_env_diff` (writes) — `POST /config/mapping/{type}` (create/delete), `PUT /doc/{name}` + `POST /action/compile` (🟦 Atelier), `POST /interop/defaultsettings`, `POST /security/webapp`, `POST /system/config` |
 
-**Mix:** 19 Atelier · 7 ExecuteMCPv2 · 0 other
+**Mix:** 19 Atelier · 9 ExecuteMCPv2 · 0 other
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_sql_analyze` (`explain`/`stats`/`indexUsage`/`running`). All four actions are governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled). The tool is Atelier/SQL-only (no ObjectScript handler, no bootstrap contribution).
 
 > **Epic 22 (2026-07-03) — governance defaults:** added `iris_loc_count` (namespace lines-of-code counter over CLS/MAC/INT/INC via `StudioOpenDialog` + `GetTextAsArray`). The tool is governance-classified `read` (scalar) and therefore **enabled by default** — reads resolve enabled under the default seed; the frozen governance baseline is untouched. `spec` is required (whole-namespace scans need an explicit `*`); compiler-generated documents are excluded unless `includeGenerated` is set; wildcard scans exclude `%`-prefixed system documents (name them explicitly to count them), and overlapping spec parts (an exact name before a wildcard that also matches it) can drop documents — an IRIS `StudioOpenDialog` spec quirk (CR 22.0-4). Backed by the `ExecuteMCPv2.Loc.{Classifier,Scanner,Generate}` library + `ExecuteMCPv2.REST.Loc` handler (bootstrap contribution — 4 new embedded classes).
+
+> **Epic 27 (2026-07-10) — governance defaults:** added `iris_env_diff` (dev 26 → 27) and `iris_env_promote` (dev 27 → 28) — cross-profile environment drift detection and (gated) promotion across five domains (`documents`, `mappings`, `defaultSettings`, `webapps`, `config`; `documents` is opt-in only, needing an explicit `spec`). `iris_env_diff` and `iris_env_promote:plan` are governance-classified `read` and are **enabled by default**; `iris_env_promote:execute` is truthfully classified `write` and is **DEFAULT-DISABLED** — unlike `iris_production_control:clean`, it deliberately does NOT use the `defaultEnabled` mechanism (promotion is a real environment-mutating write, not a recovery-of-last-resort action). `execute` never deletes a target-only item (`onlyInTarget` diff entries are always warnings, never steps) and redacts credential-ish System Default Settings values in both diff and plan/error output; enabling it also requires the **target** profile's own governance to allow the underlying write families (a fourth, target-side gate on top of `iris_env_promote:execute` itself). Enable via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}`. The frozen Epic-14 governance baseline (`1e62c5ad5bf7`, 141 keys) is **unchanged** — all three new keys (`iris_env_diff`, `iris_env_promote:plan`, `iris_env_promote:execute`) are non-baseline. Backed by the new ObjectScript endpoint `ExecuteMCPv2.REST.EnvSync:DocHashes` (`POST /dev/doc/hashes`, Story 27.0; `BOOTSTRAP_VERSION` `e5c18edd00c0` → `1e2008753853`) plus the pre-existing `Config`/`Interop`/`Security`/`SystemConfig` handlers for the other four domains.
 
 ---
 
@@ -287,7 +291,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 102-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 104-tool total.
 
 ---
 
@@ -305,7 +309,7 @@ These tools are provided by the shared framework (`@iris-mcp/shared` `server-bas
 
 ## MCP prompts (not tools)
 
-Starting with Epic 25, the suite also ships a pack of 10 **MCP prompts** (`ops` 2, `dev` 3, `interop` 3, `admin` 2; `data` none in v1) — a separate MCP protocol capability (`prompts/list` / `prompts/get`), not tools. Prompts carry no `mutates` classification, no governance key, and are **not counted** in any per-server tool table or the suite-wide rollup below. `interop` gained `resend-failed-messages` in Epic 26, once `iris_message_resend` shipped. See the root README's [Workflow Prompts & Agent Skills](README.md#workflow-prompts--agent-skills) section for the full list and the generated [`skills/`](skills/README.md) install pack.
+Starting with Epic 25, the suite also ships a pack of 11 **MCP prompts** (`ops` 2, `dev` 4, `interop` 3, `admin` 2; `data` none in v1) — a separate MCP protocol capability (`prompts/list` / `prompts/get`), not tools. Prompts carry no `mutates` classification, no governance key, and are **not counted** in any per-server tool table or the suite-wide rollup below. `interop` gained `resend-failed-messages` in Epic 26, once `iris_message_resend` shipped; `dev` gained `promote-environment-change` in Epic 27, once `iris_env_diff`/`iris_env_promote` shipped — no gated prompt remains. See the root README's [Workflow Prompts & Agent Skills](README.md#workflow-prompts--agent-skills) section for the full list and the generated [`skills/`](skills/README.md) install pack.
 
 ---
 
@@ -315,12 +319,12 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 | Server | Atelier | ExecuteMCPv2 | Other | Package total | Advertised (+1 framework) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 19 | 7 | 0 | **26** | **27** |
+| `@iris-mcp/dev` | 19 | 9 | 0 | **28** | **29** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
 | `@iris-mcp/interop` | 0 | 22 | 0 | **22** | **23** |
 | `@iris-mcp/ops` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **19** | **78** | **5** | **102** | **107** |
+| **Total** | **19** | **80** | **5** | **104** | **109** |
 
 ---
 
@@ -328,11 +332,11 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Only `@iris-mcp/dev` is partially portable without the custom REST
 
-19 of the 26 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 7 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`, `iris_loc_count`) would fail but the rest would work.
+19 of the 28 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup. The 9 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`, `iris_loc_count`, `iris_env_diff`, `iris_env_promote`) would fail but the rest would work.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 78 of the 102 tools (76% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 80 of the 104 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -346,7 +350,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance (they typical
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 78 of 102 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 80 of 104 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

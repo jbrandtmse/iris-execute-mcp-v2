@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 26 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(26);
+    it("should contain exactly 27 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(27);
     });
 
     it("should contain all required class names", () => {
@@ -1051,6 +1051,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Loc.cls",
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Health.cls",
+        "ExecuteMCPv2.REST.EnvSync.cls",
         "ExecuteMCPv2.REST.Task.cls",
         "ExecuteMCPv2.REST.SystemConfig.cls",
         "ExecuteMCPv2.REST.Analytics.cls",
@@ -1083,7 +1084,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(26);
+      expect(classes.length).toBe(27);
     });
 
     it("should return classes in compilation order", () => {
@@ -1122,6 +1123,13 @@ describe("bootstrap", () => {
       const health = classes.find(c => c.name === "ExecuteMCPv2.REST.Health.cls");
       expect(health).toBeDefined();
       expect(health!.content).toContain("ExecuteMCPv2.REST.Health");
+    });
+
+    it("should include EnvSync.cls (Story 27.0)", () => {
+      const classes = getBootstrapClasses();
+      const envSync = classes.find(c => c.name === "ExecuteMCPv2.REST.EnvSync.cls");
+      expect(envSync).toBeDefined();
+      expect(envSync!.content).toContain("ExecuteMCPv2.REST.EnvSync");
     });
 
     it("should include Task.cls (Epic 6)", () => {
@@ -1211,6 +1219,7 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.Loc.cls", "src/ExecuteMCPv2/REST/Loc.cls"],
       ["ExecuteMCPv2.REST.Monitor.cls", "src/ExecuteMCPv2/REST/Monitor.cls"],
       ["ExecuteMCPv2.REST.Health.cls", "src/ExecuteMCPv2/REST/Health.cls"],
+      ["ExecuteMCPv2.REST.EnvSync.cls", "src/ExecuteMCPv2/REST/EnvSync.cls"],
       ["ExecuteMCPv2.REST.Task.cls", "src/ExecuteMCPv2/REST/Task.cls"],
       ["ExecuteMCPv2.REST.SystemConfig.cls", "src/ExecuteMCPv2/REST/SystemConfig.cls"],
       ["ExecuteMCPv2.REST.Analytics.cls", "src/ExecuteMCPv2/REST/Analytics.cls"],

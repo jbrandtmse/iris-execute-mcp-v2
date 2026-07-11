@@ -170,6 +170,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 22: Dev tools -->
   <Route Url="/dev/loc" Method="GET" Call="ExecuteMCPv2.REST.Loc:LocCount" />
+
+  <!-- Epic 27 (Story 27.0): Environment Diff - Document Hashes -->
+  <Route Url="/dev/doc/hashes" Method="GET" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
+  <Route Url="/dev/doc/hashes" Method="POST" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
 </Routes>
 }
 

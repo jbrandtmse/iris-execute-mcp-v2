@@ -24,8 +24,18 @@ import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
 import { diagnoseSlowQueryPrompt } from "../prompts/diagnoseSlowQuery.js";
 
-/** The prompts this package (iris-dev-mcp) owns per Story 25.1 AC 25.1.1. */
-const OWN_PROMPT_NAMES = ["diagnose-slow-query", "objectscript-review", "deploy-and-test-class"];
+/**
+ * The prompts this package (iris-dev-mcp) owns per Story 25.1 AC 25.1.1, plus
+ * `promote-environment-change` (un-gated in Story 27.4 once `iris_env_diff`/
+ * `iris_env_promote` shipped — mirrors the Epic 26 `resend-failed-messages`
+ * un-gate precedent).
+ */
+const OWN_PROMPT_NAMES = [
+  "diagnose-slow-query",
+  "objectscript-review",
+  "deploy-and-test-class",
+  "promote-environment-change",
+];
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
@@ -80,7 +90,7 @@ describe("iris-dev-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () => {
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 3 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 4 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();

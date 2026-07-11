@@ -157,6 +157,8 @@ describe("tool-types", () => {
           timeout: 60000,
         },
         paginate: <T>(items: T[]) => ({ page: items, nextCursor: undefined }),
+        // Story 27.0: satisfies the interface contract; not exercised here.
+        resolveProfileClient: async () => mockHttp,
       };
 
       expect(ctx.resolveNamespace()).toBe("HSCUSTOM");

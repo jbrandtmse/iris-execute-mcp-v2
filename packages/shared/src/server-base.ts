@@ -213,11 +213,18 @@ export function decodeCursor(cursor: string | undefined): number {
  *
  * Exported for unit testing of namespace resolution logic.
  *
- * @param scope           - Namespace scope of the tool.
- * @param config          - IRIS connection config.
- * @param http            - Shared HTTP client.
- * @param atelierVersion  - Negotiated Atelier version.
- * @param pageSize        - Default page size for pagination (default: {@link DEFAULT_PAGE_SIZE}).
+ * @param scope                  - Namespace scope of the tool.
+ * @param config                 - IRIS connection config.
+ * @param http                   - Shared HTTP client.
+ * @param atelierVersion         - Negotiated Atelier version.
+ * @param pageSize               - Default page size for pagination (default: {@link DEFAULT_PAGE_SIZE}).
+ * @param resolveProfileClientImpl - Real implementation of
+ *   {@link ToolContext.resolveProfileClient} (Story 27.0). {@link McpServerBase.handleToolCall}
+ *   passes a closure over its own `getOrCreateClient`/profile registry here.
+ *   Callers that build a context directly (unit/integration tests calling
+ *   this factory without a live server) get a safe stub that rejects with a
+ *   clear "not available in this context" error — never a silently
+ *   un-established client.
  */
 export function buildToolContext(
   scope: ToolScope,
@@ -225,6 +232,7 @@ export function buildToolContext(
   http: IrisHttpClient,
   atelierVersion: number,
   pageSize: number = DEFAULT_PAGE_SIZE,
+  resolveProfileClientImpl?: (profileName: string) => Promise<IrisHttpClient>,
 ): ToolContext {
   return {
     resolveNamespace(override?: string): string {
@@ -252,6 +260,15 @@ export function buildToolContext(
         nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
       return { page, nextCursor };
     },
+    resolveProfileClient:
+      resolveProfileClientImpl ??
+      (async (profileName: string): Promise<IrisHttpClient> => {
+        throw new Error(
+          `resolveProfileClient("${profileName}") is not available: this ToolContext was built ` +
+            `without a live profile registry (buildToolContext() called directly, outside ` +
+            `McpServerBase.handleToolCall).`,
+        );
+      }),
   };
 }
 
@@ -1218,11 +1235,32 @@ export class McpServerBase {
     // (AC 14.2.5) falls out naturally: resolveNamespace(override) returns
     // `override ?? profile.namespace`. `server` selects the instance/profile;
     // a per-call `namespace` still overrides the namespace within it.
+    //
+    // resolveProfileClient (Story 27.0, AC 27.0.1): a closure over THIS SAME
+    // `getOrCreateClient` — the exact establishment path `client` above just
+    // went through (health-check + Atelier-version negotiation + one-time
+    // custom-REST bootstrap coalesced via the `establishing` in-flight map) —
+    // reused for an ARBITRARY profile name a tool handler names at call time.
+    // No separate/duplicated establishment logic (Rule #47): calling it with
+    // the SAME name as `profile.name` just hits getOrCreateClient's existing
+    // fast path and returns this identical cached `client`.
+    const resolveProfileClientForCtx = async (
+      targetProfileName: string,
+    ): Promise<IrisHttpClient> => {
+      const { client: resolvedClient } = await this.getOrCreateClient(
+        targetProfileName,
+        this.options.needsCustomRest ?? false,
+      );
+      return resolvedClient;
+    };
+
     const ctx = buildToolContext(
       tool.scope,
       profile,
       client,
       atelierVersion,
+      this.pageSize,
+      resolveProfileClientForCtx,
     );
 
     try {
