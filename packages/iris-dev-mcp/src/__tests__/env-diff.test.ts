@@ -1,5 +1,6 @@
 /**
- * Tests for `iris_env_diff` (Epic 27, Story 27.0 — AC 27.0.3).
+ * Tests for `iris_env_diff` (Epic 27, Story 27.0 — AC 27.0.3; scoping fixups
+ * for Story 27.1; cycle-2 lead-smoke rework text/default-domain fixups).
  *
  * Mocked-HTTP unit tests covering: the documents-diff happy path across TWO
  * mocked profile clients (all four buckets: onlyInSource/onlyInTarget/differs/
@@ -7,8 +8,25 @@
  * semantics (default true ignores timestamp-only differences; explicit false
  * also flags them), missing-`spec` refusal, `allowWide` wire-forwarding +
  * surfacing the endpoint's Rule #38 refusal, unknown-profile refusal (no HTTP
- * calls issued), not-yet-implemented-domain refusal, the IrisApiError
- * envelope, non-IrisApiError rethrow, and Zod schema bounds.
+ * calls issued), the IrisApiError envelope, non-IrisApiError rethrow, and Zod
+ * schema bounds.
+ *
+ * Story 27.1 (cycle 1) widened the tool's DEFAULT `domains` from
+ * `["documents"]` to ALL FIVE domains; the cycle-2 lead-smoke rework then
+ * NARROWED it back to the FOUR no-spec domains (`documents` is opt-in only —
+ * see `env-diff.ts`'s `DEFAULT_DIFF_DOMAINS`). Tests in this file that are
+ * specifically about `documents`-domain behavior pass `domains: ["documents"]`
+ * explicitly to stay scoped to just that domain (otherwise they'd either miss
+ * the default entirely post-rework, or attempt to fetch the other domains'
+ * endpoints, which these tests don't mock). A domain-fetch-level IrisApiError
+ * is now ISOLATED per-domain (cycle-2 rework, elevates CR 27.1-3) rather than
+ * wrapped in the whole-call "Error diffing environments" envelope — that
+ * phrasing is reserved for PROFILE-RESOLUTION failures only (see the CR 27.0-2
+ * test in `env-diff-domains.test.ts`). Tests for the four new domains
+ * (mappings/defaultSettings/webapps/config), credential redaction, and the
+ * roll-up/filter behavior live in the sibling file `env-diff-domains.test.ts`;
+ * per-domain error-isolation tests (partial failure, all-domains-fail,
+ * default-domain-set proof) live in `env-diff-domain-isolation.test.ts`.
  *
  * `ctx.resolveProfileClient` is overridden per test with a `vi.fn()` that maps
  * profile name -> its own mock `IrisHttpClient` (the shared `createMockCtx`
@@ -103,7 +121,7 @@ describe("iris_env_diff", () => {
     );
 
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "MyPkg.*.cls" },
+      { source: "source", target: "target", spec: "MyPkg.*.cls", domains: ["documents"] },
       ctx,
     );
 
@@ -135,7 +153,7 @@ describe("iris_env_diff", () => {
       envelope(hashesResult([{ name: "TargetOnly.cls", hash: "X" }])),
     );
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "*.cls", allowWide: true },
+      { source: "source", target: "target", spec: "*.cls", allowWide: true, domains: ["documents"] },
       ctx,
     );
     // The disclaimer itself legitimately uses the word "deletion" (to say it is
@@ -158,7 +176,7 @@ describe("iris_env_diff", () => {
       envelope(hashesResult([{ name: "A.cls", hash: "H1" }, { name: "B.cls", hash: "H2-DIFF" }])),
     );
 
-    const args = { source: "source", target: "target", spec: "MyPkg.*.cls" };
+    const args = { source: "source", target: "target", spec: "MyPkg.*.cls", domains: ["documents"] };
     const first = await envDiffTool.handler(args, ctx);
     const second = await envDiffTool.handler(args, ctx);
     expect(second.structuredContent).toEqual(first.structuredContent);
@@ -174,7 +192,7 @@ describe("iris_env_diff", () => {
       envelope(hashesResult([{ name: "A.cls", hash: "SAME", timestamp: "2026-06-01 00:00:00.000" }])),
     );
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "A.cls" },
+      { source: "source", target: "target", spec: "A.cls", domains: ["documents"] },
       ctx,
     );
     const sc = result.structuredContent as {
@@ -192,7 +210,7 @@ describe("iris_env_diff", () => {
       envelope(hashesResult([{ name: "A.cls", hash: "SAME", timestamp: "2026-06-01 00:00:00.000" }])),
     );
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "A.cls", ignoreTimestamps: false },
+      { source: "source", target: "target", spec: "A.cls", ignoreTimestamps: false, domains: ["documents"] },
       ctx,
     );
     const sc = result.structuredContent as {
@@ -206,8 +224,20 @@ describe("iris_env_diff", () => {
 
   // ── spec required ──────────────────────────────────────────────
 
+  // NOTE (cycle-2 rework): 'documents' is no longer in the DEFAULT domain set
+  // (see the "default domains" describe block below), so these two tests
+  // explicitly request `domains: ["documents"]` to keep exercising the
+  // missing-spec guard specifically. Because 'documents' is the ONLY
+  // requested domain in both cases, the guard failure means ALL requested
+  // domains errored -> isError:true (per-domain isolation's "all failed"
+  // case) -- see env-diff-domain-isolation.test.ts for the isolation-proper
+  // (partial failure / other domains still succeed) behavior.
+
   it("should reject a missing spec for the documents domain BEFORE any HTTP call", async () => {
-    const result = await envDiffTool.handler({ source: "source", target: "target" }, ctx);
+    const result = await envDiffTool.handler(
+      { source: "source", target: "target", domains: ["documents"] },
+      ctx,
+    );
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("spec");
     expect(sourceHttp.post).not.toHaveBeenCalled();
@@ -216,7 +246,7 @@ describe("iris_env_diff", () => {
 
   it("should reject a whitespace-only spec BEFORE any HTTP call", async () => {
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "   " },
+      { source: "source", target: "target", spec: "   ", domains: ["documents"] },
       ctx,
     );
     expect(result.isError).toBe(true);
@@ -228,7 +258,10 @@ describe("iris_env_diff", () => {
   it("should NOT send allowWide on the wire when omitted", async () => {
     sourceHttp.post.mockResolvedValue(envelope(hashesResult([])));
     targetHttp.post.mockResolvedValue(envelope(hashesResult([])));
-    await envDiffTool.handler({ source: "source", target: "target", spec: "MyPkg.*.cls" }, ctx);
+    await envDiffTool.handler(
+      { source: "source", target: "target", spec: "MyPkg.*.cls", domains: ["documents"] },
+      ctx,
+    );
     const body = sourceHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(body).not.toHaveProperty("allowWide");
   });
@@ -237,7 +270,7 @@ describe("iris_env_diff", () => {
     sourceHttp.post.mockResolvedValue(envelope(hashesResult([])));
     targetHttp.post.mockResolvedValue(envelope(hashesResult([])));
     await envDiffTool.handler(
-      { source: "source", target: "target", spec: "*", allowWide: true },
+      { source: "source", target: "target", spec: "*", allowWide: true, domains: ["documents"] },
       ctx,
     );
     const sourceBody = sourceHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
@@ -257,7 +290,10 @@ describe("iris_env_diff", () => {
       ),
     );
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "*" },
+      // Scoped to `domains: ["documents"]` (cycle-2 rework: 'documents' is no
+      // longer in the default set) so this stays a single-domain, all-failed
+      // call (isError:true) rather than also attempting the other 4 domains.
+      { source: "source", target: "target", spec: "*", domains: ["documents"] },
       ctx,
     );
     expect(result.isError).toBe(true);
@@ -270,7 +306,7 @@ describe("iris_env_diff", () => {
     sourceHttp.post.mockResolvedValue(envelope(hashesResult([])));
     targetHttp.post.mockResolvedValue(envelope(hashesResult([])));
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "A.cls" },
+      { source: "source", target: "target", spec: "A.cls", domains: ["documents"] },
       ctx,
     );
     // sourceHttp/targetHttp were created with DIFFERENT default namespaces
@@ -294,7 +330,7 @@ describe("iris_env_diff", () => {
     sourceHttp.post.mockResolvedValue(envelope(hashesResult([])));
     targetHttp.post.mockResolvedValue(envelope(hashesResult([])));
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "A.cls", namespace: "SADEMO" },
+      { source: "source", target: "target", spec: "A.cls", namespace: "SADEMO", domains: ["documents"] },
       ctx,
     );
     expect((sourceHttp.post.mock.calls[0]?.[1] as Record<string, unknown>).namespace).toBe(
@@ -324,47 +360,35 @@ describe("iris_env_diff", () => {
     expect(targetHttp.post).not.toHaveBeenCalled();
   });
 
-  // ── not-yet-implemented domains (27.1 scope) ─────────────────────
-
-  it("should refuse a not-yet-implemented domain, naming Story 27.1, with NO HTTP calls", async () => {
-    const result = await envDiffTool.handler(
-      { source: "source", target: "target", domains: ["mappings"] },
-      ctx,
-    );
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("mappings");
-    expect(result.content[0]?.text).toContain("27.1");
-    expect(sourceHttp.post).not.toHaveBeenCalled();
-  });
-
-  it("should refuse a mixed request that includes an unimplemented domain even alongside 'documents'", async () => {
-    const result = await envDiffTool.handler(
-      { source: "source", target: "target", domains: ["documents", "config"], spec: "A.cls" },
-      ctx,
-    );
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("config");
-    expect(sourceHttp.post).not.toHaveBeenCalled();
-  });
-
   // ── error handling ──────────────────────────────────────────────
 
-  it("should return an isError envelope for a generic IrisApiError", async () => {
+  it("should isolate a domain-fetch IrisApiError as a per-domain error (cycle-2 rework), still isError:true when it's the ONLY requested domain", async () => {
     sourceHttp.post.mockRejectedValue(
       new IrisApiError(500, [], "/api/executemcp/v2/dev/doc/hashes", "boom"),
     );
     const result = await envDiffTool.handler(
-      { source: "source", target: "target", spec: "A.cls" },
+      { source: "source", target: "target", spec: "A.cls", domains: ["documents"] },
       ctx,
     );
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("Error diffing environments");
+    // Per-domain isolation (cycle-2 rework): a domain-fetch-level IrisApiError
+    // is no longer wrapped in the whole-call "Error diffing environments"
+    // envelope (that phrasing is now reserved for PROFILE-RESOLUTION failures
+    // -- see the CR 27.0-2 test in env-diff-domains.test.ts); it is recorded
+    // as a per-domain message instead.
+    expect(result.content[0]?.text).toContain("Documents:");
+    expect(result.content[0]?.text).toContain("ERROR: boom");
+    const sc = result.structuredContent as { errors?: Record<string, string> };
+    expect(sc.errors?.documents).toBe("boom");
   });
 
   it("should rethrow non-IrisApiError failures", async () => {
     sourceHttp.post.mockRejectedValue(new TypeError("network down"));
     await expect(
-      envDiffTool.handler({ source: "source", target: "target", spec: "A.cls" }, ctx),
+      envDiffTool.handler(
+        { source: "source", target: "target", spec: "A.cls", domains: ["documents"] },
+        ctx,
+      ),
     ).rejects.toThrow("network down");
   });
 

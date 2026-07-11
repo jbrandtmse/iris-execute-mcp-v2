@@ -249,6 +249,10 @@ describe("iris_env_diff — cross-profile wiring capstone (Story 27.0, AC 27.0.3
       source: "default",
       target: "second",
       spec: "MyPkg.*.cls",
+      // Story 27.1 widened the default `domains` to all five; this capstone's
+      // fetch mock only stands in for /dev/doc/hashes (+ health/version), so
+      // scope explicitly to keep proving JUST the documents-domain routing.
+      domains: ["documents"],
     });
 
     expect(result.isError).toBeFalsy();
@@ -323,6 +327,8 @@ describe("iris_env_diff — cross-profile wiring capstone (Story 27.0, AC 27.0.3
       source: "second",
       target: "second",
       spec: "MyPkg.*.cls",
+      // Scope to `documents` -- see the note on the first capstone test above.
+      domains: ["documents"],
     });
 
     expect(result.isError).toBeFalsy();
