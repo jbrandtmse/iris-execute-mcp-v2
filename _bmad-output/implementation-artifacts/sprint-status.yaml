@@ -385,7 +385,7 @@ development_status:
   epic-27: in-progress
   27-0-profile-client-and-documents-diff: done
   27-1-diff-domains-and-redaction: done
-  27-2-promote-plan: backlog
+  27-2-promote-plan: done
   27-3-promote-execute: backlog
   27-4-env-docs-and-capstone-smokes: backlog
   epic-27-retrospective: optional

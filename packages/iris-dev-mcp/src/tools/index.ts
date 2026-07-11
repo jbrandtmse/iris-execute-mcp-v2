@@ -24,6 +24,7 @@ import { docLoadTool } from "./load.js";
 import { docExportTool } from "./export.js";
 import { locCountTool } from "./loc.js";
 import { envDiffTool } from "./env-diff.js";
+import { envPromoteTool } from "./env-promote.js";
 import { packageListTool } from "./packages.js";
 import { routineIntermediateTool } from "./routine.js";
 import { sqlExecuteTool } from "./sql.js";
@@ -70,4 +71,5 @@ export const tools: ToolDefinition[] = [
   routineIntermediateTool,
   locCountTool,
   envDiffTool,
+  envPromoteTool,
 ];
