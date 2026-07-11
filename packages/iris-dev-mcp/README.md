@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution and analysis, globals management, code execution, unit testing, package browsing, bulk export, lines-of-code analysis, and cross-profile environment diff & promotion via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, analysis, and performance advisories, globals management, code execution, unit testing, package browsing, bulk export, lines-of-code analysis, and cross-profile environment diff & promotion via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -165,9 +165,11 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
-| `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), or currently-running statements (`running`) | `action`, `query?`, `filter?`, `maxRows?`, `namespace?` | readOnly, idempotent |
+| `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), currently-running statements (`running`), or get SQL Performance Advisor findings (`advise`) | `action`, `query?`, `filter?`, `maxRows?`, `workload?`, `topN?`, `namespace?` | readOnly, idempotent |
 
-> **Governance defaults:** all four `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
+> **Governance defaults:** all five `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`/`advise`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
+>
+> **`advise` — SQL Performance Advisor (Epic 28):** given `query` (or `workload: true` to advise the top-`topN` recent statements instead, mutually exclusive with `query`), returns evidence-cited findings — `full-scan`, `missing-index` (with a suggested `CREATE INDEX` DDL), `stale-stats`, `unused-index`, `plan-anomaly` — each carrying a plan excerpt and a confidence level. **Strictly advisory: recommendations are heuristic; verify with `explain` before applying any change** — `advise` never applies anything itself (no write/`applyIndex` action ships in v1). `topN` (default 5, max 20) bounds real analysis work in `workload` mode, not just output size — each statement analyzed is a full endpoint round-trip (EXPLAIN + dictionary reads), so a larger `topN` is proportionally more work. If the recent-statement workload source is unavailable on your IRIS edition/version, `workload` mode returns a clear capability message rather than a raw SQL error.
 >
 > **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 
@@ -673,6 +675,47 @@ If the operator has set `IRIS_SQL_MAX_ROWS` lower than the effective request, th
   "plan": "<plans>\n <plan>\n   ...\n   Read master map %Dictionary.ClassDefinition.Master ...\n </plan>\n</plans>"
 }
 ```
+</details>
+
+<details>
+<summary><strong>iris_sql_analyze</strong> -- SQL Performance Advisor (<code>advise</code>)</summary>
+
+**Input (query mode):**
+```json
+{
+  "action": "advise",
+  "query": "SELECT ID, UnindexedCol FROM MyApp.Orders WHERE UnindexedCol = 'X'"
+}
+```
+
+Or workload mode (advise the 5 most recent statements instead of one query):
+```json
+{ "action": "advise", "workload": true, "topN": 5 }
+```
+
+`query` and `workload` are mutually exclusive. **Recommendations are heuristic; verify with `explain` before applying any change** — `advise` only recommends and cites evidence, it never applies anything.
+
+**Output (`structuredContent`):**
+```json
+{
+  "mode": "query",
+  "findings": [
+    {
+      "type": "missing-index",
+      "confidence": "high",
+      "statement": "SELECT ID, UnindexedCol FROM MyApp.Orders WHERE UnindexedCol = 'X'",
+      "evidence": "Predicate column(s) UnindexedCol on MyApp.Orders have no index with it as the leading subscript (existing indexes checked: IDKEY).",
+      "recommendation": "Consider: CREATE INDEX IdxUnindexedCol ON MyApp.Orders (UnindexedCol). Verify with EXPLAIN after creation.",
+      "suggestedDdl": "CREATE INDEX IdxUnindexedCol ON MyApp.Orders (UnindexedCol). Verify with EXPLAIN after creation.",
+      "planExcerpt": "Read master map MyApp.Orders.IDKEY, looping on ID."
+    }
+  ],
+  "analyzed": { "statements": 1, "skipped": 0 },
+  "notes": []
+}
+```
+
+When no findings are identified, the response says so explicitly along with what was checked (e.g. `"No performance findings (mode: query). Checked 1 statement ..."`) rather than returning silently empty. In `workload` mode, a statement that fails to `EXPLAIN` is counted in `analyzed.skipped`, not treated as a fatal error; if the recent-statement workload source itself is unavailable on your IRIS edition/version, the call returns a clear capability message instead of a raw SQL error.
 </details>
 
 <details>

@@ -1,13 +1,14 @@
 /**
  * Story 17.3 AC 17.3.5 — governance-defaults proof for `iris_sql_analyze`.
+ * Extended in Story 28.3 (AC 28.3.1) to cover the NEW `advise` action.
  *
- * `iris_sql_analyze` adds four NEW post-foundation governance keys to the
- * iris-dev-mcp server (`iris_sql_analyze:{explain,stats,indexUsage,running}`),
- * none of which is in the frozen `governance-baseline.ts`. All four are reads
+ * `iris_sql_analyze` adds FIVE NEW post-foundation governance keys to the
+ * iris-dev-mcp server (`iris_sql_analyze:{explain,stats,indexUsage,running,advise}`),
+ * none of which is in the frozen `governance-baseline.ts`. All five are reads
  * (`mutates: "read"`). This suite proves END-TO-END, through the REAL
  * `McpServerBase.handleToolCall` gate (NOT a mocked policy, NOT the pure
  * governance engine in isolation), that under EMPTY `IRIS_GOVERNANCE` every one
- * of the four read actions is ALLOWED (its handler runs) — i.e. reads
+ * of the five read actions is ALLOWED (its handler runs) — i.e. reads
  * default-ENABLE via the Story 15.0 `defaultSeed`.
  *
  * Mirrors the iris-ops `process-governance.test.ts` harness. Runs in the DEFAULT
@@ -125,12 +126,12 @@ function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
 // AC 17.3.5 — all four read actions default-ENABLED under empty config.
 // ════════════════════════════════════════════════════════════════════
 
-describe("iris_sql_analyze governance default (AC 17.3.5)", () => {
+describe("iris_sql_analyze governance default (AC 17.3.5 / 28.3.1)", () => {
   const env = makeEnvHarness();
   beforeEach(env.setup);
   afterEach(env.teardown);
 
-  const ACTIONS = ["explain", "stats", "indexUsage", "running"] as const;
+  const ACTIONS = ["explain", "stats", "indexUsage", "running", "advise"] as const;
 
   for (const action of ACTIONS) {
     it(`under EMPTY IRIS_GOVERNANCE, '${action}' is ALLOWED (read default-enabled; handler runs)`, async () => {
@@ -144,7 +145,7 @@ describe("iris_sql_analyze governance default (AC 17.3.5)", () => {
       await server.start("stdio");
 
       const args =
-        action === "explain" || action === "indexUsage"
+        action === "explain" || action === "indexUsage" || action === "advise"
           ? { action, query: "SELECT 1" }
           : { action };
       const result = await callTool(server, "iris_sql_analyze", args);
@@ -154,11 +155,22 @@ describe("iris_sql_analyze governance default (AC 17.3.5)", () => {
     });
   }
 
-  it("registers without throwing (all four NEW keys carry a `mutates` class)", async () => {
+  it("registers without throwing (all five NEW keys carry a `mutates` class)", async () => {
     stageDefaultStartup(env.fetchMock);
     // Construction + start() runs assertGovernanceClassification; absence of a
-    // throw here is the registration-time proof for the four non-baseline keys.
+    // throw here is the registration-time proof for the five non-baseline keys.
     const server = new McpServerBase(makeServerOpts([sqlAnalyzeTool]));
     await expect(server.start("stdio")).resolves.not.toThrow();
+  });
+
+  it("`advise` is the ONLY new action added by Story 28.3 (mutates key-set is exactly the five)", () => {
+    // The gate derives governance keys from `${tool.name}:${action}` for every
+    // `action` enum option (governance-baseline-derivation.ts). Asserting the
+    // exact `mutates` key set here is the local proxy for that derivation
+    // without reaching into another package's dist (Rule #45 — cross-package
+    // derivation checks live in `@iris-mcp/all`, not here).
+    expect(Object.keys(sqlAnalyzeTool.mutates as Record<string, string>).sort()).toEqual(
+      ["advise", "explain", "indexUsage", "running", "stats"].sort(),
+    );
   });
 });
