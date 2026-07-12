@@ -8,6 +8,10 @@
  * array.
  */
 
+import { access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { dirname } from "node:path";
+
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type {
@@ -26,6 +30,8 @@ import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
 import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
+import type { AuditConfig, AuditEntryInput, AuditOutcome } from "./audit.js";
+import { AuditLogger, parseAuditConfig } from "./audit.js";
 import type { ProfileRegistry, IrisProfile } from "./profiles.js";
 import {
   ProfileClientRegistry,
@@ -367,6 +373,18 @@ export class McpServerBase {
    * on an unrecognized value.
    */
   private preset: GovernancePreset | undefined = undefined;
+  /**
+   * Audit logger (Epic 29, spec `07-observability-audit-log.md`), or
+   * `undefined` when `IRIS_AUDIT_LOG` is unset (auditing OFF). `undefined` is
+   * also the constructed-but-not-yet-{@link start}ed default, matching
+   * {@link governanceConfig}'s `{}` and {@link preset}'s `undefined` defaults:
+   * {@link handleToolCall} treats an `undefined` logger as a pure
+   * pass-through with zero allocation on the hot path (Rule #19 back-compat
+   * gate; AC 29.0.4). {@link start} constructs it from the parsed
+   * `IRIS_AUDIT_LOG*` env vars, after failing fast if the target directory is
+   * not writable.
+   */
+  private auditLogger: AuditLogger | undefined;
   /**
    * Key → mutation-class lookup for the registered tools (architecture decision
    * D4), built from each {@link ToolDefinition.mutates}. Consumed by the gate's
@@ -968,13 +986,60 @@ export class McpServerBase {
   }
 
   /**
-   * Handle a tool call: validate arguments, build context, invoke handler.
+   * Handle a tool call (Epic 29, Story 29.0 — the audit interception point).
+   *
+   * This is a THIN wrapper around {@link dispatchToolCall}: when auditing is
+   * OFF (`this.auditLogger` is `undefined`), it is a pure pass-through with no
+   * extra allocation beyond the disabled-check — byte-for-byte today's
+   * behavior (Rule #19 back-compat gate; AC 29.0.4). When auditing is ON, it
+   * times the call, awaits the SAME single resolved {@link CallToolResult}
+   * `dispatchToolCall` would have returned anyway, and records one audit
+   * entry from it — every one of `dispatchToolCall`'s many return points
+   * (Zod-fail, missing-schema, not-initialised, profile-resolution error,
+   * governance denial, discovery short-circuit, client-establish failure,
+   * handler success, handler throw) is captured uniformly this way, with zero
+   * per-return-point changes. The audit write is enqueued (fire-and-forget)
+   * and never awaited here — it must never slow or fail the tool call back to
+   * the client (spec §5 ordering).
+   */
+  private async handleToolCall(
+    tool: ToolDefinition,
+    rawArgs: unknown,
+  ): Promise<CallToolResult> {
+    if (!this.auditLogger) {
+      return this.dispatchToolCall(tool, rawArgs);
+    }
+    const auditLogger = this.auditLogger;
+    const start = Date.now();
+    const result = await this.dispatchToolCall(tool, rawArgs);
+    const durationMs = Date.now() - start;
+    // Fire-and-forget audit recording must NEVER throw into the tool path
+    // (spec §5): the async file write is already swallowed inside the logger,
+    // but the SYNCHRONOUS derivation + redaction walk + JSON serialization
+    // here could in principle throw on a pathological args object (e.g. deep
+    // nesting overflowing the recursive redact walk under
+    // IRIS_AUDIT_LOG_PARAMS). Guard it so the tool result the client is owed
+    // is returned regardless.
+    try {
+      this.recordAuditEntry(auditLogger, tool, rawArgs, result, durationMs);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Audit entry recording failed; entry dropped: ${message}`);
+    }
+    return result;
+  }
+
+  /**
+   * Validate arguments, build context, invoke handler. This is the body
+   * {@link handleToolCall} used to be, before Story 29.0 renamed it to make
+   * room for the audit-timing wrapper; its own logic (and every one of its
+   * return points) is otherwise UNCHANGED.
    *
    * On Zod validation failure, returns a result with `isError: true`
    * containing the validation error details. The MCP SDK maps this to
    * the appropriate JSON-RPC error (-32602).
    */
-  private async handleToolCall(
+  private async dispatchToolCall(
     tool: ToolDefinition,
     rawArgs: unknown,
   ): Promise<CallToolResult> {
@@ -1287,6 +1352,112 @@ export class McpServerBase {
     }
   }
 
+  // ── Audit entry derivation (Epic 29, Story 29.0) ────────────────────
+
+  /**
+   * Build and enqueue one audit entry from a resolved {@link dispatchToolCall}
+   * result. Deliberately uses ONLY `rawArgs` (the pre-validation input passed
+   * into {@link handleToolCall}) and the final {@link CallToolResult} — never
+   * `dispatchToolCall`'s internal validated args, resolved profile object, or
+   * governance key — so the SAME derivation applies uniformly no matter which
+   * of `dispatchToolCall`'s many return points produced the result.
+   *
+   * This is the BASIC derivation the story calls for (Dev Notes "Scope seam
+   * vs Story 29.1"): a straightforward args read for `action`, and an
+   * `outcome` inferred from the result shape. Story 29.1 owns rigorous
+   * fidelity (structured `denyReason`, `presetApplied` attribution,
+   * sanitized-error-only, schema-aware `action`, strict per-session
+   * monotonic `seq` under concurrency).
+   */
+  private recordAuditEntry(
+    auditLogger: AuditLogger,
+    tool: ToolDefinition,
+    rawArgs: unknown,
+    result: CallToolResult,
+    durationMs: number,
+  ): void {
+    const argsRecord =
+      rawArgs !== null && typeof rawArgs === "object"
+        ? (rawArgs as Record<string, unknown>)
+        : undefined;
+
+    const profileName = this.deriveAuditProfileName(argsRecord);
+    const outcome = this.deriveAuditOutcome(result);
+    const entryInput: AuditEntryInput = {
+      tool: tool.name,
+      action: this.deriveAuditAction(argsRecord),
+      profile: profileName,
+      namespace: this.deriveAuditNamespace(argsRecord, profileName),
+      outcome,
+      durationMs,
+      paramKeys: argsRecord
+        ? Object.keys(argsRecord).filter((key) => key !== "server")
+        : [],
+      params: argsRecord,
+    };
+    if (outcome === "error") {
+      const message = this.extractAuditErrorMessage(result);
+      if (message !== undefined) entryInput.error = message;
+    }
+    auditLogger.log(entryInput);
+  }
+
+  /** `rawArgs.server` when present, else the reserved default profile name. */
+  private deriveAuditProfileName(
+    argsRecord: Record<string, unknown> | undefined,
+  ): string {
+    const value = argsRecord?.server;
+    return typeof value === "string" && value.length > 0
+      ? value
+      : DEFAULT_PROFILE_NAME;
+  }
+
+  /**
+   * `rawArgs.namespace` when present (per-call override), else the resolved
+   * profile's default namespace read from the already-built, in-memory
+   * profile registry. Basic derivation only (Dev Notes): never establishes a
+   * connection just to learn a namespace — a denied call must not connect.
+   */
+  private deriveAuditNamespace(
+    argsRecord: Record<string, unknown> | undefined,
+    profileName: string,
+  ): string {
+    const override = argsRecord?.namespace;
+    if (typeof override === "string" && override.length > 0) return override;
+    return this.profiles?.get(profileName)?.namespace ?? "";
+  }
+
+  /** `rawArgs.action` when it is a string, else `null` (spec §3). */
+  private deriveAuditAction(
+    argsRecord: Record<string, unknown> | undefined,
+  ): string | null {
+    const value = argsRecord?.action;
+    return typeof value === "string" ? value : null;
+  }
+
+  /**
+   * Basic outcome derivation (Dev Notes "Scope seam"): `denied` when the
+   * governance gate's structured code is present, `error` when the result is
+   * flagged as an error, else `ok`.
+   */
+  private deriveAuditOutcome(result: CallToolResult): AuditOutcome {
+    const structured = result.structuredContent as
+      | Record<string, unknown>
+      | undefined;
+    if (structured?.code === "GOVERNANCE_DISABLED") return "denied";
+    if (result.isError) return "error";
+    return "ok";
+  }
+
+  /** The result's first text content block, when present — the basic "sanitized message". */
+  private extractAuditErrorMessage(result: CallToolResult): string | undefined {
+    const first = result.content?.[0];
+    if (first && first.type === "text" && typeof first.text === "string") {
+      return first.text;
+    }
+    return undefined;
+  }
+
   // ── Dynamic tool management (listChanged) ──────────────────────────
 
   /**
@@ -1424,6 +1595,45 @@ export class McpServerBase {
     // running full-access when the operator intended read-only. Absent/empty ⇒
     // `undefined` ⇒ the presetSeed layer is a pure pass-through (AC 24.1.1).
     this.preset = parseGovernancePreset();
+
+    // Parse the audit-log configuration (Epic 29, spec `07-observability-
+    // audit-log.md` §2), mirroring the governance parses immediately above.
+    // Absent `IRIS_AUDIT_LOG` ⇒ `auditConfig` stays `undefined` ⇒
+    // `this.auditLogger` stays `undefined` ⇒ handleToolCall is a pure
+    // pass-through (Rule #19 back-compat gate; AC 29.0.4). A malformed
+    // `IRIS_AUDIT_LOG_MAX_MB` fails fast, naming the var — mirrors the
+    // `IRIS_SQL_MAX_ROWS` parse in config.ts.
+    let auditConfig: AuditConfig | undefined;
+    try {
+      auditConfig = parseAuditConfig();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Audit log configuration error: ${message}`);
+      process.exit(1);
+      return; // Guard: prevent continued execution when process.exit is mocked
+    }
+
+    if (auditConfig) {
+      // An operator who configured IRIS_AUDIT_LOG must not run unaudited
+      // silently: fail fast at startup if the target file's directory is not
+      // writable (spec §2), mirroring the health-check failure below.
+      const auditDir = dirname(auditConfig.path);
+      try {
+        await access(auditDir, fsConstants.W_OK);
+      } catch {
+        logger.error(
+          `IRIS_AUDIT_LOG directory is not writable: "${auditDir}". ` +
+            `Set IRIS_AUDIT_LOG to a path whose directory this process can write to, or unset IRIS_AUDIT_LOG to disable auditing.`,
+        );
+        process.exit(1);
+        return; // Guard: prevent continued execution when process.exit is mocked
+      }
+      this.auditLogger = new AuditLogger(
+        auditConfig,
+        this.options.name,
+        this.options.version,
+      );
+    }
 
     // 2. Eagerly create the default profile's HTTP client (preserves today's
     //    bootstrap/health-check/negotiation for the default profile exactly).

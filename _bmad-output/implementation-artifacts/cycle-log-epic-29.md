@@ -1,0 +1,14 @@
+# Cycle Log — Epic 29 (Tool-Call Observability & Session Audit Log)
+
+Ticketless single-project repo; epic branch `epic29` off `feature/feature-wave-1`. Format: TAB-separated, four fields (`<UTC>	<Story|Epic>	<stage>	<metadata>`).
+
+2026-07-12T03:35:30Z	Epic 29	epic_branch_created	repos=. from=c19bd96
+2026-07-12T03:35:30Z	Epic 29	epic_branch_checked_out	repos=. head=c19bd96
+2026-07-12T03:37:42Z	Epic 29	sprint_planning_complete	model=claude-opus-4-8 stories=3 all_present=true structural_change=none note=sprint-status-matches-epics.md-noop
+2026-07-12T03:41:57Z	Epic 29	retro_review_complete	source_retro=_bmad-output/implementation-artifacts/epic-28-retro-2026-07-11.md included=40 deferred=0 dropped=0 decision=rule37-tripped-burndown-scheduled-as-29.3 placement=last note=all-carried-Epic26/27/28-own-items-to-terminal-disposition-in-29.3-no-redefer 29.3-registered-epics.md+sprint-status
+2026-07-12T03:45:20Z	Story 29.0	story_created	path=_bmad-output/implementation-artifacts/29-0-audit-interceptor-and-writer.md model=claude-opus-4-8 service_introducing=true integration_ac=in-story-consumer-handleToolCall-wired+noop-proof
+2026-07-12T04:03:42Z	Story 29.0	dev_complete	spawn_at=2026-07-12T04:03:42Z model=claude-sonnet-5 files=packages/shared/src/audit.ts,packages/shared/src/server-base.ts loc_added=~400 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true note=dispatchToolCall-rename+AuditLogger+substring-redaction-failclosed+739shared/2470mono-green+baseline-141-1e62c5ad5bf7-unchanged
+2026-07-12T04:03:42Z	Story 29.0	adr_verifications_complete	tool=none acs=none result=none_required evidence= model=claude-opus-4-8 note=no-docs/adr-registry
+2026-07-12T04:08:14Z	Story 29.0	qa_complete	spawn_at=2026-07-12T04:08:14Z model=claude-sonnet-5 tests_added=2 first_run_failures=0 clarifications=0 cycle_iteration=1 closing_sections_present=true note=outcome-derivation-e2e-denied+throw-through-SDK-callback+shared741/40files+13/13pkgs-green+baseline-exit0
+2026-07-12T04:15:51Z	Story 29.0	cr_complete	spawn_at=2026-07-12T04:15:51Z model=claude-opus-4-8 resolved=2 deferred=0 dismissed=0 high=0 med=1 low=1 clarifications=0 cycle_iteration=1 closing_sections_present=true status=done note=MED-sync-audit-throw-guard+LOW-dead-rotation-stat-interval-both-patched+baseline-exit0+integration-ac-genuine
+2026-07-12T04:17:28Z	Story 29.0	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=built-dist-AuditLogger-22asserts:zero-secret-occurrence+JSONL-fidelity+seq-monotonic+rotation-.1+disabled-noop model=claude-opus-4-8

@@ -4176,6 +4176,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 29.0 Interceptor + writer + redaction + back-compat (spec §6 story 1)
 - 29.1 Outcome fidelity + concurrency (spec §6 story 2)
 - 29.2 Docs + live smokes (spec §6 story 3)
+- 29.3 Deferred-work ledger burn-down (Rule #37 mandatory — added 2026-07-12; not from the spec)
 
 **Out of scope (v1)**: `iris_audit_sessions` query/replay tool (phase 2 — Rule #31 counting implications); IRIS-global sink; OpenTelemetry export; log shipping; client identity beyond process-session.
 
@@ -4200,3 +4201,18 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 29.2.1** — Docs rollup: README env vars + a "Compliance & Auditability" section (marketing surface — written well), client-config guides, CHANGELOG; documents that logging is config (not governance-bypassable) and the params-off-by-default posture.
 - **AC 29.2.2** — Live smoke (Rules #22/#26 shape): built dist with `IRIS_AUDIT_LOG` set; real session covering an ok read, a failing call, and a governance-denied write; three entries' fidelity verified; grep for the test password — zero hits; rotation verified with a tiny `IRIS_AUDIT_LOG_MAX_MB`.
 - **AC 29.2.3** — Spec §7 ACs 1–8 pass; conventions §6 complete.
+
+### Story 29.3: Deferred-Work Ledger Burn-Down (added 2026-07-12 — Rule #37 mandatory)
+
+**Context**: Rule #37's ≥3-consecutive-re-deferral threshold trips at Epic 29. The Epic-26-own LOW batch (CR 26.1-1..6, 26.2-1, 26.4-1..3) was re-deferred by Epic 27 and Epic 28 (2 consecutive); a re-defer at Epic 29 would be the 3rd. Binding directive: Epic 28 retro §6 / Action Item #2. This story drives EVERY carried deferred-work item to TERMINAL disposition — re-deferral is NOT an allowed outcome. Placed last (Project Lead decision, 2026-07-12; mirrors the Story 22.1 and Story 26.4 burn-down precedent).
+
+**Scope of carried items** (~40, all LOW except 2 MED; all graceful-today, none shipping defects):
+- Epic-26-own (10 LOW): CR 26.1-1..6, 26.2-1, 26.4-1..3
+- Epic-27-own (18 LOW): CR 27.0-1/-2/-4/-5/-6, 27.1-4/-5/-7/-8/-9/-10/-11/-12, 27.3-1/-2/-3/-4, 27.4-1
+- Epic-28-own (12; 2 MED): CR 28.0-1/-2, 28.1-1(MED)/-2/-3/-4, 28.2-1(MED)/-2/-3/-4, 28.3-1/-2
+
+**Acceptance Criteria**:
+- **AC 29.3.1** — Every carried item receives a TERMINAL disposition of exactly one of: **resolved** (code fix applied), **closed-with-evidence** (verified no-repro / already-fixed, with the evidence cited), or **closed-by-decision** (by-design / accepted-limitation / superseded, with rationale). Re-deferral is prohibited. A disposition table (Item | Source | Disposition | Rationale/Evidence) is appended to `deferred-work.md`.
+- **AC 29.3.2** — Any item dispositioned **resolved** via a code fix meets Rule #48's higher bar: proven LIVE on the real surface OR mutation-verified (revert → red → restore); a green suite alone is NOT evidence. Each resolved fix carries a regression test pinned from live/real behavior.
+- **AC 29.3.3** — Rule #50 / #49 lenses applied where a dispositioned item touches comparison/diff/key logic (the Epic-27 env-diff/env-promote items). Additive back-compat preserved (Rule #19): no change to any existing tool's default-enabled output; frozen governance baseline `1e62c5ad5bf7` untouched; `BOOTSTRAP_VERSION` unchanged unless a resolved fix legitimately touches a bootstrapped class (then dual-roster + idempotence per Rules #39/#24).
+- **AC 29.3.4** — The disposition table is mirrored into the ledger (Rule #37) and the Epic 29 retro-review carry-forward is CLEARED (no carried Epic-26/27/28-own items remain open after this story).
