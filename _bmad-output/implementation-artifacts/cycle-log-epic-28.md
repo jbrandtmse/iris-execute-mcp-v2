@@ -36,3 +36,4 @@ Ticketless single-project repo; epic branch `epic28` off `feature/feature-wave-1
 2026-07-11T20:44:28Z	Story 28.3	committed	sha=6267b5f submodules=
 2026-07-11T20:44:29Z	Epic 28	epic_status_done	stories=4
 2026-07-12T03:13:32Z	Epic 28	epic_retro_complete	retro_doc=epic-28-retro-2026-07-11.md rules_codified=0 rules_total=50 decision=all-exercised-existing burn_down_flagged=epic-29
+2026-07-12T03:14:30Z	Epic 28	epic_merged_to_feature	repos=. feature_sha=0272b95 merge_sha=0272b95 submodules=
