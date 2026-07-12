@@ -410,7 +410,7 @@ development_status:
   28-1-advise-data-endpoint: done
   28-2-heuristic-engine: done
   28-3-advise-tool-docs-smokes: done
-  epic-28-retrospective: optional
+  epic-28-retrospective: done
 
   # Epic 29: Tool-Call Observability & Session Audit Log (shared)
   # Added 2026-07-07 via bmad-correct-course. BINDING SPEC: research/feature-specs/07-observability-audit-log.md.
