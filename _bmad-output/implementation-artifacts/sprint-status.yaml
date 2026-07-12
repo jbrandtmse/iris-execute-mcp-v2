@@ -421,7 +421,7 @@ development_status:
   epic-29: in-progress
   29-0-audit-interceptor-and-writer: done
   29-1-audit-outcome-fidelity: done
-  29-2-audit-docs-and-smokes: backlog
+  29-2-audit-docs-and-smokes: done
   # 29.3 added 2026-07-12 at the Epic 29 retro-review gate: Rule #37 ≥3-consecutive-re-defer threshold trips
   # (Epic-26-own batch: Epic 27 + Epic 28 re-deferred = 2; Epic 29 is the 3rd). Mandatory deferred-work
   # burn-down driving all carried Epic-26/27/28-own items to TERMINAL disposition (re-deferral NOT allowed).

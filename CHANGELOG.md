@@ -2,6 +2,45 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
+
+### Added — Tool-Call Observability & Session Audit Log (`@iris-mcp/shared`, all five servers)
+
+An opt-in, structured, secrets-free audit trail of every MCP tool call — the concrete answer to
+"what did the AI do to prod last Tuesday?" for regulated (e.g. healthcare) deployments. Three new
+environment variables, all optional and **default-OFF**:
+
+- `IRIS_AUDIT_LOG` (unset = OFF) — absolute path to a JSONL audit file. Setting it enables
+  auditing for every tool call across all five servers via a single interception point in
+  `McpServerBase.handleToolCall` — no per-tool changes, automatic coverage of all present and
+  future tools.
+- `IRIS_AUDIT_LOG_MAX_MB` (default `50`) — rotates the file at this size (`<path>` → `<path>.1`,
+  single generation).
+- `IRIS_AUDIT_LOG_PARAMS` (default `false`) — when `true`, entries also carry the call's redacted
+  parameter values; the default logs parameter key names only.
+
+Each entry records `ts`/`session` (per-process UUID)/`seq` (per-session monotonic)/`serverPkg`/
+`tool`/`action`/`profile`/`namespace`/`outcome` (`ok`/`error`/`denied`)/`durationMs`/`paramKeys`,
+plus a structured `denyReason` (+ `presetApplied` when a safety preset, not an explicit override,
+caused the denial) on denied entries and a sanitized-only `error` message on error entries.
+Redaction (recursive walk of the args object, credential-name-family key match →
+`"[REDACTED]"`, 2 KB string truncation) runs BEFORE anything reaches the write queue, proven
+secrets-free under fuzz testing and a live smoke grep. A post-startup sink failure (e.g. an
+unwritable file mid-session) never blocks or fails a tool call — it degrades, warns once, and
+counts a `droppedEntries` total flushed at shutdown; a *startup-time* unwritable directory fails
+fast instead, so an operator who configured auditing never runs unaudited by accident.
+
+**Logging is server configuration, not a governed tool — deliberately NOT bypassable via
+`IRIS_GOVERNANCE`.** No new tool, no new governance key, no bootstrap bump: this is a
+`@iris-mcp/shared`-only, TypeScript-layer capability (frozen governance baseline `1e62c5ad5bf7`
+and `BOOTSTRAP_VERSION` unchanged). With `IRIS_AUDIT_LOG` unset (the default), behavior is
+byte-for-byte unchanged — no audit file, no `fs` writes attempted (Rule #19 mechanical proof).
+Delivered across three stories: 29.0 (interceptor + writer foundation), 29.1 (outcome/denial/action
+fidelity + concurrency + shutdown flush), and 29.2 (this docs + live-smoke closing story — see
+[Compliance & Auditability](README.md#compliance--auditability) for the full model, the entry
+format, and the disambiguation from the pre-existing IRIS-native `iris_audit_manage`/
+`iris_audit_events` security-audit tools).
+
 ## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
 
 ### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
