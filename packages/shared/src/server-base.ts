@@ -1362,12 +1362,14 @@ export class McpServerBase {
    * governance key — so the SAME derivation applies uniformly no matter which
    * of `dispatchToolCall`'s many return points produced the result.
    *
-   * This is the BASIC derivation the story calls for (Dev Notes "Scope seam
-   * vs Story 29.1"): a straightforward args read for `action`, and an
-   * `outcome` inferred from the result shape. Story 29.1 owns rigorous
-   * fidelity (structured `denyReason`, `presetApplied` attribution,
-   * sanitized-error-only, schema-aware `action`, strict per-session
-   * monotonic `seq` under concurrency).
+   * Story 29.1 (AC 29.1.1) sharpens the `denied`/`error` fidelity here: a
+   * `"denied"` outcome COPIES `denyReason` (`structuredContent.code`) and, when
+   * present, `presetApplied` (`structuredContent.presetApplied`) straight from
+   * the denial the client actually saw — never recomputed, so it can never
+   * diverge from `dispatchToolCall`'s own `presetCaused` attribution
+   * (`:~1194-1214`). An `"error"` outcome still carries only the sanitized
+   * message text (never a stack/caret-global token). An `"ok"` outcome carries
+   * neither field.
    */
   private recordAuditEntry(
     auditLogger: AuditLogger,
@@ -1385,7 +1387,7 @@ export class McpServerBase {
     const outcome = this.deriveAuditOutcome(result);
     const entryInput: AuditEntryInput = {
       tool: tool.name,
-      action: this.deriveAuditAction(argsRecord),
+      action: this.deriveAuditAction(tool, argsRecord),
       profile: profileName,
       namespace: this.deriveAuditNamespace(argsRecord, profileName),
       outcome,
@@ -1398,6 +1400,16 @@ export class McpServerBase {
     if (outcome === "error") {
       const message = this.extractAuditErrorMessage(result);
       if (message !== undefined) entryInput.error = message;
+    } else if (outcome === "denied") {
+      const structured = result.structuredContent as
+        | Record<string, unknown>
+        | undefined;
+      const denyReason = structured?.code;
+      if (typeof denyReason === "string") entryInput.denyReason = denyReason;
+      const presetApplied = structured?.presetApplied;
+      if (typeof presetApplied === "string") {
+        entryInput.presetApplied = presetApplied;
+      }
     }
     auditLogger.log(entryInput);
   }
@@ -1427,12 +1439,33 @@ export class McpServerBase {
     return this.profiles?.get(profileName)?.namespace ?? "";
   }
 
-  /** `rawArgs.action` when it is a string, else `null` (spec §3). */
+  /**
+   * `rawArgs.action` when — and ONLY when — the tool's input schema declares
+   * an `action` field AND the raw value is an actual member of that field's
+   * (unwrapped) enum options (Story 29.1, AC 29.1.2); `null` otherwise.
+   *
+   * Reuses {@link unwrapActionOptions} — the SAME enum-membership discipline
+   * {@link computeGovernanceKey} applies (`:~965-979`) — so a tool with no
+   * `action` field never over-reports a stray `action` key a caller happened
+   * to pass, and a non-member value (e.g. a value Zod would itself reject)
+   * likewise yields `null` rather than echoing an arbitrary string. Reads
+   * `rawArgs` (pre-Zod) rather than `dispatchToolCall`'s validated args —
+   * `server` aside, Zod does not rename `action`, so the schema check applies
+   * identically to either shape.
+   */
   private deriveAuditAction(
+    tool: ToolDefinition,
     argsRecord: Record<string, unknown> | undefined,
   ): string | null {
     const value = argsRecord?.action;
-    return typeof value === "string" ? value : null;
+    if (typeof value !== "string") return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const actionField = (tool.inputSchema as any)?.shape?.action;
+    const options = unwrapActionOptions(actionField);
+    if (Array.isArray(options) && options.length > 0 && options.includes(value)) {
+      return value;
+    }
+    return null;
   }
 
   /**
@@ -1716,6 +1749,29 @@ export class McpServerBase {
           "Use stdio transport or implement HTTP setup in the server package.",
       );
       throw new Error("HTTP transport not yet implemented");
+    }
+  }
+
+  /**
+   * Stop the server (Epic 29, Story 29.1, AC 29.1.3 — the audit shutdown-flush
+   * seam). Closes the transport connection (a safe no-op via `Transport?.`
+   * optional-chaining if {@link start} was never called or already closed),
+   * then — when auditing is ON — AWAITS {@link AuditLogger.shutdown}: it
+   * enqueues the final `droppedEntries` line and drains the write queue, so
+   * no entry enqueued up to this point is lost before the process exits.
+   *
+   * This is the concrete "server's stop path" the audit writer's `shutdown()`
+   * was previously only ever CALLABLE from (Story 29.0 left it unwired); a
+   * host (e.g. a signal handler in a server package's entry point) calls this
+   * to shut down cleanly. Safe to call when auditing is off (`this.
+   * auditLogger` is `undefined` — a pure no-op flush) and idempotent-safe to
+   * call more than once (`AuditLogger.shutdown()` is documented safe to call
+   * multiple times; closing an already-closed transport is a no-op too).
+   */
+  async stop(): Promise<void> {
+    await this.mcpServer.close();
+    if (this.auditLogger) {
+      await this.auditLogger.shutdown();
     }
   }
 

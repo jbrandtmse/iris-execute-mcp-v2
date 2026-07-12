@@ -9,8 +9,12 @@
  * `denyReason`, `presetApplied` attribution, sanitized-error-only, schema-aware
  * `action` extraction, strict per-session monotonic `seq` under concurrency,
  * and shutdown-flush guarantees) is Story 29.1's scope (see the story's Dev
- * Notes "Scope seam" section). Logging is server CONFIGURATION, not a
- * governed tool — it is deliberately NOT bypassable via `IRIS_GOVERNANCE`.
+ * Notes "Scope seam" section). Story 29.1 closes that seam: `AuditEntryInput`
+ * now carries optional `denyReason`/`presetApplied` (emitted only for a
+ * `"denied"` outcome), `deriveAuditAction` (`server-base.ts`) is schema-aware,
+ * and `AuditLogger.shutdown()` is wired into `McpServerBase.stop()`. Logging
+ * is server CONFIGURATION, not a governed tool — it is deliberately NOT
+ * bypassable via `IRIS_GOVERNANCE`.
  */
 
 import { appendFile, rename, stat } from "node:fs/promises";
@@ -146,6 +150,20 @@ export interface AuditEntryInput {
   params?: unknown;
   /** Sanitized error message. Only recorded when `outcome === "error"`. */
   error?: string;
+  /**
+   * Structured governance denial code (e.g. `"GOVERNANCE_DISABLED"`), read
+   * from the denial's `structuredContent.code` (Story 29.1, AC 29.1.1).
+   * Only recorded when `outcome === "denied"`.
+   */
+  denyReason?: string;
+  /**
+   * The active governance preset name (e.g. `"read-only"`), COPIED from the
+   * denial's `structuredContent.presetApplied` — present only when the
+   * preset (not an explicit `IRIS_GOVERNANCE` override) caused the denial
+   * (mirrors `dispatchToolCall`'s `presetCaused` attribution). Only
+   * recorded when `outcome === "denied"` AND the source field was present.
+   */
+  presetApplied?: string;
 }
 
 /** One JSON line written to the audit file (spec §3 entry format). */
@@ -163,6 +181,8 @@ interface AuditEntry {
   paramKeys: string[];
   params?: unknown;
   error?: string;
+  denyReason?: string;
+  presetApplied?: string;
 }
 
 /**
@@ -237,6 +257,12 @@ export class AuditLogger {
     }
     if (input.outcome === "error" && input.error !== undefined) {
       entry.error = input.error;
+    }
+    if (input.outcome === "denied" && input.denyReason !== undefined) {
+      entry.denyReason = input.denyReason;
+    }
+    if (input.outcome === "denied" && input.presetApplied !== undefined) {
+      entry.presetApplied = input.presetApplied;
     }
     this.enqueueWrite(JSON.stringify(entry));
   }
