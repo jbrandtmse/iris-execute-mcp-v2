@@ -418,7 +418,7 @@ development_status:
   # TS-only, no bootstrap bump, no new tools/keys. IRIS_AUDIT_LOG (JSONL path) + IRIS_AUDIT_LOG_MAX_MB (50) + IRIS_AUDIT_LOG_PARAMS (false). Interceptor at the handleToolCall single choke point.
   # Redaction NON-NEGOTIABLE before queue (password/secret/token/credential families + 2KB truncation; fuzz + zero-occurrence tests). Audit writes NEVER fail/slow a tool call (fire-and-forget + droppedEntries); unwritable dir fails fast at STARTUP only.
   # Logging is server CONFIG, not a tool — deliberately NOT bypassable via IRIS_GOVERNANCE. Unset ⇒ mechanical no-op (Rule #19). presetApplied populated when Epic 24 shipped (no hard dep). iris_audit_sessions tool = phase 2, out of scope.
-  epic-29: in-progress
+  epic-29: done
   29-0-audit-interceptor-and-writer: done
   29-1-audit-outcome-fidelity: done
   29-2-audit-docs-and-smokes: done
