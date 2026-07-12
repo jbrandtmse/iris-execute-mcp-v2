@@ -2,6 +2,81 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
+
+### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
+
+Story 28.1: the **first ObjectScript handler** for the `iris_sql_analyze` tool family (the
+existing four actions are TS/SQL-only via the Atelier `action/query` endpoint — Rule #47
+correction settled in Story 28.0). Given `{ "query": "<sql>", "namespace"?: "<ns>" }`, the new
+`POST /dev/sql/advise-data` route returns in ONE round-trip: the verbatim server-side
+`EXPLAIN <query>` plan text (`##class(%SQL.Statement).%ExecDirect(, "EXPLAIN "_query)` reading
+the first row's `Plan` column — live-confirmed byte-for-byte identical to the existing `explain`
+action's `action/query` call), the enumerated `{schema, table, className}` list of tables the
+plan actually reads (parsed from its `Read master map`/`Read index map` marker lines, alias
+-stripped and deduplicated), and the `%Dictionary.CompiledIndex` rows (grouped per table,
+including the verbatim order-preserving `Properties` string) needed for the Story 28.2 TS
+heuristic engine's `missing-index` leading-subscript check. No separate tune-metadata payload —
+`stale-stats` is read straight off the plan's own `Warning: Table X is not tuned.` block,
+preserved verbatim in `plan` (Story 28.0 finding). This story is a pure PRODUCER: no TS tool
+wiring, no governance key, no consumer ships here — Story 28.2 captures reference fixtures from
+this endpoint's live output, and Story 28.3's `advise` action is the first live caller.
+
+`BOOTSTRAP_VERSION`: `1e2008753853` → `6422caf6ec31` (new bootstrapped class, Rule #24; added to
+both hand-maintained bootstrap rosters per Rule #39). Frozen governance baseline `1e62c5ad5bf7`
+untouched (no governance key added in this story).
+
+### Added — Heuristic engine + fixtures (Story 28.2, `packages/iris-dev-mcp/src/tools/sqlAdvisor.ts`)
+
+A pure-TypeScript engine, `analyzeAdviceData(raw, ctx)`, that turns the Story 28.1 endpoint's raw
+materials (`{ plan, tables, indexes }`) into ranked findings for the five heuristics pinned in
+spec §4: `full-scan`, `missing-index` (with a `suggestedDdl` and confidence `high`/`medium` by
+predicate shape), `stale-stats` (read straight off the plan's own `Warning:` block), `unused-index`
+(reusing the existing `indexUsage` marker parser), and `plan-anomaly` (temp-file markers, shared
+vocabulary with `GROUP BY`/`ORDER BY`/joins). Unrecognized/garbage plan text degrades to
+`findings: []` + a `"plan format not recognized"` note — the engine never throws and never guesses
+(AC 28.2.3). Every finding carries `evidence` + `planExcerpt`; never a recommendation against a
+`%*`/`INFORMATION_SCHEMA` system schema. All 46 tests replay 8 fixtures reference-captured live
+from `/dev/sql/advise-data` against the new durable `ExecuteMCPv2.Tests.AdvisorFixture` table
+(Rule #36 — fixture-only class, absent from the bootstrap manifest). No tool wiring, no
+`mutates`/governance change, no bootstrap change in this story — `BOOTSTRAP_VERSION` stays
+`6422caf6ec31`.
+
+### Added — `advise` action on `iris_sql_analyze` (Story 28.3, closing story)
+
+Wires the Story 28.2 engine to the Story 28.1 endpoint behind a new `advise` action — the
+market-differentiating advisor capability, strictly advisory (recommends + cites evidence; never
+applies anything; no `applyIndex` write ships in v1). **Strictly additive** — the four pre-existing
+actions' request/response shapes are byte-for-byte unchanged (dedicated Rule #19 snapshot test),
+and **tool count is unchanged** (`advise` is a new action on an existing tool, not a new tool —
+Rule #31). The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged**
+— `advise` is a non-baseline **`mutates: "read"` → enabled by default** key (a `read` still requires
+classification — `assertGovernanceClassification` throws on an unclassified non-baseline key).
+Suite governance-key count: **200 live / 59 post-foundation → 201 live / 60 post-foundation**.
+
+- **`query` mode** — posts the SQL to `POST /dev/sql/advise-data`, runs the result through
+  `analyzeAdviceData`, and renders evidence-first text (findings ranked by confidence: high, then
+  medium, then low) plus `structuredContent: { mode: "query", findings, analyzed: { statements,
+  skipped }, notes }`. Zero findings render an explicit "no findings, here's what was checked"
+  message — never a silent empty (spec §3).
+- **`workload` mode** (`workload: true`, mutually exclusive with `query`) — advises the top-`topN`
+  (default 5, max 20) recent statements from `INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp
+  DESC` (the Story 28.0-pinned source), one endpoint round-trip per statement, aggregating findings.
+  `topN` caps real scan work, not just output size (Rule #38) — each analyzed statement is a full
+  `EXPLAIN` + dictionary round-trip. A statement that fails to prepare is skipped (`analyzed.skipped`
+  increments), not fatal to the call; if the workload source itself is unavailable on the platform
+  (not expected on this instance per Story 28.0, but coded defensively for other editions), the
+  action returns a clear capability message, never a raw SQLCODE dump.
+- Every action key now carries a truthful `mutates` classification: `{ explain: "read", stats:
+  "read", indexUsage: "read", running: "read", advise: "read" }`.
+
+Documentation: [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md) (new `advise`
+row + governance-defaults note + worked example), [`tool_support.md`](tool_support.md) (endpoint
+column updated + new Epic 28 governance-defaults note), the root [README](README.md) (governance
+table row updated) and [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md)
+(description updated) — tool counts (28 / 104) unchanged everywhere; only the governance-key count
+and the `iris_sql_analyze` action list move.
+
 ## [Pre-release — 2026-07-10] — Epic 27: Environment Diff & Promotion
 
 ### Added — `iris_env_diff` / `iris_env_promote` (`@iris-mcp/dev`) + `promote-environment-change` prompt

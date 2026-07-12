@@ -28,12 +28,13 @@ describe("iris_sql_analyze", () => {
     expect(sqlAnalyzeTool.scope).toBe("NS");
   });
 
-  it("should declare all four actions as read in `mutates`", () => {
+  it("should declare all five actions as read in `mutates`", () => {
     expect(sqlAnalyzeTool.mutates).toEqual({
       explain: "read",
       stats: "read",
       indexUsage: "read",
       running: "read",
+      advise: "read",
     });
   });
 

@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 27 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(27);
+    it("should contain exactly 28 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(28);
     });
 
     it("should contain all required class names", () => {
@@ -1055,6 +1055,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Task.cls",
         "ExecuteMCPv2.REST.SystemConfig.cls",
         "ExecuteMCPv2.REST.Analytics.cls",
+        "ExecuteMCPv2.REST.SqlAdvisor.cls",
         "ExecuteMCPv2.REST.Dispatch.cls",
       ];
       for (const name of expected) {
@@ -1084,7 +1085,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(27);
+      expect(classes.length).toBe(28);
     });
 
     it("should return classes in compilation order", () => {
@@ -1151,6 +1152,13 @@ describe("bootstrap", () => {
       const analytics = classes.find(c => c.name === "ExecuteMCPv2.REST.Analytics.cls");
       expect(analytics).toBeDefined();
       expect(analytics!.content).toContain("ExecuteMCPv2.REST.Analytics");
+    });
+
+    it("should include SqlAdvisor.cls (Story 28.1)", () => {
+      const classes = getBootstrapClasses();
+      const sqlAdvisor = classes.find(c => c.name === "ExecuteMCPv2.REST.SqlAdvisor.cls");
+      expect(sqlAdvisor).toBeDefined();
+      expect(sqlAdvisor!.content).toContain("ExecuteMCPv2.REST.SqlAdvisor");
     });
   });
 
@@ -1223,6 +1231,7 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.Task.cls", "src/ExecuteMCPv2/REST/Task.cls"],
       ["ExecuteMCPv2.REST.SystemConfig.cls", "src/ExecuteMCPv2/REST/SystemConfig.cls"],
       ["ExecuteMCPv2.REST.Analytics.cls", "src/ExecuteMCPv2/REST/Analytics.cls"],
+      ["ExecuteMCPv2.REST.SqlAdvisor.cls", "src/ExecuteMCPv2/REST/SqlAdvisor.cls"],
       ["ExecuteMCPv2.REST.Dispatch.cls", "src/ExecuteMCPv2/REST/Dispatch.cls"],
     ];
 

@@ -22,7 +22,7 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 28 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis, lines-of-code metrics, cross-profile environment diff & promotion |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 28 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion |
 | [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay |
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check`), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
