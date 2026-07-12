@@ -1146,6 +1146,18 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
   const srcNs = namespaceOverride ?? sourceClient.namespace;
   const targetNs = namespaceOverride ?? targetClient.namespace;
 
+  // CR 27.3-4: refuse before any write when a resolved namespace is blank. A
+  // misconfigured profile with `namespace === ""` (and no override) would
+  // otherwise reach the per-domain fetch/write calls as `?namespace=`, and
+  // every step would fail with a misattributing "not found ... may have
+  // changed since the plan was generated" message that hides the real cause.
+  if (srcNs === "" || targetNs === "") {
+    return validationError(
+      `Cannot execute: the resolved namespace is blank (source='${srcNs}', target='${targetNs}'). ` +
+        "Check the profile's configured default namespace, or pass an explicit 'namespace' override. No changes were made.",
+    );
+  }
+
   const executed: ExecutedStep[] = [];
   let halted = false;
   let sourceAtelierVersion: number | undefined;

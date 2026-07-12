@@ -724,6 +724,13 @@ export function evaluate(
 ): EvaluateResult {
   const t: Thresholds = mergeThresholds(thresholds);
 
+  // `checked` is filtered against the canonical `AREA_VALUES` enum, so any
+  // `errors` key that is NOT one of the 9 canonical area names is silently
+  // dropped rather than surfaced as a finding (CR 23.2-2 / CR 26.4-2). This
+  // is safe: `ExecuteMCPv2.REST.Health.cls`'s `pErrors.%Set(...)` calls are
+  // all literal, hardcoded canonical area names (confirmed by source read,
+  // Story 23.2 review) -- the endpoint never emits an out-of-enum `errors`
+  // key, so this filter never masks a real per-area failure in practice.
   const checked = AREA_VALUES.filter(
     (a) =>
       Object.prototype.hasOwnProperty.call(rawAreas, a) ||

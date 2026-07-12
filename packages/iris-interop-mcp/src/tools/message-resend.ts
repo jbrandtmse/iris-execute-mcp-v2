@@ -227,8 +227,16 @@ function renderResendLine(r: ResendItemRaw): string {
     : `#${r.originalId} FAILED: ${r.error ?? "unknown error"}`;
 }
 
-function renderResendSummary(summary: ResendSummary): string {
-  return `${summary.succeeded}/${summary.total} succeeded, ${summary.failed} failed`;
+/**
+ * CR 26.2-1 fallback: a malformed HTTP-200 body (server contract drift) that
+ * omits `summary` would otherwise throw a TypeError reading `.succeeded` —
+ * mirrors the `?? []` guard already applied to `result.results`/`result.sample`.
+ */
+const EMPTY_SUMMARY: ResendSummary = { total: 0, succeeded: 0, failed: 0 };
+
+function renderResendSummary(summary: ResendSummary | undefined | null): string {
+  const s = summary ?? EMPTY_SUMMARY;
+  return `${s.succeeded}/${s.total} succeeded, ${s.failed} failed`;
 }
 
 // ── iris_message_resend ─────────────────────────────────────
@@ -456,7 +464,7 @@ export const messageResendTool: ToolDefinition = {
       );
       const result = response.result;
 
-      if (result.dryRun) {
+      if (result.dryRun === true) {
         const sample = (result.sample ?? []).map(mapSampleRow);
         const text = [
           `DRY RUN: ${result.matchCount} message(s) match the filter (showing up to ` +

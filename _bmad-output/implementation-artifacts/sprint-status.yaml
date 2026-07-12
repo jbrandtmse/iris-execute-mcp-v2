@@ -426,5 +426,5 @@ development_status:
   # (Epic-26-own batch: Epic 27 + Epic 28 re-deferred = 2; Epic 29 is the 3rd). Mandatory deferred-work
   # burn-down driving all carried Epic-26/27/28-own items to TERMINAL disposition (re-deferral NOT allowed).
   # Binding: Epic 28 retro Action #2. Placed LAST per Project Lead decision (mirrors Story 22.1 / 26.4 precedent).
-  29-3-deferred-work-burndown: backlog
+  29-3-deferred-work-burndown: done
   epic-29-retrospective: optional

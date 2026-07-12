@@ -149,8 +149,16 @@ packages:
     no shared exported version, per [[feedback_mcp_structured_content]]). Text is evidence-first,
     ranked high→medium→low confidence, and always closes with the advisory disclaimer
     ("Recommendations are heuristic; verify with 'explain' before applying any change."). A
-    malformed/non-preparable query surfaces `IrisApiError` → `isError:true` with the sanitized
-    message (the SAME catch pattern the four existing actions use).
+    TRANSPORT-level failure calling `advise-data` (network/auth/namespace-switch — an
+    `IrisApiError`) surfaces as `isError:true` with the sanitized message (the SAME catch
+    pattern the four existing actions use). **CORRECTED (Story 29.3 burn-down, CR 28.3-1):**
+    a genuinely unparseable/malformed SQL statement does NOT itself throw `IrisApiError` —
+    live-captured Fixture 7 (`ADVISE_DATA_ENDPOINT_ERROR_RESULT`, `sqlAdvisor.fixtures.ts`,
+    2026-07-11) shows `/dev/sql/advise-data` returns HTTP 200 with `result: {}` for
+    `"SELEKT GARBAGE FROM NoSuchTable"`, which `analyzeAdviceData({})` reports as
+    "plan format not recognized" / zero findings, not an error. The `sqlAnalyze-advise.test.ts`
+    "malformed/non-preparable query" test (below) exercises the transport-level `IrisApiError`
+    path only — its title has been corrected to say so.
   - `workload` mode (`workload:true`, mutually exclusive with `query`): queries
     `SELECT TOP <topN> Hash, Statement, ... FROM INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp
     DESC` via the EXISTING Atelier `action/query` path (the same path `stats`/`running` already

@@ -537,6 +537,26 @@ describe("iris_message_resend", () => {
       expect(result.content[0]?.text).toContain("new header #101");
       expect(result.content[0]?.text).toContain("FAILED: Target config item 'X' is not running");
     });
+
+    // ── CR 26.2-1 regression: malformed 200 (server contract drift) must not crash ──
+
+    it("should not throw when a 200 response omits 'summary' (CR 26.2-1) — renders 0/0 succeeded, 0 failed", async () => {
+      mockHttp.post.mockResolvedValue(
+        envelope({
+          action: "resend",
+          results: [{ originalId: 1, newHeaderId: 2, ok: true }],
+          // summary intentionally omitted — malformed/contract-drift response
+        }),
+      );
+
+      const result = await messageResendTool.handler(
+        { action: "resend", headerIds: [1] },
+        ctx,
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0]?.text).toContain("0/0 succeeded, 0 failed");
+    });
   });
 
   // ── resendFiltered ───────────────────────────────────────────
@@ -689,6 +709,66 @@ describe("iris_message_resend", () => {
       expect(structured.summary).toEqual({ total: 2, succeeded: 1, failed: 1 });
       expect(result.content[0]?.text).toContain("2 matched");
       expect(result.content[0]?.text).toContain("FAILED: Target config item 'X' is not running");
+    });
+
+    // ── CR 26.2-1 regression: bare-truthiness dryRun discriminant hardening ──
+
+    it("should route to the EXECUTED branch (not dry-run) when a 200 response's dryRun is the string 'false' (CR 26.2-1)", async () => {
+      // Not reachable with the current Story 26.1 server (which always emits a
+      // real JSON boolean), but a contract-drift response with a truthy
+      // non-`true` dryRun must not be mis-routed to the dry-run branch, which
+      // would then dereference the (absent) sample/matchCount-only shape.
+      mockHttp.post.mockResolvedValue(
+        envelope({
+          action: "resendFiltered",
+          dryRun: "false",
+          matchCount: 2,
+          results: [{ originalId: 10, newHeaderId: 110, ok: true }],
+          summary: { total: 1, succeeded: 1, failed: 0 },
+        }),
+      );
+
+      const result = await messageResendTool.handler(
+        {
+          action: "resendFiltered",
+          item: "MyApp.Service",
+          from: "2026-07-01",
+          dryRun: false,
+          confirm: true,
+        },
+        ctx,
+      );
+
+      expect(result.isError).toBeUndefined();
+      // Executed-branch rendering ("N matched, X/Y succeeded"), not "DRY RUN".
+      expect(result.content[0]?.text).toContain("2 matched");
+      expect(result.content[0]?.text).not.toContain("DRY RUN");
+    });
+
+    it("should not throw when the EXECUTED branch's 200 response omits 'summary' (CR 26.2-1)", async () => {
+      mockHttp.post.mockResolvedValue(
+        envelope({
+          action: "resendFiltered",
+          dryRun: false,
+          matchCount: 1,
+          results: [{ originalId: 10, newHeaderId: 110, ok: true }],
+          // summary intentionally omitted — malformed/contract-drift response
+        }),
+      );
+
+      const result = await messageResendTool.handler(
+        {
+          action: "resendFiltered",
+          item: "MyApp.Service",
+          from: "2026-07-01",
+          dryRun: false,
+          confirm: true,
+        },
+        ctx,
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0]?.text).toContain("0/0 succeeded, 0 failed");
     });
   });
 
