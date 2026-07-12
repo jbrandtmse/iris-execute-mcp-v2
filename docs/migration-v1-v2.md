@@ -8,7 +8,7 @@ Migrate from **iris-execute-mcp** (v1) or **mcp-server-iris** (CaretDev v1) to t
 
 The original `iris-execute-mcp` provided 8 development tools over a Python/SuperServer connection. The v2 rewrite brings:
 
-- **100 tools** across 5 specialized MCP servers (up from 8 in a single server)
+- **104 tools** across 5 specialized MCP servers (up from 8 in a single server)
 - **Node.js/TypeScript** runtime instead of Python
 - **HTTP/REST connection** via the Atelier API instead of the IRIS SuperServer binary protocol
 - **Auto-bootstrap**: IRIS helper classes install automatically on first connection -- no manual import or compile step
@@ -26,7 +26,7 @@ Both v1 projects (`iris-execute-mcp` by jbrandtmse and `mcp-server-iris` by Care
 | **Runtime** | Python (FastMCP / uvx) | Node.js / TypeScript (npx) |
 | **Installation** | `pip install` / venv / `uvx` | `npx -y @iris-mcp/<package>` (no install step) |
 | **Tool naming** | `execute_command`, `get_global`, etc. | Underscore-namespaced: `iris_execute_command`, `iris_global_get`, etc. |
-| **Architecture** | Single server, 8 tools | 5 servers, 100 tools total |
+| **Architecture** | Single server, 8 tools | 5 servers, 104 tools total |
 | **IRIS classes** | `ExecuteMCP.*` (manual import required) | `ExecuteMCPv2.*` (auto-bootstrapped on first connection) |
 | **Env var: host** | `IRIS_HOSTNAME` | `IRIS_HOST` |
 | **Env var: port** | `IRIS_PORT` = `1972` (SuperServer) | `IRIS_PORT` = `52773` (web server) |

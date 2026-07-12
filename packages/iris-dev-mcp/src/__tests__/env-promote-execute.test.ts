@@ -1354,4 +1354,85 @@ describe("iris_env_promote:execute", () => {
       expect(targetHttp.post).not.toHaveBeenCalled();
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════
+  // Story 29.3 burn-down: CR 27.3-4 (blank resolved namespace refusal)
+  // ══════════════════════════════════════════════════════════════════
+
+  describe("CR 27.3-4: a blank resolved namespace refuses before any write", () => {
+    it("refuses when the source profile's resolved namespace is blank (misconfigured profile, no override)", async () => {
+      sourceHttp = createMockHttp("");
+      ctx.resolveProfileClient = vi.fn(async (name: string) => {
+        if (name === "source") return sourceHttp;
+        if (name === "target") return targetHttp;
+        throw new ProfileResolutionError(name, ["default", "source", "target"]);
+      });
+      const diff = fourStepDiff();
+      const plan = await buildPlan(diff);
+
+      const result = await envPromoteTool.handler(
+        { action: "execute", source: "source", target: "target", diff, plan, steps: [1], confirm: true },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("resolved namespace is blank");
+      expect(result.structuredContent).toBeUndefined();
+      expect(sourceHttp.get).not.toHaveBeenCalled();
+      expect(targetHttp.post).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the target profile's resolved namespace is blank (misconfigured profile, no override)", async () => {
+      targetHttp = createMockHttp("");
+      ctx.resolveProfileClient = vi.fn(async (name: string) => {
+        if (name === "source") return sourceHttp;
+        if (name === "target") return targetHttp;
+        throw new ProfileResolutionError(name, ["default", "source", "target"]);
+      });
+      const diff = fourStepDiff();
+      const plan = await buildPlan(diff);
+
+      const result = await envPromoteTool.handler(
+        { action: "execute", source: "source", target: "target", diff, plan, steps: [1], confirm: true },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("resolved namespace is blank");
+      expect(targetHttp.post).not.toHaveBeenCalled();
+    });
+
+    it("does NOT refuse when an explicit 'namespace' override compensates for a blank-default profile", async () => {
+      sourceHttp = createMockHttp("");
+      targetHttp = createMockHttp("");
+      ctx.resolveProfileClient = vi.fn(async (name: string) => {
+        if (name === "source") return sourceHttp;
+        if (name === "target") return targetHttp;
+        throw new ProfileResolutionError(name, ["default", "source", "target"]);
+      });
+      const diff = fourStepDiff();
+      const plan = await buildPlan(diff);
+      sourceHttp.get.mockResolvedValue(
+        envelope([{ name: "NewGlobal", type: "global", namespace: "HSCUSTOM", database: "IRISDB" }]),
+      );
+      targetHttp.post.mockResolvedValue(envelope({}));
+
+      const result = await envPromoteTool.handler(
+        {
+          action: "execute",
+          source: "source",
+          target: "target",
+          diff,
+          plan,
+          steps: [1],
+          confirm: true,
+          namespace: "HSCUSTOM",
+        },
+        ctx,
+      );
+
+      expect(result.content[0]?.text).not.toContain("resolved namespace is blank");
+      expect(targetHttp.post).toHaveBeenCalled();
+    });
+  });
 });

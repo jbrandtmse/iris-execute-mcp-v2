@@ -9,6 +9,8 @@ import {
   ADVISE_DATA_RANGE_PREDICATE_AFTER_TUNE,
   ADVISE_DATA_ENDPOINT_ERROR_RESULT,
   ADVISE_DATA_LIKE_PREDICATE_AFTER_TUNE,
+  ADVISE_DATA_INFORMATION_SCHEMA_COMPOSITE_IDKEY,
+  ADVISE_DATA_CORRELATED_SUBQUERY,
 } from "./sqlAdvisor.fixtures.js";
 
 /** Every finding must carry a non-empty citation (AC 28.2.3: "Zero findings
@@ -62,6 +64,22 @@ describe("analyzeAdviceData", () => {
       // a real captured variance (see fixtures file header).
       const result = analyzeAdviceData(ADVISE_DATA_SYSTEM_SCHEMA_QUERY);
       expect(result.findings.some((f) => f.type === "full-scan")).toBe(true);
+    });
+
+    it("fires on a COMPOSITE (non-'ID') IDKEY master-map read (CR 28.2-4, live-captured 2026-07-12)", () => {
+      // INFORMATION_SCHEMA.TABLES's IDKEY loops on its own composite key
+      // columns ("looping on SchemaExact and TableExact.") instead of a bare
+      // "ID" -- the pre-fix FULL_SCAN_RE (anchored on `[\w.]*ID\.`) missed
+      // this, a false negative. Also confirms missing-index/unused-index
+      // correctly stay suppressed (INFORMATION_SCHEMA is a system schema).
+      const result = analyzeAdviceData(ADVISE_DATA_INFORMATION_SCHEMA_COMPOSITE_IDKEY);
+      const finding = result.findings.find((f) => f.type === "full-scan");
+      expect(finding).toBeDefined();
+      expectValidFinding(finding!);
+      expect(finding!.evidence).toContain("INFORMATION_SCHEMA.TABLES");
+      expect(finding!.planExcerpt).toContain("looping on SchemaExact and TableExact");
+      expect(result.findings.some((f) => f.type === "missing-index")).toBe(false);
+      expect(result.findings.some((f) => f.type === "unused-index")).toBe(false);
     });
   });
 
@@ -303,6 +321,46 @@ describe("analyzeAdviceData", () => {
     });
   });
 
+  // ── missing-index confidence determinism (CR 28.2-2, Story 29.3 burn-down) ──
+  describe("missing-index confidence is order-independent for a mixed-op single column", () => {
+    // Rule #36 note: THREE separate live probes against the pinned IRIS 2026.1
+    // (2026-07-12, `EXPLAIN SELECT ID FROM ExecuteMCPv2_Tests.AdvisorFixture
+    // WHERE UnindexedCol <op1> ? AND UnindexedCol <op2> ?`, all 3 orderings of
+    // `=`/`>`/`BETWEEN`) confirmed the runtime-parameter-class optimizer ALWAYS
+    // collapses an equality + range predicate on the SAME column down to a
+    // single `Test the = condition...` line (the range half becomes a "Boolean
+    // truth value" info-line, which `findPredicates` does not match) — so this
+    // exact order-dependency is NOT reproducible via any real EXPLAIN plan on
+    // this IRIS version; `missingPredicates` genuinely never holds a mixed
+    // `=`+range pair for one column in practice. The fix (`.every()` instead of
+    // `[0]`) is still correct defense-in-depth (Rule #48 requires a
+    // mutation-verifiable regression pin regardless of live-reachability), so
+    // these two tests reuse the real, reference-captured full-scan/predicate
+    // plan shell from ADVISE_DATA_UNINDEXED_BEFORE_TUNE (Rule #36 — the parts
+    // that drive full-scan/table-resolution are untouched) and vary ONLY the
+    // synthetic "Test the ... condition" line's predicate ORDER — deterministic
+    // parser logic over given data, mirroring the composite-index tests above.
+    const planWithMixedOps = (firstOp: "=" | ">", secondOp: "=" | ">"): string =>
+      (ADVISE_DATA_UNINDEXED_BEFORE_TUNE.plan as string).replace(
+        "Test the = condition on %SQLUPPER(UnindexedCol) and the NOT NULL condition on %SQLUPPER(UnindexedCol).",
+        `Test the ${firstOp} condition on %SQLUPPER(UnindexedCol) and the ${secondOp} condition on %SQLUPPER(UnindexedCol).`,
+      );
+
+    it("'=' first, then '>': still MEDIUM (not falsely HIGH just because '=' happens to be first)", () => {
+      const result = analyzeAdviceData({ ...ADVISE_DATA_UNINDEXED_BEFORE_TUNE, plan: planWithMixedOps("=", ">") });
+      const finding = result.findings.find((f) => f.type === "missing-index");
+      expect(finding).toBeDefined();
+      expect(finding!.confidence).toBe("medium");
+    });
+
+    it("'>' first, then '=': still MEDIUM (same logical predicate set, reversed order -- same verdict)", () => {
+      const result = analyzeAdviceData({ ...ADVISE_DATA_UNINDEXED_BEFORE_TUNE, plan: planWithMixedOps(">", "=") });
+      const finding = result.findings.find((f) => f.type === "missing-index");
+      expect(finding).toBeDefined();
+      expect(finding!.confidence).toBe("medium");
+    });
+  });
+
   // ── aggregate finding-set sanity per fixture ─────────────────────
 
   describe("aggregate finding set per fixture", () => {
@@ -345,6 +403,23 @@ describe("analyzeAdviceData", () => {
     it("like-predicate-after-tune: full-scan + unused-index ONLY — no missing-index (no equality/range op)", () => {
       const result = analyzeAdviceData(ADVISE_DATA_LIKE_PREDICATE_AFTER_TUNE);
       expect(findingTypes(result.findings)).toEqual(["full-scan", "unused-index"].sort());
+    });
+
+    it("correlated-subquery (CR 28.0-2, live-captured): full-scan + plan-anomaly, no unused-index (subquery's index-map read IS recognized as used)", () => {
+      // The engine must never throw on a real subquery plan, and the shared
+      // temp-file/module vocabulary generalizes correctly: the outer read is
+      // a full-scan (NOT NULL "predicate" present); the temp-file the
+      // subquery populates is a plan-anomaly; and critically, IdxIndexedCol
+      // (referenced only inside the subquery's "Read index map" line) is
+      // correctly recognized as USED -- proving parsePlanIndexes' shared
+      // vocabulary reaches into a subquery's own module, not just the
+      // top-level scan (the exact generalization CR 28.0-2 asked to confirm).
+      const result = analyzeAdviceData(ADVISE_DATA_CORRELATED_SUBQUERY);
+      expect(findingTypes(result.findings)).toEqual(["full-scan", "plan-anomaly"].sort());
+      for (const finding of result.findings) {
+        expectValidFinding(finding);
+      }
+      expect(result.findings.some((f) => f.type === "unused-index")).toBe(false);
     });
 
     it("every finding produced across all fixtures carries a full citation", () => {

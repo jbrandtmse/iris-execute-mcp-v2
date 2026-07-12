@@ -10,6 +10,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 🟥 | **ExecuteMCPv2** custom REST — handlers at `/api/executemcp/v2/...`, deployed automatically via bootstrap |
 | 🟩 | **Other IRIS API** — DocDB (`/api/docdb/v1`), Management (`/api/mgmnt/v2`), etc. — standard IRIS endpoints that are neither Atelier nor custom |
 
+> **Epic 29 — tool-call audit log (`IRIS_AUDIT_LOG`) is server CONFIG, not a tool.** Every tool below can optionally be recorded to a secrets-free JSONL audit file via `IRIS_AUDIT_LOG` (default unset = OFF, a mechanical no-op) — this is a single interception point in `@iris-mcp/shared`'s `McpServerBase.handleToolCall`, not an entry in any table below, and it carries **no `mutates` classification and no `IRIS_GOVERNANCE` key** (deliberately: it is server configuration set by whoever deploys the process, not a governed action an AI client could disable). **No tool count in this document moves** — see [Compliance & Auditability](README.md#compliance--auditability) in the suite README for the entry format and the disambiguation from the `iris_audit_manage` / `iris_audit_events` rows below (those manage/read IRIS's own `%SYS.Audit*` security-audit subsystem — a different, IRIS-native feature).
+
 ---
 
 ## `@iris-mcp/dev` — Development Tools (28)

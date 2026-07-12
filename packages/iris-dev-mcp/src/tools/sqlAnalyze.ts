@@ -332,6 +332,12 @@ async function handleAdvise(
     const noteSet = new Set<string>();
     let analyzedCount = 0;
     let skippedCount = 0;
+    // CR 28.3-2: track a per-statement advise-data FAILURE distinct from a
+    // blank-Statement client-side skip. Both currently roll into the same
+    // `skippedCount`/`analyzed.skipped` field (unchanged, back-compat), but
+    // `errorCount` additionally lets the all-failed case below be told apart
+    // from the all-blank case (neither of which is a "no problems found").
+    let errorCount = 0;
     for (const row of rows) {
       const stmt = String((row as Record<string, unknown>).Statement ?? "").trim();
       if (stmt === "") {
@@ -353,6 +359,7 @@ async function handleAdvise(
         // transient connectivity/framework error as a benign "skip".
         if (error instanceof IrisApiError) {
           skippedCount++;
+          errorCount++;
           continue;
         }
         throw error;
@@ -361,6 +368,30 @@ async function handleAdvise(
 
     const analyzed = { statements: analyzedCount, skipped: skippedCount };
     const notes = Array.from(noteSet);
+
+    // CR 28.3-2: a TOTAL per-statement outage (every non-blank statement's
+    // advise-data call failed with an IrisApiError, e.g. a mis-deployed
+    // route) previously rendered a benign "No performance findings" — never
+    // wrong, but misleading given `analyzed:0` was silently masking N real
+    // failures. Only fires when there was at least one non-blank statement
+    // AND every single one of them errored (never fires for an all-blank
+    // workload, which stays the existing "no findings" success shape).
+    if (rows.length > 0 && analyzedCount === 0 && errorCount > 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `The advisor could not analyze any of the ${errorCount} recent statement(s) — ` +
+              `every 'advise-data' call failed. Checked ${rows.length} recent statement(s) ` +
+              `(top ${topNValue}). Try 'query' mode with a specific SQL statement to see the ` +
+              "underlying error.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
     const result = {
       mode: "workload" as const,
       findings: allFindings,

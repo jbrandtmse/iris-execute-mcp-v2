@@ -976,4 +976,126 @@ describe("iris_env_diff -- Story 27.1 domains", () => {
       expect(result.content[0]?.text).toContain("establishment boom");
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════
+  // Story 29.3 burn-down regressions (CR 27.1-4, 27.1-7, 27.1-9, 27.1-10)
+  // ══════════════════════════════════════════════════════════════════
+
+  describe("Story 29.3 burn-down hardening", () => {
+    it("CR 27.1-4: a malformed response (result: null) for defaultSettings does not throw -- fetch fails closed to an empty map", async () => {
+      sourceHttp.get.mockResolvedValue(envelope(null));
+      targetHttp.get.mockResolvedValue(envelope(null));
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: ["defaultSettings"] },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const sc = result.structuredContent as unknown as FullDomainsSC;
+      const d = sc.domains.defaultSettings as { onlyInSource: unknown[]; onlyInTarget: unknown[]; identical: number };
+      expect(d.onlyInSource).toEqual([]);
+      expect(d.onlyInTarget).toEqual([]);
+      expect(d.identical).toBe(0);
+    });
+
+    it("CR 27.1-4: a malformed response (result: null) for config does not throw -- fetch fails closed to an empty properties object", async () => {
+      sourceHttp.post.mockResolvedValue(envelope(null));
+      targetHttp.post.mockResolvedValue(envelope(null));
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: ["config"] },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const sc = result.structuredContent as unknown as FullDomainsSC;
+      const d = sc.domains.config as ConfigDiffSC;
+      expect(d.onlyInSource).toEqual([]);
+      expect(d.onlyInTarget).toEqual([]);
+      expect(d.identical).toBe(0);
+    });
+
+    it("CR 27.1-7: a mapping row missing 'database' (per-row Config.Map*.Get failure) is not a type-lie and matches an identical missing-database row on the other side (never a spurious differs)", async () => {
+      sourceHttp.get.mockImplementation(async (path: string) => {
+        if (path.includes("/config/mapping/global")) {
+          return envelope([{ name: "Partial", type: "global", namespace: "HSCUSTOM" }]);
+        }
+        return envelope([]);
+      });
+      targetHttp.get.mockImplementation(async (path: string) => {
+        if (path.includes("/config/mapping/global")) {
+          return envelope([{ name: "Partial", type: "global", namespace: "HSCUSTOM" }]);
+        }
+        return envelope([]);
+      });
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: ["mappings"], namespace: "HSCUSTOM" },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const sc = result.structuredContent as unknown as FullDomainsSC;
+      const d = sc.domains.mappings as MappingsDiffSC;
+      expect(d.differs).toEqual([]);
+      expect(d.identical).toBe(1);
+    });
+
+    it("CR 27.1-7: a missing 'database' (undefined) normalizes the same as an empty-string 'database' -- mirrors the collation/lockDatabase missing-value handling, never a spurious differs", async () => {
+      // Source's row omits `database` entirely (Get failed); target's row
+      // carries an explicit empty string. `mappingValuesEqual` normalizes
+      // both to "" (mirroring collation/lockDatabase) so they compare equal.
+      sourceHttp.get.mockImplementation(async (path: string) => {
+        if (path.includes("/config/mapping/global")) {
+          return envelope([{ name: "Partial", type: "global", namespace: "HSCUSTOM" }]);
+        }
+        return envelope([]);
+      });
+      targetHttp.get.mockImplementation(async (path: string) => {
+        if (path.includes("/config/mapping/global")) {
+          return envelope([
+            { name: "Partial", type: "global", namespace: "HSCUSTOM", database: "" },
+          ]);
+        }
+        return envelope([]);
+      });
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: ["mappings"], namespace: "HSCUSTOM" },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const sc = result.structuredContent as unknown as FullDomainsSC;
+      const d = sc.domains.mappings as MappingsDiffSC;
+      expect(d.differs).toEqual([]);
+      expect(d.identical).toBe(1);
+    });
+
+    it("CR 27.1-9: a raw-args call with domains:[] (bypassing the Zod .min(1) gate) falls back to the default domain set, not a vacuous no-op diff", async () => {
+      sourceHttp.get.mockResolvedValue(envelope([]));
+      targetHttp.get.mockResolvedValue(envelope([]));
+      sourceHttp.post.mockResolvedValue(envelope({ section: "config", properties: configProps() }));
+      targetHttp.post.mockResolvedValue(envelope({ section: "config", properties: configProps() }));
+
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: [] } as unknown as Record<string, unknown>,
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const sc = result.structuredContent as unknown as FullDomainsSC;
+      // The default domain set (mappings/defaultSettings/webapps/config) ran,
+      // NOT a vacuous zero-domain diff.
+      expect(Object.keys(sc.domains).length).toBeGreaterThan(0);
+      expect(sc.domains.mappings).toBeDefined();
+    });
+
+    it("CR 27.1-10: the config domain's onlyInTarget render carries the 'informational -- NOT a deletion signal' annotation (matching the other four domains)", async () => {
+      const sourceProps = configProps();
+      const targetProps = { ...configProps(), ExtraOnTarget: 1 };
+      sourceHttp.post.mockResolvedValue(envelope({ section: "config", properties: sourceProps }));
+      targetHttp.post.mockResolvedValue(envelope({ section: "config", properties: targetProps }));
+
+      const result = await envDiffTool.handler(
+        { source: "source", target: "target", domains: ["config"] },
+        ctx,
+      );
+      expect(result.content[0]?.text).toContain(
+        "onlyInTarget (1, informational -- NOT a deletion signal): ExtraOnTarget",
+      );
+    });
+  });
 });

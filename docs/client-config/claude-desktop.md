@@ -231,6 +231,40 @@ All three are **optional** and apply to every server the same way (`IRIS_GOVERNA
 
 ---
 
+## Audit Log (optional)
+
+Three optional environment variables turn on a secrets-free, structured JSONL log of every MCP tool call — useful for regulated (e.g. healthcare) deployments that need to answer "what did the AI do?":
+
+| Variable | Purpose |
+|----------|---------|
+| `IRIS_AUDIT_LOG` | **Optional.** Absolute path to a JSONL audit file. Unset (the default) = OFF, a mechanical no-op — no file, no `fs` writes. Setting it enables auditing for every tool call across all five servers. |
+| `IRIS_AUDIT_LOG_MAX_MB` | **Optional**, default `50`. Rotates the audit file at this size (`<path>` → `<path>.1`, single generation). Only relevant when `IRIS_AUDIT_LOG` is set. |
+| `IRIS_AUDIT_LOG_PARAMS` | **Optional**, default `false`. When `true`, entries also include each call's redacted parameter values; the default logs parameter key names only (safest). Only relevant when `IRIS_AUDIT_LOG` is set. |
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_HTTPS": "false",
+        "IRIS_AUDIT_LOG": "/var/log/iris-mcp/audit.jsonl"
+      }
+    }
+  }
+}
+```
+
+This is server **configuration**, not a governed tool — there is no `IRIS_GOVERNANCE` key for it, and it cannot be disabled by an AI client operating through the MCP protocol. See [Compliance & Auditability](../../README.md#compliance--auditability) in the suite README for the entry format, redaction guarantee, and the disambiguation from the IRIS-native `iris_audit_manage`/`iris_audit_events` security-audit tools.
+
+---
+
 ## Setting Environment Variables
 
 The recommended approach is to put `env` values directly in the JSON config (shown above). Claude Desktop passes them to the spawned process automatically.

@@ -1,6 +1,6 @@
 # Project Rules
 
-Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#51**.
+Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#53**.
 
 ## #1 — Meta-rule: codify retrospective lessons
 
@@ -130,6 +130,14 @@ A tool whose work scales with the documents/rows it enumerates requires a caller
 ## #45 — Cross-package validation tests live in `iris-mcp-all`
 
 `@iris-mcp/shared` cannot import leaf packages (circular dependency); the only package depending on all five servers is `packages/iris-mcp-all` — cross-package checks (annotation sweeps, prompt/tool-name validation, doc-rot guards) live there, enumerating via `SERVER_PACKAGES` + `deriveKeysForTool` over each package's built dist. Single-source the check logic between the CLI script and the vitest test so they never diverge.
+
+## #51 — A tally over a table is counted mechanically, never hand-authored
+
+Context: any summary count over a list/table — a burn-down disposition tally, an audit rollup, a "N of M" doc claim. Rule: derive the count mechanically (grep/awk the disposition or category column) and cross-check any prose tally against it BEFORE the story closes; never hand-author the number. Why: Story 29.3's dev hand-counted "20 resolved" over a 41-row disposition table when the real column count was 14 (off by 6); QA's mechanical recount caught it. (Extends #25/#44 mechanical-derivation discipline from generators/classifications to summary tallies.)
+
+## #52 — Scope-seam: basic-then-rigorous across two stories, seam documented
+
+Context: a feature that naturally splits into a load-bearing skeleton + rigorous hardening (e.g. an interceptor's basic outcome derivation vs. its denyReason/action/seq-concurrency/shutdown fidelity). Rule: story N ships a BASIC-but-complete-SHAPE implementation and documents the deferred-fidelity SEAM explicitly in Dev Notes (naming the exact functions/guarantees story N+1 owns); story N+1 closes exactly that seam and does NOT re-touch story N's done work. Why: Epic 29's 29.0→29.1 split kept scope clean with zero rework — the documented seam stopped 29.0 over-building 29.1's concurrency/denyReason work and stopped 29.1 re-opening the finished writer/rotation code.
 
 ---
 

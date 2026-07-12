@@ -144,6 +144,51 @@ export function unwrapActionOptions(actionField: unknown): unknown[] | undefined
 }
 
 /**
+ * Whether an `action` field carries a `.default(...)` wrapper anywhere in its
+ * peel chain (CR 29.1-1, Story 29.3 burn-down).
+ *
+ * `computeGovernanceKey` reads `validatedArgs.action` (POST-Zod, so a Zod
+ * `.default()` has already been applied when the caller omits `action`), but
+ * `deriveAuditAction` (the audit-log action deriver) reads `rawArgs.action`
+ * (PRE-Zod, the caller's literal args) for its OWN documented reasons (an
+ * audited value should reflect what the caller actually sent, not a
+ * schema-time substitution). For every SHIPPED tool this divergence is inert
+ * — no shipped `action` field uses `.default()` (verified: every one is a
+ * required `z.enum([...])`). If a FUTURE tool ever declares
+ * `action: z.enum([...]).default("x")`, an omitted-`action` call would
+ * govern on the DEFAULTED value (`tool:x`) while the audit log would record
+ * `action: null` — a latent audit/governance divergence. This helper backs a
+ * MECHANICAL cross-package pin test (`packages/iris-mcp-all`'s
+ * `action-default-audit-pin.test.ts`) that asserts NO shipped tool across all
+ * five server packages carries a `.default(...)`-wrapped `action` field —
+ * catching the divergence the moment such a tool is added, rather than letting
+ * it ship silently. (An earlier registration-time throw approach was rejected:
+ * it broke Story 15.0's `iris_wrapped_manage` fixture, which deliberately
+ * exercises `.default()`-wrapped action enums as a supported governance shape.)
+ *
+ * @param actionField - The `inputSchema.shape.action` field (or `undefined`).
+ */
+export function actionFieldHasDefault(actionField: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let field: any = actionField;
+  for (let depth = 0; depth < 10 && field != null; depth++) {
+    // Verified empirically against Zod 4.3.6: a `.default(...)` wrapper's
+    // `_def.type === "default"` (Zod v4's internal discriminant is `_def.type`,
+    // NOT the older `_def.typeName` convention); `field.constructor.name` is
+    // `"ZodDefault"` as a belt-and-suspenders cross-check.
+    if (field._def?.type === "default" || field.constructor?.name === "ZodDefault") {
+      return true;
+    }
+    if (Array.isArray(field.options)) return false;
+    const inner =
+      typeof field.unwrap === "function" ? field.unwrap() : field._def?.innerType;
+    if (inner == null || inner === field) return false;
+    field = inner;
+  }
+  return false;
+}
+
+/**
  * Reserved object keys that, used as a governance key or profile name, would
  * collide with the prototype chain. `JSON.parse` materializes them as own
  * properties, but a *plain-object* read (`obj[key]`) of `"constructor"` /

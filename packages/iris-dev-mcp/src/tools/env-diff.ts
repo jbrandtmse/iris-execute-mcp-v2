@@ -140,7 +140,10 @@ export interface MappingEntry {
   name: string;
   type: string;
   namespace: string;
-  database: string;
+  // CR 27.1-7: optional, not a type-lie -- `Config.cls:MappingList` only sets
+  // `database` when the per-row `Config.Map*.Get` succeeds; a row whose `Get`
+  // failed carries no `database` at all.
+  database?: string;
   collation?: string;
   lockDatabase?: string;
 }
@@ -238,7 +241,12 @@ interface DocumentsDiff {
 }
 
 interface MappingValue {
-  database: string;
+  // CR 27.1-7: optional -- the server's `MappingList` only emits `database`
+  // when the per-row `Config.Map*.Get` succeeds; a row whose `Get` failed
+  // carries no `database` at all. Normalized to "" in `mappingValuesEqual`
+  // (mirroring `collation`/`lockDatabase`) so a missing value never produces
+  // a spurious `differs` against a genuinely-present empty string.
+  database?: string;
   collation?: string;
   lockDatabase?: string;
 }
@@ -538,7 +546,8 @@ function mappingKey(entry: Pick<MappingEntry, "type" | "name">): string {
 }
 
 function mappingValue(entry: MappingEntry): MappingValue {
-  const value: MappingValue = { database: entry.database };
+  const value: MappingValue = {};
+  if (entry.database !== undefined) value.database = entry.database;
   if (entry.collation !== undefined) value.collation = entry.collation;
   if (entry.lockDatabase !== undefined) value.lockDatabase = entry.lockDatabase;
   return value;
@@ -546,7 +555,7 @@ function mappingValue(entry: MappingEntry): MappingValue {
 
 function mappingValuesEqual(a: MappingValue, b: MappingValue): boolean {
   return (
-    a.database === b.database &&
+    (a.database ?? "") === (b.database ?? "") &&
     (a.collation ?? "") === (b.collation ?? "") &&
     (a.lockDatabase ?? "") === (b.lockDatabase ?? "")
   );
@@ -658,7 +667,12 @@ export async function fetchDefaultSettings(
     `${BASE_URL}/interop/defaultsettings?namespace=${encodeURIComponent(namespace)}`,
   );
   const map = new Map<string, SdsEntry>();
-  for (const entry of response.result.settings ?? []) {
+  // CR 27.1-4: guard `response.result` itself (not just `.settings`), aligning
+  // with the `fetchMappings`/`fetchWebapps` `response.result ?? []` pattern --
+  // a non-throwing envelope with a null/absent `result` would otherwise throw
+  // a TypeError reading `.settings` of undefined instead of the friendly
+  // `apiErrorEnvelope` the IrisApiError-only catch produces.
+  for (const entry of response.result?.settings ?? []) {
     map.set(sdsKey(entry), entry);
   }
   return map;
@@ -784,7 +798,12 @@ export async function fetchConfig(client: IrisHttpClient): Promise<ConfigPropert
     action: "get",
     section: "config",
   });
-  return response.result.properties;
+  // CR 27.1-4: guard `response.result` itself, mirroring the `fetchDefaultSettings`
+  // fix above -- a non-throwing envelope with a null/absent `result` would
+  // otherwise throw a TypeError reading `.properties` of undefined. A shouldn't-
+  // happen malformed-envelope path; the empty-object fallback degrades to "no
+  // config properties on this side" rather than crashing.
+  return response.result?.properties ?? ({} as ConfigProperties);
 }
 
 function diffConfig(source: ConfigProperties, target: ConfigProperties): ConfigDiff {
@@ -903,7 +922,12 @@ function renderConfigSection(d: ConfigDiff): string {
     `  onlyInSource (${d.onlyInSource.length}): ${d.onlyInSource.length > 0 ? d.onlyInSource.join(", ") : "(none)"}`,
   );
   lines.push(
-    `  onlyInTarget (${d.onlyInTarget.length}): ${d.onlyInTarget.length > 0 ? d.onlyInTarget.join(", ") : "(none)"}`,
+    // CR 27.1-10: carry the same "informational -- NOT a deletion signal"
+    // annotation the other four domains' onlyInTarget lines carry (the tool
+    // description asserts this holds for "every domain").
+    `  onlyInTarget (${d.onlyInTarget.length}, informational -- NOT a deletion signal): ${
+      d.onlyInTarget.length > 0 ? d.onlyInTarget.join(", ") : "(none)"
+    }`,
   );
   lines.push(`  differs (${d.differs.length}):`);
   for (const entry of d.differs) {
@@ -1056,7 +1080,13 @@ export const envDiffTool: ToolDefinition = {
     // raw args, so this `??` fallback is required to preserve the contract
     // regardless (mirrors the established `rest.ts` `scope ?? "spec-first"`
     // pattern).
-    const domains = input.domains ?? [...DEFAULT_DIFF_DOMAINS];
+    // CR 27.1-9: `?? [...DEFAULT]` normalizes only `undefined`, not an empty
+    // array -- a direct `handler({...,domains:[]})` call (bypassing the Zod
+    // `.min(1)` gate, which only guards the parsed-schema path) would
+    // otherwise run zero domains and report a misleadingly vacuous "0
+    // drifted, 0 identical" all-clear. `?.length` treats a present-but-empty
+    // array the same as an omitted one.
+    const domains = input.domains?.length ? input.domains : [...DEFAULT_DIFF_DOMAINS];
     const ignoreTimestamps = input.ignoreTimestamps ?? true;
 
     const includesDocuments = domains.includes("documents");

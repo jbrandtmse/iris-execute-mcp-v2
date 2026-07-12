@@ -244,6 +244,47 @@ export const ADVISE_DATA_SYSTEM_SCHEMA_QUERY: AdviseData = {
   ],
 };
 
+// ── Fixture 5.5 (CR 28.2-4 / CR 28.2-3, Story 29.3 burn-down): a COMPOSITE
+//    (non-`ID`) IDKEY master-map full scan ─────────────────────────────
+// Query: SELECT TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'
+// Captured 2026-07-12 (IRIS for Windows (x86-64) 2026.1, namespace HSCUSTOM,
+// `curl -u _SYSTEM:SYS -X POST http://localhost:52773/api/executemcp/v2/dev/sql/advise-data
+//  -d '{"query":"SELECT TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = ''BASE TABLE''"}'`).
+// `INFORMATION_SCHEMA.TABLES`'s IDKEY is a composite string key, so its
+// master-map read loops on its OWN key columns ("SchemaExact and
+// TableExact") instead of a bare "ID" — the pre-CR-28.2-4 `FULL_SCAN_RE`
+// (anchored on `looping on [\w.]*ID\.`) did NOT match this line, a false
+// NEGATIVE (CR 28.2-4). Expect: full-scan NOW fires (schema is
+// INFORMATION_SCHEMA — a system schema, so missing-index/unused-index
+// correctly do NOT fire regardless, per the existing CR 28.2-3
+// investigation); this fixture also closes the CR 28.2-3 coverage gap.
+const PLAN_INFORMATION_SCHEMA_COMPOSITE_IDKEY_LINES = [
+  '<plans>',
+  ' <plan>',
+  '   SQL:',
+  '    SELECT TABLE_TYPE FROM INFORMATION_SCHEMA . TABLES WHERE TABLE_TYPE = ? /*#OPTIONS {"DynamicSQL":1} */ /*#OPTIONS {"DynamicSQLTypeList":"1"} */',
+  '   ',
+  '   Warning:',
+  '   Table INFORMATION_SCHEMA.TABLES is not tuned.',
+  '   ',
+  '   Cost: 3107000',
+  '   ',
+  '   Module-FIRST:',
+  '     Module-B:',
+  '     Read master map INFORMATION_SCHEMA.TABLES.Master, looping on SchemaExact and TableExact.',
+  '     For each row:',
+  '         Test the = condition on %SQLUPPER(TABLE_TYPE).',
+  '         Output the row.',
+  ' </plan>',
+  '</plans>',
+];
+
+export const ADVISE_DATA_INFORMATION_SCHEMA_COMPOSITE_IDKEY: AdviseData = {
+  plan: PLAN_INFORMATION_SCHEMA_COMPOSITE_IDKEY_LINES.join("\r\n"),
+  tables: [{ schema: "INFORMATION_SCHEMA", table: "TABLES", className: "" }],
+  indexes: [],
+};
+
 // ── Fixture 6: range predicate on the unindexed column, AFTER tune ───
 // Query: SELECT ID, UnindexedCol FROM ExecuteMCPv2_Tests.AdvisorFixture
 //        WHERE UnindexedCol > 'U500'
@@ -323,6 +364,54 @@ const PLAN_LIKE_PREDICATE_AFTER_TUNE_LINES = [
 
 export const ADVISE_DATA_LIKE_PREDICATE_AFTER_TUNE: AdviseData = {
   plan: PLAN_LIKE_PREDICATE_AFTER_TUNE_LINES.join("\r\n"),
+  tables: ADVISOR_FIXTURE_TABLES,
+  indexes: ADVISOR_FIXTURE_INDEXES,
+};
+
+// ── Fixture 9 (CR 28.0-2, Story 29.3 burn-down): a correlated IN-subquery ──
+// Query: SELECT ID FROM ExecuteMCPv2_Tests.AdvisorFixture WHERE UnindexedCol
+//        IN (SELECT UnindexedCol FROM ExecuteMCPv2_Tests.AdvisorFixture WHERE
+//        IndexedCol = 'I3')
+// Captured 2026-07-12 (IRIS for Windows (x86-64) 2026.1, namespace HSCUSTOM).
+// CR 28.0-2 asked whether a standalone subquery plan generalizes to the SAME
+// temp-file/module vocabulary Story 28.0 pinned for joins/GROUP BY/ORDER BY,
+// since it had never been separately captured. Confirmed here: the inner
+// subquery drives an index-map read of IdxIndexedCol into a temp-file
+// ("Call Module-C once, which populates temp-file A"), then the outer query
+// reads that temp-file — the EXACT "Read index map"/"Call Module-X ...
+// populates temp-file"/"Read temp-file" vocabulary the engine already
+// recognizes (parsePlanIndexes/findTempFileMarkers). No new marker; the
+// generalization claim holds.
+const PLAN_CORRELATED_SUBQUERY_LINES = [
+  '<plans>',
+  ' <plan>',
+  '   SQL:',
+  '    SELECT ID FROM ExecuteMCPv2_Tests . AdvisorFixture WHERE UnindexedCol IN ( SELECT UnindexedCol FROM ExecuteMCPv2_Tests . AdvisorFixture WHERE IndexedCol = ? ) /*#OPTIONS {"DynamicSQL":1} */ /*#OPTIONS {"DynamicSQLTypeList":"1"} */',
+  '   ',
+  '   Cost: 22389',
+  '   ',
+  '   Module-FIRST:',
+  '     Module-B:',
+  '     Read master map ExecuteMCPv2_Tests.AdvisorFixture.IDKEY, looping on ID.',
+  '     For each row:',
+  '         Test the NOT NULL condition on %SQLUPPER(UnindexedCol).',
+  '           Module-D:',
+  '           Call Module-C once, which populates temp-file A.',
+  '             Module-C:',
+  '             Read index map ExecuteMCPv2_Tests.AdvisorFixture.IdxIndexedCol, using the given %SQLUPPER(IndexedCol), and looping on ID.',
+  '             For each row:',
+  '                 Read master map ExecuteMCPv2_Tests.AdvisorFixture.IDKEY, using the given idkey value.',
+  '                 Add a row to temp-file A, subscripted by %SQLUPPER(UnindexedCol) and ID,',
+  '                     with no node data.',
+  '           Read temp-file A, using the given %SQLUPPER(UnindexedCol), and looping on ID.',
+  '           For each row:',
+  '               Output the row.',
+  ' </plan>',
+  '</plans>',
+];
+
+export const ADVISE_DATA_CORRELATED_SUBQUERY: AdviseData = {
+  plan: PLAN_CORRELATED_SUBQUERY_LINES.join("\r\n"),
   tables: ADVISOR_FIXTURE_TABLES,
   indexes: ADVISOR_FIXTURE_INDEXES,
 };

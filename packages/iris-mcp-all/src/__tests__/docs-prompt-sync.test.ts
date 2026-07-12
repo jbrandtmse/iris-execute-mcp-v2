@@ -124,6 +124,18 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     expect(rootReadme).toContain("104 tools");
   });
 
+  // CR 27.4-1 (resolved Story 29.3 burn-down): `docs/migration-v1-v2.md` had
+  // been stale at "100 tools" since before Epic 27 (root README/tool_support
+  // were already reconciled to 104 by the Story 27.4 AC 27.4.1 scoped
+  // surfaces, but the migration guide was NOT one of those 5 scoped
+  // surfaces). This pins the fix and guards against the migration guide
+  // silently drifting stale again alongside the root README's own count.
+  it("docs/migration-v1-v2.md advertises 104 tools, not the stale 100 (CR 27.4-1)", () => {
+    const migrationGuide = readFileSync(resolve(root, "docs/migration-v1-v2.md"), "utf-8");
+    expect(migrationGuide).toContain("104 tools");
+    expect(migrationGuide).not.toContain("100 tools");
+  });
+
   // CR 25.2-1 (resolved Story 26.4): the primary drift vectors (rename/add/
   // remove/mis-attribution) were already mechanically enforced above, but the
   // human-readable NUMERIC prose (the README's "10 prompts" heading and

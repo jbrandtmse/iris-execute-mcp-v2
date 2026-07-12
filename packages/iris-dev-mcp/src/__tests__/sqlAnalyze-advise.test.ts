@@ -177,7 +177,16 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
     expect(result.content[0]?.text).toContain("Checked 1 statement");
   });
 
-  it("query mode: a malformed/non-preparable query returns isError with the sanitized SQL error", async () => {
+  // CR 28.3-1 (Story 29.3 burn-down): renamed from "a malformed/non-preparable
+  // query returns isError" -- Fixture 7 (`ADVISE_DATA_ENDPOINT_ERROR_RESULT`,
+  // live-captured) shows the real `/dev/sql/advise-data` endpoint does NOT
+  // throw for an unparseable SQL statement like "SELEKT GARBAGE" -- it
+  // returns HTTP 200 with `result: {}`, which the engine reports as "plan
+  // format not recognized" (see the sibling "zero findings" test above), NOT
+  // an isError. This test exercises the TRANSPORT-level `IrisApiError` path
+  // (network/auth/namespace-switch failure calling the endpoint) -- the query
+  // text is incidental, not the trigger.
+  it("query mode: a transport-level IrisApiError calling advise-data returns isError with the sanitized SQL error", async () => {
     mockHttp.post.mockRejectedValue(
       new IrisApiError(
         400,
@@ -187,7 +196,7 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
       ),
     );
 
-    const result = await sqlAnalyzeTool.handler({ action: "advise", query: "SELEKT GARBAGE" }, ctx);
+    const result = await sqlAnalyzeTool.handler({ action: "advise", query: "SELECT 1" }, ctx);
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("SQL error");
@@ -278,6 +287,55 @@ describe("iris_sql_analyze — advise action (Story 28.3 wiring)", () => {
     // rows skipped client-side without an HTTP call.
     expect(structured.analyzed).toEqual({ statements: 1, skipped: 3 });
     expect(result.isError).toBeUndefined();
+  });
+
+  // CR 28.3-2 (Story 29.3 burn-down): the residual after the "propagates
+  // non-IrisApiError" patch above -- if EVERY non-blank statement's
+  // advise-data call fails with an IrisApiError (e.g. the route is
+  // mis-deployed / 500s with an IRIS error envelope on every call), the
+  // aggregate previously rendered a benign "No performance findings" with
+  // `analyzed:0` -- misleading, since it silently hid a total outage behind
+  // a headline that reads as "no problems." Now surfaces isError:true.
+  it("workload mode: a TOTAL outage (every non-blank statement's advise-data call fails) surfaces isError, not a benign 'no findings'", async () => {
+    const stmt1 = "SELECT 1";
+    const stmt2 = "SELECT 2";
+    routeWorkloadCalls({
+      statements: [stmt1, stmt2],
+      failForStatement: () => true,
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("could not analyze any");
+    expect(result.content[0]?.text).toContain("2 recent statement(s)");
+    // No misleading benign-success structuredContent on the total-outage path.
+    expect(result.structuredContent).toBeUndefined();
+  });
+
+  it("workload mode: a PARTIAL failure (some analyzed, some errored) is unaffected -- still the existing benign aggregate, not isError", async () => {
+    const stmtOk = "SELECT ID FROM ExecuteMCPv2_Tests.AdvisorFixture WHERE UnindexedCol = ?";
+    const stmtFails = "SET SOMETHING = 1";
+    routeWorkloadCalls({
+      statements: [stmtOk, stmtFails],
+      failForStatement: (q) => q === stmtFails,
+    });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as StructuredAdvise;
+    expect(structured.analyzed).toEqual({ statements: 1, skipped: 1 });
+  });
+
+  it("workload mode: an all-BLANK statement set (no errors) stays the existing benign 'no findings' success -- never isError", async () => {
+    routeWorkloadCalls({ statements: [undefined, "  "] });
+
+    const result = await sqlAnalyzeTool.handler({ action: "advise", workload: true }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as StructuredAdvise;
+    expect(structured.analyzed).toEqual({ statements: 0, skipped: 2 });
   });
 
   it("workload mode: an UNEXPECTED (non-IrisApiError) per-statement failure propagates, not silently skipped", async () => {

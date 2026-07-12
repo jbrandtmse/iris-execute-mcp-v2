@@ -134,9 +134,19 @@ interface FullScanMatch {
  * constrained to `IDKEY` (see module doc — real captures vary it), and an
  * optional parenthetical join alias between table and map name (e.g.
  * `Table(C).IDKEY`, Story 28.0's join capture) is tolerated.
+ *
+ * CR 28.2-4: the `looping on` clause is ALSO tolerant of a composite/non-`ID`
+ * IDKEY, whose master-map read loops on its own key columns instead of a
+ * bare `ID` (live-captured, 2026-07-11: `Read master map
+ * INFORMATION_SCHEMA.TABLES.Master, looping on SchemaExact and
+ * TableExact.` — a genuine full scan that the `ID`-only clause missed, a
+ * false NEGATIVE, never a harmful false positive). `[\w.]+` matches the
+ * first looping column, optionally repeated via `" and "` for additional
+ * composite-key columns, always anchored on `Read master map` (never an
+ * index-map read) and a trailing period.
  */
 const FULL_SCAN_RE =
-  /Read master map ([\w%]+)\.([\w%]+?)(?:\([A-Za-z0-9]+\))?\.[\w%]+, looping on [\w.]*ID\./g;
+  /Read master map ([\w%]+)\.([\w%]+?)(?:\([A-Za-z0-9]+\))?\.[\w%]+, looping on [\w.]+(?: and [\w.]+)*\./g;
 
 function findFullScans(planText: string): FullScanMatch[] {
   const matches: FullScanMatch[] = [];
@@ -332,8 +342,15 @@ export function analyzeAdviceData(
     const suggestedDdl =
       `CREATE INDEX ${ddlName} ON ${ddlTable} (${uniqueMissingCols.join(", ")}). ` +
       "Verify with EXPLAIN after creation.";
+    // CR 28.2-2: check EVERY missing predicate's operator, not just the
+    // first one encountered in plan-text order. `WHERE col = ? AND col > ?`
+    // on one unindexed column previously ranked `high`/`medium` purely by
+    // which predicate the regex matched first — non-deterministic-feeling
+    // for logically equivalent queries with the operators plan-text-reordered.
+    // Deterministic per spec intent: `high` iff exactly one unique missing
+    // column AND every predicate on it is `=`, else `medium`.
     const isSingleColumnEquality =
-      uniqueMissingCols.length === 1 && missingPredicates[0]?.op === "=";
+      uniqueMissingCols.length === 1 && missingPredicates.every((p) => p.op === "=");
 
     findings.push({
       type: "missing-index",
