@@ -17,18 +17,21 @@
  * production content. No live IRIS: prompt/tool registration is fully
  * synchronous and constructor-scoped, so this never calls `start()`.
  *
- * Also confirms the 2 GATED v1-omitted prompts (AC 25.1.5) are absent from
- * THIS server specifically — `resend-failed-messages` is the gated prompt
- * that would (in a future epic) live on iris-interop-mcp.
+ * Also confirms the OTHER server's gated v1-omitted prompt
+ * (`promote-environment-change`, dev-owned) never leaks onto this server.
+ * `resend-failed-messages` was the interop-owned gated prompt (AC 25.1.5) —
+ * it un-gated in Epic 26, Story 26.3 once `iris_message_resend` shipped, and
+ * is now asserted as OWNED (not absent) below.
  */
 
 import { describe, it, expect } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
+import { recoverStuckProductionPrompt } from "../prompts/recoverStuckProduction.js";
 
-/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1. */
-const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production"];
+/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1 + Story 26.3. */
+const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production", "resend-failed-messages"];
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
@@ -84,7 +87,7 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 2 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 3 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();
@@ -100,10 +103,47 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     }
   });
 
-  it("the gated prompt 'resend-failed-messages' is NOT registered on this server (AC 25.1.5)", async () => {
+  it("the previously-gated prompt 'resend-failed-messages' IS now registered (Story 26.3)", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
-    expect(names).not.toContain("resend-failed-messages");
+    expect(names).toContain("resend-failed-messages");
+  });
+
+  it("the OTHER server's gated prompt 'promote-environment-change' (dev-owned) is NOT registered here", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
+    expect(names).not.toContain("promote-environment-change");
+  });
+});
+
+// ── CR 25.1-4 (resolved Story 26.4) ──────────────────────────────────
+// An explicitly-empty-string optional argument must take the SAME
+// "not provided" branch as an omitted one, for BOTH note branches this
+// prompt has (namespace AND production).
+
+describe("recover-stuck-production build() — CR 25.1-4 empty-string alignment", () => {
+  it("an explicit empty-string namespace renders the SAME as an omitted namespace", () => {
+    const omitted = recoverStuckProductionPrompt.build({});
+    const explicitEmpty = recoverStuckProductionPrompt.build({ namespace: "" });
+    expect(explicitEmpty).toBe(omitted);
+    expect(explicitEmpty).toContain("No namespace specified");
+  });
+
+  it("an explicit empty-string production renders the SAME as an omitted production", () => {
+    const omitted = recoverStuckProductionPrompt.build({});
+    const explicitEmpty = recoverStuckProductionPrompt.build({ production: "" });
+    expect(explicitEmpty).toBe(omitted);
+    expect(explicitEmpty).toContain("No production class name given");
+  });
+
+  it("real namespace/production values take the provided branch and are echoed", () => {
+    const result = recoverStuckProductionPrompt.build({
+      namespace: "USER",
+      production: "My.Production",
+    });
+    expect(result).toContain('Target namespace: "USER"');
+    expect(result).toContain("Production: `My.Production`.");
   });
 });

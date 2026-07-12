@@ -8,6 +8,10 @@
  * array.
  */
 
+import { access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { dirname } from "node:path";
+
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type {
@@ -26,6 +30,8 @@ import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
 import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
+import type { AuditConfig, AuditEntryInput, AuditOutcome } from "./audit.js";
+import { AuditLogger, parseAuditConfig } from "./audit.js";
 import type { ProfileRegistry, IrisProfile } from "./profiles.js";
 import {
   ProfileClientRegistry,
@@ -213,11 +219,18 @@ export function decodeCursor(cursor: string | undefined): number {
  *
  * Exported for unit testing of namespace resolution logic.
  *
- * @param scope           - Namespace scope of the tool.
- * @param config          - IRIS connection config.
- * @param http            - Shared HTTP client.
- * @param atelierVersion  - Negotiated Atelier version.
- * @param pageSize        - Default page size for pagination (default: {@link DEFAULT_PAGE_SIZE}).
+ * @param scope                  - Namespace scope of the tool.
+ * @param config                 - IRIS connection config.
+ * @param http                   - Shared HTTP client.
+ * @param atelierVersion         - Negotiated Atelier version.
+ * @param pageSize               - Default page size for pagination (default: {@link DEFAULT_PAGE_SIZE}).
+ * @param resolveProfileClientImpl - Real implementation of
+ *   {@link ToolContext.resolveProfileClient} (Story 27.0). {@link McpServerBase.handleToolCall}
+ *   passes a closure over its own `getOrCreateClient`/profile registry here.
+ *   Callers that build a context directly (unit/integration tests calling
+ *   this factory without a live server) get a safe stub that rejects with a
+ *   clear "not available in this context" error — never a silently
+ *   un-established client.
  */
 export function buildToolContext(
   scope: ToolScope,
@@ -225,6 +238,7 @@ export function buildToolContext(
   http: IrisHttpClient,
   atelierVersion: number,
   pageSize: number = DEFAULT_PAGE_SIZE,
+  resolveProfileClientImpl?: (profileName: string) => Promise<IrisHttpClient>,
 ): ToolContext {
   return {
     resolveNamespace(override?: string): string {
@@ -252,6 +266,15 @@ export function buildToolContext(
         nextOffset < items.length ? encodeCursor(nextOffset) : undefined;
       return { page, nextCursor };
     },
+    resolveProfileClient:
+      resolveProfileClientImpl ??
+      (async (profileName: string): Promise<IrisHttpClient> => {
+        throw new Error(
+          `resolveProfileClient("${profileName}") is not available: this ToolContext was built ` +
+            `without a live profile registry (buildToolContext() called directly, outside ` +
+            `McpServerBase.handleToolCall).`,
+        );
+      }),
   };
 }
 
@@ -350,6 +373,18 @@ export class McpServerBase {
    * on an unrecognized value.
    */
   private preset: GovernancePreset | undefined = undefined;
+  /**
+   * Audit logger (Epic 29, spec `07-observability-audit-log.md`), or
+   * `undefined` when `IRIS_AUDIT_LOG` is unset (auditing OFF). `undefined` is
+   * also the constructed-but-not-yet-{@link start}ed default, matching
+   * {@link governanceConfig}'s `{}` and {@link preset}'s `undefined` defaults:
+   * {@link handleToolCall} treats an `undefined` logger as a pure
+   * pass-through with zero allocation on the hot path (Rule #19 back-compat
+   * gate; AC 29.0.4). {@link start} constructs it from the parsed
+   * `IRIS_AUDIT_LOG*` env vars, after failing fast if the target directory is
+   * not writable.
+   */
+  private auditLogger: AuditLogger | undefined;
   /**
    * Key → mutation-class lookup for the registered tools (architecture decision
    * D4), built from each {@link ToolDefinition.mutates}. Consumed by the gate's
@@ -730,16 +765,36 @@ export class McpServerBase {
     // from `args` (value `undefined`), so the parameter type is
     // `Record<string, string | undefined>` — matching {@link PromptDefinition.build}
     // and forcing prompt authors (Story 25.1) to handle omitted optionals.
+    //
+    // CR 25.0-4 (resolved Story 26.4): `def.build(...)` is project-authored
+    // (Story 25.1) but not immune to a future bug (e.g. dereferencing an
+    // unexpected shape); a throw here used to surface to the client as an
+    // opaque JSON-RPC `-32603 InternalError` with the raw message, unlike the
+    // tool path's structured `isError` containment. Wrap it and rethrow as a
+    // clean, prompt-named `McpError` so a render bug is diagnosable without
+    // leaking implementation detail differently than the rest of the framework.
     const render = (
       args: Record<string, string | undefined>,
-    ): GetPromptResult => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: { type: "text" as const, text: def.build(args) },
-        },
-      ],
-    });
+    ): GetPromptResult => {
+      let text: string;
+      try {
+        text = def.build(args);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Prompt '${def.name}' failed to render: ${message}`,
+        );
+      }
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: { type: "text" as const, text },
+          },
+        ],
+      };
+    };
 
     // No-argument prompt: register WITHOUT an argsSchema (see the doc comment
     // above — this is what lets a spec-compliant client omit `arguments`
@@ -756,6 +811,18 @@ export class McpServerBase {
 
     const argsShape: Record<string, z.ZodTypeAny> = {};
     for (const arg of def.arguments) {
+      // CR 25.0-5 (resolved Story 26.4): fail fast on a duplicate argument
+      // name within one PromptDefinition. Without this guard,
+      // `argsShape[arg.name] = ...` silently last-wins — `prompts/list`
+      // advertises only one entry and the other's `required`/`description`
+      // is lost with no error, an author-side content mistake that would
+      // otherwise ship silently.
+      if (Object.prototype.hasOwnProperty.call(argsShape, arg.name)) {
+        throw new Error(
+          `Prompt '${def.name}' declares argument '${arg.name}' more than once — ` +
+            `duplicate PromptDefinition.arguments entries are not allowed.`,
+        );
+      }
       // Order matters: `.describe()` must be the OUTERMOST call. Zod v4's
       // `.optional()` returns a NEW wrapper schema whose own `.description`
       // is empty even when the inner schema was `.describe()`d first — the
@@ -766,6 +833,34 @@ export class McpServerBase {
       argsShape[arg.name] = base.describe(arg.description);
     }
 
+    // CR 25.1-6 (closed-by-decision, Story 26.4 — SDK limitation, documented
+    // here rather than worked around): when EVERY declared argument is
+    // optional (e.g. `check-system-health`'s `server?`), a `prompts/get` that
+    // OMITS `arguments` entirely (no key at all, not even `{}`) is rejected
+    // with `-32602 InvalidParams` instead of rendering with every optional
+    // arg absent. Root cause is the SDK itself
+    // (`@modelcontextprotocol/sdk@1.29.0`): `_createRegisteredPrompt` always
+    // stores `objectFromShape(argsSchema)` — a plain `z.object(shape)` — and
+    // the `GetPrompt` handler runs `safeParseAsync(z.object(shape),
+    // request.params.arguments)`, which fails on `undefined` regardless of
+    // whether every property inside the shape is itself `.optional()`. The
+    // SDK offers exactly two mutually-exclusive modes: pass an `argsSchema`
+    // (args ADVERTISED + parsed, but an omitted top-level `arguments` is
+    // refused) or pass none (omission tolerated, but NO arg advertisement and
+    // no args ever reach the callback — the branch above, for genuinely
+    // zero-argument prompts). There is no SDK-supported schema that both
+    // advertises optional args AND tolerates an omitted top-level
+    // `arguments`. Impact is LOW and the failure mode is CLEAN: every
+    // all-optional-argument prompt renders correctly when called with
+    // `arguments: {}` (the normal path for a well-behaved client that builds
+    // an arguments object from the advertised arg list), and the strict
+    // omission case errors with a spec-conformant JSON-RPC error, never a
+    // crash or wrong render. A full fix would bypass `registerPrompt` for
+    // these prompts and register `ListPrompts`/`GetPrompt` handlers directly
+    // on the underlying `Server` (mirroring the D6 governance-resource
+    // wiring) to coerce an omitted `arguments` to `{}` before validation —
+    // deferred as disproportionate framework surgery for a clean-failure edge
+    // case.
     this.mcpServer.registerPrompt(
       def.name,
       {
@@ -891,13 +986,60 @@ export class McpServerBase {
   }
 
   /**
-   * Handle a tool call: validate arguments, build context, invoke handler.
+   * Handle a tool call (Epic 29, Story 29.0 — the audit interception point).
+   *
+   * This is a THIN wrapper around {@link dispatchToolCall}: when auditing is
+   * OFF (`this.auditLogger` is `undefined`), it is a pure pass-through with no
+   * extra allocation beyond the disabled-check — byte-for-byte today's
+   * behavior (Rule #19 back-compat gate; AC 29.0.4). When auditing is ON, it
+   * times the call, awaits the SAME single resolved {@link CallToolResult}
+   * `dispatchToolCall` would have returned anyway, and records one audit
+   * entry from it — every one of `dispatchToolCall`'s many return points
+   * (Zod-fail, missing-schema, not-initialised, profile-resolution error,
+   * governance denial, discovery short-circuit, client-establish failure,
+   * handler success, handler throw) is captured uniformly this way, with zero
+   * per-return-point changes. The audit write is enqueued (fire-and-forget)
+   * and never awaited here — it must never slow or fail the tool call back to
+   * the client (spec §5 ordering).
+   */
+  private async handleToolCall(
+    tool: ToolDefinition,
+    rawArgs: unknown,
+  ): Promise<CallToolResult> {
+    if (!this.auditLogger) {
+      return this.dispatchToolCall(tool, rawArgs);
+    }
+    const auditLogger = this.auditLogger;
+    const start = Date.now();
+    const result = await this.dispatchToolCall(tool, rawArgs);
+    const durationMs = Date.now() - start;
+    // Fire-and-forget audit recording must NEVER throw into the tool path
+    // (spec §5): the async file write is already swallowed inside the logger,
+    // but the SYNCHRONOUS derivation + redaction walk + JSON serialization
+    // here could in principle throw on a pathological args object (e.g. deep
+    // nesting overflowing the recursive redact walk under
+    // IRIS_AUDIT_LOG_PARAMS). Guard it so the tool result the client is owed
+    // is returned regardless.
+    try {
+      this.recordAuditEntry(auditLogger, tool, rawArgs, result, durationMs);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Audit entry recording failed; entry dropped: ${message}`);
+    }
+    return result;
+  }
+
+  /**
+   * Validate arguments, build context, invoke handler. This is the body
+   * {@link handleToolCall} used to be, before Story 29.0 renamed it to make
+   * room for the audit-timing wrapper; its own logic (and every one of its
+   * return points) is otherwise UNCHANGED.
    *
    * On Zod validation failure, returns a result with `isError: true`
    * containing the validation error details. The MCP SDK maps this to
    * the appropriate JSON-RPC error (-32602).
    */
-  private async handleToolCall(
+  private async dispatchToolCall(
     tool: ToolDefinition,
     rawArgs: unknown,
   ): Promise<CallToolResult> {
@@ -1158,11 +1300,32 @@ export class McpServerBase {
     // (AC 14.2.5) falls out naturally: resolveNamespace(override) returns
     // `override ?? profile.namespace`. `server` selects the instance/profile;
     // a per-call `namespace` still overrides the namespace within it.
+    //
+    // resolveProfileClient (Story 27.0, AC 27.0.1): a closure over THIS SAME
+    // `getOrCreateClient` — the exact establishment path `client` above just
+    // went through (health-check + Atelier-version negotiation + one-time
+    // custom-REST bootstrap coalesced via the `establishing` in-flight map) —
+    // reused for an ARBITRARY profile name a tool handler names at call time.
+    // No separate/duplicated establishment logic (Rule #47): calling it with
+    // the SAME name as `profile.name` just hits getOrCreateClient's existing
+    // fast path and returns this identical cached `client`.
+    const resolveProfileClientForCtx = async (
+      targetProfileName: string,
+    ): Promise<IrisHttpClient> => {
+      const { client: resolvedClient } = await this.getOrCreateClient(
+        targetProfileName,
+        this.options.needsCustomRest ?? false,
+      );
+      return resolvedClient;
+    };
+
     const ctx = buildToolContext(
       tool.scope,
       profile,
       client,
       atelierVersion,
+      this.pageSize,
+      resolveProfileClientForCtx,
     );
 
     try {
@@ -1187,6 +1350,145 @@ export class McpServerBase {
         isError: true,
       };
     }
+  }
+
+  // ── Audit entry derivation (Epic 29, Story 29.0) ────────────────────
+
+  /**
+   * Build and enqueue one audit entry from a resolved {@link dispatchToolCall}
+   * result. Deliberately uses ONLY `rawArgs` (the pre-validation input passed
+   * into {@link handleToolCall}) and the final {@link CallToolResult} — never
+   * `dispatchToolCall`'s internal validated args, resolved profile object, or
+   * governance key — so the SAME derivation applies uniformly no matter which
+   * of `dispatchToolCall`'s many return points produced the result.
+   *
+   * Story 29.1 (AC 29.1.1) sharpens the `denied`/`error` fidelity here: a
+   * `"denied"` outcome COPIES `denyReason` (`structuredContent.code`) and, when
+   * present, `presetApplied` (`structuredContent.presetApplied`) straight from
+   * the denial the client actually saw — never recomputed, so it can never
+   * diverge from `dispatchToolCall`'s own `presetCaused` attribution
+   * (`:~1194-1214`). An `"error"` outcome still carries only the sanitized
+   * message text (never a stack/caret-global token). An `"ok"` outcome carries
+   * neither field.
+   */
+  private recordAuditEntry(
+    auditLogger: AuditLogger,
+    tool: ToolDefinition,
+    rawArgs: unknown,
+    result: CallToolResult,
+    durationMs: number,
+  ): void {
+    const argsRecord =
+      rawArgs !== null && typeof rawArgs === "object"
+        ? (rawArgs as Record<string, unknown>)
+        : undefined;
+
+    const profileName = this.deriveAuditProfileName(argsRecord);
+    const outcome = this.deriveAuditOutcome(result);
+    const entryInput: AuditEntryInput = {
+      tool: tool.name,
+      action: this.deriveAuditAction(tool, argsRecord),
+      profile: profileName,
+      namespace: this.deriveAuditNamespace(argsRecord, profileName),
+      outcome,
+      durationMs,
+      paramKeys: argsRecord
+        ? Object.keys(argsRecord).filter((key) => key !== "server")
+        : [],
+      params: argsRecord,
+    };
+    if (outcome === "error") {
+      const message = this.extractAuditErrorMessage(result);
+      if (message !== undefined) entryInput.error = message;
+    } else if (outcome === "denied") {
+      const structured = result.structuredContent as
+        | Record<string, unknown>
+        | undefined;
+      const denyReason = structured?.code;
+      if (typeof denyReason === "string") entryInput.denyReason = denyReason;
+      const presetApplied = structured?.presetApplied;
+      if (typeof presetApplied === "string") {
+        entryInput.presetApplied = presetApplied;
+      }
+    }
+    auditLogger.log(entryInput);
+  }
+
+  /** `rawArgs.server` when present, else the reserved default profile name. */
+  private deriveAuditProfileName(
+    argsRecord: Record<string, unknown> | undefined,
+  ): string {
+    const value = argsRecord?.server;
+    return typeof value === "string" && value.length > 0
+      ? value
+      : DEFAULT_PROFILE_NAME;
+  }
+
+  /**
+   * `rawArgs.namespace` when present (per-call override), else the resolved
+   * profile's default namespace read from the already-built, in-memory
+   * profile registry. Basic derivation only (Dev Notes): never establishes a
+   * connection just to learn a namespace — a denied call must not connect.
+   */
+  private deriveAuditNamespace(
+    argsRecord: Record<string, unknown> | undefined,
+    profileName: string,
+  ): string {
+    const override = argsRecord?.namespace;
+    if (typeof override === "string" && override.length > 0) return override;
+    return this.profiles?.get(profileName)?.namespace ?? "";
+  }
+
+  /**
+   * `rawArgs.action` when — and ONLY when — the tool's input schema declares
+   * an `action` field AND the raw value is an actual member of that field's
+   * (unwrapped) enum options (Story 29.1, AC 29.1.2); `null` otherwise.
+   *
+   * Reuses {@link unwrapActionOptions} — the SAME enum-membership discipline
+   * {@link computeGovernanceKey} applies (`:~965-979`) — so a tool with no
+   * `action` field never over-reports a stray `action` key a caller happened
+   * to pass, and a non-member value (e.g. a value Zod would itself reject)
+   * likewise yields `null` rather than echoing an arbitrary string. Reads
+   * `rawArgs` (pre-Zod) rather than `dispatchToolCall`'s validated args —
+   * `server` aside, Zod does not rename `action`, so the schema check applies
+   * identically to either shape.
+   */
+  private deriveAuditAction(
+    tool: ToolDefinition,
+    argsRecord: Record<string, unknown> | undefined,
+  ): string | null {
+    const value = argsRecord?.action;
+    if (typeof value !== "string") return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const actionField = (tool.inputSchema as any)?.shape?.action;
+    const options = unwrapActionOptions(actionField);
+    if (Array.isArray(options) && options.length > 0 && options.includes(value)) {
+      return value;
+    }
+    return null;
+  }
+
+  /**
+   * Basic outcome derivation (Dev Notes "Scope seam"): `denied` when the
+   * governance gate's structured code is present, `error` when the result is
+   * flagged as an error, else `ok`.
+   */
+  private deriveAuditOutcome(result: CallToolResult): AuditOutcome {
+    const structured = result.structuredContent as
+      | Record<string, unknown>
+      | undefined;
+    if (structured?.code === "GOVERNANCE_DISABLED") return "denied";
+    if (result.isError) return "error";
+    return "ok";
+  }
+
+  /** The result's first text content block, when present — the basic "sanitized message". */
+  private extractAuditErrorMessage(result: CallToolResult): string | undefined {
+    const first = result.content?.[0];
+    if (first && first.type === "text" && typeof first.text === "string") {
+      return first.text;
+    }
+    return undefined;
   }
 
   // ── Dynamic tool management (listChanged) ──────────────────────────
@@ -1327,6 +1629,45 @@ export class McpServerBase {
     // `undefined` ⇒ the presetSeed layer is a pure pass-through (AC 24.1.1).
     this.preset = parseGovernancePreset();
 
+    // Parse the audit-log configuration (Epic 29, spec `07-observability-
+    // audit-log.md` §2), mirroring the governance parses immediately above.
+    // Absent `IRIS_AUDIT_LOG` ⇒ `auditConfig` stays `undefined` ⇒
+    // `this.auditLogger` stays `undefined` ⇒ handleToolCall is a pure
+    // pass-through (Rule #19 back-compat gate; AC 29.0.4). A malformed
+    // `IRIS_AUDIT_LOG_MAX_MB` fails fast, naming the var — mirrors the
+    // `IRIS_SQL_MAX_ROWS` parse in config.ts.
+    let auditConfig: AuditConfig | undefined;
+    try {
+      auditConfig = parseAuditConfig();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Audit log configuration error: ${message}`);
+      process.exit(1);
+      return; // Guard: prevent continued execution when process.exit is mocked
+    }
+
+    if (auditConfig) {
+      // An operator who configured IRIS_AUDIT_LOG must not run unaudited
+      // silently: fail fast at startup if the target file's directory is not
+      // writable (spec §2), mirroring the health-check failure below.
+      const auditDir = dirname(auditConfig.path);
+      try {
+        await access(auditDir, fsConstants.W_OK);
+      } catch {
+        logger.error(
+          `IRIS_AUDIT_LOG directory is not writable: "${auditDir}". ` +
+            `Set IRIS_AUDIT_LOG to a path whose directory this process can write to, or unset IRIS_AUDIT_LOG to disable auditing.`,
+        );
+        process.exit(1);
+        return; // Guard: prevent continued execution when process.exit is mocked
+      }
+      this.auditLogger = new AuditLogger(
+        auditConfig,
+        this.options.name,
+        this.options.version,
+      );
+    }
+
     // 2. Eagerly create the default profile's HTTP client (preserves today's
     //    bootstrap/health-check/negotiation for the default profile exactly).
     const defaultClient = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
@@ -1408,6 +1749,29 @@ export class McpServerBase {
           "Use stdio transport or implement HTTP setup in the server package.",
       );
       throw new Error("HTTP transport not yet implemented");
+    }
+  }
+
+  /**
+   * Stop the server (Epic 29, Story 29.1, AC 29.1.3 — the audit shutdown-flush
+   * seam). Closes the transport connection (a safe no-op via `Transport?.`
+   * optional-chaining if {@link start} was never called or already closed),
+   * then — when auditing is ON — AWAITS {@link AuditLogger.shutdown}: it
+   * enqueues the final `droppedEntries` line and drains the write queue, so
+   * no entry enqueued up to this point is lost before the process exits.
+   *
+   * This is the concrete "server's stop path" the audit writer's `shutdown()`
+   * was previously only ever CALLABLE from (Story 29.0 left it unwired); a
+   * host (e.g. a signal handler in a server package's entry point) calls this
+   * to shut down cleanly. Safe to call when auditing is off (`this.
+   * auditLogger` is `undefined` — a pure no-op flush) and idempotent-safe to
+   * call more than once (`AuditLogger.shutdown()` is documented safe to call
+   * multiple times; closing an already-closed transport is a no-op too).
+   */
+  async stop(): Promise<void> {
+    await this.mcpServer.close();
+    if (this.auditLogger) {
+      await this.auditLogger.shutdown();
     }
   }
 

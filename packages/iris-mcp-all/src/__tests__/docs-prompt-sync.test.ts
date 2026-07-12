@@ -19,9 +19,9 @@
  *
  *   1. Every registered prompt's `name` appears in the root README.md.
  *   2. Each owning server's per-server README.md lists exactly its own
- *      prompts (ops 2, dev 3, interop 2, admin 2), and `iris-data-mcp`'s
- *      README does not claim any of the 9 registered prompt names.
- *   3. The root README's "101 tools" claim is still present — a literal
+ *      prompts (ops 2, dev 3, interop 3, admin 2), and `iris-data-mcp`'s
+ *      README does not claim any of the 10 registered prompt names.
+ *   3. The root README's "102 tools" claim is still present — a literal
  *      guard against prompts silently inflating the documented tool count
  *      (Rule #31: prompts are a framework/protocol surface, not tools).
  *
@@ -47,8 +47,8 @@ const root = resolve(__dirname, "../../../..");
 /** Expected prompt count per owning server package (Story 25.2 AC 25.2.1 / Task 2). */
 const EXPECTED_COUNTS: Record<string, number> = {
   "iris-ops-mcp": 2,
-  "iris-dev-mcp": 3,
-  "iris-interop-mcp": 2,
+  "iris-dev-mcp": 4,
+  "iris-interop-mcp": 3,
   "iris-admin-mcp": 2,
 };
 
@@ -82,7 +82,7 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("iris-data-mcp's README does not claim any of the 9 registered prompt names (it ships none in v1)", async () => {
+  it("iris-data-mcp's README does not claim any of the 10 registered prompt names (it ships none in v1)", async () => {
     const prompts = await loadAllPrompts(root);
     const dataReadme = readReadme("iris-data-mcp");
 
@@ -115,8 +115,73 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("the root README still advertises 101 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+  it("the root README still advertises 104 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+    // The literal count itself moves only when a real TOOL is added/removed
+    // (e.g. Epic 27's iris_env_diff/iris_env_promote, dev 26 -> 28, suite
+    // 102 -> 104) — never when a PROMPT is added/removed (Rule #31). This
+    // test's job is the latter guarantee, not pinning the literal forever.
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
-    expect(rootReadme).toContain("101 tools");
+    expect(rootReadme).toContain("104 tools");
+  });
+
+  // CR 27.4-1 (resolved Story 29.3 burn-down): `docs/migration-v1-v2.md` had
+  // been stale at "100 tools" since before Epic 27 (root README/tool_support
+  // were already reconciled to 104 by the Story 27.4 AC 27.4.1 scoped
+  // surfaces, but the migration guide was NOT one of those 5 scoped
+  // surfaces). This pins the fix and guards against the migration guide
+  // silently drifting stale again alongside the root README's own count.
+  it("docs/migration-v1-v2.md advertises 104 tools, not the stale 100 (CR 27.4-1)", () => {
+    const migrationGuide = readFileSync(resolve(root, "docs/migration-v1-v2.md"), "utf-8");
+    expect(migrationGuide).toContain("104 tools");
+    expect(migrationGuide).not.toContain("100 tools");
+  });
+
+  // CR 25.2-1 (resolved Story 26.4): the primary drift vectors (rename/add/
+  // remove/mis-attribution) were already mechanically enforced above, but the
+  // human-readable NUMERIC prose (the README's "10 prompts" heading and
+  // tool_support.md's per-server tallies) was not -- a green suite could
+  // coexist with a stale total if a future prompt is added/removed without
+  // updating the prose. These two tests close that gap.
+
+  it("the root README's prompt-count heading matches prompts.length exactly", async () => {
+    const prompts = await loadAllPrompts(root);
+    const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
+    const countRe = new RegExp(`\\b${prompts.length}\\s+prompts\\b`);
+    expect(
+      rootReadme,
+      `README.md does not contain a "${prompts.length} prompts" string matching prompts.length=${prompts.length}`,
+    ).toMatch(countRe);
+  });
+
+  it("tool_support.md's per-server prompt tallies match the registered per-package counts exactly", async () => {
+    const prompts = await loadAllPrompts(root);
+    const toolSupport = readFileSync(resolve(root, "tool_support.md"), "utf-8");
+
+    const shortNameToPkg: Record<string, string> = {
+      ops: "iris-ops-mcp",
+      dev: "iris-dev-mcp",
+      interop: "iris-interop-mcp",
+      admin: "iris-admin-mcp",
+    };
+
+    for (const [shortName, pkg] of Object.entries(shortNameToPkg)) {
+      const expectedCount = prompts.filter((p) => p.pkg === pkg).length;
+      const tallyRe = new RegExp("`" + shortName + "`\\s+(\\d+)");
+      const match = toolSupport.match(tallyRe);
+      expect(match, `tool_support.md missing a \`${shortName}\` N prompt tally`).not.toBeNull();
+      expect(Number(match?.[1]), `tool_support.md \`${shortName}\` prompt tally`).toBe(
+        expectedCount,
+      );
+    }
+
+    // iris-data-mcp ships no prompts in v1 -- asserted via the "none" wording
+    // (not a numeric tally) plus the actual registered count.
+    expect(toolSupport).toMatch(/`data`\s+none/);
+    expect(prompts.filter((p) => p.pkg === "iris-data-mcp")).toHaveLength(0);
+
+    // The sentence's own stated total ("a pack of N **MCP prompts**") must
+    // also match prompts.length.
+    const totalRe = new RegExp(`pack of ${prompts.length}\\s+\\*\\*MCP prompts\\*\\*`);
+    expect(toolSupport).toMatch(totalRe);
   });
 });

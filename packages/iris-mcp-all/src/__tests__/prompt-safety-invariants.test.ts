@@ -83,6 +83,161 @@ describe("recover-stuck-production — recover-first / clean-last-resort / killA
   });
 });
 
+describe("resend-failed-messages — dry-run-first workflow + duplication hazard + default-disabled write (Story 26.3)", () => {
+  it("renders the dry-run-first workflow naming both real tools, with dryRun:true preview strictly before dryRun:false/confirm:true execution", async () => {
+    const { pkg, prompt } = await findPrompt("resend-failed-messages");
+    expect(pkg).toBe("iris-interop-mcp");
+    const body = prompt.build({ item: "MyItem", since: "2026-07-01" });
+
+    expect(body).toContain("iris_message_resend");
+    expect(body).toContain("iris_production_messages");
+    expect(body).toContain("DRY-RUN-FIRST");
+
+    const previewIdx = body.indexOf("dryRun: true");
+    const executeIdx = body.indexOf("dryRun: false");
+    const confirmIdx = body.indexOf("confirm: true");
+    expect(previewIdx).toBeGreaterThan(-1);
+    expect(executeIdx).toBeGreaterThan(-1);
+    expect(confirmIdx).toBeGreaterThan(-1);
+    expect(previewIdx).toBeLessThan(executeIdx);
+    expect(executeIdx).toBeLessThan(confirmIdx);
+  });
+
+  it("states the duplication hazard and that resend/resendFiltered are governance-default-disabled writes, with the enable snippet", async () => {
+    const { prompt } = await findPrompt("resend-failed-messages");
+    const body = prompt.build({ item: "MyItem", since: "2026-07-01" });
+
+    expect(body).toContain("DUPLICATION HAZARD");
+    expect(body).toContain("DEFAULT-DISABLED");
+    expect(body).toContain("GOVERNANCE_DISABLED");
+    expect(body).toContain("IRIS_GOVERNANCE");
+  });
+
+  it("both required args interpolate into the rendered body; omitting both renders bracketed placeholders without throwing", async () => {
+    const { prompt } = await findPrompt("resend-failed-messages");
+
+    const filled = prompt.build({
+      item: "SessionAgent.Sample.BS.OrderIngest",
+      since: "2026-07-01T00:00:00Z",
+    });
+    expect(filled).toContain("SessionAgent.Sample.BS.OrderIngest");
+    expect(filled).toContain("2026-07-01T00:00:00Z");
+
+    expect(() => prompt.build({})).not.toThrow();
+    const empty = prompt.build({});
+    expect(empty).toContain("<item>");
+    expect(empty).toContain("<since>");
+  });
+});
+
+describe("promote-environment-change — review-before-write diff -> plan -> execute -> re-diff + no-deletions guarantee (Story 27.4)", () => {
+  it("renders the review-before-write workflow naming both real tools, with diff -> plan -> execute -> re-diff verify in order", async () => {
+    const { pkg, prompt } = await findPrompt("promote-environment-change");
+    expect(pkg).toBe("iris-dev-mcp");
+    const body = prompt.build({ source: "stage", target: "prod" });
+
+    expect(body).toContain("iris_env_diff");
+    expect(body).toContain("iris_env_promote");
+
+    const planIdx = body.indexOf('action: "plan"');
+    const executeIdx = body.indexOf('action: "execute"');
+    const verifyIdx = body.lastIndexOf("iris_env_diff");
+    expect(planIdx).toBeGreaterThan(-1);
+    expect(executeIdx).toBeGreaterThan(-1);
+    expect(planIdx).toBeLessThan(executeIdx);
+    // The re-diff verify step (step 5) references iris_env_diff again, AFTER
+    // the execute call -- the LAST occurrence of the token must come after
+    // "execute", proving the workflow re-verifies rather than stopping at
+    // the write.
+    expect(executeIdx).toBeLessThan(verifyIdx);
+  });
+
+  it("states the no-deletions guarantee for onlyInTarget items and the credential-redaction / secrets-exclusion promise", async () => {
+    const { prompt } = await findPrompt("promote-environment-change");
+    const body = prompt.build({ source: "stage", target: "prod" });
+
+    expect(body.toLowerCase()).toContain("never propose or attempt to remove");
+    expect(body).toContain("onlyInTarget");
+    expect(body).toContain("REDACTED");
+    expect(body.toLowerCase()).toContain("out of scope entirely");
+  });
+
+  it("states execute is governance-default-disabled (calling-profile tool key), with the enable snippet", async () => {
+    const { prompt } = await findPrompt("promote-environment-change");
+    const body = prompt.build({ source: "stage", target: "prod" });
+
+    expect(body).toContain("DEFAULT-DISABLED");
+    expect(body).toContain("GOVERNANCE_DISABLED");
+    expect(body).toContain("IRIS_GOVERNANCE");
+    expect(body).toContain('"iris_env_promote:execute": true');
+  });
+
+  it("both required args interpolate into the rendered body; the optional spec arg omitted renders bracketed placeholders without throwing", async () => {
+    const { prompt } = await findPrompt("promote-environment-change");
+
+    const filled = prompt.build({ source: "stage", target: "prod" });
+    expect(filled).toContain("stage");
+    expect(filled).toContain("prod");
+
+    expect(() => prompt.build({})).not.toThrow();
+    const empty = prompt.build({});
+    expect(empty).toContain("<source>");
+    expect(empty).toContain("<target>");
+  });
+
+  it("encodes the user-review step and the explicit step allowlist, with confirm:true gating the execute call, in full order (AC 27.4.4)", async () => {
+    // The existing "diff -> plan -> execute -> re-diff verify in order" test
+    // above does not check WHERE the user-review step, the explicit step
+    // allowlist, or `confirm: true` fall relative to those four anchors. This
+    // pins the FULL ordered workflow the spec requires: scoped diff -> review
+    // WITH the user -> plan -> explicit step allowlist -> execute gated by
+    // confirm:true -> re-diff verify.
+    const { prompt } = await findPrompt("promote-environment-change");
+    const body = prompt.build({ source: "stage", target: "prod" });
+
+    const checks: Array<[string, number]> = [
+      // Anchor on the numbered step-1 marker ("1. Call"), NOT the raw
+      // "iris_env_diff" token: the FIRST "iris_env_diff" occurrence is the
+      // GOVERNANCE preamble mention ("its sibling `plan`, and `iris_env_diff`
+      // itself, are reads"), which sits above step 1 and would make this
+      // anchor trivially-true regardless of where the step-1 diff call lands.
+      ["initial iris_env_diff call (step 1)", body.indexOf("1. Call")],
+      ["review-with-user step", body.indexOf("Review the diff report WITH the user")],
+      ["plan action", body.indexOf('action: "plan"')],
+      ["explicit step allowlist", body.indexOf("EXPLICIT list of step indices")],
+      ["execute action", body.indexOf('action: "execute"')],
+      ["confirm:true", body.indexOf("confirm: true")],
+      ["re-diff verify", body.lastIndexOf("iris_env_diff")],
+    ];
+
+    for (const [label, idx] of checks) {
+      expect(idx, `"${label}" not found in rendered body`).toBeGreaterThan(-1);
+    }
+    for (let i = 1; i < checks.length; i++) {
+      const [prevLabel, prevIdx] = checks[i - 1];
+      const [label, idx] = checks[i];
+      expect(prevIdx, `"${prevLabel}" should precede "${label}"`).toBeLessThan(idx);
+    }
+  });
+
+  it("the optional spec arg, when PROVIDED, renders the spec-aware guidance branch, not the generic omitted-spec example (Rule #47)", async () => {
+    // The other tests in this block only ever call build({source, target})
+    // (spec omitted), so the isArgProvided(args.spec) TRUE branch of
+    // specGuidance is otherwise never exercised by this suite.
+    const { prompt } = await findPrompt("promote-environment-change");
+    const body = prompt.build({ source: "stage", target: "prod", spec: "MyApp.*.cls,*.mac" });
+
+    expect(body).toContain("stage");
+    expect(body).toContain("prod");
+    // The spec-PROVIDED branch interpolates the value directly into the
+    // guidance sentence...
+    expect(body).toContain('spec: "MyApp.*.cls,*.mac"');
+    // ...and must NOT fall back to the omitted-spec branch's generic example
+    // wording -- proves the correct (isArgProvided) branch rendered.
+    expect(body).not.toContain("No `spec` is needed for the four domains listed above.");
+  });
+});
+
 describe("run-external-backup — thaw ALWAYS even on failure + journaling-resumed verification", () => {
   it("declares the never-left-frozen safety invariant up front", async () => {
     const { pkg, prompt } = await findPrompt("run-external-backup");

@@ -1083,4 +1083,23 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
   });
+
+  // ── namespace getter (Story 27.0 cycle 2 — cross-profile namespace routing) ──
+
+  describe("namespace getter", () => {
+    it("exposes the client's configured namespace via a read-only accessor", () => {
+      const client = new IrisHttpClient(makeConfig({ namespace: "HSCUSTOM" }));
+      expect(client.namespace).toBe("HSCUSTOM");
+      client.destroy();
+    });
+
+    it("reflects each client's own namespace independently (no shared state)", () => {
+      const clientA = new IrisHttpClient(makeConfig({ namespace: "HSCUSTOM" }));
+      const clientB = new IrisHttpClient(makeConfig({ namespace: "SADEMO" }));
+      expect(clientA.namespace).toBe("HSCUSTOM");
+      expect(clientB.namespace).toBe("SADEMO");
+      clientA.destroy();
+      clientB.destroy();
+    });
+  });
 });

@@ -2,6 +2,253 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
+
+### Added — Tool-Call Observability & Session Audit Log (`@iris-mcp/shared`, all five servers)
+
+An opt-in, structured, secrets-free audit trail of every MCP tool call — the concrete answer to
+"what did the AI do to prod last Tuesday?" for regulated (e.g. healthcare) deployments. Three new
+environment variables, all optional and **default-OFF**:
+
+- `IRIS_AUDIT_LOG` (unset = OFF) — absolute path to a JSONL audit file. Setting it enables
+  auditing for every tool call across all five servers via a single interception point in
+  `McpServerBase.handleToolCall` — no per-tool changes, automatic coverage of all present and
+  future tools.
+- `IRIS_AUDIT_LOG_MAX_MB` (default `50`) — rotates the file at this size (`<path>` → `<path>.1`,
+  single generation).
+- `IRIS_AUDIT_LOG_PARAMS` (default `false`) — when `true`, entries also carry the call's redacted
+  parameter values; the default logs parameter key names only.
+
+Each entry records `ts`/`session` (per-process UUID)/`seq` (per-session monotonic)/`serverPkg`/
+`tool`/`action`/`profile`/`namespace`/`outcome` (`ok`/`error`/`denied`)/`durationMs`/`paramKeys`,
+plus a structured `denyReason` (+ `presetApplied` when a safety preset, not an explicit override,
+caused the denial) on denied entries and a sanitized-only `error` message on error entries.
+Redaction (recursive walk of the args object, credential-name-family key match →
+`"[REDACTED]"`, 2 KB string truncation) runs BEFORE anything reaches the write queue, proven
+secrets-free under fuzz testing and a live smoke grep. A post-startup sink failure (e.g. an
+unwritable file mid-session) never blocks or fails a tool call — it degrades, warns once, and
+counts a `droppedEntries` total flushed at shutdown; a *startup-time* unwritable directory fails
+fast instead, so an operator who configured auditing never runs unaudited by accident.
+
+**Logging is server configuration, not a governed tool — deliberately NOT bypassable via
+`IRIS_GOVERNANCE`.** No new tool, no new governance key, no bootstrap bump: this is a
+`@iris-mcp/shared`-only, TypeScript-layer capability (frozen governance baseline `1e62c5ad5bf7`
+and `BOOTSTRAP_VERSION` unchanged). With `IRIS_AUDIT_LOG` unset (the default), behavior is
+byte-for-byte unchanged — no audit file, no `fs` writes attempted (Rule #19 mechanical proof).
+Delivered across three stories: 29.0 (interceptor + writer foundation), 29.1 (outcome/denial/action
+fidelity + concurrency + shutdown flush), and 29.2 (this docs + live-smoke closing story — see
+[Compliance & Auditability](README.md#compliance--auditability) for the full model, the entry
+format, and the disambiguation from the pre-existing IRIS-native `iris_audit_manage`/
+`iris_audit_events` security-audit tools).
+
+## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
+
+### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
+
+Story 28.1: the **first ObjectScript handler** for the `iris_sql_analyze` tool family (the
+existing four actions are TS/SQL-only via the Atelier `action/query` endpoint — Rule #47
+correction settled in Story 28.0). Given `{ "query": "<sql>", "namespace"?: "<ns>" }`, the new
+`POST /dev/sql/advise-data` route returns in ONE round-trip: the verbatim server-side
+`EXPLAIN <query>` plan text (`##class(%SQL.Statement).%ExecDirect(, "EXPLAIN "_query)` reading
+the first row's `Plan` column — live-confirmed byte-for-byte identical to the existing `explain`
+action's `action/query` call), the enumerated `{schema, table, className}` list of tables the
+plan actually reads (parsed from its `Read master map`/`Read index map` marker lines, alias
+-stripped and deduplicated), and the `%Dictionary.CompiledIndex` rows (grouped per table,
+including the verbatim order-preserving `Properties` string) needed for the Story 28.2 TS
+heuristic engine's `missing-index` leading-subscript check. No separate tune-metadata payload —
+`stale-stats` is read straight off the plan's own `Warning: Table X is not tuned.` block,
+preserved verbatim in `plan` (Story 28.0 finding). This story is a pure PRODUCER: no TS tool
+wiring, no governance key, no consumer ships here — Story 28.2 captures reference fixtures from
+this endpoint's live output, and Story 28.3's `advise` action is the first live caller.
+
+`BOOTSTRAP_VERSION`: `1e2008753853` → `6422caf6ec31` (new bootstrapped class, Rule #24; added to
+both hand-maintained bootstrap rosters per Rule #39). Frozen governance baseline `1e62c5ad5bf7`
+untouched (no governance key added in this story).
+
+### Added — Heuristic engine + fixtures (Story 28.2, `packages/iris-dev-mcp/src/tools/sqlAdvisor.ts`)
+
+A pure-TypeScript engine, `analyzeAdviceData(raw, ctx)`, that turns the Story 28.1 endpoint's raw
+materials (`{ plan, tables, indexes }`) into ranked findings for the five heuristics pinned in
+spec §4: `full-scan`, `missing-index` (with a `suggestedDdl` and confidence `high`/`medium` by
+predicate shape), `stale-stats` (read straight off the plan's own `Warning:` block), `unused-index`
+(reusing the existing `indexUsage` marker parser), and `plan-anomaly` (temp-file markers, shared
+vocabulary with `GROUP BY`/`ORDER BY`/joins). Unrecognized/garbage plan text degrades to
+`findings: []` + a `"plan format not recognized"` note — the engine never throws and never guesses
+(AC 28.2.3). Every finding carries `evidence` + `planExcerpt`; never a recommendation against a
+`%*`/`INFORMATION_SCHEMA` system schema. All 46 tests replay 8 fixtures reference-captured live
+from `/dev/sql/advise-data` against the new durable `ExecuteMCPv2.Tests.AdvisorFixture` table
+(Rule #36 — fixture-only class, absent from the bootstrap manifest). No tool wiring, no
+`mutates`/governance change, no bootstrap change in this story — `BOOTSTRAP_VERSION` stays
+`6422caf6ec31`.
+
+### Added — `advise` action on `iris_sql_analyze` (Story 28.3, closing story)
+
+Wires the Story 28.2 engine to the Story 28.1 endpoint behind a new `advise` action — the
+market-differentiating advisor capability, strictly advisory (recommends + cites evidence; never
+applies anything; no `applyIndex` write ships in v1). **Strictly additive** — the four pre-existing
+actions' request/response shapes are byte-for-byte unchanged (dedicated Rule #19 snapshot test),
+and **tool count is unchanged** (`advise` is a new action on an existing tool, not a new tool —
+Rule #31). The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged**
+— `advise` is a non-baseline **`mutates: "read"` → enabled by default** key (a `read` still requires
+classification — `assertGovernanceClassification` throws on an unclassified non-baseline key).
+Suite governance-key count: **200 live / 59 post-foundation → 201 live / 60 post-foundation**.
+
+- **`query` mode** — posts the SQL to `POST /dev/sql/advise-data`, runs the result through
+  `analyzeAdviceData`, and renders evidence-first text (findings ranked by confidence: high, then
+  medium, then low) plus `structuredContent: { mode: "query", findings, analyzed: { statements,
+  skipped }, notes }`. Zero findings render an explicit "no findings, here's what was checked"
+  message — never a silent empty (spec §3).
+- **`workload` mode** (`workload: true`, mutually exclusive with `query`) — advises the top-`topN`
+  (default 5, max 20) recent statements from `INFORMATION_SCHEMA.STATEMENTS ORDER BY Timestamp
+  DESC` (the Story 28.0-pinned source), one endpoint round-trip per statement, aggregating findings.
+  `topN` caps real scan work, not just output size (Rule #38) — each analyzed statement is a full
+  `EXPLAIN` + dictionary round-trip. A statement that fails to prepare is skipped (`analyzed.skipped`
+  increments), not fatal to the call; if the workload source itself is unavailable on the platform
+  (not expected on this instance per Story 28.0, but coded defensively for other editions), the
+  action returns a clear capability message, never a raw SQLCODE dump.
+- Every action key now carries a truthful `mutates` classification: `{ explain: "read", stats:
+  "read", indexUsage: "read", running: "read", advise: "read" }`.
+
+Documentation: [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md) (new `advise`
+row + governance-defaults note + worked example), [`tool_support.md`](tool_support.md) (endpoint
+column updated + new Epic 28 governance-defaults note), the root [README](README.md) (governance
+table row updated) and [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md)
+(description updated) — tool counts (28 / 104) unchanged everywhere; only the governance-key count
+and the `iris_sql_analyze` action list move.
+
+## [Pre-release — 2026-07-10] — Epic 27: Environment Diff & Promotion
+
+### Added — `iris_env_diff` / `iris_env_promote` (`@iris-mcp/dev`) + `promote-environment-change` prompt
+
+The suite's moat feature: cross-profile drift detection and (gated) promotion, covering exactly
+the surfaces that live OUTSIDE git in a real IRIS shop — ObjectScript source, namespace mappings,
+Interoperability System Default Settings, web applications, and system config. Answers "what's
+different between stage and prod?" in one call instead of a manual export/compare dance. Suite
+tool count: **102 → 104** (dev **26 → 28**; advertised incl. the framework tool **107 → 109**).
+
+- **`iris_env_diff`** ([packages/iris-dev-mcp/src/tools/env-diff.ts](packages/iris-dev-mcp/src/tools/env-diff.ts))
+  — compares two configured server profiles (`source`/`target`) across up to five domains:
+  - **`mappings`**, **`defaultSettings`**, **`webapps`**, **`config`** (the DEFAULT `domains` set —
+    no `spec` needed) and **`documents`** (OPT-IN only — requires `spec`, a comma-delimited
+    document spec with `*`/`?` wildcards; a bare `*` is refused unless `allowWide:true`, per Rule
+    #38's timeout guidance) — the `documents` domain being compared by SHA-256 content hash via the
+    new ObjectScript endpoint `POST /dev/doc/hashes` (`ExecuteMCPv2.REST.EnvSync.cls`), while the four
+    config domains use their own read endpoints (see [`tool_support.md`](tool_support.md)).
+  - Each requested domain is fetched/diffed in its OWN try/catch (per-domain error isolation,
+    mirrors `iris_health_check`'s per-area isolation — Epic 23/Rule #41): a domain that hard-errors
+    (e.g. `defaultSettings` against a namespace with no Interoperability schema) is reported in an
+    `errors` map and does NOT abort the other domains; the call is `isError:true` only when EVERY
+    requested domain fails.
+  - System Default Settings values whose setting name looks credential-ish (`password`/`secret`/
+    `key`/`token`/`pwd`/`passphrase`/`credential`/`cert`/`private`/`salt`, case-insensitive) are
+    REDACTED in every diff bucket — the plaintext never leaves the server. `onlyInTarget` entries
+    (in every domain) are always INFORMATIONAL — never a deletion signal, in this or any future
+    version. Pure **read**, **enabled by default**.
+- **`iris_env_promote`** ([packages/iris-dev-mcp/src/tools/env-promote.ts](packages/iris-dev-mcp/src/tools/env-promote.ts))
+  — two actions:
+  - **`plan`** (read, enabled by default) — a pure transform of a prior `iris_env_diff` result into
+    an ordered, numbered promotion plan (dependency order: mappings → documents → defaultSettings
+    → webapps → config), plus a SHA-256 `planHash` of the source diff. Every `onlyInTarget` diff
+    entry becomes a `warning`, never a step — no delete/remove operation exists anywhere in any
+    plan, in this or any future version.
+  - **`execute`** (write, **DEFAULT-DISABLED** — deliberately NOT `defaultEnabled`; promotion is a
+    real environment-mutating write, not a recovery-of-last-resort action like
+    `iris_production_control:clean`) — runs an ALLOWLISTED subset of a plan's steps against
+    `target`, behind FOUR refuse-before-any-write gates, each mutating nothing on failure:
+    (1) `confirm:true`; (2) a non-empty `steps` allowlist whose every index exists in the plan;
+    (3) plan-hash freshness (the SAME `diff` that produced the plan is re-hashed and compared,
+    refusing a stale plan, plus a plan/diff step-consistency re-derivation that refuses a
+    hand-edited plan); (4) the TARGET profile's OWN governance policy must enable every write
+    family the allowlisted steps use — this is what stops a caller on an unrestricted profile from
+    writing into a governance-locked target. Steps run in plan order and HALT ON THE FIRST FAILURE
+    (a partial apply is always reported, never hidden). Every write RE-FETCHES the current value
+    from `source` live at execute time — the plan carries no write data, and a credential value is
+    forwarded to `target` without ever appearing in this tool's own output (success or failure
+    path). `documents` steps are PUT sequentially then compiled in ONE batched call.
+  - Enable via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}`.
+- **Framework**: `ToolContext.resolveProfileClient(profileName)` ([packages/shared](packages/shared))
+  — resolves an `IrisHttpClient` for any named profile (not just the call's own `server`), reusing
+  the exact per-profile client construction/caching the `server` param resolution already uses.
+  Additive; existing tools see no behavioral change (Rule #19 snapshot).
+- **`promote-environment-change` prompt** ([packages/iris-dev-mcp/src/prompts/promoteEnvironmentChange.ts](packages/iris-dev-mcp/src/prompts/promoteEnvironmentChange.ts))
+  — the previously-gated prompt (Epic 25 spec `03-skills-prompts-pack.md` §3) now ships: params
+  `source`, `target`, `spec?`; encodes the review-before-write workflow (scoped diff → review with
+  the user → plan → explicit step allowlist → confirmed execute → re-diff verify), and states the
+  no-deletions guarantee, the secrets-exclusion redaction, and the default-disabled write status.
+  Suite prompt count: **10 → 11** (dev **3 → 4**); `skills/promote-environment-change/` generated
+  (`pnpm gen:skills`) — no gated prompt remains in the pack.
+- The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged** — every
+  new key here (`iris_env_diff`, `iris_env_promote:plan`, `iris_env_promote:execute`) is
+  non-baseline.
+- `BOOTSTRAP_VERSION` **`e5c18edd00c0` → `1e2008753853`** (Story 27.0 — new
+  `ExecuteMCPv2.REST.EnvSync.cls`, added to both bootstrap rosters per Rule #39).
+
+Documentation: root [README.md](README.md) (dev 26 → 28, 102 → 104 tools, ASCII diagram, the
+`iris_env_diff`/`iris_env_promote` governance-defaults table rows plus a dedicated
+`iris_env_promote:execute` safety-model callout, the "11 prompts" pack + new prompt row, the
+now-stale gated-prompt note removed), [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md)
+(new "Environment Tools" reference section with the governance/safety callout, new Prompts row,
+namespace-scoping count), and [`tool_support.md`](tool_support.md) (two new rows + dev → 28 /
+ExecuteMCPv2-backed 78 → 80 / suite → 104 package / 109 advertised + Epic 27 governance-defaults
+note + prompt tally 10 → 11).
+
+## [Pre-release — 2026-07-09] — Epic 26: Interoperability Message Resend / Replay
+
+### Added — `iris_message_resend` (`@iris-mcp/interop`) + `resend-failed-messages` prompt
+
+Completes the interop troubleshooting loop: the suite could already find, trace, and diagram a
+failed message (Epic 21) but stopped short at "resend it via the Management Portal." This adds a
+resend/replay tool and a matching workflow prompt. Suite tool count: **101 → 102** (interop
+**21 → 22**; advertised incl. the framework tool **106 → 107**).
+
+- **`iris_message_resend`** ([packages/iris-interop-mcp/src/tools/message-resend.ts](packages/iris-interop-mcp/src/tools/message-resend.ts),
+  `ExecuteMCPv2.REST.MessageResend.cls` via `POST /interop/message/resend` +
+  `POST /interop/message/resend/preview`) — three actions built against the pinned
+  `Ens.MessageHeader:ResendDuplicatedMessage` API (Story 26.0 probe, the same call the SMP's own
+  "Resend" button uses — NOT the deprecated `ResubmitMessage`/`ResendMessage` family):
+  - **`preview`** (read) — per header ID (1–100): id, session, source/target item, status, time,
+    body classname (+ existence check — a missing body class does not block resend but is
+    invisible on the header state), a first-~1KB body summary, and a resendability verdict + reason
+    steering toward Request-type `Status=Error` headers (the correct retry target) and flagging
+    Response-type error headers as likely a no-op.
+  - **`resend`** (write) — resend up to 100 explicit `headerIds`. Per-header result
+    `{originalId, newHeaderId?, ok, error?}`; a bad header does not abort the batch.
+  - **`resendFiltered`** (write) — bounded `item` (required) + `status` (default `'Errored'`) +
+    `from`/`to` time-window (required `from`, max 7 days) filter, with a dry-run-first double gate
+    (Epic-20 pattern): `dryRun` defaults `true` and resends NOTHING; executing requires BOTH
+    `dryRun:false` AND `confirm:true`. `maxMessages` caps the batch (default 100, hard cap 500) —
+    over-cap is refused, not truncated-and-executed.
+  - Every dangerous input is rejected ObjectScript-side BEFORE any mutation: numeric header IDs,
+    `item`+`from` required, ≤7-day window, ≤500 count (naming the count found), the confirm double
+    gate, and a `Ens.Director.IsProductionRunning()` precheck (fast, clear refusal instead of N
+    failing resend attempts). **GOVERNANCE:** `preview` is a pure **read, enabled by default**;
+    `resend`/`resendFiltered` are truthfully classified `write` and are **DEFAULT-DISABLED** —
+    unlike `iris_production_control:clean`'s `defaultEnabled` recovery exception (Epic 20), resend
+    deliberately does NOT default-enable, because it duplicates business/clinical data flow
+    downstream rather than recovering a wedged production. Enable via `IRIS_GOVERNANCE`, e.g.
+    `{"global":{"iris_message_resend:resend":true,"iris_message_resend:resendFiltered":true}}`.
+    The frozen Epic-14 governance baseline (hash `1e62c5ad5bf7`, 141 keys) is **unchanged** — every
+    new key here is non-baseline. **DUPLICATION HAZARD:** resending an already-processed message
+    delivers its data again downstream — always `preview` first.
+- **`resend-failed-messages` prompt** ([packages/iris-interop-mcp/src/prompts/resendFailedMessages.ts](packages/iris-interop-mcp/src/prompts/resendFailedMessages.ts))
+  — the previously-gated prompt (Epic 25 spec `03-skills-prompts-pack.md` §3) now ships: params
+  `item`, `since`; encodes the dry-run-first workflow (preview → review with the user → execute on
+  explicit approval → verify new headers via `iris_production_messages`), and states both the
+  duplication hazard and the default-disabled write status. Suite prompt count: **9 → 10** (interop
+  **2 → 3**); `skills/resend-failed-messages/` regenerated (`pnpm gen:skills`); `promote-environment-change`
+  (dev, Epic 27) remains the sole gated prompt.
+- `BOOTSTRAP_VERSION` **`13b4b5f003ab` → `1f3afba4ac52`** (Story 26.1 — new
+  `ExecuteMCPv2.REST.MessageResend.cls`, 26 embedded classes, added to both bootstrap rosters per
+  Rule #39).
+
+Documentation: root [README.md](README.md) (interop 21 → 22, 101 → 102 tools, ASCII diagram, the
+`iris_message_resend` governance-defaults table row, the "10 prompts" pack + new prompt row),
+[`packages/iris-interop-mcp/README.md`](packages/iris-interop-mcp/README.md) (new
+`iris_message_resend` tool-reference subsection with the duplication hazard + governance snippet,
+new Prompts row, namespace-scoping count), and [`tool_support.md`](tool_support.md) (new row +
+interop → 22 / ExecuteMCPv2-backed 78 → suite → 102 package / 107 advertised + Epic 26
+governance-defaults note + prompt tally 9 → 10).
+
 ## [Pre-release — 2026-07-09]
 
 ### Fixed — `iris_execute_tests` silent result truncation (`@iris-mcp/dev`, HIGH)

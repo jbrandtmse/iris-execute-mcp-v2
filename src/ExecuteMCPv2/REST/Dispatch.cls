@@ -115,6 +115,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/production/messages/diagram" Method="GET" Call="ExecuteMCPv2.REST.Interop:MessageDiagram" />
   <Route Url="/interop/production/adapters" Method="GET" Call="ExecuteMCPv2.REST.Interop:AdapterList" />
 
+  <!-- Epic 26: Interoperability Message Resend -->
+  <Route Url="/interop/message/resend" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResend" />
+  <Route Url="/interop/message/resend/preview" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResendPreview" />
+
   <!-- Epic 5: Credentials and Lookup Tables -->
   <Route Url="/interop/credential" Method="GET" Call="ExecuteMCPv2.REST.Interop:CredentialList" />
   <Route Url="/interop/credential" Method="POST" Call="ExecuteMCPv2.REST.Interop:CredentialManage" />
@@ -166,6 +170,13 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 22: Dev tools -->
   <Route Url="/dev/loc" Method="GET" Call="ExecuteMCPv2.REST.Loc:LocCount" />
+
+  <!-- Epic 27 (Story 27.0): Environment Diff - Document Hashes -->
+  <Route Url="/dev/doc/hashes" Method="GET" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
+  <Route Url="/dev/doc/hashes" Method="POST" Call="ExecuteMCPv2.REST.EnvSync:DocHashes" />
+
+  <!-- Epic 28 (Story 28.1): SQL Performance Advisor - Data Endpoint -->
+  <Route Url="/dev/sql/advise-data" Method="POST" Call="ExecuteMCPv2.REST.SqlAdvisor:AdviseData" />
 </Routes>
 }
 

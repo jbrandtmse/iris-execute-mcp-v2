@@ -1,0 +1,6 @@
+# Normalize line endings: store LF in the repo, check out LF on disk.
+# Ends the local Windows autocrlf=true CRLF-on-checkout noise that made
+# `scripts/gen-skills.mjs --check` (and similar LF-content generators) report
+# phantom drift on a fresh Windows checkout. Ride-along hygiene from the
+# Epic 27 retrospective (§8 action item; deferred-work.md gen-skills CRLF note).
+* text=auto eol=lf

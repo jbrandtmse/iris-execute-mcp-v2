@@ -142,6 +142,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
 | `iris_production_messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
 | `iris_message_diagram` | Mermaid sequence diagram from a message-trace session (Visual Trace as renderable text) | `sessionIds`, `labelMode?`, `maxRows?`, `dedup?`, `namespace?` | readOnly, idempotent |
+| `iris_message_resend` | Resend/replay Interoperability messages (`preview` read; `resend`/`resendFiltered` writes) | `action`, `headerIds?`, `item?`, `status?`, `from?`, `to?`, `maxMessages?`, `dryRun?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
 
 #### `iris_message_diagram` — Message Trace Sequence Diagram
@@ -178,6 +179,52 @@ MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order [ERROR]
 %% Unpaired request: message 90412 (MyApp.Service.FileIn -> MyApp.Process.Router) has no matching response
 %% Error on message 90412: connection refused
 ```
+
+#### `iris_message_resend` — Resend / Replay Messages
+
+Resends messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API (the same call the Management Portal's "Resend" button uses). Three actions:
+
+- **`preview`** (read) — per header ID (1–100): id, session, source/target item, status, time, body classname (+ existence check), a first-~1KB body summary, and a resendability verdict + reason (a Request-type `Status=Error` header is the correct retry target; a Response-type error header is flagged as likely a no-op). Never mutates.
+- **`resend`** (write) — resend up to 100 explicit `headerIds` directly. Per-header result `{originalId, newHeaderId?, ok, error?}`; a bad header does not abort the batch.
+- **`resendFiltered`** (write) — resend messages matching `item` (required — matches source or target config item) + `status` (default `'Errored'`) + a `from`/`to` time window (required `from`, max 7 days). **Dry-run-first**: `dryRun` defaults to `true` and returns only the match count + a first-20 sample, resending NOTHING; executing requires **both** `dryRun:false` AND `confirm:true`, otherwise the call is refused with no changes made. `maxMessages` caps the batch (default 100, hard cap 500) — a match count over the cap is refused (not truncated-and-executed).
+
+> **DUPLICATION HAZARD:** resending an already-processed message delivers its data again downstream — the target sees a brand-new message, not a correction. Always `preview` first and confirm the message is genuinely worth retrying.
+
+**Governance:** `preview` is a **read, enabled by default**. `resend` and `resendFiltered` are truthfully classified `write` and are **DEFAULT-DISABLED** — unlike `iris_production_control:clean` (Epic 20), resend is NOT given `defaultEnabled`, because it duplicates business data flow downstream rather than recovering a wedged production. Enable via `IRIS_GOVERNANCE`:
+
+```json
+{"global": {"iris_message_resend:resend": true, "iris_message_resend:resendFiltered": true}}
+```
+
+**Input (resendFiltered, dry run):**
+```json
+{
+  "action": "resendFiltered",
+  "item": "MyApp.Operation.Send",
+  "from": "2026-07-01T00:00:00Z"
+}
+```
+
+**Output (dry run):**
+```json
+{
+  "action": "resendFiltered",
+  "dryRun": true,
+  "matchCount": 3,
+  "sample": [
+    { "id": 90412, "sourceItem": "MyApp.Service.FileIn", "targetItem": "MyApp.Operation.Send", "status": "Errored", "timeCreated": "2026-07-01T10:30:00.000Z" },
+    { "id": 90418, "sourceItem": "MyApp.Service.FileIn", "targetItem": "MyApp.Operation.Send", "status": "Errored", "timeCreated": "2026-07-01T14:05:12.441Z" },
+    { "id": 90427, "sourceItem": "MyApp.Service.FileIn", "targetItem": "MyApp.Operation.Send", "status": "Errored", "timeCreated": "2026-07-02T09:11:03.907Z" }
+  ],
+  "item": "MyApp.Operation.Send",
+  "status": "Errored",
+  "from": "2026-07-01T00:00:00Z",
+  "to": "2026-07-02T10:30:00.000Z",
+  "maxMessages": 100
+}
+```
+
+Executing requires the same call again with `dryRun: false, confirm: true` (or `action: "resend"` with an explicit `headerIds` list for a small known set).
 
 ### Credential Tools
 
@@ -235,6 +282,7 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 |---|---|
 | `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
 | `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
+| `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
 
 Also installable as [Agent Skills](../../skills/README.md).
 
@@ -772,7 +820,7 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 21 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 22 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, monitoring, and diagram tools

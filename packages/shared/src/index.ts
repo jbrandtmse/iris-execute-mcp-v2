@@ -1,6 +1,7 @@
 // @iris-mcp/shared — barrel export
 
 export { booleanParam } from "./zod-helpers.js";
+export { isArgProvided, argOrPlaceholder } from "./prompt-helpers.js";
 export type { IrisConnectionConfig } from "./config.js";
 export { loadConfig } from "./config.js";
 export {
@@ -64,6 +65,7 @@ export {
 } from "./governance-baseline.js";
 export {
   parseGovernanceConfig,
+  parseGovernancePreset,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
   unwrapActionOptions,
@@ -74,10 +76,12 @@ export {
 } from "./governance.js";
 export type {
   MutationClass,
+  GovernancePreset,
   GovernanceLayer,
   GovernanceConfig,
   MutatesLookup,
 } from "./governance.js";
+export { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
 export {
   SERVER_DISCOVERY_TOOL_NAME,
   SERVER_DISCOVERY_INSTRUCTIONS,

@@ -20,6 +20,18 @@ Class ExecuteMCPv2.Loc.Scanner Extends %RegisteredObject
 /// ShowGenerated)</code>.</p>
 /// <p><var>pDocs</var> — output: <code>pDocs</code> = count, <code>pDocs(1..n)</code>
 /// = full document names including the type suffix (e.g. <code>Pkg.Cls.cls</code>).</p>
+/// <p><b>CR 22.0-D2 (closed-by-decision, Story 26.4):</b> a multi-part <var>pSpec</var>
+/// where an exact document name is listed BEFORE an overlapping wildcard part can
+/// silently drop documents. Re-confirmed via source read of
+/// <code>irislib/%Library/RoutineMgr.cls</code>
+/// <method>StudioOpenDialogExecute</method> (~lines 1146-1180): the query re-processes
+/// each comma-delimited spec part into its OWN pattern/index-range tuple and iterates
+/// them independently, so part order and overlap genuinely affect which names are
+/// yielded — this is native <code>%RoutineMgr:StudioOpenDialog</code> behavior, not a
+/// port defect. This method passes <var>pSpec</var> through to the query verbatim
+/// (decision D2 — spec semantics = StudioOpenDialog semantics); callers should use
+/// non-overlapping spec parts (documented in the <code>iris_loc_count</code> tool
+/// description).</p>
 ClassMethod EnumerateDocs(pSpec As %String, pIncludeGenerated As %Boolean = 0, Output pDocs) As %Status
 {
     Set tSC = $$$OK

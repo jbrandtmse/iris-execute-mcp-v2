@@ -79,6 +79,18 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ---
 
+## Audit Logging (framework surface, not part of the public barrel)
+
+`audit.ts` implements the opt-in, structured, secrets-free session audit log described in the suite's [Compliance & Auditability](../../README.md#compliance--auditability) section (`IRIS_AUDIT_LOG` / `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS`). Unlike everything in [Public API](#public-api) above, its exports (`AuditLogger`, `parseAuditConfig()`, `redactValue()`, `AuditConfig`/`AuditEntryInput`/`AuditOutcome`) are **not** re-exported from this package's barrel (`index.ts`) — the module is consumed internally, exclusively by `server-base.ts`.
+
+- **`AuditLogger`** -- Owns the per-process session UUID, a monotonic per-session `seq` counter, a serialized append queue (`fs.appendFile`, one JSONL line per call), size-based rotation (`<path>` → `<path>.1`), and degrade-never-throw semantics (a post-startup sink failure is swallowed, logged once, and counted rather than propagated into the tool path). `shutdown()` flushes the queue and writes a final line recording `droppedEntries`.
+- **`parseAuditConfig()`** -- Parses `IRIS_AUDIT_LOG` / `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS` from an injectable `env`. Returns `undefined` (auditing OFF) when `IRIS_AUDIT_LOG` is unset; throws naming the offending variable on a malformed `IRIS_AUDIT_LOG_MAX_MB`.
+- **`redactValue()`** -- Pure, non-mutating recursive redaction: replaces the value of any key matching the credential-name family (`password`, `secret`, `token`, `credential`, `apikey`, `authorization`, etc. — case-insensitive) with `"[REDACTED]"`, and truncates any other string over 2 KB.
+
+**Framework surface, not a tool (Rule #31).** `McpServerBase.handleToolCall` — the single choke point every tool call passes through, on every server — wraps each call with a thin audit interceptor when `IRIS_AUDIT_LOG` is set. It is wired centrally in `server-base.ts`, so it automatically covers all five server packages and every present and future tool with zero per-tool code, and it appears in **no package's tool array**: it adds nothing to any `packages/<pkg>/src/tools/index.ts` array and changes no package's advertised tool count. It also carries no `mutates` classification and no `IRIS_GOVERNANCE` key — deliberately: audit logging is server *configuration*, not a governed tool action an AI client could switch off via governance.
+
+---
+
 ## Architecture
 
 All five IRIS MCP server packages depend on `@iris-mcp/shared`:

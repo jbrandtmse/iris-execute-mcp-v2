@@ -724,6 +724,13 @@ export function evaluate(
 ): EvaluateResult {
   const t: Thresholds = mergeThresholds(thresholds);
 
+  // `checked` is filtered against the canonical `AREA_VALUES` enum, so any
+  // `errors` key that is NOT one of the 9 canonical area names is silently
+  // dropped rather than surfaced as a finding (CR 23.2-2 / CR 26.4-2). This
+  // is safe: `ExecuteMCPv2.REST.Health.cls`'s `pErrors.%Set(...)` calls are
+  // all literal, hardcoded canonical area names (confirmed by source read,
+  // Story 23.2 review) -- the endpoint never emits an out-of-enum `errors`
+  // key, so this filter never masks a real per-area failure in practice.
   const checked = AREA_VALUES.filter(
     (a) =>
       Object.prototype.hasOwnProperty.call(rawAreas, a) ||
@@ -838,6 +845,22 @@ export const healthCheckTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
+      // CR 23.2-3: a 200 response with a valid Atelier envelope but a missing
+      // `result` (server contract drift) must surface as this tool's clean
+      // `isError` envelope, never a raw TypeError (from dereferencing
+      // `undefined.areas`) or a false "All 0 areas healthy" from a silent
+      // `?? {}` fallback.
+      if (response.result === undefined || response.result === null) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Error checking IRIS health: health endpoint returned no result payload.",
+            },
+          ],
+          isError: true,
+        };
+      }
       const result = response.result as {
         areas?: RawAreas;
         errors?: Record<string, string>;

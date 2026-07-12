@@ -9,11 +9,7 @@
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
-
-/** Render `value`, or a bracketed placeholder for the static skills doc when omitted. */
-function arg(value: string | undefined, placeholder: string): string {
-  return value !== undefined && value !== "" ? value : placeholder;
-}
+import { argOrPlaceholder as arg, isArgProvided } from "@iris-mcp/shared";
 
 export const diagnoseSlowQueryPrompt: PromptDefinition = {
   name: "diagnose-slow-query",
@@ -37,7 +33,7 @@ export const diagnoseSlowQueryPrompt: PromptDefinition = {
     const query = arg(args.query, "<query>");
     const namespace = arg(args.namespace, "<namespace>");
     const namespaceNote =
-      args.namespace !== undefined
+      isArgProvided(args.namespace)
         ? `Target namespace: "${namespace}" — pass \`namespace: "${namespace}"\` on every \`iris_sql_analyze\` call below.`
         : `No namespace specified — omit \`namespace\` to use the server's configured default on every call below.`;
 

@@ -11,10 +11,12 @@ import type { PromptDefinition } from "@iris-mcp/shared";
 import { diagnoseSlowQueryPrompt } from "./diagnoseSlowQuery.js";
 import { objectscriptReviewPrompt } from "./objectscriptReview.js";
 import { deployAndTestClassPrompt } from "./deployAndTestClass.js";
+import { promoteEnvironmentChangePrompt } from "./promoteEnvironmentChange.js";
 
 /** All prompt definitions registered by the iris-dev-mcp server. */
 export const prompts: PromptDefinition[] = [
   diagnoseSlowQueryPrompt,
   objectscriptReviewPrompt,
   deployAndTestClassPrompt,
+  promoteEnvironmentChangePrompt,
 ];

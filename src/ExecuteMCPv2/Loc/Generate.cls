@@ -9,6 +9,17 @@
 /// <p>The aggregation invariant <code>blank + sourceCode + sourceComment + testCode
 /// + testComment = totalLines</code> is enforced per document AND in the aggregate as
 /// a hard error (the reference tool only warned on stderr).</p>
+/// <p><b>CR 22.0-D1 (closed-by-decision, Story 26.4):</b> <method>Count</method> is an
+/// ALL-OR-NOTHING facade — a per-document <method>Scanner:ScanDoc</method> failure
+/// (including the rare TOCTOU race where a matched document is deleted/renamed between
+/// <method>Scanner:EnumerateDocs</method> and retrieval) aborts the ENTIRE scan with a
+/// hard error naming the offending document, rather than skipping it and returning
+/// partial results. This is a deliberate design choice, not an oversight: the same
+/// hard-error discipline enforces the bucket-sum invariant above, no incident is
+/// possible on a quiescent namespace, and the error message names the offending
+/// document so the caller can rerun once the namespace is quiescent. See
+/// <code>packages/iris-dev-mcp/src/tools/loc.ts</code>'s <code>iris_loc_count</code>
+/// tool description for the caller-facing statement of this contract.</p>
 Class ExecuteMCPv2.Loc.Generate Extends %RegisteredObject
 {
 

@@ -12,13 +12,13 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 26 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis, lines-of-code metrics |
+| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 28 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`) |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 21 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams |
+| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay (duplication hazard — preview before executing) |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **101 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **104 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -77,10 +77,13 @@ All servers use the same environment variables:
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |
+| `IRIS_AUDIT_LOG` | *(unset — OFF)* | **Optional.** Absolute path to a JSONL audit file recording every MCP tool call (who-ish/session, what, outcome, denials). Omit for today's behavior — a mechanical no-op, zero filesystem writes. See [Compliance & Auditability](#compliance--auditability). |
+| `IRIS_AUDIT_LOG_MAX_MB` | `50` | **Optional.** Rotates the audit file at this size — the current file is renamed to `<path>.1` (single generation, overwriting a prior one) and a fresh file is started. Only relevant when `IRIS_AUDIT_LOG` is set. |
+| `IRIS_AUDIT_LOG_PARAMS` | `false` | **Optional.** When `true`, audit entries also include each call's (redacted) parameter *values*; the default logs parameter *key names* only. Only relevant when `IRIS_AUDIT_LOG` is set. |
 | `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer ceiling on the number of rows `iris_sql_execute` **returns** — a post-fetch cap on the response (it bounds the returned row count, not the server-side result set or transfer). Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
 | `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for `iris_sql_execute`'s HTTP call. Omit to use the connection's default `IRIS_TIMEOUT`. |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_SQL_MAX_ROWS`, and `IRIS_SQL_TIMEOUT` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, and `IRIS_SQL_TIMEOUT` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
 
 ### 3. Configure Your MCP Client
 
@@ -324,8 +327,11 @@ Per the default-seed rule above, the **new write actions** added after governanc
 | interop | `iris_default_settings_manage` | `set`, `delete` | `list`, `get` |
 | interop | `iris_production_item` | `add`, `remove` (new) | `enable`, `disable`, `get`, `set` (pre-governance baseline) |
 | interop | `iris_message_diagram` | — (flat read tool, no actions) | whole tool (message-trace Mermaid diagrams, Epic 21) |
-| dev | `iris_sql_analyze` | — (all four actions are reads) | `explain`, `stats`, `indexUsage`, `running` |
+| interop | `iris_message_resend` | `resend`, `resendFiltered` (message resend/replay, Epic 26) | `preview` |
+| dev | `iris_sql_analyze` | — (all five actions are reads) | `explain`, `stats`, `indexUsage`, `running`, `advise` (Epic 28) |
 | dev | `iris_loc_count` | — (flat read tool, no actions) | whole tool (namespace lines-of-code metrics, Epic 22) |
+| dev | `iris_env_diff` | — (flat read tool, no actions) | whole tool (cross-profile environment drift detection, Epic 27) |
+| dev | `iris_env_promote` | `execute` | `plan` |
 
 Every **pre-governance** tool action (everything shipped before the governance layer) stays enabled by default. The authoritative per-tool catalog with endpoints and governance notes is [`tool_support.md`](tool_support.md).
 
@@ -339,6 +345,15 @@ A small number of **new write actions ship enabled by default** even though they
 
 Absent any tool opting in, this mechanism is inert (the governance seed is byte-for-byte its pre-F2 behavior — every other new write still default-disabled).
 
+#### `iris_env_promote:execute` safety model (Epic 27)
+
+`iris_env_promote`'s `execute` action is a genuine environment-mutating write, so it carries a richer safety story than a single default-disabled flag — worth its own callout:
+
+- **Default-disabled, not `defaultEnabled`.** Unlike `iris_production_control:clean` (a recovery-of-last-resort action, Epic 20), `execute` is a real promotion write and deliberately does **not** use the `defaultEnabled` mechanism above — enable it explicitly via `IRIS_GOVERNANCE`, e.g. `{"global": {"iris_env_promote:execute": true}}`.
+- **No-deletions guarantee.** `onlyInTarget` diff entries (something exists on the target only) are always emitted as informational **warnings**, never as steps. No delete/remove operation exists anywhere in any plan, in this or any future version — the one exception is `updateMapping`'s intra-step delete+create *replace* of a mapping the source also has (`Config.cls` has no in-place update); it never targets a target-only item.
+- **Secrets exclusion.** A System Default Settings value whose setting name looks credential-ish (`password`/`secret`/`key`/`token`/`pwd`/`passphrase`/`credential`/`cert`/`private`/`salt`, case-insensitive) is redacted in both `iris_env_diff` and `iris_env_promote` output — the plaintext never appears in any tool result, on either the plan or the execute path (including error messages). Credentials/users/roles promotion is out of scope entirely.
+- **Four refuse-before-any-write gates**, each mutating nothing on failure: (1) `confirm: true` required; (2) a non-empty `steps` allowlist whose every index exists in `plan.steps`; (3) plan-hash freshness — the SAME `diff` that produced `plan` is re-hashed and compared, refusing a stale plan; (4) the **target** profile's own governance policy must enable every write family the allowlisted steps use (`iris_doc_put`/`iris_doc_compile`, `iris_mapping_manage:create`/`:delete`, `iris_default_settings_manage:set`, `iris_webapp_manage:modify`, `iris_config_manage:set`) — this is what stops a caller on an unrestricted profile from writing into a governance-locked target, independent of the outer `iris_env_promote:execute` gate.
+
 ### Backward Compatibility
 
 **Existing single-server `IRIS_*` setups require no changes.** This is a release-gate promise:
@@ -346,8 +361,33 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 - With **neither** `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, behavior is byte-for-byte identical to before — one instance from your `IRIS_*` vars, every tool enabled.
 - With `IRIS_GOVERNANCE_PRESET` **unset** (the default), the governance cascade's preset layer is a pure pass-through — behavior is unchanged whether or not `IRIS_GOVERNANCE`/`IRIS_PROFILES` are set.
 - With `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` **unset** (the default), `iris_sql_execute` is byte-for-byte today's behavior — no `rowsCapped` field, no per-request timeout override.
+- With `IRIS_AUDIT_LOG` **unset** (the default), the tool-call audit log is a mechanical no-op — no audit file is created, no `fs` write is attempted, and every tool call's result is byte-for-byte identical to before the audit interceptor existed.
 - The `server` parameter is an *optional* addition to each tool's input schema. Calls that omit it are unchanged; existing prompts and automations keep working.
 - No `BOOTSTRAP_VERSION` change is involved — these are TypeScript-layer capabilities; nothing on the IRIS side changes.
+
+---
+
+## Compliance & Auditability
+
+For regulated environments — healthcare, finance, or any shop that has to answer "what did the AI actually do to this system?" — the suite ships an opt-in, secrets-free **tool-call audit log**: a structured JSONL record of every MCP tool call, across all five servers, switched on with a single environment variable.
+
+**What gets recorded.** Every tool call — whether it succeeded, errored, or was blocked by governance — becomes one JSON line:
+
+```json
+{"ts":"2026-07-11T14:03:22.117Z","session":"1f2e3a9c-...","seq":42,"serverPkg":"@iris-mcp/ops","tool":"iris_database_action","action":"truncate","profile":"prod","namespace":"HSCUSTOM","outcome":"denied","denyReason":"GOVERNANCE_DISABLED","presetApplied":"read-only","durationMs":3,"paramKeys":["action","database"]}
+```
+
+`session` is a UUID generated once per server process, so every line from one running server shares it; `seq` is a per-session monotonic counter (1, 2, 3, …), so a log file can be replayed in exact call order even under concurrent calls. `outcome` is one of `ok`, `error` (the entry's `error` field carries the same sanitized message the caller received — never a raw stack trace or an internal `^global` reference), or `denied` (the governance gate blocked it — see [Multiple Servers & Governance](#multiple-servers--governance) — with a structured `denyReason` and, when a safety preset rather than an explicit override caused the block, `presetApplied`).
+
+**Secrets-free by construction, not by convention.** Before an entry is ever written — before it even reaches the write queue — the logger recursively walks the call's arguments (through nested objects and arrays of objects) and replaces the *value* of any key that looks like a credential (`password`, `passwd`, `secret`, `token`, `credential`, `apikey`/`api_key`, `authorization` — case-insensitive) with `"[REDACTED]"`, and truncates any other string over 2 KB to its first 256 characters. `IRIS_AUDIT_LOG_PARAMS` defaults to `false`: the safest posture, logging parameter *key names* only and never writing a single parameter value, redacted or not. Setting it to `true` includes the (still-redacted) values for deeper forensics.
+
+**A crashing or full disk never breaks a tool call.** Writing to the audit file is fire-and-forget: if the sink becomes unwritable mid-session, the write is swallowed, counted, and logged once as a warning — the tool call itself always completes and returns to the client normally. A *startup-time* misconfiguration is treated differently and deliberately less forgiving: if `IRIS_AUDIT_LOG` is set but its directory isn't writable, the server fails fast at launch naming the variable — an operator who asked for auditing must never end up silently running unaudited. On shutdown, the writer flushes its queue and appends a final line recording how many entries (if any) were dropped due to a degraded sink.
+
+**Governance cannot turn this off.** This is deliberate, and it is the whole point for a regulated deployment: `IRIS_AUDIT_LOG` is server-side **configuration**, set by whoever deploys the MCP server — it is not a tool and not a governed action, so there is no `IRIS_GOVERNANCE` key for it and none will be added. An AI client operating through the MCP protocol has no path to disable or tamper with its own audit trail; only an operator with access to the server's environment can turn it off, by unsetting `IRIS_AUDIT_LOG` and restarting.
+
+**Disambiguation — this is not `iris_audit_manage` / `iris_audit_events`.** The suite already ships two *IRIS server-side* security-audit tools: `iris_audit_manage` (`@iris-mcp/admin`) manages IRIS's own `%SYS.Audit*` security-audit subsystem (login events, privilege changes, and similar — a feature of the IRIS instance itself), and `iris_audit_events` (`@iris-mcp/ops`) reads events from that same IRIS-native audit database. `IRIS_AUDIT_LOG` is a completely different thing: it is the **MCP server process's own record of the tool calls an AI client made through it**. It has nothing to do with IRIS's built-in auditing feature, doesn't read from or write to `%SYS.Audit*`, and works whether or not IRIS-native auditing is enabled at all. Don't conflate the two when scoping a compliance review — they answer different questions ("what did IRIS's security subsystem observe" vs. "what did the AI, through this MCP server, actually do").
+
+See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
 
 ---
 
@@ -355,9 +395,9 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 
 Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) — parameterized, workflow-shaped instructions that teach an MCP client the *sequence* of tool calls an expert would use for a task, not just the tools themselves. This is a separate MCP protocol capability from tools: prompts are discoverable via `prompts/list` and rendered via `prompts/get`, on any client that supports the [MCP `prompts` capability](https://modelcontextprotocol.io/). A server only advertises `prompts` when it has at least one registered — servers with none behave exactly as before (Rule #19 back-compat).
 
-**Prompts do not change the 101-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
+**Prompts do not change the 104-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
 
-### The v1 pack — 9 prompts, grouped by owning server
+### The v1 pack — 11 prompts, grouped by owning server
 
 | Server | Prompt | What it does |
 |---|---|---|
@@ -366,14 +406,14 @@ Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) —
 | `@iris-mcp/dev` | `diagnose-slow-query` | Runs `iris_sql_analyze` (`explain` → `indexUsage` → `stats`) and recommends a fix — never auto-applies one. |
 | `@iris-mcp/dev` | `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
 | `@iris-mcp/dev` | `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. |
+| `@iris-mcp/dev` | `promote-environment-change` | Reviews and promotes configuration/code drift from a source IRIS environment to a target using the review-before-write `iris_env_diff` → `iris_env_promote` workflow — scoped diff, review with the user, plan, an explicit user-selected step allowlist, confirmed execute, then re-diff to verify. Never acts on `onlyInTarget` warnings; states the no-deletions guarantee and that `execute` is default-disabled. |
 | `@iris-mcp/interop` | `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
 | `@iris-mcp/interop` | `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
+| `@iris-mcp/interop` | `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
 | `@iris-mcp/admin` | `provision-project-environment` | Provisions a new project environment (two databases, a namespace, a user, a web application), verifying each step before the next, with rollback notes. |
 | `@iris-mcp/admin` | `audit-security-posture` | Audits users, roles, service authentication settings, SSL/TLS configs, and instance auditing status; reports default passwords, `%All` holders, and insecure services. |
 
 `@iris-mcp/data` ships **no prompts in v1**.
-
-Two additional prompts are **gated** on features that haven't shipped yet and are intentionally *not* registered: `resend-failed-messages` (interop, ships with Epic 26) and `promote-environment-change` (dev, ships with Epic 27).
 
 ### Using the prompts
 
@@ -402,7 +442,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(26)    │ │(26)    │ │(21)    │ │(21)    │ │(7)     │
+     │(28)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘
