@@ -23,6 +23,10 @@ Do not start any spec without it.
 | 08 | [08-embedded-python.md](08-embedded-python.md) | `iris_python_execute` / `iris_python_env` | dev | ~2 stories | 8 ⚪ |
 | 09 | [09-semantic-search.md](09-semantic-search.md) | `iris_semantic_index` / `iris_semantic_search` (vector) | dev | ~1.5 epics | 9 ⚪ gated |
 | 10 | [10-fhir-health-server.md](10-fhir-health-server.md) | `@iris-mcp/health` FHIR server (read-only MVP) | new package | ~2 epics | 10 🟣 |
+| 11 | [11-tool-visibility-presets.md](11-tool-visibility-presets.md) | `IRIS_TOOLS_PRESET` tool visibility presets + per-tool enable/disable | shared + all | ~4 stories | — * |
+
+\* Spec 11 was added 2026-07-12 from the tool-count/visibility analysis (suite drifted past the
+researched 5-15 tools-per-server guidance), not part of the original 10-feature wargame.
 
 ## Dependency notes
 
@@ -32,6 +36,10 @@ Do not start any spec without it.
   `mutates` classification feeds it — no rework).
 - Spec 09 is **gated**: requires spec 08 shipped AND IRIS 2024.1+ available for testing.
 - Spec 10 is a separate initiative (new package); requires an IRIS for Health test instance.
+- Spec 11 is independent and orthogonal to spec 02: visibility (advertise-time, per-tool) sits in
+  front of governance (call-time, per-action); neither replaces the other. Any tool added by a
+  later spec must carry preset-roster dispositions (spec 11's `assertPresetCoverage` enforces
+  this at construction, the same way Rule #28 enforces `mutates`).
 
 ## Ground rules that apply to every spec (enforced in 00-conventions.md)
 

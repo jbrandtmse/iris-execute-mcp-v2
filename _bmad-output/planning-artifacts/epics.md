@@ -4216,3 +4216,50 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 29.3.2** — Any item dispositioned **resolved** via a code fix meets Rule #48's higher bar: proven LIVE on the real surface OR mutation-verified (revert → red → restore); a green suite alone is NOT evidence. Each resolved fix carries a regression test pinned from live/real behavior.
 - **AC 29.3.3** — Rule #50 / #49 lenses applied where a dispositioned item touches comparison/diff/key logic (the Epic-27 env-diff/env-promote items). Additive back-compat preserved (Rule #19): no change to any existing tool's default-enabled output; frozen governance baseline `1e62c5ad5bf7` untouched; `BOOTSTRAP_VERSION` unchanged unless a resolved fix legitimately touches a bootstrapped class (then dual-roster + idempotence per Rules #39/#24).
 - **AC 29.3.4** — The disposition table is mirrored into the ledger (Rule #37) and the Epic 29 retro-review carry-forward is CLEARED (no carried Epic-26/27/28-own items remain open after this story).
+
+## Epic 30: Tool Visibility Presets & Per-Tool Enable/Disable (added 2026-07-12)
+
+**Goal**: Bring every server back inside the research-backed 5–15 tools-per-server window for the clients that need it — without removing anything. The suite has drifted past its own ceiling (dev 29 / admin 27 runtime tools vs. the "cliff at ~20" documented in the 2026-04-05 MCP best-practices research); weaker models (Haiku-class, local LLMs) pay in tool-selection accuracy and per-turn context tokens. This epic adds the missing ADVERTISE-TIME layer: config-driven per-tool visibility with named presets. A hidden tool is never registered — absent from `tools/list`, uncallable (standard MCP unknown-tool error), zero context cost — while call-time governance stays exactly as is.
+
+**Binding spec**: [research/feature-specs/11-tool-visibility-presets.md](./research/feature-specs/11-tool-visibility-presets.md) + [00-conventions.md](./research/feature-specs/00-conventions.md). Preset rosters (spec §2.5) are stakeholder-APPROVED 2026-07-12 — implement as written.
+
+**Scope**: Pure TS — visibility engine in `@iris-mcp/shared` + `presets.ts` rosters in all 5 server packages; no new tools, no governance keys, no governance-engine change, no ObjectScript/bootstrap. Env family: `IRIS_TOOLS_PRESET` (`full` default | `core` | `developer`), `IRIS_TOOLS_DISABLE` / `IRIS_TOOLS_ENABLE` (comma lists, trailing-`*` wildcards). Resolution `ENABLE > DISABLE > preset > default-visible`; the filter runs at the `McpServerBase` constructor registration loop so hidden tools never reach the SDK registry. `iris_server_profiles` is RESERVED always-visible and gains a `toolVisibility` block (preset + visible/hidden COUNTS, never hidden names); the effective-governance report and `iris-governance://` resource omit hidden tools' keys. Rosters are explicit per-preset `include`/`exclude` dispositions with registration-time `assertPresetCoverage` (Rule #28 analog — a tool without a disposition throws at construction) + a `TOOL_PAIRS` co-visibility guard (`iris_env_diff`/`iris_env_promote`). `core` lands every server at ≤13 runtime tools (12/12/9/9/7 package tools on dev/admin/interop/ops/data); `developer` hides security/enterprise administration (28/10/22/9/7). Unset env ⇒ byte-for-byte today's `tools/list` (Rule #19 mechanical snapshot, all 5 servers).
+
+**Functional Requirements (new)**: FR138.
+
+**Stories**:
+- 30.0 Visibility engine + env parsing + constructor filter + back-compat proof (spec §3 story 1)
+- 30.1 Preset rosters × 5 packages + coverage/pairs guards (spec §3 story 2)
+- 30.2 `toolVisibility` surfacing + governance-report consistency + payload measurement (spec §3 story 3)
+- 30.3 Docs + live smokes (spec §3 story 4)
+
+**Out of scope (v1)**: per-ACTION visibility (schema surgery — call-time governance owns per-action safety); runtime toggling (`RegisteredTool.enable/disable` + `listChanged`); per-profile visibility (impossible — one `tools/list` per server process); an `operator` preset (roster-only change later); tool consolidation (breaking — future major version); audit-log session-start preset record.
+
+### Story 30.0: Visibility Engine (shared)
+
+**Acceptance Criteria**:
+- **AC 30.0.1** — Env parsing with the established fail-fast style: unknown `IRIS_TOOLS_PRESET` value fails startup naming the valid values; bare `*` rejected; unknown tool names in either list WARN without failing startup (the env block is shared across all 5 servers); the same literal name in both lists warns (ENABLE wins); a literal `iris_server_profiles` in `IRIS_TOOLS_DISABLE` fails startup, while wildcards silently skip it.
+- **AC 30.0.2** — Resolution per spec §2.2 (`ENABLE > DISABLE > preset > default-visible`, trailing-`*` wildcards); filter applied at the constructor registration loop; a hidden tool is absent from `tools/list` AND calling it returns the SDK's standard unknown-tool error (no custom envelope, no governance error); `addTools()` applies the same filter; a startup log line reports preset + visible/hidden counts + any warnings.
+- **AC 30.0.3** — `assertPresetCoverage` (sibling of `assertGovernanceClassification`): for every named preset, `include ∪ exclude` EQUALS the package tool-name set and `include ∩ exclude = ∅`; violation throws at construction naming tool + preset. `full` is reserved (= all tools, not definable in rosters).
+- **AC 30.0.4** — Rule #19 back-compat capstone in the DEFAULT suite: with no visibility env vars, each of the 5 servers' registered tool-name set deep-equals its pre-feature snapshot.
+
+### Story 30.1: Preset Rosters (all 5 packages)
+
+**Acceptance Criteria**:
+- **AC 30.1.1** — `packages/<pkg>/src/tools/presets.ts` × 5 match spec §2.5 EXACTLY (approved rosters: core 12/12/9/9/7, developer 28/10/22/9/7; data-mcp declares full-inclusion rosters explicitly with empty excludes); wired via `McpServerBaseOptions.toolPresets`.
+- **AC 30.1.2** — Per-package coverage tests (the same set-equality as `assertPresetCoverage`, failing with the offending name) + a shared `TOOL_PAIRS` co-visibility test (`iris_env_diff`/`iris_env_promote` together-in or together-out of every preset).
+- **AC 30.1.3** — Package `tools[]` arrays and every existing count assertion byte-for-byte unchanged (Rule #31 — no tool counts move anywhere); a test asserts every `core` server is ≤13 runtime tools (roster + the framework `iris_server_profiles`).
+
+### Story 30.2: Surfacing + Payload Measurement
+
+**Acceptance Criteria**:
+- **AC 30.2.1** — `iris_server_profiles` output gains `toolVisibility: {preset, visibleTools, hiddenTools}` (preset name + counts only — hidden tool NAMES are deliberately not disclosed; invisible means invisible); present under every configuration including default `full`.
+- **AC 30.2.2** — The effective-governance report AND the `iris-governance://{profile}` resource omit keys belonging to hidden tools (one assertion each); `IRIS_GOVERNANCE` keys naming hidden tools remain legal and inert.
+- **AC 30.2.3** — New `scripts/measure-tools-payload.mjs` reports, per server × preset: tool count, `tools/list` JSON bytes, ~tokens (bytes/4 heuristic, no new dependency); the measured table is recorded in the README visibility section + story notes.
+
+### Story 30.3: Visibility Docs + Live Smokes
+
+**Acceptance Criteria**:
+- **AC 30.3.1** — Docs rollup (Rule #30): root README env-var rows + a "Tool Visibility Presets" section (roster tables, the visibility-vs-governance layering rules, measurement table); `tool_support.md` note; all three `docs/client-config/*.md`; per-server READMEs; CHANGELOG. Prompt-pack sweep: any prompt referencing a tool hidden under `core`/`developer` is softened or the limitation is documented in README.
+- **AC 30.3.2** — Live smokes on the built dist in a real Node process (Rules #22/#26): (a) default launch ⇒ `tools/list` identical to pre-feature; (b) `IRIS_TOOLS_PRESET=core` ⇒ list equals the core roster exactly AND a call to a hidden tool name returns the unknown-tool error; (c) `IRIS_TOOLS_DISABLE=iris_global_*` + `IRIS_TOOLS_ENABLE=iris_global_get` ⇒ family hidden, hole punched; (d) invalid preset value ⇒ startup crash naming valid values. Disposable smoke scripts deleted before staging.
+- **AC 30.3.3** — Spec §4 ACs 1–11 pass; conventions §6 checklist complete.
