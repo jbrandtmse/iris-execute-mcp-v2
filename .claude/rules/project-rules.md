@@ -1,6 +1,6 @@
 # Project Rules
 
-Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#53**.
+Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#54**.
 
 ## #1 — Meta-rule: codify retrospective lessons
 
@@ -80,11 +80,12 @@ The class name is derived from the directory prefix BEFORE the first glob metach
 - (#25) Verify with `pnpm gen:governance-baseline:check` (no-write). NEVER run the bare generator — it regrows the frozen file; if tripped, `git checkout --` the file immediately. Derive counts/membership from tests and source, never by running a generator.
 - (#20) General pattern: when gating EXISTING capability, encode the "existing set" as a generated, output-only artifact and derive "is this new?" from MEMBERSHIP (never a hand-maintained flag), with an all-preserved test under empty/default config.
 
-## #28 / #32 / #44 — Governance classification
+## #28 / #32 / #44 / #53 — Governance & visibility classification
 
 - (#28) EVERY new (post-foundation) tool/action key MUST carry `mutates: "read" | "write"` — reads included (`assertGovernanceClassification` throws at registration otherwise). read → default-enabled; write → default-disabled.
 - (#32) A new write that must ship ENABLED (recovery tooling) uses the orthogonal `defaultEnabled` marker — NEVER misclassify it as read and NEVER add it to the frozen baseline. The marker flips only the default seed; `mutates:"write"` + `annotations.destructiveHint` stay truthful; registration-time cross-validation rejects the marker on a non-write.
 - (#44) A hand-curated safety classification over an existing surface (e.g. `BASELINE_ACTION_CLASSIFICATIONS`) needs a MECHANICAL cross-check against an independent declared signal (each tool's `readOnlyHint`), flagging divergences for a justification comment — completeness tests + human review are blind to wrong-SIDE entries. Fail-safe direction: classify the stricter side.
+- (#53) EVERY new tool also carries an explicit VISIBILITY disposition (Epic 30 layer, spec 11): `include` or `exclude` in EACH named preset of the owning package's `presets.ts`, in the SAME story that adds the tool — `assertPresetCoverage` throws at construction; there is no default bucket. The disposition is a product decision, not assert-appeasement: `core` stays the everyday loop (≤13 runtime tools/server — when in doubt, EXCLUDE from `core`); `developer` excludes security/enterprise admin; tools designed as a unit go in `TOOL_PAIRS` and stay co-visible; any roster change beyond the new tool's own rows (or any doubt) is re-flagged to the lead, never silently adjusted. Visibility is orthogonal to `mutates` — a new tool needs BOTH classifications; hiding is ergonomics, never a substitute for write-gating.
 
 ## #19 / #21 — Additive back-compat proofs & the epic capstone
 
