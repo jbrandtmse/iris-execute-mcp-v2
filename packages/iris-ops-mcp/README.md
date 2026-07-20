@@ -37,6 +37,12 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **10-tool runtime roster** (9 package tools + `iris_server_profiles`) — monitoring-persona basics: health check, system metrics, alert metrics, jobs/locks/processes, tasks, license. `IRIS_TOOLS_PRESET=developer` trims to a DIFFERENT 10-tool runtime roster (9 + `iris_server_profiles`) — the runtime debugging slice (interop metrics + task history for scheduled jobs); no backup/mirror/ECP/config surface. Same COUNT, different MEMBERSHIP — `core` swaps `iris_metrics_alerts`/`iris_license_info` for `developer`'s `iris_metrics_interop`/`iris_task_history`. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+
+> **Prompt-pack limitation.** The `run-external-backup` prompt calls `iris_journal_info` and `iris_backup_manage` — both are hidden under BOTH `core` and `developer`, so this prompt only works under `full` (or with `IRIS_TOOLS_ENABLE=iris_journal_info,iris_backup_manage`). The `check-system-health` prompt's interpretation guidance also names `iris_journal_info`/`iris_database_check`/`iris_mirror_status` (hidden under both presets) and, under `developer` only, `iris_license_info`/`iris_metrics_alerts` — the composite `iris_health_check` call itself always works, but the FOLLOW-UP drill-down tool for some findings may be hidden depending on preset.
+
 ---
 
 ## MCP Client Configuration

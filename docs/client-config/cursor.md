@@ -230,6 +230,40 @@ All three are **optional** and apply to every server the same way (`IRIS_GOVERNA
 
 ---
 
+## Tool Visibility Presets (optional)
+
+One optional environment variable trims which tools a server advertises on `tools/list` — a smaller, more focused surface for a small/cheap model to reason over. This is a different concern from governance above: visibility controls what an agent can *see*; governance controls what an already-visible action is *allowed to do*.
+
+| Variable | Purpose |
+|----------|---------|
+| `IRIS_TOOLS_PRESET` | `"core"` (~10-tool everyday subset, small-model sweet spot) \| `"developer"` (persona filter — dev-relevant tools, security/enterprise admin hidden) \| `"full"` (today's behavior, default). An unrecognized value fails startup naming the valid values. |
+| `IRIS_TOOLS_DISABLE` | Optional comma-separated tool names to hide (trailing-`*` wildcard supported, e.g. `iris_doc_*`). |
+| `IRIS_TOOLS_ENABLE` | Optional comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE` (punches a hole in a hidden family). |
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_HTTPS": "false",
+        "IRIS_TOOLS_PRESET": "core"
+      }
+    }
+  }
+}
+```
+
+All three are **optional**; omitting them keeps today's `tools/list`, byte-for-byte, for every server. A hidden tool returns the MCP SDK's standard unknown-tool error when called — never a governance error. See [Tool Visibility Presets](../../README.md#tool-visibility-presets) in the suite README for the full layering model, per-server roster tables, and the measured payload-size win.
+
+---
+
 ## Audit Log (optional)
 
 Three optional environment variables turn on a secrets-free, structured JSONL log of every MCP tool call — useful for regulated (e.g. healthcare) deployments that need to answer "what did the AI do?":
