@@ -442,7 +442,7 @@ development_status:
   # iris_server_profiles RESERVED always-visible (+ toolVisibility {preset, visible/hidden COUNTS — never hidden names}); governance report + iris-governance:// resource OMIT hidden tools' keys. Rosters = explicit include/exclude per preset per package; assertPresetCoverage throws at construction on a missing disposition (Rule #28 analog); TOOL_PAIRS co-visibility (iris_env_diff/iris_env_promote).
   # core ≤13 runtime tools/server (12/12/9/9/7 package tools — the research 5-15 window); developer hides security/enterprise admin (28/10/22/9/7). Unset env ⇒ byte-for-byte today's tools/list (Rule #19 snapshot, all 5 servers, DEFAULT suite). Package tools[] arrays + count assertions UNCHANGED (Rule #31).
   # New scripts/measure-tools-payload.mjs (count/bytes/~tokens per server × preset — recorded in README + story notes). Story 30.3 sweeps the prompt pack for hidden-tool references.
-  epic-30: in-progress
+  epic-30: done
   30-0-visibility-engine: done
   30-1-preset-rosters: done
   30-2-surfacing-and-measurement: done

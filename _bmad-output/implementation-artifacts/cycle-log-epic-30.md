@@ -31,3 +31,5 @@
 2026-07-20T04:48:00Z	Story 30.3	qa_complete	spawn_at=2026-07-20T04:36:00Z model=claude-sonnet-5 tests=packages/iris-mcp-all/src/__tests__/docs-visibility-roster-sync.test.ts tests_added=10 first_run_failures=0 clarifications=0 note=docrot_guard_mutation_verified;spec4_coverage_complete closing_sections_present=true
 2026-07-20T05:20:00Z	Story 30.3	cr_complete	spawn_at=2026-07-20T04:49:00Z model=claude-opus-4-8 status=done resolved=3 deferred=0 dismissed=2 high=0 med=2 low=3 patches=3 clarifications=0 med1_fix=extended_docrot_guard_10to17_mutverified med2=dismissed_falsepositive_iris_role_list_is_core_visible closing_sections_present=true
 2026-07-20T05:28:00Z	Story 30.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=capstone_4scenarios_realhandlers_10checks_pass model=claude-opus-4-8
+2026-07-20T05:30:00Z	Story 30.3	committed	sha=5c23990 submodules=
+2026-07-20T05:31:00Z	Epic 30	epic_status_done	stories=4
