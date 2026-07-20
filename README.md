@@ -367,6 +367,26 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 
 ---
 
+## Tool Visibility Presets
+
+> **Stub section (Story 30.2).** Tool visibility (`IRIS_TOOLS_PRESET=core`/`developer`, plus `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE`) trims what a server advertises on `tools/list` — a smaller, more focused surface for a client or a smaller/cheaper model to reason over, orthogonal to governance (visibility controls what an agent can *see*; governance controls what an already-visible action is *allowed to do*). This section currently carries only the measured payload win below; **Story 30.3 completes it** with the full per-server roster tables, the visibility-vs-governance layering rules, and `env` rows across the client-config guides.
+
+### Measured `tools/list` payload (per server × preset)
+
+Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](scripts/measure-tools-payload.mjs)), which constructs a real server per preset and drives the real `tools/list` request handler — the bytes below are exactly what a connected client receives (the SDK's own Zod→JSON-schema tool conversion), not a hand-rolled estimate. `~tokens` is a `bytes / 4` heuristic (no tokenizer dependency).
+
+| Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
+| --- | --- | --- | --- |
+| @iris-mcp/dev | 29 / 53,404 / ~13,351 | 13 / 17,749 / ~4,437 | 29 / 53,404 / ~13,351 |
+| @iris-mcp/admin | 27 / 44,873 / ~11,218 | 13 / 16,613 / ~4,153 | 11 / 15,973 / ~3,993 |
+| @iris-mcp/interop | 23 / 38,332 / ~9,583 | 10 / 20,103 / ~5,026 | 23 / 38,332 / ~9,583 |
+| @iris-mcp/ops | 22 / 30,563 / ~7,641 | 10 / 13,565 / ~3,391 | 10 / 14,016 / ~3,504 |
+| @iris-mcp/data | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 |
+
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~67% fewer bytes (`@iris-mcp/dev`: 53,404 → 17,749).
+
+---
+
 ## Compliance & Auditability
 
 For regulated environments — healthcare, finance, or any shop that has to answer "what did the AI actually do to this system?" — the suite ships an opt-in, secrets-free **tool-call audit log**: a structured JSONL record of every MCP tool call, across all five servers, switched on with a single environment variable.

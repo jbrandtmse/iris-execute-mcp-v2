@@ -16,3 +16,10 @@
 2026-07-20T02:05:00Z	Story 30.1	qa_complete	spawn_at=2026-07-20T01:56:00Z model=claude-sonnet-5 tests=5_presets.e2e.test.ts tests_added=20 first_run_failures=0 clarifications=0 note=real_construction_per_preset_all5pkgs closing_sections_present=true
 2026-07-20T02:20:00Z	Story 30.1	cr_complete	spawn_at=2026-07-20T02:06:00Z model=claude-opus-4-8 status=done resolved=1 deferred=0 dismissed=0 high=0 med=0 low=1 patches=1 clarifications=0 rule36_oracle=verified_cell_by_cell closing_sections_present=true
 2026-07-20T02:30:00Z	Story 30.1	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=builtdist_5servers_35checks_pass model=claude-opus-4-8
+2026-07-20T02:32:00Z	Story 30.1	committed	sha=78a3a26 submodules=
+2026-07-20T02:40:00Z	Story 30.2	story_created	path=_bmad-output/implementation-artifacts/30-2-surfacing-and-measurement.md model=claude-opus-4-8
+2026-07-20T03:00:00Z	Story 30.2	dev_complete	spawn_at=2026-07-20T02:41:00Z model=claude-sonnet-5 files=server-discovery.ts,server-base.ts,measure-tools-payload.mjs,README.md,package.json tests_added=7 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 note=fixed_30.0_visiblecount_offbyone cycle_iteration=1 closing_sections_present=true
+2026-07-20T03:00:30Z	Story 30.2	adr_verifications_complete	tool=none acs=none result=none_required note=surfacing_ts_no_agenttime_tooling model=claude-opus-4-8
+2026-07-20T03:12:00Z	Story 30.2	qa_complete	spawn_at=2026-07-20T03:01:00Z model=claude-sonnet-5 tests=packages/iris-mcp-all/src/__tests__/tool-visibility-non-drift.test.ts tests_added=13 first_run_failures=0 clarifications=0 note=crosspkg_realdist_noleak_nondrift_baselineomit closing_sections_present=true
+2026-07-20T03:45:00Z	Story 30.2	cr_complete	spawn_at=2026-07-20T03:13:00Z model=claude-opus-4-8 status=done resolved=2 deferred=1 dismissed=0 high=0 med=1 low=2 patches=2 clarifications=0 med_fix=CR30.2-1_stale_toolvisibility_counts_addtools_removetools closing_sections_present=true
+2026-07-20T03:50:00Z	Story 30.2	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=measure_tools_payload_builtdist_5servers_x_3presets model=claude-opus-4-8
