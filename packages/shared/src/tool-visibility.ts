@@ -301,6 +301,20 @@ export function resolveVisibleTools(
 }
 
 /**
+ * Tools designed as a unit that must stay co-visible in every named preset
+ * (Epic 30, spec 11 §2.4 "Pairs guard"). Hiding one half of a pair while
+ * showing the other strands the agent mid-workflow — e.g. a `core` server
+ * that shows `iris_env_diff` (plan a change) but hides `iris_env_promote`
+ * (apply it) offers a dead-end tool. Extensible: append `[string, string]`
+ * tuples here as future pairs are identified; each owning package's tests
+ * assert every pair is together-in or together-out of every roster for any
+ * package that owns BOTH members.
+ */
+export const TOOL_PAIRS: readonly (readonly [string, string])[] = [
+  ["iris_env_diff", "iris_env_promote"],
+] as const;
+
+/**
  * Assert that every NAMED preset (`core`, `developer` — NOT `full`, which is
  * reserved and cannot be defined) in `rosters` declares an explicit
  * `include`/`exclude` disposition for EVERY name in `toolNames`, with no

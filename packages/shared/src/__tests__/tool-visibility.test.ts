@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import {
   TOOL_PRESET_NAMES,
+  TOOL_PAIRS,
   parseToolVisibilityConfig,
   resolveVisibleTools,
   assertPresetCoverage,
@@ -347,6 +348,23 @@ describe("resolveVisibleTools", () => {
     // …but the reserved tool is unaffected, and no warning names it.
     expect(visible.has(reservedName)).toBe(true);
     expect(warnings.some((w) => w.includes(reservedName))).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// TOOL_PAIRS — Story 30.1, spec 11 §2.4 "Pairs guard"
+// ════════════════════════════════════════════════════════════════════
+
+describe("TOOL_PAIRS", () => {
+  it("contains the iris_env_diff / iris_env_promote pair", () => {
+    expect(TOOL_PAIRS).toContainEqual(["iris_env_diff", "iris_env_promote"]);
+  });
+
+  it("is a non-empty, extensible list of 2-tuples", () => {
+    expect(TOOL_PAIRS.length).toBeGreaterThan(0);
+    for (const pair of TOOL_PAIRS) {
+      expect(pair).toHaveLength(2);
+    }
   });
 });
 

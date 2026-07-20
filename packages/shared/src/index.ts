@@ -97,6 +97,7 @@ export type {
 } from "./server-discovery.js";
 export {
   TOOL_PRESET_NAMES,
+  TOOL_PAIRS,
   parseToolVisibilityConfig,
   resolveVisibleTools,
   assertPresetCoverage,
