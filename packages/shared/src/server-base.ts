@@ -70,6 +70,12 @@ import {
   serverDiscoveryTool,
   computeServerDiscovery,
 } from "./server-discovery.js";
+import type { ToolPresetRosters, ToolPresetName, ToolVisibilityConfig } from "./tool-visibility.js";
+import {
+  parseToolVisibilityConfig,
+  resolveVisibleTools,
+  assertPresetCoverage,
+} from "./tool-visibility.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -168,6 +174,19 @@ export interface McpServerBaseOptions {
   config?: IrisConnectionConfig;
   /** When true, bootstrap the custom REST service on startup if not already deployed. */
   needsCustomRest?: boolean;
+  /**
+   * Package-owned tool-visibility preset rosters (Epic 30, architecture
+   * decision I2). Optional: `packages/<pkg>/src/tools/presets.ts` exports a
+   * {@link ToolPresetRosters} (`{ core: {include,exclude}; developer:
+   * {include,exclude} }`), passed here by the package's `index.ts` — Story
+   * 30.1 is the first wiring. Consumed by the constructor's tool-visibility
+   * filter (`IRIS_TOOLS_PRESET`) via `resolveVisibleTools`, and validated at
+   * construction by `assertPresetCoverage` (throws on an incomplete/
+   * overlapping roster). Default: absent ⇒ every named preset behaves like
+   * `"full"` (all tools visible) — a package that has not yet wired rosters
+   * is unaffected by `IRIS_TOOLS_PRESET=core|developer`.
+   */
+  toolPresets?: ToolPresetRosters;
 }
 
 // PaginateResult is defined in tool-types.ts and re-exported from index.ts.
@@ -427,6 +446,33 @@ export class McpServerBase {
    */
   private governedKeys: Set<string> = new Set();
 
+  /**
+   * Parsed `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE`
+   * configuration (Epic 30, architecture decision I1), parsed once in the
+   * constructor (see the asymmetry note there, ~L459). Defaults to the
+   * byte-for-byte pass-through state (`preset: "full"`, no disable/enable)
+   * so {@link isToolVisible} is safe even if ever read before the
+   * constructor's own parse runs (mirrors the other governance fields'
+   * safe-default discipline).
+   */
+  private toolVisibilityConfig: ToolVisibilityConfig = {
+    preset: "full",
+    disable: [],
+    enable: [],
+  };
+
+  /**
+   * Resolved visibility summary (Epic 30), computed once at construction and
+   * stored for Story 30.2's `toolVisibility` surfacing on
+   * `iris_server_profiles`. This story only consumes it for the startup log
+   * line.
+   */
+  private toolVisibility: {
+    preset: ToolPresetName;
+    visibleCount: number;
+    hiddenCount: number;
+  } = { preset: "full", visibleCount: 0, hiddenCount: 0 };
+
   /** Page size for tools/list pagination. */
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
 
@@ -456,9 +502,62 @@ export class McpServerBase {
       this.config = options.config;
     }
 
-    // Register all initial tools
+    // ── Tool visibility filter (Epic 30, architecture decisions I1/I2) ──
+    //
+    // Parsed HERE, in the constructor — NOT in start() — because tool
+    // registration is itself constructor-time. This is a deliberate
+    // ASYMMETRY with `IRIS_GOVERNANCE`/`IRIS_GOVERNANCE_PRESET`, which are
+    // parsed in start() (governance is a CALL-TIME gate that can wait until
+    // the profile registry exists there). A constructor throw here — an
+    // unknown preset, a bare "*" wildcard, or a literal disable of the
+    // reserved discovery tool — is still a clean startup crash, the same
+    // operator UX as every other fail-fast path in this class.
+    this.toolVisibilityConfig = parseToolVisibilityConfig();
+    // Rot-proofing (Rule #53): a package's preset rosters must declare an
+    // explicit include/exclude disposition for EVERY one of its tools. A
+    // no-op when options.toolPresets is absent (Story 30.1 wires the first
+    // rosters; until then every named preset behaves like "full").
+    assertPresetCoverage(
+      options.toolPresets,
+      options.tools.map((tool) => tool.name),
+    );
+    const toolVisibilityResolution = resolveVisibleTools({
+      toolNames: options.tools.map((tool) => tool.name),
+      config: this.toolVisibilityConfig,
+      rosters: options.toolPresets,
+      reservedName: SERVER_DISCOVERY_TOOL_NAME,
+    });
+    for (const warning of toolVisibilityResolution.warnings) {
+      logger.warn(`Tool visibility: ${warning}`);
+    }
+    const visibleToolCount = options.tools.filter((tool) =>
+      toolVisibilityResolution.visible.has(tool.name),
+    ).length;
+    this.toolVisibility = {
+      preset: this.toolVisibilityConfig.preset,
+      visibleCount: visibleToolCount,
+      hiddenCount: options.tools.length - visibleToolCount,
+    };
+    logger.info(
+      `Tool visibility: preset="${this.toolVisibility.preset}" ` +
+        `visible=${this.toolVisibility.visibleCount} hidden=${this.toolVisibility.hiddenCount}` +
+        (toolVisibilityResolution.warnings.length > 0
+          ? ` warnings=${toolVisibilityResolution.warnings.length}`
+          : ""),
+    );
+
+    // Register all initial tools — filtered to the visible subset (Epic 30).
+    // A hidden tool never reaches registerTool: it is absent from the SDK
+    // registry, from tools/list, and uncallable (the SDK's own standard
+    // unknown-tool error). The governance rebuilds below
+    // (rebuildMutatesLookup/rebuildGovernedKeys/assertGovernanceClassified)
+    // read the live `this.tools` registry, which — because of this filter —
+    // never contains a hidden tool's key: a hidden tool is invisible to
+    // governance key derivation too (spec §2.3 step 3), by construction.
     for (const tool of options.tools) {
-      this.registerTool(tool);
+      if (toolVisibilityResolution.visible.has(tool.name)) {
+        this.registerTool(tool);
+      }
     }
 
     // Register the framework-provided discovery tool centrally (Epic 19,
@@ -1494,12 +1593,40 @@ export class McpServerBase {
   // ── Dynamic tool management (listChanged) ──────────────────────────
 
   /**
+   * Decide whether a SINGLE tool name is visible under the server's already-
+   * parsed {@link toolVisibilityConfig} (Epic 30) — the SAME resolution
+   * {@link resolveVisibleTools} performs at construction, reused here so
+   * {@link addTools} applies an IDENTICAL filter to a tool registered at
+   * runtime (spec §2.3 step 5: a hidden tool added dynamically stays
+   * hidden). The one-name call recomputes (and discards) warnings that were
+   * already surfaced at startup — a negligible cost on this low-frequency
+   * dynamic-add path — so the visibility DECISION has exactly one
+   * implementation, never two.
+   */
+  private isToolVisible(name: string): boolean {
+    return resolveVisibleTools({
+      toolNames: [name],
+      config: this.toolVisibilityConfig,
+      rosters: this.options.toolPresets,
+      reservedName: SERVER_DISCOVERY_TOOL_NAME,
+    }).visible.has(name);
+  }
+
+  /**
    * Register additional tools at runtime and emit
    * `notifications/tools/list_changed`.
+   *
+   * Applies the SAME tool-visibility filter (Epic 30) as the constructor: a
+   * tool hidden by `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/
+   * `IRIS_TOOLS_ENABLE` is not registered even when added dynamically.
    */
   addTools(tools: ToolDefinition[]): void {
+    let registeredCount = 0;
     for (const tool of tools) {
-      this.registerTool(tool);
+      if (this.isToolVisible(tool.name)) {
+        this.registerTool(tool);
+        registeredCount++;
+      }
     }
     // Keep the governance mutates lookup in sync with the live tool set (D4) so
     // a newly-added governed tool's `mutates` classification is enforced.
@@ -1511,7 +1638,13 @@ export class McpServerBase {
     // (AC 15.0.3) — same safety net as construction.
     this.assertGovernanceClassified();
     this.mcpServer.sendToolListChanged();
-    logger.info(`Added ${tools.length} tool(s) and notified clients`);
+    const hiddenCount = tools.length - registeredCount;
+    logger.info(
+      `Added ${registeredCount} tool(s) and notified clients` +
+        (hiddenCount > 0
+          ? ` (${hiddenCount} hidden by tool visibility config)`
+          : ""),
+    );
   }
 
   /**
