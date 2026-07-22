@@ -37,6 +37,10 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **10-tool runtime roster** (9 package tools + `iris_server_profiles`) — the troubleshoot-a-production loop: status/summary/control, item config, logs/queues/messages, trace diagram, resend. `iris_production_control` stays visible under `core` so the `recover`-first MCP guidance holds under every preset. `IRIS_TOOLS_PRESET=developer` keeps all **23 runtime tools** (22 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets). (This server's registered prompts — `recover-stuck-production`, `resend-failed-messages`, `trace-message-flow` — only call tools that stay visible under `core`, so no prompt-pack limitation applies here.)
+
 ---
 
 ## MCP Client Configuration

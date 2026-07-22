@@ -34,6 +34,20 @@ This installs all five servers:
 
 Every server provides a framework tool, **`iris_server_profiles`** — call it **first** to discover the configured server-profile roster (non-secret connection metadata; the `password` is never included) and the effective governance policy (which actions are enabled/disabled), so a client can pick the right `server` profile and avoid disabled actions without reading config files. It is a **read tool, enabled by default**, reports in-memory config, and does not connect to IRIS. The same guidance is surfaced via the MCP server `instructions` field at connect time. Details: [Discovering profiles and policy](../../README.md#discovering-profiles-and-policy-call-this-first).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+Every server in this suite supports `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` to trim what it advertises on `tools/list` — orthogonal to governance (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). `core` is the small-model everyday subset (≤13 runtime tools per server); `developer` hides security & enterprise administration. Default (`full`, unset) is today's behavior for every server, byte-for-byte.
+
+| Server | full (runtime) | core (runtime) | developer (runtime) |
+|---|:---:|:---:|:---:|
+| `@iris-mcp/dev` | 29 | 13 | 29 |
+| `@iris-mcp/admin` | 27 | 13 | 11 |
+| `@iris-mcp/interop` | 23 | 10 | 23 |
+| `@iris-mcp/ops` | 22 | 10 | 10 |
+| `@iris-mcp/data` | 8 | 8 | 8 |
+
+Full model, per-server per-tool rosters, and the measured `tools/list` payload-size win: [Tool Visibility Presets](../../README.md#tool-visibility-presets) in the suite README.
+
 ---
 
 ## Configuration

@@ -82,8 +82,11 @@ All servers use the same environment variables:
 | `IRIS_AUDIT_LOG_PARAMS` | `false` | **Optional.** When `true`, audit entries also include each call's (redacted) parameter *values*; the default logs parameter *key names* only. Only relevant when `IRIS_AUDIT_LOG` is set. |
 | `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer ceiling on the number of rows `iris_sql_execute` **returns** — a post-fetch cap on the response (it bounds the returned row count, not the server-side result set or transfer). Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
 | `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for `iris_sql_execute`'s HTTP call. Omit to use the connection's default `IRIS_TIMEOUT`. |
+| `IRIS_TOOLS_PRESET` | `full` | **Optional.** `"full"` (today's behavior) \| `"core"` (~10-tool small-model subset) \| `"developer"` (persona filter, security/enterprise admin hidden). Unknown value fails fast at startup naming the valid values. Omit for today's `tools/list`, byte-for-byte. See [Tool Visibility Presets](#tool-visibility-presets). |
+| `IRIS_TOOLS_DISABLE` | *(unset)* | **Optional.** Comma-separated tool names to hide from `tools/list`. Trailing-`*` wildcard supported (`iris_doc_*`); a bare `*` alone is rejected. Omit to hide nothing beyond the active preset. See [Tool Visibility Presets](#tool-visibility-presets). |
+| `IRIS_TOOLS_ENABLE` | *(unset)* | **Optional.** Comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE` (punches a hole in a hidden family). Omit for no overrides. See [Tool Visibility Presets](#tool-visibility-presets). |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, and `IRIS_SQL_TIMEOUT` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, and `IRIS_TOOLS_ENABLE` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
 
 ### 3. Configure Your MCP Client
 
@@ -364,6 +367,94 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 - With `IRIS_AUDIT_LOG` **unset** (the default), the tool-call audit log is a mechanical no-op — no audit file is created, no `fs` write is attempted, and every tool call's result is byte-for-byte identical to before the audit interceptor existed.
 - The `server` parameter is an *optional* addition to each tool's input schema. Calls that omit it are unchanged; existing prompts and automations keep working.
 - No `BOOTSTRAP_VERSION` change is involved — these are TypeScript-layer capabilities; nothing on the IRIS side changes.
+
+---
+
+## Tool Visibility Presets
+
+Trim any server to a **~10-tool core** for small models with one environment variable:
+
+```bash
+IRIS_TOOLS_PRESET=core                    # ~10-tool everyday subset per server (small-model sweet spot)
+IRIS_TOOLS_PRESET=developer               # persona filter: dev-relevant tools, security/enterprise admin hidden
+IRIS_TOOLS_PRESET=full                    # explicit alias for today's behavior (default when unset)
+IRIS_TOOLS_DISABLE=iris_doc_export,iris_env_*   # hide individual tools / families
+IRIS_TOOLS_ENABLE=iris_env_diff           # punch a hole: re-show a tool the preset/disable hid
+```
+
+A **hidden** tool is never registered with the MCP SDK: it is absent from `tools/list`, and calling it by name returns the SDK's standard unknown-tool error — indistinguishable from a tool that never existed, zero context cost. **`IRIS_TOOLS_PRESET` unset (the default, `full`) is byte-for-byte today's `tools/list` for every server** — a release-gate promise, mechanically proven by a back-compat snapshot test plus a live smoke against the built `dist/` output (Epic 30 closing story).
+
+### Visibility vs. governance — two orthogonal layers
+
+Tool visibility (this section) is a different concern from [governance](#multiple-servers--governance), and the two compose in a specific order:
+
+| | Visibility (this section) | Governance (existing, unchanged) |
+|---|---|---|
+| Question | "Does the agent know this exists?" | "Is this call allowed?" |
+| Granularity | per **tool** | per **action** (`tool` / `tool:action`) |
+| Enforcement point | registration (never enters the SDK registry / `tools/list`) | `dispatchToolCall` runtime gate |
+| Failure surface | standard MCP unknown-tool error | structured `GOVERNANCE_DISABLED` error |
+| Purpose | context ergonomics, tool-selection accuracy | safety / authorization |
+
+Rules of interaction:
+- **Visibility is evaluated first**, at server construction: a hidden tool can never reach the governance gate — it was never registered.
+- An `IRIS_GOVERNANCE` key naming a hidden tool is **legal and inert** (the same `IRIS_GOVERNANCE` JSON is shared across all 5 servers, and governance already tolerates keys for tools a given server doesn't host — this is unchanged, just now also true for a tool your preset hid).
+- Visibility is per-**tool** only. Hiding a single *action* of a multi-action tool (e.g. only `iris_env_promote:execute`, not `:plan`) remains governance's job — no schema surgery on any `action` enum.
+- **Governance is the safety layer; visibility is ergonomics.** `read-only` safety still means `IRIS_GOVERNANCE_PRESET=read-only` — there is no "safe" visibility preset, and hiding a tool is never a substitute for disabling its write actions.
+- **Per-profile visibility is impossible by protocol.** An MCP server process serves exactly one `tools/list` regardless of which `IRIS_PROFILES` connection a call later targets. Visibility env vars are process-global — unlike `IRIS_GOVERNANCE`, there is no `profiles` sub-structure here.
+
+### Env vars & resolution
+
+- **`IRIS_TOOLS_PRESET`** — `full` (default) \| `core` \| `developer`. An unrecognized value **fails fast** at startup, naming the valid values.
+- **`IRIS_TOOLS_DISABLE`** — comma-separated tool names to hide. A trailing-`*` wildcard matches a whole family (`iris_doc_*`); a bare `*` alone is rejected (use `IRIS_TOOLS_PRESET` for that). Whitespace is trimmed.
+- **`IRIS_TOOLS_ENABLE`** — comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE`. Same syntax. This is what makes the "family except one" pattern work: `IRIS_TOOLS_DISABLE=iris_doc_*` + `IRIS_TOOLS_ENABLE=iris_doc_get` hides every `iris_doc_*` tool except `iris_doc_get`.
+
+Resolution precedence per tool: **`ENABLE` > `DISABLE` > preset > default-visible**.
+
+Edge-case semantics (all deterministic):
+- The same literal tool name in both `IRIS_TOOLS_DISABLE` and `IRIS_TOOLS_ENABLE` → a startup **warning** (`ENABLE` wins per precedence) — not an error, since a wildcard/literal overlap is the intended hole-punch usage.
+- An unknown tool name in either list → a startup **warning, not an error** (the same env block is shared across all 5 servers, so a name valid on another server is "unknown" here). A wildcard matching zero registered tools also warns.
+- **`iris_server_profiles` is reserved and always visible** — it is the discovery surface every server's MCP instructions say to call first, and the diagnostic for this very feature. A wildcard that would match it silently skips it; naming it **literally** in `IRIS_TOOLS_DISABLE` **fails startup** (a deliberate misconfiguration, not cross-server sharing).
+- Hiding every package tool is legal (the server then serves only `iris_server_profiles`) but logs a startup warning.
+- Matching is case-sensitive exact/prefix; tool names are already all-lowercase `iris_*`.
+
+`iris_server_profiles` reports the active configuration back to the agent: a `toolVisibility` block — `{ "preset": "core" | "developer" | "full", "visibleTools": <n>, "hiddenTools": <n> }` — deliberately **never** the hidden tool names (invisible means invisible; diagnose "why is tool X missing?" via this count plus the env vars and the roster tables below). The effective-governance report (in `iris_server_profiles` and the `iris-governance://{profile}` resource) also **omits keys belonging to hidden tools**, so the agent's view of both layers stays self-consistent. A startup stderr log line records the active preset plus visible/hidden counts and any of the warnings above.
+
+### The rosters
+
+Design intents differ per preset:
+- **`core`** attacks the **tool-count cliff** (research: LLM tool-selection accuracy degrades sharply past ~20 tools per server) — the everyday ~80% loop, **≤13 runtime tools per server**, tuned for small/cheap models. Destructive-and-rare and bulk/specialist tools are hidden.
+- **`developer`** attacks **persona relevance** — everything a developer touches (full dev server, production lifecycle + monitoring, namespace/database/webapp self-service config, runtime/task tools, all data tools) while hiding **security & enterprise administration** (users/roles/resources/SSL/OAuth/LDAP/X509/audit, backup/mirror/ECP). Counts stay above the cliff on `dev`/`interop` under `developer` — that's accepted; `core` is the count answer.
+
+`iris_server_profiles` is additionally visible on every server under every preset (the `+1` in every "runtime" count below). Two tools designed as a unit — `iris_env_diff` / `iris_env_promote` — are always co-visible in every preset (never one without the other, so an agent is never stranded mid-workflow).
+
+| Preset | dev | admin | interop | ops | data | Package total | Runtime total |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **full** (default) | 28 | 26 | 22 | 21 | 7 | 104 | 109 |
+| **developer** | 28 | 10 | 22 | 9 | 7 | 76 | 81 |
+| **core** | 12 | 12 | 9 | 9 | 7 | 49 | 54 |
+
+Every `core` server lands at ≤13 runtime tools — inside the researched 5-15-tool window. The exact per-tool `include`/`exclude` disposition for each server is declared explicitly in that package's `src/tools/presets.ts` (transcribed from and kept in lockstep with [`research/feature-specs/11-tool-visibility-presets.md#2.5`](_bmad-output/planning-artifacts/research/feature-specs/11-tool-visibility-presets.md) — the authoritative per-tool table; a mismatch fails a per-package unit test AND a construction-time assert, so it cannot drift silently). In short:
+
+- **`@iris-mcp/dev`** `core` = the authoring loop (get/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute. `developer` = the full 28-tool server (every dev tool is dev-relevant).
+- **`@iris-mcp/admin`** `core` = the everyday admin loop (namespaces, databases, users, webapps, permission checks). `developer` = only what developers self-serve (namespace/db/mapping/webapp config) — no user/security administration.
+- **`@iris-mcp/interop`** `core` = the troubleshoot-a-production loop (status/summary/control, item config, logs/queues/messages, trace diagram, resend) — `iris_production_control` stays visible so the `recover`-first MCP guidance holds under every preset. `developer` = the full 22-tool server.
+- **`@iris-mcp/ops`** `core` = monitoring-persona basics (health, system metrics, alert metrics, jobs/locks/processes, tasks, license). `developer` = the runtime debugging slice (interop metrics + task history) — no backup/mirror/ECP/config surface.
+- **`@iris-mcp/data`** — already inside the 5-15 sweet spot: both `core` and `developer` include all 7 tools.
+
+### Measured `tools/list` payload (per server × preset)
+
+Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](scripts/measure-tools-payload.mjs)), which constructs a real server per preset and drives the real `tools/list` request handler — the bytes below are exactly what a connected client receives (the SDK's own Zod→JSON-schema tool conversion), not a hand-rolled estimate. `~tokens` is a `bytes / 4` heuristic (no tokenizer dependency).
+
+| Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
+| --- | --- | --- | --- |
+| @iris-mcp/dev | 29 / 53,404 / ~13,351 | 13 / 17,749 / ~4,437 | 29 / 53,404 / ~13,351 |
+| @iris-mcp/admin | 27 / 44,873 / ~11,218 | 13 / 16,613 / ~4,153 | 11 / 15,973 / ~3,993 |
+| @iris-mcp/interop | 23 / 38,332 / ~9,583 | 10 / 20,103 / ~5,026 | 23 / 38,332 / ~9,583 |
+| @iris-mcp/ops | 22 / 30,563 / ~7,641 | 10 / 13,565 / ~3,391 | 10 / 14,016 / ~3,504 |
+| @iris-mcp/data | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 |
+
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~67% fewer bytes (`@iris-mcp/dev`: 53,404 → 17,749).
 
 ---
 

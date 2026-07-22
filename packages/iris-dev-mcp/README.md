@@ -41,6 +41,12 @@ Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_G
 
 Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on **this server** with one environment variable — no `IRIS_GOVERNANCE` JSON needed. `IRIS_GOVERNANCE_PRESET` is **framework configuration, not a tool** — it applies identically across all five servers in the suite (`@iris-mcp/dev` included), not something this package registers or exposes. An explicit `IRIS_GOVERNANCE` override still wins over the preset. Omit (or set `"full"`) for today's behavior (opt-in, default off). Details: [Read-only mode](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **13-tool runtime roster** (12 package tools + `iris_server_profiles`) — the authoring loop (get/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `IRIS_TOOLS_PRESET=developer` keeps all **29 runtime tools** (28 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+
+> **Prompt-pack limitation.** Two of this server's prompts call tools `core` hides: `diagnose-slow-query` calls `iris_sql_analyze` (hidden under `core`), and `promote-environment-change` calls `iris_env_diff`/`iris_env_promote` (both hidden together under `core` — they are always co-visible). Both prompts work unchanged under `full` or `developer`. Running under `core`, either switch to `full`/`developer` or set `IRIS_TOOLS_ENABLE` to re-show the specific tool(s) the prompt needs.
+
 ---
 
 ## MCP Client Configuration

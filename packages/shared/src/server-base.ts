@@ -70,6 +70,12 @@ import {
   serverDiscoveryTool,
   computeServerDiscovery,
 } from "./server-discovery.js";
+import type { ToolPresetRosters, ToolPresetName, ToolVisibilityConfig } from "./tool-visibility.js";
+import {
+  parseToolVisibilityConfig,
+  resolveVisibleTools,
+  assertPresetCoverage,
+} from "./tool-visibility.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -168,6 +174,19 @@ export interface McpServerBaseOptions {
   config?: IrisConnectionConfig;
   /** When true, bootstrap the custom REST service on startup if not already deployed. */
   needsCustomRest?: boolean;
+  /**
+   * Package-owned tool-visibility preset rosters (Epic 30, architecture
+   * decision I2). Optional: `packages/<pkg>/src/tools/presets.ts` exports a
+   * {@link ToolPresetRosters} (`{ core: {include,exclude}; developer:
+   * {include,exclude} }`), passed here by the package's `index.ts` — Story
+   * 30.1 is the first wiring. Consumed by the constructor's tool-visibility
+   * filter (`IRIS_TOOLS_PRESET`) via `resolveVisibleTools`, and validated at
+   * construction by `assertPresetCoverage` (throws on an incomplete/
+   * overlapping roster). Default: absent ⇒ every named preset behaves like
+   * `"full"` (all tools visible) — a package that has not yet wired rosters
+   * is unaffected by `IRIS_TOOLS_PRESET=core|developer`.
+   */
+  toolPresets?: ToolPresetRosters;
 }
 
 // PaginateResult is defined in tool-types.ts and re-exported from index.ts.
@@ -427,6 +446,48 @@ export class McpServerBase {
    */
   private governedKeys: Set<string> = new Set();
 
+  /**
+   * Parsed `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE`
+   * configuration (Epic 30, architecture decision I1), parsed once in the
+   * constructor (see the asymmetry note there, ~L459). Defaults to the
+   * byte-for-byte pass-through state (`preset: "full"`, no disable/enable)
+   * so {@link isToolVisible} is safe even if ever read before the
+   * constructor's own parse runs (mirrors the other governance fields'
+   * safe-default discipline).
+   */
+  private toolVisibilityConfig: ToolVisibilityConfig = {
+    preset: "full",
+    disable: [],
+    enable: [],
+  };
+
+  /**
+   * Resolved visibility summary (Epic 30), computed once at construction.
+   * Feeds the startup log line AND (Story 30.2, AC 30.2.1) the
+   * `toolVisibility` block on `iris_server_profiles`'s discovery result —
+   * threaded verbatim into {@link computeServerDiscovery} at the discovery
+   * short-circuit in `handleToolCall`. COUNTS ONLY; never expose the
+   * underlying tool names from this field (see {@link hiddenToolNames}).
+   */
+  private toolVisibility: {
+    preset: ToolPresetName;
+    visibleCount: number;
+    hiddenCount: number;
+  } = { preset: "full", visibleCount: 0, hiddenCount: 0 };
+
+  /**
+   * Hidden-tool NAME set (Epic 30, AC 30.2.2), computed once at construction
+   * alongside {@link toolVisibility} (`options.tools` minus the resolved
+   * visible set). PRIVATE ONLY — used exclusively to filter this server's
+   * advisory governance views via {@link visibleGovernedKeys}, so a hidden
+   * tool's governance keys (including its surviving BASELINE keys — see
+   * {@link rebuildGovernedKeys}'s union with `GOVERNANCE_BASELINE`) never
+   * appear in the discovery report or the `iris-governance://` resource.
+   * NEVER surfaced directly: AC 30.2.1's `toolVisibility` block discloses
+   * hidden tool COUNTS only, never names.
+   */
+  private hiddenToolNames: Set<string> = new Set();
+
   /** Page size for tools/list pagination. */
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
 
@@ -456,9 +517,73 @@ export class McpServerBase {
       this.config = options.config;
     }
 
-    // Register all initial tools
+    // ── Tool visibility filter (Epic 30, architecture decisions I1/I2) ──
+    //
+    // Parsed HERE, in the constructor — NOT in start() — because tool
+    // registration is itself constructor-time. This is a deliberate
+    // ASYMMETRY with `IRIS_GOVERNANCE`/`IRIS_GOVERNANCE_PRESET`, which are
+    // parsed in start() (governance is a CALL-TIME gate that can wait until
+    // the profile registry exists there). A constructor throw here — an
+    // unknown preset, a bare "*" wildcard, or a literal disable of the
+    // reserved discovery tool — is still a clean startup crash, the same
+    // operator UX as every other fail-fast path in this class.
+    this.toolVisibilityConfig = parseToolVisibilityConfig();
+    // Rot-proofing (Rule #53): a package's preset rosters must declare an
+    // explicit include/exclude disposition for EVERY one of its tools. A
+    // no-op when options.toolPresets is absent (Story 30.1 wires the first
+    // rosters; until then every named preset behaves like "full").
+    assertPresetCoverage(
+      options.toolPresets,
+      options.tools.map((tool) => tool.name),
+    );
+    const toolVisibilityResolution = resolveVisibleTools({
+      toolNames: options.tools.map((tool) => tool.name),
+      config: this.toolVisibilityConfig,
+      rosters: options.toolPresets,
+      reservedName: SERVER_DISCOVERY_TOOL_NAME,
+    });
+    for (const warning of toolVisibilityResolution.warnings) {
+      logger.warn(`Tool visibility: ${warning}`);
+    }
+    const visiblePackageToolCount = options.tools.filter((tool) =>
+      toolVisibilityResolution.visible.has(tool.name),
+    ).length;
+    this.toolVisibility = {
+      preset: this.toolVisibilityConfig.preset,
+      // AC 30.2.1: the reserved iris_server_profiles tool is ALWAYS visible
+      // (registered outside options.tools) and is counted as visible here —
+      // visibleCount + hiddenCount sums to options.tools.length + 1, matching
+      // the real advertised tools/list count.
+      visibleCount: visiblePackageToolCount + 1,
+      hiddenCount: options.tools.length - visiblePackageToolCount,
+    };
+    // Hidden-tool NAME set (AC 30.2.2) — private, feeds visibleGovernedKeys()
+    // only; never surfaced (see the field doc).
+    this.hiddenToolNames = new Set(
+      options.tools
+        .map((tool) => tool.name)
+        .filter((name) => !toolVisibilityResolution.visible.has(name)),
+    );
+    logger.info(
+      `Tool visibility: preset="${this.toolVisibility.preset}" ` +
+        `visible=${this.toolVisibility.visibleCount} hidden=${this.toolVisibility.hiddenCount}` +
+        (toolVisibilityResolution.warnings.length > 0
+          ? ` warnings=${toolVisibilityResolution.warnings.length}`
+          : ""),
+    );
+
+    // Register all initial tools — filtered to the visible subset (Epic 30).
+    // A hidden tool never reaches registerTool: it is absent from the SDK
+    // registry, from tools/list, and uncallable (the SDK's own standard
+    // unknown-tool error). The governance rebuilds below
+    // (rebuildMutatesLookup/rebuildGovernedKeys/assertGovernanceClassified)
+    // read the live `this.tools` registry, which — because of this filter —
+    // never contains a hidden tool's key: a hidden tool is invisible to
+    // governance key derivation too (spec §2.3 step 3), by construction.
     for (const tool of options.tools) {
-      this.registerTool(tool);
+      if (toolVisibilityResolution.visible.has(tool.name)) {
+        this.registerTool(tool);
+      }
     }
 
     // Register the framework-provided discovery tool centrally (Epic 19,
@@ -570,6 +695,41 @@ export class McpServerBase {
   }
 
   /**
+   * {@link governedKeys} filtered to drop every key belonging to a HIDDEN
+   * tool (Epic 30, AC 30.2.2) — including a hidden tool's surviving BASELINE
+   * (frozen) key, which `rebuildGovernedKeys`'s union with
+   * `GOVERNANCE_BASELINE` keeps in {@link governedKeys} even though the
+   * hidden tool itself was never registered. A key's "tool component" is the
+   * substring before its first `:` (tool names never contain `:`, so a
+   * bare-name key like `iris_doc_get` is its own tool component).
+   *
+   * This is the SINGLE shared filter consumed by BOTH advisory governance
+   * surfaces — the discovery tool's `governance.policy`/`policies`
+   * (via {@link computeServerDiscovery}, at the `handleToolCall` discovery
+   * short-circuit) and the `iris-governance://{profile}` resource
+   * ({@link buildGovernancePolicyResult}) — so the two cannot drift (mirrors
+   * the existing shared {@link getEffectivePolicy} non-drift discipline).
+   *
+   * Report-only: `IRIS_GOVERNANCE` parsing/validation is UNCHANGED — a key
+   * naming a hidden tool remains legal and inert in {@link governanceConfig};
+   * only this REPORTED view omits it, so the agent's governance picture never
+   * references a tool it cannot see.
+   */
+  private visibleGovernedKeys(): Set<string> {
+    if (this.hiddenToolNames.size === 0) return this.governedKeys;
+    const filtered = new Set<string>();
+    for (const key of this.governedKeys) {
+      const colonIndex = key.indexOf(":");
+      const toolComponent =
+        colonIndex === -1 ? key : key.slice(0, colonIndex);
+      if (!this.hiddenToolNames.has(toolComponent)) {
+        filtered.add(key);
+      }
+    }
+    return filtered;
+  }
+
+  /**
    * Fail fast (Story 15.0 AC 15.0.3) if any governed key in this server's key
    * universe is NEW (absent from {@link GOVERNANCE_BASELINE}) yet carries no
    * `mutates` classification — which would otherwise let the default seed treat
@@ -629,7 +789,9 @@ export class McpServerBase {
     const policy = getEffectivePolicy(
       profileName,
       this.governanceConfig,
-      this.governedKeys,
+      // AC 30.2.2: filtered so a hidden tool's key (incl. its surviving
+      // baseline key) never appears in the resource's reported policy.
+      this.visibleGovernedKeys(),
       this.mutatesLookup,
       GOVERNANCE_BASELINE,
       this.defaultEnabledWrites,
@@ -1243,11 +1405,15 @@ export class McpServerBase {
           validatedArgs as { profile?: string; allProfiles?: boolean },
           this.profiles,
           this.governanceConfig,
-          this.governedKeys,
+          // AC 30.2.2: filtered so a hidden tool's key never appears in the
+          // discovery tool's reported policy (same helper the resource uses
+          // — no drift).
+          this.visibleGovernedKeys(),
           this.mutatesLookup,
           this.defaultEnabledWrites,
           this.preset,
           BASELINE_ACTION_CLASSIFICATIONS,
+          this.toolVisibility,
         );
         return {
           content: [
@@ -1494,12 +1660,67 @@ export class McpServerBase {
   // ── Dynamic tool management (listChanged) ──────────────────────────
 
   /**
+   * Decide whether a SINGLE tool name is visible under the server's already-
+   * parsed {@link toolVisibilityConfig} (Epic 30) — the SAME resolution
+   * {@link resolveVisibleTools} performs at construction, reused here so
+   * {@link addTools} applies an IDENTICAL filter to a tool registered at
+   * runtime (spec §2.3 step 5: a hidden tool added dynamically stays
+   * hidden). The one-name call recomputes (and discards) warnings that were
+   * already surfaced at startup — a negligible cost on this low-frequency
+   * dynamic-add path — so the visibility DECISION has exactly one
+   * implementation, never two.
+   */
+  private isToolVisible(name: string): boolean {
+    return resolveVisibleTools({
+      toolNames: [name],
+      config: this.toolVisibilityConfig,
+      rosters: this.options.toolPresets,
+      reservedName: SERVER_DISCOVERY_TOOL_NAME,
+    }).visible.has(name);
+  }
+
+  /**
+   * Recompute the {@link toolVisibility} visible/hidden COUNTS (Epic 30, AC
+   * 30.2.1) from live state after a dynamic {@link addTools}/{@link removeTools}
+   * mutation. The construction-time counts drift the instant the advertised
+   * tool set changes, so — matching the governance-state sync the dynamic paths
+   * already perform ({@link rebuildMutatesLookup}/{@link rebuildGovernedKeys}) —
+   * this keeps `iris_server_profiles`'s reported counts consistent with the real
+   * `tools/list`. `preset` is immutable after construction (parsed once), so it
+   * is preserved. `visibleCount` is the live registry size ({@link tools} — the
+   * exact advertised set, INCLUDING the reserved discovery tool, so it equals
+   * the construction formula `visiblePackageToolCount + 1`); `hiddenCount` is
+   * the tracked hidden-name-set size ({@link hiddenToolNames}, maintained on
+   * both dynamic paths).
+   */
+  private recomputeToolVisibilityCounts(): void {
+    this.toolVisibility = {
+      preset: this.toolVisibility.preset,
+      visibleCount: this.tools.size,
+      hiddenCount: this.hiddenToolNames.size,
+    };
+  }
+
+  /**
    * Register additional tools at runtime and emit
    * `notifications/tools/list_changed`.
+   *
+   * Applies the SAME tool-visibility filter (Epic 30) as the constructor: a
+   * tool hidden by `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/
+   * `IRIS_TOOLS_ENABLE` is not registered even when added dynamically.
    */
   addTools(tools: ToolDefinition[]): void {
+    let registeredCount = 0;
     for (const tool of tools) {
-      this.registerTool(tool);
+      if (this.isToolVisible(tool.name)) {
+        this.registerTool(tool);
+        registeredCount++;
+      } else {
+        // Track a dynamically-added-but-hidden tool (Epic 30, AC 30.2.2/30.2.1):
+        // keeps both the `visibleGovernedKeys()` filter and the hidden COUNT
+        // correct for tools hidden by config after construction.
+        this.hiddenToolNames.add(tool.name);
+      }
     }
     // Keep the governance mutates lookup in sync with the live tool set (D4) so
     // a newly-added governed tool's `mutates` classification is enforced.
@@ -1510,8 +1731,17 @@ export class McpServerBase {
     // Fail fast if a dynamically-added NEW governed key lacks a `mutates` class
     // (AC 15.0.3) — same safety net as construction.
     this.assertGovernanceClassified();
+    // Keep the AC 30.2.1 visible/hidden counts in sync with the live tool set,
+    // matching the governance-state sync above (Story 30.2 review).
+    this.recomputeToolVisibilityCounts();
     this.mcpServer.sendToolListChanged();
-    logger.info(`Added ${tools.length} tool(s) and notified clients`);
+    const hiddenCount = tools.length - registeredCount;
+    logger.info(
+      `Added ${registeredCount} tool(s) and notified clients` +
+        (hiddenCount > 0
+          ? ` (${hiddenCount} hidden by tool visibility config)`
+          : ""),
+    );
   }
 
   /**
@@ -1520,6 +1750,7 @@ export class McpServerBase {
    */
   removeTools(names: string[]): void {
     let removedCount = 0;
+    let visibilityChanged = false;
     for (const name of names) {
       if (this.tools.delete(name)) {
         // Drop the extended-schema entry too, so it does not leak after removal.
@@ -1533,6 +1764,13 @@ export class McpServerBase {
           delete sdkTools[name];
         }
         removedCount++;
+        visibilityChanged = true;
+      } else if (this.hiddenToolNames.delete(name)) {
+        // Removing a tool this server offered but hid by config: it is no
+        // longer part of this server's tool universe, so drop it from the
+        // hidden COUNT (Epic 30, AC 30.2.1). No governance/listChanged work —
+        // a hidden tool was never registered or advertised.
+        visibilityChanged = true;
       }
     }
     if (removedCount > 0) {
@@ -1548,6 +1786,12 @@ export class McpServerBase {
       // rebuild pair makes the invariant uniform across every mutation path.
       this.assertGovernanceClassified();
       this.mcpServer.sendToolListChanged();
+    }
+    if (visibilityChanged) {
+      // Keep the AC 30.2.1 visible/hidden counts in sync with the live tool
+      // set (Story 30.2 review), whether a visible tool was unregistered or a
+      // hidden tool dropped from this server's universe.
+      this.recomputeToolVisibilityCounts();
     }
     logger.info(`Removed ${removedCount} tool(s) and notified clients`);
   }
