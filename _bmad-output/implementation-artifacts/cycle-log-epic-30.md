@@ -34,3 +34,4 @@
 2026-07-20T05:30:00Z	Story 30.3	committed	sha=5c23990 submodules=
 2026-07-20T05:31:00Z	Epic 30	epic_status_done	stories=4
 2026-07-22T00:00:00Z	Epic 30	epic_retro_complete	source_retro=_bmad-output/implementation-artifacts/epic-30-retro-2026-07-22.md rules_codified=0 action_items=3 model=claude-opus-4-8
+2026-07-22T00:05:00Z	Epic 30	epic_merged_to_feature	repos=. feature_sha=9edf1c4 merge_sha=9edf1c4 submodules=
