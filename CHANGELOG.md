@@ -52,6 +52,15 @@ engine — env parsing, resolution, constructor filter, `assertPresetCoverage`),
 × 5 packages + `TOOL_PAIRS`), 30.2 (`iris_server_profiles` surfacing + the payload-measurement
 script), and 30.3 (this docs + live-smoke closing story).
 
+Documentation: the root [README](README.md) (env-var rows + new [Tool Visibility
+Presets](README.md#tool-visibility-presets) section — layering rules, rosters, measured payload
+table), [`tool_support.md`](tool_support.md) (visibility note), all three
+[`docs/client-config/*.md`](docs/client-config/) guides (`env` examples), all five server
+[per-package READMEs](packages/) + [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md)
+(per-server "Tool Visibility" sections with runtime counts) and
+[`packages/shared/README.md`](packages/shared/README.md) (visibility engine Public-API section) —
+tool counts (104 / 109 advertised) unchanged everywhere.
+
 ## [Unreleased] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
 
 ### Added — Tool-Call Observability & Session Audit Log (`@iris-mcp/shared`, all five servers)
@@ -90,6 +99,14 @@ fidelity + concurrency + shutdown flush), and 29.2 (this docs + live-smoke closi
 [Compliance & Auditability](README.md#compliance--auditability) for the full model, the entry
 format, and the disambiguation from the pre-existing IRIS-native `iris_audit_manage`/
 `iris_audit_events` security-audit tools).
+
+Documentation: the root [README](README.md) (env-var rows + [Compliance &
+Auditability](README.md#compliance--auditability) section), [`tool_support.md`](tool_support.md)
+(disambiguation note), all three [`docs/client-config/*.md`](docs/client-config/) guides (`env`
+examples), all five server [per-package READMEs](packages/) +
+[`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md) (per-package "Audit Logging"
+sections) and [`packages/shared/README.md`](packages/shared/README.md) (audit framework-surface
+section) — no tool count moves (framework surface, not a tool).
 
 ## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
 

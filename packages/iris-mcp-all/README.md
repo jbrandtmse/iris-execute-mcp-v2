@@ -48,6 +48,10 @@ Every server in this suite supports `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IR
 
 Full model, per-server per-tool rosters, and the measured `tools/list` payload-size win: [Tool Visibility Presets](../../README.md#tool-visibility-presets) in the suite README.
 
+### Audit Logging (`IRIS_AUDIT_LOG`)
+
+Every server in this suite supports the opt-in, secrets-free tool-call audit log: set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` (plus optional `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS`) to record **every MCP tool call — success, error, or governance denial — as JSONL, across all five servers**. Off by default (unset ⇒ a mechanical no-op); it is server-side configuration an AI client cannot switch off, and is distinct from IRIS's own `iris_audit_*` security-audit tools. Full details: [Compliance & Auditability](../../README.md#compliance--auditability) in the suite README.
+
 ---
 
 ## Configuration

@@ -45,6 +45,10 @@ Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **10-tool r
 
 ---
 
+### Audit Logging (`IRIS_AUDIT_LOG`)
+
+For regulated deployments, set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` to record **every MCP tool call this server handles** — success, error, or governance denial — as one secrets-free JSON line (session, sequence, tool, action, outcome, redacted parameter keys). It is **off by default** (unset ⇒ a mechanical no-op, zero filesystem writes) and framework-wide — the same interceptor covers every tool on this server. `IRIS_AUDIT_LOG_MAX_MB` (default `50`) sets the single-generation rotation size; `IRIS_AUDIT_LOG_PARAMS=true` additionally records (redacted) parameter *values*. Because it is server-side **configuration** — not a governed tool action — an AI client cannot disable its own audit trail; only an operator with server-environment access can. This MCP-call audit trail is distinct from this server's `iris_audit_events` tool, which reads IRIS's *own* `%SYS.Audit*` security-audit database — full record shape, redaction rules, and that disambiguation: [Compliance & Auditability](../../README.md#compliance--auditability).
+
 ## MCP Client Configuration
 
 ### Claude Code (`.mcp.json`)
