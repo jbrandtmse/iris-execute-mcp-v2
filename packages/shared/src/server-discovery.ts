@@ -39,6 +39,7 @@ import { getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
 import type { ToolDefinition, ToolResult } from "./tool-types.js";
+import type { ToolPresetName } from "./tool-visibility.js";
 
 /** The discovery tool's registered name (architecture decision E1). */
 export const SERVER_DISCOVERY_TOOL_NAME = "iris_server_profiles";
@@ -95,6 +96,15 @@ export interface ProfileRosterEntry {
  *   `"read-only"` or `"full"` when explicitly set, else `null` (unset — the
  *   `governance` policy above already reflects it, since it is computed by the
  *   SAME {@link getEffectivePolicy} the gate/resource use).
+ * - `toolVisibility` — the active `IRIS_TOOLS_*` tool-visibility state (Epic
+ *   30, architecture decision I1, AC 30.2.1): the resolved preset plus the
+ *   visible/hidden tool COUNTS. Present under every configuration, including
+ *   the default `full` (where `hiddenTools` is 0). **Deliberately counts
+ *   ONLY — hidden tool NAMES are never disclosed here** (spec §2.6: invisible
+ *   means invisible to the agent; an operator diagnoses via env vars + README
+ *   roster tables, not via this tool). Sourced from the server's own
+ *   `this.toolVisibility` state (`server-base.ts`), computed once at
+ *   construction.
  */
 export interface ServerDiscoveryResult {
   defaultProfile: string;
@@ -108,6 +118,18 @@ export interface ServerDiscoveryResult {
     policies?: Record<string, Record<string, boolean>>;
   };
   preset: GovernancePreset | null;
+  /**
+   * Active tool-visibility preset + visible/hidden tool COUNTS (Epic 30, AC
+   * 30.2.1). NEVER includes hidden tool names — see the interface doc above.
+   */
+  toolVisibility: {
+    /** Active `IRIS_TOOLS_PRESET` (`full` when unset — Rule #19 back-compat). */
+    preset: ToolPresetName;
+    /** Number of tools advertised on `tools/list`, including the reserved `iris_server_profiles`. */
+    visibleTools: number;
+    /** Number of tools hidden by the active preset/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` config. */
+    hiddenTools: number;
+  };
 }
 
 /**
@@ -154,6 +176,11 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  *   Threaded into every {@link getEffectivePolicy} call below AND surfaced verbatim
  *   (as `null` when unset) so the reported policy and the `preset` field never drift.
  * @param classifications - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
+ * @param toolVisibility - The server's resolved tool-visibility state (Epic 30, AC
+ *   30.2.1) — `{ preset, visibleCount, hiddenCount }`, sourced verbatim from
+ *   `McpServerBase`'s `this.toolVisibility`. Defaulted to the byte-for-byte
+ *   pass-through state (`full`, 0 hidden) so existing direct callers/tests that
+ *   omit it are unaffected; the real server always passes its own state.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -166,6 +193,11 @@ export function computeServerDiscovery(
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
+  toolVisibility: {
+    preset: ToolPresetName;
+    visibleCount: number;
+    hiddenCount: number;
+  } = { preset: "full", visibleCount: 0, hiddenCount: 0 },
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -228,6 +260,11 @@ export function computeServerDiscovery(
     profiles: roster,
     preset: preset ?? null,
     governance,
+    toolVisibility: {
+      preset: toolVisibility.preset,
+      visibleTools: toolVisibility.visibleCount,
+      hiddenTools: toolVisibility.hiddenCount,
+    },
   };
 }
 

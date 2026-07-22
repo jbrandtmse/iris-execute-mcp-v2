@@ -95,3 +95,18 @@ export type {
   ProfileRosterEntry,
   ServerDiscoveryResult,
 } from "./server-discovery.js";
+export {
+  TOOL_PRESET_NAMES,
+  TOOL_PAIRS,
+  parseToolVisibilityConfig,
+  resolveVisibleTools,
+  assertPresetCoverage,
+} from "./tool-visibility.js";
+export type {
+  ToolPresetName,
+  ToolPresetRoster,
+  ToolPresetRosters,
+  ToolVisibilityConfig,
+  ResolveVisibleToolsParams,
+  ResolveVisibleToolsResult,
+} from "./tool-visibility.js";

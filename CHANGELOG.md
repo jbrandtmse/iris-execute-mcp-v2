@@ -2,7 +2,66 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
+## [Pre-release — 2026-07-22] — Epic 30: Tool Visibility Presets (`IRIS_TOOLS_PRESET`)
+
+### Added — Advertise-time tool visibility (`@iris-mcp/shared`, all five servers)
+
+A new, orthogonal layer in front of the existing per-action governance gate: **visibility** answers
+"does the agent know this tool exists?" at registration time, while governance continues to answer
+"is this call allowed?" at call time. A hidden tool is never registered with the MCP SDK — absent
+from `tools/list`, and calling it by name returns the SDK's standard unknown-tool error (never a
+custom envelope, never a governance error). Three new environment variables, all optional and
+**default `full`** (today's behavior):
+
+- `IRIS_TOOLS_PRESET` (default `full`) — `"core"` (a ~10-tool everyday subset per server, ≤13
+  runtime tools, tuned for small/cheap models) or `"developer"` (a persona filter hiding security
+  & enterprise administration). An unrecognized value fails fast at startup, naming the valid
+  values.
+- `IRIS_TOOLS_DISABLE` (unset) — comma-separated tool names to hide; trailing-`*` wildcard
+  supported (`iris_doc_*`); a bare `*` alone is rejected.
+- `IRIS_TOOLS_ENABLE` (unset) — comma-separated tool names to force-show, beating both the preset
+  and `IRIS_TOOLS_DISABLE` — punches a hole in a hidden family (e.g.
+  `IRIS_TOOLS_DISABLE=iris_global_*` + `IRIS_TOOLS_ENABLE=iris_global_get`).
+
+Resolution precedence: `ENABLE > DISABLE > preset > default-visible`. `iris_server_profiles` is
+reserved and always visible (the discovery surface for this very feature); naming it literally in
+`IRIS_TOOLS_DISABLE` fails startup, while a wildcard silently skips it. `iris_server_profiles`
+additionally reports a new `toolVisibility` block (`{ preset, visibleTools, hiddenTools }` —
+deliberately never the hidden tool names) and the effective-governance report/`iris-governance://`
+resource omit keys belonging to hidden tools, so the agent's view of both layers stays
+self-consistent.
+
+Each of the 5 server packages declares an explicit `core`/`developer` roster
+(`src/tools/presets.ts`) covering every one of its tools — enforced at server construction
+(`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
+added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
+`iris_env_promote` are a declared pair, always co-visible in every preset. Roster summary (runtime
+tool counts): `full` 29/27/23/22/8 (dev/admin/interop/ops/data, default/unchanged), `core`
+13/13/10/10/8, `developer` 29/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
+Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
+[Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~67% fewer bytes under
+`core` on `@iris-mcp/dev`).
+
+**Strictly additive — `IRIS_TOOLS_PRESET` unset (the default) is byte-for-byte today's `tools/list`
+for every server**, mechanically proven by a Rule #19 back-compat snapshot test and a live smoke
+against the built `dist/` output. No new tool, no new/changed governance key, no bootstrap bump:
+this is a `@iris-mcp/shared` + per-package `presets.ts`-only, TypeScript-layer capability (frozen
+governance baseline `1e62c5ad5bf7` and `BOOTSTRAP_VERSION` unchanged; package `tools[]` arrays and
+their existing count assertions are untouched). Delivered across four stories: 30.0 (visibility
+engine — env parsing, resolution, constructor filter, `assertPresetCoverage`), 30.1 (preset rosters
+× 5 packages + `TOOL_PAIRS`), 30.2 (`iris_server_profiles` surfacing + the payload-measurement
+script), and 30.3 (this docs + live-smoke closing story).
+
+Documentation: the root [README](README.md) (env-var rows + new [Tool Visibility
+Presets](README.md#tool-visibility-presets) section — layering rules, rosters, measured payload
+table), [`tool_support.md`](tool_support.md) (visibility note), all three
+[`docs/client-config/*.md`](docs/client-config/) guides (`env` examples), all five server
+[per-package READMEs](packages/) + [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md)
+(per-server "Tool Visibility" sections with runtime counts) and
+[`packages/shared/README.md`](packages/shared/README.md) (visibility engine Public-API section) —
+tool counts (104 / 109 advertised) unchanged everywhere.
+
+## [Pre-release — 2026-07-12] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
 
 ### Added — Tool-Call Observability & Session Audit Log (`@iris-mcp/shared`, all five servers)
 
@@ -41,7 +100,15 @@ fidelity + concurrency + shutdown flush), and 29.2 (this docs + live-smoke closi
 format, and the disambiguation from the pre-existing IRIS-native `iris_audit_manage`/
 `iris_audit_events` security-audit tools).
 
-## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
+Documentation: the root [README](README.md) (env-var rows + [Compliance &
+Auditability](README.md#compliance--auditability) section), [`tool_support.md`](tool_support.md)
+(disambiguation note), all three [`docs/client-config/*.md`](docs/client-config/) guides (`env`
+examples), all five server [per-package READMEs](packages/) +
+[`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md) (per-package "Audit Logging"
+sections) and [`packages/shared/README.md`](packages/shared/README.md) (audit framework-surface
+section) — no tool count moves (framework surface, not a tool).
+
+## [Pre-release — 2026-07-11] — Epic 28: SQL Performance Advisor
 
 ### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
 

@@ -77,6 +77,16 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 - **`booleanParam`** -- Zod schema for boolean parameters that also accepts string/number values ("true"/"false", 1/0).
 
+### Tool Visibility (advertise-time preset filter)
+
+`tool-visibility.ts` implements the config-driven, advertise-time tool-visibility engine (the `IRIS_TOOLS_PRESET` / `IRIS_TOOLS_DISABLE` / `IRIS_TOOLS_ENABLE` family) applied by `McpServerBase` at construction, in FRONT of call-time governance — described in the suite's [Tool Visibility Presets](../../README.md#tool-visibility-presets) section. A hidden tool is never registered with the SDK (absent from `tools/list`, uncallable), so it is orthogonal to governance (which controls whether an already-visible action is *allowed*).
+
+- **`parseToolVisibilityConfig()`** -- Parses the visibility env family into a `ToolVisibilityConfig`. Fails fast on an unknown preset value (naming the valid `full`/`core`/`developer`), a bare `*`, or a literal `iris_server_profiles` in `IRIS_TOOLS_DISABLE`; WARNs (never fails) on unknown tool names and on the same literal in both lists (ENABLE wins).
+- **`resolveVisibleTools()`** -- Applies resolution `ENABLE > DISABLE > preset > default-visible` (trailing-`*` wildcards) over a package's tool set, returning the visible set plus visible/hidden counts. Reserved `iris_server_profiles` is always visible.
+- **`assertPresetCoverage()`** -- Registration-time guard (sibling of `assertGovernanceClassification`): throws, naming the offending tool + preset, if any preset's `include ∪ exclude` ≠ the package tool-set or `include ∩ exclude ≠ ∅`. `full` is reserved (all tools).
+- **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`) that every preset must keep together-in or together-out.
+- **`ToolPresetName`** / **`ToolPresetRoster`** / **`ToolPresetRosters`** / **`ToolVisibilityConfig`** (types) -- Preset name union and the per-package `include`/`exclude` roster shapes wired via `McpServerBaseOptions.toolPresets`.
+
 ---
 
 ## Audit Logging (framework surface, not part of the public barrel)

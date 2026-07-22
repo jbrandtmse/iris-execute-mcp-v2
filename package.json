@@ -18,6 +18,7 @@
     "gen:skills": "node scripts/gen-skills.mjs",
     "gen:skills:check": "node scripts/gen-skills.mjs --check",
     "validate:prompts": "node scripts/validate-prompts.mjs",
+    "measure:tools-payload": "node scripts/measure-tools-payload.mjs",
     "changeset": "changeset"
   },
   "devDependencies": {

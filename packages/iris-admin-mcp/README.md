@@ -37,7 +37,17 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **13-tool runtime roster** (12 package tools + `iris_server_profiles`) — the everyday admin loop (namespaces, databases, users, webapps, permission checks); no mapping/role-security/SSL/OAuth/service/LDAP/X509/audit management. `IRIS_TOOLS_PRESET=developer` trims to **11 runtime tools** (10 + `iris_server_profiles`) — only what a developer self-serves (namespace/database/mapping/webapp config plus permission checks), hiding ALL user/security administration. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+
+> **Prompt-pack limitation.** The `audit-security-posture` prompt calls `iris_user_get`, `iris_role_list`, `iris_service_manage`, `iris_ssl_list`, and `iris_audit_manage` — under `core`, `iris_service_manage`/`iris_ssl_list`/`iris_audit_manage` are hidden (the prompt cannot complete steps 4-6); under `developer`, ALL FIVE tools it calls are hidden (the prompt cannot run at all). The `provision-project-environment` prompt calls `iris_user_manage`, which is hidden under `developer` (step 4 fails). Both prompts need `full`, or `IRIS_TOOLS_ENABLE` naming the specific tool(s) they use.
+
 ---
+
+### Audit Logging (`IRIS_AUDIT_LOG`)
+
+For regulated deployments, set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` to record **every MCP tool call this server handles** — success, error, or governance denial — as one secrets-free JSON line (session, sequence, tool, action, outcome, redacted parameter keys). It is **off by default** (unset ⇒ a mechanical no-op, zero filesystem writes) and framework-wide — the same interceptor covers every tool on this server. `IRIS_AUDIT_LOG_MAX_MB` (default `50`) sets the single-generation rotation size; `IRIS_AUDIT_LOG_PARAMS=true` additionally records (redacted) parameter *values*. Because it is server-side **configuration** — not a governed tool action — an AI client cannot disable its own audit trail; only an operator with server-environment access can. Full record shape, redaction rules, and how it differs from IRIS's own `iris_audit_manage` security-audit tool: [Compliance & Auditability](../../README.md#compliance--auditability).
 
 ## MCP Client Configuration
 

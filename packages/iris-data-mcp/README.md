@@ -37,7 +37,15 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+### Tool Visibility (`IRIS_TOOLS_PRESET`)
+
+This server's 7 tools are already inside the researched 5-15-tool sweet spot, so `IRIS_TOOLS_PRESET=core` and `=developer` both keep all **8 runtime tools** (7 + `iris_server_profiles`) visible — `iris-data-mcp` is unaffected by any preset. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` still work here to hide/force-show individual tools independent of the preset. Full model and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+
 ---
+
+### Audit Logging (`IRIS_AUDIT_LOG`)
+
+For regulated deployments, set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` to record **every MCP tool call this server handles** — success, error, or governance denial — as one secrets-free JSON line (session, sequence, tool, action, outcome, redacted parameter keys). It is **off by default** (unset ⇒ a mechanical no-op, zero filesystem writes) and framework-wide — the same interceptor covers every tool on this server. `IRIS_AUDIT_LOG_MAX_MB` (default `50`) sets the single-generation rotation size; `IRIS_AUDIT_LOG_PARAMS=true` additionally records (redacted) parameter *values*. Because it is server-side **configuration** — not a governed tool action — an AI client cannot disable its own audit trail; only an operator with server-environment access can. Full record shape, redaction rules, and how it differs from IRIS's own security-audit tools: [Compliance & Auditability](../../README.md#compliance--auditability).
 
 ## MCP Client Configuration
 
