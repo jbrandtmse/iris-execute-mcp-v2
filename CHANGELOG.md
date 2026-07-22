@@ -2,7 +2,7 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] — Epic 30: Tool Visibility Presets (`IRIS_TOOLS_PRESET`)
+## [Pre-release — 2026-07-22] — Epic 30: Tool Visibility Presets (`IRIS_TOOLS_PRESET`)
 
 ### Added — Advertise-time tool visibility (`@iris-mcp/shared`, all five servers)
 
@@ -61,7 +61,7 @@ table), [`tool_support.md`](tool_support.md) (visibility note), all three
 [`packages/shared/README.md`](packages/shared/README.md) (visibility engine Public-API section) —
 tool counts (104 / 109 advertised) unchanged everywhere.
 
-## [Unreleased] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
+## [Pre-release — 2026-07-12] — Epic 29: Tool-Call Observability & Session Audit Log (`IRIS_AUDIT_LOG`)
 
 ### Added — Tool-Call Observability & Session Audit Log (`@iris-mcp/shared`, all five servers)
 
@@ -108,7 +108,7 @@ examples), all five server [per-package READMEs](packages/) +
 sections) and [`packages/shared/README.md`](packages/shared/README.md) (audit framework-surface
 section) — no tool count moves (framework surface, not a tool).
 
-## [Unreleased] — Epic 28 (in progress): SQL Performance Advisor
+## [Pre-release — 2026-07-11] — Epic 28: SQL Performance Advisor
 
 ### Added — `/dev/sql/advise-data` endpoint (`ExecuteMCPv2.REST.SqlAdvisor.cls`)
 
