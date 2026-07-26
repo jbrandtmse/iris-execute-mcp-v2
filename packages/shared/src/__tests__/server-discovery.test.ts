@@ -41,9 +41,11 @@ import {
   SERVER_DISCOVERY_TOOL_NAME,
   SERVER_DISCOVERY_INSTRUCTIONS,
   serverDiscoveryTool,
+  buildRoster,
 } from "../server-discovery.js";
 import type { ServerDiscoveryResult } from "../server-discovery.js";
 import type { ToolDefinition } from "../tool-types.js";
+import type { IrisProfile, ProfileRegistry } from "../profiles.js";
 
 // A successful, no-op bootstrap result (REST service already current).
 const okBootstrap: BootstrapResult = {
@@ -287,6 +289,38 @@ describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () =>
     const text = (result.content as Array<{ text: string }>)[0]!.text;
     expect(text).not.toContain("supersecret");
     expect(text).not.toContain("anothersecret");
+  });
+
+  // ── Story 31.1, Task 7 (AC 31.1.4) ────────────────────────────────
+  //
+  // Extends the allow-list guarantee above to a profile whose password came
+  // from Story 31.1's credential chain (env/OS keychain/credential helper)
+  // rather than the `IRIS_*`/`IRIS_PROFILES` vars the tests above use. The
+  // allow-list in `buildRosterEntry` is source-agnostic (it never reads
+  // `profile.password` at all, regardless of provenance), so this is a
+  // deterministic, synthetic-registry proof — no real chain/keychain/helper
+  // execution needed to demonstrate the property.
+  it("a Server-Manager credential-chain-resolved profile's password is still never included in the roster (AC 31.1.4)", () => {
+    const registry: ProfileRegistry = new Map();
+    const chainResolved: IrisProfile = {
+      name: "chainServer",
+      host: "chain.example.com",
+      port: 443,
+      username: "chainuser",
+      password: "chainresolvedsecret", // as if resolved via keychain/helper/env
+      namespace: "USER",
+      https: true,
+      baseUrl: "https://chain.example.com:443",
+      timeout: 30000,
+    };
+    registry.set("chainServer", chainResolved);
+
+    const roster = buildRoster(registry);
+    expect(roster).toHaveLength(1);
+    expect(Object.prototype.hasOwnProperty.call(roster[0] as object, "password")).toBe(false);
+    const rosterJson = JSON.stringify(roster);
+    expect(rosterJson).not.toContain("chainresolvedsecret");
+    expect(rosterJson).not.toContain("password");
   });
 });
 

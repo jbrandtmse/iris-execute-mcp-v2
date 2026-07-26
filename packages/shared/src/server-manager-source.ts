@@ -9,27 +9,72 @@
  * **Scope seam (Rule #52) — read this before extending.** This module owns
  * settings-file discovery, JSONC parsing, and `IRIS_SERVER_MANAGER`/`IRIS_SM_*`
  * env parsing ONLY. It does NOT own:
- * - **Credential resolution (Story 31.1).** A profile lacking a password is
- *   counted as *unresolved* and EXCLUDED from
- *   {@link resolveServerManagerProfiles}'s returned set (with a single summary
- *   startup log line) — there is no env → keychain → helper chain yet. Only the
- *   deprecated inline `password` field (honored with a warning) yields a usable
- *   profile in this story.
+ * - **Credential resolution (Story 31.1 — IMPLEMENTED as of this story).** A
+ *   profile lacking a password is tagged
+ *   `credentialStatus: "unresolved"` and INCLUDED (not dropped) in
+ *   {@link resolveServerManagerProfiles}'s returned {@link ServerManagerProfileResult}
+ *   array, with `password` left `""`. This function still does NOT run the
+ *   env → keychain → helper chain itself — that lives in the sibling module
+ *   `credential-chain.ts` (`resolveCredential`/`resolveServerManagerCredentials`),
+ *   invoked by `loadProfileRegistry` (`profiles.ts`) after this function
+ *   returns. Only the deprecated inline `password` field (honored with a
+ *   warning) yields an already-`"resolved"` entry from THIS function; every
+ *   other entry is handed to the chain unresolved.
  *
- *   **Seam contract for Story 31.1 (explicit — code review 2026-07-25).** This
- *   story does NOT introduce a `credentialStatus` field: an unresolved profile
- *   is dropped inside this function, so nothing carrying such a marker is ever
- *   returned. Story 31.1 therefore OWNS widening this function's return
- *   contract (returning unresolved entries — e.g. tagged
- *   `credentialStatus: "unresolved"` — or a richer result type) together with
- *   the credential chain that resolves them. That widening is 31.1's work by
- *   design, not a re-opening of finished 31.0 work.
+ *   **Widened return contract (Story 31.1, Task 2 — the seam 31.0 explicitly
+ *   assigned here).** {@link resolveServerManagerProfiles} returns
+ *   {@link ServerManagerProfileResult}`[]` (an {@link IrisProfile} plus
+ *   `credentialStatus`), not `IrisProfile[]` — every unique, structurally-valid
+ *   Server-Manager definition is represented exactly once, tagged `"resolved"`
+ *   or `"unresolved"`, regardless of whether a password is yet known.
+ *
+ *   **31-0-1 (`seenNames` shadowing) — resolved.** An unresolved
+ *   higher-precedence entry no longer permanently shadows a same-named,
+ *   already-resolvable (legacy-password) entry in a lower-precedence file: a
+ *   later file's entry for the same name may "rescue" an unresolved slot by
+ *   overwriting it, but ONLY when the later entry is itself `"resolved"` (a
+ *   later entry that is ALSO unresolved changes nothing — the first,
+ *   highest-precedence unresolved candidate remains authoritative). A name
+ *   already fully claimed (`"resolved"`) or permanently invalid (failed
+ *   {@link mergeProfile} validation) is never reconsidered.
+ *
+ *   A rescue REPLACES the whole higher-precedence definition (host, port,
+ *   username, scheme), not merely its missing password — so it is announced
+ *   with a `logger.warn` naming both files' hosts and the remedy
+ *   (`iris-mcp-credentials set <name>` makes the higher-precedence definition
+ *   win). Code review 2026-07-25 downgraded this from a silent overwrite:
+ *   `"resolved"` at THIS layer only means "carries a deprecated inline
+ *   password", never "is the only resolvable candidate", so the rescue can
+ *   prefer a stale lower-precedence host over one the credential chain would
+ *   have completed. Whether a rescue should be allowed to change the
+ *   connection TARGET at all is deferred to Story 31.3, which owns collision
+ *   precedence and `source` provenance.
+ *
+ *   **31-0-2 (`username` inheritance) — resolved.** A Server-Manager entry
+ *   that does not declare its OWN `username` is NOT IMPORTED: it is skipped
+ *   with a warning naming the file and the remedy, regardless of whether it
+ *   carries an inline legacy `password`. Silently pairing an inherited local
+ *   username with a password destined for a *different* remote host risks
+ *   repeated authentication failures that lock out the account on that remote
+ *   instance (deferred item `31-0-2`). Add an explicit `"username"` to the
+ *   `intersystems.servers` entry to opt back in.
+ *
+ *   Merely tagging such an entry `"unresolved"` is NOT sufficient and was the
+ *   original (defective) implementation: `"unresolved"` is precisely what is
+ *   handed to `credential-chain.ts`, which resolves by NAME and would write a
+ *   keychain/helper password straight back onto the inherited username. Skip
+ *   is the only form of this guard the chain cannot undo. **Behavior change
+ *   vs. Story 31.0:** an entry with an inline `password` but no `username`
+ *   used to yield a usable profile; it no longer does (see the README and the
+ *   changeset).
  * - **Full registry merge semantics (Story 31.3).** Collision precedence (with a
  *   log notice), `source: "env" | "server-manager"` provenance through the
  *   `iris_server_profiles` allow-list, and audit `profileSource` attribution are
  *   NOT implemented here. `loadProfileRegistry` (`profiles.ts`) carries only a
  *   minimal, provably-inert-when-off wire-in sufficient to make this story's
- *   back-compat proof (AC 31.0.4) and unresolved-exclusion (AC 31.0.5) real.
+ *   back-compat proof (AC 31.0.4) real; final unresolved-profile exclusion (AC
+ *   31.0.5) now happens one layer up, in `credential-chain.ts`, after the
+ *   chain has had its shot.
  *
  * **Why passwords are not readable here.** Server-Manager-saved passwords live
  * in VS Code SecretStorage, encrypted via Electron `safeStorage` with an
@@ -83,6 +128,24 @@ export interface ParsedServerManagerEntry {
   pathPrefix?: string;
   /** Whether `password` came from the deprecated inline `intersystems.servers[name].password` field. */
   legacyPassword: boolean;
+}
+
+/**
+ * Whether a {@link ServerManagerProfileResult} already carries a usable
+ * password (`"resolved"`, from a legacy inline `password` field) or still
+ * needs Story 31.1's credential chain (`"unresolved"`; `password` is `""`).
+ */
+export type CredentialStatus = "resolved" | "unresolved";
+
+/**
+ * One Server-Manager-sourced profile, as returned by
+ * {@link resolveServerManagerProfiles} (Story 31.1's widened contract — see
+ * the module doc comment). Structurally an {@link IrisProfile} plus
+ * {@link credentialStatus}; `password` is `""` when `credentialStatus` is
+ * `"unresolved"`.
+ */
+export interface ServerManagerProfileResult extends IrisProfile {
+  credentialStatus: CredentialStatus;
 }
 
 /** Fail-fast helper: a clear error naming `IRIS_SERVER_MANAGER` (mirrors `parseGovernancePreset`/`parseToolVisibilityConfig`). */
@@ -393,11 +456,17 @@ export function parseIntersystemsServers(
  * (the `mergeProfile` trap). The default's `password` is deliberately NOT
  * inherited (it would otherwise silently reuse one host's password against a
  * different host) — a profile with no password of its own (no legacy inline
- * `password`) is counted as unresolved and EXCLUDED from the returned array,
- * with ONE summary startup log line (AC 31.0.5; Story 31.1 owns real credential
- * resolution). A name already defined by a higher-precedence file is skipped
- * (first file wins). `IRIS_SM_SERVERS` restricts import to a comma-separated
- * allow-list; a listed name matching nothing WARNs (never fails in `auto`).
+ * `password`, or no `username` of its own — see 31-0-2 below) is tagged
+ * `credentialStatus: "unresolved"` (Story 31.1's widened contract — see the
+ * module doc comment) rather than excluded; the returned array always contains
+ * exactly one entry per unique, structurally-valid name, `"resolved"` or
+ * `"unresolved"`. A name already defined by a higher-precedence file is skipped
+ * — UNLESS the higher-precedence entry is still `"unresolved"` and this
+ * lower-precedence entry is itself `"resolved"`, in which case it RESCUES the
+ * slot (31-0-1; see the module doc comment) — a permanently-invalid
+ * (validation-failed) or already-`"resolved"` name is never reconsidered.
+ * `IRIS_SM_SERVERS` restricts import to a comma-separated allow-list; a listed
+ * name matching nothing WARNs (never fails in `auto`).
  *
  * **Containment (AC 31.0.2 — "never crashes startup in `auto`").** Every
  * per-file AND per-entry failure is contained: an entry whose fields fail
@@ -407,12 +476,16 @@ export function parseIntersystemsServers(
  * (and with it the perfectly good env-derived `default` profile).
  *
  * `required` fails fast when NO server definition was found across all files
- * (counted BEFORE both the `IRIS_SM_SERVERS` allow-list and the
- * credential-completeness exclusion), and — separately, with its own message
- * naming `IRIS_SM_SERVERS` — when definitions existed but the allow-list matched
- * none of them. A definition that exists but lacks a password does NOT trip
- * `required` here; that credential-completeness escalation is AC 31.1.1's
- * (Story 31.1), per binding spec F1-D1 vs F1-D2.
+ * (counted BEFORE both the `IRIS_SM_SERVERS` allow-list and credential
+ * resolution), and — separately, with its own message naming
+ * `IRIS_SM_SERVERS` — when definitions existed but the allow-list matched none
+ * of them. A definition that exists but lacks a password does NOT trip
+ * `required` here; that credential-chain-exhaustion escalation is AC 31.1.1's,
+ * implemented in `credential-chain.ts` (`resolveServerManagerCredentials`), per
+ * binding spec F1-D1 vs F1-D2. The two `required` checks are DELIBERATELY kept
+ * apart (Story 31.1 Dev Notes) — conflating "zero definitions found" with "a
+ * definition was found but its credential chain was exhausted" would make a
+ * passwordless definition indistinguishable from a missing one.
  *
  * @param env      - Environment map (defaults to `process.env`).
  * @param platform - Target platform (defaults to `process.platform`).
@@ -427,7 +500,7 @@ export function resolveServerManagerProfiles(
   env: Record<string, string | undefined> = process.env,
   platform: NodeJS.Platform = process.platform,
   cwd: string = process.cwd(),
-): IrisProfile[] {
+): ServerManagerProfileResult[] {
   const mode = parseServerManagerMode(env);
   if (mode === "off") return [];
 
@@ -440,8 +513,18 @@ export function resolveServerManagerProfiles(
   const matchedAllowNames = new Set<string>();
 
   const files = discoverSettingsFiles(env, platform, cwd);
+  /** Names whose first sighting (any outcome) has already been counted (definitionsFound). */
   const seenNames = new Set<string>();
-  const resolved: IrisProfile[] = [];
+  /** Names whose first sighting has already been counted toward consideredCount. */
+  const consideredNames = new Set<string>();
+  /**
+   * Per-name terminal/current state (31-0-1 rescue bookkeeping): `"resolved"`
+   * and `"invalid"` are terminal (never reconsidered); `"unresolved"` may be
+   * overwritten by a later, lower-precedence entry that resolves.
+   */
+  const nameStates = new Map<string, CredentialStatus | "invalid">();
+  /** The current best {@link ServerManagerProfileResult} per name (insertion order = first-successful-sighting order). */
+  const resultByName = new Map<string, ServerManagerProfileResult>();
   let unresolvedCount = 0;
   /** Definitions discovered, counted BEFORE the allow-list filter. */
   let definitionsFound = 0;
@@ -493,15 +576,31 @@ export function resolveServerManagerProfiles(
     }
 
     for (const [name, entry] of Object.entries(entries)) {
-      if (seenNames.has(name)) continue; // higher-precedence file already won
-      seenNames.add(name);
-      definitionsFound++;
+      const priorState = nameStates.get(name);
+      // Terminal states are never reconsidered: "resolved" already has a
+      // usable password, "invalid" permanently failed mergeProfile validation
+      // on its FIRST sighting (mirrors pre-31.1 per-file containment — a bad
+      // field value is not silently "fixed" by a later file without an
+      // operator noticing the original warning).
+      if (priorState === "resolved" || priorState === "invalid") continue;
+
+      // definitionsFound/consideredCount each count a unique NAME exactly
+      // once, at first sighting — regardless of resolution outcome — so the
+      // 31-0-1 rescue mechanism below (which DOES re-examine an unresolved
+      // name across files) never double-counts.
+      if (!seenNames.has(name)) {
+        seenNames.add(name);
+        definitionsFound++;
+      }
 
       if (allowList !== undefined) {
         if (!allowList.includes(name)) continue;
         matchedAllowNames.add(name);
       }
-      consideredCount++;
+      if (!consideredNames.has(name)) {
+        consideredNames.add(name);
+        consideredCount++;
+      }
 
       const sourceLabel = `Server Manager definition "${name}" (${file})`;
       let profile: IrisProfile;
@@ -516,6 +615,45 @@ export function resolveServerManagerProfiles(
         // `mergeProfile`'s message never echoes a password (asserted in tests).
         const reason = e instanceof Error ? e.message : String(e);
         logger.warn(`IRIS_SERVER_MANAGER: skipping ${reason}`);
+        // Only claim the name as permanently "invalid" on a genuine FIRST
+        // sighting — a lower-precedence entry's own validation failure must
+        // never erase a perfectly good (if still password-less)
+        // higher-precedence "unresolved" candidate already on file.
+        if (priorState === undefined) nameStates.set(name, "invalid");
+        continue;
+      }
+
+      // 31-0-2: a Server-Manager entry that does not declare its OWN
+      // "username" is NOT IMPORTED AT ALL. Checked via entry.override, NOT
+      // profile.username, because mergeProfile always fills profile.username
+      // from the inherited default when the override omits it, so
+      // profile.username is never a reliable "was it explicit" signal.
+      //
+      // Code review 2026-07-25 (HIGH): the original implementation only
+      // CLEARED the password and tagged the entry "unresolved" — but
+      // "unresolved" is exactly what gets handed to the credential chain,
+      // and the chain resolves by NAME only. A keychain/helper hit was
+      // therefore written straight back onto a profile still carrying the
+      // inherited LOCAL username, silently recreating the very remote-account
+      // lockout this guard exists to prevent (proven live). Worse, the
+      // warning was gated on an inline password being present, so the common
+      // shape — no username AND no inline password — was completely silent.
+      // Skipping the entry outright is the only form of the guard that the
+      // chain cannot undo, and it matches this module's existing containment
+      // style for a structurally unusable entry (missing host, failed
+      // mergeProfile validation): warn naming the file + reason, skip, never
+      // fatal. `nameStates` is deliberately NOT set, so a lower-precedence
+      // file's entry for the same name that DOES declare a username can still
+      // claim the slot.
+      if (entry.override.username === undefined) {
+        logger.warn(
+          `IRIS_SERVER_MANAGER: skipping server "${name}" (${file}) — it declares no ` +
+            `"username" of its own. Inheriting the local default username here would pair ` +
+            `it with a password destined for a different remote host (repeated failures can ` +
+            `lock out the remote account), so this definition is NOT imported and the ` +
+            `credential chain is never run for it. Add "username" to ` +
+            `intersystems.servers.${name} to enable it.`,
+        );
         continue;
       }
 
@@ -527,11 +665,39 @@ export function resolveServerManagerProfiles(
         );
       }
 
-      if (profile.password.trim() === "") {
-        unresolvedCount++;
-        continue; // excluded — credential resolution is not part of this release
+      const credentialStatus: CredentialStatus =
+        profile.password.trim() === "" ? "unresolved" : "resolved";
+
+      if (priorState === "unresolved" && credentialStatus === "unresolved") {
+        // A lower-precedence entry that is ALSO unresolved adds nothing —
+        // keep the existing (higher-precedence) unresolved candidate as
+        // authoritative (31-0-1: only a RESOLVED lower-precedence candidate
+        // may rescue an unresolved slot).
+        continue;
       }
-      resolved.push(profile);
+
+      if (priorState === "unresolved") {
+        // 31-0-1 RESCUE. Code review 2026-07-25 (MEDIUM): this replaces the
+        // WHOLE higher-precedence definition — host, port, username, scheme —
+        // not just its missing password, and it does so on the strength of a
+        // DEPRECATED inline password while the higher-precedence entry would
+        // very likely have been completed by the credential chain (which
+        // resolves by name). Connecting to a different host than the
+        // highest-precedence settings file declares is undiagnosable in
+        // silence, so say it out loud and name both hosts.
+        const shadowed = resultByName.get(name);
+        logger.warn(
+          `IRIS_SERVER_MANAGER: server "${name}" is defined in more than one settings file. ` +
+            `The higher-precedence definition (host ${shadowed?.host ?? "?"}) carries no ` +
+            `password of its own, so the lower-precedence definition from "${file}" (host ` +
+            `${profile.host}) is imported INSTEAD — including its host, port and username. ` +
+            `Store a password for "${name}" (iris-mcp-credentials set ${name}) to make the ` +
+            `higher-precedence definition win.`,
+        );
+      }
+
+      nameStates.set(name, credentialStatus);
+      resultByName.set(name, { ...profile, credentialStatus });
     }
   }
 
@@ -545,10 +711,18 @@ export function resolveServerManagerProfiles(
     }
   }
 
+  const results = [...resultByName.values()];
+  unresolvedCount = results.filter((r) => r.credentialStatus === "unresolved").length;
+
   if (unresolvedCount > 0) {
-    logger.warn(
-      `IRIS_SERVER_MANAGER: ${unresolvedCount} server profile(s) skipped — no password ` +
-        `available yet. Supply one via IRIS_PROFILES, or wait for the credential chain.`,
+    // Informational, not final: Story 31.1's credential chain
+    // (`credential-chain.ts`, invoked from `loadProfileRegistry`) still gets a
+    // shot at env/keychain/helper resolution for each of these. Only that
+    // chain's own per-profile exhaustion log (or the `required` throw) is the
+    // terminal word on whether a name actually ends up usable.
+    logger.debug(
+      `IRIS_SERVER_MANAGER: ${unresolvedCount} server profile(s) have no password yet; ` +
+        `the credential chain (env, OS keychain, credential helper) will attempt resolution.`,
     );
   }
 
@@ -574,5 +748,5 @@ export function resolveServerManagerProfiles(
     );
   }
 
-  return resolved;
+  return results;
 }

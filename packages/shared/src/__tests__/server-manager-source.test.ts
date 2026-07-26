@@ -494,13 +494,19 @@ describe("resolveServerManagerProfiles", () => {
     }
   });
 
-  it("auto: an entry without its own password is EXCLUDED — never silently inherits the default profile's password", () => {
+  it("auto: an entry without its own password is tagged UNRESOLVED (not dropped) — never silently inherits the default profile's password (Story 31.1 widened contract)", () => {
     const dir = tmpDir();
     const file = writeSettings(
       dir,
       JSON.stringify({
         "intersystems.servers": {
-          noPassword: { webServer: { scheme: "http", host: "other.example.com", port: 52773 } },
+          // Declares its own username so the 31-0-2 guard (an entry with no
+          // "username" of its own is not imported at all) does not fire —
+          // this test is about a missing PASSWORD, nothing else.
+          noPassword: {
+            webServer: { scheme: "http", host: "other.example.com", port: 52773 },
+            username: "u",
+          },
         },
       }),
     );
@@ -513,8 +519,16 @@ describe("resolveServerManagerProfiles", () => {
       },
       "win32",
     );
-    // Excluded: if the default password had leaked in, this array would be non-empty.
-    expect(result).toEqual([]);
+    // Story 31.1: no longer excluded outright — included, tagged unresolved,
+    // for the credential chain to attempt. If the default password had
+    // leaked in, credentialStatus would read "resolved" and/or password
+    // would be non-empty.
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "noPassword",
+      credentialStatus: "unresolved",
+      password: "",
+    });
   });
 
   // The mirror image of the guard above (code review 2026-07-25): the entry
@@ -548,28 +562,33 @@ describe("resolveServerManagerProfiles", () => {
     expect(result).toEqual([]);
   });
 
-  it("auto: excluded (unresolved) profiles produce exactly ONE summary log line regardless of count", () => {
+  it("auto: unresolved profiles are all INCLUDED (tagged) and produce exactly ONE debug-level pending-resolution log line regardless of count (Story 31.1 widened contract)", () => {
     const dir = tmpDir();
     const file = writeSettings(
       dir,
       JSON.stringify({
+        // Each declares its own username (31-0-2 guard) — this test is about
+        // the count of password-less profiles, not about username handling.
         "intersystems.servers": {
-          a: { webServer: { scheme: "http", host: "a.example.com", port: 52773 } },
-          b: { webServer: { scheme: "http", host: "b.example.com", port: 52773 } },
-          c: { webServer: { scheme: "http", host: "c.example.com", port: 52773 } },
+          a: { webServer: { scheme: "http", host: "a.example.com", port: 52773 }, username: "u" },
+          b: { webServer: { scheme: "http", host: "b.example.com", port: 52773 }, username: "u" },
+          c: { webServer: { scheme: "http", host: "c.example.com", port: 52773 }, username: "u" },
         },
       }),
     );
-    resolveServerManagerProfiles(
+    const result = resolveServerManagerProfiles(
       { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
       "win32",
     );
-    const warnSpy = vi.mocked(logger.warn);
-    const summaryCalls = warnSpy.mock.calls.filter((c) =>
-      String(c[0]).includes("server profile(s) skipped"),
+    expect(result).toHaveLength(3);
+    expect(result.every((r) => r.credentialStatus === "unresolved")).toBe(true);
+
+    const debugSpy = vi.mocked(logger.debug);
+    const summaryCalls = debugSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("have no password yet"),
     );
     expect(summaryCalls).toHaveLength(1);
-    expect(String(summaryCalls[0]?.[0])).toContain("3 server profile(s) skipped");
+    expect(String(summaryCalls[0]?.[0])).toContain("3 server profile(s) have no password yet");
   });
 
   it("auto: malformed JSONC in one file logs a warning naming that file and skips ONLY it — the other file's valid entries still resolve", () => {
@@ -1071,6 +1090,257 @@ describe("resolveServerManagerProfiles", () => {
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toContain("zero server definitions were found");
     expect((caught as Error).message).not.toContain("defaultsupersecret");
+  });
+
+  // ── Story 31.1, Task 5 — deferred item 31-0-1 (`seenNames` shadowing) ────
+  //
+  // Decision (documented in the module doc comment): a later file's entry
+  // for a name already claimed but still UNRESOLVED may "rescue" the slot by
+  // overwriting it, but ONLY when the later entry itself resolves (a later
+  // entry that is ALSO unresolved changes nothing).
+
+  it("31-0-1: a lower-precedence file's RESOLVED entry rescues a higher-precedence file's UNRESOLVED entry of the same name", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "higher.example.com", port: 52773 },
+            username: "u", // has its own username, so it's genuinely just password-missing
+          },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
+            username: "u2",
+            password: "lowerpw", // legacy inline password — immediately resolvable
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    // Exactly one "dup" entry, using the LOWER file's full definition
+    // (structure + password) — not a mix of the higher file's host with the
+    // lower file's password.
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "dup",
+      credentialStatus: "resolved",
+      host: "lower.example.com",
+      username: "u2",
+      password: "lowerpw",
+    });
+
+    // Code review 2026-07-25 (MEDIUM): the rescue replaces the WHOLE
+    // higher-precedence definition — host included — so it must never be
+    // silent. The warning names both hosts and the remedy.
+    const warnSpy = vi.mocked(logger.warn);
+    const rescueWarnings = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("defined in more than one settings file"),
+    );
+    expect(rescueWarnings).toHaveLength(1);
+    const message = String(rescueWarnings[0]?.[0]);
+    expect(message).toContain("higher.example.com");
+    expect(message).toContain("lower.example.com");
+    expect(message).toContain("iris-mcp-credentials set dup");
+    // Secret discipline: the rescuing entry's password is never echoed.
+    for (const call of warnSpy.mock.calls) {
+      expect(call.map(String).join(" ")).not.toContain("lowerpw");
+    }
+  });
+
+  it("31-0-1: a lower-precedence file's ALSO-unresolved entry does NOT rescue — the higher-precedence structural definition remains authoritative", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "higher.example.com", port: 52773 },
+            username: "u",
+          },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
+            username: "u2",
+            // No password here either — nothing to rescue with.
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "dup",
+      credentialStatus: "unresolved",
+      host: "higher.example.com", // higher-precedence structure wins, unchanged
+    });
+  });
+
+  // ── Story 31.1, Task 6 — deferred item 31-0-2 (`username` inheritance) ───
+  //
+  // Decision (documented in the module doc comment): an entry that does not
+  // declare its OWN "username" is NOT IMPORTED AT ALL — never silently pair
+  // an inherited local username with a password destined for a different
+  // remote host.
+  //
+  // Code review 2026-07-25 (HIGH): the first implementation only tagged such
+  // an entry "unresolved" and cleared its password. That does not work,
+  // because "unresolved" is precisely what is handed to the credential chain,
+  // which resolves by NAME and wrote the resulting password straight back
+  // onto the inherited username — recreating the exact lockout hazard. The
+  // guard now SKIPS the entry, which the chain cannot undo. The end-to-end
+  // proof (chain would have resolved it, and does not) lives in
+  // `profiles.test.ts`; these two pin the source-layer contract.
+
+  it("31-0-2: a legacy-password entry WITHOUT its own username is NOT imported (never inherits the local default username)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          noUsername: {
+            webServer: { scheme: "https", host: "remote.example.com", port: 443 },
+            password: "remotepw", // legacy inline password, but no "username" field
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toEqual([]);
+
+    const warnSpy = vi.mocked(logger.warn);
+    const usernameWarnings = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes(`declares no "username" of its own`),
+    );
+    expect(usernameWarnings).toHaveLength(1);
+    expect(String(usernameWarnings[0]?.[0])).toContain("skipping server \"noUsername\"");
+    // Secret discipline: the password never appears in the warning either.
+    for (const call of warnSpy.mock.calls) {
+      expect(call.map(String).join(" ")).not.toContain("remotepw");
+    }
+  });
+
+  it("31-0-2: an entry with NO username and NO inline password is also skipped, and still warns (the silent case the first implementation missed)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          noUsername: { webServer: { scheme: "https", host: "remote.example.com", port: 443 } },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toEqual([]);
+    const warnSpy = vi.mocked(logger.warn);
+    expect(
+      warnSpy.mock.calls.filter((c) => String(c[0]).includes(`declares no "username" of its own`)),
+    ).toHaveLength(1);
+  });
+
+  it("31-0-2: a username-less entry does NOT poison the name — a lower-precedence file's entry that DOES declare a username still claims the slot", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: { webServer: { scheme: "http", host: "higher.example.com", port: 52773 } },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
+            username: "u2",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "dup",
+      host: "lower.example.com",
+      username: "u2",
+      credentialStatus: "unresolved",
+    });
+  });
+
+  it("31-0-2: an entry WITH its own username and a legacy password resolves normally (no forced-unresolved, no username warning)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          hasUsername: {
+            webServer: { scheme: "https", host: "remote.example.com", port: 443 },
+            username: "remoteuser",
+            password: "remotepw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "hasUsername",
+      credentialStatus: "resolved",
+      username: "remoteuser",
+      password: "remotepw",
+    });
+    const warnSpy = vi.mocked(logger.warn);
+    expect(
+      warnSpy.mock.calls.filter((c) => String(c[0]).includes(`no "username" of its own`)),
+    ).toHaveLength(0);
   });
 });
 

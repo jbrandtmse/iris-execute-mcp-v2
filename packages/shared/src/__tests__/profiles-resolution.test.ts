@@ -477,13 +477,13 @@ describe("back-compat — empty IRIS_PROFILES is treated as absent", () => {
     expect(connOnly).toEqual(loadConfig(env));
   });
 
-  it('loadProfileRegistry with IRIS_PROFILES="" matches loadConfig byte-for-byte', () => {
+  it('loadProfileRegistry with IRIS_PROFILES="" matches loadConfig byte-for-byte', async () => {
     const env = {
       IRIS_USERNAME: "u",
       IRIS_PASSWORD: "p",
       IRIS_PROFILES: "",
     };
-    const registry = loadProfileRegistry(env);
+    const registry = await loadProfileRegistry(env);
     expect([...registry.keys()]).toEqual([DEFAULT_PROFILE_NAME]);
     const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
     const { name: _n, ...connOnly } = def;

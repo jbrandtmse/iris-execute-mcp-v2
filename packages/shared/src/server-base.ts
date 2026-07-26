@@ -1853,7 +1853,7 @@ export class McpServerBase {
       // environment centrally (which also parses IRIS_PROFILES).
       this.profiles = this.options.config
         ? buildProfileRegistry(this.config)
-        : loadProfileRegistry();
+        : await loadProfileRegistry();
     }
     this.clients = new ProfileClientRegistry(this.profiles);
 

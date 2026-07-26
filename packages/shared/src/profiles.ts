@@ -34,7 +34,9 @@ import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
 import { IrisHttpClient } from "./http-client.js";
 import { logger } from "./logger.js";
-import { resolveServerManagerProfiles } from "./server-manager-source.js";
+import { parseServerManagerMode, resolveServerManagerProfiles } from "./server-manager-source.js";
+import type { CredentialChainOptions } from "./credential-chain.js";
+import { resolveServerManagerCredentials } from "./credential-chain.js";
 
 /** Reserved profile name synthesized from the existing `IRIS_*` env vars. */
 export const DEFAULT_PROFILE_NAME = "default";
@@ -345,37 +347,89 @@ export function buildProfileRegistry(
  * untouched so existing callers are unaffected; this is the additive entry
  * point new (profile-aware) code calls instead.
  *
- * **Story 31.0 minimal wire-in (Rule #52 seam).** After the existing
- * default + `IRIS_PROFILES` merge, Server-Manager-sourced profiles
- * ({@link resolveServerManagerProfiles}) are appended for any name not already
- * present. This is intentionally NOT Story 31.3's full merge semantics — no
- * collision log notice, no `source` provenance field, no allow-list surfacing,
- * no audit `profileSource`; those land in Story 31.3. With `IRIS_SERVER_MANAGER`
- * unset/`off` (the default), `resolveServerManagerProfiles` returns `[]` with
- * ZERO filesystem access, so this step is a provable no-op and the returned
- * registry is byte-for-byte today's output (AC 31.0.4).
+ * **Story 31.0 minimal wire-in + Story 31.1 credential chain (Rule #52
+ * seam).** After the existing default + `IRIS_PROFILES` merge,
+ * Server-Manager-sourced profiles ({@link resolveServerManagerProfiles}) are
+ * resolved for any name not already present in the registry (a name already
+ * defined by `IRIS_*`/`IRIS_PROFILES` always wins — filtered out BEFORE the
+ * credential chain runs, so a shadowed name never triggers a real
+ * keychain/helper lookup for a profile that would be discarded anyway; each
+ * such discard now WARNS, because an `IRIS_PROFILES` entry replaces rather
+ * than completes a Server-Manager definition — see the filter body). A
+ * consequence worth knowing: the chain's link 1
+ * (`IRIS_PROFILES.<name>.password` / `IRIS_PASSWORD`) can never fire through
+ * THIS entry point, since every name it could match is already in the
+ * registry; it is live only for direct `resolveCredential` callers such as
+ * Story 31.2's CLI. Surviving entries are then
+ * completed via {@link resolveServerManagerCredentials} (env → OS keychain →
+ * credential helper; AC 31.1.1) and appended. This is intentionally NOT Story
+ * 31.3's full merge semantics — no collision log notice, no `source`
+ * provenance field, no allow-list surfacing, no audit `profileSource`; those
+ * land in Story 31.3. With `IRIS_SERVER_MANAGER` unset/`off` (the default),
+ * `resolveServerManagerProfiles` returns `[]` with ZERO filesystem access, the
+ * credential chain therefore has nothing to resolve, and the returned
+ * registry stays byte-for-byte today's output (AC 31.0.4 / Rule #19) —
+ * provable synchronously in spirit even though the function is now `async`
+ * (unavoidable: the OS-keychain link loads its native module via a guarded
+ * dynamic `import()`, which is inherently asynchronous — see
+ * `credential-chain.ts`'s module doc comment).
  *
- * @param env      - Environment map (defaults to `process.env`).
+ * @param env - Environment map (defaults to `process.env`).
  * @param platform - Target platform for Server-Manager settings-file discovery
  *   (defaults to `process.platform`); irrelevant when `IRIS_SERVER_MANAGER` is
  *   unset/`off`.
+ * @param credentialChainDeps - Injectable OS-keychain/credential-helper seams
+ *   (AC 31.1.2/31.1.5) — tests drive the credential chain through this REAL
+ *   entry point without ever touching a real keychain or spawning a real
+ *   helper process. Production callers omit this (real `@napi-rs/keyring` +
+ *   `child_process` implementations).
  * @returns A {@link ProfileRegistry} containing `default`, any `IRIS_PROFILES`
- *   entries, and (when opted in) any resolved Server-Manager profiles.
+ *   entries, and (when opted in) any credential-chain-completed Server-Manager
+ *   profiles.
  * @throws {Error} from {@link loadConfig} (naming `IRIS_PORT`/`IRIS_TIMEOUT`/`IRIS_USERNAME`/`IRIS_PASSWORD`).
  * @throws {Error} (naming `IRIS_PROFILES`) on malformed/invalid `IRIS_PROFILES`.
- * @throws {Error} (naming `IRIS_SERVER_MANAGER`) on an unrecognized mode, or (in `required` mode) zero definitions found.
+ * @throws {Error} (naming `IRIS_SERVER_MANAGER`) on an unrecognized mode, or (in `required` mode) zero definitions found, or zero definitions surviving `IRIS_SM_SERVERS`.
+ * @throws {Error} (naming `IRIS_SERVER_MANAGER=required`) when at least one Server-Manager profile's credential chain is exhausted (Story 31.1, AC 31.1.1 — a check deliberately distinct from the zero-definitions-found one above).
  */
-export function loadProfileRegistry(
+export async function loadProfileRegistry(
   env: Record<string, string | undefined> = process.env,
   platform: NodeJS.Platform = process.platform,
-): ProfileRegistry {
+  credentialChainDeps?: Pick<CredentialChainOptions, "getKeychainPassword" | "runCredentialHelper">,
+): Promise<ProfileRegistry> {
   const defaultConfig = loadConfig(env);
   const registry = buildProfileRegistry(defaultConfig, env);
 
-  for (const profile of resolveServerManagerProfiles(env, platform)) {
-    if (!registry.has(profile.name)) {
-      registry.set(profile.name, profile);
-    }
+  const mode = parseServerManagerMode(env);
+  const smEntries = resolveServerManagerProfiles(env, platform).filter((entry) => {
+    if (!registry.has(entry.name)) return true;
+    // Code review 2026-07-25 (HIGH): this discard used to be completely
+    // silent, while the credential chain's own exhaustion message told the
+    // operator to "add a password via IRIS_PROFILES". Following that advice
+    // does NOT complete the Server-Manager definition — it REPLACES it with
+    // an env profile that inherits the LOCAL host/port/username, so a remote
+    // credential ends up aimed at the local instance with no diagnostic at
+    // all. Name the collision and the correct remedy. (Story 31.3 owns the
+    // richer notice with `source` provenance — AC 31.3.1; this is the
+    // minimum needed to stop the silent-wrong-host trap.)
+    logger.warn(
+      `IRIS_SERVER_MANAGER: a Server Manager definition named "${entry.name}" (host ` +
+        `${entry.host}) was found, but a profile with that name is already defined by ` +
+        `IRIS_*/IRIS_PROFILES — the environment definition wins and the Server Manager ` +
+        `definition is discarded ENTIRELY, including its host, port and username. An ` +
+        `IRIS_PROFILES entry supplying only a password does NOT complete a Server Manager ` +
+        `definition: give it the full connection fields, or store the password with ` +
+        `"iris-mcp-credentials set ${entry.name}" and remove the IRIS_PROFILES entry.`,
+    );
+    return false;
+  });
+  const smProfiles = await resolveServerManagerCredentials(smEntries, {
+    env,
+    mode,
+    ...credentialChainDeps,
+  });
+
+  for (const profile of smProfiles) {
+    registry.set(profile.name, profile);
   }
 
   return registry;
