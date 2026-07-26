@@ -473,6 +473,12 @@ development_status:
   31-3-registry-integration: done
   31-4-broker-extension: done
   31-5-launcher-selection-ui: done
+  # Added 2026-07-26: the Story 31.5 smoke established that NO @iris-mcp/*
+  # package is published to npm, so `npx -y @iris-mcp/<pkg>` fails on every
+  # machine and every definition the extension registers cannot start. 31.6
+  # adds irisMcpLauncher.developmentRepoPath and removes the `all` key, which
+  # is a dependency-only meta-package with no bin/main/dist (latent 31.4 defect).
+  31-6-local-package-path: ready-for-dev
   epic-31-retrospective: done
 
   # Epic 32: Governance File & Editors (FR140). Make one governance policy portable across every client via IRIS_GOVERNANCE_FILE (a static file path is the only fully agent-agnostic contract). Same parseGovernanceConfig validation; cascade explicit IRIS_GOVERNANCE env > file > IRIS_GOVERNANCE_PRESET seed > defaults; per-key configSource attribution. New iris-mcp-governance CLI (validate/get/set/unset/preset/effective/diff, single-sourced with the shared engine) + later extension governance UI. Enforcement NEVER moves — servers keep sole authority at dispatchToolCall. No hot-reload in v1 (restart semantics, documented). Unset ⇒ mechanically-proven no-op.
