@@ -362,7 +362,7 @@ describe("discoverSettingsFiles", () => {
     ]);
   });
 
-  it("linux: workspace + all 4 product user-settings paths, from HOME", () => {
+  it("linux: workspace + all 4 product user-settings paths + Flatpak, from HOME", () => {
     const files = discoverSettingsFiles(
       { HOME: "/home/test", IRIS_SM_WORKSPACE: "/home/test/project" },
       "linux",
@@ -373,6 +373,13 @@ describe("discoverSettingsFiles", () => {
       "/home/test/.config/Code - Insiders/User/settings.json",
       "/home/test/.config/VSCodium/User/settings.json",
       "/home/test/.config/Cursor/User/settings.json",
+      // Flatpak installs cannot write ~/.config; Flatpak redirects the app's
+      // XDG_CONFIG_HOME into ~/.var/app/<id>/config. Native paths come first
+      // so a native install wins a same-name collision. Cursor is absent
+      // deliberately — it is not published on Flathub.
+      "/home/test/.var/app/com.visualstudio.code/config/Code/User/settings.json",
+      "/home/test/.var/app/com.visualstudio.code.insiders/config/Code - Insiders/User/settings.json",
+      "/home/test/.var/app/com.vscodium.codium/config/VSCodium/User/settings.json",
     ]);
   });
 
@@ -1833,5 +1840,238 @@ describe(".code-workspace support (coverage-gap fix)", () => {
     expect(result.find((r) => r.name === "viaExplicitPath")?.host).toBe(
       "explicit.example.com",
     );
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Linux user-scope completeness — XDG_CONFIG_HOME + Flatpak
+//
+// VS Code is Electron; `app.getPath("appData")` on Linux is documented as
+// `$XDG_CONFIG_HOME` OR `~/.config`. The Flatpak packaging docs confirm the
+// mechanism from the other side: a Flatpak sandbox redirects the app's
+// XDG_CONFIG_HOME into `~/.var/app/<id>/config`, which only works because
+// Electron honors that variable. Both shapes must therefore be discoverable
+// or those users import nothing at all, silently (`auto` does not fail on
+// zero definitions).
+// ════════════════════════════════════════════════════════════════════
+
+describe("linux user scope: XDG_CONFIG_HOME and Flatpak", () => {
+  let dirs: string[] = [];
+
+  beforeEach(() => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+    vi.restoreAllMocks();
+  });
+
+  function tmpDirPosix(): string {
+    const raw = mkdtempSync(join(tmpdir(), "iris-sm-xdg-"));
+    dirs.push(raw);
+    return raw.split("\\").join("/");
+  }
+
+  // ── XDG_CONFIG_HOME ──────────────────────────────────────────────
+
+  it("XDG_CONFIG_HOME, when set, is searched BEFORE ~/.config for every product", () => {
+    const files = discoverSettingsFiles(
+      {
+        HOME: "/home/test",
+        XDG_CONFIG_HOME: "/home/test/.myconfig",
+        IRIS_SM_WORKSPACE: "/home/test/project",
+      },
+      "linux",
+    );
+    for (const product of ["Code", "Code - Insiders", "VSCodium", "Cursor"]) {
+      const xdgIdx = files.indexOf(`/home/test/.myconfig/${product}/User/settings.json`);
+      const defaultIdx = files.indexOf(`/home/test/.config/${product}/User/settings.json`);
+      expect(xdgIdx).toBeGreaterThanOrEqual(0);
+      expect(defaultIdx).toBeGreaterThanOrEqual(0);
+      expect(xdgIdx).toBeLessThan(defaultIdx);
+    }
+  });
+
+  it("XDG_CONFIG_HOME equal to $HOME/.config does not produce duplicate candidates", () => {
+    const files = discoverSettingsFiles(
+      {
+        HOME: "/home/test",
+        XDG_CONFIG_HOME: "/home/test/.config",
+        IRIS_SM_WORKSPACE: "/home/test/project",
+      },
+      "linux",
+    );
+    const codePaths = files.filter((f) => f === "/home/test/.config/Code/User/settings.json");
+    expect(codePaths).toHaveLength(1);
+  });
+
+  it("XDG_CONFIG_HOME alone (no HOME) still yields user candidates", () => {
+    const files = discoverSettingsFiles(
+      { XDG_CONFIG_HOME: "/xdg", IRIS_SM_WORKSPACE: "/ws" },
+      "linux",
+    );
+    expect(files).toContain("/xdg/Code/User/settings.json");
+    // no HOME ⇒ neither ~/.config nor Flatpak candidates
+    expect(files.some((f) => f.includes("/.config/"))).toBe(false);
+    expect(files.some((f) => f.includes("/.var/app/"))).toBe(false);
+  });
+
+  it("XDG_CONFIG_HOME is ignored on win32 and darwin (not their config mechanism)", () => {
+    const win = discoverSettingsFiles(
+      { APPDATA: "C:\\Users\\test\\AppData\\Roaming", XDG_CONFIG_HOME: "/xdg", IRIS_SM_WORKSPACE: "C:\\ws" },
+      "win32",
+    );
+    expect(win.some((f) => f.includes("xdg"))).toBe(false);
+
+    const mac = discoverSettingsFiles(
+      { HOME: "/Users/test", XDG_CONFIG_HOME: "/xdg", IRIS_SM_WORKSPACE: "/ws" },
+      "darwin",
+    );
+    expect(mac.some((f) => f.includes("xdg"))).toBe(false);
+  });
+
+  // ── Flatpak ──────────────────────────────────────────────────────
+
+  it("emits the three verified Flathub app paths, and no Cursor entry", () => {
+    const files = discoverSettingsFiles(
+      { HOME: "/home/test", IRIS_SM_WORKSPACE: "/ws" },
+      "linux",
+    );
+    const flatpak = files.filter((f) => f.includes("/.var/app/"));
+    expect(flatpak).toEqual([
+      "/home/test/.var/app/com.visualstudio.code/config/Code/User/settings.json",
+      "/home/test/.var/app/com.visualstudio.code.insiders/config/Code - Insiders/User/settings.json",
+      "/home/test/.var/app/com.vscodium.codium/config/VSCodium/User/settings.json",
+    ]);
+    // Cursor is not published on Flathub — a wrong id would be worse than none.
+    expect(flatpak.some((f) => f.includes("Cursor") || f.includes("cursor"))).toBe(false);
+  });
+
+  it("native user paths are searched BEFORE Flatpak ones", () => {
+    const files = discoverSettingsFiles(
+      { HOME: "/home/test", IRIS_SM_WORKSPACE: "/ws" },
+      "linux",
+    );
+    const lastNative = files.lastIndexOf("/home/test/.config/Cursor/User/settings.json");
+    const firstFlatpak = files.findIndex((f) => f.includes("/.var/app/"));
+    expect(lastNative).toBeGreaterThanOrEqual(0);
+    expect(firstFlatpak).toBeGreaterThan(lastNative);
+  });
+
+  it("no Flatpak candidates on win32 or darwin (Flatpak is Linux-only)", () => {
+    const win = discoverSettingsFiles(
+      { APPDATA: "C:\\Users\\test\\AppData\\Roaming", HOME: "C:\\Users\\test", IRIS_SM_WORKSPACE: "C:\\ws" },
+      "win32",
+    );
+    expect(win.some((f) => f.includes(".var"))).toBe(false);
+
+    const mac = discoverSettingsFiles(
+      { HOME: "/Users/test", IRIS_SM_WORKSPACE: "/ws" },
+      "darwin",
+    );
+    expect(mac.some((f) => f.includes("/.var/app/"))).toBe(false);
+  });
+
+  // ── end to end, on real files ────────────────────────────────────
+
+  it("REGRESSION: a server defined ONLY under XDG_CONFIG_HOME is imported", () => {
+    const xdg = tmpDirPosix();
+    const dir = `${xdg}/Code/User`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      `${dir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          fromXdg: {
+            webServer: { scheme: "http", host: "xdg.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        XDG_CONFIG_HOME: xdg,
+        IRIS_SM_WORKSPACE: tmpDirPosix(),
+      },
+      "linux",
+    );
+    expect(result.find((r) => r.name === "fromXdg")?.host).toBe("xdg.example.com");
+  });
+
+  it("REGRESSION: a server defined ONLY in a Flatpak sandbox is imported", () => {
+    const home = tmpDirPosix();
+    const dir = `${home}/.var/app/com.visualstudio.code/config/Code/User`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      `${dir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          fromFlatpak: {
+            webServer: { scheme: "http", host: "flatpak.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: home, IRIS_SM_WORKSPACE: tmpDirPosix() },
+      "linux",
+    );
+    expect(result.find((r) => r.name === "fromFlatpak")?.host).toBe("flatpak.example.com");
+  });
+
+  it("precedence: native ~/.config beats a Flatpak install for the same server name", () => {
+    const home = tmpDirPosix();
+    const name = "dual";
+
+    const nativeDir = `${home}/.config/Code/User`;
+    mkdirSync(nativeDir, { recursive: true });
+    writeFileSync(
+      `${nativeDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          [name]: {
+            webServer: { scheme: "http", host: "native.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const flatpakDir = `${home}/.var/app/com.visualstudio.code/config/Code/User`;
+    mkdirSync(flatpakDir, { recursive: true });
+    writeFileSync(
+      `${flatpakDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          [name]: {
+            webServer: { scheme: "http", host: "flatpak.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: home, IRIS_SM_WORKSPACE: tmpDirPosix() },
+      "linux",
+    );
+    expect(result.find((r) => r.name === name)?.host).toBe("native.example.com");
   });
 });

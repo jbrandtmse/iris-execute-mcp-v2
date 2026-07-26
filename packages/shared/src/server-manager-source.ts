@@ -196,30 +196,85 @@ function parseServerAllowList(
  * Returns `undefined` when the platform's home/appdata env var is not set
  * (never throws — a missing env var just means that candidate is skipped).
  */
-function userSettingsPathFor(
+function userSettingsPathsFor(
   product: string,
   env: Record<string, string | undefined>,
   platform: NodeJS.Platform,
-): string | undefined {
+): string[] {
   if (platform === "win32") {
     const appData = env.APPDATA;
-    if (!appData) return undefined;
-    return path.win32.join(appData, product, "User", "settings.json");
+    if (!appData) return [];
+    return [path.win32.join(appData, product, "User", "settings.json")];
   }
+
   const home = env.HOME;
-  if (!home) return undefined;
+
   if (platform === "darwin") {
-    return path.posix.join(
-      home,
-      "Library",
-      "Application Support",
-      product,
-      "User",
-      "settings.json",
-    );
+    if (!home) return [];
+    return [
+      path.posix.join(home, "Library", "Application Support", product, "User", "settings.json"),
+    ];
   }
+
   // linux and any other posix-like platform.
-  return path.posix.join(home, ".config", product, "User", "settings.json");
+  //
+  // VS Code is Electron, and Electron's `app.getPath("appData")` on Linux is
+  // documented as `$XDG_CONFIG_HOME` OR `~/.config` — it is not hard-wired to
+  // `~/.config`. The Flatpak packaging docs confirm the mechanism from the
+  // other side: Flatpak sandboxes an Electron app's config precisely BY
+  // redirecting `$XDG_CONFIG_HOME` into `~/.var/app/<id>/config`, which only
+  // works because Electron honors that variable. So when `XDG_CONFIG_HOME` is
+  // set we must look there.
+  //
+  // Both are emitted (XDG first) rather than either/or: candidates need not
+  // exist, so the extra path costs one already-guarded failed read, and it
+  // keeps working for someone who set `XDG_CONFIG_HOME` after VS Code had
+  // already written to `~/.config`.
+  const paths: string[] = [];
+  const xdgConfigHome = env.XDG_CONFIG_HOME;
+  if (xdgConfigHome) {
+    paths.push(path.posix.join(xdgConfigHome, product, "User", "settings.json"));
+  }
+  if (home) {
+    const defaultPath = path.posix.join(home, ".config", product, "User", "settings.json");
+    // Deduplicate the common case XDG_CONFIG_HOME="$HOME/.config".
+    if (!paths.includes(defaultPath)) paths.push(defaultPath);
+  }
+  return paths;
+}
+
+/**
+ * Flatpak-sandboxed user-settings paths (Linux only).
+ *
+ * A Flatpak install cannot write `~/.config` at all — Flatpak redirects the
+ * app's `$XDG_CONFIG_HOME` into `~/.var/app/<app-id>/config`, so the settings
+ * file lands at `~/.var/app/<app-id>/config/<Product>/User/settings.json`.
+ * Without these candidates a Flatpak user (common on Fedora/Silverblue)
+ * imports nothing at all, silently, since `auto` does not fail on zero.
+ *
+ * The `(appId, product)` pairs are fixed, not a cross product: each Flathub
+ * app carries exactly one Electron product directory. Verified against
+ * Flathub 2026-07-26. **Cursor is deliberately absent — it is not published
+ * on Flathub**; a third-party Cursor Flatpak would have an unknowable app id,
+ * and `IRIS_SM_SETTINGS_PATHS` is the escape hatch for anything unlisted here.
+ */
+const FLATPAK_USER_SETTINGS = [
+  { appId: "com.visualstudio.code", product: "Code" },
+  { appId: "com.visualstudio.code.insiders", product: "Code - Insiders" },
+  { appId: "com.vscodium.codium", product: "VSCodium" },
+] as const;
+
+/** Flatpak user-settings candidates for `platform`; empty on win32/darwin (Flatpak is Linux-only). */
+function flatpakSettingsPaths(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+): string[] {
+  if (platform === "win32" || platform === "darwin") return [];
+  const home = env.HOME;
+  if (!home) return [];
+  return FLATPAK_USER_SETTINGS.map(({ appId, product }) =>
+    path.posix.join(home, ".var", "app", appId, "config", product, "User", "settings.json"),
+  );
 }
 
 /**
@@ -285,10 +340,15 @@ export function discoverSettingsFiles(
   }
 
   for (const product of SETTINGS_PRODUCTS) {
-    const userSettingsPath = userSettingsPathFor(product, env, platform);
-    if (userSettingsPath !== undefined) {
+    for (const userSettingsPath of userSettingsPathsFor(product, env, platform)) {
       candidates.push(userSettingsPath);
     }
+  }
+
+  // Flatpak installs last within user scope: a native install is the more
+  // common case, so it wins a same-name collision against a Flatpak one.
+  for (const flatpakPath of flatpakSettingsPaths(env, platform)) {
+    candidates.push(flatpakPath);
   }
 
   return candidates;
