@@ -4382,6 +4382,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 **Functional Requirements (new)**: FR140.
 
 **Stories**:
+- 32.3 Deferred-work ledger burn-down (added 2026-07-26 at the Epic 32 retro-review gate — **executes FIRST**, before all feature work, per the binding Epic 31 phase-1 retro action #1 / phase-2 retro action #1 and Rule #37: the Epic-30-own batch reaches its 3rd consecutive re-deferral at this gate)
 - 32.0 `IRIS_GOVERNANCE_FILE` loader + cascade + attribution + back-compat proof
 - 32.1 `iris-mcp-governance` CLI
 - 32.2 Extension governance UI
@@ -4415,6 +4416,18 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 32.2.2** — All writes go through the same shared engine as the CLI (one code path); diff preview before save; the UI edits the governance FILE only — it never touches client configs or env.
 - **AC 32.2.3** — Effective-policy preview pane renders the full cascade with `configSource` badges, matching `iris_server_profiles` output for a running server byte-for-byte in a recorded check.
 - **AC 32.2.4** — Manual smoke recorded in story notes: toggle a write tool off in the UI → restart a server launched with `IRIS_GOVERNANCE_FILE` under a real agent → `iris_server_profiles` shows it disabled → calling it returns `GOVERNANCE_DISABLED` (the F2 success-metric round-trip).
+
+### Story 32.3: Deferred-Work Ledger Burn-Down (added 2026-07-26, retro-review gate)
+
+**Executes FIRST in Epic 32.** Mandate: Epic 31 phase-1 retro action #1 + phase-2 retro action #1 (binding), and Rule #37 — the Epic-30-own batch (30-0-1, 30-0-3, 30-0-4, 30-2-1) is at re-deferral count 2 entering this gate; a further carry is its 3rd consecutive. Precedent shape: Stories 22.1 / 26.4 / 29.3. Not a service-introducing story (cleanup/defect-disposition); no Integration AC required.
+
+**Acceptance Criteria**:
+- **AC 32.3.1** — TERMINAL disposition for EVERY carried-open item in `deferred-work.md` (44 items: the 4 Epic-30-own at count 2; Epic-31-own 31-0-5, 31-1-2/3/5, 31-2-1…6, 31-3-1…9, 31-4-1…8, 31-5-1…6, 31-6-1…6; plus pre-existing 31-7-1). Each lands in exactly one of **resolved / closed-with-evidence / closed-by-decision**. Re-deferral is NOT an allowed outcome for any carried item — only Epic-32's OWN new review findings may remain open (the AC-22.1.7/26.4.3 shape). Items already moot (e.g. 31-4-9, closed by the 2026-07-26 GUI smoke 6/6) are closed-with-evidence citing that record — verify, do not assume mootness for any other item.
+- **AC 32.3.2** — Rule #48 bar on every "resolved" code fix: prove it LIVE on the real surface or MUTATION-verify (revert → red → restore). A green suite is not evidence — these items were deferred precisely because the suite was blind there.
+- **AC 32.3.3** — Rule #16 probe-first: any item whose suggested resolution embeds an unverified API claim (e.g. 31-4-5's session-scope keying, 31-7-1's `X-CSRF-Token` expectation) is probed against the real system/docs before disposition; disposable probe artifacts are deleted before commit.
+- **AC 32.3.4** — Paired questions decided ONCE, not patched per-side: `31-3-1` + `31-4-4` (reserved name `default`, one policy across both sides of the process boundary) and `31-3-3` + `31-1-2` (the precedence/rescue question) each get a single recorded decision applied uniformly.
+- **AC 32.3.5** — The full disposition table is mirrored into `deferred-work.md` with per-item evidence references; every summary tally is derived MECHANICALLY (grep/awk over the disposition column) and cross-checked against any prose count before close (Rule #51 — Story 29.3's off-by-6 hand-count is the standing counterexample).
+- **AC 32.3.6** — Back-compat gates green at close: `pnpm turbo run build test lint type-check` all green; `pnpm gen:governance-baseline:check` (the `:check` ONLY, Rule #25) exit 0 with the frozen baseline `1e62c5ad5bf7` byte-unchanged (Rules #23/#25); no tool count moves (Rule #31); extension suite (`extensions/iris-mcp-launcher`) green. No `bootstrap-classes.ts` / `BOOTSTRAP_VERSION` / `src/ExecuteMCPv2/**` change is expected — if any item's resolution genuinely requires ObjectScript, HALT and surface to the lead before proceeding.
 
 ## Epic 33: Multi-Client MCP Configuration Manager (added 2026-07-25)
 
