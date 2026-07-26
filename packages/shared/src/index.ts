@@ -110,3 +110,28 @@ export type {
   ResolveVisibleToolsParams,
   ResolveVisibleToolsResult,
 } from "./tool-visibility.js";
+export {
+  SERVER_MANAGER_MODES,
+  discoverSettingsFiles,
+  parseIntersystemsServers,
+  parseServerManagerMode,
+  resolveServerManagerProfiles,
+} from "./server-manager-source.js";
+export type {
+  ServerManagerMode,
+  ParsedServerManagerEntry,
+  CredentialStatus,
+  ServerManagerProfileResult,
+} from "./server-manager-source.js";
+export {
+  CREDENTIAL_CHAIN_KEYCHAIN_SERVICE,
+  CREDENTIAL_HELPER_TIMEOUT_MS,
+  resolveCredential,
+  resolveServerManagerCredentials,
+} from "./credential-chain.js";
+export type {
+  CredentialLinkSource,
+  CredentialLinkResult,
+  CredentialChainOptions,
+  ResolveServerManagerCredentialsOptions,
+} from "./credential-chain.js";

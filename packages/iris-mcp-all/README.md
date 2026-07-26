@@ -52,6 +52,10 @@ Full model, per-server per-tool rosters, and the measured `tools/list` payload-s
 
 Every server in this suite supports the opt-in, secrets-free tool-call audit log: set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` (plus optional `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS`) to record **every MCP tool call — success, error, or governance denial — as JSONL, across all five servers**. Off by default (unset ⇒ a mechanical no-op); it is server-side configuration an AI client cannot switch off, and is distinct from IRIS's own `iris_audit_*` security-audit tools. Full details: [Compliance & Auditability](../../README.md#compliance--auditability) in the suite README.
 
+### Server Manager connections (`IRIS_SERVER_MANAGER`)
+
+Every server in this suite supports `IRIS_SERVER_MANAGER=auto`, which imports IRIS connection definitions straight from the InterSystems Server Manager VS Code extension's `intersystems.servers` settings — one curated roster instead of re-typing host/port/username into every MCP client's config. `IRIS_SERVER_MANAGER` is **framework configuration, not a tool**. Omit (or set `"off"`, the default) for today's behavior: no settings file is ever read. A password-less imported definition is completed via an OS-keychain / `IRIS_CREDENTIAL_HELPER` credential chain (see the [`iris-mcp-credentials` CLI](../../README.md#iris-mcp-credentials-cli) — Server Manager passwords themselves are never readable outside VS Code, by design); `iris_server_profiles` reports where each profile's connection fields came from via `source` (`"env"`/`"server-manager"`) and `sourceFile`. The companion variables are all optional, each with its own default: `IRIS_SM_SERVERS` (unset — import all), `IRIS_SM_SETTINGS_PATHS` (unset — normal discovery), `IRIS_SM_WORKSPACE` (unset — the process CWD) and `IRIS_CREDENTIAL_HELPER` (unset). Full model, discovery precedence, and the SecretStorage boundary explained plainly: [Server Manager connections](../../README.md#server-manager-connections-optional) in the suite README.
+
 ---
 
 ## Configuration

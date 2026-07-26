@@ -194,6 +194,38 @@ With this config, `iris_global_list({ server: "prod" })` runs against the prod i
 
 ---
 
+## Standalone Setup: Server Manager + OS Keychain (optional)
+
+If you already curate IRIS connections in the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) VS Code extension (or Cursor's own `intersystems.servers` setting), you can skip retyping `host`/`port`/`username` into `.cursor/mcp.json` entirely — two commands import them.
+
+1. Store the password for a connection in your OS keychain (Windows Credential Manager / macOS Keychain / libsecret) — never typed into a config file:
+
+   ```bash
+   npx -y -p @iris-mcp/shared iris-mcp-credentials set myserver
+   ```
+
+   > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
+
+2. Set `IRIS_SERVER_MANAGER` to `auto` in the server's `env` block:
+
+   ```json
+   {
+     "mcpServers": {
+       "iris-dev-mcp": {
+         "command": "npx",
+         "args": ["-y", "@iris-mcp/dev"],
+         "env": {
+           "IRIS_SERVER_MANAGER": "auto"
+         }
+       }
+     }
+   }
+   ```
+
+`IRIS_SERVER_MANAGER` defaults to `off` — nothing is read or imported unless you opt in. Once set, connection names from your Server Manager settings (including `myserver` above) become profiles you address with the tools' `server` parameter, exactly like an `IRIS_PROFILES` entry — no `IRIS_HOST`/`IRIS_PASSWORD` needed for those names. See [Server Manager connections](../../README.md#server-manager-connections-optional) in the suite README for the full discovery order, precedence rules, and the credential chain `iris-mcp-credentials set` feeds.
+
+---
+
 ## Read-only Mode + SQL Resource Caps (optional)
 
 Point a server at production in **read-only mode** with one environment variable — no `IRIS_GOVERNANCE` JSON required:

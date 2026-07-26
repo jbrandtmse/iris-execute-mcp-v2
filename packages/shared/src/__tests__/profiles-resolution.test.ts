@@ -472,22 +472,28 @@ describe("back-compat — empty IRIS_PROFILES is treated as absent", () => {
     const registry = buildProfileRegistry(loadConfig(env), env);
     expect(registry.size).toBe(1);
     const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
-    const { name: _name, ...connOnly } = def;
+    expect(def.source).toBe("env");
+    // Strip `name`/`source` (Story 31.3's deliberate, reviewed addition to
+    // this pinned fixture — see profiles.ts Dev Notes).
+    const { name: _name, source: _source, ...connOnly } = def;
     void _name;
+    void _source;
     expect(connOnly).toEqual(loadConfig(env));
   });
 
-  it('loadProfileRegistry with IRIS_PROFILES="" matches loadConfig byte-for-byte', () => {
+  it('loadProfileRegistry with IRIS_PROFILES="" matches loadConfig byte-for-byte', async () => {
     const env = {
       IRIS_USERNAME: "u",
       IRIS_PASSWORD: "p",
       IRIS_PROFILES: "",
     };
-    const registry = loadProfileRegistry(env);
+    const registry = await loadProfileRegistry(env);
     expect([...registry.keys()]).toEqual([DEFAULT_PROFILE_NAME]);
     const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
-    const { name: _n, ...connOnly } = def;
+    expect(def.source).toBe("env");
+    const { name: _n, source: _s, ...connOnly } = def;
     void _n;
+    void _s;
     expect(connOnly).toEqual(loadConfig(env));
   });
 });

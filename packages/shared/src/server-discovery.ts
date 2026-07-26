@@ -36,7 +36,7 @@ import { z } from "zod";
 
 import type { GovernanceConfig, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
 import { getEffectivePolicy } from "./governance.js";
-import type { IrisProfile, ProfileRegistry } from "./profiles.js";
+import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
 import type { ToolDefinition, ToolResult } from "./tool-types.js";
 import type { ToolPresetName } from "./tool-visibility.js";
@@ -83,6 +83,29 @@ export interface ProfileRosterEntry {
   https: boolean;
   baseUrl: string;
   timeout: number;
+  /**
+   * Provenance (Story 31.3, AC 31.3.2): `"env"` (`IRIS_*`/`IRIS_PROFILES`) or
+   * `"server-manager"` (imported from an `intersystems.servers` settings
+   * file). Absent only for a hand-built {@link IrisProfile} that never went
+   * through {@link import("./profiles.js").mergeProfile}/
+   * {@link import("./profiles.js").buildProfileRegistry} — every profile a
+   * real server registry contains carries it.
+   */
+  source?: ProfileSource;
+  /**
+   * The settings FILE a `"server-manager"`-sourced profile was imported from
+   * (deferred item 31-0-3's resolution). Absent for `"env"`-sourced profiles.
+   *
+   * Secret-free — no credential can reach it — but NOT information-free: it is
+   * a real local filesystem path, so a user-scope discovery hit embeds the OS
+   * account name (`C:\Users\<account>\AppData\Roaming\Code\User\settings.json`)
+   * and a workspace hit embeds the workspace directory, and this roster is
+   * returned to the connected MCP client. Deliberate, reviewed trade-off (code
+   * review 2026-07-25): a basename is useless here — every candidate file is
+   * literally named `settings.json` — so the directory IS the information the
+   * field exists to convey. See {@link import("./profiles.js").IrisProfile.sourceFile}.
+   */
+  sourceFile?: string;
 }
 
 /**
@@ -138,6 +161,11 @@ export interface ServerDiscoveryResult {
  * spread (`{ ...profile }`) + delete — the whole point is that a NEW field added
  * to {@link IrisProfile} must require a deliberate edit here to ever appear in
  * discovery output, so a secret can never leak by accident.
+ *
+ * `source`/`sourceFile` (Story 31.3, AC 31.3.2/deferred item 31-0-3) are named
+ * explicitly, same discipline as every other field — conditional spread so a
+ * profile that never set them (e.g. a hand-built test fixture) does not gain
+ * an `undefined`-valued key.
  */
 export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
   return {
@@ -150,6 +178,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     https: profile.https,
     baseUrl: profile.baseUrl,
     timeout: profile.timeout,
+    ...(profile.source !== undefined ? { source: profile.source } : {}),
+    ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
   };
 }
 
@@ -308,8 +338,10 @@ export const serverDiscoveryTool: ToolDefinition = {
     "enabled/disabled) — so you can choose the right `server` profile and avoid " +
     "calling disabled actions, without reading the client's config files. " +
     "Returns: (1) a profile roster with non-secret connection metadata " +
-    "(name, host, port, username, namespace, https, baseUrl, timeout; the " +
-    "password is NEVER included); and (2) the effective enabled/disabled action " +
+    "(name, host, port, username, namespace, https, baseUrl, timeout, source " +
+    "[\"env\" or \"server-manager\"], sourceFile [the settings file, for " +
+    "server-manager-sourced profiles only]; the password is NEVER included); " +
+    "and (2) the effective enabled/disabled action " +
     "map for a selected profile (optional `profile` arg; defaults to the " +
     "`default` profile), or for every profile when `allProfiles: true`. " +
     "Note: the optional `profile` arg selects which profile's POLICY to report; " +
