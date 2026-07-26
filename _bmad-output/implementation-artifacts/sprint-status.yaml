@@ -461,7 +461,7 @@ development_status:
   # BINDING SPEC (all three): research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md. prd.md +FR139/FR140/FR141. Three independently shippable features; strictly additive under the standing back-compat gate; NO new MCP tool, NO governance key, NO tool-count change anywhere (Rule #31 held). The optional VS Code extension iris-mcp-launcher is scaffold-if-absent across 31.4/32.2/33.3 — whichever epic runs first creates it; no cross-epic blocking.
 
   # Epic 31: Server Manager Connection Integration (FR139). Source IRIS profiles from intersystems.servers (JSONC in VS Code settings, readable anywhere) in BOTH standalone + in-VS-Code runtimes. Env: IRIS_SERVER_MANAGER (off default|auto|required), IRIS_SM_SERVERS, IRIS_SM_SETTINGS_PATHS, IRIS_CREDENTIAL_HELPER. VS Code SecretStorage passwords are unreachable outside VS Code (verified) → credential chain env→OS keychain(@napi-rs/keyring optionalDep, service iris-mcp)→helper→fail-with-remediation. Merge AFTER env profiles (env wins collisions); source provenance through iris_server_profiles allow-list + audit profileSource. New iris-mcp-credentials CLI. Optional broker extension (McpServerDefinitionProvider, gjServAI pattern) = separate deliverable, may trail. Unset IRIS_SERVER_MANAGER ⇒ byte-for-byte today's resolution (Rule #19).
-  epic-31: in-progress
+  epic-31: done
   31-0-settings-discovery: done
   31-1-credential-chain: done
   31-2-credentials-cli: done
