@@ -34,6 +34,7 @@ import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
 import { IrisHttpClient } from "./http-client.js";
 import { logger } from "./logger.js";
+import { resolveServerManagerProfiles } from "./server-manager-source.js";
 
 /** Reserved profile name synthesized from the existing `IRIS_*` env vars. */
 export const DEFAULT_PROFILE_NAME = "default";
@@ -86,8 +87,12 @@ export class ProfileResolutionError extends Error {
  * specify. Any omitted field inherits from the default profile. `timeout` is
  * also inherited (it is not part of the documented per-profile schema but
  * defaults from the `default` profile so each client gets a sane timeout).
+ *
+ * Exported (Story 31.0, AC 31.0.2) so {@link import("./server-manager-source.js")}
+ * can map `intersystems.servers` entries onto this same shape and reuse
+ * {@link mergeProfile}'s field validation instead of duplicating it.
  */
-interface ProfileOverride {
+export interface ProfileOverride {
   host?: unknown;
   port?: unknown;
   username?: unknown;
@@ -104,33 +109,53 @@ function deriveBaseUrl(host: string, port: number, https: boolean): string {
 }
 
 /**
- * Fail-fast helper: throw a clear error naming `IRIS_PROFILES`.
+ * Fail-fast helper: throw a clear error naming the source (`IRIS_PROFILES` by
+ * default).
  *
  * Mirrors the fail-fast style of {@link loadConfig} (which names `IRIS_PORT` /
  * `IRIS_TIMEOUT`), so misconfiguration surfaces a clear, actionable startup
  * error rather than a silent or cryptic failure.
+ *
+ * @param detail     - The specific validation problem.
+ * @param sourceLabel - What to blame in the message (default `IRIS_PROFILES`,
+ *   preserving today's byte-identical error text). Story 31.0's
+ *   `server-manager-source.ts` passes a label naming the settings file/server
+ *   instead, so a malformed Server-Manager definition never blames a variable
+ *   the user may not have set (the "mergeProfile trap").
  */
-function profilesError(detail: string): Error {
-  return new Error(`IRIS_PROFILES is invalid: ${detail}`);
+function profilesError(detail: string, sourceLabel = "IRIS_PROFILES"): Error {
+  return new Error(`${sourceLabel} is invalid: ${detail}`);
 }
 
 /**
- * Merge one `IRIS_PROFILES` entry over the default profile to produce a fully
- * populated {@link IrisProfile}. Omitted fields inherit from `base`; `baseUrl`
- * is re-derived from the merged `host`/`port`/`https`.
+ * Merge one `IRIS_PROFILES` (or Story 31.0 Server-Manager) entry over a base
+ * profile to produce a fully populated {@link IrisProfile}. Omitted fields
+ * inherit from `base`; `baseUrl` is re-derived from the merged
+ * `host`/`port`/`https`.
  *
- * @throws {Error} (naming `IRIS_PROFILES`) when a field has the wrong type.
+ * Exported (Story 31.0, AC 31.0.2) so `server-manager-source.ts` can reuse this
+ * SAME field validation for `intersystems.servers` entries rather than
+ * duplicating it — see `sourceLabel` below for how it avoids mis-blaming
+ * `IRIS_PROFILES` for a Server-Manager-sourced error.
+ *
+ * @param sourceLabel - Passed through to {@link profilesError} (default
+ *   `IRIS_PROFILES`, so existing `IRIS_PROFILES` error text stays byte-identical).
+ * @throws {Error} (naming `sourceLabel`) when a field has the wrong type.
  */
-function mergeProfile(
+export function mergeProfile(
   name: string,
   base: IrisConnectionConfig,
   override: ProfileOverride,
+  sourceLabel = "IRIS_PROFILES",
 ): IrisProfile {
   // host
   let host = base.host;
   if (override.host !== undefined) {
     if (typeof override.host !== "string" || override.host === "") {
-      throw profilesError(`profile "${name}": "host" must be a non-empty string.`);
+      throw profilesError(
+        `profile "${name}": "host" must be a non-empty string.`,
+        sourceLabel,
+      );
     }
     host = override.host;
   }
@@ -143,6 +168,7 @@ function mergeProfile(
     if (!Number.isInteger(p) || p <= 0 || p > 65535) {
       throw profilesError(
         `profile "${name}": "port" must be an integer 1-65535. Received: ${JSON.stringify(override.port)}.`,
+        sourceLabel,
       );
     }
     port = p;
@@ -154,6 +180,7 @@ function mergeProfile(
     if (typeof override.username !== "string" || override.username === "") {
       throw profilesError(
         `profile "${name}": "username" must be a non-empty string.`,
+        sourceLabel,
       );
     }
     username = override.username;
@@ -163,7 +190,10 @@ function mergeProfile(
   let password = base.password;
   if (override.password !== undefined) {
     if (typeof override.password !== "string") {
-      throw profilesError(`profile "${name}": "password" must be a string.`);
+      throw profilesError(
+        `profile "${name}": "password" must be a string.`,
+        sourceLabel,
+      );
     }
     password = override.password;
   }
@@ -174,6 +204,7 @@ function mergeProfile(
     if (typeof override.namespace !== "string" || override.namespace === "") {
       throw profilesError(
         `profile "${name}": "namespace" must be a non-empty string.`,
+        sourceLabel,
       );
     }
     namespace = override.namespace;
@@ -185,6 +216,7 @@ function mergeProfile(
     if (typeof override.https !== "boolean") {
       throw profilesError(
         `profile "${name}": "https" must be a boolean (true/false).`,
+        sourceLabel,
       );
     }
     https = override.https;
@@ -200,6 +232,7 @@ function mergeProfile(
     if (!Number.isFinite(t) || t <= 0) {
       throw profilesError(
         `profile "${name}": "timeout" must be a positive number of milliseconds. Received: ${JSON.stringify(override.timeout)}.`,
+        sourceLabel,
       );
     }
     timeout = t;
@@ -312,16 +345,40 @@ export function buildProfileRegistry(
  * untouched so existing callers are unaffected; this is the additive entry
  * point new (profile-aware) code calls instead.
  *
- * @param env - Environment map (defaults to `process.env`).
- * @returns A {@link ProfileRegistry} containing `default` plus any `IRIS_PROFILES` entries.
+ * **Story 31.0 minimal wire-in (Rule #52 seam).** After the existing
+ * default + `IRIS_PROFILES` merge, Server-Manager-sourced profiles
+ * ({@link resolveServerManagerProfiles}) are appended for any name not already
+ * present. This is intentionally NOT Story 31.3's full merge semantics — no
+ * collision log notice, no `source` provenance field, no allow-list surfacing,
+ * no audit `profileSource`; those land in Story 31.3. With `IRIS_SERVER_MANAGER`
+ * unset/`off` (the default), `resolveServerManagerProfiles` returns `[]` with
+ * ZERO filesystem access, so this step is a provable no-op and the returned
+ * registry is byte-for-byte today's output (AC 31.0.4).
+ *
+ * @param env      - Environment map (defaults to `process.env`).
+ * @param platform - Target platform for Server-Manager settings-file discovery
+ *   (defaults to `process.platform`); irrelevant when `IRIS_SERVER_MANAGER` is
+ *   unset/`off`.
+ * @returns A {@link ProfileRegistry} containing `default`, any `IRIS_PROFILES`
+ *   entries, and (when opted in) any resolved Server-Manager profiles.
  * @throws {Error} from {@link loadConfig} (naming `IRIS_PORT`/`IRIS_TIMEOUT`/`IRIS_USERNAME`/`IRIS_PASSWORD`).
  * @throws {Error} (naming `IRIS_PROFILES`) on malformed/invalid `IRIS_PROFILES`.
+ * @throws {Error} (naming `IRIS_SERVER_MANAGER`) on an unrecognized mode, or (in `required` mode) zero definitions found.
  */
 export function loadProfileRegistry(
   env: Record<string, string | undefined> = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): ProfileRegistry {
   const defaultConfig = loadConfig(env);
-  return buildProfileRegistry(defaultConfig, env);
+  const registry = buildProfileRegistry(defaultConfig, env);
+
+  for (const profile of resolveServerManagerProfiles(env, platform)) {
+    if (!registry.has(profile.name)) {
+      registry.set(profile.name, profile);
+    }
+  }
+
+  return registry;
 }
 
 /**

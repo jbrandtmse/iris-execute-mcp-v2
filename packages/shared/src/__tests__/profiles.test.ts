@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildProfileRegistry,
   loadProfileRegistry,
@@ -577,5 +580,272 @@ describe("SQL caps propagate to non-default profiles (Story 24.2 CR patch)", () 
     expect(secondary.sqlTimeoutMs).toBeUndefined();
     expect(secondary).not.toHaveProperty("sqlMaxRows");
     expect(secondary).not.toHaveProperty("sqlTimeoutMs");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 31.0 — IRIS_SERVER_MANAGER minimal wire-in into loadProfileRegistry.
+//
+// Scope seam (Rule #52): loadProfileRegistry's ONLY new behavior in this
+// story is appending resolveServerManagerProfiles(env, platform)'s output
+// for any name not already present — no collision log notice, no `source`
+// provenance, no allow-list surfacing, no audit profileSource (Story 31.3).
+//
+// AC 31.0.4 (Rule #19 mechanical back-compat proof): with IRIS_SERVER_MANAGER
+// unset, loadProfileRegistry's output deep-equals buildProfileRegistry's own
+// (unchanged) output — even with a REAL, POPULATED .vscode/settings.json
+// fixture present on disk — proving the file is never read when off.
+//
+// AC 31.0.5: profiles lacking a password are excluded from the registry at
+// this stage (Story 31.1 owns real credential resolution).
+// ════════════════════════════════════════════════════════════════════
+
+describe("Story 31.0 — Server Manager minimal wire-in (AC 31.0.4, 31.0.5)", () => {
+  let dirs: string[] = [];
+
+  function tmpWorkspaceWithSettings(settingsJson: unknown): string {
+    const dir = mkdtempSync(join(tmpdir(), "iris-profiles-sm-backcompat-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, ".vscode"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vscode", "settings.json"),
+      JSON.stringify(settingsJson),
+      "utf8",
+    );
+    return dir;
+  }
+
+  beforeEach(() => {
+    // Every fixture in this block carries an inline legacy password, so the real
+    // deprecation warning would otherwise reach CI stderr. Stubbing here (rather
+    // than inside the one test that asserts on it) also guarantees restoration
+    // even when an assertion fails mid-test — a spy left installed by a failing
+    // test silently poisons every later log assertion in the file.
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  const POPULATED_SETTINGS = {
+    "intersystems.servers": {
+      someServer: {
+        webServer: { scheme: "https", host: "sm.example.com", port: 443 },
+        username: "smuser",
+        password: "smpass", // legacy inline — would normally resolve if SM were on
+      },
+    },
+  };
+
+  it("AC 31.0.4: with IRIS_SERVER_MANAGER unset and a populated .vscode/settings.json fixture on disk, loadProfileRegistry deep-equals buildProfileRegistry's plain output (default-only)", () => {
+    const workspaceDir = tmpWorkspaceWithSettings(POPULATED_SETTINGS);
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SM_WORKSPACE: workspaceDir,
+      // IRIS_SERVER_MANAGER intentionally unset.
+    };
+    const defaultConfig = loadConfig(env);
+    const expected = buildProfileRegistry(defaultConfig, env);
+    const actual = loadProfileRegistry(env);
+
+    expect(actual).toEqual(expected);
+    // The fixture's "someServer" profile must NOT have leaked in.
+    expect(actual.has("someServer")).toBe(false);
+  });
+
+  it("AC 31.0.4: same proof extended across the existing multi-profile matrix (IRIS_PROFILES set, fixture present, IRIS_SERVER_MANAGER unset)", () => {
+    const workspaceDir = tmpWorkspaceWithSettings(POPULATED_SETTINGS);
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({
+        prod: { host: "prod.example.com" },
+        staging: { host: "staging.example.com" },
+      }),
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const defaultConfig = loadConfig(env);
+    const expected = buildProfileRegistry(defaultConfig, env);
+    const actual = loadProfileRegistry(env);
+
+    expect(actual).toEqual(expected);
+    expect([...actual.keys()].sort()).toEqual(["default", "prod", "staging"]);
+  });
+
+  it("AC 31.0.4: explicit IRIS_SERVER_MANAGER=off is likewise inert with the fixture present", () => {
+    const workspaceDir = tmpWorkspaceWithSettings(POPULATED_SETTINGS);
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "off",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const defaultConfig = loadConfig(env);
+    const expected = buildProfileRegistry(defaultConfig, env);
+    expect(loadProfileRegistry(env)).toEqual(expected);
+  });
+
+  it("AC 31.0.5 (positive path): with IRIS_SERVER_MANAGER=auto, a resolvable (legacy-password) Server-Manager profile IS added to the registry", () => {
+    const workspaceDir = tmpWorkspaceWithSettings(POPULATED_SETTINGS);
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const registry = loadProfileRegistry(env);
+    expect(registry.has("someServer")).toBe(true);
+    const sm = registry.get("someServer") as IrisProfile;
+    expect(sm.host).toBe("sm.example.com");
+    expect(sm.password).toBe("smpass");
+  });
+
+  it("AC 31.0.5: with IRIS_SERVER_MANAGER=auto, a passwordless Server-Manager profile is EXCLUDED from the registry, with a single startup log line", () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        noPassword: {
+          webServer: { scheme: "http", host: "other.example.com", port: 52773 },
+          username: "u",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const registry = loadProfileRegistry(env);
+
+    expect(registry.has("noPassword")).toBe(false);
+    expect([...registry.keys()]).toEqual([DEFAULT_PROFILE_NAME]);
+    const warnSpy = vi.mocked(logger.warn);
+    const summaryCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("server profile(s) skipped"),
+    );
+    expect(summaryCalls).toHaveLength(1);
+  });
+
+  it("an env-defined profile name wins over a same-named Server-Manager definition (minimal wire-in never overwrites an existing entry)", () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        prod: {
+          webServer: { scheme: "https", host: "sm-prod.example.com", port: 443 },
+          username: "smuser",
+          password: "smpass",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host: "env-prod.example.com" } }),
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const registry = loadProfileRegistry(env);
+    const prod = registry.get("prod") as IrisProfile;
+    expect(prod.host).toBe("env-prod.example.com");
+  });
+
+  // ── QA addition: genuine end-to-end pass through loadProfileRegistry ──
+  //
+  // Every test above drives loadProfileRegistry through a SINGLE settings
+  // file (IRIS_SM_WORKSPACE only). It never exercises the real multi-file
+  // discovery precedence (workspace .vscode/settings.json outranking a VS
+  // Code product's user settings.json) THROUGH the full loadProfileRegistry
+  // entry point — server-manager-source.test.ts proves precedence at the
+  // resolveServerManagerProfiles layer directly, but AC 31.0.4/31.0.5 are
+  // about what ships through loadProfileRegistry specifically. Close that
+  // gap with a real on-disk two-file fixture and no IRIS_SM_SETTINGS_PATHS
+  // override anywhere in the env.
+  //
+  // Code review 2026-07-25: this drives the LINUX/HOME branch (with tmp paths
+  // normalized to forward slashes, matching path.posix.join's output) rather
+  // than win32/APPDATA. Node's fs accepts forward-slash paths on Windows, so
+  // this runs for real on every host OS. The earlier win32 form composed the
+  // fixture directories with the HOST path module while discovery used
+  // path.win32.join — on a posix host those disagree, the read ENOENTs, and
+  // the swallow turns a genuine cross-platform failure into a red assertion.
+  it("loadProfileRegistry(auto): resolves a real multi-file discovery precedence (workspace beats user settings) end-to-end, with no IRIS_SM_SETTINGS_PATHS override", () => {
+    /** A tmpdir path normalized to forward slashes, matching path.posix.join's output style. */
+    const posixTmp = (prefix: string): string => {
+      const raw = mkdtempSync(join(tmpdir(), prefix));
+      dirs.push(raw);
+      return raw.split("\\").join("/");
+    };
+
+    const workspaceDir = posixTmp("iris-profiles-e2e-ws-");
+    mkdirSync(`${workspaceDir}/.vscode`, { recursive: true });
+    writeFileSync(
+      `${workspaceDir}/.vscode/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "workspace-host.example.com", port: 52773 },
+            username: "u",
+            password: "wspw",
+          },
+          onlyInWorkspace: {
+            webServer: { scheme: "http", host: "only-ws.example.com", port: 52773 },
+            username: "u",
+            password: "wspw2",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const homeDir = posixTmp("iris-profiles-e2e-home-");
+    mkdirSync(`${homeDir}/.config/Code/User`, { recursive: true });
+    writeFileSync(
+      `${homeDir}/.config/Code/User/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "user-settings-host.example.com", port: 52773 },
+            username: "u",
+            password: "uspw",
+          },
+          onlyInUserSettings: {
+            webServer: { scheme: "http", host: "only-us.example.com", port: 52773 },
+            username: "u",
+            password: "uspw2",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+      HOME: homeDir,
+      // No IRIS_SM_SETTINGS_PATHS — this exercises real discoverSettingsFiles
+      // precedence ordering, pinned to the linux branch so HOME is the one
+      // consulted regardless of the host OS running this suite (Node's fs
+      // accepts the forward-slash paths path.posix.join composes on Windows).
+    };
+    const registry = loadProfileRegistry(env, "linux");
+
+    // Entries unique to each file both made it in.
+    const onlyWs = registry.get("onlyInWorkspace") as IrisProfile;
+    const onlyUs = registry.get("onlyInUserSettings") as IrisProfile;
+    expect(onlyWs?.host).toBe("only-ws.example.com");
+    expect(onlyUs?.host).toBe("only-us.example.com");
+
+    // The name defined in BOTH files resolves to the workspace file's
+    // definition — workspace outranks user settings (AC 31.0.1 precedence),
+    // proven here through the full loadProfileRegistry entry point, not just
+    // resolveServerManagerProfiles in isolation.
+    const dup = registry.get("dup") as IrisProfile;
+    expect(dup?.host).toBe("workspace-host.example.com");
   });
 });

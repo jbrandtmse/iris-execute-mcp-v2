@@ -110,3 +110,14 @@ export type {
   ResolveVisibleToolsParams,
   ResolveVisibleToolsResult,
 } from "./tool-visibility.js";
+export {
+  SERVER_MANAGER_MODES,
+  discoverSettingsFiles,
+  parseIntersystemsServers,
+  parseServerManagerMode,
+  resolveServerManagerProfiles,
+} from "./server-manager-source.js";
+export type {
+  ServerManagerMode,
+  ParsedServerManagerEntry,
+} from "./server-manager-source.js";

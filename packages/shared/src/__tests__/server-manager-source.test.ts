@@ -1,0 +1,1202 @@
+/**
+ * Story 31.0 — Server Manager settings discovery + JSONC parsing + profile
+ * mapping (`server-manager-source.ts`).
+ *
+ * Scope (Rule #52 seam, see the module's own doc comment): this file covers
+ * the THREE exported functions this story owns — `discoverSettingsFiles`,
+ * `parseIntersystemsServers`, `resolveServerManagerProfiles` — plus
+ * `parseServerManagerMode`'s fail-fast env parsing. Credential-chain
+ * completion (Story 31.1) and full registry merge semantics/provenance
+ * (Story 31.3) are explicitly NOT tested here — only the minimal wire-in's
+ * back-compat proof, which lives in `profiles.test.ts` (AC 31.0.4/31.0.5).
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, posix } from "node:path";
+
+// Wrap the REAL node:fs implementation in vi.fn() (profiles-bootstrap.test.ts's
+// established pattern) so on-disk fixture reads keep working while calls remain
+// spy-able/countable (needed for the "off touches zero filesystem" proof).
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
+
+import { readFileSync as mockedReadFileSync } from "node:fs";
+const readFileSyncSpy = mockedReadFileSync as unknown as ReturnType<typeof vi.fn>;
+
+import {
+  discoverSettingsFiles,
+  parseIntersystemsServers,
+  parseServerManagerMode,
+  resolveServerManagerProfiles,
+} from "../server-manager-source.js";
+import { logger } from "../logger.js";
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function makeTmpDir(): string {
+  return mkdtempSync(join(tmpdir(), "iris-sm-source-test-"));
+}
+
+/** Write `settings.json` (JSONC text) directly into `dir`. */
+function writeSettings(dir: string, text: string): string {
+  const filePath = join(dir, "settings.json");
+  writeFileSync(filePath, text, "utf8");
+  return filePath;
+}
+
+const BASE_ENV = { IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret" };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  readFileSyncSpy.mockClear();
+});
+
+// ════════════════════════════════════════════════════════════════════
+// parseServerManagerMode (AC 31.0.3)
+// ════════════════════════════════════════════════════════════════════
+
+describe("parseServerManagerMode", () => {
+  it("unset ⇒ off", () => {
+    expect(parseServerManagerMode({})).toBe("off");
+  });
+
+  it("empty string ⇒ off", () => {
+    expect(parseServerManagerMode({ IRIS_SERVER_MANAGER: "" })).toBe("off");
+  });
+
+  it.each(["off", "auto", "required"])("recognizes %s", (mode) => {
+    expect(parseServerManagerMode({ IRIS_SERVER_MANAGER: mode })).toBe(mode);
+  });
+
+  it("throws naming IRIS_SERVER_MANAGER and the valid set for an unknown value", () => {
+    expect(() => parseServerManagerMode({ IRIS_SERVER_MANAGER: "sometimes" })).toThrow(
+      "IRIS_SERVER_MANAGER is invalid",
+    );
+    expect(() => parseServerManagerMode({ IRIS_SERVER_MANAGER: "sometimes" })).toThrow(
+      /off, auto, required/,
+    );
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// parseIntersystemsServers (AC 31.0.2)
+// ════════════════════════════════════════════════════════════════════
+
+describe("parseIntersystemsServers", () => {
+  it("parses comments and trailing commas (JSONC)", () => {
+    const text = `{
+      // a leading comment
+      "intersystems.servers": {
+        "localIris": {
+          "webServer": { "scheme": "http", "host": "localhost", "port": 52773, },
+          "username": "_SYSTEM", // trailing comma above and here
+        },
+      },
+    }`;
+    const result = parseIntersystemsServers(text);
+    expect(Object.keys(result)).toEqual(["localIris"]);
+    expect(result.localIris?.override).toEqual({
+      https: false,
+      host: "localhost",
+      port: 52773,
+      username: "_SYSTEM",
+    });
+    expect(result.localIris?.legacyPassword).toBe(false);
+  });
+
+  it("skips the /default marker and any /-prefixed key", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        localIris: {
+          webServer: { scheme: "http", host: "localhost", port: 52773 },
+          username: "_SYSTEM",
+        },
+        "/default": "localIris",
+        "/somethingElse": "ignored",
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(Object.keys(result)).toEqual(["localIris"]);
+  });
+
+  it("ignores superServer entirely", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        localIris: {
+          webServer: { scheme: "http", host: "localhost", port: 52773 },
+          superServer: { host: "localhost", port: 1972 },
+          username: "_SYSTEM",
+        },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.localIris?.override).toEqual({
+      https: false,
+      host: "localhost",
+      port: 52773,
+      username: "_SYSTEM",
+    });
+  });
+
+  it("maps scheme https to override.https = true, and any other/absent scheme to false", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        secure: { webServer: { scheme: "https", host: "h", port: 443 } },
+        plain: { webServer: { scheme: "http", host: "h", port: 80 } },
+        unspecified: { webServer: { host: "h", port: 52773 } },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.secure?.override.https).toBe(true);
+    expect(result.plain?.override.https).toBe(false);
+    expect(result.unspecified?.override.https).toBe(false);
+  });
+
+  it("honors a legacy inline password and flags legacyPassword", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        legacy: {
+          webServer: { scheme: "http", host: "h", port: 52773 },
+          username: "u",
+          password: "hunter2",
+        },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.legacy?.override.password).toBe("hunter2");
+    expect(result.legacy?.legacyPassword).toBe(true);
+  });
+
+  it("does not set override.password (and legacyPassword stays false) when password is absent", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        noPw: { webServer: { scheme: "http", host: "h", port: 52773 } },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.noPw?.override.password).toBeUndefined();
+    expect(result.noPw?.legacyPassword).toBe(false);
+  });
+
+  it.each([
+    ["prefix", "/prefix"],
+    ["/prefix", "/prefix"],
+    ["/prefix/", "/prefix"],
+    ["prefix//", "/prefix"],
+    ["", undefined],
+    ["/", undefined],
+  ])("normalizes pathPrefix %j to %j", (raw, expected) => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        srv: { webServer: { scheme: "http", host: "h", port: 52773, pathPrefix: raw } },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.srv?.pathPrefix).toBe(expected);
+  });
+
+  it("absent intersystems.servers key returns {} with no error (common case)", () => {
+    const result = parseIntersystemsServers(JSON.stringify({ "editor.fontSize": 14 }));
+    expect(result).toEqual({});
+  });
+
+  it("non-object intersystems.servers value returns {} with no error", () => {
+    const result = parseIntersystemsServers(JSON.stringify({ "intersystems.servers": "nope" }));
+    expect(result).toEqual({});
+  });
+
+  it("skips an entry with no webServer block", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": { broken: { username: "u" } },
+    });
+    expect(parseIntersystemsServers(text)).toEqual({});
+  });
+
+  // ── Code-review additions (2026-07-25) ───────────────────────────
+
+  it("parses a settings file saved with a UTF-8 BOM (jsonc-parser reports it as a parse error at offset 0)", () => {
+    const text =
+      "﻿" +
+      JSON.stringify({
+        "intersystems.servers": {
+          localIris: {
+            webServer: { scheme: "http", host: "localhost", port: 52773 },
+            username: "_SYSTEM",
+          },
+        },
+      });
+    // Pre-fix this threw "malformed JSONC (1 parse error(s), first at offset 0)"
+    // and the caller discarded the whole (valid) file.
+    expect(Object.keys(parseIntersystemsServers(text))).toEqual(["localIris"]);
+  });
+
+  it.each([
+    ["absent host", { scheme: "https", port: 443 }],
+    ["empty host", { scheme: "https", host: "", port: 443 }],
+    ["whitespace-only host", { scheme: "https", host: "   ", port: 443 }],
+    ["non-string host", { scheme: "https", host: 12345, port: 443 }],
+  ])(
+    "skips an entry whose webServer has an unusable host (%s) — it must never inherit the LOCAL default host",
+    (_label, webServer) => {
+      const text = JSON.stringify({
+        "intersystems.servers": {
+          prod: { webServer, username: "prod-admin", password: "prodpw" },
+        },
+      });
+      expect(parseIntersystemsServers(text)).toEqual({});
+    },
+  );
+
+  it.each([
+    ["https", true],
+    ["HTTPS", true],
+    ["Https", true],
+    [" https ", true],
+    ["http", false],
+    ["HTTP", false],
+  ])("compares scheme %j case- and whitespace-insensitively (https = %s)", (scheme, expected) => {
+    const text = JSON.stringify({
+      "intersystems.servers": { srv: { webServer: { scheme, host: "h", port: 443 } } },
+    });
+    expect(parseIntersystemsServers(text).srv?.override.https).toBe(expected);
+  });
+
+  it("skips an empty/whitespace-only server name (it would be an unreachable registry entry)", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        "": { webServer: { scheme: "http", host: "h", port: 1 }, password: "pw" },
+        "   ": { webServer: { scheme: "http", host: "h", port: 1 }, password: "pw" },
+        ok: { webServer: { scheme: "http", host: "h", port: 1 }, password: "pw" },
+      },
+    });
+    expect(Object.keys(parseIntersystemsServers(text))).toEqual(["ok"]);
+  });
+
+  it("treats a whitespace-only inline password as no password at all", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        wspw: { webServer: { scheme: "http", host: "h", port: 1 }, password: "   " },
+      },
+    });
+    const result = parseIntersystemsServers(text);
+    expect(result.wspw?.override.password).toBeUndefined();
+    expect(result.wspw?.legacyPassword).toBe(false);
+  });
+
+  it("skips a non-object entry value", () => {
+    const text = JSON.stringify({
+      "intersystems.servers": { broken: "not-an-object" },
+    });
+    expect(parseIntersystemsServers(text)).toEqual({});
+  });
+
+  it("empty text returns {} with no error", () => {
+    expect(parseIntersystemsServers("")).toEqual({});
+  });
+
+  it("throws on genuinely malformed JSONC", () => {
+    expect(() => parseIntersystemsServers("{ this is not json at all !!!")).toThrow(
+      /malformed JSONC/,
+    );
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// discoverSettingsFiles (AC 31.0.1)
+// ════════════════════════════════════════════════════════════════════
+
+describe("discoverSettingsFiles", () => {
+  it("IRIS_SM_SETTINGS_PATHS (win32 delimiter ;) replaces discovery entirely", () => {
+    const files = discoverSettingsFiles(
+      {
+        IRIS_SM_SETTINGS_PATHS: "C:\\a\\settings.json;C:\\b\\settings.json",
+        APPDATA: "C:\\Users\\test\\AppData\\Roaming", // must be ignored — replaced entirely
+      },
+      "win32",
+    );
+    expect(files).toEqual(["C:\\a\\settings.json", "C:\\b\\settings.json"]);
+  });
+
+  it("IRIS_SM_SETTINGS_PATHS (posix delimiter :) replaces discovery entirely", () => {
+    const files = discoverSettingsFiles(
+      { IRIS_SM_SETTINGS_PATHS: "/a/settings.json:/b/settings.json" },
+      "linux",
+    );
+    expect(files).toEqual(["/a/settings.json", "/b/settings.json"]);
+  });
+
+  it("win32: workspace + all 4 product user-settings paths, from APPDATA", () => {
+    const files = discoverSettingsFiles(
+      { APPDATA: "C:\\Users\\test\\AppData\\Roaming", IRIS_SM_WORKSPACE: "C:\\myworkspace" },
+      "win32",
+    );
+    expect(files).toEqual([
+      "C:\\myworkspace\\.vscode\\settings.json",
+      "C:\\Users\\test\\AppData\\Roaming\\Code\\User\\settings.json",
+      "C:\\Users\\test\\AppData\\Roaming\\Code - Insiders\\User\\settings.json",
+      "C:\\Users\\test\\AppData\\Roaming\\VSCodium\\User\\settings.json",
+      "C:\\Users\\test\\AppData\\Roaming\\Cursor\\User\\settings.json",
+    ]);
+  });
+
+  it("win32: missing APPDATA skips user-settings candidates gracefully (never throws)", () => {
+    const files = discoverSettingsFiles({ IRIS_SM_WORKSPACE: "C:\\myworkspace" }, "win32");
+    expect(files).toEqual(["C:\\myworkspace\\.vscode\\settings.json"]);
+  });
+
+  it("darwin: workspace + all 4 product user-settings paths, from HOME", () => {
+    const files = discoverSettingsFiles(
+      { HOME: "/Users/test", IRIS_SM_WORKSPACE: "/Users/test/project" },
+      "darwin",
+    );
+    expect(files).toEqual([
+      "/Users/test/project/.vscode/settings.json",
+      "/Users/test/Library/Application Support/Code/User/settings.json",
+      "/Users/test/Library/Application Support/Code - Insiders/User/settings.json",
+      "/Users/test/Library/Application Support/VSCodium/User/settings.json",
+      "/Users/test/Library/Application Support/Cursor/User/settings.json",
+    ]);
+  });
+
+  it("linux: workspace + all 4 product user-settings paths, from HOME", () => {
+    const files = discoverSettingsFiles(
+      { HOME: "/home/test", IRIS_SM_WORKSPACE: "/home/test/project" },
+      "linux",
+    );
+    expect(files).toEqual([
+      "/home/test/project/.vscode/settings.json",
+      "/home/test/.config/Code/User/settings.json",
+      "/home/test/.config/Code - Insiders/User/settings.json",
+      "/home/test/.config/VSCodium/User/settings.json",
+      "/home/test/.config/Cursor/User/settings.json",
+    ]);
+  });
+
+  it("linux: missing HOME skips user-settings candidates gracefully (never throws)", () => {
+    const files = discoverSettingsFiles({ IRIS_SM_WORKSPACE: "/home/test/project" }, "linux");
+    expect(files).toEqual(["/home/test/project/.vscode/settings.json"]);
+  });
+
+  it("a non-existent candidate path never throws, and still yields the candidate (existence is not checked here)", () => {
+    let files: string[] = [];
+    expect(() => {
+      files = discoverSettingsFiles({ IRIS_SM_WORKSPACE: "/does/not/exist" }, "linux");
+    }).not.toThrow();
+    expect(files).toEqual(["/does/not/exist/.vscode/settings.json"]);
+  });
+
+  // ── Code-review addition (2026-07-25) ────────────────────────────
+  //
+  // The workspace fallback used to read `process.cwd()` INSIDE the function
+  // (Task 2: "never read from globals inside the function"), so the branch that
+  // runs for essentially every real user — nobody sets IRIS_SM_WORKSPACE — was
+  // the only one with no coverage. `cwd` is now a signature-defaulted parameter.
+  it("falls back to the injected cwd for the workspace candidate when IRIS_SM_WORKSPACE is unset", () => {
+    const files = discoverSettingsFiles({}, "linux", "/injected/workspace");
+    expect(files).toEqual(["/injected/workspace/.vscode/settings.json"]);
+  });
+
+  it("IRIS_SM_WORKSPACE takes precedence over the injected cwd", () => {
+    const files = discoverSettingsFiles(
+      { IRIS_SM_WORKSPACE: "/explicit/ws" },
+      "linux",
+      "/injected/workspace",
+    );
+    expect(files).toEqual(["/explicit/ws/.vscode/settings.json"]);
+  });
+
+  it("defaults cwd to process.cwd() when the parameter is omitted", () => {
+    const files = discoverSettingsFiles({}, "linux");
+    expect(files[0]).toBe(posix.join(process.cwd(), ".vscode", "settings.json"));
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// resolveServerManagerProfiles (AC 31.0.1, 31.0.2, 31.0.3, 31.0.5)
+// ════════════════════════════════════════════════════════════════════
+
+describe("resolveServerManagerProfiles", () => {
+  let dirs: string[] = [];
+
+  beforeEach(() => {
+    dirs = [];
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  function tmpDir(): string {
+    const d = makeTmpDir();
+    dirs.push(d);
+    return d;
+  }
+
+  it("off (unset) returns [] and touches ZERO filesystem", () => {
+    const result = resolveServerManagerProfiles(BASE_ENV, "win32");
+    expect(result).toEqual([]);
+    expect(readFileSyncSpy).not.toHaveBeenCalled();
+  });
+
+  it("off (explicit) returns [] and touches ZERO filesystem", () => {
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "off" },
+      "win32",
+    );
+    expect(result).toEqual([]);
+    expect(readFileSyncSpy).not.toHaveBeenCalled();
+  });
+
+  it("auto: resolves a legacy-password entry into a usable IrisProfile, with a deprecation warning", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          legacyServer: {
+            webServer: { scheme: "https", host: "legacy.example.com", port: 443 },
+            username: "legacyuser",
+            password: "hunter2",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "legacyServer",
+      host: "legacy.example.com",
+      port: 443,
+      username: "legacyuser",
+      password: "hunter2",
+      https: true,
+      baseUrl: "https://legacy.example.com:443",
+    });
+
+    const warnSpy = vi.mocked(logger.warn);
+    const deprecationCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("deprecated inline"),
+    );
+    expect(deprecationCalls).toHaveLength(1);
+    // Secrets discipline: the deprecation warning never echoes the password.
+    for (const call of warnSpy.mock.calls) {
+      expect(call.map(String).join(" ")).not.toContain("hunter2");
+    }
+  });
+
+  it("auto: an entry without its own password is EXCLUDED — never silently inherits the default profile's password", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          noPassword: { webServer: { scheme: "http", host: "other.example.com", port: 52773 } },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "supersecretdefaultpw",
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: file,
+      },
+      "win32",
+    );
+    // Excluded: if the default password had leaked in, this array would be non-empty.
+    expect(result).toEqual([]);
+  });
+
+  // The mirror image of the guard above (code review 2026-07-25): the entry
+  // brings its OWN password but no host. Pre-fix it inherited the LOCAL default
+  // host, producing a profile named after a remote server that pointed at
+  // localhost — and shipped that server's password there on first use.
+  it("auto: an entry with an inline password but NO host is EXCLUDED — its password never travels to the local default host", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          prod: {
+            webServer: { scheme: "https", port: 443 },
+            username: "prod-admin",
+            password: "prodsecret",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        IRIS_HOST: "localhost",
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "localpw",
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: file,
+      },
+      "win32",
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("auto: excluded (unresolved) profiles produce exactly ONE summary log line regardless of count", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          a: { webServer: { scheme: "http", host: "a.example.com", port: 52773 } },
+          b: { webServer: { scheme: "http", host: "b.example.com", port: 52773 } },
+          c: { webServer: { scheme: "http", host: "c.example.com", port: 52773 } },
+        },
+      }),
+    );
+    resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    const warnSpy = vi.mocked(logger.warn);
+    const summaryCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("server profile(s) skipped"),
+    );
+    expect(summaryCalls).toHaveLength(1);
+    expect(String(summaryCalls[0]?.[0])).toContain("3 server profile(s) skipped");
+  });
+
+  it("auto: malformed JSONC in one file logs a warning naming that file and skips ONLY it — the other file's valid entries still resolve", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const badFile = writeSettings(dir1, "{ this is not valid json at all !!!");
+    const goodFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          good: {
+            webServer: { scheme: "http", host: "good.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${badFile};${goodFile}`,
+      },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("good");
+
+    const warnSpy = vi.mocked(logger.warn);
+    const malformedCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes(badFile));
+    expect(malformedCalls).toHaveLength(1);
+  });
+
+  it("a name defined by an earlier (higher-precedence) file wins over a later file's same-named entry", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const file1 = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "first.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const file2 = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "second.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: `${file1};${file2}` },
+      "win32",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.host).toBe("first.example.com");
+  });
+
+  it("IRIS_SM_SERVERS allow-list filters imported names; a listed name matching nothing WARNs (never fails)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          a: {
+            webServer: { scheme: "http", host: "a.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+          b: {
+            webServer: { scheme: "http", host: "b.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: file,
+        IRIS_SM_SERVERS: "a, doesNotExist",
+      },
+      "win32",
+    );
+    expect(result.map((p) => p.name)).toEqual(["a"]);
+
+    const warnSpy = vi.mocked(logger.warn);
+    const notFoundCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes("doesNotExist"));
+    expect(notFoundCalls).toHaveLength(1);
+  });
+
+  it("required: throws an actionable error when zero definitions are found", () => {
+    expect(() =>
+      resolveServerManagerProfiles(
+        {
+          ...BASE_ENV,
+          IRIS_SERVER_MANAGER: "required",
+          IRIS_SM_SETTINGS_PATHS: "C:\\does\\not\\exist\\settings.json",
+        },
+        "win32",
+      ),
+    ).toThrow(/IRIS_SERVER_MANAGER=required but zero server definitions were found/);
+  });
+
+  it("required: does NOT throw when at least one definition is found, even if it is unresolved (no password)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          noPw: { webServer: { scheme: "http", host: "h", port: 52773 } },
+        },
+      }),
+    );
+    expect(() =>
+      resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "required", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      ),
+    ).not.toThrow();
+  });
+
+  it("pathPrefix is applied as a post-merge baseUrl suffix (composed URL)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          prefixed: {
+            webServer: {
+              scheme: "http",
+              host: "localhost",
+              port: 52773,
+              pathPrefix: "myprefix//",
+            },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result[0]?.baseUrl).toBe("http://localhost:52773/myprefix");
+  });
+
+  it("an absent/empty pathPrefix produces a baseUrl identical to today's derivation", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          plain: {
+            webServer: { scheme: "http", host: "localhost", port: 52773, pathPrefix: "" },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result[0]?.baseUrl).toBe("http://localhost:52773");
+  });
+
+  it("the mergeProfile trap: a bad Server-Manager definition's diagnostic names the settings file/server, NEVER 'IRIS_PROFILES'", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          badPort: {
+            webServer: { scheme: "http", host: "h", port: "not-a-number" },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    expect(() =>
+      resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      ),
+    ).not.toThrow();
+
+    const warnSpy = vi.mocked(logger.warn);
+    const badPortCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes("badPort"));
+    expect(badPortCalls).toHaveLength(1);
+    const message = String(badPortCalls[0]?.[0]);
+    expect(message).not.toContain("IRIS_PROFILES");
+    expect(message).toContain(file);
+    expect(message).toContain("port");
+  });
+
+  // ── Containment (code review 2026-07-25) ─────────────────────────
+  //
+  // AC 31.0.2 requires that `auto` "never crashes startup". Malformed JSONC was
+  // contained per-FILE from the start, but a malformed FIELD VALUE used to throw
+  // straight out of resolveServerManagerProfiles → loadProfileRegistry →
+  // McpServerBase.start(), taking down all five servers (and the perfectly good
+  // env-derived `default` profile) because of one stale entry in a VS Code
+  // settings file this suite does not own.
+  it("auto: one entry with an invalid field value is warned-and-skipped; sibling entries in the SAME file still resolve", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          bad: {
+            webServer: { scheme: "http", host: "bad.example.com", port: "not-a-number" },
+            username: "u",
+            password: "pw",
+          },
+          good: {
+            webServer: { scheme: "http", host: "good.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result.map((p) => p.name)).toEqual(["good"]);
+  });
+
+  it.each([
+    ["port 0", { webServer: { scheme: "http", host: "h", port: 0 }, password: "pw" }],
+    ["port null", { webServer: { scheme: "http", host: "h", port: null }, password: "pw" }],
+    [
+      "port out of range",
+      { webServer: { scheme: "http", host: "h", port: 99999 }, password: "pw" },
+    ],
+    [
+      "non-string username",
+      { webServer: { scheme: "http", host: "h", port: 1 }, username: 42, password: "pw" },
+    ],
+    [
+      "empty username",
+      { webServer: { scheme: "http", host: "h", port: 1 }, username: "", password: "pw" },
+    ],
+    [
+      "non-string password",
+      { webServer: { scheme: "http", host: "h", port: 1 }, username: "u", password: 42 },
+    ],
+  ])(
+    "auto: an invalid entry (%s) never escapes as a throw — containment holds on every mergeProfile validation branch",
+    (_label, brokenEntry) => {
+      const dir = tmpDir();
+      const file = writeSettings(
+        dir,
+        JSON.stringify({ "intersystems.servers": { broken: brokenEntry } }),
+      );
+      expect(() =>
+        resolveServerManagerProfiles(
+          { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+          "win32",
+        ),
+      ).not.toThrow();
+    },
+  );
+
+  it("auto: an unreadable (non-ENOENT) candidate — e.g. a directory — logs a warning naming it, and is skipped", () => {
+    const dir = tmpDir(); // a directory, not a file → EISDIR/EPERM, never ENOENT
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: dir },
+      "win32",
+    );
+    expect(result).toEqual([]);
+    const warnSpy = vi.mocked(logger.warn);
+    const readCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes("could not read"));
+    expect(readCalls).toHaveLength(1);
+    expect(String(readCalls[0]?.[0])).toContain(dir);
+  });
+
+  it("auto: a merely-missing (ENOENT) candidate stays silent — no 'could not read' noise", () => {
+    resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: "C:\\does\\not\\exist\\settings.json",
+      },
+      "win32",
+    );
+    const warnSpy = vi.mocked(logger.warn);
+    expect(
+      warnSpy.mock.calls.filter((c) => String(c[0]).includes("could not read")),
+    ).toHaveLength(0);
+  });
+
+  it("required + an IRIS_SM_SERVERS that matches nothing fails naming IRIS_SM_SERVERS and the available names — not the settings files", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          prodA: {
+            webServer: { scheme: "http", host: "a.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+          prodB: {
+            webServer: { scheme: "http", host: "b.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    let caught: unknown;
+    try {
+      resolveServerManagerProfiles(
+        {
+          ...BASE_ENV,
+          IRIS_SERVER_MANAGER: "required",
+          IRIS_SM_SETTINGS_PATHS: file,
+          IRIS_SM_SERVERS: "prodC",
+        },
+        "win32",
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_SM_SERVERS");
+    expect(message).toContain("prodC");
+    expect(message).toContain("prodA");
+    expect(message).toContain("prodB");
+    // The old message sent the user to fix settings files that were already correct.
+    expect(message).not.toContain("zero server definitions were found");
+  });
+
+  it("auto + an IRIS_SM_SERVERS that matches nothing still only WARNs (AC 31.0.3)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          prodA: {
+            webServer: { scheme: "http", host: "a.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    expect(() =>
+      resolveServerManagerProfiles(
+        {
+          ...BASE_ENV,
+          IRIS_SERVER_MANAGER: "auto",
+          IRIS_SM_SETTINGS_PATHS: file,
+          IRIS_SM_SERVERS: "prodC",
+        },
+        "win32",
+      ),
+    ).not.toThrow();
+  });
+
+  it("auto: zero candidate settings files warns actionably instead of failing silently", () => {
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: "   " },
+      "win32",
+    );
+    expect(result).toEqual([]);
+    const warnSpy = vi.mocked(logger.warn);
+    const noCandidateCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("no candidate settings files were derived"),
+    );
+    expect(noCandidateCalls).toHaveLength(1);
+  });
+
+  it("a Server-Manager profile inherits namespace/timeout from the local default config, like an IRIS_PROFILES entry", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          srv: {
+            webServer: { scheme: "http", host: "h", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "secret",
+        IRIS_NAMESPACE: "CUSTOMNS",
+        IRIS_TIMEOUT: "12345",
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: file,
+      },
+      "win32",
+    );
+    expect(result[0]?.namespace).toBe("CUSTOMNS");
+    expect(result[0]?.timeout).toBe(12345);
+  });
+
+  it("a missing settings file candidate is silently skipped (never throws, no entries)", () => {
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: "C:\\does\\not\\exist\\settings.json",
+      },
+      "win32",
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("propagates loadConfig's fail-fast (missing IRIS_USERNAME) in auto mode", () => {
+    expect(() =>
+      resolveServerManagerProfiles(
+        { IRIS_PASSWORD: "p", IRIS_SERVER_MANAGER: "auto" },
+        "win32",
+      ),
+    ).toThrow("IRIS_USERNAME");
+  });
+
+  // ── Secret-safety (QA addition) ──────────────────────────────────
+  //
+  // The dev's existing "the mergeProfile trap" test proves the error names
+  // the file/server, not IRIS_PROFILES. It does NOT combine a validation
+  // failure with a genuine secret value present in the SAME entry — the one
+  // shape where a careless error message (e.g. echoing the whole malformed
+  // entry for debuggability) could leak a password. Prove it can't.
+  it("secret-safety: a validation failure on an entry that ALSO carries a legacy password never echoes the password", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          badEntry: {
+            webServer: { scheme: "http", host: "h", port: "not-a-number" },
+            username: "u",
+            password: "topsecretvalue",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toEqual([]);
+
+    // The diagnostic naming the bad entry exists (containment, not silence)...
+    const warnSpy = vi.mocked(logger.warn);
+    const badEntryCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes("badEntry"));
+    expect(badEntryCalls.length).toBeGreaterThan(0);
+    // ...and nothing warned along the way echoes the secret.
+    for (const call of warnSpy.mock.calls) {
+      expect(call.map(String).join(" ")).not.toContain("topsecretvalue");
+    }
+  });
+
+  it("secret-safety: the default profile's own password never appears in the required-mode zero-definitions error", () => {
+    // NOTE: `.not.toThrow(/pattern/)` also passes when NOTHING throws, so this
+    // must assert the throw happens first and then inspect the message — the
+    // negative-matcher alone would stay green if the fail-fast were deleted.
+    let caught: unknown;
+    try {
+      resolveServerManagerProfiles(
+        {
+          IRIS_USERNAME: "admin",
+          IRIS_PASSWORD: "defaultsupersecret",
+          IRIS_SERVER_MANAGER: "required",
+          IRIS_SM_SETTINGS_PATHS: "C:\\does\\not\\exist\\settings.json",
+        },
+        "win32",
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("zero server definitions were found");
+    expect((caught as Error).message).not.toContain("defaultsupersecret");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Cross-platform integration (QA addition): resolveServerManagerProfiles
+// driven through REAL discoverSettingsFiles precedence (workspace + one
+// user-settings product), not the IRIS_SM_SETTINGS_PATHS override every
+// other resolveServerManagerProfiles test above uses. This proves the
+// posix path-building in discoverSettingsFiles (path.posix.join) actually
+// composes a path that fs.readFileSync can open — the dev's own
+// discoverSettingsFiles tests only assert the RETURNED STRINGS, never that
+// a file written at that exact composed path is readable end-to-end. Run
+// unconditionally (not host-OS-gated): Node's fs calls accept forward-slash
+// paths on Windows too, so this exercises the posix-join code path for real
+// regardless of the host platform running the suite.
+// ════════════════════════════════════════════════════════════════════
+
+describe("resolveServerManagerProfiles — real posix discovery integration (QA addition)", () => {
+  let dirs: string[] = [];
+
+  beforeEach(() => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+    vi.restoreAllMocks();
+  });
+
+  /** A tmpdir path normalized to forward slashes, matching path.posix.join's own output style. */
+  function tmpDirPosix(): string {
+    const raw = mkdtempSync(join(tmpdir(), "iris-sm-posix-"));
+    dirs.push(raw);
+    return raw.split("\\").join("/");
+  }
+
+  it("linux: entries from BOTH the workspace file AND a user-settings file (found via real discovery, not an override) resolve together", () => {
+    const home = tmpDirPosix();
+    const workspace = tmpDirPosix();
+
+    const userSettingsDir = `${home}/.config/Code/User`;
+    mkdirSync(userSettingsDir, { recursive: true });
+    writeFileSync(
+      `${userSettingsDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          fromUserSettings: {
+            webServer: { scheme: "http", host: "user.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspaceSettingsDir = `${workspace}/.vscode`;
+    mkdirSync(workspaceSettingsDir, { recursive: true });
+    writeFileSync(
+      `${workspaceSettingsDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          fromWorkspace: {
+            webServer: { scheme: "http", host: "ws.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: home, IRIS_SM_WORKSPACE: workspace },
+      "linux",
+    );
+
+    expect(result.map((p) => p.name).sort()).toEqual(["fromUserSettings", "fromWorkspace"]);
+    expect(result.find((p) => p.name === "fromWorkspace")?.host).toBe("ws.example.com");
+    expect(result.find((p) => p.name === "fromUserSettings")?.host).toBe("user.example.com");
+  });
+
+  it("linux: a name defined in BOTH files resolves to the workspace file's definition (real precedence, not IRIS_SM_SETTINGS_PATHS-forced order)", () => {
+    const home = tmpDirPosix();
+    const workspace = tmpDirPosix();
+
+    const userSettingsDir = `${home}/.config/Code/User`;
+    mkdirSync(userSettingsDir, { recursive: true });
+    writeFileSync(
+      `${userSettingsDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "user-settings-host.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspaceSettingsDir = `${workspace}/.vscode`;
+    mkdirSync(workspaceSettingsDir, { recursive: true });
+    writeFileSync(
+      `${workspaceSettingsDir}/settings.json`,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "workspace-host.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: home, IRIS_SM_WORKSPACE: workspace },
+      "linux",
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.host).toBe("workspace-host.example.com");
+  });
+});
