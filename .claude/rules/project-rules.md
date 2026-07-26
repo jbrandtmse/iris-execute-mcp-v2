@@ -1,6 +1,6 @@
 # Project Rules
 
-Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#54**.
+Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#57**.
 
 ## #1 — Meta-rule: codify retrospective lessons
 
@@ -139,6 +139,18 @@ Context: any summary count over a list/table — a burn-down disposition tally, 
 ## #52 — Scope-seam: basic-then-rigorous across two stories, seam documented
 
 Context: a feature that naturally splits into a load-bearing skeleton + rigorous hardening (e.g. an interceptor's basic outcome derivation vs. its denyReason/action/seq-concurrency/shutdown fidelity). Rule: story N ships a BASIC-but-complete-SHAPE implementation and documents the deferred-fidelity SEAM explicitly in Dev Notes (naming the exact functions/guarantees story N+1 owns); story N+1 closes exactly that seam and does NOT re-touch story N's done work. Why: Epic 29's 29.0→29.1 split kept scope clean with zero rework — the documented seam stopped 29.0 over-building 29.1's concurrency/denyReason work and stopped 29.1 re-opening the finished writer/rotation code.
+
+## #54 — A branch the real system cannot reach is worse than a missing one
+
+Context: any code path handling a state that a third-party API, OS, or framework produces. Rule: before adding the branch, confirm the real system can actually produce that state — and every test fake must return a shape the real API can genuinely return, pinned to the installed type declaration or live probe as its oracle (#36). A fake that manufactures an impossible state makes the suite green over a path that can never execute, while the path that DOES execute stays untested. Review lens: for each branch, ask "what real input reaches this?"; for each fake, ask "can the real thing return this?" Why: three instances in Epic 31 alone — `getSession({createIfNone:true})` REJECTS on cancel but every test faked it resolving `undefined` (31.4 HIGH, the AC-required warning was unreachable code); a `workspaceFolder` config-write target that an unscoped `WorkspaceConfiguration` can never reach, pinned as correct by six tests (31.5 HIGH, found independently by all three review layers); and a package-key→directory map whose disk check verified EXISTENCE but not CORRESPONDENCE, so pointing `ops` at the real `iris-data-mcp` directory left all 200 tests green while silently handing users the wrong server (31.6 HIGH).
+
+## #55 — Never generate file content through a shell heredoc
+
+Context: writing or appending source, docs, or ledger entries from an agent. Rule: use the file-writing tools directly. If a script must generate content, (a) parse-check before writing, and (b) verify afterwards with `git diff --stat` that the file is still text and the write actually landed. Never chain a generation step and a `git commit` such that the commit can succeed after the generation aborted. Why: five occurrences in Epic 31 — a script wrote literal NUL bytes making `serverDefinitionProvider.ts` a binary file; a Python heredoc parsed `\User` in a Windows path as a `\U` unicode escape and aborted, silently dropping a ledger entry while the chained `git commit` still succeeded; bare apostrophes inside a single-quoted YAML scalar broke `sprint-status.yaml` parsing; and two further heredoc quoting failures. Every one was caught by verification, never by the tooling.
+
+## #56 — Enumeration completeness is a review question, not an implementation detail
+
+Context: any feature that enumerates a candidate set — settings-file paths, client adapters, product variants, OS scopes, governed keys. Rule: the ACs state the enumeration is EXHAUSTIVE-as-of-a-named-date with its source, and review asks "what is MISSING from this list?" as a distinct question from "does the code handle the listed entries correctly?". A list that is wrong by omission passes every test written against it, and `auto`-style modes that do not fail on zero results make the omission silent. Why: Epic 31 shipped Story 31.0 through three adversarial review layers, all of which verified the code did exactly what the ACs said — and none asked whether the AC's own candidate list was complete. The Project Lead subsequently found two omissions by inspection: `.code-workspace` files were never a discovery candidate (a multi-root user imported nothing, silently), and Linux user scope ignored both `XDG_CONFIG_HOME` and Flatpak's `~/.var/app` sandbox.
 
 ---
 
