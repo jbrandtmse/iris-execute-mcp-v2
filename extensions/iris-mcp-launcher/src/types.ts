@@ -117,8 +117,18 @@ export interface ServerManagerApi {
   getAccount(spec: ServerSpec): AccountInfo | undefined;
 }
 
-/** Which @iris-mcp suite package a registered definition spawns. */
-export type SuitePackageKey = "admin" | "data" | "dev" | "interop" | "ops" | "all";
+/**
+ * Which @iris-mcp suite package a registered definition spawns.
+ *
+ * Deliberately excludes `"all"` (AC 31.6.5): `@iris-mcp/all` declares no
+ * `main`/`bin`/`files` and ships no `dist` — it "contains no source code of
+ * its own" (its own README) — so `npx -y @iris-mcp/all` has no executable to
+ * run and local mode has no `dist/index.js` to target. It is unspawnable by
+ * construction, not by a bug fixable in this extension. See `settings.ts`'s
+ * `hadStaleAllPackage` for how a settings.json that still lists `"all"` is
+ * handled (one warning, the other selected packages still register).
+ */
+export type SuitePackageKey = "admin" | "data" | "dev" | "interop" | "ops";
 
 /** A fully-resolved IRIS connection (host/port/https/username/password/namespace) for one named server. */
 export interface ResolvedConnectionProfile {
@@ -142,6 +152,24 @@ export interface LauncherSettings {
   namespace: string;
   /** When true, one definition per package covers ALL selected servers via IRIS_PROFILES. */
   combineProfiles: boolean;
+  /**
+   * Absolute path to a local monorepo checkout of the IRIS MCP suite (AC
+   * 31.6.1). `""` (default) ⇒ spawn stays `npx -y @iris-mcp/<pkg>`, byte-
+   * identical to Story 31.5. Non-empty ⇒ each definition spawns
+   * `node <developmentRepoPath>/packages/<dir>/dist/index.js` instead — see
+   * `definitions.ts`'s `PACKAGE_DIR_NAME` for the explicit key->directory map.
+   * Development-only: this makes the extension execute an arbitrary local
+   * file path the user is trusting (README "Development mode" section).
+   */
+  developmentRepoPath: string;
+  /**
+   * `true` when the raw, unfiltered `irisMcpLauncher.packages` array (as
+   * literally stored in settings.json) still contains the removed `"all"`
+   * meta-package key (AC 31.6.5) — computed in `settings.ts`'s `readSettings`
+   * BEFORE the invalid-key filter drops it, so `LauncherProvider` can surface
+   * exactly one warning naming the removal without re-reading raw config.
+   */
+  hadStaleAllPackage: boolean;
   /** Pass-through governance/audit/visibility env — each "" means unset (do not emit the var). */
   governance: string;
   governancePreset: string;

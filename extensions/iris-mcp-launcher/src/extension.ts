@@ -1,8 +1,9 @@
 /**
- * Extension activation entry point (Task 2). The ONLY file in this extension
- * with a value-level `import * as vscode from "vscode"` — every other module
- * is plain-data / injected-dependency and unit-testable without a VS Code
- * host (see `serverDefinitionProvider.ts`'s doc comment).
+ * Extension activation entry point (Task 2; Story 31.5 extends it). The ONLY
+ * file in this extension with a value-level `import * as vscode from
+ * "vscode"` — every other module is plain-data / injected-dependency and
+ * unit-testable without a VS Code host (see `serverDefinitionProvider.ts`'s
+ * and `selectServers.ts`'s doc comments).
  *
  * Acquires the Server Manager extension API (`extensionDependencies` in
  * package.json guarantees it is installed; activation itself is still
@@ -11,15 +12,45 @@
  * (`contributes.mcpServerDefinitionProviders` in package.json), and adapts
  * `LauncherProvider`'s plain-data output onto real
  * `vscode.McpStdioServerDefinition` instances.
+ *
+ * Story 31.5 additionally registers the `irisMcpLauncher.selectServers`
+ * command and a status bar item — both thin adapters over `selectServers.ts`'s
+ * pure logic, following the same injected-dependency pattern as the provider
+ * above. `package.json`'s `activationEvents: ["onStartupFinished"]` (AC
+ * 31.5.4) is what makes `activate()` — and so the status bar item — run on
+ * every window, not only when the MCP subsystem first asks for definitions.
+ *
+ * **AC 31.5.4 — the cost accepted.** `onStartupFinished` means (a) this
+ * extension activates in EVERY VS Code window, including windows with no IRIS
+ * work, and (b) because `extensionDependencies` declares
+ * `intersystems-community.servermanager` — which VS Code activates BEFORE
+ * this extension — the Server Manager extension is now activated in every
+ * window too, where previously both stayed dormant until the MCP subsystem
+ * first asked for definitions. That cost is accepted because AC 31.5.3's
+ * zero-state status bar item is "the only signal a fresh install gives that
+ * the extension is installed and waiting for input", and a lazily-activated
+ * extension cannot render one. Activation itself stays cheap: `activate()`
+ * performs no I/O and no Server Manager API call — `getServerManagerApi()` is
+ * only ever awaited from a command handler or the provider.
  */
 import * as vscode from "vscode";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
+import {
+  buildStatusBarState,
+  selectServers,
+  SELECT_SERVERS_COMMAND_ID,
+  type ConfigInspection,
+  type ConfigWriteTarget,
+  type SelectServersDeps,
+  type SelectServersQuickPickItem,
+} from "./selectServers.js";
 import { LauncherProvider } from "./serverDefinitionProvider.js";
-import { readSettings, type ConfigReader } from "./settings.js";
+import { CONFIG_SECTION, readSettings, type ConfigReader } from "./settings.js";
 import type { AuthApi, ServerManagerApi } from "./types.js";
 
 const PROVIDER_ID = "iris-mcp-launcher";
+const STATUS_BAR_ITEM_ID = "irisMcpLauncher.status";
 
 let cachedApi: ServerManagerApi | undefined;
 
@@ -58,68 +89,239 @@ function toConfigReader(config: vscode.WorkspaceConfiguration): ConfigReader {
   return { get: (section, defaultValue) => config.get(section, defaultValue) };
 }
 
+/** Adapts this extension's own `vscode`-independent {@link ConfigWriteTarget} vocabulary (`selectServers.ts`) onto the real `vscode.ConfigurationTarget` enum. */
+function toConfigurationTarget(target: ConfigWriteTarget): vscode.ConfigurationTarget {
+  switch (target) {
+    case "workspace":
+      return vscode.ConfigurationTarget.Workspace;
+    case "global":
+      return vscode.ConfigurationTarget.Global;
+  }
+}
+
+/**
+ * The `irisMcpLauncher.servers` section key, single-sourced so the inspect and
+ * update adapters below can never drift apart and so `packaging.test.ts` can
+ * pin it mechanically against `settings.ts`'s read key and `package.json`'s
+ * declared property (Integration AC 31.5.8's "a rename on EITHER side must
+ * fail this test" — added at code review, which found the write side
+ * uncovered).
+ */
+const SERVERS_SETTING_KEY = "servers";
+
+/**
+ * `WorkspaceConfiguration.inspect("servers")`, scoped to `irisMcpLauncher`.
+ * Fetches a FRESH `WorkspaceConfiguration` on every call (never caches one),
+ * matching `toConfigReader`'s own call pattern above — settings can change
+ * between activation and any later read.
+ *
+ * Deliberately UNSCOPED (no `ConfigurationScope` second argument), matching
+ * the read path: `getSettings()` below also calls
+ * `vscode.workspace.getConfiguration(section)` with no resource. Both sides
+ * must agree, or the command would write a value the provider never reads —
+ * see {@link ConfigWriteTarget} in `selectServers.ts` for why a folder scope
+ * is not a write candidate at all.
+ */
+function inspectServersConfig(): ConfigInspection<string[]> | undefined {
+  return vscode.workspace.getConfiguration(CONFIG_SECTION).inspect<string[]>(SERVERS_SETTING_KEY);
+}
+
+/** `WorkspaceConfiguration.update("servers", value, target)`, scoped to `irisMcpLauncher`. */
+function updateServersConfig(value: string[], target: ConfigWriteTarget): PromiseLike<void> {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  return config.update(SERVERS_SETTING_KEY, value, toConfigurationTarget(target));
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel("IRIS MCP Launcher");
   context.subscriptions.push(outputChannel);
 
-  // Credential containment (AC 31.4.3): this output channel and every
-  // `showWarning` call below carry only the fixed, human-authored strings
-  // built in `serverDefinitionProvider.ts` (server/package/plan labels) —
-  // never a resolved profile, env map, or session/token value. No code path
-  // in this extension writes a credential to `context.globalState`,
-  // `context.workspaceState`, `vscode.workspace.getConfiguration(...).update`,
-  // or any log/output channel.
+  // Credential containment (AC 31.4.3, extended by AC 31.5.5 to the Story
+  // 31.5 UI surfaces): this output channel and every `showWarning`/`showInfo`
+  // call below carry only fixed, human-authored strings plus non-secret data
+  // — server/package/plan labels (`serverDefinitionProvider.ts`), Server
+  // Manager server names/descriptions, and the `irisMcpLauncher.servers`
+  // selection itself (`selectServers.ts`) — never a resolved profile, env
+  // map, or session/token value. The ONE settings write this extension makes
+  // (`updateServersConfig`, below) writes exactly that same non-secret
+  // selection to `irisMcpLauncher.servers` and nothing else; no code path in
+  // this extension writes a credential to `context.globalState`,
+  // `context.workspaceState`, any configuration key, or any log/output
+  // channel.
   const showWarning = (message: string): void => {
     outputChannel.appendLine(message);
     void vscode.window.showWarningMessage(message);
   };
 
+  // Task 2 / AC 31.5.2 / AC 31.5.6: the ONLY informational (non-warning)
+  // message this extension shows — the post-write "servers saved"
+  // confirmation. Kept separate from `showWarning` so a successful save does
+  // not render with a warning icon; still funnels through the same output
+  // channel as every other user-facing message.
+  const showInfo = (message: string): void => {
+    outputChannel.appendLine(message);
+    void vscode.window.showInformationMessage(message);
+  };
+
+  const getSettings = () =>
+    readSettings((section) => toConfigReader(vscode.workspace.getConfiguration(section)));
+
+  // Story 31.5: the command + status bar item are registered FIRST, before the
+  // MCP provider below (code review, Story 31.5). `activate()` has no
+  // top-level error containment, so anything that throws before this point
+  // takes the whole activation down with it — and the single most likely
+  // thrower is `vscode.lm.registerMcpServerDefinitionProvider`, which is
+  // absent on VS Code forks and on hosts older than the `engines.vscode`
+  // floor. Registering the UI surfaces first means that failure degrades to
+  // "MCP not registered, one warning" instead of "command not found + no
+  // status bar item", i.e. it cannot silently destroy exactly the zero-state
+  // discoverability signal AC 31.5.3/31.5.4 exist to guarantee.
+
+  // Story 31.5: server-selection command (AC 31.5.1/31.5.2/31.5.5/31.5.6).
+  const selectServersDeps: SelectServersDeps = {
+    getServerManagerApi,
+    getSettings,
+    configWriter: {
+      inspectServers: inspectServersConfig,
+      updateServers: updateServersConfig,
+    },
+    showQuickPick: (items: SelectServersQuickPickItem[]) =>
+      vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        matchOnDescription: true,
+        matchOnDetail: true,
+        // Without this the picker is dismissed — resolving `undefined`, i.e.
+        // the cancel path — the moment focus moves elsewhere, silently
+        // discarding a multi-selection the user may have spent a while
+        // building. `QuickPickOptions.ignoreFocusOut` defaults to `false`
+        // (`@types/vscode@1.125.0` index.d.ts, `QuickInput.ignoreFocusOut`:
+        // "Determines if the UI should stay open even when losing UI focus.
+        // Defaults to false."). This picker actively invites the user to
+        // switch to the Server Manager view to tell two similarly-named
+        // servers apart, so losing the selection is a realistic gesture.
+        ignoreFocusOut: true,
+        placeHolder: "Select the IRIS servers to expose as MCP servers",
+      }),
+    showWarning,
+    showInfo,
+  };
+
+  const selectServersCommand = vscode.commands.registerCommand(SELECT_SERVERS_COMMAND_ID, () =>
+    selectServers(selectServersDeps),
+  );
+  context.subscriptions.push(selectServersCommand);
+
+  // Story 31.5: status bar item (AC 31.5.3/31.5.4) — created unconditionally
+  // in `activate()`. `package.json`'s `onStartupFinished` activation event
+  // (AC 31.5.4) is what makes this appear on a plain window reload with MCP
+  // never exercised; without it, `activate()` (and this item) would not run
+  // until VS Code's MCP subsystem first asked for definitions, defeating the
+  // zero-state's whole purpose.
+  const statusBarItem = vscode.window.createStatusBarItem(
+    STATUS_BAR_ITEM_ID,
+    vscode.StatusBarAlignment.Left,
+  );
+  statusBarItem.name = "IRIS MCP Launcher";
+  statusBarItem.command = SELECT_SERVERS_COMMAND_ID;
+  context.subscriptions.push(statusBarItem);
+
+  const refreshStatusBar = (): void => {
+    let settings;
+    try {
+      settings = getSettings();
+    } catch {
+      // Never let a hand-edited settings.json crash the status bar refresh
+      // (same containment/never-throw bar as the provider). Deliberately NOT
+      // the zero-state text: rendering "IRIS MCP: none" here would be
+      // indistinguishable from a healthy fresh install, hiding a broken
+      // settings file behind a normal-looking status bar (code review, Story
+      // 31.5). Logged to the output channel — the sanctioned surface — rather
+      // than shown as a toast, since this runs on every configuration change.
+      outputChannel.appendLine(
+        "IRIS MCP Launcher: could not read irisMcpLauncher settings while refreshing the status bar. " +
+          "Check that irisMcpLauncher.servers and irisMcpLauncher.packages are arrays of strings.",
+      );
+      statusBarItem.text = "$(warning) IRIS MCP: settings error";
+      statusBarItem.tooltip =
+        "IRIS MCP Launcher: could not read your irisMcpLauncher settings.\n" +
+        "See the 'IRIS MCP Launcher' output channel for details.";
+      statusBarItem.show();
+      return;
+    }
+    const state = buildStatusBarState(settings);
+    statusBarItem.text = state.text;
+    statusBarItem.tooltip = state.tooltip;
+    statusBarItem.show();
+  };
+
+  refreshStatusBar();
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(CONFIG_SECTION)) {
+        refreshStatusBar();
+      }
+    }),
+  );
+
   const provider = new LauncherProvider({
     getServerManagerApi,
     authApi,
-    getSettings: () =>
-      readSettings((section) => toConfigReader(vscode.workspace.getConfiguration(section))),
+    getSettings,
     showWarning,
   });
 
-  const registration = vscode.lm.registerMcpServerDefinitionProvider(PROVIDER_ID, {
-    provideMcpServerDefinitions: async () => {
-      const planned = await provider.providePlannedDefinitions();
-      return planned.map(
-        (definition) =>
-          new vscode.McpStdioServerDefinition(
-            definition.label,
-            definition.command,
-            definition.args,
-            {},
-          ),
-      );
-    },
-    resolveMcpServerDefinition: async (server) => {
-      const env = await provider.resolveEnvForLabel(server.label);
-      if (!env) {
-        // First-class cancellation/error outcome: return undefined so the
-        // editor quietly does not start this server (Task 3) — no exception,
-        // no toast storm beyond the single `showWarning` already issued above.
-        return undefined;
-      }
-      if (!(server instanceof vscode.McpStdioServerDefinition)) {
-        // Fail CLOSED. Returning `server` unmodified here would spawn a child
-        // with none of the resolved IRIS_* variables — after having already
-        // prompted the user for their password — and it would die with an
-        // opaque "IRIS_USERNAME environment variable is required".
-        showWarning(
-          `IRIS MCP Launcher: "${server.label}" was not started — the editor returned an ` +
-            `unexpected server definition type, so the resolved connection could not be applied.`,
+  try {
+    const registration = vscode.lm.registerMcpServerDefinitionProvider(PROVIDER_ID, {
+      provideMcpServerDefinitions: async () => {
+        const planned = await provider.providePlannedDefinitions();
+        return planned.map(
+          (definition) =>
+            new vscode.McpStdioServerDefinition(
+              definition.label,
+              definition.command,
+              definition.args,
+              {},
+            ),
         );
-        return undefined;
-      }
-      server.env = env;
-      return server;
-    },
-  });
+      },
+      resolveMcpServerDefinition: async (server) => {
+        const env = await provider.resolveEnvForLabel(server.label);
+        if (!env) {
+          // First-class cancellation/error outcome: return undefined so the
+          // editor quietly does not start this server (Task 3) — no exception,
+          // no toast storm beyond the single `showWarning` already issued above.
+          return undefined;
+        }
+        if (!(server instanceof vscode.McpStdioServerDefinition)) {
+          // Fail CLOSED. Returning `server` unmodified here would spawn a child
+          // with none of the resolved IRIS_* variables — after having already
+          // prompted the user for their password — and it would die with an
+          // opaque "IRIS_USERNAME environment variable is required".
+          showWarning(
+            `IRIS MCP Launcher: "${server.label}" was not started — the editor returned an ` +
+              `unexpected server definition type, so the resolved connection could not be applied.`,
+          );
+          return undefined;
+        }
+        server.env = env;
+        return server;
+      },
+    });
 
-  context.subscriptions.push(registration);
+    context.subscriptions.push(registration);
+  } catch {
+    // `vscode.lm.registerMcpServerDefinitionProvider` is finalized as of the
+    // `engines.vscode` floor (^1.101.0), but VS Code forks report their own
+    // version and may not implement it. One warning, no third-party error
+    // text, and — because this block runs LAST — the command and status bar
+    // item registered above survive (code review, Story 31.5).
+    showWarning(
+      "IRIS MCP Launcher: this editor does not support MCP server definition providers, so no " +
+        "IRIS MCP servers were registered. The extension's settings and the " +
+        '"IRIS MCP Launcher: Select Servers…" command still work.',
+    );
+  }
 }
 
 export function deactivate(): void {

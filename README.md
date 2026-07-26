@@ -97,6 +97,14 @@ All servers use the same environment variables:
 
 If you already curate IRIS connections in the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) VS Code extension, set `IRIS_SERVER_MANAGER=auto` and the suite reads those `intersystems.servers` definitions straight out of your VS Code settings files — no re-typing host/port/username into every MCP client config. Each imported definition becomes a named profile you address with the `server` parameter, exactly like an `IRIS_PROFILES` entry.
 
+> **⚠️ Read this first — Server Manager import is ADDITIVE, and the keychain does NOT cover your base credentials.**
+>
+> **The six base variables are still required.** `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE` and `IRIS_HTTPS` configure the reserved `default` profile, and `default` is built **before** any Server Manager import. Setting `IRIS_SERVER_MANAGER=auto` **does not let you omit them** — the server fails at startup with `IRIS_USERNAME environment variable is required` (then `IRIS_PASSWORD…`) if you try. Server Manager adds *extra* addressable profiles; it does not replace your primary connection.
+>
+> **The OS keychain serves Server-Manager-discovered profiles ONLY.** `iris-mcp-credentials set <name>` stores a password that the credential chain uses for an **imported** definition that has none. It is **not** consulted for `IRIS_PASSWORD`: storing an entry named `default` has no effect, because `loadConfig` reads the base credentials from the environment and never calls the chain. So today the keychain reduces plaintext for your *additional* servers — it cannot remove `IRIS_PASSWORD` from your client config.
+>
+> Worked example: with `IRIS_HOST`/`IRIS_USERNAME`/`IRIS_PASSWORD` set for `default`, `IRIS_PROFILES` adding `sademo`, `IRIS_SERVER_MANAGER=auto` importing `local` (inline password) and `localhost2` (keychain, via `iris-mcp-credentials set localhost2`), all four resolve and route — but removing `IRIS_PASSWORD` breaks startup for all of them.
+
 - **Default is `off`.** Nothing is read, nothing is imported, and no settings file is touched unless you opt in.
 - **Discovery order** (highest precedence first), mirroring VS Code's own folder > workspace > user scope ranking: (1) the workspace `.vscode/settings.json` (from `IRIS_SM_WORKSPACE`, else the process working directory); (2) every `*.code-workspace` file directly inside that same directory, sorted by filename — multi-root workspaces commonly keep `intersystems.servers` only there; (3) each product's user settings — `Code`, `Code - Insiders`, `VSCodium`, `Cursor` (`%APPDATA%\<Product>\User\settings.json` on Windows, `~/Library/Application Support/<Product>/User/settings.json` on macOS, `$XDG_CONFIG_HOME/<Product>/User/settings.json` then `~/.config/<Product>/User/settings.json` on Linux); (4) on Linux only, Flatpak sandboxes — `~/.var/app/{com.visualstudio.code,com.visualstudio.code.insiders,com.vscodium.codium}/config/<Product>/User/settings.json`. The first file to define a name wins. A name already defined by `IRIS_*` or `IRIS_PROFILES` always wins over a Server Manager definition.
 - **Linux specifics.** VS Code is Electron, whose Linux config root is `$XDG_CONFIG_HOME` *or* `~/.config` — so both are searched, XDG first. A Flatpak install cannot write `~/.config` at all (Flatpak redirects the app's `XDG_CONFIG_HOME` into its sandbox), so the three published Flathub apps are searched too, after the native paths. Cursor is not published on Flathub and therefore has no Flatpak entry; use `IRIS_SM_SETTINGS_PATHS` for any install layout not listed here, including VS Code portable mode.
@@ -166,6 +174,8 @@ Every output path — human text, `--json`, `--help`, and error/failure messages
 ### 3. Configure Your MCP Client
 
 Point your MCP client at the built server using `node` and the local `dist/index.js` path. Replace `/path/to/iris-execute-mcp-v2` with the actual path where you cloned the repo.
+
+> **📖 [MCP client configuration index](docs/client-config/README.md)** — copy-pasteable config for **13 clients** (Claude Code, VS Code/Copilot, Cline, Kimi Code, Kimi CLI, Codex CLI, Cursor, Claude Desktop, Windsurf, Roo Code, Gemini CLI, Zed, Goose), a format/root-key matrix (three formats and four different root keys between them), and the two credential caveats above restated where you need them.
 
 #### Claude Code (`.mcp.json`)
 
@@ -347,7 +357,7 @@ Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_e
 { "env": { "IRIS_GOVERNANCE_PRESET": "read-only", "IRIS_SQL_MAX_ROWS": "1000", "IRIS_SQL_TIMEOUT": "30" } }
 ```
 
-See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ### Worked example — enable a write action globally, block it on `prod`
 
@@ -553,7 +563,7 @@ For regulated environments — healthcare, finance, or any shop that has to answ
 
 **Disambiguation — this is not `iris_audit_manage` / `iris_audit_events`.** The suite already ships two *IRIS server-side* security-audit tools: `iris_audit_manage` (`@iris-mcp/admin`) manages IRIS's own `%SYS.Audit*` security-audit subsystem (login events, privilege changes, and similar — a feature of the IRIS instance itself), and `iris_audit_events` (`@iris-mcp/ops`) reads events from that same IRIS-native audit database. `IRIS_AUDIT_LOG` is a completely different thing: it is the **MCP server process's own record of the tool calls an AI client made through it**. It has nothing to do with IRIS's built-in auditing feature, doesn't read from or write to `%SYS.Audit*`, and works whether or not IRIS-native auditing is enabled at all. Don't conflate the two when scoping a compliance review — they answer different questions ("what did IRIS's security subsystem observe" vs. "what did the AI, through this MCP server, actually do").
 
-See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ---
 

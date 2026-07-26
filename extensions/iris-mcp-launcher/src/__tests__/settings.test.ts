@@ -12,7 +12,7 @@ function fakeConfig(values: Record<string, unknown>): (section: string) => Confi
 }
 
 describe("readSettings", () => {
-  it("defaults: no config set -> all five individual packages, empty servers, HSCUSTOM namespace, combineProfiles off", () => {
+  it("defaults: no config set -> all five individual packages, empty servers, HSCUSTOM namespace, combineProfiles off, developmentRepoPath empty", () => {
     const settings = readSettings(fakeConfig({}));
 
     expect(settings.packages).toEqual([...DEFAULT_PACKAGES]);
@@ -20,31 +20,104 @@ describe("readSettings", () => {
     expect(settings.namespace).toBe("HSCUSTOM");
     expect(settings.combineProfiles).toBe(false);
     expect(settings.governance).toBe("");
+    expect(settings.developmentRepoPath).toBe("");
+    expect(settings.hadStaleAllPackage).toBe(false);
   });
 
-  it("reads every configured field through", () => {
+  it("reads every configured field through, including developmentRepoPath", () => {
     const settings = readSettings(
       fakeConfig({
         servers: ["prod"],
-        packages: ["dev", "all"],
+        packages: ["dev", "admin"],
         namespace: "USER",
         combineProfiles: true,
         governance: "off",
         toolsPreset: "core",
+        developmentRepoPath: "/home/dev/iris-execute-mcp-v2",
       }),
     );
 
     expect(settings.servers).toEqual(["prod"]);
-    expect(settings.packages).toEqual(["dev", "all"]);
+    expect(settings.packages).toEqual(["dev", "admin"]);
     expect(settings.namespace).toBe("USER");
     expect(settings.combineProfiles).toBe(true);
     expect(settings.governance).toBe("off");
     expect(settings.toolsPreset).toBe("core");
+    expect(settings.developmentRepoPath).toBe("/home/dev/iris-execute-mcp-v2");
+    expect(settings.hadStaleAllPackage).toBe(false);
   });
 
   it("filters out any unrecognized package key (defensive against a stale/hand-edited settings.json)", () => {
     const settings = readSettings(fakeConfig({ packages: ["dev", "bogus", "admin"] }));
     expect(settings.packages).toEqual(["dev", "admin"]);
+  });
+
+  it("trims whitespace off developmentRepoPath the same way namespace is trimmed", () => {
+    const settings = readSettings(fakeConfig({ developmentRepoPath: "  /home/dev/repo  " }));
+    expect(settings.developmentRepoPath).toBe("/home/dev/repo");
+  });
+
+  it("a developmentRepoPath of only whitespace normalizes to the empty-string default (back-compat npx path)", () => {
+    const settings = readSettings(fakeConfig({ developmentRepoPath: "   " }));
+    expect(settings.developmentRepoPath).toBe("");
+  });
+
+  /**
+   * QA pass (Story 31.6) — the settings layer applies ONLY `.trim()` to
+   * `developmentRepoPath`; it must never reshape, resolve, or reject an
+   * otherwise-valid-looking path string. `readSettings` never touches the
+   * filesystem (that validation is `LauncherProvider.resolveSpawnTargets`'s
+   * job, covered with real fs fixtures in `serverDefinitionProvider.test.ts`),
+   * so these are pinned here as pure string round-trips.
+   */
+  it("preserves internal spaces in developmentRepoPath verbatim — only leading/trailing whitespace is trimmed, not spaces inside the path", () => {
+    const settings = readSettings(
+      fakeConfig({ developmentRepoPath: "  /home/dev/my repo with spaces  " }),
+    );
+    expect(settings.developmentRepoPath).toBe("/home/dev/my repo with spaces");
+  });
+
+  it("preserves a relative developmentRepoPath verbatim — it is not resolved against cwd or otherwise normalized here", () => {
+    const settings = readSettings(fakeConfig({ developmentRepoPath: "  ../sibling-repo  " }));
+    expect(settings.developmentRepoPath).toBe("../sibling-repo");
+  });
+
+  it("preserves a trailing path separator on developmentRepoPath verbatim — it is not stripped at the settings layer", () => {
+    const settings = readSettings(fakeConfig({ developmentRepoPath: "/home/dev/repo/" }));
+    expect(settings.developmentRepoPath).toBe("/home/dev/repo/");
+
+    const windowsStyle = readSettings(fakeConfig({ developmentRepoPath: "C:\\dev\\repo\\" }));
+    expect(windowsStyle.developmentRepoPath).toBe("C:\\dev\\repo\\");
+  });
+
+  it("preserves a UNC-style developmentRepoPath verbatim — no special-casing of the \\\\server\\share form at the settings layer", () => {
+    const settings = readSettings(
+      fakeConfig({ developmentRepoPath: "\\\\myserver\\share\\iris-execute-mcp-v2" }),
+    );
+    expect(settings.developmentRepoPath).toBe("\\\\myserver\\share\\iris-execute-mcp-v2");
+  });
+
+  it("AC 31.6.5: 'all' in the raw packages array is filtered out (like any unrecognized key) AND flagged via hadStaleAllPackage", () => {
+    const settings = readSettings(fakeConfig({ packages: ["dev", "all"] }));
+    expect(settings.packages).toEqual(["dev"]);
+    expect(settings.hadStaleAllPackage).toBe(true);
+  });
+
+  it("hadStaleAllPackage is false when 'all' is not present, even alongside other unrecognized keys", () => {
+    const settings = readSettings(fakeConfig({ packages: ["dev", "bogus"] }));
+    expect(settings.hadStaleAllPackage).toBe(false);
+  });
+
+  it("'all' as the ONLY configured package still yields hadStaleAllPackage true with packages ending up empty (not silently falling back to the default five)", () => {
+    const settings = readSettings(fakeConfig({ packages: ["all"] }));
+    expect(settings.packages).toEqual([]);
+    expect(settings.hadStaleAllPackage).toBe(true);
+  });
+
+  it("'all' appearing TWICE in the raw array still yields hadStaleAllPackage as a single boolean true (not double-counted), and 'dev' is kept exactly once — this is where a duplicated stale key collapses to the ONE-warning guarantee LauncherProvider relies on", () => {
+    const settings = readSettings(fakeConfig({ packages: ["all", "dev", "all"] }));
+    expect(settings.packages).toEqual(["dev"]);
+    expect(settings.hadStaleAllPackage).toBe(true);
   });
 
   it("falls back to HSCUSTOM when namespace is configured as an empty string", () => {
@@ -96,5 +169,21 @@ describe("readSettings — hand-edited settings.json must never throw", () => {
 
   it("a whitespace-only namespace falls back to the default (both consumers only reject the empty string, so '   ' would target a nonexistent namespace)", () => {
     expect(readSettings(fakeConfig({ namespace: "   " })).namespace).toBe("HSCUSTOM");
+  });
+
+  it("a JSON number/boolean developmentRepoPath is coerced to its string form (same toSettingString discipline as every other string setting), never thrown", () => {
+    expect(readSettings(fakeConfig({ developmentRepoPath: 42 })).developmentRepoPath).toBe("42");
+    expect(readSettings(fakeConfig({ developmentRepoPath: true })).developmentRepoPath).toBe("true");
+  });
+
+  it("a developmentRepoPath of the wrong shape entirely (array/object) falls back to the empty-string default instead of throwing", () => {
+    expect(readSettings(fakeConfig({ developmentRepoPath: ["not", "a", "string"] })).developmentRepoPath).toBe(
+      "",
+    );
+    expect(readSettings(fakeConfig({ developmentRepoPath: { path: "x" } })).developmentRepoPath).toBe("");
+  });
+
+  it("a non-array packages value still computes hadStaleAllPackage as false rather than throwing", () => {
+    expect(readSettings(fakeConfig({ packages: "all" })).hadStaleAllPackage).toBe(false);
   });
 });

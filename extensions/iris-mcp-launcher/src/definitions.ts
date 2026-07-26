@@ -11,7 +11,6 @@ export const PACKAGE_NPM_NAME: Record<SuitePackageKey, string> = {
   dev: "@iris-mcp/dev",
   interop: "@iris-mcp/interop",
   ops: "@iris-mcp/ops",
-  all: "@iris-mcp/all",
 };
 
 /** Human-readable label prefix for each suite package key. */
@@ -21,7 +20,35 @@ export const PACKAGE_LABEL: Record<SuitePackageKey, string> = {
   dev: "IRIS Dev Tools",
   interop: "IRIS Interop Tools",
   ops: "IRIS Ops Tools",
-  all: "IRIS All Tools",
+};
+
+/**
+ * Directory name under a monorepo checkout's `packages/` for each suite
+ * package key (Story 31.6, AC 31.6.2) — used ONLY for
+ * `irisMcpLauncher.developmentRepoPath` (local `node <path>/dist/index.js`
+ * spawn), never for the published `npx -y @iris-mcp/<pkg>` path above.
+ *
+ * **Deliberately an EXPLICIT map, never derived from {@link PACKAGE_NPM_NAME}
+ * or `SuitePackageKey`.** All five surviving keys DO happen to follow the
+ * `iris-<key>-mcp` pattern today — which is exactly what makes a derivation
+ * rule tempting and dangerous. The counterexample is recent, not
+ * hypothetical: the `all` meta-package's directory is `iris-mcp-all`, NOT the
+ * `iris-all-mcp` that rule would have produced, and it was removed in this
+ * same story (AC 31.6.5) only because it never had a `dist/index.js` to
+ * target. A transformation rule here would look correct, pass any test
+ * written against that same rule, and — the moment the next package breaks
+ * the pattern, as one already has — silently produce a directory that does
+ * not exist. Verified against the real `packages/` directory listing on disk
+ * 2026-07-26 (story Dev Notes); `definitions.test.ts` cross-checks every
+ * value here against that listing mechanically (Rule #51), pairing each key
+ * with its directory's own `package.json` `name` rather than re-deriving it.
+ */
+export const PACKAGE_DIR_NAME: Record<SuitePackageKey, string> = {
+  admin: "iris-admin-mcp",
+  data: "iris-data-mcp",
+  dev: "iris-dev-mcp",
+  interop: "iris-interop-mcp",
+  ops: "iris-ops-mcp",
 };
 
 /** One planned MCP server definition: which package it spawns and which Server Manager server(s) it covers. */
