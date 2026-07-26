@@ -199,12 +199,53 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
     expect(entry.tool).toBe("iris_doc_get");
     expect(entry.action).toBeNull();
     expect(entry.profile).toBe("default");
+    // Story 31.3, AC 31.3.2: attribution ONLY, copied from the resolved
+    // profile's `source` field — the reserved default is always "env".
+    expect(entry.profileSource).toBe("env");
     expect(entry.namespace).toBe("HSCUSTOM");
     expect(entry.outcome).toBe("ok");
     expect(entry.paramKeys).toEqual(["name"]);
     expect(entry.seq).toBe(1);
     expect(typeof entry.durationMs).toBe("number");
     expect(appendFileMock).toHaveBeenCalled();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // Code review 2026-07-25 (Story 31.3): the README and tool_support.md
+  // originally said `profileSource` is "omitted, meaning `env`" for an
+  // `IRIS_*`/`IRIS_PROFILES` profile. That is false — the test above proves
+  // env profiles emit `"env"` explicitly. The docs were corrected to state the
+  // real contract: the field is present for every call that resolves a REAL
+  // registry profile, and absent ONLY when the `server` parameter named a
+  // profile that does not exist, so absence means "no profile resolved" and
+  // must never be read as `"env"`. This pins that one absence case, which is
+  // the ambiguous one an audit consumer would otherwise mis-classify.
+  it("Story 31.3 (code review): profileSource is ABSENT — not \"env\" — when `server` names an unknown profile", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "iris-audit-interceptor-unknown-"));
+    const auditPath = join(dir, "audit.log");
+    process.env.IRIS_AUDIT_LOG = auditPath;
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(versionResponse());
+
+    const server = new McpServerBase(
+      makeServerOpts([makeGetDocTool()], makeConfig()),
+    );
+    await server.start("stdio");
+
+    const result = await invokeTool(server, "iris_doc_get", {
+      name: "Foo.cls",
+      server: "no-such-profile",
+    });
+    expect(result.isError).toBe(true);
+
+    const lines = await waitForLineCount(auditPath, 2);
+    const entry = JSON.parse(lines[1] as string);
+    expect(entry.profile).toBe("no-such-profile");
+    // The distinguishing assertion: absent, NOT "env".
+    expect(Object.prototype.hasOwnProperty.call(entry, "profileSource")).toBe(false);
+    expect(entry.profileSource).toBeUndefined();
 
     rmSync(dir, { recursive: true, force: true });
   });

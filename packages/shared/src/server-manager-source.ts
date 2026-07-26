@@ -67,14 +67,16 @@
  *   vs. Story 31.0:** an entry with an inline `password` but no `username`
  *   used to yield a usable profile; it no longer does (see the README and the
  *   changeset).
- * - **Full registry merge semantics (Story 31.3).** Collision precedence (with a
- *   log notice), `source: "env" | "server-manager"` provenance through the
- *   `iris_server_profiles` allow-list, and audit `profileSource` attribution are
- *   NOT implemented here. `loadProfileRegistry` (`profiles.ts`) carries only a
- *   minimal, provably-inert-when-off wire-in sufficient to make this story's
- *   back-compat proof (AC 31.0.4) real; final unresolved-profile exclusion (AC
- *   31.0.5) now happens one layer up, in `credential-chain.ts`, after the
- *   chain has had its shot.
+ * - **Full registry merge semantics (Story 31.3 — IMPLEMENTED).** Collision
+ *   precedence (env always wins, with an aggregate log notice) lives in
+ *   `loadProfileRegistry` (`profiles.ts`), one layer up. THIS module sets
+ *   `source: "server-manager"` and (when applicable) `sourceFile`/`pathPrefix`
+ *   on every profile it returns (via `mergeProfile`'s new parameters — see
+ *   `profiles.ts`); those are surfaced through the `iris_server_profiles`
+ *   allow-list and audit `profileSource` attribution by `server-discovery.ts`
+ *   / `server-base.ts` / `audit.ts`. Final unresolved-profile exclusion (AC
+ *   31.0.5) happens one layer up, in `credential-chain.ts`, after the chain
+ *   has had its shot.
  *
  * **Why passwords are not readable here.** Server-Manager-saved passwords live
  * in VS Code SecretStorage, encrypted via Electron `safeStorage` with an
@@ -475,17 +477,23 @@ export function parseIntersystemsServers(
  * VS Code settings file this suite does not own can never take down the server
  * (and with it the perfectly good env-derived `default` profile).
  *
- * `required` fails fast when NO server definition was found across all files
- * (counted BEFORE both the `IRIS_SM_SERVERS` allow-list and credential
- * resolution), and — separately, with its own message naming
- * `IRIS_SM_SERVERS` — when definitions existed but the allow-list matched none
- * of them. A definition that exists but lacks a password does NOT trip
- * `required` here; that credential-chain-exhaustion escalation is AC 31.1.1's,
- * implemented in `credential-chain.ts` (`resolveServerManagerCredentials`), per
- * binding spec F1-D1 vs F1-D2. The two `required` checks are DELIBERATELY kept
- * apart (Story 31.1 Dev Notes) — conflating "zero definitions found" with "a
- * definition was found but its credential chain was exhausted" would make a
- * passwordless definition indistinguishable from a missing one.
+ * `required` fails fast on THREE distinct conditions, each with its own
+ * message so the operator is pointed at the right fix: (1) NO server
+ * definition was found across all files (counted BEFORE both the
+ * `IRIS_SM_SERVERS` allow-list and credential resolution); (2) definitions
+ * existed but the `IRIS_SM_SERVERS` allow-list matched none of them; (3)
+ * definitions existed and survived the allow-list, but every single one was
+ * rejected by field validation or the "own username" check, so NOTHING
+ * landed in the returned array (deferred item 31-1-1's resolution — Story
+ * 31.0 originally had only checks 1 and 2, so an all-invalid settings file
+ * silently started the server with just the `default` profile). A definition
+ * that exists, is structurally valid, and merely lacks a password does NOT
+ * trip `required` here; that credential-chain-exhaustion escalation is a
+ * FOURTH, separate check — AC 31.1.1's, implemented in `credential-chain.ts`
+ * (`resolveServerManagerCredentials`), per binding spec F1-D1 vs F1-D2. All
+ * these `required` checks are DELIBERATELY kept apart (Story 31.1 Dev Notes)
+ * — conflating them would make a passwordless-but-valid definition
+ * indistinguishable from a missing or malformed one.
  *
  * @param env      - Environment map (defaults to `process.env`).
  * @param platform - Target platform (defaults to `process.platform`).
@@ -494,7 +502,7 @@ export function parseIntersystemsServers(
  *   {@link discoverSettingsFiles}.
  * @throws {Error} (naming `IRIS_SERVER_MANAGER`) on an unrecognized mode.
  * @throws {Error} From `loadConfig` (naming `IRIS_USERNAME`/`IRIS_PASSWORD`/etc.) in `auto`/`required` mode.
- * @throws {Error} `required` mode with zero definitions found, or with zero definitions surviving `IRIS_SM_SERVERS`.
+ * @throws {Error} `required` mode with zero definitions found, zero definitions surviving `IRIS_SM_SERVERS`, or zero definitions surviving per-entry validation (deferred item 31-1-1).
  */
 export function resolveServerManagerProfiles(
   env: Record<string, string | undefined> = process.env,
@@ -605,11 +613,22 @@ export function resolveServerManagerProfiles(
       const sourceLabel = `Server Manager definition "${name}" (${file})`;
       let profile: IrisProfile;
       try {
-        const merged = mergeProfile(name, smBase, entry.override, sourceLabel);
-        profile =
-          entry.pathPrefix !== undefined
-            ? { ...merged, baseUrl: `${merged.baseUrl}${entry.pathPrefix}` }
-            : merged;
+        // `"server-manager"` provenance (AC 31.3.1) and the pathPrefix
+        // (deferred item 31-0-4's resolution) are both applied INSIDE
+        // mergeProfile now, so `baseUrl` is derived in the one place that
+        // knows the formula. `sourceFile` (deferred item 31-0-3's
+        // resolution) is metadata about WHERE this definition came from, not
+        // a connection field mergeProfile merges/validates, so it is set
+        // here instead.
+        const merged = mergeProfile(
+          name,
+          smBase,
+          entry.override,
+          sourceLabel,
+          "server-manager",
+          entry.pathPrefix,
+        );
+        profile = { ...merged, sourceFile: file };
       } catch (e: unknown) {
         // Containment: a bad FIELD VALUE is skipped exactly like a bad FILE.
         // `mergeProfile`'s message never echoes a password (asserted in tests).
@@ -745,6 +764,31 @@ export function resolveServerManagerProfiles(
         `${definitionsFound} server definition(s) found. Requested: ` +
         `${(allowList ?? []).join(", ")}. Available: ${[...seenNames].join(", ")}. ` +
         `Correct IRIS_SM_SERVERS (names are case-sensitive) or unset it to import all.`,
+    );
+  }
+
+  // Deferred item 31-1-1's resolution — a THIRD, narrower `required` check.
+  // definitionsFound/consideredCount both increment at first SIGHTING,
+  // before mergeProfile validation and the "own username" check, so a
+  // definition that is structurally invalid (e.g. a non-numeric port) or
+  // omits its own "username" was counted as "found"/"considered" while never
+  // landing in `results` — and neither check above ever tripped: `required`
+  // silently started the server with only the `default` profile (reproduced
+  // live: a sole definition with `"port": "not-a-port"` threw nothing and
+  // yielded an empty registry). By the time control reaches here in
+  // `required` mode, both checks above have already passed without throwing,
+  // so definitionsFound > 0 and consideredCount > 0 are guaranteed — the only
+  // way `results` can still be empty is every considered definition having
+  // been REJECTED, each with its own warning already logged above (naming
+  // the file + server + reason). This escalates that into a startup failure
+  // rather than a silently degraded (default-only) server.
+  if (mode === "required" && results.length === 0) {
+    throw new Error(
+      `IRIS_SERVER_MANAGER=required but ${consideredCount} server definition(s) were ` +
+        `considered and NONE could be imported — every one was rejected (an invalid field ` +
+        `value, or no "username" of its own; see the warning logged above for the specific ` +
+        `reason for each). Fix the offending intersystems.servers entries, or set ` +
+        `IRIS_SERVER_MANAGER=auto/off.`,
     );
   }
 

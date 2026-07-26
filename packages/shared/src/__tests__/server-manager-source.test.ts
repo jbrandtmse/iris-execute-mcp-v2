@@ -708,11 +708,14 @@ describe("resolveServerManagerProfiles", () => {
 
   it("required: does NOT throw when at least one definition is found, even if it is unresolved (no password)", () => {
     const dir = tmpDir();
+    // Deliberately declares its OWN "username" (the 31-0-2 guard requires it
+    // to survive import at all — see the "no username" tests below); the
+    // point of THIS test is the password being absent, not the username.
     const file = writeSettings(
       dir,
       JSON.stringify({
         "intersystems.servers": {
-          noPw: { webServer: { scheme: "http", host: "h", port: 52773 } },
+          noPw: { webServer: { scheme: "http", host: "h", port: 52773 }, username: "u" },
         },
       }),
     );
@@ -722,6 +725,78 @@ describe("resolveServerManagerProfiles", () => {
         "win32",
       ),
     ).not.toThrow();
+  });
+
+  // ── Story 31.3, Task 5 — deferred item 31-1-1's resolution ──────────
+  //
+  // Reproduces the exact live scenario the deferred item recorded: a sole
+  // definition that fails mergeProfile's field validation (a non-numeric
+  // port). Pre-Story-31.3, definitionsFound/consideredCount both incremented
+  // at first sighting BEFORE validation, so neither existing `required` check
+  // tripped and the function returned an EMPTY array without throwing —
+  // `required` mode silently degraded to "just the default profile". This is
+  // the third, narrower check this story adds.
+  it("required: throws when the only definition found is rejected by field validation (deferred item 31-1-1)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          badPort: {
+            webServer: { scheme: "http", host: "h", port: "not-a-port" },
+            username: "u",
+          },
+        },
+      }),
+    );
+    expect(() =>
+      resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "required", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      ),
+    ).toThrow(/IRIS_SERVER_MANAGER=required but 1 server definition\(s\) were considered and NONE could be imported/);
+  });
+
+  it("required: throws when the only definition found is rejected for declaring no username of its own (deferred item 31-1-1)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          noUsername: { webServer: { scheme: "http", host: "h", port: 52773 } },
+        },
+      }),
+    );
+    expect(() =>
+      resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "required", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      ),
+    ).toThrow(/IRIS_SERVER_MANAGER=required but 1 server definition\(s\) were considered and NONE could be imported/);
+  });
+
+  it("required: does NOT throw when at least one of several definitions is imported, even though another was rejected", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          good: { webServer: { scheme: "http", host: "h1", port: 52773 }, username: "u" },
+          badPort: {
+            webServer: { scheme: "http", host: "h2", port: "not-a-port" },
+            username: "u",
+          },
+        },
+      }),
+    );
+    let result: ReturnType<typeof resolveServerManagerProfiles> = [];
+    expect(() => {
+      result = resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "required", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      );
+    }).not.toThrow();
+    expect(result.map((p) => p.name)).toEqual(["good"]);
   });
 
   it("pathPrefix is applied as a post-merge baseUrl suffix (composed URL)", () => {
@@ -748,9 +823,16 @@ describe("resolveServerManagerProfiles", () => {
       "win32",
     );
     expect(result[0]?.baseUrl).toBe("http://localhost:52773/myprefix");
+    // Deferred item 31-0-4's resolution: the prefix is now a STRUCTURED field
+    // too, so baseUrl is recoverable as deriveBaseUrl(host, port, https) +
+    // pathPrefix — restoring the invariant without touching deriveBaseUrl.
+    expect(result[0]?.pathPrefix).toBe("/myprefix");
+    expect(result[0]?.baseUrl).toBe(
+      `http://${result[0]?.host}:${result[0]?.port}${result[0]?.pathPrefix}`,
+    );
   });
 
-  it("an absent/empty pathPrefix produces a baseUrl identical to today's derivation", () => {
+  it("an absent/empty pathPrefix produces a baseUrl identical to today's derivation, and carries NO pathPrefix field", () => {
     const dir = tmpDir();
     const file = writeSettings(
       dir,
@@ -769,6 +851,32 @@ describe("resolveServerManagerProfiles", () => {
       "win32",
     );
     expect(result[0]?.baseUrl).toBe("http://localhost:52773");
+    expect(result[0]?.pathPrefix).toBeUndefined();
+    expect(result[0]).not.toHaveProperty("pathPrefix");
+  });
+
+  // ── Story 31.3 — AC 31.3.1 provenance + deferred item 31-0-3's resolution ──
+
+  it("a resolved Server-Manager profile carries source:\"server-manager\" and sourceFile naming the settings file it came from", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          someServer: {
+            webServer: { scheme: "https", host: "sm.example.com", port: 443 },
+            username: "smuser",
+            password: "smpass",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result[0]?.source).toBe("server-manager");
+    expect(result[0]?.sourceFile).toBe(file);
   });
 
   it("the mergeProfile trap: a bad Server-Manager definition's diagnostic names the settings file/server, NEVER 'IRIS_PROFILES'", () => {

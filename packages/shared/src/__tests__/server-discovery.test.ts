@@ -261,6 +261,8 @@ describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () =>
       https: false,
       baseUrl: "http://default.example.com:52773",
       timeout: expect.any(Number),
+      // Story 31.3, AC 31.3.2: the reserved default is always "env"-sourced.
+      source: "env",
     });
   });
 

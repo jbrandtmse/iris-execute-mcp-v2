@@ -237,6 +237,30 @@ describe("AuditLogger", () => {
     expect(entry.error).toBeUndefined();
     expect(typeof entry.ts).toBe("string");
     expect(new Date(entry.ts as string).toISOString()).toBe(entry.ts);
+    // Story 31.3, AC 31.3.2: `profileSource` omitted (never a literal
+    // `undefined` key) when the input didn't supply it — mirrors the existing
+    // `denyReason`/`presetApplied` conditional-inclusion discipline.
+    expect(entry.profileSource).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(entry, "profileSource")).toBe(false);
+  });
+
+  it("includes profileSource when supplied — attribution only, present for BOTH ok and non-ok outcomes (Story 31.3, AC 31.3.2)", async () => {
+    const dir = makeTmpDir();
+    const filePath = join(dir, "audit.log");
+    const auditLogger = new AuditLogger(
+      { path: filePath, maxBytes: 1_000_000, includeParams: false },
+      "test-pkg",
+      "1.0.0",
+    );
+    auditLogger.log(baseEntry({ profileSource: "server-manager" }));
+    auditLogger.log(
+      baseEntry({ profile: "prod", profileSource: "env", outcome: "error", error: "boom" }),
+    );
+    await drain(auditLogger);
+
+    const lines = readLines(filePath);
+    expect((lines[1] as Record<string, unknown>).profileSource).toBe("server-manager");
+    expect((lines[2] as Record<string, unknown>).profileSource).toBe("env");
   });
 
   it("increments seq monotonically per entry", async () => {

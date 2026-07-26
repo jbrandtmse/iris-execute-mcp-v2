@@ -2,6 +2,78 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
+
+### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)
+
+A new, fully opt-in connection source alongside the existing `IRIS_*`/`IRIS_PROFILES` model: if you already curate IRIS
+connections in the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager)
+VS Code extension, set `IRIS_SERVER_MANAGER=auto` and the suite reads those `intersystems.servers` definitions straight
+out of your VS Code settings files — no re-typing host/port/username into every MCP client's config. Each imported
+definition becomes a named profile addressable via the existing `server` parameter, exactly like an `IRIS_PROFILES`
+entry, with full session isolation (its own `IrisHttpClient`) and identical governance-cascade behavior.
+
+Five new environment variables, all optional. The feature as a whole is **off by default**: with `IRIS_SERVER_MANAGER`
+unset, no settings file is ever touched, zero filesystem access, and the other four have no effect at all (each states
+its own default below):
+
+- `IRIS_SERVER_MANAGER` (default `off`) — `"auto"` imports what it finds; `"required"` additionally fails startup if
+  zero definitions are found, if `IRIS_SM_SERVERS` matches none of them, or if every found definition is rejected by
+  field validation or the "must declare its own `username`" guard. An unrecognized value fails fast, naming the valid
+  set.
+- `IRIS_SM_SERVERS` (unset — import all) — comma-separated allow-list of server names to import.
+- `IRIS_SM_SETTINGS_PATHS` (unset — normal discovery) — an escape hatch that replaces discovery entirely with an
+  explicit, `;`/`:`-separated list of `settings.json` paths.
+- `IRIS_SM_WORKSPACE` (unset — the process CWD) — the workspace directory whose `.vscode/settings.json` is the
+  highest-precedence source.
+- `IRIS_CREDENTIAL_HELPER` (unset) — an operator-configured command that prints a password to stdout for a server name
+  appended as its final argument; link 3 of the credential chain below.
+
+**Server-Manager-saved passwords are never readable outside VS Code, by design** — they live in VS Code's own
+SecretStorage, cryptographically unreachable from any external process. A password-less imported definition is instead
+completed by a three-link credential chain, in order: (1) explicit env (`IRIS_PROFILES.<name>.password` /
+`IRIS_PASSWORD` for `default`), live only for direct callers such as the CLI below; (2) the OS keychain (Windows
+Credential Manager / macOS Keychain / libsecret), service `iris-mcp`, account `<name>`; (3) `IRIS_CREDENTIAL_HELPER`.
+If every link is exhausted the profile is excluded at startup with a remediation log line naming all three options;
+under `IRIS_SERVER_MANAGER=required` this fails startup instead.
+
+A new bundled CLI, **`iris-mcp-credentials`** (shipped as a `bin` of `@iris-mcp/shared`, so `npx iris-mcp-credentials`
+works wherever the suite is installed), does the one-time per-machine setup: `set <name>` stores a password in the OS keychain (interactive prompt or `--stdin`), `delete
+<name>` removes it, `list [--json]` lists stored names (never values), and `test <name> [--connect] [--json]` runs
+the real credential chain and optionally live-probes the resolved connection. Every output path is secret-free by
+construction (known secrets substring-redacted; a secret too short to redact safely withholds the whole message body).
+
+**Provenance is now visible end to end.** `iris_server_profiles` roster entries gain `source` (`"env"` or
+`"server-manager"`) and `sourceFile` (the settings file, for Server-Manager-sourced profiles); the optional
+`IRIS_AUDIT_LOG` audit trail gains a matching optional `profileSource` per entry. Both are attribution-only — they
+never feed into any governance decision, which still keys purely on the profile NAME. A name collision (the same name
+defined by both `IRIS_*`/`IRIS_PROFILES` and Server Manager) is resolved in favor of the environment definition every
+time, with one aggregate startup log notice naming both provenance sources and every colliding name.
+
+**Strictly additive.** With `IRIS_SERVER_MANAGER` unset (the default), **no Server Manager data enters the profile
+registry** and every profile's connection fields — `host`, `port`, `username`, `password`, `namespace`, `https`,
+`baseUrl`, `timeout` — are byte-for-byte today's `loadProfileRegistry` output. The one deliberate difference is the
+additive `source: "env"` attribution field described above (a reviewed widening of the pre-feature back-compat
+fixtures — see the Story 31.3 Dev Notes). Both properties are mechanically proven by the Rule #19 back-compat tests,
+against fixtures that put a populated `.vscode/settings.json` on disk to prove it is not read when off. No new MCP
+tool, no new governance key: the frozen governance baseline (`1e62c5ad5bf7`, 141 keys) and every package's tool count
+are unchanged (Rule #31 — the discovery tool gained fields, not actions).
+
+Delivered across the epic's four npm-suite stories: 31.0 (settings-file discovery + JSONC parsing +
+`IRIS_SERVER_MANAGER`/`IRIS_SM_*` parsing), 31.1 (the three-link credential chain), 31.2 (the `iris-mcp-credentials`
+CLI), and 31.3 (full registry merge semantics, provenance surfacing, and the closing live capstone: a real built
+server, a real disposable workspace settings file, a real OS-keychain-stored password, and a real `iris_server_info`
+call against live IRIS via a Server-Manager-sourced profile carrying no password in any config file). Epic 31's
+remaining story, 31.4 (`iris-mcp-launcher`, a VS Code broker extension), ships as a **separate extension outside this
+npm workspace** and is not part of this release; nothing above depends on it.
+
+Documentation: the root [README](README.md) (env-var rows + [Server Manager connections](README.md#server-manager-connections-optional)
+section — discovery order, the credential chain, collision precedence — and the plain-language
+["Where do Server Manager passwords come from?"](README.md#where-do-server-manager-passwords-come-from-the-canonical-answer)
+SecretStorage-boundary answer), [`tool_support.md`](tool_support.md) (framework-tool field note), all five server
+per-package READMEs + [`packages/iris-mcp-all/README.md`](packages/iris-mcp-all/README.md) (per-server "Server Manager
+connections" sections).
+
 ## [Pre-release — 2026-07-22] — Epic 30: Tool Visibility Presets (`IRIS_TOOLS_PRESET`)
 
 ### Added — Advertise-time tool visibility (`@iris-mcp/shared`, all five servers)

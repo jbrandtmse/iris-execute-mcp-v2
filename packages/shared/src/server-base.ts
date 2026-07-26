@@ -1551,6 +1551,7 @@ export class McpServerBase {
 
     const profileName = this.deriveAuditProfileName(argsRecord);
     const outcome = this.deriveAuditOutcome(result);
+    const profileSource = this.profiles?.get(profileName)?.source;
     const entryInput: AuditEntryInput = {
       tool: tool.name,
       action: this.deriveAuditAction(tool, argsRecord),
@@ -1563,6 +1564,11 @@ export class McpServerBase {
         : [],
       params: argsRecord,
     };
+    // Story 31.3, AC 31.3.2: attribution ONLY — read straight from the
+    // already-resolved profile's `source` field (same in-memory registry
+    // lookup `deriveAuditNamespace` uses below), never fed into any
+    // authorization decision.
+    if (profileSource !== undefined) entryInput.profileSource = profileSource;
     if (outcome === "error") {
       const message = this.extractAuditErrorMessage(result);
       if (message !== undefined) entryInput.error = message;
