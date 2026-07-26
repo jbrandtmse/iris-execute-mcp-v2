@@ -1244,3 +1244,35 @@ Epic-30 CAPSTONE/closing story (docs rollup + live smokes + epic gate; no produc
 **Dismissed (recorded for coherence — NOT carried, NOT actioned):**
 - **CR 30.3-MED-2 (Blind Hunter — no source access) — FALSE POSITIVE.** Claimed the admin core prompt-pack note wrongly omits `iris_role_list` as core-hidden and understates "steps 4-6". Verified against source: `auditSecurityPosture.ts` step 2 calls `iris_role_list`, which is in admin **core `include`** (`presets.ts:32` — VISIBLE under core; only `iris_role_manage` is excluded). The note's "3 of 5 hidden under core (`iris_service_manage`/`iris_ssl_list`/`iris_audit_manage`), cannot complete steps 4-6; all 5 hidden under developer" is EXACTLY correct (steps 4/5/6 call those three; all 5 are developer-excluded). The suggested patch was correctly NOT applied — it would have injected a factual error. (Reinforces Rule #14/#16: a Blind-Hunter roster claim with no project access must be re-derived from `presets.ts` before action.)
 - **CR 30.3-LOW-5 (Blind Hunter) — cosmetic.** `#2.5` appears in a link's DISPLAY TEXT while the href intentionally targets the spec file (no anchor). Not a broken link; standard section-reference style. No change.
+
+## Epic 31 retro-review gate (2026-07-25)
+
+The `/epic-cycle 31` kickoff retro-review gate read the Epic 30 retrospective (`epic-30-retro-2026-07-22.md`) and this ledger. Carried-open items entering the gate:
+
+- **Epic-30-own batch (5 LOW):** 30-0-1..4 (Story 30.0 visibility-engine review) + 30-2-1 (Story 30.2 surfacing review) — **re-deferral count entering: 1** (first carry; Story 30.3 deferred nothing). No pre-Epic-30 item remains open (the Story 29.3 Rule #37 burn-down terminally disposed all 41 carried items).
+
+**Decision: 1 CLOSED-WITH-EVIDENCE, 4 RE-DEFERRED.** Rationale:
+
+- **Epic 31 is a FEATURE epic** — Server Manager Connection Integration (FR139): settings discovery + profile mapping, a credential chain, an `iris-mcp-credentials` CLI, registry integration, and the `iris-mcp-launcher` broker extension. Its surface is **disjoint** from every carried item's file (`packages/shared/src/tool-visibility.ts`, `server-base.ts`, `tool-visibility-backcompat.test.ts`, `tool-visibility-non-drift.test.ts`, `tool-visibility-surfacing.test.ts`) — confirmed at kickoff. Epic 31 adds NO tool and NO governance key, so the aggregate Rule #19 back-compat property the 30-0-3 item concerns is not placed at new risk.
+- The 4 re-deferred items move to **re-deferral count 2 — below Rule #37's ≥3-consecutive threshold.** A 3rd re-defer at Epic 32 would trip it, requiring a dedicated burn-down story with terminal disposition in the Epic 32 plan.
+- **No colliding Story X.0** — the 31.0 slot is the feature story `31-0-settings-discovery` (a shared-package foundation story), mirroring the Epics 19/20/21/23/24/27/28/30 feature-epic pattern. No cleanup story created (0 items included).
+
+| # | Item | Severity | Disposition |
+|---|------|----------|-------------|
+| 30-0-1 | `addTools()` dynamic-add bypasses named-preset roster curation | LOW | **RE-DEFERRED** (count 2) — zero production impact; `addTools` still has no production caller (tests only), and `assertPresetCoverage` structurally forbids a roster naming a non-registered tool. Epic 31 does not touch `tool-visibility.ts`. |
+| 30-0-2 | A named preset against a package with UNWIRED rosters is a silent no-op | LOW | **CLOSED WITH EVIDENCE** — the finding was explicitly scoped to "the 30.0→30.1 window". That window is closed: all 5 server packages now ship `src/tools/presets.ts` and wire `toolPresets` into `McpServerBase` via their `index.ts` (verified mechanically at this gate). The silent-no-op condition is unreachable for every shipped package. |
+| 30-0-3 | AC 30.0.4 back-compat capstone snapshot transcribed from spec §2.5, not source-derived | LOW | **RE-DEFERRED** (count 2) — the aggregate Rule #19 property stays doubly gated (each leaf `index.test.ts` pins its real `tools[]` through the same filter under empty env). Epic 31 adds no tool, so the "package adds/renames a tool" scenario the item guards against cannot arise this epic. |
+| 30-0-4 | Spec §2.2 "config hiding EVERY package tool ⇒ startup warning" not implemented | LOW | **RE-DEFERRED** (count 2) — diagnostic nicety, no correctness impact; not enumerated in any Epic 30 AC. |
+| 30-2-1 | Hidden-name leak assertions use substring matching; would false-FAIL on a future substring-colliding tool name | LOW | **RE-DEFERRED** (count 2) — test-robustness only, inert today (no collision in real fixtures); the production filter (`visibleGovernedKeys`, exact `Set.has`) is correct. Epic 31 adds no tool name, so no new collision can be introduced. |
+
+**Disposition tally:** 1 closed-with-evidence · 4 re-deferred · 0 resolved · 0 dropped. (5 items total; mechanically recounted from the disposition column at this gate, per Rule #51.)
+
+### Epic 30 retrospective §8 action items — disposition at this gate
+
+| # | Epic 30 action item | Owner | Disposition |
+|---|---|---|---|
+| 1 | Rebuild + reload the running MCP servers so tool visibility (Epic 30), `IRIS_AUDIT_LOG` (Epic 29), and `iris_sql_analyze:advise` (Epic 28) go live at the MCP layer | Project Lead | ✅ **RESOLVED — verified live at this gate.** Carried across three retros (29 → 30 → 31); the reload has in fact happened. `iris_server_profiles` on the running `iris-dev-mcp` returns `toolVisibility {preset:"full", visibleTools:29, hiddenTools:0}` (Epic 30's surfacing block — live) and lists `iris_sql_analyze:advise` in its effective policy (Epic 28 — live). Epic 29's `IRIS_AUDIT_LOG` ships in the same build; it is env-gated, so activation is a config choice, not a deployment gap. Closed — not carried a fourth time. |
+| 2 | Pre-instruct the code-review spawn to read its layers' on-disk output files directly on completion, rather than block on a background poller | Pipeline/harness | ✅ **INCLUDED — actioned by the lead in this cycle.** Folded into every Epic 31 `/bmad-code-review` spawn prompt as an explicit directive. Process change only; no code, no story. |
+| 3 | When a next epic is seeded, consider the deferred v1 out-of-scope items (per-action visibility, runtime toggling, `operator` preset) and Epic 29's `iris_audit_sessions` phase-2 | Project Lead | **CLOSED BY DECISION — superseded.** The next epics were seeded 2026-07-25 as Epics 31–33 (Connection & Configuration Management Wave, FR139/FR140/FR141) on a different axis; none of the listed candidates was selected. They remain available for a future seeding, and are recorded in the Epic 30 retro §6 rather than carried here. |
+
+**Carried into the Epic 32 retro-review gate:** the Epic-30-own batch reduced to **4 LOW** (30-0-1, 30-0-3, 30-0-4, 30-2-1), **re-deferral count after Epic 31: 2**. **Rule #37 watch: a re-defer at Epic 32 is the 3rd consecutive for this batch → the Epic 32 plan MUST include a dedicated burn-down story with terminal disposition for every carried item.**
