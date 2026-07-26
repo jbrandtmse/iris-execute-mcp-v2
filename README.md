@@ -108,6 +108,22 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
 - **See where every profile came from.** `iris_server_profiles` (the [discovery tool](#discovering-profiles-and-policy-call-this-first)) reports a `source` field on every roster entry — `"env"` (from `IRIS_*`/`IRIS_PROFILES`) or `"server-manager"` (imported from a settings file) — plus `sourceFile`, the exact settings file a Server-Manager-sourced profile came from. Both are attribution only: they never affect which actions governance allows, only where you look to change a connection's host/port/username. The optional `IRIS_AUDIT_LOG` audit trail (see [Compliance & Auditability](#compliance--auditability)) likewise records `profileSource` per call, for the same reason.
 - **`sourceFile` is a local path, and your AI client sees it.** It never contains a password — but it *is* a real filesystem path, so when a profile comes from a **user-scope** settings file it includes your OS account name (e.g. `C:\Users\jsmith\AppData\Roaming\Code\User\settings.json`), and when it comes from a workspace it includes that directory. Because the roster is returned to the connected MCP client, that path is visible to the model. This is deliberate: a bare filename would be useless — every candidate file is called `settings.json`, so the folder is the whole point. If you would rather not disclose local paths, define the connections you expose at workspace scope (`IRIS_SM_WORKSPACE`), or leave `IRIS_SERVER_MANAGER` off and use `IRIS_PROFILES`.
 
+#### VS Code extension: IRIS MCP Launcher (optional, Copilot-family only)
+
+If you're inside VS Code with GitHub Copilot (or another client that consumes VS Code's built-in MCP server
+registry), there's a **fourth** way to connect that sidesteps the credential chain above entirely:
+[`extensions/iris-mcp-launcher/`](extensions/iris-mcp-launcher/README.md), a standalone, optional VS Code
+extension (outside this repo's npm workspace) that registers the `@iris-mcp/*` servers directly with VS Code and
+resolves credentials from Server Manager's `vscode.authentication` session **inside the extension host** — the
+one place a Server-Manager-saved SecretStorage password actually is reachable. No OS keychain setup, no
+`IRIS_CREDENTIAL_HELPER`, no `IRIS_PROFILES` password entry required.
+
+**This only helps Copilot-family agents.** Claude Code manages its own MCP configuration (`claude mcp add` /
+`.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
+`IRIS_SERVER_MANAGER`/credential-chain path documented above instead. See the extension's own README for the
+verified client-coverage boundary and citations. Not yet published to any Marketplace — see its README for the
+draft publish checklist.
+
 #### Where do Server Manager passwords come from? (the canonical answer)
 
 **Short version: a Server Manager password is never readable outside VS Code, by design — but the suite can still get one from you through three other doors.**
