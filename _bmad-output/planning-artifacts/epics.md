@@ -4263,3 +4263,165 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 30.3.1** — Docs rollup (Rule #30): root README env-var rows + a "Tool Visibility Presets" section (roster tables, the visibility-vs-governance layering rules, measurement table); `tool_support.md` note; all three `docs/client-config/*.md`; per-server READMEs; CHANGELOG. Prompt-pack sweep: any prompt referencing a tool hidden under `core`/`developer` is softened or the limitation is documented in README.
 - **AC 30.3.2** — Live smokes on the built dist in a real Node process (Rules #22/#26): (a) default launch ⇒ `tools/list` identical to pre-feature; (b) `IRIS_TOOLS_PRESET=core` ⇒ list equals the core roster exactly AND a call to a hidden tool name returns the unknown-tool error; (c) `IRIS_TOOLS_DISABLE=iris_global_*` + `IRIS_TOOLS_ENABLE=iris_global_get` ⇒ family hidden, hole punched; (d) invalid preset value ⇒ startup crash naming valid values. Disposable smoke scripts deleted before staging.
 - **AC 30.3.3** — Spec §4 ACs 1–11 pass; conventions §6 checklist complete.
+
+## Epic 31: Server Manager Connection Integration (added 2026-07-25)
+
+**Goal**: Let users source IRIS connections from the InterSystems Server Manager VS Code extension instead of embedding host/credentials in MCP client config — in BOTH runtime scenarios: standalone launches (plain-terminal Claude Code, Cursor, any stdio client) via a settings-file reader + credential chain, and in-VS-Code launches via an optional broker extension that resolves SecretStorage credentials at spawn time. Verified hard boundary that shapes the design: `intersystems.servers` definitions are plain JSONC in VS Code settings files (readable anywhere); Server-Manager-saved passwords live in VS Code SecretStorage and are cryptographically unreachable from outside VS Code (no supported extraction/CLI/IPC — never attempted).
+
+**Binding spec**: [research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md](./research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md) (Feature 1: designs F1-D1…F1-D5).
+
+**Scope**: New `packages/shared/src/server-manager-source.ts` (settings discovery across Code/Insiders/VSCodium/Cursor user+workspace scopes; `jsonc-parser` parsing; profile mapping); env family `IRIS_SERVER_MANAGER` (`off` default | `auto` | `required`), `IRIS_SM_SERVERS` (allow-list), `IRIS_SM_SETTINGS_PATHS` (escape hatch), `IRIS_CREDENTIAL_HELPER`; credential chain env → suite-owned OS keychain (`@napi-rs/keyring` as optionalDependency, service `iris-mcp`) → helper command → fail-with-named-remediation; merge into `loadProfileRegistry` AFTER env profiles (explicit env wins collisions, logged); `source: "env" | "server-manager"` provenance through the `iris_server_profiles` allow-list + audit `profileSource`; new `iris-mcp-credentials` CLI (`set`/`delete`/`list`/`test`); optional separate-deliverable VS Code broker extension `iris-mcp-launcher` (`McpServerDefinitionProvider`, gjServAI pattern, `extensionDependencies: ["intersystems-community.servermanager"]`). NO new MCP tools, NO governance keys, NO tool-count changes (Rule #31 silent); governance/audit join on profile NAME unchanged. `superServer` blocks ignored; `/default` marker skipped; legacy inline `password` honored with deprecation log.
+
+**Functional Requirements (new)**: FR139.
+
+**Stories**:
+- 31.0 Settings discovery + JSONC parsing + profile mapping + back-compat proof
+- 31.1 Credential chain: keychain + helper + fail-fast remediation
+- 31.2 `iris-mcp-credentials` CLI
+- 31.3 Registry integration + provenance + live end-to-end capstone + docs
+- 31.4 Broker extension MVP (`iris-mcp-launcher`, separate deliverable — may trail; nothing depends on it)
+
+**Out of scope (v1)**: live credential-broker daemon (ssh-agent-style IPC — deferred unless the keychain chain proves insufficient); reading VS Code SecretStorage from outside VS Code (unsupported by design — permanently out); hot-reload on settings change (restart semantics, documented); Server Manager `superServer`/native-port connections; writing anything back into `intersystems.servers`.
+
+### Story 31.0: Settings Discovery + Profile Mapping (shared)
+
+**Acceptance Criteria**:
+- **AC 31.0.1** — `discoverSettingsFiles(env, platform)` returns candidate files in documented precedence (workspace `.vscode/settings.json` from CWD or `IRIS_SM_WORKSPACE`, then user settings for Code, Code - Insiders, VSCodium, Cursor on win32/darwin/linux); `IRIS_SM_SETTINGS_PATHS` (path-delimited list) replaces discovery entirely; all paths derived from an injectable `env`/`platform` so every branch is unit-testable on any OS.
+- **AC 31.0.2** — `parseIntersystemsServers` uses `jsonc-parser`: comments and trailing commas parse; malformed JSONC in one file logs a warning and skips that FILE (never crashes startup in `auto`); `/default` and any `/`-prefixed keys skipped; `webServer.{scheme,host,port,pathPrefix}` + `username` map to the existing `ProfileOverride` shape with the same field validation as `IRIS_PROFILES` (via `mergeProfile`); `superServer` ignored; inline legacy `password` accepted with a deprecation warning naming the credentials CLI.
+- **AC 31.0.3** — `IRIS_SERVER_MANAGER` parsing fail-fast on unknown values naming the valid set; `off`/unset ⇒ the new module is never invoked; `required` ⇒ startup fails with an actionable error if zero definitions resolve; `IRIS_SM_SERVERS` comma allow-list filters imported names (unknown names WARN, not fail).
+- **AC 31.0.4** — Rule #19 mechanical back-compat proof in the default suite: with `IRIS_SERVER_MANAGER` unset, `loadProfileRegistry` output deep-equals its pre-feature output across the existing profile test matrix (fixtures include a populated `.vscode/settings.json` on disk to prove it is NOT read when off).
+- **AC 31.0.5** — Dev Notes document the story-31.1 seam (Rule #52): this story ships profiles WITHOUT passwords marked `credentialStatus: "unresolved"`; 31.1 owns resolution. Unresolved profiles are excluded from the registry at this stage with a single startup log line.
+
+### Story 31.1: Credential Chain (shared)
+
+**Acceptance Criteria**:
+- **AC 31.1.1** — Ordered chain per Server-Manager-sourced profile lacking a password: (1) `IRIS_PROFILES.<name>.password` / `IRIS_PASSWORD` for the default-mapped name; (2) OS keychain service `iris-mcp`, account `<serverName>` via `@napi-rs/keyring` declared as **optionalDependency** — when the native module fails to load, the chain SKIPS this link with a debug log (never a crash; verified by a test that mocks the import failure); (3) `IRIS_CREDENTIAL_HELPER` executed with the server name as argv[1] — trimmed stdout is the password, non-zero exit skips the link, stderr passed through to logs, 10s timeout; (4) exhausted ⇒ profile excluded with an error log naming ALL remediations verbatim (`iris-mcp-credentials set <name>`, `IRIS_CREDENTIAL_HELPER`, `IRIS_PROFILES`); `required` mode escalates exhaustion to startup failure.
+- **AC 31.1.2** — Unit tests drive the full chain with injected fake keychain + fake helper (order, first-hit-wins, skip-on-error per link); no test touches a real keychain.
+- **AC 31.1.3** — Live smoke (Windows, this machine): password stored in Windows Credential Manager under `iris-mcp/<name>` resolves through the real `@napi-rs/keyring` path; secret never appears in logs or errors (assert on captured output).
+- **AC 31.1.4** — Passwords resolved via any link are held in memory only, flow through the existing `IrisHttpClient` construction unchanged, and never appear in `iris_server_profiles` output (existing allow-list test extended to the new fields).
+
+### Story 31.2: `iris-mcp-credentials` CLI
+
+**Acceptance Criteria**:
+- **AC 31.2.1** — New bin (in `@iris-mcp/shared` or sibling package per lead call at implementation): `set <serverName>` (hidden interactive prompt — never an argv password; `--stdin` for scripted use), `delete <serverName>`, `list` (names only, never secrets), `test <serverName>` (runs the full 31.1 chain, reports which link resolved, optional `--connect` performs an Atelier HEAD against the mapped profile; output never contains the password).
+- **AC 31.2.2** — Exit codes: 0 success, 1 not-found/unresolved, 2 usage error; errors name remediations; `--json` flag for machine-readable output on `list`/`test`.
+- **AC 31.2.3** — Rule #22 dist smoke: fresh Node process runs the built bin end-to-end (`set` via `--stdin` → `test` → `delete`) against the real OS keychain; disposable smoke script deleted before staging.
+- **AC 31.2.4** — Docs: README section + `docs/client-config/*.md` gain the two-command standalone recipe (`iris-mcp-credentials set` + `IRIS_SERVER_MANAGER=auto` in the client env block).
+
+### Story 31.3: Registry Integration + Provenance + Capstone
+
+**Acceptance Criteria**:
+- **AC 31.3.1** — `loadProfileRegistry(env)` merges resolved Server-Manager profiles after `default` + `IRIS_PROFILES` (collision ⇒ env wins, single log notice naming both sources); merged profiles get `source: "server-manager"`, env profiles `source: "env"`; `ProfileClientRegistry`/session isolation and governance cascade behave identically for both sources (one test each, keyed on a Server-Manager-sourced profile name).
+- **AC 31.3.2** — `iris_server_profiles` roster entries gain `source` via the explicit allow-list (doc-comment rule against spread preserved); audit entries gain optional `profileSource`; redaction sweep test re-run over the extended shapes.
+- **AC 31.3.3** — Rule #21 genuine live capstone in the default suite where feasible, else a scripted smoke recorded in story notes: define a server in a real workspace `.vscode/settings.json` → store its password via the 31.2 CLI → launch built `iris-dev-mcp` with `IRIS_SERVER_MANAGER=auto` and NO `IRIS_PASSWORD`/`IRIS_PROFILES` password → MCP call `iris_server_info` (default profile from env still required per existing contract; the SM profile addressed via `server` param) succeeds against live IRIS; re-run with `IRIS_SERVER_MANAGER` unset ⇒ SM profile absent (proves the switch).
+- **AC 31.3.4** — Rule #34 second-environment discipline: capstone variant proves workspace-scope definitions override user-scope for the same server name, and the Cursor settings path is exercised via `IRIS_SM_SETTINGS_PATHS` (or a real Cursor install if present); Rule #30 docs rollup: env-var rows (`IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_CREDENTIAL_HELPER`) with default states in root + per-server READMEs and `tool_support.md` note; CHANGELOG.
+- **AC 31.3.5** — SecretStorage boundary documented plainly in README ("Server Manager passwords are NOT readable outside VS Code; here are the three ways to complete credentials"), so support questions have a canonical answer.
+
+### Story 31.4: Broker Extension MVP (`iris-mcp-launcher`)
+
+**Acceptance Criteria**:
+- **AC 31.4.1** — New VS Code extension (separate repo/package; not in the npm workspace): `extensionDependencies: ["intersystems-community.servermanager"]`; registers a `McpServerDefinitionProvider`; enumerates `api.getServerNames()`; extension settings select which Server Manager servers and which of the 5 suite servers (+ `@iris-mcp/all`) to expose.
+- **AC 31.4.2** — `resolveMcpServerDefinition` resolves credentials per the verified pattern: `getServerSpec(name)` → if no password, `getAccount(spec)` + `vscode.authentication.getSession(AUTHENTICATION_PROVIDER, [name, username], {silent:true, account})` → fallback `{createIfNone:true, account}`; password = `session.accessToken`; user cancellation ⇒ definition unresolved with a clear message (no error toast storm); spawns `npx -y @iris-mcp/<pkg>` with synthesized `IRIS_*` env (single-profile) or `IRIS_PROFILES` (multi), plus pass-through governance/audit/visibility env from extension settings.
+- **AC 31.4.3** — Credentials exist only in the spawned process env — never written to settings, globalState, or logs (code-review assertion + no-write test where feasible); README documents the client-coverage boundary (Copilot-family consumes VS Code-registered MCP servers; Claude Code does not — verified against current Claude Code docs at implementation time, Rule #16 spirit).
+- **AC 31.4.4** — Manual smoke recorded in story notes: Copilot chat lists an iris-dev-mcp tool set via the extension with zero manual config on a machine with Server Manager profiles; cancel-the-prompt path verified; Marketplace/Open Exchange publish checklist drafted (publish itself may be a follow-on decision).
+
+## Epic 32: Governance File & Editors (added 2026-07-25)
+
+**Goal**: Make one governance policy portable across every MCP client. Client config formats are heterogeneous (JSON/JSONC/TOML, divergent env-expansion syntaxes) — a static file path is the only fully agent-agnostic contract, so governance gains a file substrate (`IRIS_GOVERNANCE_FILE`) that every client can pass as a plain env string, plus a CLI editor now and an extension UI later. Enforcement NEVER moves: the servers keep sole authority at the existing `dispatchToolCall` gate; the file is a config source, the editors are management surfaces.
+
+**Binding spec**: [research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md](./research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md) (Feature 2: designs F2-D1…F2-D3).
+
+**Scope**: Shared-package loader for `IRIS_GOVERNANCE_FILE` (same `parseGovernanceConfig` validation, fail-fast naming file+var; per-key cascade explicit `IRIS_GOVERNANCE` env > file > `IRIS_GOVERNANCE_PRESET` seed > defaults; `configSource` attribution in the effective-policy report); new `iris-mcp-governance` CLI (`validate`/`get`/`set`/`unset`/`preset`/`effective`/`diff`, single-sourced with the shared engine per Rule #45 spirit); extension governance UI view (scaffolds `iris-mcp-launcher` if Epic 31.4 has not shipped — Feature independence preserved). NO new tools, NO governance keys, NO enforcement changes. No hot-reload in v1 (restart semantics uniform with env config, documented).
+
+**Functional Requirements (new)**: FR140.
+
+**Stories**:
+- 32.0 `IRIS_GOVERNANCE_FILE` loader + cascade + attribution + back-compat proof
+- 32.1 `iris-mcp-governance` CLI
+- 32.2 Extension governance UI
+
+**Out of scope (v1)**: file watch/hot-reload; per-agent governance divergence tooling (the point is convergence); any governance channel not readable by the servers themselves; moving enforcement out of `dispatchToolCall`.
+
+### Story 32.0: `IRIS_GOVERNANCE_FILE` Loader (shared)
+
+**Acceptance Criteria**:
+- **AC 32.0.1** — Unset var ⇒ mechanically-proven no-op (Rule #19: existing governance test matrix re-run deep-equal under unset-file config); set but missing/unreadable/malformed file ⇒ startup fail-fast naming path, var, and parse error (never silently permissive); valid file parsed by the SAME `parseGovernanceConfig` validation (reserved-key rejection included).
+- **AC 32.0.2** — Per-key cascade `IRIS_GOVERNANCE` env explicit > file explicit > preset seed > default seed, implemented so explicit `false` at any layer is honored (nullish-coalescing discipline, matching the existing cascade); matrix test covers env×file×preset combinations including env-true/file-false and env-absent/file-false.
+- **AC 32.0.3** — `iris_server_profiles` governance view and `iris-governance://` resource report `configSource` per effective key (`env` | `file` | `preset` | `default`); hidden-tool key omission (Epic 30) unchanged.
+- **AC 32.0.4** — Docs rows (Rule #43 minimal-docs-with-story): `IRIS_GOVERNANCE_FILE` env row + one-line capability + default state in root README and per-server READMEs.
+
+### Story 32.1: `iris-mcp-governance` CLI
+
+**Acceptance Criteria**:
+- **AC 32.1.1** — Commands over a governance file: `validate` (exit 1 on invalid, printing the same error text the servers would); `get <key>` / `set <key> true|false` / `unset <key>` with `--profile <name>` for the profiles layer; `preset read-only|full` (writes nothing to the file — prints guidance that preset is env-level — OR takes `--file-default` per implementation decision recorded in Dev Notes); `effective [--profile]` rendering the same cascade the servers compute by importing the shared functions (single-sourced — no reimplementation); `diff` (file vs defaults).
+- **AC 32.1.2** — Writes are atomic (temp file + rename), preserve key ordering where feasible, and `validate` runs automatically post-write with rollback on failure; `--json` output mode on read commands.
+- **AC 32.1.3** — Rule #22 dist smoke in a fresh Node process: create file → `set` a write-tool key false → `effective` shows it disabled with `configSource: "file"` → launch a built server with `IRIS_GOVERNANCE_FILE` pointing at it → `iris_server_profiles` reports the same effective policy (live cross-check).
+- **AC 32.1.4** — Docs: CLI reference section + recipes showing the same file path wired into Claude Code (`.mcp.json`), Cursor, and Codex (`config.toml` env table) config snippets.
+
+### Story 32.2: Extension Governance UI
+
+**Acceptance Criteria**:
+- **AC 32.2.1** — Governance view in `iris-mcp-launcher` (scaffolding the extension with only this view if 31.4 hasn't shipped): tree/webview over the governed key universe derived from the published packages' dist metadata (same derivation the `iris-mcp-all` cross-package tests use — never a hand-maintained list); per-tool/per-action toggles, preset display, per-profile tabs, inline validation errors.
+- **AC 32.2.2** — All writes go through the same shared engine as the CLI (one code path); diff preview before save; the UI edits the governance FILE only — it never touches client configs or env.
+- **AC 32.2.3** — Effective-policy preview pane renders the full cascade with `configSource` badges, matching `iris_server_profiles` output for a running server byte-for-byte in a recorded check.
+- **AC 32.2.4** — Manual smoke recorded in story notes: toggle a write tool off in the UI → restart a server launched with `IRIS_GOVERNANCE_FILE` under a real agent → `iris_server_profiles` shows it disabled → calling it returns `GOVERNANCE_DISABLED` (the F2 success-metric round-trip).
+
+## Epic 33: Multi-Client MCP Configuration Manager (added 2026-07-25)
+
+**Goal**: One surface — CLI and extension UI — that wires the iris-mcp suite into every common MCP client and manages it there: detect installed clients, add/remove the suite's server entries in each client's native config format, and enable/disable individual servers per client, with user-selectable clients in the extension. Kills the per-client copy-paste-JSON ritual and composes with Epics 31/32 for the zero-secrets end state (Server Manager owns connections, the governance file owns policy, the manager owns wiring).
+
+**Binding spec**: [research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md](./research/technical-iris-server-manager-mcp-connections-research-2026-07-25.md) (Feature 3 addendum: §3.1–§3.9, including the verified 13-client capability table).
+
+**Scope**: New `@iris-mcp/client-config` package (NOT a dependency of any server runtime): declarative `ClientAdapter` registry for 13 verified clients — Claude Code, Claude Desktop, Cursor, VS Code (Copilot), Cline, Roo Code, Windsurf, OpenAI Codex CLI, Gemini CLI, Zed, Goose, Kimi CLI, Kimi Code (CLI+VS Code extension share config; also honors repo `.mcp.json`) — with format (JSON/JSONC/TOML/YAML), root key (`mcpServers`/`servers`/`mcp_servers`/`context_servers`/`extensions`), per-OS paths, scopes, env-expansion capability, disable capability, restart hints; detection; format-preserving write engine (`jsonc-parser` edits; TOML section splices limited to owned `[mcp_servers.<name>]` tables; comment-preserving `yaml` CST edits); universal safety protocol (validate → timestamped backup → edit → re-parse → auto-restore on failure → diff-preview-confirm); per-client × per-server enable/disable (native flags: Cline/Roo `disabled`, Goose `enabled`, Codex pending verification; universal byte-preserving stash-and-remove via `~/.iris-mcp/client-manager/state.json`); entry synthesis in four env modes (`server-manager` [needs Epic 31], `env-reference` [client-syntax-aware], `governance-file` [needs Epic 32], `explicit` [typed confirmation gate before any literal secret]); manager modifies ONLY entries it owns; `iris-mcp-clients` CLI (`detect`/`status`/`apply`/`enable`/`disable`/`remove`/`diff`/`doctor`); extension "MCP Clients" view (user-selectable client roster, per-server toggle matrix, diff preview, restart hints; third-party entries read-only). Pi documented as not-MCP-capable (excluded with rationale); JetBrains/Kilo Code roadmap adapters pending verification. NO new MCP tools; no server-runtime changes at all.
+
+**Functional Requirements (new)**: FR141.
+
+**Stories**:
+- 33.0 Adapter registry + detection + read/status/diff engine (read-only)
+- 33.1 Write engine + backup/restore + enable/disable
+- 33.2 `iris-mcp-clients` CLI
+- 33.3 Extension "MCP Clients" UI
+- 33.4 Adapter certification pass + docs rollup
+
+**Out of scope (v1)**: HTTP-transport MCP entries (suite is stdio); managing third-party servers' entries (read-only listing only); file locking against concurrent client edits (post-write re-parse + restart hints instead, documented); JetBrains/Kilo/Pi adapters; auto-restart of clients after config writes.
+
+### Story 33.0: Adapter Registry + Read Engine
+
+**Acceptance Criteria**:
+- **AC 33.0.1** — `ClientAdapter` registry data for all 13 v1 clients matching the binding spec's capability table (id, format, rootKey, scopes with per-OS path templates, entryShape, envExpansion, disableSupport, restartHint, detection rules, docsUrl); paths resolved via injectable env/platform; adapter data is version-stamped.
+- **AC 33.0.2** — `detect` reports installed clients (config file and/or app-dir probes) without writing anything; `status` renders the client × iris-mcp-server matrix (present-enabled / present-disabled / absent) by parsing each detected config in its native format — JSONC comments, TOML tables, and YAML all parse via fixtures for every adapter.
+- **AC 33.0.3** — `diff` renders the exact pending edit for a hypothetical `apply`/`enable`/`disable` without writing (pure function of current file content + canonical entry) — this story ships the renderer used by 33.1's confirm flow (Rule #52 seam documented in Dev Notes).
+- **AC 33.0.4** — Fixture suite per adapter includes files with foreign third-party entries and asserts they are surfaced read-only and NEVER included in any pending-edit rendering; malformed config files yield a per-client `unparseable` status (never a crash).
+
+### Story 33.1: Write Engine + Enable/Disable
+
+**Acceptance Criteria**:
+- **AC 33.1.1** — Format-preserving writes: JSON/JSONC via `jsonc-parser` `modify`/`applyEdits` (foreign keys, comments, formatting untouched — golden-file byte comparisons); TOML via text-level splices strictly bounded to owned `[mcp_servers.<name>]`(+`.env`) tables (user comments elsewhere byte-identical); YAML via comment-preserving document edits under `extensions.<name>`.
+- **AC 33.1.2** — Safety protocol on every write: pre-parse validate → timestamped backup to `~/.iris-mcp/client-manager/backups/` → edit → re-parse → on parse failure auto-restore backup and report; `restore` command surface exists; no config content ever logged (foreign entries may contain third-party secrets).
+- **AC 33.1.3** — Enable/disable: native flag adapters (Cline/Roo `disabled`, Goose `enabled`; Codex `enabled` flag verified live during this story — Rule #16 probe — with stash fallback if absent) toggle in place; stash adapters move the entry byte-preserved into `state.json` and restore it exactly (golden-file round-trip: add → disable → enable → remove ⇒ file byte-equals each expected stage); both directions idempotent.
+- **AC 33.1.4** — Ownership rule enforced in code: operations refuse (with a clear error) to modify any entry whose name is outside the iris-mcp namespace and not recorded as manager-created in `state.json`.
+- **AC 33.1.5** — Entry synthesis: four env modes rendered per adapter capability (`env-reference` uses `${VAR}` for Claude Code, `${env:VAR}`/`inputs` for VS Code, literal-with-doctor-note for no-expansion clients; `server-manager`/`governance-file` modes hidden when Epics 31/32 are not shipped); `explicit` mode requires a typed confirmation string before writing any literal `IRIS_PASSWORD` and marks the entry `contains-secret` in state.
+
+### Story 33.2: `iris-mcp-clients` CLI
+
+**Acceptance Criteria**:
+- **AC 33.2.1** — Full command surface over the engine: `detect`, `status` (`--json`), `apply --client <id> --servers <list> --scope user|project --mode <mode>` (diff + confirm; `--yes` skips), `enable|disable --client <id> --server <name>`, `remove`, `diff`, `doctor` (env-reference resolvability, file parseability, stale-backup and orphaned-stash detection, restart hints).
+- **AC 33.2.2** — Rule #22 dist smoke in a fresh Node process against a sandbox HOME: `apply` to fixture Claude Code + Codex + Goose configs (one per format family) → `status` shows enabled → `disable` → `enable` → `remove` → files byte-equal originals.
+- **AC 33.2.3** — Exit codes and `--json` stable for scripting; every write path prints the client's restart hint.
+- **AC 33.2.4** — Rule #51: any counts the CLI prints (clients detected, servers managed) are derived from the data structures, never hand-authored in copy.
+
+### Story 33.3: Extension "MCP Clients" UI
+
+**Acceptance Criteria**:
+- **AC 33.3.1** — "MCP Clients" view in `iris-mcp-launcher` (scaffolding the extension if neither 31.4 nor 32.2 shipped it): detected clients with **user-selectable checkboxes** (roster persisted in extension state); undetected v1 clients listed collapsed with a "not detected" note; Pi shown in a "not MCP-capable" info row with rationale (user-requested client, documented disposition).
+- **AC 33.3.2** — Per selected client: the iris-mcp server matrix (5 servers + `@iris-mcp/all`) with enable/disable toggles driving the 33.1 engine; scope and env-mode pickers respecting adapter capabilities; third-party entries listed read-only.
+- **AC 33.3.3** — Every write flows through diff preview → explicit confirm → engine (same single code path as the CLI); post-write the client's restart hint is surfaced; backup/restore reachable from the UI.
+- **AC 33.3.4** — Manual smoke recorded in story notes: from the UI, enable `iris-dev-mcp` for two different real clients (e.g. Claude Code + one other installed), verify both agents list the tools after restart; disable for one, verify absence there and continued presence in the other (the F3 success metric).
+
+### Story 33.4: Adapter Certification + Docs
+
+**Acceptance Criteria**:
+- **AC 33.4.1** — Live certification per locally available client (minimum: Claude Code, VS Code/Copilot, Cursor, Cline, Codex, Kimi if installable): scripted or recorded manual pass of add → client lists tools → disable → absent → restore; results in a disposition table (certified-live / fixture-only-with-residual-risk note) in the package README (Rule #34 discipline — no silent certification).
+- **AC 33.4.2** — Config-surface drift guard: `doctor` warns when a client's config file exists but fails adapter expectations (unknown root key/shape), citing the adapter data version; drift fix procedure documented (data patch + fixture update, no engine change).
+- **AC 33.4.3** — Docs rollup (Rule #30): `@iris-mcp/client-config` README (adapter table with per-client paths/formats/disable mechanism/restart hints, certification dispositions); root README section; per-client recipes superseded by `iris-mcp-clients apply` guidance with the old manual snippets retained as fallback; CHANGELOG.
+- **AC 33.4.4** — Kimi Code dual-surface verification: one config written to `~/.kimi-code/mcp.json` is confirmed visible in BOTH the Kimi Code CLI/TUI and its VS Code extension; repo `.mcp.json` sharing between Claude Code and Kimi Code verified and documented (binding-spec claim, proven live per Rule #14/#16).

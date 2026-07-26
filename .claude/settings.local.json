@@ -24,7 +24,9 @@
       "mcp__iris-data-mcp__iris_rest_manage",
       "mcp__iris-admin-mcp__iris_webapp_get",
       "mcp__iris-interop-mcp__iris_production_messages",
-      "mcp__iris-dev-mcp__iris_doc_get"
+      "mcp__iris-dev-mcp__iris_doc_get",
+      "mcp__iris-ops-mcp__iris_server_profiles",
+      "mcp__iris-interop-mcp__iris_server_profiles"
     ]
   }
 }
