@@ -8,16 +8,9 @@ import type { LauncherSettings, SuitePackageKey } from "./types.js";
 
 export const CONFIG_SECTION = "irisMcpLauncher";
 
-const ALL_PACKAGE_KEYS: readonly SuitePackageKey[] = [
-  "admin",
-  "data",
-  "dev",
-  "interop",
-  "ops",
-  "all",
-];
+const ALL_PACKAGE_KEYS: readonly SuitePackageKey[] = ["admin", "data", "dev", "interop", "ops"];
 
-/** Default `irisMcpLauncher.packages` — every individual suite package, matching the root README's "install one or all" guidance. Excludes the `all` meta-package (opt-in, heavier). */
+/** Default `irisMcpLauncher.packages` — every individual suite package, matching the root README's "install one or all" guidance. There is no meta-package key to exclude: `all` was removed in Story 31.6 (AC 31.6.5) because `@iris-mcp/all` ships no `bin`/`dist` and could never be started. */
 export const DEFAULT_PACKAGES: readonly SuitePackageKey[] = [
   "admin",
   "data",
@@ -68,6 +61,15 @@ export function readSettings(getConfig: (section: string) => ConfigReader): Laun
     ...DEFAULT_PACKAGES,
   ]);
   const packages = rawPackages.filter(isSuitePackageKey);
+  // Checked against the RAW array, before the valid-key filter above drops
+  // it — same mechanism that silently drops any other unrecognized key, but
+  // "all" specifically gets a named warning (AC 31.6.5): it is a REMOVED key
+  // a real settings.json may still carry from before this story, not a typo.
+  // Case/whitespace-insensitive on purpose: `isSuitePackageKey` rejects "All"
+  // and " all " just like any other unrecognized value, so an exact-match test
+  // here would drop them with NO explanation at all — the one outcome AC
+  // 31.6.5 exists to prevent.
+  const hadStaleAllPackage = rawPackages.some((key) => key.trim().toLowerCase() === "all");
 
   // A whitespace-only namespace passes a plain falsy check but is accepted
   // verbatim by both consumers (`loadConfig` and `mergeProfile` only reject
@@ -77,8 +79,14 @@ export function readSettings(getConfig: (section: string) => ConfigReader): Laun
   return {
     servers: toStringArray(config.get<unknown>("servers", []), []),
     packages,
+    hadStaleAllPackage,
     namespace: rawNamespace.trim() || DEFAULT_NAMESPACE,
     combineProfiles: config.get<boolean>("combineProfiles", false) === true,
+    // Development-only (AC 31.6.1/31.6.4) — same hostile-input coercion as
+    // every other string setting, plus a trim so a stray trailing/leading
+    // space in a hand-edited settings.json does not turn a valid repo path
+    // into a nonexistent one (mirrors the namespace field's own `.trim()`).
+    developmentRepoPath: toSettingString(config.get<unknown>("developmentRepoPath", ""), "").trim(),
     governance: toSettingString(config.get<unknown>("governance", ""), ""),
     governancePreset: toSettingString(config.get<unknown>("governancePreset", ""), ""),
     auditLog: toSettingString(config.get<unknown>("auditLog", ""), ""),

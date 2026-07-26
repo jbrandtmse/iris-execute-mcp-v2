@@ -20,6 +20,8 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     packages: ["dev"],
     namespace: "HSCUSTOM",
     combineProfiles: false,
+    developmentRepoPath: "",
+    hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
     auditLog: "",
@@ -408,6 +410,36 @@ describe("buildStatusBarState — AC 31.5.3", () => {
   it("zero packages configured is still rendered (not a crash / not 'undefined') in the tooltip", () => {
     const state = buildStatusBarState(settings({ servers: [], packages: [] }));
     expect(state.tooltip).toContain("(none configured)");
+  });
+
+  describe("AC 31.6.7 — development mode surfaced in the tooltip only, text/count/zero-state untouched", () => {
+    it("developmentRepoPath set -> tooltip names development mode and the path, in BOTH the zero-state and populated-count tooltips", () => {
+      const zeroState = buildStatusBarState(
+        settings({ servers: [], packages: ["dev"], developmentRepoPath: "/home/dev/iris-execute-mcp-v2" }),
+      );
+      expect(zeroState.text).toBe("$(server) IRIS MCP: none"); // AC 31.5.3's zero-state text is pinned — unchanged
+      expect(zeroState.tooltip).toContain("Development mode");
+      expect(zeroState.tooltip).toContain("/home/dev/iris-execute-mcp-v2");
+
+      const populatedState = buildStatusBarState(
+        settings({
+          servers: ["prod"],
+          packages: ["dev"],
+          developmentRepoPath: "/home/dev/iris-execute-mcp-v2",
+        }),
+      );
+      expect(populatedState.text).toBe("$(server) IRIS MCP: 1"); // AC 31.5.3's count shape is pinned — unchanged
+      expect(populatedState.tooltip).toContain("Development mode");
+      expect(populatedState.tooltip).toContain("/home/dev/iris-execute-mcp-v2");
+    });
+
+    it("developmentRepoPath empty (default) -> no 'Development mode' line in either tooltip shape (back-compat, AC 31.6.6's spirit extended to the tooltip)", () => {
+      const zeroState = buildStatusBarState(settings({ servers: [], packages: ["dev"] }));
+      expect(zeroState.tooltip).not.toContain("Development mode");
+
+      const populatedState = buildStatusBarState(settings({ servers: ["prod"], packages: ["dev"] }));
+      expect(populatedState.tooltip).not.toContain("Development mode");
+    });
   });
 });
 

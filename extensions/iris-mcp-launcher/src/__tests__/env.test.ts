@@ -21,6 +21,8 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     packages: [],
     namespace: "HSCUSTOM",
     combineProfiles: false,
+    developmentRepoPath: "",
+    hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
     auditLog: "",

@@ -139,6 +139,8 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     packages: ["dev"],
     namespace: "HSCUSTOM",
     combineProfiles: false,
+    developmentRepoPath: "",
+    hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
     auditLog: "",
@@ -634,7 +636,13 @@ describe("credential containment — Story 31.5 UI surfaces (QuickPick items, to
     }
   });
 
-  it("buildStatusBarState (the status bar text/tooltip source) never reflects a marker placed in a settings field it does not read (namespace/governance/audit*/tools*) — only .servers/.packages ever reach the text or tooltip", () => {
+  // Story 31.6 update: `developmentRepoPath` now DOES reach the tooltip by
+  // design (AC 31.6.7's development-mode line), so it is deliberately excluded
+  // from the marker sweep below — the invariant is "no field this surface does
+  // not read leaks into it", and the read set is now
+  // `.servers`/`.packages`/`.developmentRepoPath`. Every credential-bearing and
+  // pass-through field (namespace/governance/audit*/tools*) is still swept.
+  it("buildStatusBarState (the status bar text/tooltip source) never reflects a marker placed in a settings field it does not read (namespace/governance/audit*/tools*) — only .servers/.packages/.developmentRepoPath ever reach the text or tooltip", () => {
     const MARKER = "status-bar-marker-6a3e9d1c";
 
     const zeroState = buildStatusBarState(

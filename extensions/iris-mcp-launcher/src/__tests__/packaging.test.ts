@@ -17,6 +17,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SERVER_MANAGER_EXTENSION_ID } from "../constants.js";
+import { PACKAGE_DIR_NAME, PACKAGE_NPM_NAME } from "../definitions.js";
+import { DEFAULT_PACKAGES } from "../settings.js";
 import { stripComments } from "./sourceGrep.js";
 
 // __dirname (not import.meta.url), matching containment.test.ts, so this file
@@ -93,6 +95,65 @@ describe("package.json packaging contract", () => {
     // false pass (both sides accidentally [] ) cannot slip through.
     expect(readKeys.length).toBeGreaterThan(0);
     expect(declaredKeys).toEqual(readKeys);
+  });
+
+  /**
+   * Story 31.6 (AC 31.6.5, Rule #51). The `packages` enum in
+   * `contributes.configuration` and the `SuitePackageKey` union that
+   * `readSettings`'s `isSuitePackageKey` filter enforces are two
+   * hand-maintained lists that must agree, and Story 31.6 edited BOTH by hand
+   * to remove `"all"`. Nothing previously compared them:
+   *  - a key in the enum but not in the union is offered by the Settings UI
+   *    and then silently filtered out at read time (exactly the `"all"`
+   *    situation this story had to clean up);
+   *  - a key in the union but not the enum is accepted by `readSettings` while
+   *    the Settings UI marks it invalid.
+   * `PACKAGE_NPM_NAME`/`PACKAGE_DIR_NAME` are keyed by `SuitePackageKey`, so
+   * their key sets ARE the union at runtime — derived, not re-typed here.
+   */
+  it("contributes.configuration's packages enum EXACTLY matches the SuitePackageKey set the code accepts, and its default EXACTLY matches DEFAULT_PACKAGES (both derived, not re-typed)", () => {
+    const pkg = readJson<{
+      contributes: {
+        configuration: {
+          properties: Record<string, { items?: { enum?: string[] }; default?: unknown }>;
+        };
+      };
+    }>("package.json");
+    const packagesProperty = pkg.contributes.configuration.properties["irisMcpLauncher.packages"];
+
+    const declaredEnum = [...(packagesProperty?.items?.enum ?? [])].sort();
+    expect(declaredEnum.length).toBeGreaterThan(0);
+
+    // Runtime source of truth for "which keys does the code accept".
+    expect(declaredEnum).toEqual(Object.keys(PACKAGE_NPM_NAME).sort());
+    // ...and the local-spawn map must cover exactly the same key set, so a
+    // future package added to one map but not the other cannot ship.
+    expect(Object.keys(PACKAGE_DIR_NAME).sort()).toEqual(declaredEnum);
+
+    expect(packagesProperty?.default).toEqual([...DEFAULT_PACKAGES]);
+  });
+
+  /**
+   * Story 31.6 code review. `irisMcpLauncher.developmentRepoPath` is the ONLY
+   * setting in this extension that names a path the extension then EXECUTES
+   * (`node <path>/packages/<dir>/dist/index.js`). Every other setting is inert
+   * env pass-through or a server/package name. Without an explicit `scope`, a
+   * VS Code setting defaults to `window`, which a workspace's own
+   * `.vscode/settings.json` can set — so merely opening an untrusted folder
+   * that carries a settings file plus a checked-in `dist/index.js` would hand
+   * this extension an attacker-chosen executable. `machine` scope confines it
+   * to the user's own User/Machine settings, which is what AC 31.6.4's stated
+   * posture ("a checkout YOU trust") actually assumes. `machine-overridable`,
+   * `resource` and `window` are all workspace-settable and must NOT appear here.
+   */
+  it("irisMcpLauncher.developmentRepoPath is machine-scoped, so a workspace's .vscode/settings.json can never choose which local binary this extension executes", () => {
+    const pkg = readJson<{
+      contributes: { configuration: { properties: Record<string, { scope?: string }> } };
+    }>("package.json");
+
+    expect(pkg.contributes.configuration.properties["irisMcpLauncher.developmentRepoPath"]?.scope).toBe(
+      "machine",
+    );
   });
 
   it("every declared configuration property has a 'default' matching readSettings()'s own fallback shape (array settings default to an array, string settings to a string, boolean settings to a boolean)", () => {

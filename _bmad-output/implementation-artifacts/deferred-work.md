@@ -1552,3 +1552,79 @@ rather than worked around in code (skill Rule 5). The six items below are what r
   in one deliberate pass than as review drive-by. *Suggested resolution:* switch both to
   `readdirSync(SRC_DIR, { recursive: true, withFileTypes: true })` (Node 20+, already the declared
   `@types/node` floor), excluding `__tests__`, and add a test asserting the roster picks up a nested file.
+
+## Deferred from: code review of 31-6-local-package-path (2026-07-26)
+
+Three-layer adversarial review; 17 findings were patched in-story (including three HIGHs: the
+`PACKAGE_DIR_NAME` correspondence gap, the fail-OPEN relative `developmentRepoPath`, and the missing
+`"scope": "machine"` on a setting that names an executable). The six below were deferred.
+
+- **`31-6-1` — MEDIUM — the two new warnings re-fire on every `providePlannedDefinitions()` call.**
+  `serverDefinitionProvider.ts`'s stale-`"all"` warning and the aggregated `developmentRepoPath` warning both
+  call `showWarning` unconditionally; verified live, three provide calls on one provider instance produced six
+  warnings. The `warnedPathPrefixes` set immediately above them exists precisely "so the docs' 'one-time
+  warning' is literally true", and neither new warning has an equivalent. Blast radius is currently bounded:
+  `extension.ts` supplies no `onDidChangeMcpServerDefinitions` emitter, so VS Code re-enumerates only on
+  activation / MCP refresh. *Why deferred:* the pre-existing "none of the configured servers match" warning
+  behaves identically, so this is a consistency gap across all three warnings rather than a regression this
+  story introduced, and fixing one in isolation would leave the surface inconsistent. *Suggested resolution:*
+  one dedupe set keyed by warning identity covering all three, applied in a single pass, with a test driving
+  `providePlannedDefinitions()` repeatedly and asserting one warning total. Becomes user-visible the moment an
+  `onDidChangeMcpServerDefinitions` emitter lands.
+
+- **`31-6-2` — MEDIUM — synchronous `fs` validation blocks the VS Code extension host on a network path.**
+  `isExistingDirectory`/`isExistingFile` (`serverDefinitionProvider.ts:63-77`) call `existsSync`/`statSync`
+  inside `provideMcpServerDefinitions`, which VS Code invokes on the single-threaded extension host — every
+  extension in the window stalls for the duration. Measured on this machine: `existsSync` on a nonexistent UNC
+  host blocked **1281 ms** (a fast DNS failure; a reachable-but-hung SMB share is far worse). The story
+  explicitly enumerates UNC paths as a supported input shape, and the one UNC test mocks `existsSync` away, so
+  the suite gives zero signal here. *Why deferred:* `providePlannedDefinitions` is already `async`, so moving
+  to `fs/promises` is mechanically feasible, but it changes the shape of `resolveSpawnTargets` and its ten
+  tests — a deliberate change, not a review drive-by. *Suggested resolution:* switch both helpers to
+  `fs/promises` with `Promise.all` over the per-package checks, and add a test asserting the validation does
+  not run serially per plan.
+
+- **`31-6-3` — MEDIUM — `command: "node"` is resolved from the extension host's PATH and never validated.**
+  `resolveSpawnTargets` proves `dist/index.js` exists but assumes an interpreter. A Windows user with
+  nvm-windows/Volta shims that only exist in an interactive shell, or VS Code launched from a Start Menu
+  shortcut with a stale PATH, passes every check and then dies at spawn with an opaque ENOENT inside VS Code's
+  MCP output — bypassing the legible failure path that is the entire point of this story's fail-closed work.
+  *Why deferred:* AC 31.6.1 pins the spawn as `node <repoPath>/packages/<dir>/dist/index.js`, so switching to
+  the standard extension-host pattern (`process.execPath` with `ELECTRON_RUN_AS_NODE=1`) would contradict the
+  AC as written and needs a spec amendment first (skill Rule 5). *Suggested resolution:* amend AC 31.6.1 to
+  name the interpreter as an implementation detail, then use `process.execPath`, which removes the PATH
+  dependency entirely; alternatively keep `node` and add an explicit resolvability probe with its own reason
+  string.
+
+- **`31-6-4` — LOW — the status bar tooltip claims development mode is spawning local builds even when it
+  registered nothing.** `buildStatusBarState` (`selectServers.ts:376-383`) branches only on
+  `developmentRepoPath !== ""`; it never sees `resolveSpawnTargets`'s verdict. With a typo'd path the status
+  bar reads `$(server) IRIS MCP: 2` plus "Development mode: spawning from local build at C:\typo" while zero
+  definitions exist — AC 31.6.7's stated purpose ("never ambiguous whether the extension is running local
+  builds or published packages") is inverted in exactly the state where it matters most. Note the count was
+  already `settings.servers.length` rather than a registered-definition count (pre-existing), so this is a
+  sharper instance of an existing divergence. *Why deferred:* `buildStatusBarState` is a pure function of
+  `LauncherSettings` by design and is pinned by AC 31.5.3's tests; giving it the provider's verdict means
+  plumbing new state through `extension.ts`'s refresh path. *Suggested resolution:* pass an optional
+  "definitions actually registered" count into `buildStatusBarState` and word the dev-mode line from it.
+
+- **`31-6-5` — LOW — live IRIS credentials hardcoded in a committed test file.**
+  `localSpawnIntegration.test.ts` hardcodes `_SYSTEM`/`SYS` and asserts
+  `expect(env?.IRIS_PASSWORD).toBe(IRIS_PASSWORD)`, so a failure prints both values to stdout/CI logs — in an
+  extension whose headline invariant is "no password ever written to a log/output channel" and which maintains
+  a dedicated `containment.test.ts` for it. `containment.test.ts`'s `SOURCE_FILES` roster deliberately excludes
+  `__tests__/`, so no guard covers this file. *Why deferred:* these are the documented local dev defaults used
+  throughout this repo's docs and rules, and changing the convention in one test file is not the right scope.
+  *Suggested resolution:* read them from `IRIS_TEST_*` env vars with the current values as fallbacks, and
+  decide repo-wide whether `__tests__/` should join the containment roster.
+
+- **`31-6-6` — LOW — the extension's unit tests now hard-require the monorepo `packages/` tree on disk.**
+  `definitions.test.ts` reads `<repoRoot>/packages` for the AC 31.6.2 cross-check and
+  `localSpawnIntegration.test.ts` probes `<repoRoot>/node_modules/.pnpm`, so the extension folder is no longer
+  testable in isolation (standalone `vsce` packaging checks, sparse checkouts). This is in tension with the
+  README's "nothing in `packages/**` depends on it, and it depends on nothing in `packages/**`" claim, which is
+  about build-time dependencies but reads more broadly. *Partially mitigated in review:* the `readdirSync` is
+  now guarded so a missing `packages/` produces a named diagnostic instead of an ENOENT stack trace.
+  *Why deferred:* the cross-check's value comes precisely from reading the real tree (Rule #51), so removing
+  the dependency would weaken the HIGH fix it implements. *Suggested resolution:* keep the disk oracle, and
+  narrow the README claim to build-time/runtime dependency rather than the test tier.

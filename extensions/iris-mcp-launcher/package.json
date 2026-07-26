@@ -70,8 +70,7 @@
               "data",
               "dev",
               "interop",
-              "ops",
-              "all"
+              "ops"
             ]
           },
           "uniqueItems": true,
@@ -82,7 +81,7 @@
             "interop",
             "ops"
           ],
-          "description": "Which @iris-mcp suite packages to register as MCP servers ('all' is the combined meta-package, @iris-mcp/all, registered in addition to any individually-selected packages)."
+          "description": "Which @iris-mcp suite packages to register as MCP servers. (The former 'all' meta-package key was removed — @iris-mcp/all ships no dist/bin and could never be started; select the individual packages you need instead.)"
         },
         "irisMcpLauncher.namespace": {
           "type": "string",
@@ -93,6 +92,12 @@
           "type": "boolean",
           "default": false,
           "description": "When true, register ONE MCP server definition per package covering ALL selected Server Manager servers (via the suite's IRIS_PROFILES multi-profile env var, addressable with the 'server' tool parameter). When false (default), register one definition per (package, server) pair, each single-profile."
+        },
+        "irisMcpLauncher.developmentRepoPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "DEVELOPMENT ONLY. Absolute path to a local monorepo checkout of the IRIS MCP suite. Empty (default) spawns the published packages via 'npx -y @iris-mcp/<pkg>'. Non-empty spawns 'node <path>/packages/<dir>/dist/index.js' instead, for testing local changes before publishing. This executes an arbitrary local file path, so it is machine-scoped: it can only be set in your own User/Machine settings, never by a workspace's .vscode/settings.json. Only set it to a checkout you trust. A relative path is rejected — it must be absolute. A missing or unbuilt package registers no definition for that package and produces one warning; other selected packages still register."
         },
         "irisMcpLauncher.governance": {
           "type": "string",

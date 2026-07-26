@@ -373,6 +373,14 @@ export interface StatusBarState {
 export function buildStatusBarState(settings: LauncherSettings): StatusBarState {
   const count = settings.servers.length;
   const packagesText = settings.packages.length > 0 ? settings.packages.join(", ") : "(none configured)";
+  // AC 31.6.7: surface when development mode is active, so a user cannot
+  // forget the extension is running local builds rather than published
+  // packages. Deliberately tooltip-only — `text` and the count/zero-state
+  // shape are pinned by AC 31.5.3's tests and must not change here.
+  const devModeLine =
+    settings.developmentRepoPath !== ""
+      ? `Development mode: spawning from local build at ${settings.developmentRepoPath}\n`
+      : "";
 
   if (count === 0) {
     return {
@@ -382,6 +390,7 @@ export function buildStatusBarState(settings: LauncherSettings): StatusBarState 
         "irisMcpLauncher.servers is empty, so every server InterSystems Server Manager currently " +
         "reports will be exposed (the documented default).\n" +
         `Packages: ${packagesText}\n` +
+        devModeLine +
         "Click to choose specific servers.",
     };
   }
@@ -390,6 +399,7 @@ export function buildStatusBarState(settings: LauncherSettings): StatusBarState 
     text: `$(server) IRIS MCP: ${count}`,
     tooltip:
       `IRIS MCP Launcher\nServers: ${settings.servers.join(", ")}\nPackages: ${packagesText}\n` +
+      devModeLine +
       "Click to change selection.",
   };
 }

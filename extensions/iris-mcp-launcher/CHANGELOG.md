@@ -6,6 +6,19 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Added
 
+- `irisMcpLauncher.developmentRepoPath` setting (Story 31.6): points the extension at a local monorepo checkout so
+  it spawns `node <path>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>` — the only way to run
+  this extension against a real server before any `@iris-mcp/*` package is published. Empty (default) leaves
+  spawning byte-identical to `npx` behavior. The path must be **absolute**; a relative one is rejected rather than
+  resolved, because this extension and the spawned server resolve relative paths against different working
+  directories. Fails closed on a relative/missing/invalid repo path, a directory that is not a checkout, or an
+  unbuilt package: that package registers no definition and one aggregated warning names the offending path and
+  setting; other selected packages still register. Because it names a path the extension **executes**, it is
+  declared `"scope": "machine"` — settable only in your own User/Machine settings, never by a workspace's
+  `.vscode/settings.json`.
+- Status bar tooltip now surfaces a "Development mode" line when `developmentRepoPath` is set, so it's never
+  ambiguous whether the extension is running local builds or published packages. The status bar `text`, count,
+  and zero-state shape (pinned by Story 31.5) are unchanged.
 - Initial MVP (Epic 31, Story 31.4): registers an `iris-mcp-launcher` MCP server definition provider that
   enumerates InterSystems Server Manager server definitions and plans one `npx -y @iris-mcp/<pkg>` MCP server
   definition per (suite package, Server Manager server) pair, or one per package covering every selected server
@@ -24,6 +37,15 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 - `irisMcpLauncher.*` settings: `servers`, `packages`, `namespace`, `combineProfiles`, and pass-through
   governance/audit/visibility variables (`governance`, `governancePreset`, `auditLog`, `auditLogMaxMb`,
   `auditLogParams`, `toolsPreset`, `toolsDisable`, `toolsEnable`).
+
+### Removed
+
+- The `"all"` package key (`@iris-mcp/all`, the combined meta-package) is not a valid value for
+  `irisMcpLauncher.packages` (removed in Story 31.6, before any release). `@iris-mcp/all` ships no
+  `main`/`bin`/`files`/`dist` and could never be started via `npx` or a local build — it was a latent defect
+  masked only by the suite's own non-publication. A settings.json that still lists `"all"` (in any casing) gets
+  one warning naming the removal; any other selected packages still register normally.
+  `irisMcpLauncher.packages`'s default (the five individual packages) is unaffected — it never included `"all"`.
 
 ### Known limitations
 
