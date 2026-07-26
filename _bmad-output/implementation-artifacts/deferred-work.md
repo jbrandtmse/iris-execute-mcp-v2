@@ -1466,3 +1466,89 @@ Second gap in the same discovery surface, again raised by the Project Lead — t
 Docs updated at the point of use (Rules #30/#43): the root README's discovery-order bullet now lists all four scope tiers plus a Linux-specifics bullet naming the XDG/Flatpak rationale, the Cursor-not-on-Flathub exclusion, and portable mode as the escape-hatch case.
 
 **Process note:** the first attempt to append this very entry failed silently-ish — a Python heredoc parsed `\User` in a Windows path as a `\U` unicode escape and aborted, while the `git commit` in the same command chain still succeeded. The code fix shipped in `7b3f1a3` with its ledger entry missing until this follow-up. Third instance this epic of shell/Python quoting mangling content (cf. the NUL-byte binary file and the Story 31.2 review's heredoc trouble); prefer writing content to a file and appending it, over inlining it in a shell heredoc.
+
+## Deferred from: code review of 31-5-launcher-selection-ui (2026-07-26)
+
+Story 31.5 (Launcher Server-Selection UI, `extensions/iris-mcp-launcher/`) — the post-retro story Epic 31 was
+re-opened for. Nothing below touches `packages/**`; these items live entirely in
+`extensions/iris-mcp-launcher/`, so they do NOT interact with the frozen governance baseline, tool counts, or
+`bootstrap-classes.ts`.
+
+Verified live at review: extension `npx tsc --noEmit` clean, `npx vitest run` **162/162 across 11 files**
+(baseline 107/10 → dev 140/11 → QA 153/11 → review 162/11, counted mechanically from the runner output per
+Rule #51), `npm run build` clean, zero `packages/**` files modified, no binary/NUL-byte files in the diff.
+**Thirteen findings were PATCHED IN-STORY and are not carried** — including the HIGH: the `workspaceFolder`
+write target was a branch the real VS Code API can never reach (and is documented to reject if it were),
+"proven correct" only by fakes returning an impossible `inspect()` shape. AC 31.5.2 was amended in `epics.md`
+rather than worked around in code (skill Rule 5). The six items below are what remains.
+
+- **`31-5-1` — HIGH (skill Rule 3) — no real-runtime (Extension-Host) test evidence for a user-facing UI
+  surface.** `src/extension.ts` is the only file with a value-level `import * as vscode` and is imported by
+  **zero** tests; `package.json` has no `@vscode/test-electron` / `@vscode/test-cli`, so there is no
+  Extension-Host tier at all. Everything that constitutes the shipped UX — status bar creation and `show()`,
+  the click wiring, the `onDidChangeConfiguration` filter, `showQuickPick`'s real options object,
+  `toConfigurationTarget`, `updateServersConfig` — runs only in a real VS Code process.
+  *Why deferred, not fixed:* standing up an Extension-Host tier means a new dev dependency, a downloaded VS
+  Code build, and a second `vitest`-independent runner — its own story, and not runnable in the headless
+  environment this review ran in. *What WAS done instead:* the mechanically-closable part is now pinned from
+  disk in `packaging.test.ts`'s new "extension.ts wiring" describe — the `ConfigWriteTarget` →
+  `vscode.ConfigurationTarget` mapping (a swap type-checks cleanly and is exactly AC 31.5.2's named failure
+  mode), the declared setting `scope`, the command/status-bar-before-MCP activation order, the status bar
+  `command` constant, and the `affectsConfiguration(CONFIG_SECTION)` filter. Two of those were
+  mutation-verified red→green. *Suggested resolution:* a dedicated story adding `@vscode/test-electron` with a
+  smoke suite that activates the extension, asserts the status bar item exists with the zero-state text, and
+  drives the command end-to-end against a real `WorkspaceConfiguration`. *Compensating control until then:*
+  the Project Lead's per-story manual smoke, which Rule 3 itself names as a separate later gate — AC 31.5.4's
+  empirical step is part of it.
+
+- **`31-5-2` — LOW — the status bar count is the raw `settings.servers.length`, which can diverge from the
+  number of MCP definitions actually registered.** `buildStatusBarState` counts the literal
+  `irisMcpLauncher.servers` array; `planDefinitions()` de-duplicates AND intersects with the Server Manager
+  roster. So a hand-edited `["prod","prod"]` shows `IRIS MCP: 2` while one server is registered, and a
+  mistyped name shows `1` while zero are. *Why deferred:* this is the open design question the QA stage
+  explicitly flagged for a **product decision**, and AC 31.5.3 does not specify raw vs effective — its wording
+  ("when the roster is empty") matches the current raw reading. Current behavior is pinned by a test, so it
+  cannot drift unnoticed. The blast radius is small: the command itself de-dupes on write and the setting
+  declares `uniqueItems: true`, so only a hand-edit produces it. *Suggested resolution:* Project Lead decides
+  whether the status bar should report the raw setting or the effective registered count; if effective, feed
+  the resolved roster into `buildStatusBarState` (it is pure, so this stays unit-testable) and update the
+  pinning test.
+
+- **`31-5-3` — LOW — unchecking every item writes `[]`, which means "expose ALL servers" — the inverse of the
+  gesture.** A user who opens the picker to stop exposing anything and unchecks everything ends up exposing
+  strictly more. *Why deferred:* the `[]`-means-all semantic is inherited from Story 31.4's setting contract,
+  not introduced by this story, and both the post-write confirmation and the zero-state tooltip explain it in
+  words. A confirm-before-writing-empty prompt is a new UI interaction no AC asks for. *Suggested resolution:*
+  either a modal confirmation on an empty selection, or a separate explicit "expose none" representation
+  distinct from `[]` — a settings-contract change that should be decided alongside `31-5-2`.
+
+- **`31-5-4` — LOW — `onDidChangeMcpServerDefinitions` is never supplied or fired**, so a saved selection has
+  no effect until the user reloads. `McpServerDefinitionProvider` declares the optional event
+  (`@types/vscode@1.125.0` `index.d.ts` ~20518) and the object literal in `extension.ts` supplies only
+  `provideMcpServerDefinitions` / `resolveMcpServerDefinition`. *Why deferred:* AC 31.5.6 **deliberately**
+  specifies reload semantics ("writing the setting does not retroactively change already-registered MCP
+  definitions; the confirmation therefore states plainly that a reload ... is required"), so wiring the event
+  now would contradict the AC as written rather than fix a defect. *Suggested resolution:* a follow-up story
+  that amends AC 31.5.6 first, then adds a `vscode.EventEmitter<void>` pushed to `context.subscriptions`,
+  fired from the same `onDidChangeConfiguration` handler that refreshes the status bar, and softens the
+  confirmation wording.
+
+- **`31-5-5` — LOW — `$(…)` in Server Manager metadata renders as a theme icon in QuickPick rows.**
+  `QuickPickItem.label`/`.description`/`.detail` all document "Supports rendering of theme icons via the
+  `$(<name>)`-syntax", so a server literally named `$(zap)prod` renders an icon instead of its text; the value
+  written back is still the raw name, so settings stay correct but the user picked partly blind. *Why
+  deferred:* `@types/vscode` documents no escape for `QuickPickItem` fields (unlike `MarkdownString`), so a
+  blind `$(` → `$\(` substitution risks corrupting legitimately-displayed names — that would be a worse
+  outcome than the cosmetic issue. Server names come from the user's own Server Manager config, not from an
+  untrusted source. *Suggested resolution:* verify empirically in a real Extension Host whether an escape is
+  honored (natural companion to `31-5-1`), and only then escape.
+
+- **`31-5-6` — LOW — both source-file rosters are non-recursive.** `containment.test.ts`'s `SOURCE_FILES` and
+  `packaging.test.ts`'s `sourceFiles` each use a flat `readdirSync(SRC_DIR)`, so a module added under a future
+  `src/commands/` or `src/views/` subdirectory would be invisible to the credential-leak grep, the
+  `.update(` write pin, and the `contributes.commands` ↔ `registerCommand` cross-check — a hand-rostered
+  blind spot of exactly the kind Rule #51 exists to prevent. *Why deferred:* `src/` is flat today (10 files),
+  so nothing is currently uncovered, and making both recursive is a behavior change to two guards better done
+  in one deliberate pass than as review drive-by. *Suggested resolution:* switch both to
+  `readdirSync(SRC_DIR, { recursive: true, withFileTypes: true })` (Node 20+, already the declared
+  `@types/node` floor), excluding `__tests__`, and add a test asserting the roster picks up a nested file.

@@ -13,19 +13,25 @@
  * not hand-copied — so adding a setting to one file without the other fails
  * this test immediately instead of silently drifting.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SERVER_MANAGER_EXTENSION_ID } from "../constants.js";
+import { stripComments } from "./sourceGrep.js";
 
 // __dirname (not import.meta.url), matching containment.test.ts, so this file
 // type-checks cleanly under the extension's own CommonJS tsconfig.json.
 const ROOT = path.resolve(__dirname, "..", "..");
+const SRC_DIR = path.join(ROOT, "src");
 
 interface PackageJson {
   main: string;
+  activationEvents: string[];
   extensionDependencies: string[];
-  contributes: { configuration: { properties: Record<string, unknown> } };
+  contributes: {
+    configuration: { properties: Record<string, unknown> };
+    commands: { command: string; title: string }[];
+  };
 }
 
 /**
@@ -112,5 +118,132 @@ describe("package.json packaging contract", () => {
         );
       }
     }
+  });
+
+  it("Story 31.5 AC 31.5.4: activationEvents includes onStartupFinished, so the status bar item appears on a plain window reload with MCP never exercised (not only when mcpServerDefinitionProviders is first asked)", () => {
+    const pkg = readJson<PackageJson>("package.json");
+    expect(pkg.activationEvents).toContain("onStartupFinished");
+  });
+
+  it("Task 5 / Rule #51: every declared contributes.commands id is registered via a *.registerCommand(...) call somewhere in src/*.ts (mechanically resolved through any exported string constant, never a hand-copied literal), and vice versa", () => {
+    const pkg = readJson<PackageJson>("package.json");
+    const declaredIds = pkg.contributes.commands.map((c) => c.command).sort();
+
+    const sourceFiles = readdirSync(SRC_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => entry.name);
+
+    // Resolve `registerCommand(SOME_CONSTANT, ...)` to SOME_CONSTANT's literal
+    // value by scanning every `export const NAME = "..."` in src/*.ts first —
+    // this test reads SOURCE TEXT only (no dynamic import), so an id passed
+    // as an imported constant (this extension's actual style — see
+    // `selectServers.ts`'s `SELECT_SERVERS_COMMAND_ID`) still resolves.
+    // Comments are stripped first (code review, Story 31.5): this scan reads
+    // raw source, so a `registerCommand("some.id")` written inside a doc
+    // comment or a commented-out line would register a phantom id and flip
+    // the strict `toEqual` below — a docs edit breaking a packaging test.
+    const constValues = new Map<string, string>();
+    for (const file of sourceFiles) {
+      const text = stripComments(readFileSync(path.join(SRC_DIR, file), "utf8"));
+      for (const match of text.matchAll(/export const (\w+)(?:\s*:\s*[^=]+)?\s*=\s*"([^"]+)"/g)) {
+        const [, name, value] = match;
+        if (name && value) constValues.set(name, value);
+      }
+    }
+
+    const registeredIds = new Set<string>();
+    for (const file of sourceFiles) {
+      const text = stripComments(readFileSync(path.join(SRC_DIR, file), "utf8"));
+      for (const match of text.matchAll(/registerCommand\(\s*(?:"([^"]+)"|(\w+))/g)) {
+        const [, literal, identifier] = match;
+        if (literal) {
+          registeredIds.add(literal);
+        } else if (identifier && constValues.has(identifier)) {
+          registeredIds.add(constValues.get(identifier)!);
+        }
+      }
+    }
+
+    expect(declaredIds.length).toBeGreaterThan(0);
+    expect([...registeredIds].sort()).toEqual(declaredIds);
+  });
+});
+
+/**
+ * `extension.ts` is the ONLY file with a value-level `import * as vscode`, so
+ * no test can import it — every adapter in it (`toConfigurationTarget`,
+ * `inspectServersConfig`/`updateServersConfig`, the status bar wiring, the
+ * `onDidChangeConfiguration` filter, activation ORDER) is invisible to the
+ * unit suite by construction, and the compiler cannot help either: all three
+ * `ConfigurationTarget` members share one type, so a swapped mapping
+ * type-checks cleanly. That gap is precisely where AC 31.5.2's named failure
+ * mode ("must not silently write ... into user settings or vice versa") would
+ * live.
+ *
+ * These are source-derived structural pins (Rule #51 — derived from disk, no
+ * hand-rostered list) closing the mechanically-closable part of that gap. They
+ * do NOT substitute for an Extension-Host test tier; see `deferred-work.md`
+ * (item 31-5-1) and the Project Lead's per-story manual smoke, which remains
+ * the compensating control for everything genuinely runtime-only.
+ */
+describe("extension.ts wiring — structural pins for the adapters no unit test can import (code review, Story 31.5)", () => {
+  const extensionCode = stripComments(readFileSync(path.join(SRC_DIR, "extension.ts"), "utf8"));
+  const selectServersCode = stripComments(
+    readFileSync(path.join(SRC_DIR, "selectServers.ts"), "utf8"),
+  );
+
+  it("toConfigurationTarget maps every ConfigWriteTarget member onto the SAME-NAMED vscode.ConfigurationTarget member — a swap (e.g. \"workspace\" -> Global) type-checks fine and would write the user's pick to the wrong file", () => {
+    const pairs = [
+      ...extensionCode.matchAll(/case\s+"(\w+)":\s*return\s+vscode\.ConfigurationTarget\.(\w+);/g),
+    ].map((match) => ({ local: match[1]!, target: match[2]! }));
+
+    expect(pairs.length).toBeGreaterThan(0);
+    for (const { local, target } of pairs) {
+      expect(target.toLowerCase(), `case "${local}" must map to ConfigurationTarget.${local}`).toBe(
+        local.toLowerCase(),
+      );
+    }
+
+    // ...and the mapped set is EXACTLY the ConfigWriteTarget union, extracted
+    // from selectServers.ts's source — so adding a union member without a
+    // mapping case (or leaving a case for a removed member) fails here.
+    const union = /export type ConfigWriteTarget =([^;]+);/.exec(selectServersCode);
+    expect(union, "ConfigWriteTarget union not found in selectServers.ts").not.toBeNull();
+    const members = [...union![1]!.matchAll(/"(\w+)"/g)].map((match) => match[1]!).sort();
+    expect(members.length).toBeGreaterThan(0);
+    expect(pairs.map((p) => p.local).sort()).toEqual(members);
+  });
+
+  it("irisMcpLauncher.servers declares no folder-writable `scope`, which is WHY ConfigWriteTarget has no workspaceFolder member — adding `\"scope\": \"resource\"` here without revisiting resolveWriteTarget/getConfiguration would silently reintroduce the dead branch", () => {
+    const pkg = readJson<{
+      contributes: { configuration: { properties: Record<string, { scope?: string }> } };
+    }>("package.json");
+    const declaredScope = pkg.contributes.configuration.properties["irisMcpLauncher.servers"]?.scope;
+
+    // Absent === VS Code's default `window` scope, which folder settings
+    // cannot carry (see the update() @throws oracle quoted in
+    // selectServers.test.ts). `resource`/`language-overridable`/
+    // `machine-overridable` ARE folder-writable and would invalidate the
+    // union below.
+    expect(["window", "application", "machine", undefined]).toContain(declaredScope);
+    expect(selectServersCode).not.toMatch(/"workspaceFolder"/);
+  });
+
+  it("the selectServers command and the status bar item are registered BEFORE the MCP provider, so a registerMcpServerDefinitionProvider failure cannot take the zero-state signal (AC 31.5.3/31.5.4) down with it", () => {
+    const commandAt = extensionCode.indexOf("registerCommand(");
+    const statusBarAt = extensionCode.indexOf("createStatusBarItem(");
+    const mcpAt = extensionCode.indexOf("registerMcpServerDefinitionProvider(");
+
+    expect(commandAt).toBeGreaterThan(-1);
+    expect(statusBarAt).toBeGreaterThan(-1);
+    expect(mcpAt).toBeGreaterThan(-1);
+    expect(commandAt).toBeLessThan(mcpAt);
+    expect(statusBarAt).toBeLessThan(mcpAt);
+  });
+
+  it("the status bar item's click action is the command constant (not a hand-copied literal) and the config listener is filtered to CONFIG_SECTION, so the AC 31.5.3 refresh cannot fire on unrelated settings or point at a stale id", () => {
+    expect(extensionCode).toMatch(/statusBarItem\.command\s*=\s*SELECT_SERVERS_COMMAND_ID/);
+    expect(extensionCode).toMatch(/affectsConfiguration\(CONFIG_SECTION\)/);
+    expect(extensionCode).toMatch(/onDidChangeConfiguration\(/);
   });
 });

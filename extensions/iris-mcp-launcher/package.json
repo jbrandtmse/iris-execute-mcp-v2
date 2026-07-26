@@ -32,12 +32,21 @@
     "intersystems-community.servermanager"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "mcpServerDefinitionProviders": [
       {
         "id": "iris-mcp-launcher",
         "label": "IRIS MCP Server Suite"
+      }
+    ],
+    "commands": [
+      {
+        "command": "irisMcpLauncher.selectServers",
+        "title": "Select Servers…",
+        "category": "IRIS MCP Launcher"
       }
     ],
     "configuration": {

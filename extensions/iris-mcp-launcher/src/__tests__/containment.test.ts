@@ -16,12 +16,26 @@
  *     every `showWarning` call, and assert none contain the secret — while
  *     also asserting the returned env DOES contain it, so the test is not
  *     vacuous (it proves the secret really flowed through this code path).
+ *
+ * AC 31.5.5 extends this bar to Story 31.5's new UI surfaces — QuickPick
+ * items, tooltips, and status bar text — added at the bottom of this file.
+ * `SOURCE_FILES` below is disk-enumerated (not hand-rostered), so
+ * `selectServers.ts` is automatically covered by check (1) with no roster
+ * edit required; `extension.ts`'s ONE new legitimate `WorkspaceConfiguration
+ * .update(...)` call (writing the plain, non-secret `irisMcpLauncher.servers`
+ * selection) is deliberately structured through an intermediate `config`
+ * local (see `updateServersConfig` in `extension.ts`) so it still reads as
+ * "a config value was read, then updated elsewhere" rather than the risky
+ * "read-then-immediately-mutate-in-one-chain" shape check (1) exists to
+ * catch — the same indirection `toConfigReader` already uses for reads.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildStatusBarState, selectServers, type SelectServersDeps } from "../selectServers.js";
 import { LauncherProvider, type ProviderDeps } from "../serverDefinitionProvider.js";
-import type { AuthApi, LauncherSettings, ServerManagerApi, ServerSpec } from "../types.js";
+import { stripComments } from "./sourceGrep.js";
+import type { AuthApi, LauncherSettings, ServerManagerApi, ServerName, ServerSpec } from "../types.js";
 
 // __dirname (not import.meta.url) so this file type-checks cleanly under the
 // extension's own CommonJS tsconfig.json, not just under vitest's transform.
@@ -60,6 +74,7 @@ const LOGGING_EXEMPT: Record<string, RegExp[]> = {
   "extension.ts": [/appendLine\s*\(/],
 };
 
+
 describe("credential containment — structural (source grep)", () => {
   it("enumerates every non-test source file from disk (the roster cannot go stale)", () => {
     expect(SOURCE_FILES.length).toBeGreaterThan(5);
@@ -83,6 +98,38 @@ describe("credential containment — structural (source grep)", () => {
     }
 
     expect(offenders).toEqual([]);
+  });
+
+  it("the ONE configuration write this extension makes targets the plain irisMcpLauncher.servers key and nothing else — pinned POSITIVELY, because the shape-based grep above cannot see a two-statement write", () => {
+    // Code review (Story 31.5). `SUSPICIOUS_WRITE_PATTERNS`'s
+    // `getConfiguration(...).update(` pattern only matches a single-expression
+    // chain, and `extension.ts`'s `updateServersConfig` deliberately splits it
+    // across two statements — so the guard whose stated purpose is "a future
+    // write-capable call cannot slip in silently" is structurally blind to
+    // exactly the idiom this extension now models. Rather than restore the
+    // chain or blanket-exempt the file, the write is pinned from the other
+    // direction: enumerate EVERY `.update(` in every source file and assert
+    // the complete set is the single `irisMcpLauncher.servers` write. A second
+    // config write anywhere — including one carrying a credential — fails
+    // here, and so does a rename of the written key (which is also what makes
+    // Integration AC 31.5.8's "a rename on EITHER side must fail" true for the
+    // write side; the read side is covered in selectServers.test.ts).
+    const updateArguments: string[] = [];
+    for (const file of SOURCE_FILES) {
+      const code = stripComments(readFileSync(path.join(SRC_DIR, file), "utf8"));
+      for (const match of code.matchAll(/(?<![\w$])update\s*\(\s*("[^"]*"|[A-Za-z_$][\w$]*)/g)) {
+        updateArguments.push(`${file}: update(${match[1]})`);
+      }
+    }
+
+    expect(updateArguments).toEqual(["extension.ts: update(SERVERS_SETTING_KEY)"]);
+
+    // ...and that constant is literally the `servers` key, cross-checked
+    // against `settings.ts`'s READ of the same key so the two can never drift.
+    const extensionCode = stripComments(readFileSync(path.join(SRC_DIR, "extension.ts"), "utf8"));
+    expect(extensionCode).toMatch(/const SERVERS_SETTING_KEY\s*=\s*"servers"/);
+    const settingsCode = stripComments(readFileSync(path.join(SRC_DIR, "settings.ts"), "utf8"));
+    expect(settingsCode).toMatch(/config\.get<[^>]+>\(\s*"servers"/);
   });
 });
 
@@ -440,5 +487,185 @@ describe("cancellation must not storm: repeated resolves of the same cancelled d
       expect(warnings).toHaveLength(call); // linear growth: one new warning per call, never a burst
       expect(sessionCallCount).toBe(call * 2); // silent + createIfNone, no extra retries
     }
+  });
+});
+
+/**
+ * Story 31.5 / AC 31.5.5 — the credential-containment bar extended to the new
+ * server-selection UI: "No credential, token, or password may appear in any
+ * QuickPick item, tooltip, status bar text, log line, or warning."
+ */
+describe("credential containment — Story 31.5 UI surfaces (QuickPick items, tooltips, status bar, selectServers messages)", () => {
+  it("selectServers.ts's CODE (doc comments stripped — they legitimately explain this absence in prose) references NO credential-bearing identifier (AuthApi, ResolvedConnectionProfile, resolveServerCredentials, accessToken, password) — structural proof this module cannot see a credential by construction", () => {
+    const raw = readFileSync(path.join(SRC_DIR, "selectServers.ts"), "utf8");
+    // Strip block (/** ... */) and line (// ...) comments before matching —
+    // this file's OWN doc comments name these identifiers in prose to explain
+    // their absence, which would otherwise self-defeat this check.
+    const code = stripComments(raw);
+    // Code review (Story 31.5): `getServerSpec`/`getSession`/`username` were
+    // added. The original list forbade only the types this module never
+    // imports plus the bare word "password", while `selectServers.ts` DOES
+    // import `ServerManagerApi` — whose `getServerSpec()` resolves to a
+    // `ServerSpec` carrying `username`/`password` (see `types.ts`). Adding
+    // `const spec = await api.getServerSpec(n); items.push({detail:
+    // JSON.stringify(spec)})` would have leaked a credential into a QuickPick
+    // item while leaving this check green, so the "cannot see a credential by
+    // construction" claim did not hold. Forbidding the doorway, not only the
+    // payload, is what makes it hold.
+    const forbidden = [
+      /AuthApi/,
+      /ResolvedConnectionProfile/,
+      /resolveServerCredentials/,
+      /getServerSpec/,
+      /getSession/,
+      /accessToken/,
+      /\busername\b/i,
+      /\bpassword\b/i,
+    ];
+    for (const pattern of forbidden) {
+      expect(code, `selectServers.ts's code must not reference ${pattern}`).not.toMatch(pattern);
+    }
+  });
+
+  it("a distinctive marker placed in every OTHER LauncherSettings field never reaches a QuickPick item, a showWarning call, or a showInfo call", async () => {
+    // Code review (Story 31.5): this test's title promised a QuickPick-item
+    // assertion it did not make — the fake resolved `items` straight back
+    // without capturing them, so nothing about the items was ever checked and
+    // a future edit putting `settings.namespace` into `item.detail` would
+    // have left it green. The items are now captured and asserted.
+    const MARKER = "DO-NOT-LEAK-31-5-UI-7d4a1c";
+    const warnings: string[] = [];
+    const infos: string[] = [];
+    let capturedItems: { label: string; description?: string; detail?: string }[] = [];
+
+    const names: ServerName[] = [{ name: "a", description: "a desc", detail: "a.example.com:52773" }];
+    const api: ServerManagerApi = {
+      getServerNames: () => names,
+      getServerSpec: async () => undefined,
+      getAccount: () => undefined,
+    };
+
+    const deps: SelectServersDeps = {
+      getServerManagerApi: async () => api,
+      getSettings: () =>
+        settings({
+          servers: [],
+          governance: MARKER,
+          governancePreset: MARKER,
+          auditLog: MARKER,
+          auditLogMaxMb: MARKER,
+          auditLogParams: MARKER,
+          toolsPreset: MARKER,
+          toolsDisable: MARKER,
+          toolsEnable: MARKER,
+          namespace: MARKER,
+        }),
+      configWriter: {
+        inspectServers: () => undefined,
+        updateServers: () => Promise.resolve(),
+      },
+      showQuickPick: (items) => {
+        capturedItems = items;
+        return Promise.resolve(items);
+      },
+      showWarning: (message) => warnings.push(message),
+      showInfo: (message) => infos.push(message),
+    };
+
+    await selectServers(deps);
+
+    expect(capturedItems.length).toBeGreaterThan(0); // sanity: items really were built
+    for (const item of capturedItems) {
+      expect(item.label).not.toContain(MARKER);
+      expect(item.description ?? "").not.toContain(MARKER);
+      expect(item.detail ?? "").not.toContain(MARKER);
+    }
+    expect(infos.length + warnings.length).toBeGreaterThan(0); // sanity: the flow actually produced user-facing output
+    for (const message of [...warnings, ...infos]) {
+      expect(message).not.toContain(MARKER);
+    }
+  });
+
+  it("a distinctive marker placed in a Server Manager server's description/detail (the only per-server fields this module surfaces) DOES reach the QuickPick item — proving the QuickPick construction is not vacuously empty — but never reaches a showWarning/showInfo call", async () => {
+    const MARKER = "server-detail-marker-2f9b";
+    const warnings: string[] = [];
+    const infos: string[] = [];
+
+    const names: ServerName[] = [{ name: "a", description: MARKER, detail: MARKER }];
+    const api: ServerManagerApi = {
+      getServerNames: () => names,
+      getServerSpec: async () => undefined,
+      getAccount: () => undefined,
+    };
+
+    let capturedItems: { label: string; description?: string; detail?: string }[] = [];
+
+    const deps: SelectServersDeps = {
+      getServerManagerApi: async () => api,
+      getSettings: () => settings(),
+      configWriter: {
+        inspectServers: () => undefined,
+        updateServers: () => Promise.resolve(),
+      },
+      showQuickPick: (items) => {
+        capturedItems = items;
+        // Code review (Story 31.5): this used to resolve `undefined`
+        // (cancel), which returned from `selectServers` before ANY
+        // message could be produced — so `warnings` and `infos` were both
+        // empty and the "never reaches a showWarning/showInfo call" loop
+        // below iterated zero times, i.e. that half of the test could not
+        // fail even if the confirmation interpolated `server.detail`
+        // verbatim. Confirming instead drives the real write + confirmation
+        // path, so the message assertion is now load-bearing.
+        return Promise.resolve(items);
+      },
+      showWarning: (message) => warnings.push(message),
+      showInfo: (message) => infos.push(message),
+    };
+
+    await selectServers(deps);
+
+    expect(capturedItems.some((item) => item.description === MARKER || item.detail === MARKER)).toBe(
+      true,
+    );
+    expect(infos.length + warnings.length).toBeGreaterThan(0); // sanity: the message assertion below is not vacuous
+    for (const message of [...warnings, ...infos]) {
+      expect(message).not.toContain(MARKER);
+    }
+  });
+
+  it("buildStatusBarState (the status bar text/tooltip source) never reflects a marker placed in a settings field it does not read (namespace/governance/audit*/tools*) — only .servers/.packages ever reach the text or tooltip", () => {
+    const MARKER = "status-bar-marker-6a3e9d1c";
+
+    const zeroState = buildStatusBarState(
+      settings({
+        servers: [],
+        packages: ["dev"],
+        namespace: MARKER,
+        governance: MARKER,
+        governancePreset: MARKER,
+        auditLog: MARKER,
+        auditLogMaxMb: MARKER,
+        auditLogParams: MARKER,
+        toolsPreset: MARKER,
+        toolsDisable: MARKER,
+        toolsEnable: MARKER,
+      }),
+    );
+    expect(zeroState.text).not.toContain(MARKER);
+    expect(zeroState.tooltip).not.toContain(MARKER);
+
+    const populatedState = buildStatusBarState(
+      settings({
+        servers: ["prod"],
+        packages: ["dev"],
+        namespace: MARKER,
+        governance: MARKER,
+        auditLog: MARKER,
+        toolsDisable: MARKER,
+      }),
+    );
+    expect(populatedState.text).not.toContain(MARKER);
+    expect(populatedState.tooltip).not.toContain(MARKER);
   });
 });
