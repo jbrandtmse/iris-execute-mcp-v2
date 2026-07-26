@@ -229,3 +229,39 @@ None — no IRIS/ObjectScript involved; no debug globals used. All verification 
 | 2026-07-26 | 1.0 | Implemented (Tasks 1-7 complete): scaffolded `extensions/iris-mcp-launcher/` outside the npm workspace; MCP server definition provider with credential resolution, env synthesis (single + multi-profile), and credential containment; docs + publish checklist; 52 passing unit tests; root workspace verified unaffected (turbo 25/25, governance baseline exit 0, zero `packages/**` changes). AC 31.4.4 left open per Dev Notes — hands-on Copilot smoke steps recorded in Completion Notes for the Project Lead. Status set to `review`. | Dev (claude-sonnet-5) |
 | 2026-07-26 | 1.1 | QA automation pass: +19 tests (71 total / 9 files), new `packaging.test.ts`; two highest-value tests mutation-verified. See `tests/31-4-test-summary.md`. | QA |
 | 2026-07-25 | 1.2 | **Code review (3 adversarial layers + reviewer verification): 18 patches applied, 9 deferred (8 findings + the sanctioned open AC 31.4.4), 5 dismissed — 31 findings after dedupe, tallied mechanically per Rule #51.** Two HIGH findings, both on the cancellation path and raised independently by all three layers: `vscode.authentication.getSession({createIfNone:true})` REJECTS on user cancel (it does not resolve `undefined`), and there was no `try`/`catch` anywhere on the credential path — so AC 31.4.2's "one clear message, no toast storm" was dead code, and every cancellation test was green against a fake the real API contradicts. Both fixed and mutation-verified (4 tests red on revert). Also: Integration AC 31.4.5 now RUNS the real `loadConfig`/`buildProfileRegistry` as its oracle instead of restating them (Rule #36); ambient `IRIS_*` no longer leaks into spawned servers; multi-root `scope` threaded through; `combineProfiles` single-server `IRIS_PROFILES` gap closed; settings hardened against hand-edited JSON; docs corrected (issue #47344 is CLOSED-not-planned, containment guarantee scoped, `combineProfiles` blast radius documented). Tests 71 → **107 / 10 files**; turbo 25/25 and governance baseline unchanged; VSIX repackaged. AC 31.4.4 remains OPEN by design. Status → `done`. | Review |
+
+---
+
+## GUI smoke — Project Lead, 2026-07-26 (closes AC 31.4.4 and AC 31.5.4)
+
+Performed by the Project Lead in a real VS Code 1.128.0 session — the half no headless agent could reach. Extension installed from the Story-31.6 VSIX (16 files, 40.6 KB); `irisMcpLauncher.servers = ["localhost2","local"]`, `irisMcpLauncher.developmentRepoPath = "c:/git/iris-execute-mcp-v2"` (user scope — the setting is `machine`-scoped).
+
+**All six steps CONFIRMED WORKING:**
+
+1. **Status bar** — `$(server) IRIS MCP: 2` present after a plain window reload with MCP never exercised. **This closes AC 31.5.4's empirical half**, which the dev stage honestly flagged as unverifiable headlessly: it proves the `onStartupFinished` activation event actually fires and that the item is not gated behind the MCP subsystem first asking for definitions.
+2. **QuickPick** — both servers listed and pre-checked; Esc left configuration unchanged; confirming wrote the selection and reported the scope + reload requirement.
+3. **Registration** — `MCP: List Servers` showed the expected entries under "IRIS MCP Server Suite"; no `all` entry (removed in Story 31.6 as unspawnable).
+4. **Short-circuit path (`local`, inline password)** — server started with no credential prompt, exercising the `credentials.ts:104` early return.
+5. **Prompt path (`localhost2`, no stored password)** — Server Manager prompted, password accepted, server started. **This is the VS Code SecretStorage path**, which is cryptographically unreachable from outside VS Code and therefore could never be covered by any automated tier — the constraint the whole epic is built around.
+6. **⭐ Cancel path** — confirmed working. **This is the branch that carried Story 31.4's headline HIGH**: `authentication.getSession({createIfNone:true})` REJECTS on cancel rather than resolving `undefined`, there was no `try`/`catch` anywhere on the path, and every test faked the wrong shape — a green suite over an impossible path. Fixed at code review, mutation-verified (4 tests red on revert), and now confirmed against real VS Code.
+
+**Live evidence from the VS Code MCP output channel** (`IRIS Admin Tools — localhost2`, four start/stop cycles across steps 4-6):
+
+```
+Starting server from LocalProcess extension host
+Connection state: Running
+[INFO] Tool visibility: preset="full" visible=27 hidden=0
+[INFO] HEAD /api/atelier/ completed in 79ms
+[INFO] IRIS health check passed
+[INFO] Detected Atelier API v8
+[INFO] @iris-mcp/admin v0.0.2 starting with Atelier API v8
+[INFO] Bootstrap: REST service is current (version 6422caf6ec31), skipping deploy
+[INFO] Connected via stdio transport
+Discovered 27 tools
+```
+
+Confirms the full chain: extension resolves credentials → spawns the Story-31.6 local `node …/packages/iris-admin-mcp/dist/index.js` target → server reaches live IRIS → VS Code discovers 27 tools. Every start/stop cycle was clean, with no error toast, no repeated prompt, and no orphaned process.
+
+**Sanctioned residual — the Copilot half of AC 31.4.4 was NOT performed.** The original AC reads "Copilot chat lists an iris-dev-mcp tool set". The Project Lead does not use Copilot (verified: no `github.copilot-chat` extension installed; their clients are Claude Code, Cline and Kimi Code, none of which consume VS Code's MCP registry — see the client-coverage boundary in the extension README). Registration into VS Code's MCP registry IS confirmed by step 3, so what remains unverified is only the final consumer hop inside Copilot's own UI. Deferred to an external Copilot user; recorded as a residual risk rather than closed silently.
+
+**Observation, not a defect (pre-existing, unrelated to Stories 31.4-31.6):** every server start logs `[WARN] CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.` twice. It predates this epic, appears on the Project Lead's live instance regardless of launch path, and did not prevent any operation during the smoke. Flagged for separate triage.

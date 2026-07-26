@@ -50,7 +50,7 @@ Verbatim from [epics.md](../planning-artifacts/epics.md) — "### Story 31.5: La
 - [x] **Task 4 — Activation strategy (AC: 31.5.4)**
   - [x] Add the explicit activation event to `package.json` (expected: `onStartupFinished`).
   - [x] Record in Dev Notes WHY, and the cost accepted.
-  - [ ] **Empirically verify**: reload a window, never touch MCP, confirm the status bar item appears. Record the observation — this AC is not satisfiable by unit test alone. **NOT performed by this agent** — no interactive VS Code GUI is available in this headless CLI environment. Left for the Project Lead's per-story smoke gate; see Completion Notes.
+  - [x] **Empirically verify**: reload a window, never touch MCP, confirm the status bar item appears. Record the observation — this AC is not satisfiable by unit test alone. *(Correctly NOT performed by the dev agent — no interactive VS Code GUI in a headless CLI environment; deferred to the lead's smoke gate rather than claimed.* **PERFORMED AND CONFIRMED by the Project Lead 2026-07-26** in real VS Code 1.128.0: `$(server) IRIS MCP: 2` present after a plain window reload with MCP never exercised, proving the `onStartupFinished` activation event fires and the item is not gated behind the MCP subsystem. See "GUI smoke" in Completion Notes.)
 - [x] **Task 5 — package.json contributions (AC: 31.5.1)**
   - [x] Add `contributes.commands` with the id and the `IRIS MCP Launcher: Select Servers…` title (use a `category` so the palette groups it).
   - [x] Extend `packaging.test.ts` with a mechanical check that every declared `contributes.commands` id is actually registered in source, and vice versa — same Rule #51 spirit as the existing settings-key ↔ `readSettings()` test.
@@ -254,3 +254,39 @@ None — no IRIS/ObjectScript involved; no debug globals used. All verification 
 | 2026-07-26 | 1.0 | Implemented (Tasks 1-7 complete): `selectServers.ts` (QuickPick build/precheck, scope-correct write, failure containment, pure status-bar computation); `extension.ts` wiring (command registration, status bar item, `onDidChangeConfiguration` refresh); `package.json` (`onStartupFinished` activation event, `contributes.commands`); 33 new tests (140 total / 11 files, up from 107/10), including the Integration AC 31.5.8 real `readSettings`→`planDefinitions` round trip and the Rule #19 back-compat proof. `tsc --noEmit` clean; `npm run build` + `npx vsce package` produced a self-contained 16-file VSIX; root workspace confirmed unaffected (zero `packages/**` changes). AC 31.5.4's empirical "reload and observe the status bar" step left open — no interactive VS Code GUI available in this headless dev environment; hands-on steps recorded in Completion Notes for the Project Lead, mirroring Story 31.4's AC 31.4.4 precedent. Status set to `review`. | Dev (claude-sonnet-5) |
 | 2026-07-26 | 1.1 | QA pass: found and fixed an AC 31.5.5 containment gap in PRODUCTION code — `deps.showQuickPick()` and `configWriter.inspectServers()` were the only third-party calls on the command path left outside any try/catch, so a throw from either would have been an unhandled rejection out of the registered command handler. Mutation-verified. +13 tests (140 → 153 / 11 files). *(This row was reconstructed at code review from `cycle-log-epic-31.md`'s `qa_complete` entry — the QA stage did not record its own production edit in this story file.)* | QA (claude-sonnet-5) |
 | 2026-07-26 | 1.2 | Code review (3-layer adversarial: Blind Hunter + Edge Case Hunter + Acceptance Auditor). 26 raw findings → 16 after dedupe: **13 patched in-story, 6 deferred (`31-5-1`…`31-5-6`), 7 dismissed**. Headline HIGH: the `workspaceFolder` write target was a branch the real VS Code API can never reach — `irisMcpLauncher.servers` is `window`-scoped and both adapters use an unscoped `WorkspaceConfiguration`, so `update(…, WorkspaceFolder)` is documented to reject twice over — "proven correct" only by fakes returning an impossible `inspect()` shape, the same green-suite-over-an-impossible-path defect Story 31.4's review headlined. **AC 31.5.2 amended in `epics.md`** with the original wording, rationale and `@types/vscode@1.125.0` oracle recorded (skill Rule 5 — amend the planning artifact, never work around in code). Also fixed: silent deletion of configured servers Server Manager was not currently reporting; the unguarded `getServerManagerApi()` await; activation order (command + status bar now registered BEFORE the MCP provider, which is itself wrapped so a fork without `vscode.lm` cannot destroy the zero-state signal); the uncovered Integration AC 31.5.8 write side; two containment tests that did not assert what their titles claimed; a `expect(true).toBe(true)` test; a five-key Rule #19 env proof (now a whole-object `toEqual`, with `IRIS_HTTPS: "false"` captured from the real return value — it could not be hand-reasoned); plus `ignoreFocusOut`, the swallowed status-bar refresh error, and comment-blind source greps. Four fixes mutation-verified red→green. **162/162 tests across 11 files**, `tsc --noEmit` clean, `npm run build` clean, zero `packages/**` changes, no binary/NUL-byte files. Status → `done`. **Open for the Project Lead:** AC 31.5.4's empirical status-bar observation (unchanged, headless environment) AND deferred item `31-5-1` — skill Rule 3's real-runtime (Extension-Host) test evidence does not exist for this extension and cannot be created here; the mechanically-closable part is now pinned in `packaging.test.ts`, and the per-story manual smoke is the compensating control. The Lead may reasonably override this story to `in-progress` if they want that tier before shipping. | Code Review (claude-opus-5) |
+
+---
+
+## GUI smoke — Project Lead, 2026-07-26 (closes AC 31.4.4 and AC 31.5.4)
+
+Performed by the Project Lead in a real VS Code 1.128.0 session — the half no headless agent could reach. Extension installed from the Story-31.6 VSIX (16 files, 40.6 KB); `irisMcpLauncher.servers = ["localhost2","local"]`, `irisMcpLauncher.developmentRepoPath = "c:/git/iris-execute-mcp-v2"` (user scope — the setting is `machine`-scoped).
+
+**All six steps CONFIRMED WORKING:**
+
+1. **Status bar** — `$(server) IRIS MCP: 2` present after a plain window reload with MCP never exercised. **This closes AC 31.5.4's empirical half**, which the dev stage honestly flagged as unverifiable headlessly: it proves the `onStartupFinished` activation event actually fires and that the item is not gated behind the MCP subsystem first asking for definitions.
+2. **QuickPick** — both servers listed and pre-checked; Esc left configuration unchanged; confirming wrote the selection and reported the scope + reload requirement.
+3. **Registration** — `MCP: List Servers` showed the expected entries under "IRIS MCP Server Suite"; no `all` entry (removed in Story 31.6 as unspawnable).
+4. **Short-circuit path (`local`, inline password)** — server started with no credential prompt, exercising the `credentials.ts:104` early return.
+5. **Prompt path (`localhost2`, no stored password)** — Server Manager prompted, password accepted, server started. **This is the VS Code SecretStorage path**, which is cryptographically unreachable from outside VS Code and therefore could never be covered by any automated tier — the constraint the whole epic is built around.
+6. **⭐ Cancel path** — confirmed working. **This is the branch that carried Story 31.4's headline HIGH**: `authentication.getSession({createIfNone:true})` REJECTS on cancel rather than resolving `undefined`, there was no `try`/`catch` anywhere on the path, and every test faked the wrong shape — a green suite over an impossible path. Fixed at code review, mutation-verified (4 tests red on revert), and now confirmed against real VS Code.
+
+**Live evidence from the VS Code MCP output channel** (`IRIS Admin Tools — localhost2`, four start/stop cycles across steps 4-6):
+
+```
+Starting server from LocalProcess extension host
+Connection state: Running
+[INFO] Tool visibility: preset="full" visible=27 hidden=0
+[INFO] HEAD /api/atelier/ completed in 79ms
+[INFO] IRIS health check passed
+[INFO] Detected Atelier API v8
+[INFO] @iris-mcp/admin v0.0.2 starting with Atelier API v8
+[INFO] Bootstrap: REST service is current (version 6422caf6ec31), skipping deploy
+[INFO] Connected via stdio transport
+Discovered 27 tools
+```
+
+Confirms the full chain: extension resolves credentials → spawns the Story-31.6 local `node …/packages/iris-admin-mcp/dist/index.js` target → server reaches live IRIS → VS Code discovers 27 tools. Every start/stop cycle was clean, with no error toast, no repeated prompt, and no orphaned process.
+
+**Sanctioned residual — the Copilot half of AC 31.4.4 was NOT performed.** The original AC reads "Copilot chat lists an iris-dev-mcp tool set". The Project Lead does not use Copilot (verified: no `github.copilot-chat` extension installed; their clients are Claude Code, Cline and Kimi Code, none of which consume VS Code's MCP registry — see the client-coverage boundary in the extension README). Registration into VS Code's MCP registry IS confirmed by step 3, so what remains unverified is only the final consumer hop inside Copilot's own UI. Deferred to an external Copilot user; recorded as a residual risk rather than closed silently.
+
+**Observation, not a defect (pre-existing, unrelated to Stories 31.4-31.6):** every server start logs `[WARN] CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.` twice. It predates this epic, appears on the Project Lead's live instance regardless of launch path, and did not prevent any operation during the smoke. Flagged for separate triage.

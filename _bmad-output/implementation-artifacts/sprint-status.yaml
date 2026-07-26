@@ -466,7 +466,7 @@ development_status:
   # server-selection UI). Stories 31.0-31.4 stay done and are NOT re-touched;
   # epic-31-retrospective stays done (it covered 31.0-31.4 and is not re-run).
   # Epic returns to done when 31.5 closes.
-  epic-31: in-progress
+  epic-31: done
   31-0-settings-discovery: done
   31-1-credential-chain: done
   31-2-credentials-cli: done

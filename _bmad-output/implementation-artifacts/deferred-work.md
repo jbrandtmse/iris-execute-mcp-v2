@@ -1628,3 +1628,18 @@ Three-layer adversarial review; 17 findings were patched in-story (including thr
   *Why deferred:* the cross-check's value comes precisely from reading the real tree (Rule #51), so removing
   the dependency would weaken the HIGH fix it implements. *Suggested resolution:* keep the disk oracle, and
   narrow the README claim to build-time/runtime dependency rather than the test tier.
+
+## Epic 31 GUI smoke (2026-07-26) — AC 31.4.4 + AC 31.5.4 closed; `31-5-1` compensating control satisfied
+
+The Project Lead ran the full six-step GUI smoke in real VS Code 1.128.0. **All six steps confirmed working.** Full record in the Completion Notes of both `31-4-broker-extension.md` and `31-5-launcher-selection-ui.md`.
+
+**What this closes:**
+
+- **AC 31.5.4 (empirical half)** — the status bar item IS present after a plain window reload with MCP never exercised, proving `onStartupFinished` activation works. The dev agent correctly declined to claim this headlessly rather than asserting it; the lead performed it.
+- **AC 31.4.4 (except the Copilot hop)** — registration, both credential paths, and the cancel path all confirmed against real VS Code.
+- **The Story 31.4 headline HIGH is now confirmed fixed on real infrastructure.** `authentication.getSession({createIfNone:true})` REJECTS on cancel rather than resolving `undefined`; there was no `try`/`catch` on the path and every test faked the wrong shape — a green suite over an impossible path. Code review fixed it, mutation-verified it (4 tests red on revert), and the lead has now exercised the real cancel branch in a real session.
+- **`31-5-1` (Rule 3 real-runtime gap) — compensating control SATISFIED, item narrowed but NOT closed.** Story 31.6's `localSpawnIntegration.test.ts` added genuine automated real-runtime evidence (real child process, real MCP handshake, live IRIS, runs rather than skips), and this manual smoke covers the VS Code-host surface that no automated tier can reach. What remains open is only the absent `@vscode/test-electron` Extension-Host tier, which would let `src/extension.ts` be exercised automatically instead of by hand. Keep `31-5-1` open at reduced severity.
+
+**Residual risk, recorded not hidden — the Copilot consumer hop.** AC 31.4.4 as written says "Copilot chat lists an iris-dev-mcp tool set". The Project Lead does not use Copilot (no `github.copilot-chat` installed; their clients are Claude Code, Cline and Kimi Code, none of which consume VS Code's MCP registry). Registration into the registry IS confirmed (step 3, `MCP: List Servers`), so the only unverified link is the final hop inside Copilot's own UI. Deferred to an external Copilot user. This is the one AC in Epic 31 closed on partial evidence, and it is deliberate: the extension's whole audience is Copilot-family users, and nobody on this project is one.
+
+**New observation, unrelated to Epic 31 — `31-7-1` (LOW, pre-existing).** Every MCP server start logs `[WARN] CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.` twice. It predates this epic, occurs regardless of launch path (extension, Claude Code, or a direct spawn), and blocked nothing during the smoke — every start/stop cycle was clean and all tool calls succeeded. Suggested resolution: determine whether the Atelier CSRF preflight is expected to return `X-CSRF-Token` on this IRIS configuration, and either stop emitting the warning when the token is legitimately absent, or explain the condition in the message. Not urgent; do not fix blind.
