@@ -1578,3 +1578,260 @@ describe("resolveServerManagerProfiles — real posix discovery integration (QA 
     expect(result[0]?.host).toBe("workspace-host.example.com");
   });
 });
+
+// ════════════════════════════════════════════════════════════════════
+// .code-workspace support — post-Epic-31 coverage-gap fix
+//
+// A VS Code `.code-workspace` file is a legitimate home for
+// `intersystems.servers` (multi-root workspaces commonly use ONLY that file),
+// but discovery originally looked at `.vscode/settings.json` and the per-product
+// user settings only — so those servers were silently invisible, and `auto`
+// does not fail on zero definitions. Precedence follows VS Code's own scope
+// ranking: folder (`.vscode/settings.json`) > workspace (`*.code-workspace`)
+// > user.
+// ════════════════════════════════════════════════════════════════════
+
+describe(".code-workspace support (coverage-gap fix)", () => {
+  let dirs: string[] = [];
+
+  beforeEach(() => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+    vi.restoreAllMocks();
+  });
+
+  /** A tmpdir path normalized to forward slashes, matching path.posix.join's output style. */
+  function tmpDirPosix(): string {
+    const raw = mkdtempSync(join(tmpdir(), "iris-sm-cw-"));
+    dirs.push(raw);
+    return raw.split("\\").join("/");
+  }
+
+  function entry(host: string) {
+    return {
+      webServer: { scheme: "http", host, port: 52773 },
+      username: "u",
+      password: "pw",
+    };
+  }
+
+  // ── parser accepts both file shapes ──────────────────────────────
+
+  it("parses intersystems.servers nested under a .code-workspace settings key", () => {
+    const result = parseIntersystemsServers(
+      JSON.stringify({
+        folders: [{ path: "." }, { name: "iris", uri: "isfs://local/" }],
+        settings: {
+          "objectscript.export.folder": "src",
+          "intersystems.servers": { wsOnly: entry("ws.example.com") },
+        },
+      }),
+    );
+    expect(Object.keys(result)).toEqual(["wsOnly"]);
+    expect(result.wsOnly?.override.host).toBe("ws.example.com");
+    expect(result.wsOnly?.legacyPassword).toBe(true);
+  });
+
+  it("a top-level intersystems.servers wins over a nested one in the same file", () => {
+    const result = parseIntersystemsServers(
+      JSON.stringify({
+        "intersystems.servers": { pick: entry("top.example.com") },
+        settings: { "intersystems.servers": { ignore: entry("nested.example.com") } },
+      }),
+    );
+    expect(Object.keys(result)).toEqual(["pick"]);
+    expect(result.pick?.override.host).toBe("top.example.com");
+  });
+
+  it("a non-object settings key yields no servers and does not throw", () => {
+    expect(() =>
+      parseIntersystemsServers(JSON.stringify({ settings: "not-an-object" })),
+    ).not.toThrow();
+    expect(parseIntersystemsServers(JSON.stringify({ settings: "x" }))).toEqual({});
+    expect(parseIntersystemsServers(JSON.stringify({ settings: [1, 2] }))).toEqual({});
+    expect(parseIntersystemsServers(JSON.stringify({ settings: null }))).toEqual({});
+  });
+
+  it("JSONC comments and trailing commas parse inside a .code-workspace too", () => {
+    const result = parseIntersystemsServers(`{
+      // a real .code-workspace is JSONC as well
+      "folders": [{ "path": "." },],
+      "settings": {
+        "intersystems.servers": {
+          "jsoncWs": {
+            "webServer": { "scheme": "https", "host": "sec.example.com", "port": 443, },
+            "username": "u",
+          },
+        },
+      },
+    }`);
+    expect(Object.keys(result)).toEqual(["jsoncWs"]);
+    expect(result.jsoncWs?.override.https).toBe(true);
+  });
+
+  // ── discovery ordering ───────────────────────────────────────────
+
+  it("places code-workspace files AFTER .vscode/settings.json and BEFORE user settings", () => {
+    const ws = tmpDirPosix();
+    writeFileSync(`${ws}/proj.code-workspace`, "{}", "utf8");
+
+    const candidates = discoverSettingsFiles(
+      { HOME: tmpDirPosix(), IRIS_SM_WORKSPACE: ws },
+      "linux",
+    );
+
+    const folderIdx = candidates.indexOf(`${ws}/.vscode/settings.json`);
+    const wsFileIdx = candidates.indexOf(`${ws}/proj.code-workspace`);
+    const firstUserIdx = candidates.findIndex((c) => c.includes("/.config/"));
+
+    expect(folderIdx).toBeGreaterThanOrEqual(0);
+    expect(wsFileIdx).toBeGreaterThanOrEqual(0);
+    expect(firstUserIdx).toBeGreaterThanOrEqual(0);
+    // folder < workspace-file < user — VS Code's own scope ranking
+    expect(folderIdx).toBeLessThan(wsFileIdx);
+    expect(wsFileIdx).toBeLessThan(firstUserIdx);
+  });
+
+  it("returns multiple code-workspace files sorted by name for determinism", () => {
+    const ws = tmpDirPosix();
+    for (const n of ["zeta.code-workspace", "alpha.code-workspace", "mid.code-workspace"]) {
+      writeFileSync(`${ws}/${n}`, "{}", "utf8");
+    }
+    const found = discoverSettingsFiles(
+      { HOME: tmpDirPosix(), IRIS_SM_WORKSPACE: ws },
+      "linux",
+    ).filter((c) => c.endsWith(".code-workspace"));
+    expect(found).toEqual([
+      `${ws}/alpha.code-workspace`,
+      `${ws}/mid.code-workspace`,
+      `${ws}/zeta.code-workspace`,
+    ]);
+  });
+
+  it("a workspace directory that does not exist contributes no candidates and never throws", () => {
+    let candidates: string[] = [];
+    expect(() => {
+      candidates = discoverSettingsFiles(
+        { HOME: tmpDirPosix(), IRIS_SM_WORKSPACE: "/no/such/dir/anywhere" },
+        "linux",
+      );
+    }).not.toThrow();
+    expect(candidates.some((c) => c.endsWith(".code-workspace"))).toBe(false);
+    // the fixed .vscode/settings.json candidate is still emitted unconditionally
+    expect(candidates).toContain("/no/such/dir/anywhere/.vscode/settings.json");
+  });
+
+  it("files that merely contain the suffix mid-name are not candidates", () => {
+    const ws = tmpDirPosix();
+    writeFileSync(`${ws}/notes.code-workspace.bak`, "{}", "utf8");
+    const found = discoverSettingsFiles(
+      { HOME: tmpDirPosix(), IRIS_SM_WORKSPACE: ws },
+      "linux",
+    ).filter((c) => c.includes(".code-workspace"));
+    expect(found).toEqual([]);
+  });
+
+  // ── the actual gap being fixed ───────────────────────────────────
+
+  it("REGRESSION: a server defined ONLY in a .code-workspace file IS imported", () => {
+    const ws = tmpDirPosix();
+    writeFileSync(
+      `${ws}/iris.code-workspace`,
+      JSON.stringify({
+        folders: [{ path: "." }],
+        settings: {
+          "intersystems.servers": { onlyInWorkspaceFile: entry("wsonly.example.com") },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: tmpDirPosix(), IRIS_SM_WORKSPACE: ws },
+      "linux",
+    );
+
+    const found = result.find((r) => r.name === "onlyInWorkspaceFile");
+    expect(found).toBeDefined();
+    expect(found?.host).toBe("wsonly.example.com");
+  });
+
+  // ── precedence, end to end ───────────────────────────────────────
+
+  it("precedence: .vscode/settings.json beats .code-workspace beats user settings", () => {
+    const home = tmpDirPosix();
+    const ws = tmpDirPosix();
+    const sameName = "collide";
+
+    const userDir = `${home}/.config/Code/User`;
+    mkdirSync(userDir, { recursive: true });
+    writeFileSync(
+      `${userDir}/settings.json`,
+      JSON.stringify({ "intersystems.servers": { [sameName]: entry("user.example.com") } }),
+      "utf8",
+    );
+
+    writeFileSync(
+      `${ws}/proj.code-workspace`,
+      JSON.stringify({
+        settings: {
+          "intersystems.servers": { [sameName]: entry("workspacefile.example.com") },
+        },
+      }),
+      "utf8",
+    );
+
+    const vscodeDir = `${ws}/.vscode`;
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(
+      `${vscodeDir}/settings.json`,
+      JSON.stringify({ "intersystems.servers": { [sameName]: entry("folder.example.com") } }),
+      "utf8",
+    );
+
+    const env = { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", HOME: home, IRIS_SM_WORKSPACE: ws };
+
+    // all three present => folder scope wins
+    let hit = resolveServerManagerProfiles(env, "linux").find(
+      (r) => r.name === sameName,
+    );
+    expect(hit?.host).toBe("folder.example.com");
+
+    // drop folder scope => the .code-workspace file wins
+    rmSync(`${vscodeDir}/settings.json`);
+    hit = resolveServerManagerProfiles(env, "linux").find((r) => r.name === sameName);
+    expect(hit?.host).toBe("workspacefile.example.com");
+
+    // drop the workspace file too => user settings win
+    rmSync(`${ws}/proj.code-workspace`);
+    hit = resolveServerManagerProfiles(env, "linux").find((r) => r.name === sameName);
+    expect(hit?.host).toBe("user.example.com");
+  });
+
+  it("IRIS_SM_SETTINGS_PATHS can name a .code-workspace file directly", () => {
+    const ws = tmpDirPosix();
+    const file = `${ws}/explicit.code-workspace`;
+    writeFileSync(
+      file,
+      JSON.stringify({
+        settings: {
+          "intersystems.servers": { viaExplicitPath: entry("explicit.example.com") },
+        },
+      }),
+      "utf8",
+    );
+
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "linux",
+    );
+    expect(result.find((r) => r.name === "viaExplicitPath")?.host).toBe(
+      "explicit.example.com",
+    );
+  });
+});

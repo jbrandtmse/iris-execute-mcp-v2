@@ -230,13 +230,21 @@ function userSettingsPathFor(
  * platform's own delimiter — `;` on win32, `:` elsewhere) REPLACES discovery
  * entirely when set: no workspace/user candidates are appended.
  *
- * Otherwise: workspace `.vscode/settings.json` (resolved from
- * `IRIS_SM_WORKSPACE` if set, else `process.cwd()`), then each product
- * variant's user settings file for the given `platform`.
+ * Otherwise, in descending precedence (the caller takes the FIRST file that
+ * defines a given server name, so this order IS the precedence order, and it
+ * mirrors VS Code's own folder > workspace > user scope ranking):
+ *
+ * 1. workspace `.vscode/settings.json` — folder scope (resolved from
+ *    `IRIS_SM_WORKSPACE` if set, else `process.cwd()`)
+ * 2. every `*.code-workspace` file directly inside that same directory —
+ *    workspace scope, sorted by filename for determinism
+ * 3. each product variant's user settings file for the given `platform`
  *
  * Candidates are returned whether or not they exist on disk — existence is
  * checked later, when the file is actually read — so a non-existent path
- * never throws here.
+ * never throws here. The one exception is step 2, which must list the
+ * directory to find workspace files at all; that read is fully guarded and
+ * degrades to contributing nothing (see {@link workspaceFileCandidates}).
  *
  * @param env      - Environment map (defaults to `process.env`).
  * @param platform - Target platform (defaults to `process.platform`), injectable
@@ -266,6 +274,16 @@ export function discoverSettingsFiles(
   const workspaceDir = env.IRIS_SM_WORKSPACE ?? cwd;
   candidates.push(p.join(workspaceDir, ".vscode", "settings.json"));
 
+  // A `.code-workspace` file is WORKSPACE scope, which VS Code ranks BELOW
+  // folder scope (`.vscode/settings.json`) and ABOVE user scope — so it slots
+  // exactly here, and the caller's first-file-wins rule then yields VS Code's
+  // own precedence for a name defined in more than one place. Multi-root users
+  // commonly keep `intersystems.servers` ONLY in this file; without it they
+  // silently import nothing, because `auto` does not fail on zero definitions.
+  for (const workspaceFile of workspaceFileCandidates(workspaceDir, p)) {
+    candidates.push(workspaceFile);
+  }
+
   for (const product of SETTINGS_PRODUCTS) {
     const userSettingsPath = userSettingsPathFor(product, env, platform);
     if (userSettingsPath !== undefined) {
@@ -274,6 +292,40 @@ export function discoverSettingsFiles(
   }
 
   return candidates;
+}
+
+/**
+ * List `*.code-workspace` files directly inside `workspaceDir`, sorted for a
+ * deterministic candidate order.
+ *
+ * Unlike the rest of discovery this MUST touch the filesystem — a VS Code
+ * workspace file has no fixed name, so it can only be found by listing the
+ * directory. Every failure mode (missing directory, permission error, a path
+ * that is not a directory) therefore degrades to an empty list rather than
+ * throwing: discovery's contract is that a path which is not there never
+ * throws, and `auto` must never crash startup (AC 31.0.2).
+ *
+ * Not reached when `IRIS_SERVER_MANAGER` is `off` — `resolveServerManagerProfiles`
+ * returns before calling discovery, so the "off touches ZERO filesystem" proof
+ * (AC 31.0.3) still holds.
+ */
+function workspaceFileCandidates(
+  workspaceDir: string,
+  // `typeof path.win32` rather than a named `PlatformPath` type: @types/node
+  // does not expose that name under the `path` namespace here, and both
+  // `path.win32` and `path.posix` share this exact shape.
+  p: typeof path.win32,
+): string[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(workspaceDir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((name) => name.endsWith(".code-workspace"))
+    .sort()
+    .map((name) => p.join(workspaceDir, name));
 }
 
 /** Normalize a `webServer.pathPrefix` value: leading `/`, no trailing `/`. Empty/whitespace-only ⇒ `undefined`. */
@@ -353,7 +405,21 @@ export function parseIntersystemsServers(
     return result;
   }
 
-  const servers = (root as Record<string, unknown>)["intersystems.servers"];
+  const rootObj = root as Record<string, unknown>;
+
+  // A `settings.json` holds `intersystems.servers` at the top level; a VS Code
+  // `.code-workspace` file nests every setting under a `settings` key. Accept
+  // BOTH shapes from the one parser, so a workspace file works whether it was
+  // reached through discovery or named explicitly in `IRIS_SM_SETTINGS_PATHS`.
+  // The top-level form wins if a file somehow carries both.
+  let servers = rootObj["intersystems.servers"];
+  if (servers === undefined) {
+    const nested = rootObj["settings"];
+    if (nested !== null && typeof nested === "object" && !Array.isArray(nested)) {
+      servers = (nested as Record<string, unknown>)["intersystems.servers"];
+    }
+  }
+
   if (
     servers === undefined ||
     servers === null ||
