@@ -1,0 +1,26 @@
+{
+  // VS Code user MCP configuration — comments and trailing commas are legal here.
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "iris-password",
+      "description": "IRIS password",
+      "password": true
+    }
+  ],
+  "servers": {
+    // The dev server, managed by iris-mcp.
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_PASSWORD": "${input:iris-password}"
+      }
+    },
+    // A foreign third-party server (must never be touched).
+    "microsoft-learn": {
+      "type": "http",
+      "url": "https://learn.microsoft.com/api/mcp",
+    },
+  }
+}

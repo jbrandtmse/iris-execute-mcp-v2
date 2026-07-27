@@ -1,0 +1,19 @@
+extensions:
+  developer:
+    type: builtin
+    name: developer
+    enabled: true
+  iris-data-mcp:
+    type: stdio
+    cmd: npx
+    args:
+      - "-y"
+      - "@iris-mcp/data"
+    enabled: true
+  iris-ops-mcp:
+    type: stdio
+    cmd: npx
+    args:
+      - "-y"
+      - "@iris-mcp/ops"
+    enabled: false

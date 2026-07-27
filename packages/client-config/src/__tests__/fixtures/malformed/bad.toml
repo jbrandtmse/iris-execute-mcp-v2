@@ -1,0 +1,5 @@
+# Broken TOML — unclosed table value.
+[mcp_servers.iris-dev-mcp]
+command = "npx"
+args = ["-y", "@iris-mcp/dev"
+env = broken

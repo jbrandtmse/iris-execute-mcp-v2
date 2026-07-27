@@ -1,0 +1,23 @@
+{
+  "theme": "One Dark",
+  "context_servers": {
+    "iris-dev-mcp": {
+      "command": {
+        "path": "npx",
+        "args": ["-y", "@iris-mcp/dev"],
+        "env": {
+          "IRIS_NAMESPACE": "HSCUSTOM"
+        }
+      },
+      "settings": {}
+    },
+    "linear": {
+      "command": {
+        "path": "npx",
+        "args": ["-y", "mcp-remote", "https://mcp.linear.app/sse"]
+      },
+      "settings": {}
+    }
+  },
+  "vim_mode": false
+}

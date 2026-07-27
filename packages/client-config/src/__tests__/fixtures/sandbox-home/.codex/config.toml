@@ -1,0 +1,9 @@
+# Codex config in the sandbox HOME.
+[mcp_servers.iris-ops-mcp]
+command = "npx"
+args = ["-y", "@iris-mcp/ops"]
+
+# A foreign third-party server.
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
