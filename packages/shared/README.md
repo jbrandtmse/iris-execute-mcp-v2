@@ -109,6 +109,16 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ---
 
+## Governance File & the `iris-mcp-governance` CLI
+
+`governance.ts` implements the policy engine (parse, seeds, 6-layer cascade, `configSource`) and `cli/governance.ts` the suite's second `bin` — **`iris-mcp-governance`** (built to `dist/cli/governance-cli.js`) — the scriptable management surface for the [`IRIS_GOVERNANCE_FILE`](../../README.md#governance-file-iris_governance_file) policy file (Epic 32). Both are **opt-in**: with the variable unset the servers never touch the filesystem, and the CLI is a standalone utility that changes nothing until you point it (or a server) at a file.
+
+- **`iris-mcp-governance` bin** — `validate` (the server's exact loader error text on failure), `get`/`set`/`unset <key> [--profile <name>]` (file-layer edits; atomic temp+rename writes with automatic post-write re-validation and rollback), `preset read-only|full` (prints env-level guidance — writes nothing, the preset is env-sourced only), `effective [--profile]` and `diff` (the SAME shared cascade functions the servers compute with — imported, never reimplemented). Default file resolution: `--file` wins over `IRIS_GOVERNANCE_FILE`; explicit path only, never discovered (architecture decision J1). Exit codes: 0 success / 1 operational failure (invalid file per the server loader, key not set for `unset`) / 2 usage error. `--json` on read commands emits exactly one parseable JSON object on every operational outcome, failures included. Full reference: the [suite README](../../README.md#iris-mcp-governance-cli).
+- **Single-sourcing discipline.** The CLI composes `loadGovernanceFile`, `parseGovernanceConfig`, `parseGovernancePreset`, `effective`, `configSource`, `defaultSeed`, `GOVERNANCE_BASELINE`, and `BASELINE_ACTION_CLASSIFICATIONS` from this package — a policy written by the CLI is byte-for-byte what the servers will enforce, and `validate` failure text is identical to a server's startup failure.
+- **Caveat (post-foundation keys).** The CLI renders `effective`/`diff` over the frozen baseline ∪ keys mentioned in any config layer; it cannot enumerate each server's registered tool keys (importing a server package would be a circular dependency). `iris_server_profiles` on a running server is the authoritative full-universe render.
+
+---
+
 ## Audit Logging (framework surface, not part of the public barrel)
 
 `audit.ts` implements the opt-in, structured, secrets-free session audit log described in the suite's [Compliance & Auditability](../../README.md#compliance--auditability) section (`IRIS_AUDIT_LOG` / `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS`). Unlike everything in [Public API](#public-api) above, its exports (`AuditLogger`, `parseAuditConfig()`, `redactValue()`, `AuditConfig`/`AuditEntryInput`/`AuditOutcome`) are **not** re-exported from this package's barrel (`index.ts`) — the module is consumed internally, exclusively by `server-base.ts`.

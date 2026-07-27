@@ -35,6 +35,27 @@
  *      even when `iris_env_promote:execute` itself is enabled in env and the
  *      other three gates pass — the file channel reaches Gate 4, not just the
  *      D5 gate.
+ *   G. **CLI → file → server round-trip (Story 32.1, AC 32.1.3 durable
+ *      form).** The BUILT `iris-mcp-governance` bin (spawned via
+ *      `spawnSync`, the 31-2 lesson) CREATES a policy file and `set`s a
+ *      write-tool key `false`; the CLI's own `effective --json` then renders
+ *      it disabled with `configSource: "file"`; and the BUILT server —
+ *      launched with `IRIS_GOVERNANCE_FILE` pointing at that CLI-written
+ *      file — reports the IDENTICAL policy via `iris_server_profiles` over a
+ *      real MCP handshake. The CLI and the server provably share one engine.
+ *   H. **Startup-snapshot semantics at process level (Story 32.1 QA; the
+ *      32-0-1 restart-only contract made uniform).** A server launched with
+ *      a file that disables a key KEEPS reporting and enforcing the STARTUP
+ *      value after the file is rewritten mid-session — `iris_server_profiles`
+ *      still reports the old verdict AND the call-time gate still denies,
+ *      proving no surface re-reads the file after startup (restart-only).
+ *   I. **CLI ↔ server agreement, key-for-key (Story 32.1 QA; single-sourcing
+ *      at the wire).** `effective --json` from the BUILT bin and
+ *      `iris_server_profiles` from a server launched with the SAME file
+ *      agree on EVERY key the CLI renders (policy value AND configSource) —
+ *      the CLI's key universe is exactly the frozen baseline ∪ mentioned
+ *      keys (asserted against the built `GOVERNANCE_BASELINE`), and the
+ *      server's universe is a superset. One engine, two processes, no drift.
  *
  * **Keychain note:** no test touches the OS keychain — the default profile is
  * configured entirely from `IRIS_*` env vars, and every denied call is refused
@@ -49,16 +70,17 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
+const GOVERNANCE_CLI_BIN = path.join(REPO_ROOT, "packages", "shared", "dist", "cli", "governance-cli.js");
 
 const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
 const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
@@ -156,6 +178,7 @@ function childEnv(extra: Record<string, string>): Record<string, string> {
 
 let distSkipReason: string | undefined;
 let liveSkipReason: string | undefined;
+let cliSkipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir: string | undefined;
 let policyPath: string;
@@ -175,6 +198,14 @@ beforeAll(async () => {
       "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
   } else if (!(await isIrisReachable())) {
     liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+  }
+
+  // Case G additionally needs the BUILT governance CLI bin, and (like the
+  // other live cases) the SDK + a reachable IRIS for its server half.
+  if (!existsSync(GOVERNANCE_CLI_BIN)) {
+    cliSkipReason = `packages/shared/dist/cli/governance-cli.js is not built (run "pnpm turbo run build" first). Looked at: ${GOVERNANCE_CLI_BIN}`;
+  } else if (liveSkipReason) {
+    cliSkipReason = liveSkipReason;
   }
 
   fixtureDir = mkdtempSync(path.join(tmpdir(), "iris-gov-file-gate-"));
@@ -566,6 +597,183 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
           expect(text).toContain("No changes were made");
         },
       );
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "G: CLI -> file -> server round-trip (Story 32.1, AC 32.1.3 durable form) — the BUILT iris-mcp-governance bin writes a policy the BUILT server then reports identically",
+    async (ctx) => {
+      if (skipIf(ctx, cliSkipReason, "CLI round-trip")) return;
+
+      // 1. The BUILT bin CREATES the file and sets a write-tool key false
+      //    (spawnSync against dist — the 31-2 review lesson; expected values
+      //    here are the CLI's REAL output contract, pinned by the shared
+      //    package's own bin-packaging tests).
+      const cliFile = path.join(fixtureDir!, "governance-cli-roundtrip.json");
+      const setResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "set", "iris_doc_put", "false", "--file", cliFile],
+        { encoding: "utf8" },
+      );
+      expect(setResult.error).toBeUndefined();
+      expect(setResult.status).toBe(0);
+      expect(existsSync(cliFile)).toBe(true);
+
+      // 2. The CLI's own validate + effective agree on what it wrote.
+      const validateResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "validate", "--file", cliFile],
+        { encoding: "utf8" },
+      );
+      expect(validateResult.status).toBe(0);
+
+      const effectiveResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "effective", "--file", cliFile, "--json"],
+        { encoding: "utf8" },
+      );
+      expect(effectiveResult.status).toBe(0);
+      const cliRender = JSON.parse(effectiveResult.stdout) as {
+        policy: Record<string, boolean>;
+        configSource: Record<string, string>;
+      };
+      expect(cliRender.policy["iris_doc_put"]).toBe(false);
+      expect(cliRender.configSource["iris_doc_put"]).toBe("file");
+
+      // 3. The BUILT server, launched with IRIS_GOVERNANCE_FILE pointing at
+      //    the CLI-written file, reports the IDENTICAL policy over a real
+      //    MCP handshake — one engine, two surfaces, no drift.
+      await withServer({ IRIS_GOVERNANCE_FILE: cliFile }, async (client) => {
+        const governance = await discoveryGovernance(client);
+        expect(governance.policy?.["iris_doc_put"]).toBe(cliRender.policy["iris_doc_put"]);
+        expect(governance.configSource?.["iris_doc_put"]).toBe(cliRender.configSource["iris_doc_put"]);
+      });
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "H: startup snapshot at process level (32-0-1 restart-only contract) — rewriting the file mid-session changes NEITHER iris_server_profiles NOR the call-time gate",
+    async (ctx) => {
+      if (skipIf(ctx, liveSkipReason, "startup snapshot")) return;
+
+      // Dedicated fixture (this test deliberately REWRITES it mid-session).
+      // The disable lives in the profile layer so the denial is attributable
+      // to the file alone; `iris_sql_execute` is a READ tool, so the denied
+      // call mutates nothing on IRIS even if the gate regressed open.
+      const snapshotPath = path.join(fixtureDir!, "governance-snapshot.json");
+      writeFileSync(
+        snapshotPath,
+        JSON.stringify({ profiles: { default: { iris_sql_execute: false } } }),
+        "utf8",
+      );
+
+      await withServer({ IRIS_GOVERNANCE_FILE: snapshotPath }, async (client) => {
+        // ── Baseline: the startup file is reported AND enforced. ─────────
+        const before = await discoveryGovernance(client);
+        expect(before.policy?.["iris_sql_execute"]).toBe(false);
+        expect(before.configSource?.["iris_sql_execute"]).toBe("file");
+
+        const deniedBefore = await client.callTool({
+          name: "iris_sql_execute",
+          arguments: { query: "SELECT 1" },
+        });
+        expect(deniedBefore.isError).toBe(true);
+        expect(deniedBefore.structuredContent?.code).toBe("GOVERNANCE_DISABLED");
+
+        // ── Rewrite the file mid-session: every layer removed, so a server
+        //    that re-read the file would now resolve iris_sql_execute to the
+        //    default seed (enabled). Confirm the rewrite actually landed, so
+        //    the test can never pass on a failed write. ────────────────────
+        writeFileSync(snapshotPath, "{}\n", "utf8");
+        expect(readFileSync(snapshotPath, "utf8")).toBe("{}\n");
+
+        // ── Restart-only contract: the REPORTING surface keeps the startup
+        //    snapshot… ─────────────────────────────────────────────────────
+        const after = await discoveryGovernance(client);
+        expect(after.policy?.["iris_sql_execute"]).toBe(false);
+        expect(after.configSource?.["iris_sql_execute"]).toBe("file");
+
+        // ── …and so does the ENFORCEMENT surface (the gate still denies —
+        //    a re-read anywhere would flip this to a live query). ──────────
+        const deniedAfter = await client.callTool({
+          name: "iris_sql_execute",
+          arguments: { query: "SELECT 1" },
+        });
+        expect(deniedAfter.isError).toBe(true);
+        expect(deniedAfter.structuredContent?.code).toBe("GOVERNANCE_DISABLED");
+      });
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "I: CLI <-> server agreement key-for-key — the built bin's `effective --json` and the built server's iris_server_profiles render the SAME policy for the SAME file",
+    async (ctx) => {
+      if (skipIf(ctx, cliSkipReason, "CLI-server agreement")) return;
+
+      // Reuse the Case A fixture (baseline keys flipped at both layers). The
+      // CLI spawns with the SAME scrubbed env shape as a gate server (childEnv
+      // adds only the base connection vars, which the CLI ignores), so its
+      // env channel is empty — matching the server launched below.
+      const effectiveResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "effective", "--file", policyPath, "--json"],
+        { encoding: "utf8", env: childEnv({}) },
+      );
+      expect(effectiveResult.error).toBeUndefined();
+      expect(effectiveResult.status).toBe(0);
+      const cliRender = JSON.parse(effectiveResult.stdout) as {
+        profile: string;
+        policy: Record<string, boolean>;
+        configSource: Record<string, string>;
+      };
+      expect(cliRender.profile).toBe("default");
+
+      // The CLI's key universe is EXACTLY the frozen baseline ∪ keys
+      // mentioned in the fixture (here: two baseline members, so the union
+      // is the baseline itself) — pinned against the BUILT shared package's
+      // own GOVERNANCE_BASELINE (mechanical count, Rule #51; never a
+      // hand-authored number).
+      const baselineModuleUrl = pathToFileURL(
+        path.join(REPO_ROOT, "packages", "shared", "dist", "governance-baseline.js"),
+      ).href;
+      const { GOVERNANCE_BASELINE } = (await import(baselineModuleUrl)) as {
+        GOVERNANCE_BASELINE: ReadonlySet<string>;
+      };
+      expect(new Set(Object.keys(cliRender.policy))).toEqual(new Set(GOVERNANCE_BASELINE));
+      expect(new Set(Object.keys(cliRender.configSource))).toEqual(new Set(GOVERNANCE_BASELINE));
+
+      await withServer({ IRIS_GOVERNANCE_FILE: policyPath }, async (client) => {
+        const governance = await discoveryGovernance(client);
+        expect(governance.policy).toBeDefined();
+        expect(governance.configSource).toBeDefined();
+
+        // The server renders a SUPERSET (its universe adds this server's
+        // registered post-foundation keys) — every key the CLI knows about
+        // must be present on the server…
+        for (const key of Object.keys(cliRender.policy)) {
+          expect(governance.policy, `server policy missing CLI key ${key}`).toHaveProperty(key);
+          expect(governance.configSource, `server configSource missing CLI key ${key}`).toHaveProperty(key);
+        }
+        // …and the two processes agree on value AND attribution for ALL of
+        // them — ~141 keys, one engine, zero drift (the single-sourcing
+        // proof at the wire, not just unit level).
+        for (const [key, value] of Object.entries(cliRender.policy)) {
+          expect(governance.policy![key], `policy[${key}]`).toBe(value);
+        }
+        for (const [key, source] of Object.entries(cliRender.configSource)) {
+          expect(governance.configSource![key], `configSource[${key}]`).toBe(source);
+        }
+
+        // Spot-pin the fixture's own flips so the agreement is over a
+        // NON-trivial render (file attribution at both layers present).
+        expect(cliRender.policy["iris_doc_put"]).toBe(false);
+        expect(cliRender.configSource["iris_doc_put"]).toBe("file");
+        expect(cliRender.policy["iris_sql_execute"]).toBe(false);
+        expect(cliRender.configSource["iris_sql_execute"]).toBe("file");
+      });
     },
     { timeout: 60000 },
   );

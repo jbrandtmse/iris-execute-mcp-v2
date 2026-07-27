@@ -252,6 +252,13 @@ export function decodeCursor(cursor: string | undefined): number {
  *   this factory without a live server) get a safe stub that rejects with a
  *   clear "not available in this context" error — never a silently
  *   un-established client.
+ * @param governanceFileConfig - The STARTUP-SNAPSHOT parsed
+ *   `IRIS_GOVERNANCE_FILE` config (Story 32.1, deferred item 32-0-1).
+ *   {@link McpServerBase.handleToolCall} passes the snapshot loaded once in
+ *   {@link McpServerBase.start}; direct callers omit it (`undefined` = no
+ *   file = byte-for-byte the pre-Epic-32 behavior). Handlers read it via
+ *   {@link ToolContext.governanceFileConfig} — never a per-call
+ *   `loadGovernanceFile()`.
  */
 export function buildToolContext(
   scope: ToolScope,
@@ -260,6 +267,7 @@ export function buildToolContext(
   atelierVersion: number,
   pageSize: number = DEFAULT_PAGE_SIZE,
   resolveProfileClientImpl?: (profileName: string) => Promise<IrisHttpClient>,
+  governanceFileConfig?: GovernanceConfig,
 ): ToolContext {
   return {
     resolveNamespace(override?: string): string {
@@ -296,6 +304,10 @@ export function buildToolContext(
             `McpServerBase.handleToolCall).`,
         );
       }),
+    // Conditional spread (the buildRosterEntry discipline): a context built
+    // without the snapshot carries NO key rather than an undefined-valued
+    // one, so direct-caller shape is byte-for-byte pre-Story-32.1.
+    ...(governanceFileConfig !== undefined ? { governanceFileConfig } : {}),
   };
 }
 
@@ -1550,6 +1562,11 @@ export class McpServerBase {
       atelierVersion,
       this.pageSize,
       resolveProfileClientForCtx,
+      // Story 32.1 (32-0-1): the startup-snapshot file config, so a handler
+      // whose governance check runs OUTSIDE the D5 gate (iris_env_promote's
+      // Gate 4) reads the SAME frozen view as every other surface — never a
+      // per-call file re-read (restart-only semantics, no hot-reload in v1).
+      this.governanceFileConfig,
     );
 
     try {

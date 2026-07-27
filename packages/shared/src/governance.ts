@@ -221,8 +221,12 @@ export function actionFieldHasDefault(actionField: unknown): boolean {
  * policy. We reject them outright (D7 fail-fast) and additionally read every
  * layer via {@link ownBool} so an externally-constructed config (e.g. from
  * Story 14.4 / tests) is also safe.
+ *
+ * Exported (Story 32.1) for the `iris-mcp-governance` CLI, which rejects the
+ * same keys on WRITE commands with the same rule — single-sourced, so the
+ * CLI can never drift from the parser on what is reserved.
  */
-const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+export const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
  * Read `key` from `layer` ONLY as an own boolean property; otherwise `undefined`.

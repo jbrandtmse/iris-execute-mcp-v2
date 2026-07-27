@@ -172,6 +172,28 @@ Exit codes are consistent across all four commands: `0` success · `1` not found
 
 Every output path — human text, `--json`, `--help`, and error/failure messages, including a failed `--connect` — is secret-free: known secrets are substring-redacted, and a secret too short to redact safely causes the whole message body to be withheld. Unlike the credential chain's own OS-keychain link (which silently skips to the next link when the native keychain module is unavailable), this CLI's `set`/`delete`/`list` fail loudly with a non-zero exit and an actionable message, since operating on the OS keychain is the whole point of the command. Run `node packages/shared/dist/cli/credentials-cli.js --help` for full usage.
 
+#### `iris-mcp-governance` CLI
+
+A small command-line tool — ships as a second `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/governance-cli.js` — for validating, inspecting, and editing a [governance file](#governance-file-iris_governance_file) with the SAME engine the servers enforce with: every parse goes through the server's own loader (so `validate` prints the exact error text a server would fail startup with), and `effective`/`diff` compose the shared cascade functions directly rather than reimplementing them. Opt-in and agent-agnostic — with no file configured, the servers are unaffected. Not yet published to npm (see [Quick Start](#quick-start)), so invoke it directly with `node`:
+
+```bash
+node packages/shared/dist/cli/governance-cli.js validate --file C:\governance\iris-policy.json
+```
+
+| Command | Effect |
+|---------|--------|
+| `validate [--file <path>] [--json]` | Parse and validate the file with the same loader the servers use at startup. Exit 1 (the server's exact error text, naming `IRIS_GOVERNANCE_FILE` + the path) when invalid. |
+| `get <key> [--profile <name>] [--json]` | Print the key's explicit value **in the file** (`true`/`false`/unset) — the file's own layer, not the cascade. |
+| `set <key> true\|false [--profile <name>]` | Write the key into the file (creating the file when missing). Atomic write (temp + rename in the same directory), existing key order preserved, the written file automatically re-validated with rollback on failure. Reserved keys (`__proto__` etc.) are rejected; a key outside the frozen baseline warns on stderr but is still written (post-foundation keys like `iris_env_promote:execute` are legitimate). |
+| `unset <key> [--profile <name>]` | Remove the key from the file. Exit 1 when the key is not set (the `iris-mcp-credentials delete` not-found convention). |
+| `preset read-only\|full` | Print the env-level wiring for `IRIS_GOVERNANCE_PRESET` — **writes nothing**: the servers source the preset from their process environment only, never from a governance file. |
+| `effective [--profile <name>] [--json]` | Render the SAME cascade the servers compute (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`) for the CLI's own environment plus the resolved file, with the per-key `configSource` (`env`\|`file`\|`preset`\|`default`). |
+| `diff [--json]` | Compare every key the file sets against its default-seed value. |
+
+**Default file resolution** — `--file <path>` wins; otherwise `IRIS_GOVERNANCE_FILE` from the environment. Explicit path only: the CLI never discovers or searches for a file (architecture decision J1). Exit codes: `0` success · `1` operational failure (file unreadable/invalid per the server loader, a key not set for `unset`) · `2` usage error. `--json` on the read commands (`validate`, `get`, `effective`, `diff`) always emits exactly one parseable JSON object to stdout on an operational outcome — including failures; usage errors (exit 2) are always plain text on stderr.
+
+One caveat: the full governance-key universe is the frozen baseline plus each server's registered tool keys, which a standalone CLI cannot enumerate. `effective`/`diff` therefore render over the baseline plus keys mentioned in any config layer — a post-foundation key mentioned nowhere renders with the read-default seed (enabled) even when a real server would seed it disabled. `iris_server_profiles` on a running server is the authoritative full-universe render. Run `node packages/shared/dist/cli/governance-cli.js --help` for full usage.
+
 ### 3. Configure Your MCP Client
 
 Point your MCP client at the built server using `node` and the local `dist/index.js` path. Replace `/path/to/iris-execute-mcp-v2` with the actual path where you cloned the repo.
@@ -350,6 +372,8 @@ The "existing action" baseline is generated mechanically from the shipped tool c
 - **Restart semantics (no hot-reload in v1).** The file is read once at startup; edits take effect on the next server restart.
 - **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file aborts startup with an error naming `IRIS_GOVERNANCE_FILE`, the path, and the underlying reason — an operator who pointed at a policy file never runs ungoverned by mistake.
 - **Attribution.** `iris_server_profiles` and the `iris-governance://<profile>` resource report a `configSource` per key (`env` | `file` | `preset` | `default`), so you can see which channel resolved each setting.
+
+Manage the file without hand-editing JSON: the [`iris-mcp-governance` CLI](#iris-mcp-governance-cli) (`validate` / `get` / `set` / `unset` / `effective` / `diff`) uses the same loader and cascade the servers enforce with, so what you write is what the servers will compute.
 
 ### Read-only mode — point it at production with one environment variable
 

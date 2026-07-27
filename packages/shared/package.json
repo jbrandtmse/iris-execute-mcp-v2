@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "iris-mcp-credentials": "./dist/cli/credentials-cli.js"
+    "iris-mcp-credentials": "./dist/cli/credentials-cli.js",
+    "iris-mcp-governance": "./dist/cli/governance-cli.js"
   },
   "exports": {
     ".": {

@@ -207,6 +207,15 @@ IRIS_NAMESPACE = "USER"
 
 Path and the per-server `enabled` flag are spec-sourced, not hands-verified.
 
+To share ONE governance policy file across clients, add it to the same env table (explicit absolute path; unset ⇒ inert):
+
+```toml
+[mcp_servers.iris-dev.env]
+IRIS_GOVERNANCE_FILE = "C:\\governance\\iris-policy.json"
+```
+
+Create/maintain the file with `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js` (the `iris-mcp-governance` CLI — see the [suite README](../../README.md#iris-mcp-governance-cli)).
+
 ## Kimi CLI ⚠️
 
 `~/.kimi/mcp.json`, same `mcpServers` shape as Kimi Code. Override with `--mcp-config-file`. Distinct from Kimi Code — different directory, different file.
