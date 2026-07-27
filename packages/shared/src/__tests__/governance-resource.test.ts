@@ -187,7 +187,7 @@ function firstContentText(result: any): string {
 /** Parse the first content block of a ReadResourceResult as the policy map. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function readPolicy(result: any): Record<string, boolean> {
-  return JSON.parse(firstContentText(result)) as Record<string, boolean>;
+  return (JSON.parse(firstContentText(result)) as { policy: Record<string, boolean> }).policy;
 }
 
 /** Shared environment save/restore for hermetic runs. */
@@ -356,7 +356,7 @@ describe("Story 14.5 — resources/read effective policy (AC 14.5.3)", () => {
     expect(block.uri).toBe(GOV_DEFAULT_URI);
     expect(block.mimeType).toBe("application/json");
 
-    const policy = JSON.parse(block.text) as Record<string, boolean>;
+    const policy = (JSON.parse(block.text) as { policy: Record<string, boolean> }).policy;
     // Globally disabled grandfathered read → false.
     expect(policy.iris_doc_get).toBe(false);
     // NEW write, no override → seed-disabled → false.

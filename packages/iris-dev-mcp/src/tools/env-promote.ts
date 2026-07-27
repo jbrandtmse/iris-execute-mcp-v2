@@ -64,6 +64,7 @@ import {
   negotiateVersion,
   parseGovernanceConfig,
   parseGovernancePreset,
+  loadGovernanceFile,
   effective,
   GOVERNANCE_BASELINE,
   BASELINE_ACTION_CLASSIFICATIONS,
@@ -1093,10 +1094,16 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
   const allowedIndices = new Set(input.steps);
   const orderedAllowed = parsedPlan.steps.filter((s) => allowedIndices.has(s.index));
 
-  // Gate 4 -- TARGET-PROFILE governance. Pure env reads + the shared
+  // Gate 4 -- TARGET-PROFILE governance. Pure env/file reads + the shared
   // governance engine -- NO IRIS connection is made for this gate, so a
-  // denial here mutates nothing and costs no network round-trip.
+  // denial here mutates nothing and costs no network round-trip. Story 32.0:
+  // the file channel (IRIS_GOVERNANCE_FILE) is loaded with the SAME shared
+  // loader and threaded as the final effective() argument, so a write-family
+  // key disabled ONLY in the file is honored here too (this inner gate is the
+  // ONLY governance check on the family keys -- execute re-fetches via profile
+  // clients directly, never through handleToolCall).
   const governanceConfig = parseGovernanceConfig();
+  const governanceFileConfig = loadGovernanceFile();
   const preset = parseGovernancePreset();
   const checkedKeys = new Set<string>();
   for (const step of orderedAllowed) {
@@ -1112,6 +1119,7 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
         new Set<string>(),
         preset,
         BASELINE_ACTION_CLASSIFICATIONS,
+        governanceFileConfig,
       );
       if (!enabled) {
         return validationError(

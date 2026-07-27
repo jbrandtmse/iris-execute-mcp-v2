@@ -802,7 +802,7 @@ describe("AC 24.1.4b — governance resource reflects the preset", () => {
       uri: "iris-governance://default",
     });
     const contents = result.contents as Array<{ text: string }>;
-    const policy = JSON.parse(contents[0]!.text) as Record<string, boolean>;
+    const policy = (JSON.parse(contents[0]!.text) as { policy: Record<string, boolean> }).policy;
     expect(policy.iris_new_write).toBe(false);
     expect(policy.iris_new_read).toBe(true);
   });

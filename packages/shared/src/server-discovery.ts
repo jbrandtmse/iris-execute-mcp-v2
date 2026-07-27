@@ -34,8 +34,8 @@
 
 import { z } from "zod";
 
-import type { GovernanceConfig, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
-import { getEffectivePolicy } from "./governance.js";
+import type { GovernanceConfig, GovernanceConfigSource, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
+import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
 import type { ToolDefinition, ToolResult } from "./tool-types.js";
@@ -137,8 +137,22 @@ export interface ServerDiscoveryResult {
     profile?: string;
     /** Single-profile effective policy map (absent when `allProfiles`). */
     policy?: Record<string, boolean>;
+    /**
+     * Per-key config channel that resolved the single profile's policy (Epic
+     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `preset` | `default`.
+     * Emitted UNCONDITIONALLY alongside `policy` (absent only when
+     * `allProfiles`), over the SAME visibility-filtered key set — the
+     * hidden-tool key omission (Epic 30) applies identically, so no hidden
+     * tool name can leak through this field.
+     */
+    configSource?: Record<string, GovernanceConfigSource>;
     /** Per-profile effective policy maps (present only when `allProfiles`). */
     policies?: Record<string, Record<string, boolean>>;
+    /**
+     * Per-profile `configSource` maps (present only when `allProfiles`) —
+     * the all-profiles sibling of {@link configSource}.
+     */
+    configSources?: Record<string, Record<string, GovernanceConfigSource>>;
   };
   preset: GovernancePreset | null;
   /**
@@ -211,6 +225,11 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  *   `McpServerBase`'s `this.toolVisibility`. Defaulted to the byte-for-byte
  *   pass-through state (`full`, 0 hidden) so existing direct callers/tests that
  *   omit it are unaffected; the real server always passes its own state.
+ * @param fileConfig - The parsed `IRIS_GOVERNANCE_FILE` config (Epic 32, Story
+ *   32.0), threaded into every {@link getEffectivePolicy}/
+ *   {@link getEffectiveConfigSources} call so the reported policy + per-key
+ *   `configSource` reflect the file layers exactly as the gate does. Default
+ *   `undefined` (no file) — byte-for-byte the pre-Epic-32 report's policy.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -228,6 +247,7 @@ export function computeServerDiscovery(
     visibleCount: number;
     hiddenCount: number;
   } = { preset: "full", visibleCount: 0, hiddenCount: 0 },
+  fileConfig?: GovernanceConfig,
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -242,6 +262,7 @@ export function computeServerDiscovery(
       resolveProfile(profiles, args.profile);
     }
     const policies: Record<string, Record<string, boolean>> = {};
+    const configSources: Record<string, Record<string, GovernanceConfigSource>> = {};
     for (const name of profiles.keys()) {
       // Use defineProperty so a profile name that collides with a prototype
       // member (e.g. "__proto__", "constructor") is written as a real own
@@ -259,13 +280,30 @@ export function computeServerDiscovery(
           defaultEnabledWrites,
           preset,
           classifications,
+          fileConfig,
+        ),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      // Story 32.0 (AC 32.0.3): the per-key channel map, same collision-safe
+      // construction, over the SAME (already visibility-filtered) key set.
+      Object.defineProperty(configSources, name, {
+        value: getEffectiveConfigSources(
+          name,
+          config,
+          governedKeys,
+          mutatesLookup,
+          preset,
+          classifications,
+          fileConfig,
         ),
         enumerable: true,
         writable: true,
         configurable: true,
       });
     }
-    governance = { policies };
+    governance = { policies, configSources };
   } else {
     // Resolve the single profile name (defaults to `default`). An unknown name
     // throws ProfileResolutionError — the caller maps it to a structured error.
@@ -281,6 +319,16 @@ export function computeServerDiscovery(
         defaultEnabledWrites,
         preset,
         classifications,
+        fileConfig,
+      ),
+      configSource: getEffectiveConfigSources(
+        profile.name,
+        config,
+        governedKeys,
+        mutatesLookup,
+        preset,
+        classifications,
+        fileConfig,
       ),
     };
   }

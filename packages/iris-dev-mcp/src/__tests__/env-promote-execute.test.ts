@@ -35,6 +35,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError, ProfileResolutionError } from "@iris-mcp/shared";
 import { envPromoteTool } from "../tools/env-promote.js";
@@ -277,6 +280,53 @@ describe("iris_env_promote:execute", () => {
       } finally {
         if (originalGovernance === undefined) delete process.env.IRIS_GOVERNANCE;
         else process.env.IRIS_GOVERNANCE = originalGovernance;
+      }
+    });
+
+    it("Gate 4 honors the FILE channel (Story 32.0): a write key disabled ONLY in IRIS_GOVERNANCE_FILE refuses, resolving NO client", async () => {
+      // Gate 4 is the ONLY governance check on the write-family keys (execute
+      // re-fetches via profile clients directly, never through handleToolCall),
+      // so a file-layer disable must be honored here -- this is the regression
+      // proof that Gate 4 evaluates the same 6-layer cascade as the D5 gate.
+      const originalGovernanceFile = process.env.IRIS_GOVERNANCE_FILE;
+      const dir = mkdtempSync(join(tmpdir(), "iris-gov-gate4-"));
+      const filePath = join(dir, "governance.json");
+      writeFileSync(
+        filePath,
+        JSON.stringify({
+          profiles: { target: { "iris_config_manage:set": false } },
+        }),
+        "utf8",
+      );
+      process.env.IRIS_GOVERNANCE_FILE = filePath;
+      try {
+        const diff = fourStepDiff();
+        const plan = await buildPlan(diff);
+        const configStep = plan.steps.find((s) => s.operation === "setConfig");
+        expect(configStep).toBeDefined();
+
+        const result = await envPromoteTool.handler(
+          {
+            action: "execute",
+            source: "source",
+            target: "target",
+            diff,
+            plan,
+            steps: [configStep!.index],
+            confirm: true,
+          },
+          ctx,
+        );
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("iris_config_manage:set");
+        expect(result.content[0]?.text).toContain("target");
+        expect(ctx.resolveProfileClient).not.toHaveBeenCalled();
+        expect(targetHttp.post).not.toHaveBeenCalled();
+      } finally {
+        if (originalGovernanceFile === undefined) delete process.env.IRIS_GOVERNANCE_FILE;
+        else process.env.IRIS_GOVERNANCE_FILE = originalGovernanceFile;
+        rmSync(dir, { recursive: true, force: true });
       }
     });
 
