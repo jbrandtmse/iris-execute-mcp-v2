@@ -231,6 +231,39 @@ export function mergeProfile(
     }
     host = override.host;
   }
+  // 31-3-7 (Story 32.3): a host is not a URL. URL userinfo
+  // (`admin:hunter2@host`), a scheme/slash, or whitespace would land
+  // verbatim in `baseUrl` — hence in the `iris_server_profiles` roster,
+  // which the docs describe as never containing a password. Reject it. The
+  // message deliberately does NOT echo the received value: a userinfo host
+  // can embed a credential, and this error must not become the leak it
+  // prevents (asserted in tests).
+  //
+  // 32-3-R6 (Story 32.4): the guard now runs on the FINAL host — the
+  // override's when present, else the INHERITED default (`base.host`, i.e.
+  // `IRIS_HOST`) — and additionally rejects `\` and `:`. Pre-Story-32.4 only
+  // the override was checked, so a userinfo-carrying `IRIS_HOST` landed
+  // verbatim in the reserved default profile's `baseUrl` and in every
+  // host-less `IRIS_PROFILES` entry — the same roster-leak class via the
+  // inherited path. `:` is rejected because a host is not host:port
+  // (`host: "example.com:8080"` composed `http://example.com:8080:52773`)
+  // EXCEPT inside a bracketed IPv6 literal (`[::1]`), which composes a valid
+  // baseUrl and worked before this guard existed (Rule #19 — a bare `::1`
+  // never worked: `deriveBaseUrl` does not bracket it). `?`/`#` are rejected
+  // too (32.4 review): they compose a baseUrl whose query/fragment swallows
+  // the port and every request path, so no working configuration used them.
+  const isBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(host);
+  if (/[@/\s\\?#]/.test(host) || (!isBracketedIpv6 && host.includes(":"))) {
+    const origin =
+      override.host !== undefined ? `"host"` : `the inherited default host (from IRIS_HOST)`;
+    throw profilesError(
+      `profile "${name}": ${origin} must be a bare hostname — it must not contain ` +
+        `"@", "/", "\\", "?", "#", or whitespace, and no ":" outside a bracketed IPv6 ` +
+        `literal like "[::1]" (URL userinfo, a scheme, or an inline port is not ` +
+        `a host; use "port" for the port).`,
+      sourceLabel,
+    );
+  }
 
   // port
   let port = base.port;
@@ -531,6 +564,35 @@ export async function loadProfileRegistry(
         `NOT complete a Server Manager definition: give it the full connection fields, or ` +
         `store the password with "iris-mcp-credentials set <name>" and remove the ` +
         `IRIS_PROFILES entry.${reservedNote}`,
+    );
+    // 31-3-1 (Story 32.3, PAIRED DECISION with extension item 31-4-4 — AC
+    // 32.3.4): under `required`, a settings source whose EVERY definition was
+    // discarded by a collision is a startup FAILURE, not a degraded
+    // (default-only) start. `required` means "at least one Server-Manager
+    // profile must reach the registry" — collision-discard is a fourth
+    // rejection class, and the three `required` checks inside
+    // `resolveServerManagerProfiles` all passed before this filter ran.
+    if (mode === "required" && smEntries.length === 0) {
+      throw new Error(
+        `IRIS_SERVER_MANAGER=required but every Server Manager definition collided with an ` +
+          `existing profile name and was discarded (the "env" definition always wins): ${named}. ` +
+          `Rename the colliding intersystems.servers definition(s), or remove/rename the ` +
+          `conflicting IRIS_PROFILES entry, or set IRIS_SERVER_MANAGER=auto/off.${reservedNote}`,
+      );
+    }
+  }
+  // 31-1-5 (Story 32.3): the pending-resolution summary lives HERE — post
+  // collision-filter, immediately before the chain runs — so it counts only
+  // the profiles that will actually be attempted. (Pre-Story-32.3 it was
+  // emitted inside `resolveServerManagerProfiles`, which cannot see the
+  // shadow filter above and over-counted.)
+  const pendingCount = smEntries.filter(
+    (entry) => entry.credentialStatus === "unresolved",
+  ).length;
+  if (pendingCount > 0) {
+    logger.debug(
+      `IRIS_SERVER_MANAGER: ${pendingCount} server profile(s) have no password yet; ` +
+        `the credential chain (env, OS keychain, credential helper) will attempt resolution.`,
     );
   }
   const smProfiles = await resolveServerManagerCredentials(smEntries, {

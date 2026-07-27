@@ -8,7 +8,11 @@ extension at spawn time — **zero manual config, no password ever written to a 
 > **Status: not yet published.** This extension is an optional, standalone deliverable of the IRIS MCP Server
 > Suite (Epic 31, Story 31.4). It lives at `extensions/iris-mcp-launcher/` in the suite's repository, deliberately
 > _outside_ the npm workspace (`pnpm-workspace.yaml` globs only `packages/*`) — nothing in `packages/**` depends on
-> it, and it depends on nothing in `packages/**` at build time. It talks to the published `@iris-mcp/*` npm
+> it, and it depends on nothing in `packages/**` at build time or at runtime. (Its _test tier_ is the exception:
+> two unit/integration tests deliberately read the monorepo `packages/` tree and the pnpm store on disk as their
+> oracle, so the extension folder is not testable in isolation from a sparse checkout — see
+> `src/__tests__/definitions.test.ts` and `src/__tests__/localSpawnIntegration.test.ts`.) It talks to the
+> published `@iris-mcp/*` npm
 > packages only at _runtime_, via `npx`. **Because no `@iris-mcp/*` package is published yet, `npx -y @iris-mcp/<pkg>`
 > currently fails to start on every machine** — see [Development mode](#development-mode) below for the only way
 > to run this extension against a real server before publication.
@@ -31,8 +35,8 @@ extension at spawn time — **zero manual config, no password ever written to a 
      `username`, then `session.scopes[1]`, then `session.account.id`.
    - If the user declines the credential prompt, the server is reported as **not started**, with one clear
      message — never a repeated prompt, never an error toast storm.
-4. It spawns `npx -y @iris-mcp/<pkg>` (or, in [Development mode](#development-mode), `node
-   <developmentRepoPath>/packages/<dir>/dist/index.js`) with the resolved connection synthesized into the suite's
+4. It spawns `npx -y @iris-mcp/<pkg>` (or, in [Development mode](#development-mode),
+   `<developmentRepoPath>/packages/<dir>/dist/index.js` with the editor's own interpreter) with the resolved connection synthesized into the suite's
    own documented env contract (`IRIS_HOST`/`IRIS_PORT`/`IRIS_HTTPS`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`
    for a single server, or `IRIS_PROFILES` JSON for several — see [`irisMcpLauncher.combineProfiles`](#settings)
    below), plus whatever governance/audit/visibility variables you've set in this extension's own settings,
@@ -83,7 +87,9 @@ CLI, all documented in the suite's root README.
 
 `irisMcpLauncher.developmentRepoPath` (Story 31.6) makes this extension usable **before** any `@iris-mcp/*`
 package is published: set it to the absolute path of a local monorepo checkout, and every registered definition
-spawns `node <developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`. Empty
+spawns `<developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`, using the
+editor's own interpreter (`process.execPath` with `ELECTRON_RUN_AS_NODE=1` — the standard extension-host
+pattern, so no dependence on a `node` being on the host's PATH). Empty
 (the default) leaves spawning untouched — byte-identical `npx` behavior.
 
 - **Development only, opt-in, and security-relevant.** This setting makes the extension execute an **arbitrary
@@ -127,6 +133,44 @@ from `irisMcpLauncher.packages`'s allowed values (Story 31.6). If your settings 
 warning naming the removal; select the five individual packages instead (`admin`, `data`, `dev`, `interop`,
 `ops` — already this setting's default).
 
+## Governance editor
+
+**Command: "IRIS MCP Launcher: Open Governance Editor"** (Story 32.2). A webview editor for ONE shared
+governance policy file — the JSON file `IRIS_GOVERNANCE_FILE` points every spawned server at — so you can manage
+the policy visually and every MCP client picks it up on next server start.
+
+- **The engine is the suite's own CLI, never a reimplementation.** The view shells out to the
+  `iris-mcp-governance` CLI (the second `bin` of `@iris-mcp/shared`) for everything: validation, the
+  governed-key universe, the effective-policy cascade, and every write (`set`/`unset` — never hand-serialized
+  JSON). With `irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
+  (`packages/shared/dist/cli/governance-cli.js`); otherwise `npx -y -p @iris-mcp/shared iris-mcp-governance`.
+  **Until `@iris-mcp/*` is published** (see the status note at the top of this file), the published-mode npx
+  invocation cannot resolve — set `developmentRepoPath` to use the editor before publication.
+- **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
+  the five server packages' built dist (the same derivation the suite's own cross-package tests use), grouped
+  per package with read/write badges, baseline/post-foundation origin, and each key's effective value with its
+  `configSource` badge (`env` / `file` / `preset` / `default`) — the same render a running server's
+  `iris_server_profiles` reports.
+- **Per-key tri-state toggles** (enabled / disabled / inherit) edit the file's global layer or one profile
+  layer (tabs: `global (file)` + `default` + every Server Manager server name + every profile the file names).
+  Edits are **staged** first: a pending-changes preview plus the current file-vs-default-seed diff is shown
+  before **Save** applies them through the CLI.
+- **Inline validation** uses the engine's own error text (the exact message a server would fail startup with);
+  an invalid file disables editing until it parses. A file path that does not exist yet is called out loudly —
+  a server launched with `IRIS_GOVERNANCE_FILE` pointing at a missing file **fails to start**; Save creates the
+  file.
+- **The UI edits the governance FILE only** — it never touches client configs or environment variables. The
+  only settings write it can make is the `irisMcpLauncher.governanceFile` path itself, when you use **Choose
+  File…**. Changes apply on next server start (servers read the file once at startup; the view reflects the
+  file's state at open/refresh — no hot-reload).
+- **Default state: `irisMcpLauncher.governanceFile` is `""` (unset)** — the editor shows an empty state with a
+  Choose File… affordance, and spawned servers run with no governance file (today's default behavior).
+- **Credential containment**: the CLI subprocess runs with every `IRIS_*` variable scrubbed from its
+  environment (no `IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_PROFILES` can ever reach it), re-adding only the
+  extension's own `IRIS_GOVERNANCE`/`IRIS_GOVERNANCE_PRESET` settings so the preview computes the same env
+  channel your spawned servers will see. Governance files are policy, not secrets — but the layer that spawns
+  processes is pinned to never receive credential material.
+
 ## Settings
 
 All settings live under `irisMcpLauncher.*` (Settings UI: search "IRIS MCP Launcher").
@@ -137,9 +181,10 @@ All settings live under `irisMcpLauncher.*` (Settings UI: search "IRIS MCP Launc
 | `irisMcpLauncher.packages`         | `["admin","data","dev","interop","ops"]` | Which `@iris-mcp` suite packages to register. (The `"all"` meta-package key was removed in Story 31.6 — `@iris-mcp/all` ships no `dist`/`bin` and could never be started; select the individual packages you need.)                                                              |
 | `irisMcpLauncher.namespace`        | `"HSCUSTOM"`                             | Default `IRIS_NAMESPACE` for every spawned server (matches the suite's own `loadConfig()` default). Server Manager has no per-server namespace concept, so this is the one connection field this extension cannot read from Server Manager.                                       |
 | `irisMcpLauncher.combineProfiles`  | `false`                                  | `false` (default): one definition per (package, server) pair, each single-profile. `true`: one definition **per package**, covering **every selected server** via the suite's multi-profile `IRIS_PROFILES` env var — address a specific server with the `server` tool parameter. |
-| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `node <path>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`.                                    |
+| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `<path>/packages/<dir>/dist/index.js` with the editor's own interpreter (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) instead of `npx -y @iris-mcp/<pkg>`.                                    |
 | `irisMcpLauncher.governance`       | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE`.                                                                                                                                                                                                                                    |
 | `irisMcpLauncher.governancePreset` | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE_PRESET`.                                                                                                                                                                                                                             |
+| `irisMcpLauncher.governanceFile`   | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE_FILE` — the shared governance policy file, **also edited by the [Governance editor](#governance-editor)**. Empty = unset (no file; the editor shows an empty state). Explicit path only, never discovered; servers read the file once at startup — restart to apply edits. |
 | `irisMcpLauncher.auditLog`         | `""` (unset)                             | Passed through unchanged as `IRIS_AUDIT_LOG`.                                                                                                                                                                                                                                     |
 | `irisMcpLauncher.auditLogMaxMb`    | `""` (unset)                             | Passed through unchanged as `IRIS_AUDIT_LOG_MAX_MB`.                                                                                                                                                                                                                              |
 | `irisMcpLauncher.auditLogParams`   | `""` (unset)                             | Passed through unchanged as `IRIS_AUDIT_LOG_PARAMS`.                                                                                                                                                                                                                              |

@@ -89,6 +89,10 @@ export function readSettings(getConfig: (section: string) => ConfigReader): Laun
     developmentRepoPath: toSettingString(config.get<unknown>("developmentRepoPath", ""), "").trim(),
     governance: toSettingString(config.get<unknown>("governance", ""), ""),
     governancePreset: toSettingString(config.get<unknown>("governancePreset", ""), ""),
+    // Trimmed like developmentRepoPath — a pasted path with trailing
+    // whitespace otherwise renders the scary "file does not exist — a server
+    // FAILS TO START" banner with no hint that whitespace is the cause.
+    governanceFile: toSettingString(config.get<unknown>("governanceFile", ""), "").trim(),
     auditLog: toSettingString(config.get<unknown>("auditLog", ""), ""),
     auditLogMaxMb: toSettingString(config.get<unknown>("auditLogMaxMb", ""), ""),
     auditLogParams: toSettingString(config.get<unknown>("auditLogParams", ""), ""),

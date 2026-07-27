@@ -190,9 +190,12 @@ describe("package.json packaging contract", () => {
     const pkg = readJson<PackageJson>("package.json");
     const declaredIds = pkg.contributes.commands.map((c) => c.command).sort();
 
-    const sourceFiles = readdirSync(SRC_DIR, { withFileTypes: true })
+    // 31-5-6: RECURSIVE enumeration (a command registered from a future
+    // src/<sub>/ module must not escape the cross-check), __tests__ excluded.
+    const sourceFiles = readdirSync(SRC_DIR, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-      .map((entry) => entry.name);
+      .map((entry) => path.relative(SRC_DIR, path.join(entry.parentPath, entry.name)))
+      .filter((rel) => !rel.startsWith(`__tests__${path.sep}`));
 
     // Resolve `registerCommand(SOME_CONSTANT, ...)` to SOME_CONSTANT's literal
     // value by scanning every `export const NAME = "..."` in src/*.ts first —
@@ -306,5 +309,24 @@ describe("extension.ts wiring — structural pins for the adapters no unit test 
     expect(extensionCode).toMatch(/statusBarItem\.command\s*=\s*SELECT_SERVERS_COMMAND_ID/);
     expect(extensionCode).toMatch(/affectsConfiguration\(CONFIG_SECTION\)/);
     expect(extensionCode).toMatch(/onDidChangeConfiguration\(/);
+  });
+
+  it("31-4-8 (Story 32.3): getServerManagerApi duck-types the Server Manager exports BEFORE caching — a truthy-but-wrong-shaped exports object is NOT cached and gets its own version-mismatch message", () => {
+    expect(extensionCode).toContain("typeof candidate?.getServerNames");
+    expect(extensionCode).toContain("typeof candidate?.getServerSpec");
+    expect(extensionCode).toContain("typeof candidate?.getAccount");
+    expect(extensionCode).toContain("not the shape this extension expects");
+    // The dedicated message is produced; the bad object must not be cached
+    // (the cache assignment happens only after the shape check).
+    const checkAt = extensionCode.indexOf("typeof candidate?.getServerNames");
+    const cacheAt = extensionCode.indexOf("cachedApi = candidate");
+    expect(checkAt).toBeGreaterThan(-1);
+    expect(cacheAt).toBeGreaterThan(checkAt);
+  });
+
+  it("31-5-3 (Story 32.3): the uncheck-all confirmation is wired with a modal naming the expose-all consequence", () => {
+    expect(extensionCode).toContain("confirmExposeAll");
+    expect(extensionCode).toContain("Expose All");
+    expect(extensionCode).toContain("modal");
   });
 });

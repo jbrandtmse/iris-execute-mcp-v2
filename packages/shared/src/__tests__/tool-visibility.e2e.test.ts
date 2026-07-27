@@ -129,7 +129,7 @@ async function readGovernancePolicy(
 ): Promise<Record<string, boolean>> {
   const result = await callRequest(server, "resources/read", { uri });
   const contents = result.contents as Array<{ text: string }>;
-  return JSON.parse(contents[0]!.text) as Record<string, boolean>;
+  return (JSON.parse(contents[0]!.text) as { policy: Record<string, boolean> }).policy;
 }
 
 const savedEnv = {

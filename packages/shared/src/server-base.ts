@@ -53,12 +53,14 @@ import type { GovernanceConfig, GovernancePreset, MutatesLookup } from "./govern
 import {
   parseGovernanceConfig,
   parseGovernancePreset,
+  loadGovernanceFile,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
   getEffectivePolicy,
+  getEffectiveConfigSources,
   presetSeed,
   hasExplicitOverride,
 } from "./governance.js";
@@ -250,6 +252,13 @@ export function decodeCursor(cursor: string | undefined): number {
  *   this factory without a live server) get a safe stub that rejects with a
  *   clear "not available in this context" error — never a silently
  *   un-established client.
+ * @param governanceFileConfig - The STARTUP-SNAPSHOT parsed
+ *   `IRIS_GOVERNANCE_FILE` config (Story 32.1, deferred item 32-0-1).
+ *   {@link McpServerBase.handleToolCall} passes the snapshot loaded once in
+ *   {@link McpServerBase.start}; direct callers omit it (`undefined` = no
+ *   file = byte-for-byte the pre-Epic-32 behavior). Handlers read it via
+ *   {@link ToolContext.governanceFileConfig} — never a per-call
+ *   `loadGovernanceFile()`.
  */
 export function buildToolContext(
   scope: ToolScope,
@@ -258,6 +267,7 @@ export function buildToolContext(
   atelierVersion: number,
   pageSize: number = DEFAULT_PAGE_SIZE,
   resolveProfileClientImpl?: (profileName: string) => Promise<IrisHttpClient>,
+  governanceFileConfig?: GovernanceConfig,
 ): ToolContext {
   return {
     resolveNamespace(override?: string): string {
@@ -294,6 +304,10 @@ export function buildToolContext(
             `McpServerBase.handleToolCall).`,
         );
       }),
+    // Conditional spread (the buildRosterEntry discipline): a context built
+    // without the snapshot carries NO key rather than an undefined-valued
+    // one, so direct-caller shape is byte-for-byte pre-Story-32.1.
+    ...(governanceFileConfig !== undefined ? { governanceFileConfig } : {}),
   };
 }
 
@@ -377,6 +391,21 @@ export class McpServerBase {
    * `IRIS_GOVERNANCE`, which fails fast (naming the var) on malformed input.
    */
   private governanceConfig: GovernanceConfig = {};
+  /**
+   * Parsed `IRIS_GOVERNANCE_FILE` policy (Epic 32, Story 32.0, AC 32.0.1;
+   * architecture decision J1), or `undefined` when the var is unset — the two
+   * file layers of the cascade, strictly BELOW both env layers
+   * (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ??
+   * defaultSeed`, AC 32.0.2).
+   *
+   * `undefined` is also the constructed-but-not-yet-{@link start}ed default —
+   * every cascade helper treats an absent file config as byte-for-byte the
+   * pre-Epic-32 behavior (the AC 32.0.1 back-compat gate). {@link start}
+   * replaces this with {@link loadGovernanceFile}'s result: unset ⇒
+   * `undefined` with ZERO filesystem access; set ⇒ the file MUST load and
+   * validate or startup fails fast (naming the var + the path).
+   */
+  private governanceFileConfig: GovernanceConfig | undefined = undefined;
   /**
    * Active `IRIS_GOVERNANCE_PRESET` (Story 24.1, spec 02 §2.2), or `undefined`
    * when unset. Threaded (optional, default-`undefined`) into every
@@ -564,6 +593,19 @@ export class McpServerBase {
         .map((tool) => tool.name)
         .filter((name) => !toolVisibilityResolution.visible.has(name)),
     );
+    // Spec §2.2 (deferred item 30-0-4, burned down in Story 32.3): a config
+    // that hides EVERY package tool leaves the server with only the reserved
+    // discovery tool — almost certainly a misconfiguration — so startup says
+    // so loudly. Distinct from the per-entry warnings above: those flag
+    // individual suspect entries; this flags the aggregate outcome.
+    if (options.tools.length > 0 && visiblePackageToolCount === 0) {
+      logger.warn(
+        `Tool visibility: the active config hides EVERY one of this server's ` +
+          `${options.tools.length} package tool(s); only the reserved ` +
+          `${SERVER_DISCOVERY_TOOL_NAME} discovery tool remains visible. ` +
+          `If this is unintended, review IRIS_TOOLS_PRESET / IRIS_TOOLS_DISABLE / IRIS_TOOLS_ENABLE.`,
+      );
+    }
     logger.info(
       `Tool visibility: preset="${this.toolVisibility.preset}" ` +
         `visible=${this.toolVisibility.visibleCount} hidden=${this.toolVisibility.hiddenCount}` +
@@ -797,6 +839,23 @@ export class McpServerBase {
       this.defaultEnabledWrites,
       this.preset,
       BASELINE_ACTION_CLASSIFICATIONS,
+      this.governanceFileConfig,
+    );
+
+    // Story 32.0 (AC 32.0.3): report which channel resolved each key
+    // (`env` | `file` | `preset` | `default`) alongside the policy map —
+    // emitted unconditionally (with no file set, keys report
+    // env/preset/default). Built over the SAME visibleGovernedKeys() filter,
+    // so the source map inherits the hidden-tool key omission structurally
+    // (no hidden tool name can leak through `configSource`).
+    const configSource = getEffectiveConfigSources(
+      profileName,
+      this.governanceConfig,
+      this.visibleGovernedKeys(),
+      this.mutatesLookup,
+      this.preset,
+      BASELINE_ACTION_CLASSIFICATIONS,
+      this.governanceFileConfig,
     );
 
     return {
@@ -804,7 +863,7 @@ export class McpServerBase {
         {
           uri,
           mimeType: "application/json",
-          text: JSON.stringify(policy),
+          text: JSON.stringify({ policy, configSource }),
         },
       ],
     };
@@ -1331,7 +1390,10 @@ export class McpServerBase {
     // IRIS_GOVERNANCE_PRESET, `governanceConfig` is `{}` and `this.preset` is
     // `undefined`, so `presetSeed` is a pure pass-through and every key in the
     // generated baseline resolves enabled — this gate is a pure pass-through,
-    // today's behavior, byte-for-byte (Rule #19).
+    // today's behavior, byte-for-byte (Rule #19). Story 32.0: an unset
+    // `IRIS_GOVERNANCE_FILE` leaves `this.governanceFileConfig === undefined`,
+    // which the cascade treats as byte-for-byte its pre-Epic-32 behavior too
+    // (AC 32.0.1).
     const governanceKey = this.computeGovernanceKey(tool, validatedArgs);
     if (
       !effective(
@@ -1343,6 +1405,7 @@ export class McpServerBase {
         this.defaultEnabledWrites,
         this.preset,
         BASELINE_ACTION_CLASSIFICATIONS,
+        this.governanceFileConfig,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
@@ -1350,12 +1413,18 @@ export class McpServerBase {
       // invoked and the connection is NOT established.
       //
       // AC 24.1.4c: attribute WHY the call was denied. `presetApplied` is set
-      // ONLY when the `presetSeed` layer (not an explicit IRIS_GOVERNANCE
-      // override at either layer) caused the denial — an explicit `false`
-      // denial must NOT carry it, so operators can tell the two apart.
+      // ONLY when the `presetSeed` layer (not an explicit override at ANY of
+      // the four env/file explicit layers — Story 32.0) caused the denial —
+      // an explicit `false` denial must NOT carry it, so operators can tell
+      // the two apart.
       const presetCaused =
         this.preset !== undefined &&
-        !hasExplicitOverride(governanceKey, profile.name, this.governanceConfig) &&
+        !hasExplicitOverride(
+          governanceKey,
+          profile.name,
+          this.governanceConfig,
+          this.governanceFileConfig,
+        ) &&
         presetSeed(
           governanceKey,
           this.preset,
@@ -1414,6 +1483,7 @@ export class McpServerBase {
           this.preset,
           BASELINE_ACTION_CLASSIFICATIONS,
           this.toolVisibility,
+          this.governanceFileConfig,
         );
         return {
           content: [
@@ -1492,6 +1562,11 @@ export class McpServerBase {
       atelierVersion,
       this.pageSize,
       resolveProfileClientForCtx,
+      // Story 32.1 (32-0-1): the startup-snapshot file config, so a handler
+      // whose governance check runs OUTSIDE the D5 gate (iris_env_promote's
+      // Gate 4) reads the SAME frozen view as every other surface — never a
+      // per-call file re-read (restart-only semantics, no hot-reload in v1).
+      this.governanceFileConfig,
     );
 
     try {
@@ -1714,6 +1789,19 @@ export class McpServerBase {
    * Applies the SAME tool-visibility filter (Epic 30) as the constructor: a
    * tool hidden by `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/
    * `IRIS_TOOLS_ENABLE` is not registered even when added dynamically.
+   *
+   * Named-preset roster curation deliberately does NOT extend to dynamic
+   * adds (RECORDED DECISION — deferred item 30-0-1, closed-by-decision in
+   * Story 32.3): a dynamically-added name is in no package roster, so
+   * `presetVisible` returns `undefined` and the documented resolution
+   * cascade (`ENABLE > DISABLE > preset > default-visible`, spec §2.2)
+   * leaves it visible. That is accepted because (1) this method has ZERO
+   * production callers across the suite — it is a framework extension point
+   * exercised by tests only (verified by grep 2026-07-26); (2)
+   * `assertPresetCoverage` structurally forbids the real risk (a SHIPPED
+   * roster naming a non-registered tool or missing a disposition); and (3)
+   * defaulting unlisted dynamic adds to hidden would invent policy the
+   * spec's cascade deliberately does not contain.
    */
   addTools(tools: ToolDefinition[]): void {
     let registeredCount = 0;
@@ -1870,6 +1958,18 @@ export class McpServerBase {
     // per call. Absent/empty IRIS_GOVERNANCE ⇒ `{}` ⇒ the enforcement gate is a
     // pure pass-through (every baseline action enabled — the back-compat gate).
     this.governanceConfig = parseGovernanceConfig();
+
+    // Load the optional governance policy FILE (Epic 32, Story 32.0, AC
+    // 32.0.1; architecture decision J1), mirroring the IRIS_GOVERNANCE parse
+    // immediately above: read once at startup (no hot-reload in v1 — restart
+    // semantics). Unset `IRIS_GOVERNANCE_FILE` ⇒ `undefined` with ZERO
+    // filesystem access (the "off touches ZERO filesystem" guarantee); set ⇒
+    // loadGovernanceFile fails fast (naming the var + the path) on a
+    // missing/unreadable/malformed/invalid file — never silently permissive.
+    // The file's layers sit strictly BELOW both env layers in the cascade
+    // (AC 32.0.2), so a file introduced later can never override a
+    // pre-existing IRIS_GOVERNANCE setting.
+    this.governanceFileConfig = loadGovernanceFile();
 
     // Parse the governance safety preset (Story 24.1, spec 02 §2.2), mirroring
     // the IRIS_GOVERNANCE parse immediately above. parseGovernancePreset fails

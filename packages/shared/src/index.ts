@@ -66,6 +66,7 @@ export {
 export {
   parseGovernanceConfig,
   parseGovernancePreset,
+  loadGovernanceFile,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
   unwrapActionOptions,
@@ -73,12 +74,16 @@ export {
   defaultSeed,
   effective,
   getEffectivePolicy,
+  hasExplicitOverride,
+  configSource,
+  getEffectiveConfigSources,
 } from "./governance.js";
 export type {
   MutationClass,
   GovernancePreset,
   GovernanceLayer,
   GovernanceConfig,
+  GovernanceConfigSource,
   MutatesLookup,
 } from "./governance.js";
 export { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";

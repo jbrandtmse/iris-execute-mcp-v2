@@ -64,6 +64,15 @@ export interface AccountInfo {
   label: string;
 }
 
+/**
+ * Minimal mirror of `vscode.CancellationToken` (only the member this
+ * extension reads, 31-4-6). Structural, so the real token satisfies it
+ * without a `vscode` value import, and tests can fake it with a plain object.
+ */
+export interface CancellationTokenLike {
+  readonly isCancellationRequested: boolean;
+}
+
 /** Mirrors `vscode.AuthenticationSession` (only the fields this extension reads). */
 export interface AuthSession {
   id: string;
@@ -116,6 +125,17 @@ export interface ServerManagerApi {
   ): Promise<ServerSpec | undefined>;
   getAccount(spec: ServerSpec): AccountInfo | undefined;
 }
+
+/**
+ * WHY `getServerManagerApi()` returned `undefined` on its most recent call
+ * (32-3-R3, Story 32.4): lets a downstream "Server Manager is not available"
+ * warning distinguish a genuinely missing/inactive dependency from a
+ * VERSION MISMATCH — the latter already produced its own accurate warning at
+ * the source (`extension.ts`'s shape check), so re-warning with "it should
+ * be installed automatically" would misattribute the cause. Optional on the
+ * injected deps: test fakes that omit it keep the pre-Story-32.4 behavior.
+ */
+export type ServerManagerApiFailureReason = "not-available" | "shape-mismatch";
 
 /**
  * Which @iris-mcp suite package a registered definition spawns.
@@ -173,6 +193,14 @@ export interface LauncherSettings {
   /** Pass-through governance/audit/visibility env — each "" means unset (do not emit the var). */
   governance: string;
   governancePreset: string;
+  /**
+   * Path to the shared governance policy file (Story 32.2). Passed through
+   * UNCHANGED as `IRIS_GOVERNANCE_FILE` to every spawned server AND used as
+   * the file the governance editor view edits (J1: explicit path only, never
+   * discovered). An inert JSON path — window scope suffices (unlike
+   * `developmentRepoPath`, nothing here is executed).
+   */
+  governanceFile: string;
   auditLog: string;
   auditLogMaxMb: string;
   auditLogParams: string;

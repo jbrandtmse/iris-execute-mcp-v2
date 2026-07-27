@@ -194,6 +194,38 @@ Un-escaped, the two values above are simply:
 
 With this config, `iris_global_list({ server: "prod" })` runs against the prod instance, while `iris_backup_manage({ action: "run", server: "prod" })` is blocked. Omit `server` and the call uses the `default` profile from your `IRIS_*` vars — exactly as before.
 
+### Governance File (optional)
+
+Instead of inlining `IRIS_GOVERNANCE` JSON per client, point every client at ONE shared policy file with `IRIS_GOVERNANCE_FILE` (an explicit absolute path — never discovered). **Default state: unset ⇒ inert** — nothing is read unless you set it.
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_GOVERNANCE_FILE": "C:\\governance\\iris-policy.json"
+      }
+    }
+  }
+}
+```
+
+Create and maintain the file with the `iris-mcp-governance` CLI (same engine the servers enforce with — what you write is what they compute):
+
+```bash
+node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js set iris_doc_put false --file C:\governance\iris-policy.json
+node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js effective --file C:\governance\iris-policy.json
+```
+
+The file's layers sit strictly BELOW any `IRIS_GOVERNANCE` env value in the cascade, and the file is read once at server startup — restart the client/server after editing. See [Governance file](../../README.md#governance-file-iris_governance_file) in the suite README for the full model.
+
 ---
 
 ## Standalone Setup: Server Manager + OS Keychain (optional)

@@ -2,8 +2,10 @@
  * Tool governance policy engine (Epic 14 — architecture decisions D3, D4, D7).
  *
  * A *governance policy* enables or disables individual tool actions, with a
- * two-layer cascade — a `global` baseline plus per-`profiles` overrides — so an
- * operator can lock writes down globally and tune exceptions per environment.
+ * layered cascade — `global` baselines plus per-`profiles` overrides from up
+ * to two config channels (`IRIS_GOVERNANCE` env, then `IRIS_GOVERNANCE_FILE`)
+ * over the preset/default seeds — so an operator can lock writes down
+ * globally and tune exceptions per environment.
  * This module is the policy ENGINE only: parsing, the default seed, the cascade,
  * and {@link getEffectivePolicy}. Enforcement (the call-time gate) is Story 14.4
  * and the advisory `iris-governance://{profile}` resource is Story 14.5; both
@@ -22,10 +24,22 @@
  *   capability opt-in while guaranteeing no pre-existing action is disabled by
  *   default (the back-compat gate).
  *
- * **Cascade (D4).** `effective(key, profile) =
- *   profile.explicit(key) ?? global.explicit(key) ?? defaultSeed(key)`. The
- * nullish-coalescing is load-bearing: an explicit `false` override at either
- * layer is honored (it disables), never mistaken for "unset".
+ * **Cascade (D4, extended by Epic 32 / AC 32.0.2).** `effective(key, profile) =
+ *   env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key)
+ *   ?? presetSeed(key) ?? defaultSeed(key)` — ALL env layers sit above ALL file
+ *   layers (no interleaving; Project Lead decision 2026-07-26: no pre-existing
+ *   `IRIS_GOVERNANCE` setting may be overridden by a governance file introduced
+ *   later). The nullish-coalescing is load-bearing: an explicit `false` override
+ *   at any layer is honored (it disables), never mistaken for "unset".
+ *
+ * **File channel (Epic 32, Story 32.0, architecture decision J1).**
+ * {@link loadGovernanceFile} reads a JSON file at the explicit operator-supplied
+ * path in `IRIS_GOVERNANCE_FILE` — never discovered, never searched for (J1:
+ * new config channels are explicit-path-only). It is validated by the SAME
+ * layer validation as `IRIS_GOVERNANCE` (reserved-key rejection included) and
+ * fails fast naming the var + the path. Unset ⇒ `undefined` with ZERO
+ * filesystem access, and every cascade helper treats an absent file config as
+ * the exact pre-Epic-32 behavior (the AC 32.0.1 back-compat gate).
  *
  * **Parsing (D7).** {@link parseGovernanceConfig} reads `IRIS_GOVERNANCE`
  * centrally; malformed/wrong-shape JSON fails fast with an error naming the var
@@ -33,6 +47,7 @@
  * config ⇒ the seed governs everything ⇒ byte-for-byte today's behavior.
  */
 
+import { readFileSync } from "node:fs";
 import type { ToolDefinition } from "./tool-types.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 
@@ -78,6 +93,15 @@ export type MutatesLookup = ReadonlyMap<string, MutationClass>;
 /** Fail-fast helper: a clear error naming `IRIS_GOVERNANCE` (mirrors `profilesError`). */
 function governanceError(detail: string): Error {
   return new Error(`IRIS_GOVERNANCE is invalid: ${detail}`);
+}
+
+/**
+ * Fail-fast helper for the file channel (Epic 32, AC 32.0.1): names the var
+ * AND the operator-supplied path (never the file's CONTENTS — a governance
+ * file is not secret, but the not-echoing-inputs discipline is uniform).
+ */
+function governanceFileError(path: string, detail: string): Error {
+  return new Error(`IRIS_GOVERNANCE_FILE is invalid: ${detail} (path: ${path})`);
 }
 
 /** Valid `IRIS_GOVERNANCE_PRESET` values, named in the fail-fast error message. */
@@ -197,8 +221,12 @@ export function actionFieldHasDefault(actionField: unknown): boolean {
  * policy. We reject them outright (D7 fail-fast) and additionally read every
  * layer via {@link ownBool} so an externally-constructed config (e.g. from
  * Story 14.4 / tests) is also safe.
+ *
+ * Exported (Story 32.1) for the `iris-mcp-governance` CLI, which rejects the
+ * same keys on WRITE commands with the same rule — single-sourced, so the
+ * CLI can never drift from the parser on what is reserved.
  */
-const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+export const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
  * Read `key` from `layer` ONLY as an own boolean property; otherwise `undefined`.
@@ -220,13 +248,19 @@ function ownBool(
 
 /**
  * Validate one policy layer (`global` or a single profile's overrides): it must
- * be a JSON object of `key → boolean`. Throws (naming `IRIS_GOVERNANCE`) on any
- * non-boolean value so a typo like `"iris_x": "true"` fails fast rather than
- * silently coercing.
+ * be a JSON object of `key → boolean`. Throws on any non-boolean value so a
+ * typo like `"iris_x": "true"` fails fast rather than silently coercing. The
+ * thrown error is built by `fail` (defaults to {@link governanceError}, naming
+ * `IRIS_GOVERNANCE`; the file channel passes a builder naming
+ * `IRIS_GOVERNANCE_FILE` + the path instead).
  */
-function validateLayer(label: string, raw: unknown): GovernanceLayer {
+function validateLayer(
+  label: string,
+  raw: unknown,
+  fail: (detail: string) => Error = governanceError,
+): GovernanceLayer {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw governanceError(
+    throw fail(
       `${label} must be a JSON object mapping "<tool|tool:action>" to true/false.`,
     );
   }
@@ -235,15 +269,15 @@ function validateLayer(label: string, raw: unknown): GovernanceLayer {
   const layer: GovernanceLayer = Object.create(null) as GovernanceLayer;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (key === "") {
-      throw governanceError(`${label}: governance keys must be non-empty strings.`);
+      throw fail(`${label}: governance keys must be non-empty strings.`);
     }
     if (RESERVED_KEYS.has(key)) {
-      throw governanceError(
+      throw fail(
         `${label}: "${key}" is a reserved key and cannot be used as a governance key.`,
       );
     }
     if (typeof value !== "boolean") {
-      throw governanceError(
+      throw fail(
         `${label}: value for "${key}" must be a boolean (true/false). Received: ${JSON.stringify(value)}.`,
       );
     }
@@ -281,8 +315,24 @@ export function parseGovernanceConfig(
     throw governanceError(`could not parse JSON (${reason}).`);
   }
 
+  return parseGovernanceRoot(parsed, governanceError);
+}
+
+/**
+ * Validate an already-parsed JSON value as a {@link GovernanceConfig} root
+ * object — the SHARED shape validation consumed by both the env channel
+ * ({@link parseGovernanceConfig}) and the file channel ({@link
+ * loadGovernanceFile}), so the two can never drift (AC 32.0.1: the file is
+ * parsed by the SAME validation, reserved-key rejection included). `fail`
+ * builds the thrown error, so each channel's messages name ITS OWN variable
+ * (and, for the file, the path).
+ */
+function parseGovernanceRoot(
+  parsed: unknown,
+  fail: (detail: string) => Error,
+): GovernanceConfig {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw governanceError(
+    throw fail(
       'expected a JSON object, e.g. {"global":{"iris_x_manage:delete":false}}.',
     );
   }
@@ -291,7 +341,7 @@ export function parseGovernanceConfig(
   const config: GovernanceConfig = {};
 
   if (root.global !== undefined) {
-    config.global = validateLayer('"global"', root.global);
+    config.global = validateLayer('"global"', root.global, fail);
   }
 
   if (root.profiles !== undefined) {
@@ -300,7 +350,7 @@ export function parseGovernanceConfig(
       typeof root.profiles !== "object" ||
       Array.isArray(root.profiles)
     ) {
-      throw governanceError(
+      throw fail(
         '"profiles" must be a JSON object mapping a profile name to its overrides.',
       );
     }
@@ -311,19 +361,98 @@ export function parseGovernanceConfig(
       root.profiles as Record<string, unknown>,
     )) {
       if (name === "") {
-        throw governanceError("profile names must be non-empty strings.");
+        throw fail("profile names must be non-empty strings.");
       }
       if (RESERVED_KEYS.has(name)) {
-        throw governanceError(
+        throw fail(
           `"${name}" is a reserved key and cannot be used as a profile name.`,
         );
       }
-      profiles[name] = validateLayer(`profile "${name}"`, layer);
+      profiles[name] = validateLayer(`profile "${name}"`, layer, fail);
     }
     config.profiles = profiles;
   }
 
   return config;
+}
+
+/**
+ * Load the optional governance policy FILE referenced by
+ * `IRIS_GOVERNANCE_FILE` (Epic 32, Story 32.0, AC 32.0.1; architecture
+ * decision J1).
+ *
+ * The value is an EXPLICIT operator-supplied path — never discovered, never
+ * searched for (J1: new config channels are explicit-path-only, so the
+ * "untrusted repo injects config" class does not arise). A RELATIVE path
+ * resolves against the server process's CWD, which the MCP *client* chooses —
+ * operators should prefer absolute paths (documented in the READMEs). No
+ * hot-reload in v1: the file is read once at startup; a change takes effect
+ * on the next server restart.
+ *
+ * - Unset/empty ⇒ `undefined`, with **ZERO filesystem access** (the env check
+ *   precedes any `fs` call — the AC 32.0.1 / 31.0-style "off touches ZERO
+ *   filesystem" guarantee, proven by a readFileSync-spy test).
+ * - Set ⇒ the file MUST exist, be readable, and contain valid JSON of the
+ *   same shape as `IRIS_GOVERNANCE`: a missing/unreadable file, malformed
+ *   JSON, or an invalid shape **fails fast** naming `IRIS_GOVERNANCE_FILE`,
+ *   the path, and the underlying read/parse/validation error — never silently
+ *   permissive (an operator who pointed at a policy file must never run
+ *   ungoverned by mistake). File CONTENTS are never echoed in errors.
+ *
+ * The returned config occupies the TWO file layers of the cascade
+ * (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ??
+ * defaultSeed`); see {@link effective}.
+ *
+ * @param env - Environment map (defaults to `process.env`).
+ * @returns The parsed file config, or `undefined` when the var is unset/empty.
+ * @throws {Error} (naming `IRIS_GOVERNANCE_FILE` + the path) on any failure.
+ */
+export function loadGovernanceFile(
+  env: Record<string, string | undefined> = process.env,
+): GovernanceConfig | undefined {
+  const raw = env.IRIS_GOVERNANCE_FILE;
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  const fail = (detail: string): Error => governanceFileError(raw, detail);
+
+  let text: string;
+  try {
+    text = readFileSync(raw, "utf8");
+  } catch (e: unknown) {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw fail(`could not read the file (${reason}).`);
+  }
+
+  return parseGovernanceFileText(text, raw);
+}
+
+/**
+ * Validate the TEXT of a governance file — the parse+shape half of
+ * {@link loadGovernanceFile} with the file read factored out, so a caller
+ * that has ALREADY read the bytes (the CLI's write commands, which need the
+ * pre-image for a potential rollback — 32-1-R7) validates the SAME bytes it
+ * would restore rather than re-reading the file a second time (under
+ * concurrent modification the rollback would otherwise restore content the
+ * caller never parsed). Error text is identical to the loader's (naming
+ * `IRIS_GOVERNANCE_FILE` + `path`).
+ *
+ * @param text - The file's raw UTF-8 text.
+ * @param path - The path the text was read from (error attribution only).
+ * @throws {Error} (naming `IRIS_GOVERNANCE_FILE` + `path`) on any failure.
+ */
+export function parseGovernanceFileText(text: string, path: string): GovernanceConfig {
+  const fail = (detail: string): Error => governanceFileError(path, detail);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e: unknown) {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw fail(`could not parse JSON (${reason}).`);
+  }
+
+  return parseGovernanceRoot(parsed, fail);
 }
 
 /**
@@ -591,8 +720,9 @@ export function defaultSeed(
 
 /**
  * Compute the preset-layer enablement for a single governance key (Story
- * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers and {@link defaultSeed}
- * in the cascade: `profile.explicit ?? global.explicit ?? presetSeed(...) ??
+ * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers (env, then file —
+ * Story 32.0) and {@link defaultSeed} in the cascade: `env.profile ??
+ * env.global ?? file.profile ?? file.global ?? presetSeed(...) ??
  * defaultSeed(...)`.
  *
  * - `preset` is `undefined` or `"full"` ⇒ pass-through (`undefined` — falls
@@ -648,24 +778,50 @@ export function presetSeed(
 }
 
 /**
+ * Resolve a profile's override layer from one config as an OWN property only —
+ * a `profile` named after a prototype member (e.g. "constructor") must not
+ * read the inherited member. Shared by {@link effective}, {@link
+ * hasExplicitOverride}, and {@link configSource} so the env and file configs
+ * get the identical treatment.
+ */
+function ownProfileLayer(
+  config: GovernanceConfig | undefined,
+  profile: string,
+): GovernanceLayer | undefined {
+  if (
+    config === undefined ||
+    config.profiles === undefined ||
+    !Object.prototype.hasOwnProperty.call(config.profiles, profile)
+  ) {
+    return undefined;
+  }
+  return config.profiles[profile];
+}
+
+/**
  * Resolve the effective enablement of one governance key for one profile
  * (architecture decision D4 cascade; Story 24.1 extends it with the
- * `presetSeed` layer).
+ * `presetSeed` layer; Story 32.0 extends it with the two file layers).
  *
- * `effective = profile.explicit(key) ?? global.explicit(key) ??
- * presetSeed(key) ?? defaultSeed(key)`. Nullish-coalescing (`??`) is
- * intentional: an explicit `false` at the profile or global layer is honored
- * as "disabled", never treated as "unset" (which `||` would wrongly do) — and
- * it is what lets an explicit override beat the preset too (AC 24.1.2/24.1.4).
+ * `effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ??
+ * file.global(key) ?? presetSeed(key) ?? defaultSeed(key)` — ALL env layers
+ * above ALL file layers (AC 32.0.2; NOT interleaved per scope — Project Lead
+ * decision 2026-07-26: no pre-existing `IRIS_GOVERNANCE` setting may be
+ * overridden by a governance file introduced later). Nullish-coalescing
+ * (`??`) is intentional: an explicit `false` at ANY layer is honored as
+ * "disabled", never treated as "unset" (which `||` would wrongly do) — and it
+ * is what lets an explicit override beat the preset too (AC 24.1.2/24.1.4).
  *
  * @param key                - The governance key.
  * @param profile            - The profile name whose overrides take top priority.
- * @param config             - Parsed {@link GovernanceConfig}.
+ * @param config             - Parsed {@link GovernanceConfig} (the ENV channel).
  * @param mutatesLookup      - Key → mutation class for new actions.
  * @param baseline           - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
  * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
  * @param preset             - Active {@link GovernancePreset} (Story 24.1); default `undefined` (none).
  * @param classifications    - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
+ * @param fileConfig         - Parsed FILE channel ({@link loadGovernanceFile}); default
+ *   `undefined` (no file) — byte-for-byte the pre-Epic-32 cascade (AC 32.0.1).
  * @returns `true` if the action is enabled for the profile, else `false`.
  */
 export function effective(
@@ -677,51 +833,157 @@ export function effective(
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
+  fileConfig?: GovernanceConfig,
 ): boolean {
-  // Resolve the profile's layer as an own property only — a `profile` named
-  // after a prototype member (e.g. "constructor") must not read the inherited
-  // member. Then read each layer via ownBool so the `??` cascade only ever sees
+  // Read each layer via ownBool so the `??` cascade only ever sees
   // `boolean | undefined`, never a leaked non-boolean prototype value.
-  const profileLayer =
-    config.profiles !== undefined &&
-    Object.prototype.hasOwnProperty.call(config.profiles, profile)
-      ? config.profiles[profile]
-      : undefined;
   return (
-    ownBool(profileLayer, key) ??
+    ownBool(ownProfileLayer(config, profile), key) ??
     ownBool(config.global, key) ??
+    ownBool(ownProfileLayer(fileConfig, profile), key) ??
+    ownBool(fileConfig?.global, key) ??
     presetSeed(key, preset, mutatesLookup, classifications) ??
     defaultSeed(key, mutatesLookup, baseline, defaultEnabledWrites)
   );
 }
 
 /**
- * Whether an explicit `IRIS_GOVERNANCE` override exists for `key` at either
- * the profile or global layer (Story 24.1, AC 24.1.4c) — used by the
- * call-time enforcement gate to distinguish "denied by an explicit `false`"
- * from "denied by the `presetSeed` layer", so a `GOVERNANCE_DISABLED` denial
- * can accurately attribute WHY the call was blocked (`presetApplied` is set
- * only for the latter).
+ * Whether an explicit override exists for `key` at ANY of the four explicit
+ * layers — env profile, env global, file profile, file global (Story 24.1, AC
+ * 24.1.4c; file layers added by Story 32.0) — used by the call-time
+ * enforcement gate to distinguish "denied by an explicit `false`" from
+ * "denied by the `presetSeed` layer", so a `GOVERNANCE_DISABLED` denial can
+ * accurately attribute WHY the call was blocked (`presetApplied` is set only
+ * for the latter).
  *
- * @param key     - The governance key.
- * @param profile - The profile name whose overrides take top priority.
- * @param config  - Parsed {@link GovernanceConfig}.
- * @returns `true` when either layer carries an explicit boolean for `key`.
+ * **File-layer attribution decision (Story 32.0, documented per the story's
+ * Constraints):** a file-layer explicit value IS an explicit override — the
+ * denial was operator-configured (via `IRIS_GOVERNANCE_FILE`), so a denial
+ * that the file caused must NOT be attributed to the preset. With no file
+ * (`fileConfig === undefined`) the result is byte-for-byte the pre-Epic-32
+ * behavior (AC 32.0.1's attribution deep-equal constraint).
+ *
+ * @param key        - The governance key.
+ * @param profile    - The profile name whose overrides take top priority.
+ * @param config     - Parsed {@link GovernanceConfig} (the ENV channel).
+ * @param fileConfig - Parsed FILE channel ({@link loadGovernanceFile}); default `undefined`.
+ * @returns `true` when any explicit layer carries a boolean for `key`.
  */
 export function hasExplicitOverride(
   key: string,
   profile: string,
   config: GovernanceConfig,
+  fileConfig?: GovernanceConfig,
 ): boolean {
-  const profileLayer =
-    config.profiles !== undefined &&
-    Object.prototype.hasOwnProperty.call(config.profiles, profile)
-      ? config.profiles[profile]
-      : undefined;
   return (
-    ownBool(profileLayer, key) !== undefined ||
-    ownBool(config.global, key) !== undefined
+    ownBool(ownProfileLayer(config, profile), key) !== undefined ||
+    ownBool(config.global, key) !== undefined ||
+    ownBool(ownProfileLayer(fileConfig, profile), key) !== undefined ||
+    ownBool(fileConfig?.global, key) !== undefined
   );
+}
+
+/**
+ * Which configuration channel resolved a key's effective value (Epic 32,
+ * Story 32.0, AC 32.0.3): the first cascade layer that carries the key —
+ * `"env"` (either `IRIS_GOVERNANCE` layer), `"file"` (either
+ * `IRIS_GOVERNANCE_FILE` layer), `"preset"` (the `presetSeed` layer — a
+ * `read-only` preset resolves every key), or `"default"` (the seed). Emitted
+ * unconditionally: with no file set, keys simply never report `"file"`.
+ */
+export type GovernanceConfigSource = "env" | "file" | "preset" | "default";
+
+/**
+ * Resolve the {@link GovernanceConfigSource} for one key — walks the SAME
+ * cascade ordering as {@link effective} and reports which layer FIRST carries
+ * the key (single-sourced with the cascade via {@link ownProfileLayer}/
+ * {@link ownBool}/{@link presetSeed}, so source and value can never disagree
+ * about ordering).
+ *
+ * @param key             - The governance key.
+ * @param profile         - The profile name.
+ * @param config          - Parsed {@link GovernanceConfig} (the ENV channel).
+ * @param mutatesLookup   - Key → mutation class for new actions.
+ * @param preset          - Active {@link GovernancePreset}; default `undefined` (none).
+ * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
+ * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
+ */
+export function configSource(
+  key: string,
+  profile: string,
+  config: GovernanceConfig,
+  mutatesLookup: MutatesLookup,
+  preset?: GovernancePreset,
+  classifications: Readonly<Record<string, MutationClass>> = {},
+  fileConfig?: GovernanceConfig,
+): GovernanceConfigSource {
+  if (
+    ownBool(ownProfileLayer(config, profile), key) !== undefined ||
+    ownBool(config.global, key) !== undefined
+  ) {
+    return "env";
+  }
+  if (
+    fileConfig !== undefined &&
+    (ownBool(ownProfileLayer(fileConfig, profile), key) !== undefined ||
+      ownBool(fileConfig.global, key) !== undefined)
+  ) {
+    return "file";
+  }
+  if (presetSeed(key, preset, mutatesLookup, classifications) !== undefined) {
+    return "preset";
+  }
+  return "default";
+}
+
+/**
+ * Compute the per-key {@link GovernanceConfigSource} map for a profile over
+ * `allKeys` (Epic 32, AC 32.0.3) — the sibling of {@link getEffectivePolicy},
+ * consumed by the SAME surfaces (the `iris_server_profiles` governance view
+ * and the `iris-governance://{profile}` resource) and by the Story 32.1 CLI.
+ * Callers pass the SAME `governedKeys` they pass to `getEffectivePolicy`
+ * (the Epic-30 `visibleGovernedKeys()` filter at the server surfaces), so the
+ * source map inherits the hidden-tool key omission structurally.
+ *
+ * @param profile         - The profile name.
+ * @param config          - Parsed {@link GovernanceConfig} (the ENV channel).
+ * @param allKeys         - Every known governance key to report (already visibility-filtered).
+ * @param mutatesLookup   - Key → mutation class for new actions.
+ * @param preset          - Active {@link GovernancePreset}; default `undefined` (none).
+ * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
+ * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
+ * @returns A `Record<key, GovernanceConfigSource>` for the profile.
+ */
+export function getEffectiveConfigSources(
+  profile: string,
+  config: GovernanceConfig,
+  allKeys: Iterable<string>,
+  mutatesLookup: MutatesLookup,
+  preset?: GovernancePreset,
+  classifications: Readonly<Record<string, MutationClass>> = {},
+  fileConfig?: GovernanceConfig,
+): Record<string, GovernanceConfigSource> {
+  const sources: Record<string, GovernanceConfigSource> = {};
+  for (const key of allKeys) {
+    // defineProperty, mirroring getEffectivePolicy: a key colliding with a
+    // prototype member becomes a real own enumerable property (1-key-per-
+    // allKeys invariant), never a silent no-op or prototype mutation.
+    Object.defineProperty(sources, key, {
+      value: configSource(
+        key,
+        profile,
+        config,
+        mutatesLookup,
+        preset,
+        classifications,
+        fileConfig,
+      ),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return sources;
 }
 
 /**
@@ -734,13 +996,15 @@ export function hasExplicitOverride(
  * map covers both grandfathered and newly-added actions).
  *
  * @param profile        - The profile name.
- * @param config         - Parsed {@link GovernanceConfig}.
+ * @param config         - Parsed {@link GovernanceConfig} (the ENV channel).
  * @param allKeys        - Every known governance key (baseline ∪ registered keys).
  * @param mutatesLookup  - Key → mutation class for new actions.
  * @param baseline       - The generated baseline set (defaults to {@link GOVERNANCE_BASELINE}).
  * @param defaultEnabledWrites - Write keys that seed enabled (F2); default empty.
  * @param preset         - Active {@link GovernancePreset} (Story 24.1); default `undefined` (none).
  * @param classifications - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
+ * @param fileConfig     - Parsed FILE channel ({@link loadGovernanceFile}); default
+ *   `undefined` (no file) — byte-for-byte the pre-Epic-32 policy map (AC 32.0.1).
  * @returns A `Record<key, boolean>` of effective enablement for the profile.
  */
 export function getEffectivePolicy(
@@ -752,6 +1016,7 @@ export function getEffectivePolicy(
   defaultEnabledWrites: ReadonlySet<string> = new Set(),
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
+  fileConfig?: GovernanceConfig,
 ): Record<string, boolean> {
   const policy: Record<string, boolean> = {};
   for (const key of allKeys) {
@@ -769,6 +1034,7 @@ export function getEffectivePolicy(
         defaultEnabledWrites,
         preset,
         classifications,
+        fileConfig,
       ),
       enumerable: true,
       writable: true,

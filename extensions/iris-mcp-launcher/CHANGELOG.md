@@ -4,8 +4,39 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ## [0.1.0] — Unreleased (not yet published)
 
+### Changed
+
+- **Status bar zero-state now reports the effective count** (Story 32.4, aligned with the 31-5-2/31-6-4
+  decisions): with `irisMcpLauncher.servers: []` — expose-ALL, the documented default — the status bar text
+  shows the number of servers actually registered (e.g. `IRIS MCP: 3`) instead of `IRIS MCP: none`, which
+  contradicted the expose-all semantics the picker teaches. The fresh-install guidance ("no servers selected
+  yet… Click to choose specific servers") stays in the tooltip, and `none` is still shown when zero servers
+  are registered or the count cannot be computed.
+- Warning behavior hardening (Story 32.4): a mis-shaped Server Manager API now warns once per session (named
+  as the version mismatch it is) instead of re-toasting on every refresh, and the generic "Server Manager is
+  not available" warning is suppressed in that case so the cause is never misattributed; warnings for a fixed-
+  then-reintroduced problem (a removed `"all"` package key, a `default`-named server) warn once per occurrence
+  instead of once per session; the status bar refresh can no longer render a stale settings read over a newer
+  one.
+
 ### Added
 
+- **Governance editor** (Story 32.2): a new command "IRIS MCP Launcher: Open Governance Editor" opens a webview
+  editor for the shared governance policy file (`IRIS_GOVERNANCE_FILE`). It shows the full governed-key universe
+  — derived from the server packages' built dist, never a hand-maintained list — grouped per package with
+  read/write and baseline/post-foundation badges, per-key effective values with `configSource` badges (the same
+  render a running server's `iris_server_profiles` reports), per-profile tabs, tri-state toggles
+  (enabled/disabled/inherit), a pending-changes + file-vs-default diff preview before save, and inline
+  validation using the engine's own error text. Every read and write goes through the `iris-mcp-governance` CLI
+  as a subprocess (never a bundled copy of `@iris-mcp/shared` — the VSIX stays self-contained with zero runtime
+  dependencies), resolved exactly like server spawning: `developmentRepoPath`'s built CLI first, else
+  `npx -y -p @iris-mcp/shared iris-mcp-governance`. The CLI subprocess runs with every `IRIS_*` variable scrubbed
+  from its environment (credential containment), and the UI edits the governance FILE only — never client
+  configs or env. Changes apply on next server start.
+- New `irisMcpLauncher.governanceFile` setting (default `""` = unset): passed through unchanged as
+  `IRIS_GOVERNANCE_FILE` to every spawned server AND used as the file the governance editor edits. Window scope
+  (an inert JSON path, not an executable selector). Empty = no governance file; the editor shows an empty state
+  with a Choose File… affordance.
 - `irisMcpLauncher.developmentRepoPath` setting (Story 31.6): points the extension at a local monorepo checkout so
   it spawns `node <path>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>` — the only way to run
   this extension against a real server before any `@iris-mcp/*` package is published. Empty (default) leaves

@@ -29,7 +29,8 @@
  * "read-then-immediately-mutate-in-one-chain" shape check (1) exists to
  * catch — the same indirection `toConfigReader` already uses for reads.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildStatusBarState, selectServers, type SelectServersDeps } from "../selectServers.js";
@@ -42,14 +43,28 @@ import type { AuthApi, LauncherSettings, ServerManagerApi, ServerName, ServerSpe
 const SRC_DIR = path.dirname(__dirname);
 
 /**
- * Enumerated from the DIRECTORY, never hand-maintained (project rule #51): a
- * hardcoded roster silently stops covering the one thing it exists to catch —
- * a NEW source file that writes a credential somewhere persistent.
+ * Enumerated from the DIRECTORY RECURSIVELY (31-5-6), never hand-maintained
+ * (project rule #51): a hardcoded OR FLAT roster silently stops covering the
+ * one thing it exists to catch — a NEW source file (including one under a
+ * future `src/<sub>/` directory) that writes a credential somewhere
+ * persistent. `__tests__` is excluded deliberately (31-6-5's recorded
+ * repo-wide decision: test fixtures are not shipped code).
+ *
+ * Parameterized on the root so the recursion can be proven against a FIXTURE
+ * tree in the OS temp dir (Story 32.3 code review): the original proof
+ * created a probe directory under the REAL src/ tree, which raced the other
+ * test files' own recursive src/ scans in parallel workers (an ENOENT
+ * TOCTOU between their readdir and readFileSync — reproduced in-review).
  */
-const SOURCE_FILES = readdirSync(SRC_DIR, { withFileTypes: true })
-  .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-  .map((entry) => entry.name)
-  .sort();
+function enumerateSourceFiles(rootDir: string = SRC_DIR): string[] {
+  return readdirSync(rootDir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .map((entry) => path.relative(rootDir, path.join(entry.parentPath, entry.name)))
+    .filter((rel) => !rel.startsWith(`__tests__${path.sep}`))
+    .sort();
+}
+
+const SOURCE_FILES = enumerateSourceFiles();
 
 // Patterns that would indicate a credential/config value is being WRITTEN
 // somewhere persistent, rather than only read or handed to the spawned
@@ -82,6 +97,25 @@ describe("credential containment — structural (source grep)", () => {
     expect(SOURCE_FILES).toContain("serverDefinitionProvider.ts");
   });
 
+  it("31-5-6: the roster is RECURSIVE — a module under a future src/<sub>/ directory is picked up (and __tests__ is excluded)", () => {
+    // Fixture tree in the OS temp dir — NEVER under src/ (see the function
+    // doc: a probe inside src/ races parallel test files' recursive scans).
+    const fixtureRoot = path.join(tmpdir(), `iris-mcp-launcher-31-5-6-${process.pid}`);
+    mkdirSync(path.join(fixtureRoot, "sub"), { recursive: true });
+    mkdirSync(path.join(fixtureRoot, "__tests__"), { recursive: true });
+    try {
+      writeFileSync(path.join(fixtureRoot, "top.ts"), "// top\n", "utf8");
+      writeFileSync(path.join(fixtureRoot, "sub", "probe.ts"), "// probe\n", "utf8");
+      writeFileSync(path.join(fixtureRoot, "__tests__", "excluded.test.ts"), "// excluded\n", "utf8");
+      const files = enumerateSourceFiles(fixtureRoot);
+      expect(files).toContain(path.join("sub", "probe.ts"));
+      expect(files).toContain("top.ts");
+      expect(files.some((f) => f.startsWith(`__tests__${path.sep}`))).toBe(false);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("no source file calls a globalState/workspaceState/config/.secrets WRITE API, or an unsanctioned log/file-write API", () => {
     const offenders: string[] = [];
 
@@ -100,20 +134,23 @@ describe("credential containment — structural (source grep)", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the ONE configuration write this extension makes targets the plain irisMcpLauncher.servers key and nothing else — pinned POSITIVELY, because the shape-based grep above cannot see a two-statement write", () => {
+  it("the ONLY configuration writes this extension makes target the plain irisMcpLauncher.servers key and the (non-secret) irisMcpLauncher.governanceFile path — pinned POSITIVELY, because the shape-based grep above cannot see a two-statement write", () => {
     // Code review (Story 31.5). `SUSPICIOUS_WRITE_PATTERNS`'s
     // `getConfiguration(...).update(` pattern only matches a single-expression
     // chain, and `extension.ts`'s `updateServersConfig` deliberately splits it
     // across two statements — so the guard whose stated purpose is "a future
     // write-capable call cannot slip in silently" is structurally blind to
     // exactly the idiom this extension now models. Rather than restore the
-    // chain or blanket-exempt the file, the write is pinned from the other
+    // chain or blanket-exempt the file, the writes are pinned from the other
     // direction: enumerate EVERY `.update(` in every source file and assert
-    // the complete set is the single `irisMcpLauncher.servers` write. A second
-    // config write anywhere — including one carrying a credential — fails
-    // here, and so does a rename of the written key (which is also what makes
-    // Integration AC 31.5.8's "a rename on EITHER side must fail" true for the
-    // write side; the read side is covered in selectServers.test.ts).
+    // the complete set is exactly the two sanctioned, non-secret writes — the
+    // `irisMcpLauncher.servers` selection (Story 31.5) and the governance file
+    // PATH chosen in the governance editor (Story 32.2; a plain file path,
+    // never a credential). A third config write anywhere — including one
+    // carrying a credential — fails here, and so does a rename of either
+    // written key (which is also what makes Integration AC 31.5.8's "a rename
+    // on EITHER side must fail" true for the write side; the read side is
+    // covered in selectServers.test.ts / settings.test.ts).
     const updateArguments: string[] = [];
     for (const file of SOURCE_FILES) {
       const code = stripComments(readFileSync(path.join(SRC_DIR, file), "utf8"));
@@ -122,14 +159,20 @@ describe("credential containment — structural (source grep)", () => {
       }
     }
 
-    expect(updateArguments).toEqual(["extension.ts: update(SERVERS_SETTING_KEY)"]);
+    expect(updateArguments).toEqual([
+      "extension.ts: update(SERVERS_SETTING_KEY)",
+      "extension.ts: update(GOVERNANCE_FILE_SETTING_KEY)",
+    ]);
 
-    // ...and that constant is literally the `servers` key, cross-checked
-    // against `settings.ts`'s READ of the same key so the two can never drift.
+    // ...and those constants are literally the `servers` and `governanceFile`
+    // keys, cross-checked against `settings.ts`'s READ of the same keys so the
+    // two can never drift.
     const extensionCode = stripComments(readFileSync(path.join(SRC_DIR, "extension.ts"), "utf8"));
     expect(extensionCode).toMatch(/const SERVERS_SETTING_KEY\s*=\s*"servers"/);
+    expect(extensionCode).toMatch(/const GOVERNANCE_FILE_SETTING_KEY\s*=\s*"governanceFile"/);
     const settingsCode = stripComments(readFileSync(path.join(SRC_DIR, "settings.ts"), "utf8"));
     expect(settingsCode).toMatch(/config\.get<[^>]+>\(\s*"servers"/);
+    expect(settingsCode).toMatch(/config\.get<[^>]+>\(\s*"governanceFile"/);
   });
 });
 
@@ -143,6 +186,7 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
+    governanceFile: "",
     auditLog: "",
     auditLogMaxMb: "",
     auditLogParams: "",

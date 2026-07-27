@@ -16,7 +16,7 @@
  * no `BOOTSTRAP_VERSION` impact, no governance-baseline touch.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import {
   TOOL_PRESET_NAMES,
@@ -28,6 +28,7 @@ import {
 import type { ToolPresetRosters } from "../tool-visibility.js";
 import { McpServerBase } from "../server-base.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
+import { logger } from "../logger.js";
 import type { ToolDefinition } from "../tool-types.js";
 
 // ── Fixtures ────────────────────────────────────────────────────────
@@ -544,6 +545,110 @@ describe("McpServerBase constructor tool-visibility filter (AC 30.0.2)", () => {
       expect(names).toContain("iris_vis_d");
     } finally {
       restoreEnv();
+    }
+  });
+
+  // Spec §2.2 / deferred item 30-0-4 (burned down in Story 32.3): a config
+  // that hides EVERY package tool leaves the server with only the reserved
+  // discovery tool — almost certainly a misconfiguration — so startup must
+  // say so loudly.
+  it("warns when the config hides EVERY package tool, leaving only the reserved discovery tool", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    delete process.env.IRIS_TOOLS_PRESET;
+    process.env.IRIS_TOOLS_DISABLE = "iris_vis_all_a, iris_vis_all_b";
+    delete process.env.IRIS_TOOLS_ENABLE;
+    try {
+      const server = new McpServerBase({
+        name: "vis-test-all-hidden",
+        version: "0.0.0",
+        tools: [makeTool("iris_vis_all_a"), makeTool("iris_vis_all_b")],
+      });
+      // Only the reserved discovery tool remains registered.
+      expect(server.getToolNames()).toEqual([SERVER_DISCOVERY_TOOL_NAME]);
+      expect(
+        warnSpy.mock.calls.some(
+          ([msg]) =>
+            typeof msg === "string" &&
+            msg.includes("hides EVERY") &&
+            msg.includes(SERVER_DISCOVERY_TOOL_NAME),
+        ),
+      ).toBe(true);
+    } finally {
+      restoreEnv();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("warns when a preset roster hides EVERY package tool (same condition via the preset path)", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    process.env.IRIS_TOOLS_PRESET = "core";
+    delete process.env.IRIS_TOOLS_DISABLE;
+    delete process.env.IRIS_TOOLS_ENABLE;
+    const rosters: ToolPresetRosters = {
+      core: { include: [], exclude: ["iris_vis_roster_a"] },
+      developer: { include: ["iris_vis_roster_a"], exclude: [] },
+    };
+    try {
+      const server = new McpServerBase({
+        name: "vis-test-roster-all-hidden",
+        version: "0.0.0",
+        tools: [makeTool("iris_vis_roster_a")],
+        toolPresets: rosters,
+      });
+      expect(server.getToolNames()).toEqual([SERVER_DISCOVERY_TOOL_NAME]);
+      expect(
+        warnSpy.mock.calls.some(
+          ([msg]) => typeof msg === "string" && msg.includes("hides EVERY"),
+        ),
+      ).toBe(true);
+    } finally {
+      restoreEnv();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT warn when at least one package tool remains visible", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    delete process.env.IRIS_TOOLS_PRESET;
+    process.env.IRIS_TOOLS_DISABLE = "iris_vis_part_a";
+    delete process.env.IRIS_TOOLS_ENABLE;
+    try {
+      new McpServerBase({
+        name: "vis-test-partial-hidden",
+        version: "0.0.0",
+        tools: [makeTool("iris_vis_part_a"), makeTool("iris_vis_part_b")],
+      });
+      expect(
+        warnSpy.mock.calls.some(
+          ([msg]) => typeof msg === "string" && msg.includes("hides EVERY"),
+        ),
+      ).toBe(false);
+    } finally {
+      restoreEnv();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT warn for a server registering zero package tools", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    delete process.env.IRIS_TOOLS_PRESET;
+    delete process.env.IRIS_TOOLS_DISABLE;
+    delete process.env.IRIS_TOOLS_ENABLE;
+    try {
+      const server = new McpServerBase({
+        name: "vis-test-empty",
+        version: "0.0.0",
+        tools: [],
+      });
+      expect(server.getToolNames()).toEqual([SERVER_DISCOVERY_TOOL_NAME]);
+      expect(
+        warnSpy.mock.calls.some(
+          ([msg]) => typeof msg === "string" && msg.includes("hides EVERY"),
+        ),
+      ).toBe(false);
+    } finally {
+      restoreEnv();
+      warnSpy.mockRestore();
     }
   });
 });

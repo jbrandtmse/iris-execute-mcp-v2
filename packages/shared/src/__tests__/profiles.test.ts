@@ -421,6 +421,165 @@ describe("malformed IRIS_PROFILES fail-fast (AC 14.1.1)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+// 31-3-7 (Story 32.3) — host validation: URL userinfo / slashes / whitespace
+// are rejected in `host` (a host is not a URL). Shared by IRIS_PROFILES and
+// Server-Manager entries via the SAME mergeProfile validation. The error
+// deliberately does NOT echo the received value: a userinfo host can embed a
+// credential (`admin:hunter2@…`), and the message must not become the leak
+// it prevents.
+// ════════════════════════════════════════════════════════════════════
+
+describe("31-3-7 — mergeProfile host validation rejects URL userinfo, slashes, and whitespace", () => {
+  it.each([
+    "admin:hunter2@remote.example.com",
+    "https://remote.example.com",
+    "remote/example.com",
+    "remote example.com",
+    "remote\texample.com",
+  ])("IRIS_PROFILES host %j is rejected naming IRIS_PROFILES, without echoing the value", (host) => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host } }),
+    };
+    const defaultConfig = loadConfig(env);
+    let caught: unknown;
+    try {
+      buildProfileRegistry(defaultConfig, env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_PROFILES");
+    expect(message).toContain('"host"');
+    expect(message).not.toContain("hunter2");
+  });
+
+  it("a plain hostname (with dots, dashes, digits) still passes", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host: "iris-prod-01.example.com" } }),
+    };
+    const defaultConfig = loadConfig(env);
+    const registry = buildProfileRegistry(defaultConfig, env);
+    expect(registry.get("prod")?.host).toBe("iris-prod-01.example.com");
+  });
+
+  // ── 32-3-R6 (Story 32.4): the guard runs on the FINAL host — including the
+  // inherited IRIS_HOST default — and additionally rejects `\` and `:`.
+  it.each([
+    "example.com:8080", // inline port composes http://example.com:8080:52773
+    "example.com\\evil",
+    "example.com?x=1", // 32.4 review: query swallows the port (http://example.com?x=1:52773 parses with port "")
+    "example.com#frag", // same for a fragment
+    "[::1]:8080", // a bracketed IPv6 literal with an inline port is still host:port
+  ])("IRIS_PROFILES host %j is now also rejected (backslash / inline port / query / fragment), without echoing the value", (host) => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host } }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(() => buildProfileRegistry(defaultConfig, env)).toThrow(/must be a bare hostname/);
+  });
+
+  // 32.4 review: a bracketed IPv6 literal composed a VALID baseUrl before the
+  // guard existed (`http://[::1]:52773`) — rejecting it would be a Rule #19
+  // back-compat break on a working configuration, so the `:` rejection
+  // carves it out at BOTH layers (loadConfig and the IRIS_PROFILES override).
+  it("32-3-R6 (review carve-out): a bracketed IPv6 literal is accepted at both layers and composes a valid baseUrl", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "[::1]",
+      IRIS_PROFILES: JSON.stringify({ v6: { host: "[fe80::1]", username: "u", password: "p" } }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(defaultConfig.host).toBe("[::1]");
+    expect(defaultConfig.baseUrl).toBe("http://[::1]:52773");
+    // A bracketed literal parses as a valid URL with the port intact.
+    const parsed = new URL(defaultConfig.baseUrl);
+    expect(parsed.hostname).toBe("[::1]");
+    expect(parsed.port).toBe("52773");
+    const registry = buildProfileRegistry(defaultConfig, env);
+    expect(registry.get("v6")?.baseUrl).toBe("http://[fe80::1]:52773");
+    // …and a host-less entry inherits the bracketed default host untouched.
+    const inherited = buildProfileRegistry(defaultConfig, {
+      ...env,
+      IRIS_PROFILES: JSON.stringify({ inh: { username: "u", password: "p" } }),
+    });
+    expect(inherited.get("inh")?.host).toBe("[::1]");
+  });
+
+  it("32-3-R6 (review): IRIS_HOST carrying a query or fragment is rejected — the port would be silently swallowed", () => {
+    for (const host of ["example.com?x=1", "example.com#frag"]) {
+      expect(() =>
+        loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_HOST: host }),
+      ).toThrow(/IRIS_HOST must be a bare hostname/);
+    }
+  });
+
+  it("32-3-R6: a userinfo-carrying IRIS_HOST fails loadConfig fast — the reserved default profile's baseUrl can never carry it", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "admin:hunter2@remote.example.com",
+    };
+    let caught: unknown;
+    try {
+      loadConfig(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_HOST");
+    expect(message).toContain("bare hostname");
+    // The received value (which can embed a credential) is never echoed.
+    expect(message).not.toContain("hunter2");
+  });
+
+  it("32-3-R6: a host-less IRIS_PROFILES entry inheriting a hostile IRIS_HOST fails naming IRIS_PROFILES and the inherited origin", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "admin:hunter2@remote.example.com",
+      IRIS_PROFILES: JSON.stringify({ prod: { namespace: "USER" } }),
+    };
+    // loadConfig throws FIRST (the inherited-default path is guarded at the
+    // source), so the mergeProfile inherited-host guard is unreachable from
+    // real flows — defense in depth. Both layers are pinned.
+    expect(() => loadConfig(env)).toThrow(/IRIS_HOST must be a bare hostname/);
+    // Direct mergeProfile proof of the inner guard (the layer a future caller
+    // with a hand-built base would hit): the error names the profile and the
+    // inherited origin, never the received value.
+    const base = {
+      host: "admin:hunter2@remote.example.com",
+      port: 52773,
+      username: "admin",
+      password: "secret",
+      namespace: "HSCUSTOM",
+      https: false,
+      baseUrl: "http://admin:hunter2@remote.example.com:52773",
+      timeout: 60000,
+    };
+    let caught: unknown;
+    try {
+      mergeProfile("prod", base, {});
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain('"prod"');
+    expect(message).toContain("inherited default host");
+    expect(message).not.toContain("hunter2");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // AC 14.1.5 — resolveProfile(name?) + structured unknown-profile error.
 // ════════════════════════════════════════════════════════════════════
 
@@ -1258,6 +1417,108 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
     expect(message).toContain("1 definition(s) collided");
     expect(message).toContain("RESERVED profile name");
     expect(message).toContain("rename it in");
+  });
+
+  // ── 31-3-1 (Story 32.3, PAIRED DECISION with 31-4-4 — AC 32.3.4) ────────
+  // The reserved-name / collision policy, uniform on both sides of the
+  // process boundary: a collision is never silent (the aggregate warning
+  // above), and under IRIS_SERVER_MANAGER=required a settings file whose
+  // EVERY definition is discarded by a collision is a startup FAILURE —
+  // `required` means "at least one Server-Manager profile must reach the
+  // registry", not merely "the source produced definitions".
+  it("31-3-1: required mode throws when EVERY Server-Manager definition is discarded by a collision (here: the reserved \"default\")", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        default: {
+          webServer: { scheme: "https", host: "sm-default.example.com", port: 443 },
+          username: "smuser",
+          password: "smpass",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "required",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    let caught: unknown;
+    try {
+      await loadProfileRegistry(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_SERVER_MANAGER=required");
+    expect(message).toContain("collided");
+    // The remedy for the reserved name: rename the Server Manager definition.
+    expect(message).toContain("rename");
+    // Secret discipline: the colliding definition's password is never echoed.
+    expect(message).not.toContain("smpass");
+  });
+
+  it("31-3-1: required mode does NOT throw when at least one Server-Manager definition survives the collision filter", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        prod: {
+          webServer: { scheme: "https", host: "sm-prod.example.com", port: 443 },
+          username: "smuser",
+          password: "smpass",
+        },
+        unique: {
+          webServer: { scheme: "https", host: "sm-unique.example.com", port: 443 },
+          username: "smuser2",
+          password: "smpass2",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host: "env-prod.example.com" } }),
+      IRIS_SERVER_MANAGER: "required",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const registry = await loadProfileRegistry(env);
+    expect(registry.has("unique")).toBe(true);
+    expect(registry.get("prod")?.host).toBe("env-prod.example.com");
+  });
+
+  // ── 31-1-5 (Story 32.3): the pending-resolution debug summary is emitted
+  // from THIS layer, post-filter, so names discarded by the collision filter
+  // (which never reach the chain) are not counted.
+  it("31-1-5: the pending-resolution debug summary counts only profiles that actually reach the chain (post-filter)", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        shadowed: {
+          webServer: { scheme: "https", host: "shadowed.example.com", port: 443 },
+          username: "u",
+        },
+        pending: {
+          webServer: { scheme: "https", host: "pending.example.com", port: 443 },
+          username: "u",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ shadowed: { host: "env-shadowed.example.com" } }),
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    await loadProfileRegistry(env);
+
+    const debugSpy = vi.mocked(logger.debug);
+    const summaryCalls = debugSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("have no password yet"),
+    );
+    expect(summaryCalls).toHaveLength(1);
+    // "shadowed" was discarded by the collision filter BEFORE the chain — the
+    // pre-31-1-5 line (emitted inside resolveServerManagerProfiles) counted
+    // it anyway, claiming 2 profiles would be attempted.
+    expect(String(summaryCalls[0]?.[0])).toContain("1 server profile(s) have no password yet");
   });
 
   it("AC 31.3.1: ProfileClientRegistry session isolation behaves identically for a Server-Manager-sourced profile as for an env one", async () => {

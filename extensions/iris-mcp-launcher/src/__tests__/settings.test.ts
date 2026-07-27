@@ -57,6 +57,11 @@ describe("readSettings", () => {
     expect(settings.developmentRepoPath).toBe("/home/dev/repo");
   });
 
+  it("trims whitespace off governanceFile (the developmentRepoPath discipline) — a pasted trailing space otherwise renders the 'file does not exist' banner with no hint of the cause (32.2 review)", () => {
+    const settings = readSettings(fakeConfig({ governanceFile: "  C:\\governance\\policy.json \t" }));
+    expect(settings.governanceFile).toBe("C:\\governance\\policy.json");
+  });
+
   it("a developmentRepoPath of only whitespace normalizes to the empty-string default (back-compat npx path)", () => {
     const settings = readSettings(fakeConfig({ developmentRepoPath: "   " }));
     expect(settings.developmentRepoPath).toBe("");

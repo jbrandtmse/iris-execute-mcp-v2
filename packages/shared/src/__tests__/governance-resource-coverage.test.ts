@@ -195,7 +195,7 @@ function firstContentText(result: any): string {
 /** Parse the first content block of a ReadResourceResult as the policy map. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function readPolicy(result: any): Record<string, boolean> {
-  return JSON.parse(firstContentText(result)) as Record<string, boolean>;
+  return (JSON.parse(firstContentText(result)) as { policy: Record<string, boolean> }).policy;
 }
 
 /** Shared environment save/restore for hermetic runs. */

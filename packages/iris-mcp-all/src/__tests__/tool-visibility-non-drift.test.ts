@@ -229,7 +229,7 @@ async function wireToolCount(server: any): Promise<number> {
   return count;
 }
 
-/** Read a governance resource URI and parse its flat JSON policy map. */
+/** Read a governance resource URI and parse its JSON policy map. */
 async function readGovernancePolicy(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   server: any,
@@ -239,7 +239,10 @@ async function readGovernancePolicy(
     uri: `iris-governance://${profile}`,
   });
   const contents = result.contents as Array<{ text: string }>;
-  return JSON.parse(contents[0]!.text) as Record<string, boolean>;
+  // Story 32.0 (AC 32.0.3): the resource payload grew from a bare policy map
+  // to { policy, configSource } — unwrap `.policy` here.
+  return (JSON.parse(contents[0]!.text) as { policy: Record<string, boolean> })
+    .policy;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

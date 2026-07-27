@@ -28,27 +28,34 @@
  *   Server-Manager definition is represented exactly once, tagged `"resolved"`
  *   or `"unresolved"`, regardless of whether a password is yet known.
  *
- *   **31-0-1 (`seenNames` shadowing) — resolved.** An unresolved
- *   higher-precedence entry no longer permanently shadows a same-named,
- *   already-resolvable (legacy-password) entry in a lower-precedence file: a
- *   later file's entry for the same name may "rescue" an unresolved slot by
- *   overwriting it, but ONLY when the later entry is itself `"resolved"` (a
- *   later entry that is ALSO unresolved changes nothing — the first,
- *   highest-precedence unresolved candidate remains authoritative). A name
- *   already fully claimed (`"resolved"`) or permanently invalid (failed
- *   {@link mergeProfile} validation) is never reconsidered.
+ *   **31-0-1 (`seenNames` shadowing) / 31-1-2 (rescue changes the target) /
+ *   31-3-3 (terminal-invalid never reconsidered) — PAIRED DECISION, recorded
+ *   2026-07-26 in Story 32.3 (AC 32.3.4): FIRST-FILE-WINS, always.** A name's
+ *   fate is decided at its FIRST sighting across the precedence-ordered files
+ *   and is never reconsidered — whether that first sighting resolved, is
+ *   still unresolved, or failed validation. The Story-31.1 "rescue" (a
+ *   lower-precedence RESOLVED entry overwriting an UNRESOLVED
+ *   higher-precedence slot — host, port and username included, on the
+ *   strength of a deprecated inline password) is REMOVED: the credential
+ *   chain resolves by NAME, so an unresolved higher-precedence entry is the
+ *   RECOMMENDED shape (password in the OS keychain via
+ *   `iris-mcp-credentials set <name>`), not a dead one, and the rescue
+ *   silently overrode the documented discovery precedence (VS Code's own
+ *   folder > workspace > user ranking) and could move the connection TARGET
+ *   to a stale lower-precedence host. Skipping a password-bearing
+ *   lower-precedence definition is never silent: one `logger.warn` names
+ *   both files' hosts and the remedy.
  *
- *   A rescue REPLACES the whole higher-precedence definition (host, port,
- *   username, scheme), not merely its missing password — so it is announced
- *   with a `logger.warn` naming both files' hosts and the remedy
- *   (`iris-mcp-credentials set <name>` makes the higher-precedence definition
- *   win). Code review 2026-07-25 downgraded this from a silent overwrite:
- *   `"resolved"` at THIS layer only means "carries a deprecated inline
- *   password", never "is the only resolvable candidate", so the rescue can
- *   prefer a stale lower-precedence host over one the credential chain would
- *   have completed. Whether a rescue should be allowed to change the
- *   connection TARGET at all is deferred to Story 31.3, which owns collision
- *   precedence and `source` provenance.
+ *   **32-3-R1 (Story 32.4) — PD-1 covers PARSER-LEVEL drops too.** A name
+ *   whose first sighting is a structurally unusable entry (non-object, no
+ *   `webServer`, blank host — reported via
+ *   {@link ParseIntersystemsServersOptions.dropped}) is marked terminal
+ *   `"invalid"` exactly like a mergeProfile-invalid first sighting: a
+ *   lower-precedence file's VALID definition of the same name is NOT
+ *   imported. The one deliberate exception remains 31-0-2 below (an entry
+ *   skipped ONLY for lacking its own `"username"` sets no state, so a
+ *   lower-precedence entry that declares one can still claim the slot) — the
+ *   `required` check-3 message states both halves.
  *
  *   **31-0-2 (`username` inheritance) — resolved.** A Server-Manager entry
  *   that does not declare its OWN `username` is NOT IMPORTED: it is skipped
@@ -301,6 +308,12 @@ function flatpakSettingsPaths(
  * directory to find workspace files at all; that read is fully guarded and
  * degrades to contributing nothing (see {@link workspaceFileCandidates}).
  *
+ * Every candidate is ABSOLUTE (31-3-5): a relative `IRIS_SM_SETTINGS_PATHS`
+ * entry or `IRIS_SM_WORKSPACE` is resolved with the platform path module's
+ * `resolve` (against the server process's CWD), so the `sourceFile` a
+ * profile later reports is never a relative path meaningful only to the CWD
+ * the MCP *client* happened to choose.
+ *
  * @param env      - Environment map (defaults to `process.env`).
  * @param platform - Target platform (defaults to `process.platform`), injectable
  *   so every OS branch is unit-testable on any host OS.
@@ -314,19 +327,35 @@ export function discoverSettingsFiles(
   platform: NodeJS.Platform = process.platform,
   cwd: string = process.cwd(),
 ): string[] {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  // 31-3-5: resolve candidates to ABSOLUTE so `sourceFile` is never a
+  // relative path meaningful only against the server process's CWD. A
+  // candidate already absolute under EITHER path convention (a win32 drive
+  // path or a posix root path) is kept verbatim — in production the platform
+  // and every path share one convention, and the other-convention-absolute
+  // case only arises when a test simulates a foreign platform against real
+  // host temp directories (which must stay openable). 32-3-R2 (Story 32.4):
+  // the posix disjunct is spelled out EXPLICITLY rather than relying on the
+  // subtlety that `path.win32.isAbsolute("/x")` is true (win32 treats a
+  // leading slash as rooted) — the either-convention guarantee is now stated
+  // in the code, and a passthrough test pins it on every host OS.
+  const toAbsolute = (candidate: string): string =>
+    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate)
+      ? candidate
+      : p.resolve(candidate);
   const explicit = env.IRIS_SM_SETTINGS_PATHS;
   if (explicit !== undefined && explicit !== "") {
     const delimiter = platform === "win32" ? ";" : ":";
     return explicit
       .split(delimiter)
       .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
+      .filter((entry) => entry.length > 0)
+      .map(toAbsolute);
   }
 
-  const p = platform === "win32" ? path.win32 : path.posix;
   const candidates: string[] = [];
 
-  const workspaceDir = env.IRIS_SM_WORKSPACE ?? cwd;
+  const workspaceDir = toAbsolute(env.IRIS_SM_WORKSPACE ?? cwd);
   candidates.push(p.join(workspaceDir, ".vscode", "settings.json"));
 
   // A `.code-workspace` file is WORKSPACE scope, which VS Code ranks BELOW
@@ -341,14 +370,14 @@ export function discoverSettingsFiles(
 
   for (const product of SETTINGS_PRODUCTS) {
     for (const userSettingsPath of userSettingsPathsFor(product, env, platform)) {
-      candidates.push(userSettingsPath);
+      candidates.push(toAbsolute(userSettingsPath));
     }
   }
 
   // Flatpak installs last within user scope: a native install is the more
   // common case, so it wins a same-name collision against a Flatpak one.
   for (const flatpakPath of flatpakSettingsPaths(env, platform)) {
-    candidates.push(flatpakPath);
+    candidates.push(toAbsolute(flatpakPath));
   }
 
   return candidates;
@@ -399,12 +428,48 @@ function normalizePathPrefix(raw: string): string | undefined {
   return prefix === "/" ? undefined : prefix;
 }
 
+/**
+ * A normalized prefix that still contains `?`, `#`, `//`, or `:` is invalid
+ * (31-0-5): it composes a malformed `baseUrl` authority — e.g. `?debug=1`
+ * normalizes to `/?debug=1`, and `http://h:52773/?debug=1/api/atelier/…`
+ * lets the query string swallow the entire path so every call 404s with
+ * nothing pointing at `pathPrefix` as the cause. The prefix is IGNORED (the
+ * entry survives), never applied.
+ */
+function isInvalidPathPrefix(prefix: string): boolean {
+  return (
+    prefix.includes("?") ||
+    prefix.includes("#") ||
+    prefix.includes("//") ||
+    prefix.includes(":")
+  );
+}
+
 /** JSONC parse options: comments allowed (default), trailing commas allowed (AC 31.0.2), empty content allowed (an empty settings file is not malformed). */
 const JSONC_PARSE_OPTIONS = {
   disallowComments: false,
   allowTrailingComma: true,
   allowEmptyContent: true,
 };
+
+/** Options accepted by {@link parseIntersystemsServers} (31-3-2). */
+export interface ParseIntersystemsServersOptions {
+  /**
+   * The settings file being parsed, used ONLY to name it in the per-entry
+   * drop warnings. When omitted the parser stays the pure, never-logging
+   * parser Story 31.0 shipped (back-compat); `resolveServerManagerProfiles`
+   * always passes it.
+   */
+  fileLabel?: string;
+  /**
+   * Out-param: every structurally-unusable entry dropped during the parse,
+   * with the specific reason. Filled whether or not `fileLabel` is set, so
+   * the caller can COUNT the drops (a parser-level drop must not masquerade
+   * as "zero definitions found" under `required` — it is a rejected
+   * definition, and the third `required` check is the one that should fire).
+   */
+  dropped?: { name: string; reason: string }[];
+}
 
 /**
  * Parse `intersystems.servers` out of a VS Code settings file's raw text
@@ -414,20 +479,30 @@ const JSONC_PARSE_OPTIONS = {
  * and any other `/`-prefixed key are skipped (Server Manager markers, not server
  * definitions). `superServer` is ignored entirely (this suite is Atelier/web-server
  * only). An inline legacy `password` is honored (flagged via
- * {@link ParsedServerManagerEntry.legacyPassword} so the caller can warn — this
- * function itself never logs, keeping it a pure parser).
+ * {@link ParsedServerManagerEntry.legacyPassword} so the caller can warn).
  *
  * An absent/non-object `intersystems.servers` key returns an empty object with NO
  * error — a settings file with no IRIS servers is the common case, not a problem.
  *
- * Structurally unusable entries are skipped silently (this function never logs):
- * a non-object entry, an entry with no `webServer` object, an entry whose
- * `webServer.host` is not a non-empty string, and an empty/whitespace-only
- * server name. **`webServer.host` is deliberately mandatory** — Server Manager's
- * own schema requires it, and inheriting the LOCAL default host would point a
- * profile named after a remote server at `localhost` and send that entry's
- * inline password there (the mirror image of the password-inheritance guard in
- * {@link resolveServerManagerProfiles}).
+ * Structurally unusable entries are dropped: a non-object entry, an entry with
+ * no `webServer` object, an entry whose `webServer.host` is not a non-empty
+ * string, and an empty/whitespace-only server name. **`webServer.host` is
+ * deliberately mandatory** — Server Manager's own schema requires it, and
+ * inheriting the LOCAL default host would point a profile named after a remote
+ * server at `localhost` and send that entry's inline password there (the mirror
+ * image of the password-inheritance guard in {@link resolveServerManagerProfiles}).
+ * Each drop is reported via {@link ParseIntersystemsServersOptions.dropped} and,
+ * when {@link ParseIntersystemsServersOptions.fileLabel} is set, announced with
+ * ONE `logger.warn` per entry naming file + server + the specific reason
+ * (31-3-2 — pre-Story-32.3 these drops were completely silent, so under
+ * `required` the misleading "zero definitions found" check fired against the
+ * very file that defined the server). A `/`-prefixed marker key and an
+ * empty/whitespace-only NAME are NOT reported (markers are not definitions,
+ * and a blank name has nothing actionable to name).
+ *
+ * A `webServer.pathPrefix` that is still invalid after normalization
+ * (`?`/`#`/`//`/`:` — 31-0-5) is IGNORED with a warning (when `fileLabel` is
+ * set); the entry itself survives with no prefix.
  *
  * @throws {Error} When the JSONC text itself is malformed (non-empty `ParseError[]`
  *   from `jsonc-parser`) — the caller is expected to catch this, warn naming the
@@ -435,7 +510,18 @@ const JSONC_PARSE_OPTIONS = {
  */
 export function parseIntersystemsServers(
   text: string,
+  options?: ParseIntersystemsServersOptions,
 ): Record<string, ParsedServerManagerEntry> {
+  const fileLabel = options?.fileLabel;
+  /** Report one dropped entry: out-param always, warning only with a fileLabel. */
+  const reportDrop = (name: string, reason: string): void => {
+    options?.dropped?.push({ name, reason });
+    if (fileLabel !== undefined) {
+      logger.warn(
+        `IRIS_SERVER_MANAGER: skipping server "${name}" (${fileLabel}) — ${reason}.`,
+      );
+    }
+  };
   const errors: ParseError[] = [];
   // Strip a UTF-8 BOM before parsing: `jsonc-parser` reports it as an
   // `InvalidSymbol` error at offset 0 (while still returning the correct value),
@@ -505,6 +591,7 @@ export function parseIntersystemsServers(
       typeof rawEntry !== "object" ||
       Array.isArray(rawEntry)
     ) {
+      reportDrop(name, "the entry is not an object");
       continue;
     }
 
@@ -516,6 +603,7 @@ export function parseIntersystemsServers(
       Array.isArray(rawWebServer)
     ) {
       // No webServer block — not a usable connection definition.
+      reportDrop(name, "it has no \"webServer\" block");
       continue;
     }
     const webServer = rawWebServer as Record<string, unknown>;
@@ -524,7 +612,10 @@ export function parseIntersystemsServers(
     // inherit the local default host and quietly aim a remote-named profile —
     // and that entry's own inline password — at localhost.
     const rawHost = webServer["host"];
-    if (typeof rawHost !== "string" || rawHost.trim() === "") continue;
+    if (typeof rawHost !== "string" || rawHost.trim() === "") {
+      reportDrop(name, "its \"webServer.host\" is missing or blank");
+      continue;
+    }
 
     const rawScheme = webServer["scheme"];
     const override: ProfileOverride = {
@@ -555,6 +646,19 @@ export function parseIntersystemsServers(
     const rawPathPrefix = webServer["pathPrefix"];
     if (typeof rawPathPrefix === "string") {
       pathPrefix = normalizePathPrefix(rawPathPrefix);
+      // 31-0-5: an invalid prefix is IGNORED (never applied) with a warning —
+      // the entry itself survives with no prefix.
+      if (pathPrefix !== undefined && isInvalidPathPrefix(pathPrefix)) {
+        if (fileLabel !== undefined) {
+          logger.warn(
+            `IRIS_SERVER_MANAGER: ignoring "webServer.pathPrefix" ${JSON.stringify(rawPathPrefix)} ` +
+              `for server "${name}" (${fileLabel}) — a path prefix must not contain "?", "#", ` +
+              `"//" or ":" (it would compose a malformed base URL). The server is imported ` +
+              `without a path prefix.`,
+          );
+        }
+        pathPrefix = undefined;
+      }
     }
 
     result[name] = {
@@ -588,11 +692,15 @@ export function parseIntersystemsServers(
  * `credentialStatus: "unresolved"` (Story 31.1's widened contract — see the
  * module doc comment) rather than excluded; the returned array always contains
  * exactly one entry per unique, structurally-valid name, `"resolved"` or
- * `"unresolved"`. A name already defined by a higher-precedence file is skipped
- * — UNLESS the higher-precedence entry is still `"unresolved"` and this
- * lower-precedence entry is itself `"resolved"`, in which case it RESCUES the
- * slot (31-0-1; see the module doc comment) — a permanently-invalid
- * (validation-failed) or already-`"resolved"` name is never reconsidered.
+ * `"unresolved"`. A name already seen by a higher-precedence file is skipped
+ * — FIRST-FILE-WINS, always (the 31-1-2/31-3-3 paired decision, Story 32.3 —
+ * see the module doc comment): a later file's entry never replaces an earlier
+ * sighting, whether that sighting resolved, is still unresolved, failed
+ * validation, or was dropped by the parser as structurally unusable
+ * (32-3-R1 — parser drops are terminal too; the sole exception is 31-0-2's
+ * no-own-username skip, which yields to a lower-precedence entry that
+ * declares one). A password-bearing skipped definition is announced with a
+ * `logger.warn` naming both files' hosts and the remedy.
  * `IRIS_SM_SERVERS` restricts import to a comma-separated allow-list; a listed
  * name matching nothing WARNs (never fails in `auto`).
  *
@@ -606,16 +714,19 @@ export function parseIntersystemsServers(
  * `required` fails fast on THREE distinct conditions, each with its own
  * message so the operator is pointed at the right fix: (1) NO server
  * definition was found across all files (counted BEFORE both the
- * `IRIS_SM_SERVERS` allow-list and credential resolution); (2) definitions
+ * `IRIS_SM_SERVERS` allow-list and credential resolution, and INCLUDING
+ * parser-level drops — 31-3-2, so a file whose only definition is
+ * structurally unusable does not masquerade as "zero found"); (2) definitions
  * existed but the `IRIS_SM_SERVERS` allow-list matched none of them; (3)
  * definitions existed and survived the allow-list, but every single one was
- * rejected by field validation or the "own username" check, so NOTHING
- * landed in the returned array (deferred item 31-1-1's resolution — Story
- * 31.0 originally had only checks 1 and 2, so an all-invalid settings file
- * silently started the server with just the `default` profile). A definition
- * that exists, is structurally valid, and merely lacks a password does NOT
- * trip `required` here; that credential-chain-exhaustion escalation is a
- * FOURTH, separate check — AC 31.1.1's, implemented in `credential-chain.ts`
+ * rejected — by the parser (no usable `webServer.host`), by field validation,
+ * or by the "own username" check — so NOTHING landed in the returned array
+ * (deferred item 31-1-1's resolution — Story 31.0 originally had only checks
+ * 1 and 2, so an all-invalid settings file silently started the server with
+ * just the `default` profile). A definition that exists, is structurally
+ * valid, and merely lacks a password does NOT trip `required` here; that
+ * credential-chain-exhaustion escalation is a FOURTH, separate check — AC
+ * 31.1.1's, implemented in `credential-chain.ts`
  * (`resolveServerManagerCredentials`), per binding spec F1-D1 vs F1-D2. All
  * these `required` checks are DELIBERATELY kept apart (Story 31.1 Dev Notes)
  * — conflating them would make a passwordless-but-valid definition
@@ -652,14 +763,19 @@ export function resolveServerManagerProfiles(
   /** Names whose first sighting has already been counted toward consideredCount. */
   const consideredNames = new Set<string>();
   /**
-   * Per-name terminal/current state (31-0-1 rescue bookkeeping): `"resolved"`
-   * and `"invalid"` are terminal (never reconsidered); `"unresolved"` may be
-   * overwritten by a later, lower-precedence entry that resolves.
+   * Per-name terminal/current state (31-0-1 bookkeeping): `"resolved"` and
+   * `"invalid"` are terminal (never reconsidered — and since Story 32.4 /
+   * 32-3-R1 a PARSER-LEVEL drop also lands here as terminal `"invalid"`); under
+   * the 31-1-2/31-3-3 FIRST-FILE-WINS decision (Story 32.3) `"unresolved"` is
+   * terminal too in effect — a later sighting of ANY outcome keeps the
+   * higher-precedence candidate (with one warning when the skipped entry bore
+   * a password). The single documented exception is 31-0-2 (an entry skipped
+   * ONLY for lacking its own `"username"`), which deliberately sets no state
+   * so a lower-precedence entry that declares one can still claim the slot.
    */
   const nameStates = new Map<string, CredentialStatus | "invalid">();
   /** The current best {@link ServerManagerProfileResult} per name (insertion order = first-successful-sighting order). */
   const resultByName = new Map<string, ServerManagerProfileResult>();
-  let unresolvedCount = 0;
   /** Definitions discovered, counted BEFORE the allow-list filter. */
   let definitionsFound = 0;
   /** Definitions surviving the allow-list (i.e. actually considered for import). */
@@ -701,27 +817,62 @@ export function resolveServerManagerProfiles(
     }
 
     let entries: Record<string, ParsedServerManagerEntry>;
+    const parserDropped: { name: string; reason: string }[] = [];
     try {
-      entries = parseIntersystemsServers(text);
+      entries = parseIntersystemsServers(text, { fileLabel: file, dropped: parserDropped });
     } catch (e: unknown) {
       const reason = e instanceof Error ? e.message : String(e);
       logger.warn(`IRIS_SERVER_MANAGER: skipping "${file}" — ${reason}`);
       continue;
     }
 
+    // 31-3-2: parser-level drops COUNT as found/considered definitions (each
+    // already produced its own per-entry warning above naming file + server +
+    // reason). Without this, a settings file whose only definition is
+    // structurally unusable makes `required`'s FIRST check throw "zero server
+    // definitions were found. Checked: <the very file that defines prod>" —
+    // blaming the file instead of the entry — when the THIRD check ("every
+    // considered definition was rejected") is the honest one.
+    for (const drop of parserDropped) {
+      if (!seenNames.has(drop.name)) {
+        seenNames.add(drop.name);
+        definitionsFound++;
+        // 32-3-R1 (Story 32.4 — PD-1 alignment, recorded decision): a
+        // parser-level drop is a TERMINAL first sighting, exactly like a
+        // mergeProfile-invalid one. Pre-Story-32.4 the drop claimed
+        // `seenNames` (counting) but never `nameStates`, so a lower-precedence
+        // file's VALID definition of the same name was still imported —
+        // contradicting PD-1's "a name's fate is decided at its first
+        // sighting" and the check-3 message's "NOT reconsidered" note. The
+        // per-drop warning above already names the file + reason; the fix is
+        // to repair the rejected entry in the file that OWNS the first
+        // sighting, never to shadow it from a lower-precedence file.
+        nameStates.set(drop.name, "invalid");
+      }
+      if (allowList !== undefined) {
+        if (!allowList.includes(drop.name)) continue;
+        matchedAllowNames.add(drop.name);
+      }
+      if (!consideredNames.has(drop.name)) {
+        consideredNames.add(drop.name);
+        consideredCount++;
+      }
+    }
+
     for (const [name, entry] of Object.entries(entries)) {
       const priorState = nameStates.get(name);
       // Terminal states are never reconsidered: "resolved" already has a
-      // usable password, "invalid" permanently failed mergeProfile validation
-      // on its FIRST sighting (mirrors pre-31.1 per-file containment — a bad
-      // field value is not silently "fixed" by a later file without an
+      // usable password, "invalid" permanently failed on its FIRST sighting —
+      // either mergeProfile field validation or (32-3-R1) a parser-level drop
+      // in a higher-precedence file (mirrors pre-31.1 per-file containment —
+      // a bad definition is not silently "fixed" by a later file without an
       // operator noticing the original warning).
       if (priorState === "resolved" || priorState === "invalid") continue;
 
       // definitionsFound/consideredCount each count a unique NAME exactly
-      // once, at first sighting — regardless of resolution outcome — so the
-      // 31-0-1 rescue mechanism below (which DOES re-examine an unresolved
-      // name across files) never double-counts.
+      // once, at first sighting — regardless of resolution outcome — so a
+      // name re-examined across files (a lower-precedence sighting skipped
+      // under FIRST-FILE-WINS) never double-counts.
       if (!seenNames.has(name)) {
         seenNames.add(name);
         definitionsFound++;
@@ -816,29 +967,37 @@ export function resolveServerManagerProfiles(
       if (priorState === "unresolved" && credentialStatus === "unresolved") {
         // A lower-precedence entry that is ALSO unresolved adds nothing —
         // keep the existing (higher-precedence) unresolved candidate as
-        // authoritative (31-0-1: only a RESOLVED lower-precedence candidate
-        // may rescue an unresolved slot).
+        // authoritative.
         continue;
       }
 
       if (priorState === "unresolved") {
-        // 31-0-1 RESCUE. Code review 2026-07-25 (MEDIUM): this replaces the
-        // WHOLE higher-precedence definition — host, port, username, scheme —
-        // not just its missing password, and it does so on the strength of a
-        // DEPRECATED inline password while the higher-precedence entry would
-        // very likely have been completed by the credential chain (which
-        // resolves by name). Connecting to a different host than the
-        // highest-precedence settings file declares is undiagnosable in
-        // silence, so say it out loud and name both hosts.
+        // 31-1-2 + 31-3-3 PAIRED DECISION (Story 32.3, AC 32.3.4 — recorded
+        // 2026-07-26): FIRST-FILE-WINS, always. The 31-0-1 "rescue" (a
+        // lower-precedence RESOLVED entry overwriting the unresolved
+        // higher-precedence slot — host, port and username included, on the
+        // strength of a DEPRECATED inline password) is REMOVED. The
+        // credential chain resolves by NAME, so an unresolved
+        // higher-precedence entry is the RECOMMENDED shape (password in the
+        // OS keychain via `iris-mcp-credentials set <name>`), not a dead
+        // one; the rescue silently overrode the documented discovery
+        // precedence (VS Code's own folder > workspace > user ranking) and
+        // could move the connection TARGET to a stale lower-precedence host.
+        //
+        // The skip must still never be silent: a password-bearing definition
+        // was IGNORED, and the operator very likely does not know. One
+        // warning names both hosts and the remedy that completes the WINNING
+        // definition.
         const shadowed = resultByName.get(name);
         logger.warn(
           `IRIS_SERVER_MANAGER: server "${name}" is defined in more than one settings file. ` +
-            `The higher-precedence definition (host ${shadowed?.host ?? "?"}) carries no ` +
-            `password of its own, so the lower-precedence definition from "${file}" (host ` +
-            `${profile.host}) is imported INSTEAD — including its host, port and username. ` +
-            `Store a password for "${name}" (iris-mcp-credentials set ${name}) to make the ` +
-            `higher-precedence definition win.`,
+            `First-file-wins: the higher-precedence definition (host ${shadowed?.host ?? "?"}) ` +
+            `stays authoritative, and the lower-precedence definition from "${file}" (host ` +
+            `${profile.host}) — including its inline password — is IGNORED. Store a password ` +
+            `for "${name}" (iris-mcp-credentials set ${name}) to complete the higher-precedence ` +
+            `definition, or remove that definition to import this one.`,
         );
+        continue;
       }
 
       nameStates.set(name, credentialStatus);
@@ -857,19 +1016,11 @@ export function resolveServerManagerProfiles(
   }
 
   const results = [...resultByName.values()];
-  unresolvedCount = results.filter((r) => r.credentialStatus === "unresolved").length;
-
-  if (unresolvedCount > 0) {
-    // Informational, not final: Story 31.1's credential chain
-    // (`credential-chain.ts`, invoked from `loadProfileRegistry`) still gets a
-    // shot at env/keychain/helper resolution for each of these. Only that
-    // chain's own per-profile exhaustion log (or the `required` throw) is the
-    // terminal word on whether a name actually ends up usable.
-    logger.debug(
-      `IRIS_SERVER_MANAGER: ${unresolvedCount} server profile(s) have no password yet; ` +
-        `the credential chain (env, OS keychain, credential helper) will attempt resolution.`,
-    );
-  }
+  // 31-1-5 (Story 32.3): no pending-resolution summary is emitted HERE — this
+  // layer cannot see loadProfileRegistry's registry-shadow filter, so its
+  // count included entries discarded one call later that never reached the
+  // chain. The (post-filter) summary now lives in loadProfileRegistry
+  // (`profiles.ts`), immediately before the chain actually runs.
 
   if (mode === "required" && definitionsFound === 0) {
     throw new Error(
@@ -911,10 +1062,13 @@ export function resolveServerManagerProfiles(
   if (mode === "required" && results.length === 0) {
     throw new Error(
       `IRIS_SERVER_MANAGER=required but ${consideredCount} server definition(s) were ` +
-        `considered and NONE could be imported — every one was rejected (an invalid field ` +
-        `value, or no "username" of its own; see the warning logged above for the specific ` +
-        `reason for each). Fix the offending intersystems.servers entries, or set ` +
-        `IRIS_SERVER_MANAGER=auto/off.`,
+        `considered and NONE could be imported — every one was rejected (a structurally ` +
+        `unusable entry, an invalid field value, or no "username" of its own; see the warning ` +
+        `logged above for the specific reason for each). Note: a name whose first sighting was ` +
+        `structurally unusable or failed field validation is NOT reconsidered in lower-precedence ` +
+        `files (32-3-R1); only an entry skipped solely for lacking its own "username" yields to ` +
+        `a lower-precedence entry that declares one. Fix the offending ` +
+        `intersystems.servers entries, or set IRIS_SERVER_MANAGER=auto/off.`,
     );
   }
 

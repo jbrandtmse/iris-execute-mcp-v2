@@ -1095,8 +1095,23 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
 
   // Gate 4 -- TARGET-PROFILE governance. Pure env reads + the shared
   // governance engine -- NO IRIS connection is made for this gate, so a
-  // denial here mutates nothing and costs no network round-trip.
+  // denial here mutates nothing and costs no network round-trip. Story 32.0:
+  // the file channel (IRIS_GOVERNANCE_FILE) is threaded as the final
+  // effective() argument, so a write-family key disabled ONLY in the file is
+  // honored here too (this inner gate is the ONLY governance check on the
+  // family keys -- execute re-fetches via profile clients directly, never
+  // through handleToolCall). Story 32.1 (deferred item 32-0-1, TERMINAL):
+  // the file config comes from the STARTUP SNAPSHOT threaded through
+  // ToolContext -- the SAME frozen view the D5 gate, the iris-governance://
+  // resource, and iris_server_profiles all use -- NEVER a per-call
+  // loadGovernanceFile() re-read. The documented contract is "read once at
+  // startup; restart to apply (no hot-reload in v1)"; a per-call re-read
+  // honored a mid-session file edit at exactly this one enforcement point
+  // while every other surface reported the old value (in both directions).
+  // A ToolContext built without the field (direct unit-test construction)
+  // yields undefined = no file = byte-for-byte the pre-Epic-32 behavior.
   const governanceConfig = parseGovernanceConfig();
+  const governanceFileConfig = ctx.governanceFileConfig;
   const preset = parseGovernancePreset();
   const checkedKeys = new Set<string>();
   for (const step of orderedAllowed) {
@@ -1112,6 +1127,7 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
         new Set<string>(),
         preset,
         BASELINE_ACTION_CLASSIFICATIONS,
+        governanceFileConfig,
       );
       if (!enabled) {
         return validationError(

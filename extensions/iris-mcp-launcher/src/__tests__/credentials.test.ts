@@ -197,7 +197,7 @@ describe("resolveServerCredentials", () => {
     if (result.status === "resolved") expect(result.profile.username).toBe("acctUser");
   });
 
-  it("degenerate case: ALL THREE fallback levels empty/falsy resolves to an empty-string username rather than throwing — documents a downstream risk: packages/shared/src/profiles.ts's mergeProfile REJECTS an empty username inside IRIS_PROFILES, so this extension does not itself guard against spawning a server with an unusable identity", async () => {
+  it("31-4-3 (Story 32.3 — DECISION (a), refuse-with-message): ALL THREE fallback levels empty/falsy returns {status:\"no-username\"} — an empty username is REFUSED, never passed through (an empty IRIS_PROFILES username aborts packages/shared's mergeProfile, which would take down every profile in a combineProfiles child)", async () => {
     const spec = makeSpec({ username: "" });
     const api = makeApi(spec);
     const auth = makeAuth(() =>
@@ -205,8 +205,18 @@ describe("resolveServerCredentials", () => {
     );
 
     const result = await resolveServerCredentials(api, auth, "myServer", "USER");
-    expect(result.status).toBe("resolved");
-    if (result.status === "resolved") expect(result.profile.username).toBe("");
+    expect(result.status).toBe("no-username");
+  });
+
+  it("31-4-3: the inline-password branch refuses an empty username too (spec.password set, spec.username absent)", async () => {
+    const spec = makeSpec({ username: undefined, password: "SYS" });
+    const api = makeApi(spec);
+    const auth = makeAuth(() => {
+      throw new Error("must not be called when spec already has a password");
+    });
+
+    const result = await resolveServerCredentials(api, auth, "myServer", "USER");
+    expect(result.status).toBe("no-username");
   });
 
   it("passes the enumerated configuration scope and hideFromRecents back to getServerSpec (multi-root correctness + no Recent-list pollution)", async () => {

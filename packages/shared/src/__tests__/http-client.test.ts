@@ -351,7 +351,7 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
 
-    it("should warn when preflight HEAD succeeds but returns no CSRF token", async () => {
+    it("31-7-1: should log at DEBUG (not WARN) when preflight HEAD succeeds but returns no CSRF token — expected on a stock Atelier endpoint", async () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);
       const consoleSpy = vi.spyOn(console, "error");
@@ -374,10 +374,16 @@ describe("IrisHttpClient", () => {
 
       await client.post("/api/create", { data: 1 });
 
-      // Verify warning was logged about missing CSRF token
+      // The condition is logged — accurately, at DEBUG level (31-7-1: the
+      // token is legitimately absent on a stock Atelier endpoint, probed live
+      // 2026-07-26 + InterSystems docs) — and NOT as a WARN, which fired on
+      // every server start for a condition that blocks nothing.
       const allCalls = consoleSpy.mock.calls.map((c) => c.map(String).join(" "));
-      const csrfWarning = allCalls.some((msg) => msg.includes("CSRF preflight completed but no X-CSRF-Token"));
-      expect(csrfWarning).toBe(true);
+      const csrfNote = allCalls.find((msg) => msg.includes("CSRF preflight completed but no X-CSRF-Token"));
+      expect(csrfNote).toBeDefined();
+      expect(csrfNote).toContain("[DEBUG]");
+      expect(csrfNote).toContain("expected on a stock Atelier endpoint");
+      expect(allCalls.some((msg) => msg.includes("[WARN]") && msg.includes("CSRF"))).toBe(false);
 
       // POST should still proceed (without CSRF token)
       expect(fetchMock).toHaveBeenCalledTimes(2);

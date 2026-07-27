@@ -35,8 +35,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError, ProfileResolutionError } from "@iris-mcp/shared";
+import { IrisApiError, ProfileResolutionError, loadGovernanceFile } from "@iris-mcp/shared";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
@@ -133,6 +136,9 @@ describe("iris_env_promote:execute", () => {
   // `McpServerBase.start()`'s own parse). Restoring it after EVERY test here
   // (not just the ones that set it) is more robust than scattered
   // try/finally blocks -- no test can leak governance state into a sibling.
+  // (The FILE channel is different: since Story 32.1 / deferred item 32-0-1
+  // Gate 4 reads the STARTUP SNAPSHOT via `ctx.governanceFileConfig`, never
+  // the process env or the file itself -- tests thread it through the ctx.)
   afterEach(() => {
     if (originalGovernance === undefined) delete process.env.IRIS_GOVERNANCE;
     else process.env.IRIS_GOVERNANCE = originalGovernance;
@@ -277,6 +283,115 @@ describe("iris_env_promote:execute", () => {
       } finally {
         if (originalGovernance === undefined) delete process.env.IRIS_GOVERNANCE;
         else process.env.IRIS_GOVERNANCE = originalGovernance;
+      }
+    });
+
+    it("Gate 4 honors the FILE channel (Story 32.0/32.1): a write key disabled ONLY in the startup-snapshot file config refuses, resolving NO client", async () => {
+      // Gate 4 is the ONLY governance check on the write-family keys (execute
+      // re-fetches via profile clients directly, never through handleToolCall),
+      // so a file-layer disable must be honored here -- this is the regression
+      // proof that Gate 4 evaluates the same 6-layer cascade as the D5 gate.
+      // Since Story 32.1 (32-0-1) the file config reaches Gate 4 as the
+      // STARTUP SNAPSHOT via ctx.governanceFileConfig -- built here with the
+      // REAL loader, so the file -> snapshot -> Gate 4 wiring stays in the loop.
+      const dir = mkdtempSync(join(tmpdir(), "iris-gov-gate4-"));
+      const filePath = join(dir, "governance.json");
+      writeFileSync(
+        filePath,
+        JSON.stringify({
+          profiles: { target: { "iris_config_manage:set": false } },
+        }),
+        "utf8",
+      );
+      const snapshot = loadGovernanceFile({ IRIS_GOVERNANCE_FILE: filePath });
+      expect(snapshot).toBeDefined();
+      if (snapshot !== undefined) ctx.governanceFileConfig = snapshot;
+      try {
+        const diff = fourStepDiff();
+        const plan = await buildPlan(diff);
+        const configStep = plan.steps.find((s) => s.operation === "setConfig");
+        expect(configStep).toBeDefined();
+
+        const result = await envPromoteTool.handler(
+          {
+            action: "execute",
+            source: "source",
+            target: "target",
+            diff,
+            plan,
+            steps: [configStep!.index],
+            confirm: true,
+          },
+          ctx,
+        );
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("iris_config_manage:set");
+        expect(result.content[0]?.text).toContain("target");
+        expect(ctx.resolveProfileClient).not.toHaveBeenCalled();
+        expect(targetHttp.post).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("Gate 4 reads the STARTUP SNAPSHOT, never re-reads the file (32-0-1 TERMINAL): a file edited after startup does NOT change the verdict", async () => {
+      // The documented contract is "read once at startup; restart to apply
+      // (no hot-reload in v1)" -- uniform across the D5 gate, the resource,
+      // iris_server_profiles, AND Gate 4. The defect being pinned: Gate 4
+      // used to call loadGovernanceFile() per execute call, honoring a
+      // mid-session edit at exactly this one enforcement point.
+      //
+      // Setup: the startup snapshot DISABLES the key; the on-disk file is
+      // then REWRITTEN to re-enable it. The verdict must STILL refuse -- a
+      // per-call re-read would now allow and proceed to resolve clients.
+      // (Mutation check, run during dev: restoring `loadGovernanceFile()`
+      // in Gate 4 turns this test red.)
+      const dir = mkdtempSync(join(tmpdir(), "iris-gov-gate4-snapshot-"));
+      const filePath = join(dir, "governance.json");
+      writeFileSync(
+        filePath,
+        JSON.stringify({
+          profiles: { target: { "iris_config_manage:set": false } },
+        }),
+        "utf8",
+      );
+      // "Startup": the snapshot is parsed ONCE via the real loader…
+      const snapshot = loadGovernanceFile({ IRIS_GOVERNANCE_FILE: filePath });
+      expect(snapshot).toBeDefined();
+      if (snapshot !== undefined) ctx.governanceFileConfig = snapshot;
+      // …and a mid-session edit RE-ENABLES the key on disk (also proves Gate
+      // 4 performs zero filesystem access of its own: a re-read would parse
+      // this NEW content, or throw if it were malformed).
+      writeFileSync(filePath, JSON.stringify({}), "utf8");
+      try {
+        const diff = fourStepDiff();
+        const plan = await buildPlan(diff);
+        const configStep = plan.steps.find((s) => s.operation === "setConfig");
+        expect(configStep).toBeDefined();
+
+        const result = await envPromoteTool.handler(
+          {
+            action: "execute",
+            source: "source",
+            target: "target",
+            diff,
+            plan,
+            steps: [configStep!.index],
+            confirm: true,
+          },
+          ctx,
+        );
+
+        // Still refused per the snapshot: the mid-session edit is honored
+        // NOWHERE until restart.
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("Gate 4");
+        expect(result.content[0]?.text).toContain("iris_config_manage:set");
+        expect(ctx.resolveProfileClient).not.toHaveBeenCalled();
+        expect(targetHttp.post).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     });
 

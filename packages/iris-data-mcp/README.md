@@ -37,6 +37,8 @@ All servers use the same environment variables:
 
 Optionally, set `IRIS_PROFILES` (a JSON map of named IRIS instances) and `IRIS_GOVERNANCE` (a JSON tool-action policy) to target several instances from one server and restrict which actions are allowed. Every tool accepts an optional `server` parameter (a profile name from `IRIS_PROFILES`) that selects which instance the call targets; omit it to use the `default` profile. It composes with the existing per-call `namespace` override. Both variables are **optional and additive** — omit them and this server behaves exactly as a single-instance, fully-enabled install. Full model, escaping, and worked examples: [Multiple Servers & Governance](../../README.md#multiple-servers--governance).
 
+Optionally, set `IRIS_GOVERNANCE_FILE` to the path of a JSON file of the same shape as `IRIS_GOVERNANCE` to load policy from a file shared across several MCP clients instead of inline JSON. **Optional and additive** — unset (the default) means inert: no file is ever read and behavior is byte-for-byte unchanged. An `IRIS_GOVERNANCE` env value always wins over the file. Details: [Governance file](../../README.md#governance-file-iris_governance_file).
+
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
 This server's 7 tools are already inside the researched 5-15-tool sweet spot, so `IRIS_TOOLS_PRESET=core` and `=developer` both keep all **8 runtime tools** (7 + `iris_server_profiles`) visible — `iris-data-mcp` is unaffected by any preset. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` still work here to hide/force-show individual tools independent of the preset. Full model and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).

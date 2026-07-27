@@ -43,6 +43,7 @@ import {
   resolveProfile,
   type IrisProfile,
   type ProfileRegistry,
+  type ProfileSource,
 } from "../profiles.js";
 import { IrisHttpClient } from "../http-client.js";
 import { checkHealth } from "../health.js";
@@ -71,6 +72,15 @@ export interface KeyringPort {
   getPassword(account: string): string | null;
   /** `false` when there was nothing to delete (verified live — `deleteCredential()` returns `false`, never throws, for a missing entry). */
   deleteCredential(account: string): boolean;
+  /**
+   * Whether a password EXISTS for `account`, without the value crossing into
+   * CLI logic (31-2-4) — used so `set` can report create vs replace. The
+   * native API has no exists call, so the production implementation reads
+   * the value inside the port and discards it immediately (the lightest
+   * available probe — `findCredentials` would pull EVERY stored secret); only
+   * the boolean is exposed.
+   */
+  exists(account: string): boolean;
   /**
    * Enumerate every credential under this port's service.
    *
@@ -123,6 +133,11 @@ async function loadRealKeyring(service: string): Promise<KeyringPort> {
     },
     deleteCredential(account: string): boolean {
       return new keyringModule.Entry(service, account).deleteCredential();
+    },
+    exists(account: string): boolean {
+      // No native exists call (see KeyringPort.exists): read-and-discard is
+      // the lightest probe available; the value never leaves this closure.
+      return new keyringModule.Entry(service, account).getPassword() !== null;
     },
     listCredentials(): KeyringCredential[] {
       return keyringModule.findCredentials(service);
@@ -329,18 +344,72 @@ export function promptPasswordFromStream(
  * empty-input guard silently absorbs, so `set` reported success and every
  * later authentication failed against a value differing from what the user
  * typed (code review 2026-07-25, reproduced live).
+ *
+ * Two input guards (Story 32.3):
+ *
+ * - **64 KiB cap (31-2-5).** A misdirected pipe (`cat bigfile | \u2026 set x
+ *   --stdin`) used to be an unbounded allocation; it now fails naming the
+ *   cap and the likely cause. 64 KiB is deliberately generous \u2014 far beyond
+ *   any real passphrase \u2014 so it only ever trips on a file piped in by
+ *   mistake. 32-3-R13 (Story 32.4): the cap is measured on the PASSWORD
+ *   after the single-trailing-newline strip (the stream reader allows the
+ *   newline's 1\u20132 bytes of slack), so a boundary-length password with its
+ *   newline is accepted, and an over-cap password is rejected with the
+ *   accurate cause rather than the file-pipe message.
+ * - **NUL rejection (31-2-6).** A decoded password containing U+0000 means
+ *   the input was almost certainly UTF-16 (what PowerShell's `Out-File`
+ *   produces on some hosts): stored NUL-interleaved, it would "succeed" here
+ *   and fail every later authentication with no diagnosable cause. REJECTED
+ *   \u2014 never transcoded; encoding-guessing can misfire on a legitimate
+ *   password containing the bytes a heuristic keys off.
  */
 async function readStdinPassword(stream: Readable): Promise<string> {
+  const STDIN_PASSWORD_CAP_BYTES = 64 * 1024;
+  // 32-3-R13 (Story 32.4): the stream cap carries +2 bytes of slack so a
+  // boundary-length password plus its SINGLE trailing newline (\n or \r\n —
+  // stripped below) is not misdiagnosed as a piped-in file. The cap the
+  // operator reads about is on the PASSWORD; the newline is framing.
+  const STREAM_CAP_BYTES = STDIN_PASSWORD_CAP_BYTES + 2;
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of stream) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : (chunk as Buffer));
+    const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : (chunk as Buffer);
+    total += buf.length;
+    if (total > STREAM_CAP_BYTES) {
+      throw new Error(
+        // 32.4 review (Edge L1): name BOTH causes \u2014 an over-cap password with
+        // its trailing newline also lands here (1\u20132 wire bytes past the
+        // slack), and blaming only a piped-in file misdiagnoses it.
+        `stdin input exceeds the 64 KiB password limit (even allowing 2 bytes of newline slack) \u2014 ` +
+          `the password itself is too long, or a file was piped in by ` +
+          `mistake ("cat bigfile | iris-mcp-credentials set <name> --stdin"). Pipe only the password itself.`,
+      );
+    }
+    chunks.push(buf);
   }
   let text = Buffer.concat(chunks).toString("utf8");
   if (text.startsWith("\uFEFF")) text = text.slice(1);
+  if (text.includes("\u0000")) {
+    throw new Error(
+      `the decoded password contains a NUL (U+0000) character \u2014 the input was probably ` +
+        `UTF-16-encoded (PowerShell's Out-File writes UTF-16 on some hosts). Re-encode as UTF-8 ` +
+        `(e.g. -Encoding utf8) or pipe from printf, and try again.`,
+    );
+  }
   if (text.endsWith("\r\n")) {
     text = text.slice(0, -2);
   } else if (text.endsWith("\n")) {
     text = text.slice(0, -1);
+  }
+  // 32-3-R13: after the newline strip, the PASSWORD ITSELF is measured — a
+  // boundary-length password with its newline is accepted, an over-cap
+  // password is rejected with the ACCURATE cause (never the file-pipe
+  // message).
+  if (Buffer.byteLength(text, "utf8") > STDIN_PASSWORD_CAP_BYTES) {
+    throw new Error(
+      `the password exceeds the 64 KiB limit (its trailing newline is not counted). ` +
+        `Pipe only the password itself.`,
+    );
   }
   return text;
 }
@@ -609,18 +678,32 @@ async function cmdSet(args: string[], deps: ResolvedDeps): Promise<number> {
   }
 
   try {
+    // 31-2-4: create vs replace is meaningful information for a tool whose
+    // worst failure mode is "the wrong password is stored" — read existence
+    // (a boolean, never the value) BEFORE the write.
+    //
+    // 32-3-R13 (Story 32.4 — recorded decision): the exists()-then-setPassword
+    // pair is deliberately NOT made atomic. The keychain write itself is
+    // atomic at the OS level and the stored VALUE is correct either way;
+    // under a concurrent writer to the same account the only casualty is the
+    // human-facing verb ("Stored" vs "Replaced") — message-only. The
+    // KeyringPort contract added in 31-2-4 exposes existence as a boolean
+    // probe precisely because no check-and-set primitive exists across the
+    // supported keychains.
+    const replaced = keyring.exists(serverName);
     keyring.setPassword(serverName, password);
+    deps.stdout.write(
+      replaced
+        ? `Replaced the existing password for "${serverName}" in the OS keychain (service "${CREDENTIAL_CHAIN_KEYCHAIN_SERVICE}").\n`
+        : `Stored a password for "${serverName}" in the OS keychain (service "${CREDENTIAL_CHAIN_KEYCHAIN_SERVICE}").\n`,
+    );
+    return 0;
   } catch (e: unknown) {
     deps.stderr.write(
       `Error: could not write to the OS keychain for "${serverName}" — ${redactSecret(errorMessage(e), password)}\n`,
     );
     return 1;
   }
-
-  deps.stdout.write(
-    `Stored a password for "${serverName}" in the OS keychain (service "${CREDENTIAL_CHAIN_KEYCHAIN_SERVICE}").\n`,
-  );
-  return 0;
 }
 
 async function cmdDelete(args: string[], deps: ResolvedDeps): Promise<number> {
@@ -737,8 +820,25 @@ async function cmdList(args: string[], deps: ResolvedDeps): Promise<number> {
 }
 
 interface ConnectOutcome {
+  /**
+   * Whether the HTTP probe actually ran (31-2-3). `false` BOTH when the
+   * credential was unresolved AND when registry mapping failed before any
+   * HTTP call — the two "probe never ran" cases — so `attempted`/`ok` read as
+   * a pair can always distinguish "the probe failed" from "the probe never
+   * ran".
+   */
   attempted: boolean;
-  ok: boolean;
+  /** `null` when `attempted` is `false` (31-2-3): "never ran" is not "failed". */
+  ok: boolean | null;
+  /**
+   * WHICH password the probe exercised (31-2-1): the provenance of the
+   * REGISTRY profile whose password `connectFn` authenticated with — which
+   * is the credential the servers would actually use, and can differ from
+   * the chain-resolved one reported in `source` (e.g. a stale env password
+   * resolves link 1 while the registry maps a different keychain password).
+   * Absent when no profile was resolved (registry-mapping failure).
+   */
+  credentialSource?: ProfileSource;
   error?: string;
 }
 
@@ -798,7 +898,7 @@ async function cmdTest(args: string[], deps: ResolvedDeps): Promise<number> {
     if (!resolved) {
       connect = {
         attempted: false,
-        ok: false,
+        ok: null,
         error: "No credential was resolved via the chain; skipping the connectivity check.",
       };
     } else {
@@ -806,7 +906,8 @@ async function cmdTest(args: string[], deps: ResolvedDeps): Promise<number> {
       // catch clause can still redact its password, even though
       // `resolveProfile`/`connectFn` are what threw. `stage` distinguishes a
       // registry-mapping failure (no HTTP call was made — the operator needs
-      // a DIFFERENT remedy) from a genuine connectivity failure.
+      // a DIFFERENT remedy, and 31-2-3 reports attempted:false/ok:null for
+      // it) from a genuine connectivity failure (attempted:true/ok:false).
       let profile: IrisProfile | undefined;
       let stage: "registry" | "connect" = "registry";
       try {
@@ -814,7 +915,10 @@ async function cmdTest(args: string[], deps: ResolvedDeps): Promise<number> {
         profile = resolveProfile(registry, serverName);
         stage = "connect";
         await deps.connectFn(profile);
-        connect = { attempted: true, ok: true };
+        // 31-2-1: record WHICH password the probe exercised — the registry
+        // profile's, with its provenance — not necessarily the chain-resolved
+        // one reported in `source`.
+        connect = { attempted: true, ok: true, credentialSource: profile.source ?? "env" };
       } catch (e: unknown) {
         // Redact against EVERY known secret, not just `profile.password` —
         // which is `undefined` precisely on the branch that matters, a throw
@@ -828,8 +932,14 @@ async function cmdTest(args: string[], deps: ResolvedDeps): Promise<number> {
           envPassword,
         ]);
         connect = {
-          attempted: true,
-          ok: false,
+          // 31-2-3: a registry-stage failure means the probe never ran —
+          // attempted:false/ok:null, indistinguishable from a genuine
+          // connectivity failure no longer.
+          attempted: stage === "connect",
+          ok: stage === "connect" ? false : null,
+          ...(profile !== undefined
+            ? { credentialSource: profile.source ?? ("env" as ProfileSource) }
+            : {}),
           error:
             stage === "registry"
               ? `${safeMessage} ${connectRemediationText(serverName)}`
@@ -854,12 +964,21 @@ async function cmdTest(args: string[], deps: ResolvedDeps): Promise<number> {
     deps.stdout.write(`"${serverName}": resolved via ${source} link.\n`);
     if (connect !== undefined) {
       if (connect.ok) {
-        deps.stdout.write(`"${serverName}": connect OK (HEAD /api/atelier/ succeeded).\n`);
+        // 31-2-1: name WHICH password the probe exercised — the registry
+        // profile's, whose provenance can differ from the chain-resolved
+        // credential named on the line above.
+        deps.stdout.write(
+          `"${serverName}": connect OK (HEAD /api/atelier/ succeeded; probed the registry profile's password, source: ${connect.credentialSource ?? "env"}).\n`,
+        );
       } else {
         // Failures go to stderr like every other failure in this CLI, so
         // `test <name> --connect > result.txt` does not swallow the
-        // diagnostic (code review 2026-07-25).
-        deps.stderr.write(`"${serverName}": connect FAILED — ${connect.error}\n`);
+        // diagnostic (code review 2026-07-25). 31-2-3 (Story 32.3 code
+        // review): "the probe never ran" (attempted:false/ok:null — a
+        // registry-mapping failure) is NOT "connect FAILED"; say SKIPPED,
+        // mirroring the unresolved branch below.
+        const label = connect.attempted ? "connect FAILED" : "connect SKIPPED";
+        deps.stderr.write(`"${serverName}": ${label} — ${connect.error}\n`);
       }
     }
   } else {

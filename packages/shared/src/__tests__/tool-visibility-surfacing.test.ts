@@ -175,6 +175,55 @@ function discoveryOf(result: any): ServerDiscoveryResult {
   return result.structuredContent as ServerDiscoveryResult;
 }
 
+/**
+ * Exact-name absence assertion (deferred item 30-2-1, burned down in Story
+ * 32.3): the hidden tool's NAME must appear NOWHERE in the discovery output —
+ * not as an exact string value, not as an exact object key, and not as the
+ * tool component of a composite `tool:action` governance key (tool names
+ * never contain `:`). The previous substring form (`not.toContain(name)`)
+ * would false-FAIL the day a VISIBLE tool's name merely CONTAINS the hidden
+ * one (e.g. a future `iris_global_get_extended` alongside a hidden
+ * `iris_global_get`). Applied to the parsed structuredContent — the result's
+ * text block is `JSON.stringify(discovery, null, 2)` of the same object
+ * (server-base.ts), so walking the parsed object covers the raw text too.
+ */
+function expectToolNameAbsent(value: unknown, name: string): void {
+  if (typeof value === "string") {
+    expect(value).not.toBe(name);
+    // 32-3-R10 (Story 32.4): the same composite-key check the object-KEY
+    // branch applies — a future surface serializing governance keys as
+    // STRING VALUES (e.g. `["iris_hidden_tool:read"]` in an array) must not
+    // slip a `tool:action` leak past an exact-equality-only check.
+    expect(value.startsWith(`${name}:`)).toBe(false);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) expectToolNameAbsent(item, name);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      expect(key).not.toBe(name);
+      expect(key.startsWith(`${name}:`)).toBe(false);
+      expectToolNameAbsent(nested, name);
+    }
+  }
+}
+
+describe("expectToolNameAbsent — the walker itself (32-3-R10)", () => {
+  it("catches a composite tool:action leak in a string VALUE, not only exact values and object keys", () => {
+    expect(() =>
+      expectToolNameAbsent({ keys: ["iris_hidden_tool:read"] }, "iris_hidden_tool"),
+    ).toThrow();
+    // …and still passes a clean shape, including a LONGER name that merely
+    // shares the hidden name as a prefix (the 30-2-1 anti-substring bar).
+    expectToolNameAbsent(
+      { keys: ["iris_other:read", "iris_hidden_tool_extra"] },
+      "iris_hidden_tool",
+    );
+  });
+});
+
 function makeEnvHarness() {
   let fetchMock: ReturnType<typeof vi.fn>;
   const originalFetch = globalThis.fetch;
@@ -286,10 +335,9 @@ describe("Story 30.2 — toolVisibility block on iris_server_profiles (AC 30.2.1
     });
 
     // Counts only — the hidden tool's NAME must never appear anywhere in the
-    // full serialized discovery output (spec §2.6, AC 30.2.1).
-    const fullText = (result.content as Array<{ text: string }>)[0]!.text;
-    expect(fullText).not.toContain("iris_global_get");
-    expect(JSON.stringify(discovery)).not.toContain("iris_global_get");
+    // full serialized discovery output (spec §2.6, AC 30.2.1). Exact-match
+    // form (30-2-1): the text block serializes this same object.
+    expectToolNameAbsent(discovery, "iris_global_get");
   });
 
   it("under an IRIS_TOOLS_DISABLE-driven config (no preset): counts reflect it, hidden NAME never leaks", async () => {
@@ -308,7 +356,7 @@ describe("Story 30.2 — toolVisibility block on iris_server_profiles (AC 30.2.1
       visibleTools: 2,
       hiddenTools: 1,
     });
-    expect(JSON.stringify(discovery)).not.toContain("iris_global_get");
+    expectToolNameAbsent(discovery, "iris_global_get");
   });
 });
 
@@ -496,6 +544,6 @@ describe("Story 30.2 — toolVisibility counts track addTools/removeTools (revie
       visibleTools: 2,
       hiddenTools: 1,
     });
-    expect(JSON.stringify(discovery)).not.toContain("iris_review_hidden_add");
+    expectToolNameAbsent(discovery, "iris_review_hidden_add");
   });
 });
