@@ -8,3 +8,4 @@
 2026-07-27T20:40:00Z	Story 33.0	qa_complete	spawn_at=2026-07-27T20:21:00Z model=claude-sonnet-5 tests=packages/client-config/src/__tests__/e2e.test.ts tests_added=21 clarifications=0 closing_sections_present=true
 2026-07-27T21:35:00Z	Story 33.0	cr_complete	spawn_at=2026-07-27T20:41:00Z model=claude-opus-5 resolved=3 deferred=0 dismissed=4 high=1 med=1 low=0 clarifications=0 closing_sections_present=true note=review-layers-silent-again
 2026-07-27T21:50:00Z	Story 33.0	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=dist-detect-status-diff-roundtrip model=claude-fable-5
+2026-07-27T21:55:00Z	Story 33.0	committed	sha=5ffa161 submodules=
