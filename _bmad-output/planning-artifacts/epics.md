@@ -4386,6 +4386,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 32.0 `IRIS_GOVERNANCE_FILE` loader + cascade + attribution + back-compat proof
 - 32.1 `iris-mcp-governance` CLI
 - 32.2 Extension governance UI
+- 32.4 Late review-layer findings cleanup (added 2026-07-27 — terminal handling for the 22 Epic-32-own items triaged from review layers that returned AFTER their stories' reviews had closed: 32-3-R1…R15, 32-1-R1…R7, 32-2-R1; **executes LAST**, after 32.2)
 
 **Out of scope (v1)**: file watch/hot-reload; per-agent governance divergence tooling (the point is convergence); any governance channel not readable by the servers themselves; moving enforcement out of `dispatchToolCall`.
 
@@ -4429,6 +4430,16 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 32.3.4** — Paired questions decided ONCE, not patched per-side: `31-3-1` + `31-4-4` (reserved name `default`, one policy across both sides of the process boundary) and `31-3-3` + `31-1-2` (the precedence/rescue question) each get a single recorded decision applied uniformly.
 - **AC 32.3.5** — The full disposition table is mirrored into `deferred-work.md` with per-item evidence references; every summary tally is derived MECHANICALLY (grep/awk over the disposition column) and cross-checked against any prose count before close (Rule #51 — Story 29.3's off-by-6 hand-count is the standing counterexample).
 - **AC 32.3.6** — Back-compat gates green at close: `pnpm turbo run build test lint type-check` all green; `pnpm gen:governance-baseline:check` (the `:check` ONLY, Rule #25) exit 0 with the frozen baseline `1e62c5ad5bf7` byte-unchanged (Rules #23/#25); no tool count moves (Rule #31); extension suite (`extensions/iris-mcp-launcher`) green. No `bootstrap-classes.ts` / `BOOTSTRAP_VERSION` / `src/ExecuteMCPv2/**` change is expected — if any item's resolution genuinely requires ObjectScript, HALT and surface to the lead before proceeding.
+
+### Story 32.4: Late Review-Layer Findings Cleanup (added 2026-07-27)
+
+**Executes LAST in Epic 32.** Epic 32's code reviews suffered a repeated infrastructure failure: the three adversarial review layers (blind-hunter / edge-case-hunter / acceptance-auditor) failed to return before their reviews closed — then returned HOURS LATE with real findings the committed reviews never saw (32.3: 15 deduped items, 6 MEDIUM; 32.1: 6 carried items, 2 MEDIUM; 32.2's review deferred 1 LOW directly into this batch). The lead triaged all of them into `deferred-work.md` (sections "Late-returning Story 32.3 review-layer findings" and "Late-returning Story 32.1 review-layer findings", plus item 32-2-R1). This story drives every one to a terminal disposition so the epic does not close on unexamined MEDIUMs. Cleanup story; no Integration AC required.
+
+**Acceptance Criteria**:
+- **AC 32.4.1** — TERMINAL disposition (resolved / closed-with-evidence / closed-by-decision) for all 22 items: 32-3-R1…R15, 32-1-R1…R7 (R2 already closed-with-evidence at triage — verify, don't re-litigate), 32-2-R1. Verify-before-patch per Rules #16/#48 (blind-layer findings have produced false positives before — e.g. 32-3-R15 may already be closed by the committed 32.3 review's patch #5): every "resolved" is live-proven or mutation-verified; every dismissed-as-false-positive cites the disproving evidence.
+- **AC 32.4.2** — The 8 MEDIUMs are fixed or dispositioned with evidence, never waved through: 32-3-R1 (parser-drop terminality vs PD-1), 32-3-R2 (toAbsolute posix/win32), 32-3-R3 (apiShapeWarningSink dedupe), 32-3-R4 (eager Server Manager activation), 32-3-R5 (zero-state status bar), 32-3-R6 (IRIS_HOST inherited-default validation), 32-1-R1 (Case G env hygiene), 32-1-R3 (unknown top-level keys dropped on write).
+- **AC 32.4.3** — Dispositions mirrored into `deferred-work.md` in place (per-item, with evidence); tallies mechanically derived (Rule #51).
+- **AC 32.4.4** — Back-compat gates green at close (same shape as AC 32.3.6): turbo suite + extension suite green; frozen baseline `1e62c5ad5bf7` byte-unchanged (`:check` only); no tool count moves; no `bootstrap-classes.ts`/`src/ExecuteMCPv2/**` change.
 
 ## Epic 33: Multi-Client MCP Configuration Manager (added 2026-07-25)
 
