@@ -493,7 +493,7 @@ development_status:
   epic-31-retrospective: done
 
   # Epic 32: Governance File & Editors (FR140). Make one governance policy portable across every client via IRIS_GOVERNANCE_FILE (a static file path is the only fully agent-agnostic contract). Same parseGovernanceConfig validation; cascade explicit IRIS_GOVERNANCE env > file > IRIS_GOVERNANCE_PRESET seed > defaults; per-key configSource attribution. New iris-mcp-governance CLI (validate/get/set/unset/preset/effective/diff, single-sourced with the shared engine) + later extension governance UI. Enforcement NEVER moves — servers keep sole authority at dispatchToolCall. No hot-reload in v1 (restart semantics, documented). Unset ⇒ mechanically-proven no-op.
-  epic-32: in-progress
+  epic-32: done
   32-0-governance-file-loader: done
   32-1-governance-cli: done
   32-2-governance-ui: done
