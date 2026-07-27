@@ -397,6 +397,7 @@ const VIEW_CSS = `
   .badge.disabled { background: var(--vscode-editorError-foreground); color: var(--vscode-editor-background); }
   .badge.enabled { background: var(--vscode-charts-green); color: var(--vscode-editor-background); }
   .staged { outline: 1px dashed var(--vscode-editorWarning-foreground); }
+  .tool-header td { padding-top: 10px; font-weight: 600; color: var(--vscode-descriptionForeground); }
   table { border-collapse: collapse; width: 100%; }
   td, th { text-align: left; padding: 2px 8px 2px 0; vertical-align: top; }
   td.key { font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
@@ -497,7 +498,12 @@ function renderGroups(state: GovernanceViewState): string {
   const editable = state.validation === undefined || state.validation.ok;
   return groups
     .map((group) => {
-      const toolSections = group.tools
+      // One <table> per GROUP (32-2-U1): the previous per-tool tables each
+      // auto-sized their own key column, so badge/toggle columns zigzagged
+      // between tools within one package group. Multi-action tools get a
+      // spanning header row for readability; single-action tools need none
+      // (the key already names the tool).
+      const bodyRows = group.tools
         .map((tool) => {
           const rows = tool.rows
             .map((row) => {
@@ -519,11 +525,15 @@ function renderGroups(state: GovernanceViewState): string {
               );
             })
             .join("");
-          return `<table><tbody>${rows}</tbody></table>`;
+          const toolHeader =
+            tool.rows.length > 1
+              ? `<tr class="tool-header"><td colspan="5">${escapeHtml(tool.tool)}</td></tr>`
+              : "";
+          return toolHeader + rows;
         })
         .join("");
       const keyCount = group.tools.reduce((count, tool) => count + tool.rows.length, 0);
-      return `<details open><summary>${escapeHtml(group.pkg)} (${keyCount} keys)</summary>${toolSections}</details>`;
+      return `<details open><summary>${escapeHtml(group.pkg)} (${keyCount} keys)</summary><table><tbody>${bodyRows}</tbody></table></details>`;
     })
     .join("");
 }

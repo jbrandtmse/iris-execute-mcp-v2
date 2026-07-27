@@ -17,7 +17,7 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runCli, writeGovernanceFileAtomic, type CliDeps } from "../cli/governance.js";
+import { runCli, writeGovernanceFileAtomic, VALUED_OPTIONS, type CliDeps } from "../cli/governance.js";
 import {
   effective,
   configSource,
@@ -744,5 +744,28 @@ describe("diff", () => {
     expect(code).toBe(1);
     const payload = JSON.parse(stdout.text) as { error: string };
     expect(payload.error).toContain("IRIS_GOVERNANCE_FILE is invalid");
+  });
+});
+
+describe("32-4-R1 — VALUED_OPTIONS single-sourcing pin", () => {
+  it("every parseArgs call site's allowed options are a subset of VALUED_OPTIONS, and helpRequested consumes the same set", () => {
+    // Mechanical cross-check (the finding's ask): a valued option added to a
+    // command's parseArgs call but NOT to VALUED_OPTIONS makes helpRequested
+    // treat that option's value as a flag — the 32-1-R4 class. Scan the
+    // source so the lists can never silently diverge.
+    const source = readFileSync(new URL("../cli/governance.ts", import.meta.url), "utf8");
+    const callSites = [...source.matchAll(/parseArgs\(\s*args\s*,\s*\[[^\]]*\]\s*,\s*\[([^\]]*)\]/g)];
+    expect(callSites.length).toBeGreaterThanOrEqual(7);
+    const used = new Set<string>();
+    for (const site of callSites) {
+      for (const opt of site[1]!.match(/"--[a-z-]+"/g) ?? []) used.add(opt.slice(1, -1));
+    }
+    for (const opt of used) {
+      expect(VALUED_OPTIONS.has(opt), `parseArgs option ${opt} missing from VALUED_OPTIONS`).toBe(true);
+    }
+    // helpRequested must skip values for exactly the same set — a second
+    // hand-maintained literal is the defect this pin exists to catch.
+    expect(source).toContain("const valuedOptions = VALUED_OPTIONS");
+    expect(source).not.toMatch(/const valuedOptions = new Set\(/);
   });
 });

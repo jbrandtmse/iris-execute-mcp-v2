@@ -184,6 +184,18 @@ interface ParsedArgs {
  * take the NEXT token verbatim as their value (even one starting with `-` —
  * a file path may legitimately begin with a dash).
  */
+/**
+ * Every CLI option that takes a VALUE (as opposed to a boolean flag), as one
+ * single-sourced set (32-4-R1): `helpRequested`'s option-skipping must stay
+ * in lock-step with the `allowedOptions` handed to {@link parseArgs} at every
+ * call site — a valued option added to a command but not here would let
+ * `cmd --newopt --help` print help instead of treating `--help` as the
+ * option's value (the 32-1-R4 class). A source-scan test in
+ * `governance-cli.test.ts` mechanically cross-checks every `parseArgs` call
+ * site's options against this set.
+ */
+export const VALUED_OPTIONS: ReadonlySet<string> = new Set(["--file", "--profile", "--root"]);
+
 function parseArgs(
   args: string[],
   allowedFlags: readonly string[],
@@ -1477,7 +1489,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
  * never a flag.
  */
 function helpRequested(args: string[]): boolean {
-  const valuedOptions = new Set(["--file", "--profile", "--root"]);
+  const valuedOptions = VALUED_OPTIONS; // single-sourced (32-4-R1) — see the constant's doc comment
   let optionsEnded = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;

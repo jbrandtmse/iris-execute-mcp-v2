@@ -357,6 +357,20 @@ describe("renderGovernanceHtml", () => {
     expect(html).toContain("differs");
   });
 
+  it("renders ONE table per package group, so badge/toggle columns align across tools (32-2-U1)", () => {
+    const html = renderGovernanceHtml(makeState(), "N");
+    // Three groups in the fixture: iris-dev-mcp, iris-ops-mcp, framework — plus
+    // the diff preview's own table, which is unrelated to the group layout.
+    const groupTables = html.match(/<details open><summary>[^<]*<\/summary><table>/g) ?? [];
+    expect(groupTables).toHaveLength(3);
+    // The multi-action tool gets a spanning header row…
+    expect(html).toContain('<tr class="tool-header"><td colspan="5">iris_backup_manage</td></tr>');
+    // …and single-action tools get none (the key already names the tool).
+    expect(html).not.toContain('<tr class="tool-header"><td colspan="5">iris_doc_get</td></tr>');
+    // Regression guard on the old shape: no bare per-tool tables remain.
+    expect(html.match(/<table><tbody>/g) ?? []).toHaveLength(3);
+  });
+
   it("an invalid file renders the engine's OWN error, disables editing, and HTML-escapes the message", () => {
     const state = makeState({
       validation: { ok: false, error: 'IRIS_GOVERNANCE_FILE is invalid: <script>alert("x")</script>' },
