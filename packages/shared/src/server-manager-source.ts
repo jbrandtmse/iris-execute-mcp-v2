@@ -46,6 +46,17 @@
  *   lower-precedence definition is never silent: one `logger.warn` names
  *   both files' hosts and the remedy.
  *
+ *   **32-3-R1 (Story 32.4) — PD-1 covers PARSER-LEVEL drops too.** A name
+ *   whose first sighting is a structurally unusable entry (non-object, no
+ *   `webServer`, blank host — reported via
+ *   {@link ParseIntersystemsServersOptions.dropped}) is marked terminal
+ *   `"invalid"` exactly like a mergeProfile-invalid first sighting: a
+ *   lower-precedence file's VALID definition of the same name is NOT
+ *   imported. The one deliberate exception remains 31-0-2 below (an entry
+ *   skipped ONLY for lacking its own `"username"` sets no state, so a
+ *   lower-precedence entry that declares one can still claim the slot) — the
+ *   `required` check-3 message states both halves.
+ *
  *   **31-0-2 (`username` inheritance) — resolved.** A Server-Manager entry
  *   that does not declare its OWN `username` is NOT IMPORTED: it is skipped
  *   with a warning naming the file and the remedy, regardless of whether it
@@ -323,9 +334,13 @@ export function discoverSettingsFiles(
   // path or a posix root path) is kept verbatim — in production the platform
   // and every path share one convention, and the other-convention-absolute
   // case only arises when a test simulates a foreign platform against real
-  // host temp directories (which must stay openable).
+  // host temp directories (which must stay openable). 32-3-R2 (Story 32.4):
+  // the posix disjunct is spelled out EXPLICITLY rather than relying on the
+  // subtlety that `path.win32.isAbsolute("/x")` is true (win32 treats a
+  // leading slash as rooted) — the either-convention guarantee is now stated
+  // in the code, and a passthrough test pins it on every host OS.
   const toAbsolute = (candidate: string): string =>
-    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate)
+    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate)
       ? candidate
       : p.resolve(candidate);
   const explicit = env.IRIS_SM_SETTINGS_PATHS;
@@ -680,9 +695,12 @@ export function parseIntersystemsServers(
  * `"unresolved"`. A name already seen by a higher-precedence file is skipped
  * — FIRST-FILE-WINS, always (the 31-1-2/31-3-3 paired decision, Story 32.3 —
  * see the module doc comment): a later file's entry never replaces an earlier
- * sighting, whether that sighting resolved, is still unresolved, or failed
- * validation (a password-bearing skipped definition is announced with a
- * `logger.warn` naming both files' hosts and the remedy).
+ * sighting, whether that sighting resolved, is still unresolved, failed
+ * validation, or was dropped by the parser as structurally unusable
+ * (32-3-R1 — parser drops are terminal too; the sole exception is 31-0-2's
+ * no-own-username skip, which yields to a lower-precedence entry that
+ * declares one). A password-bearing skipped definition is announced with a
+ * `logger.warn` naming both files' hosts and the remedy.
  * `IRIS_SM_SERVERS` restricts import to a comma-separated allow-list; a listed
  * name matching nothing WARNs (never fails in `auto`).
  *
@@ -746,10 +764,14 @@ export function resolveServerManagerProfiles(
   const consideredNames = new Set<string>();
   /**
    * Per-name terminal/current state (31-0-1 bookkeeping): `"resolved"` and
-   * `"invalid"` are terminal (never reconsidered); under the 31-1-2/31-3-3
-   * FIRST-FILE-WINS decision (Story 32.3) `"unresolved"` is terminal too in
-   * effect — a later sighting of ANY outcome keeps the higher-precedence
-   * candidate (with one warning when the skipped entry bore a password).
+   * `"invalid"` are terminal (never reconsidered — and since Story 32.4 /
+   * 32-3-R1 a PARSER-LEVEL drop also lands here as terminal `"invalid"`); under
+   * the 31-1-2/31-3-3 FIRST-FILE-WINS decision (Story 32.3) `"unresolved"` is
+   * terminal too in effect — a later sighting of ANY outcome keeps the
+   * higher-precedence candidate (with one warning when the skipped entry bore
+   * a password). The single documented exception is 31-0-2 (an entry skipped
+   * ONLY for lacking its own `"username"`), which deliberately sets no state
+   * so a lower-precedence entry that declares one can still claim the slot.
    */
   const nameStates = new Map<string, CredentialStatus | "invalid">();
   /** The current best {@link ServerManagerProfileResult} per name (insertion order = first-successful-sighting order). */
@@ -815,6 +837,17 @@ export function resolveServerManagerProfiles(
       if (!seenNames.has(drop.name)) {
         seenNames.add(drop.name);
         definitionsFound++;
+        // 32-3-R1 (Story 32.4 — PD-1 alignment, recorded decision): a
+        // parser-level drop is a TERMINAL first sighting, exactly like a
+        // mergeProfile-invalid one. Pre-Story-32.4 the drop claimed
+        // `seenNames` (counting) but never `nameStates`, so a lower-precedence
+        // file's VALID definition of the same name was still imported —
+        // contradicting PD-1's "a name's fate is decided at its first
+        // sighting" and the check-3 message's "NOT reconsidered" note. The
+        // per-drop warning above already names the file + reason; the fix is
+        // to repair the rejected entry in the file that OWNS the first
+        // sighting, never to shadow it from a lower-precedence file.
+        nameStates.set(drop.name, "invalid");
       }
       if (allowList !== undefined) {
         if (!allowList.includes(drop.name)) continue;
@@ -829,9 +862,10 @@ export function resolveServerManagerProfiles(
     for (const [name, entry] of Object.entries(entries)) {
       const priorState = nameStates.get(name);
       // Terminal states are never reconsidered: "resolved" already has a
-      // usable password, "invalid" permanently failed mergeProfile validation
-      // on its FIRST sighting (mirrors pre-31.1 per-file containment — a bad
-      // field value is not silently "fixed" by a later file without an
+      // usable password, "invalid" permanently failed on its FIRST sighting —
+      // either mergeProfile field validation or (32-3-R1) a parser-level drop
+      // in a higher-precedence file (mirrors pre-31.1 per-file containment —
+      // a bad definition is not silently "fixed" by a later file without an
       // operator noticing the original warning).
       if (priorState === "resolved" || priorState === "invalid") continue;
 
@@ -1030,8 +1064,10 @@ export function resolveServerManagerProfiles(
       `IRIS_SERVER_MANAGER=required but ${consideredCount} server definition(s) were ` +
         `considered and NONE could be imported — every one was rejected (a structurally ` +
         `unusable entry, an invalid field value, or no "username" of its own; see the warning ` +
-        `logged above for the specific reason for each). Note: a name rejected on its first ` +
-        `sighting is NOT reconsidered in lower-precedence files. Fix the offending ` +
+        `logged above for the specific reason for each). Note: a name whose first sighting was ` +
+        `structurally unusable or failed field validation is NOT reconsidered in lower-precedence ` +
+        `files (32-3-R1); only an entry skipped solely for lacking its own "username" yields to ` +
+        `a lower-precedence entry that declares one. Fix the offending ` +
         `intersystems.servers entries, or set IRIS_SERVER_MANAGER=auto/off.`,
     );
   }

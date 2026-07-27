@@ -28,10 +28,22 @@
  *      name that fails field validation on its FIRST sighting is not rescued
  *      by a valid lower-precedence definition; `required` fails startup with
  *      the "NONE could be imported" error.
+ *   E. **32-3-R1 (Story 32.4) — a PARSER-LEVEL drop is terminal too, at the
+ *      wire.** A name whose FIRST sighting is structurally unusable (no
+ *      `webServer` block) marks the name `"invalid"` exactly like a
+ *      mergeProfile-invalid first sighting: a lower-precedence file's fully
+ *      VALID definition of the same name (inline password included) is NOT
+ *      imported, and the roster never carries the lower-precedence host. The
+ *      drop warning names file + server + reason.
+ *   F. **32-3-R1 under `required`: the THIRD check fires (not the first).**
+ *      The parser-drop name counts as found/considered but lands nothing, so
+ *      `required` fails startup with the "NONE could be imported … NOT
+ *      reconsidered" error — never the misleading "zero definitions found"
+ *      one — with the per-drop warning visible above it.
  *
- * Cases C/D need no live IRIS (startup fails before any connection) and touch
+ * Cases C/D/F need no live IRIS (startup fails before any connection) and touch
  * no keychain (the colliding/invalid entries never reach the credential
- * chain). Cases A/B use the real SDK handshake against live IRIS, like the
+ * chain). Cases A/B/E use the real SDK handshake against live IRIS, like the
  * existing gate.
  *
  * **Keychain note (review directive: no test may touch the real keychain).**
@@ -73,6 +85,11 @@ const DROP_NO_WS = "qaGateDropNoWebServer";
 const DROP_BLANK_HOST = "qaGateDropBlankHost";
 const INVALID_NAME = "qaGateBadPort";
 const SHADOWED_HOST = "shadowed-lower-precedence.example.invalid";
+// 32-3-R1 (Story 32.4, Case E/F): a PARSER-LEVEL drop's terminality across
+// files — the higher-precedence file's entry is structurally unusable (no
+// webServer), the lower-precedence file's same-name entry is fully valid.
+const R1_NAME = "qaGateParserDropTerminal";
+const R1_SHADOWED_HOST = "r1-rescue-attempt.example.invalid";
 
 /** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */
 async function isIrisReachable(): Promise<boolean> {
@@ -135,11 +152,15 @@ interface SdkClient {
  * EVERY IRIS_* variable first, so a developer shell's own suite configuration
  * can never leak into a spawned gate server, then layer the test's explicit
  * IRIS_* values on top.
+ *
+ * 32-3-R9 (Story 32.4): the scrub is CASE-INSENSITIVE — Windows environment
+ * variables are case-insensitive, so an ambient lowercase `iris_host` would
+ * otherwise survive the scrub and still be seen by the child.
  */
 function childEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.startsWith("IRIS_")) env[key] = value;
+    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
   }
   return {
     ...env,
@@ -203,6 +224,8 @@ let fileLow: string;
 let fileCollide: string;
 let fileBad: string;
 let fileGood: string;
+let fileR1High: string;
+let fileR1Low: string;
 
 beforeAll(async () => {
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
@@ -305,6 +328,36 @@ beforeAll(async () => {
     }),
     "utf8",
   );
+
+  // Case E/F fixtures (32-3-R1) — the SAME name whose FIRST sighting (higher
+  // precedence) is a PARSER-LEVEL drop (no webServer block at all), with a
+  // fully VALID same-name definition (inline password included) in the
+  // lower-precedence file. PD-1 as extended by Story 32.4: the parser drop is
+  // terminal "invalid", so the valid lower definition is NOT imported.
+  fileR1High = path.join(fixtureDir, "settings-r1-high.json");
+  writeFileSync(
+    fileR1High,
+    JSON.stringify({
+      "intersystems.servers": {
+        [R1_NAME]: { username: IRIS_USERNAME },
+      },
+    }),
+    "utf8",
+  );
+  fileR1Low = path.join(fixtureDir, "settings-r1-low.json");
+  writeFileSync(
+    fileR1Low,
+    JSON.stringify({
+      "intersystems.servers": {
+        [R1_NAME]: {
+          webServer: { scheme: "http", host: R1_SHADOWED_HOST, port: IRIS_PORT },
+          username: "qaR1RescueUser",
+          password: "R1RescuePass1234",
+        },
+      },
+    }),
+    "utf8",
+  );
 });
 
 afterAll(() => {
@@ -339,19 +392,18 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         }) => unknown;
       };
 
-      const env: Record<string, string> = {
-        IRIS_HOST,
-        IRIS_PORT: String(IRIS_PORT),
-        IRIS_USERNAME,
-        IRIS_PASSWORD,
-        IRIS_NAMESPACE,
+      // 32-3-R9 (Story 32.4): use the SAME inherited-then-scrubbed childEnv
+      // as the other gates — the fresh-built env this replaces had NO PATH,
+      // so the IRIS_CREDENTIAL_HELPER's `node -e …` resolved only via a
+      // Windows CreateProcess quirk and broke on POSIX/nvm.
+      const env: Record<string, string> = childEnv({
         IRIS_SERVER_MANAGER: "auto",
         // Explicit two-file list: order IS precedence (highest first).
         IRIS_SM_SETTINGS_PATHS: [fileHigh, fileLow].join(path.delimiter),
         // Completes the UNRESOLVED higher-precedence winner without the OS
         // keychain holding the password (see the file header's keychain note).
         IRIS_CREDENTIAL_HELPER: `node -e "process.stdout.write('HelperPass1234')"`,
-      };
+      });
 
       const transport = new StdioClientTransport({
         command: "node",
@@ -459,6 +511,110 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
       // …and the THIRD required check is the one that fires (not the
       // misleading "zero definitions found"), naming the no-reconsideration
       // rule.
+      expect(outcome.stderr).toContain("NONE could be imported");
+      expect(outcome.stderr).toContain("NOT reconsidered");
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "32-3-R1 (E): a PARSER-LEVEL drop is terminal — the lower-precedence file's VALID same-name definition is NOT imported (auto, real handshake)",
+    async (ctx) => {
+      if (liveSkipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] SM precedence gate (R1 parser-drop terminality): ${liveSkipReason}`);
+        ctx.skip();
+        return;
+      }
+
+      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
+      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+      const { Client } = (await import(sdkClientIndex)) as {
+        Client: new (info: { name: string; version: string }) => SdkClient;
+      };
+      const { StdioClientTransport } = (await import(sdkClientStdio)) as {
+        StdioClientTransport: new (params: {
+          command: string;
+          args: string[];
+          env: Record<string, string>;
+          stderr: string;
+        }) => unknown;
+      };
+
+      // No IRIS_CREDENTIAL_HELPER needed: the parser-dropped name never
+      // reaches the credential chain (it is terminal "invalid" before any
+      // profile exists to complete).
+      const env: Record<string, string> = childEnv({
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: [fileR1High, fileR1Low].join(path.delimiter),
+      });
+
+      const transport = new StdioClientTransport({
+        command: "node",
+        args: [DEV_MCP_ENTRY_POINT],
+        env,
+        stderr: "pipe",
+      });
+      let stderr = "";
+      (transport as { stderr?: Readable | null }).stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+
+      const client = new Client({ name: "iris-mcp-all-sm-r1-gate", version: "0.0.0" });
+      let roster: RosterEntry[] = [];
+      try {
+        await client.connect(transport);
+        const result = await client.callTool({ name: "iris_server_profiles", arguments: {} });
+        expect(result.isError).not.toBe(true);
+        roster = result.structuredContent?.profiles ?? [];
+      } finally {
+        await client.close().catch(() => {});
+      }
+
+      // ── 32-3-R1: the first sighting was a parser drop ⇒ the name is
+      // terminal "invalid". The lower-precedence file's fully valid
+      // definition (inline password and all) is NOT imported, and the roster
+      // never carries its host — the server still starts healthy on the
+      // default profile.
+      expect(roster.find((entry) => entry.name === R1_NAME)).toBeUndefined();
+      expect(roster.some((entry) => entry.host === R1_SHADOWED_HOST)).toBe(false);
+      expect(roster.some((entry) => entry.name === "default")).toBe(true);
+
+      // ── The drop itself is loud: ONE warning naming file + server + the
+      // specific reason (the operator repairs the entry in the file that OWNS
+      // the first sighting — that warning is the only signal).
+      expect(stderr).toContain(`skipping server "${R1_NAME}" (${fileR1High})`);
+      expect(stderr).toContain('it has no "webServer" block');
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "32-3-R1 (F): under required, a parser-drop first sighting trips the THIRD check (NONE could be imported / NOT reconsidered), never the misleading zero-definitions one",
+    async (ctx) => {
+      if (distSkipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] SM precedence gate (R1 required/check-3): ${distSkipReason}`);
+        ctx.skip();
+        return;
+      }
+      const outcome = await spawnAndWaitForExit(
+        childEnv({
+          IRIS_SERVER_MANAGER: "required",
+          IRIS_SM_SETTINGS_PATHS: [fileR1High, fileR1Low].join(path.delimiter),
+        }),
+        45000,
+      );
+      expect(outcome.timedOut).toBe(false);
+      expect(outcome.code).not.toBe(0);
+      // The parser drop counts as a found/considered definition, so the FIRST
+      // check must NOT fire…
+      expect(outcome.stderr).not.toContain("zero server definitions were found");
+      // …the per-drop warning names file + server + reason…
+      expect(outcome.stderr).toContain(`skipping server "${R1_NAME}" (${fileR1High})`);
+      expect(outcome.stderr).toContain('it has no "webServer" block');
+      // …and the THIRD check is the one that fires, stating the
+      // no-reconsideration rule that 32-3-R1 extended to parser drops.
       expect(outcome.stderr).toContain("NONE could be imported");
       expect(outcome.stderr).toContain("NOT reconsidered");
     },

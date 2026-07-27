@@ -34,9 +34,18 @@
  * reports the EFFECTIVE registered count), which activates Server Manager
  * and enumerates its roster once; the fs validation that path can trigger is
  * fully async (31-6-2), so the extension host is never blocked on I/O.
+ *
+ * **32-3-R4 (Story 32.4 — recorded product decision).** The eager activation
+ * the late review layer flagged is NOT a Story-32.3 regression:
+ * `extensionDependencies` + `onStartupFinished` activate Server Manager in
+ * every window regardless (the AC-31.5.4 accepted cost above). What 32.3
+ * added is the activation-time PLAN (roster enumeration + async fs
+ * validation) the effective-count status bar (31-5-2) requires — and 31-5-2's
+ * decision stands: the alternative (a raw-count status bar) re-ships the
+ * divergence it burned down. Recorded, not replanned.
  */
 import * as vscode from "vscode";
-import { statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
 import {
@@ -60,12 +69,24 @@ import {
 } from "./selectServers.js";
 import { LauncherProvider } from "./serverDefinitionProvider.js";
 import { CONFIG_SECTION, readSettings, type ConfigReader } from "./settings.js";
-import type { AuthApi, ServerManagerApi } from "./types.js";
+import type { AuthApi, ServerManagerApi, ServerManagerApiFailureReason } from "./types.js";
 
 const PROVIDER_ID = "iris-mcp-launcher";
 const STATUS_BAR_ITEM_ID = "irisMcpLauncher.status";
 
 let cachedApi: ServerManagerApi | undefined;
+
+/**
+ * 32-3-R3 (Story 32.4): why the most recent `getServerManagerApi()` call
+ * failed (`undefined` when it has not failed). Handed to the provider and
+ * the select-servers command as an optional dep so their generic "not
+ * available" warnings can stay silent when the real cause — a shape/version
+ * mismatch — already produced its own accurate warning here.
+ */
+let lastApiFailure: ServerManagerApiFailureReason | undefined;
+
+/** 32-3-R3: the 31-4-8 shape-mismatch warning fires ONCE per session, not on every provide/resolve/refresh against a persistently mis-shaped Server Manager. */
+let apiShapeWarned = false;
 
 /**
  * Acquire (and cache) the Server Manager extension's exported API, activating
@@ -79,13 +100,17 @@ async function getServerManagerApi(): Promise<ServerManagerApi | undefined> {
   if (cachedApi) return cachedApi;
 
   const extension = vscode.extensions.getExtension<ServerManagerApi>(SERVER_MANAGER_EXTENSION_ID);
-  if (!extension) return undefined;
+  if (!extension) {
+    lastApiFailure = "not-available";
+    return undefined;
+  }
 
   try {
     if (!extension.isActive) {
       await extension.activate();
     }
   } catch {
+    lastApiFailure = "not-available";
     return undefined;
   }
 
@@ -102,14 +127,29 @@ async function getServerManagerApi(): Promise<ServerManagerApi | undefined> {
     typeof candidate?.getServerSpec !== "function" ||
     typeof candidate?.getAccount !== "function"
   ) {
-    const message =
-      "IRIS MCP Launcher: the InterSystems Server Manager extension activated, but its API is " +
-      "not the shape this extension expects (missing getServerNames/getServerSpec/getAccount) — " +
-      "a version mismatch. No IRIS MCP servers were registered.";
-    apiShapeWarningSink?.(message);
+    lastApiFailure = "shape-mismatch";
+    // 32-3-R3 (Story 32.4): ONE warning per session. A persistently
+    // mis-shaped Server Manager used to re-toast on EVERY provide / resolve /
+    // status-bar refresh (the mismatch is never cached, so every call
+    // re-checked and re-warned) — the exact re-fire class 31-6-1 burned down.
+    // Once-per-session (vs 32-3-R7's rising-edge) is deliberate here: a
+    // RECOVERED API is cached for the rest of the session, so a
+    // fix-then-rebreak is not observable in-session — there is no edge to
+    // re-fire on. The flag is set only when the sink actually receives the
+    // message (32.4 review): a pre-activation call (sink still undefined)
+    // must not consume the session's one warning without showing it.
+    if (!apiShapeWarned && apiShapeWarningSink !== undefined) {
+      apiShapeWarned = true;
+      apiShapeWarningSink(
+        "IRIS MCP Launcher: the InterSystems Server Manager extension activated, but its API is " +
+          "not the shape this extension expects (missing getServerNames/getServerSpec/getAccount) — " +
+          "a version mismatch. No IRIS MCP servers were registered.",
+      );
+    }
     return undefined;
   }
 
+  lastApiFailure = undefined;
   cachedApi = candidate;
   return cachedApi;
 }
@@ -233,6 +273,9 @@ export function activate(context: vscode.ExtensionContext): void {
   // Story 31.5: server-selection command (AC 31.5.1/31.5.2/31.5.5/31.5.6).
   const selectServersDeps: SelectServersDeps = {
     getServerManagerApi,
+    // 32-3-R3: lets the command's "not available" warning stay silent when
+    // the real cause was a shape/version mismatch (already warned, once).
+    getServerManagerApiFailureReason: () => lastApiFailure,
     getSettings,
     configWriter: {
       inspectServers: inspectServersConfig,
@@ -283,9 +326,9 @@ export function activate(context: vscode.ExtensionContext): void {
   // env scrub, subprocess). The panel edits the governance FILE only — never
   // client configs, never env — and every write goes through the shared CLI.
   const governanceEngineHost: GovernanceEngineHost = {
-    describe: () => {
+    describe: async () => {
       try {
-        const resolution = resolveGovernanceCli(getSettings(), true);
+        const resolution = await resolveGovernanceCli(getSettings(), true);
         return resolution.ok
           ? { ok: true, mode: resolution.target.mode }
           : { ok: false, error: resolution.error };
@@ -308,7 +351,7 @@ export function activate(context: vscode.ExtensionContext): void {
           spawnError: "could not read the irisMcpLauncher settings to run the governance CLI",
         };
       }
-      const resolution = resolveGovernanceCli(settings, command.kind === "universe");
+      const resolution = await resolveGovernanceCli(settings, command.kind === "universe");
       if (!resolution.ok) {
         return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
       }
@@ -325,9 +368,11 @@ export function activate(context: vscode.ExtensionContext): void {
       return api.getServerNames().map((server) => server.name);
     },
     engine: governanceEngineHost,
-    fileExists: (candidatePath) => {
+    fileExists: async (candidatePath) => {
+      // 32-2-R1: async stat (the 31-6-2 discipline) — a UNC governance-file
+      // path must never stall the extension host on panel open/refresh.
       try {
-        return statSync(candidatePath).isFile();
+        return (await stat(candidatePath)).isFile();
       } catch {
         return false;
       }
@@ -405,12 +450,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const provider = new LauncherProvider({
     getServerManagerApi,
+    // 32-3-R3: same misattribution guard as the select-servers command.
+    getServerManagerApiFailureReason: () => lastApiFailure,
     authApi,
     getSettings,
     showWarning,
+    // 32.4 review (Edge L4): diagnostic crumb for the 32-3-R14 containment —
+    // output channel only, never a toast; the provider bounds the content to
+    // the error name + a truncated message (no profile/env/session data).
+    logDiagnostic: (message) => outputChannel.appendLine(message),
   });
 
+  // 32-3-R8 (Story 32.4): monotonic refresh guard. Two overlapping async
+  // refreshes (activation + a config change, or rapid successive changes)
+  // otherwise complete out of order and the OLDER settings read / plan count
+  // overwrites the newer render. The latest refresh owns the item; an older
+  // one still in flight when a newer starts abandons its render.
+  let refreshSeq = 0;
+
   const refreshStatusBar = async (): Promise<void> => {
+    const seq = ++refreshSeq;
     let settings;
     try {
       settings = getSettings();
@@ -448,6 +507,9 @@ export function activate(context: vscode.ExtensionContext): void {
     } catch {
       registeredCount = undefined;
     }
+    // 32-3-R8: a newer refresh started while this one awaited — it owns the
+    // status bar; rendering here would restore a STALE settings read.
+    if (seq !== refreshSeq) return;
     const state = buildStatusBarState(settings, registeredCount);
     statusBarItem.text = state.text;
     statusBarItem.tooltip = state.tooltip;
@@ -523,4 +585,6 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   cachedApi = undefined;
   apiShapeWarningSink = undefined;
+  lastApiFailure = undefined;
+  apiShapeWarned = false;
 }

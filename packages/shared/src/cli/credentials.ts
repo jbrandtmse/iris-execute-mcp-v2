@@ -351,7 +351,11 @@ export function promptPasswordFromStream(
  *   --stdin`) used to be an unbounded allocation; it now fails naming the
  *   cap and the likely cause. 64 KiB is deliberately generous \u2014 far beyond
  *   any real passphrase \u2014 so it only ever trips on a file piped in by
- *   mistake.
+ *   mistake. 32-3-R13 (Story 32.4): the cap is measured on the PASSWORD
+ *   after the single-trailing-newline strip (the stream reader allows the
+ *   newline's 1\u20132 bytes of slack), so a boundary-length password with its
+ *   newline is accepted, and an over-cap password is rejected with the
+ *   accurate cause rather than the file-pipe message.
  * - **NUL rejection (31-2-6).** A decoded password containing U+0000 means
  *   the input was almost certainly UTF-16 (what PowerShell's `Out-File`
  *   produces on some hosts): stored NUL-interleaved, it would "succeed" here
@@ -361,14 +365,23 @@ export function promptPasswordFromStream(
  */
 async function readStdinPassword(stream: Readable): Promise<string> {
   const STDIN_PASSWORD_CAP_BYTES = 64 * 1024;
+  // 32-3-R13 (Story 32.4): the stream cap carries +2 bytes of slack so a
+  // boundary-length password plus its SINGLE trailing newline (\n or \r\n —
+  // stripped below) is not misdiagnosed as a piped-in file. The cap the
+  // operator reads about is on the PASSWORD; the newline is framing.
+  const STREAM_CAP_BYTES = STDIN_PASSWORD_CAP_BYTES + 2;
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of stream) {
     const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : (chunk as Buffer);
     total += buf.length;
-    if (total > STDIN_PASSWORD_CAP_BYTES) {
+    if (total > STREAM_CAP_BYTES) {
       throw new Error(
-        `stdin input exceeds the 64 KiB password limit \u2014 a file was probably piped in by ` +
+        // 32.4 review (Edge L1): name BOTH causes \u2014 an over-cap password with
+        // its trailing newline also lands here (1\u20132 wire bytes past the
+        // slack), and blaming only a piped-in file misdiagnoses it.
+        `stdin input exceeds the 64 KiB password limit (even allowing 2 bytes of newline slack) \u2014 ` +
+          `the password itself is too long, or a file was piped in by ` +
           `mistake ("cat bigfile | iris-mcp-credentials set <name> --stdin"). Pipe only the password itself.`,
       );
     }
@@ -387,6 +400,16 @@ async function readStdinPassword(stream: Readable): Promise<string> {
     text = text.slice(0, -2);
   } else if (text.endsWith("\n")) {
     text = text.slice(0, -1);
+  }
+  // 32-3-R13: after the newline strip, the PASSWORD ITSELF is measured — a
+  // boundary-length password with its newline is accepted, an over-cap
+  // password is rejected with the ACCURATE cause (never the file-pipe
+  // message).
+  if (Buffer.byteLength(text, "utf8") > STDIN_PASSWORD_CAP_BYTES) {
+    throw new Error(
+      `the password exceeds the 64 KiB limit (its trailing newline is not counted). ` +
+        `Pipe only the password itself.`,
+    );
   }
   return text;
 }
@@ -658,6 +681,15 @@ async function cmdSet(args: string[], deps: ResolvedDeps): Promise<number> {
     // 31-2-4: create vs replace is meaningful information for a tool whose
     // worst failure mode is "the wrong password is stored" — read existence
     // (a boolean, never the value) BEFORE the write.
+    //
+    // 32-3-R13 (Story 32.4 — recorded decision): the exists()-then-setPassword
+    // pair is deliberately NOT made atomic. The keychain write itself is
+    // atomic at the OS level and the stored VALUE is correct either way;
+    // under a concurrent writer to the same account the only casualty is the
+    // human-facing verb ("Stored" vs "Replaced") — message-only. The
+    // KeyringPort contract added in 31-2-4 exposes existence as a boolean
+    // probe precisely because no check-and-set primitive exists across the
+    // supported keychains.
     const replaced = keyring.exists(serverName);
     keyring.setPassword(serverName, password);
     deps.stdout.write(

@@ -1245,6 +1245,37 @@ describe("set --stdin byte handling", () => {
     expect(keyring.store.get("myserver")).toHaveLength(64 * 1024);
   });
 
+  it("32-3-R13: a 64 KiB password WITH its trailing newline (65,537 wire bytes) is accepted — the newline is framing, not password", async () => {
+    const keyring = createFakeKeyring();
+    const atCapPlusNewline = Buffer.concat([Buffer.alloc(64 * 1024, "z"), Buffer.from("\n")]);
+    const { deps } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([atCapPlusNewline]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(0);
+    expect(keyring.store.get("myserver")).toHaveLength(64 * 1024);
+  });
+
+  it("32-3-R13: an OVER-cap password (64 KiB + 1 byte, no newline) is rejected with the ACCURATE cause — never the file-pipe message", async () => {
+    const keyring = createFakeKeyring();
+    const setPasswordSpy = vi.spyOn(keyring, "setPassword");
+    const overCap = Buffer.alloc(64 * 1024 + 1, "w");
+    const { deps, stderr } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([overCap]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(2);
+    expect(stderr.text).toContain("the password exceeds the 64 KiB limit");
+    expect(stderr.text).not.toContain("piped in by");
+    expect(setPasswordSpy).not.toHaveBeenCalled();
+  });
+
   // \u2500\u2500 31-2-6 (Story 32.3): UTF-16 input is REJECTED (never transcoded \u2014
   // encoding-guessing can misfire on a legitimate password).
   it("31-2-6: a UTF-16LE input WITH a BOM is rejected with exit 2 naming UTF-16 as the likely cause", async () => {

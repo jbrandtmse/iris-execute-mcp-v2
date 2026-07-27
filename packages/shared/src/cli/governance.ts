@@ -72,7 +72,9 @@
 
 import {
   existsSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -83,6 +85,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   loadGovernanceFile,
+  parseGovernanceFileText,
   parseGovernanceConfig,
   parseGovernancePreset,
   effective,
@@ -310,6 +313,40 @@ function writeFileAtomic(path: string, content: string): void {
 }
 
 /**
+ * 32-1-R6 (Story 32.4): when `path` is a SYMLINK, return the link's real
+ * target so the temp+rename lands NEXT TO THE TARGET (rename is only atomic
+ * same-volume) and the link itself survives — a naive temp+rename over the
+ * LINK path would replace the symlink with a regular file, silently
+ * severing a nix/etckeeper-style config-managed link on the first
+ * `set`/`unset`. A non-symlink (or a path that cannot be lstat'd, e.g. one
+ * about to be created) returns unchanged. The realpath is only taken when
+ * the path IS a link — an unconditional realpath would rewrite ordinary
+ * paths on Windows (extended-length `\\?\` prefixes).
+ *
+ * BROKEN-link disposition (32.4 review, recorded): `realpathSync` throws on
+ * a link whose target does not exist, so a broken symlink falls through to
+ * the `return path` case and the temp+rename REPLACES THE LINK with a
+ * regular file at the link's own path — the pre-Story-32.4 behavior for
+ * every path, kept deliberately: the alternative (readlink + write through
+ * to a moved-away target) silently recreates a file somewhere the operator
+ * abandoned, which is the bigger surprise, and a broken link has no working
+ * indirection left to preserve. Rollback stays consistent with that choice:
+ * the create-case `rmSync(writeTarget)` removes exactly the file the write
+ * created (at the link's path) — rename never writes THROUGH a link, so no
+ * target can leak.
+ */
+function resolveWriteTarget(path: string): string {
+  try {
+    if (lstatSync(path).isSymbolicLink()) {
+      return realpathSync(path);
+    }
+  } catch {
+    // Not present / unreadable — write the path itself (the create case).
+  }
+  return path;
+}
+
+/**
  * Atomically replace `path` with `content`, then re-validate the WRITTEN
  * file with the real loader; on validation failure roll the original bytes
  * back (or remove the file when it did not pre-exist) and rethrow. Exported
@@ -326,7 +363,10 @@ export function writeGovernanceFileAtomic(
   preexisting: string | undefined,
   validate: (path: string) => GovernanceConfig = loadFileOrThrow,
 ): GovernanceConfig {
-  writeFileAtomic(path, content);
+  // 32-1-R6: write (and roll back) THROUGH a symlink — the temp+rename must
+  // land beside the link's TARGET, never replace the link itself.
+  const writeTarget = resolveWriteTarget(path);
+  writeFileAtomic(writeTarget, content);
   try {
     return validate(path);
   } catch (e: unknown) {
@@ -334,9 +374,9 @@ export function writeGovernanceFileAtomic(
     // failure is surfaced with BOTH messages so nothing fails silently.
     try {
       if (preexisting === undefined) {
-        rmSync(path, { force: true });
+        rmSync(writeTarget, { force: true });
       } else {
-        writeFileAtomic(path, preexisting);
+        writeFileAtomic(writeTarget, preexisting);
       }
     } catch (rollbackError: unknown) {
       throw new Error(
@@ -357,6 +397,76 @@ export function writeGovernanceFileAtomic(
  */
 function serializeConfig(config: GovernanceConfig): string {
   return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+/**
+ * 32-1-R3 (Story 32.4): serialize the mutated config WITHOUT dropping
+ * unknown top-level keys. `parseGovernanceRoot` reads only `global` and
+ * `profiles`, so re-serializing the parsed config alone VANISHED any other
+ * top-level key on the first write — a `"comment"`/`"version"` annotation
+ * (silent data loss by re-serialization) or a typo'd layer name like
+ * `"globals"` (which also never took effect). `rawRoot` is the raw JSON
+ * root parsed from the SAME pre-image bytes the config was validated from;
+ * every key it carries is preserved verbatim at its original position, with
+ * the mutated `global`/`profiles` layers written back at THEIR original
+ * positions (or appended when the file had no such layer).
+ */
+function serializeConfigPreservingUnknown(
+  config: GovernanceConfig,
+  rawRoot: Record<string, unknown>,
+): string {
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const define = (key: string, value: unknown): void => {
+    Object.defineProperty(out, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  };
+  const rootKeys = Object.keys(rawRoot);
+  for (const key of rootKeys) {
+    if (key === "global") {
+      if (config.global !== undefined) define(key, config.global);
+    } else if (key === "profiles") {
+      if (config.profiles !== undefined) define(key, config.profiles);
+    } else {
+      define(key, rawRoot[key]);
+    }
+  }
+  if (config.global !== undefined && !rootKeys.includes("global")) define("global", config.global);
+  if (config.profiles !== undefined && !rootKeys.includes("profiles")) {
+    define("profiles", config.profiles);
+  }
+  return `${JSON.stringify(out, null, 2)}\n`;
+}
+
+/**
+ * 32-1-R3 (Story 32.4): the recognized top-level layer names, and a
+ * layer-SHAPED detector for the typo class a validation CLI exists to catch
+ * (`"globals"`, `"profile"`, `"Global"`, …). Unknown keys that are NOT
+ * layer-shaped (annotations like `"comment"`/`"version"`) are preserved
+ * silently; a layer-shaped one additionally earns a stderr warning because
+ * it LOOKS like policy that has no effect.
+ */
+const LAYER_SHAPED_KEY = /^(globals?|profiles?)$/i;
+
+/** Warn (non-fatal) on unknown top-level keys that look like a misspelled layer name. */
+function warnOnLayerShapedUnknownKeys(
+  file: string,
+  rawRoot: Record<string, unknown>,
+  deps: ResolvedDeps,
+): void {
+  for (const key of Object.keys(rawRoot)) {
+    if (key === "global" || key === "profiles") continue;
+    if (LAYER_SHAPED_KEY.test(key)) {
+      deps.stderr.write(
+        `Warning: ${file} has an unrecognized top-level key "${key}" — it has NO effect ` +
+          `(the recognized layers are "global" and "profiles"; is it a typo?). The key is ` +
+          `preserved as-is on write.\n`,
+      );
+    }
+  }
 }
 
 /** Set `key = value` on `layer`, preserving existing key order (defineProperty, never bare assignment). */
@@ -622,15 +732,37 @@ async function cmdSet(args: string[], deps: ResolvedDeps): Promise<number> {
   // 32.1.3); a missing PARENT directory is an operational failure, named.
   let preexisting: string | undefined;
   let config: GovernanceConfig;
+  let rawRoot: Record<string, unknown> | undefined;
   if (existsSync(file)) {
     try {
-      // Load through the real loader FIRST so an unreadable target —
-      // including a DIRECTORY (EISDIR) — fails with the server's exact
-      // error text, never a raw "unexpected error". The raw bytes for a
-      // potential rollback are read only once the file is known to be
-      // loadable (the cmdUnset discipline).
-      config = loadFileOrThrow(file);
+      // 32-1-R7 (Story 32.4): the pre-image is read ONCE and used for BOTH
+      // the parse and a potential rollback — two separate reads could
+      // observe different content under concurrent modification, restoring
+      // bytes the CLI never validated.
       preexisting = readFileSync(file, "utf8");
+    } catch {
+      // A raw READ failure (e.g. a DIRECTORY as --file → EISDIR) carries no
+      // loader framing; re-run it through the real loader so the CLI prints
+      // the server's exact read-error text (naming IRIS_GOVERNANCE_FILE +
+      // path), never a bare OS error.
+      try {
+        loadGovernanceFile({ IRIS_GOVERNANCE_FILE: file });
+      } catch (loaderError: unknown) {
+        deps.stderr.write(`Error: ${errorMessage(loaderError)}\n`);
+        return 1;
+      }
+      deps.stderr.write(`Error: could not read ${file}.\n`);
+      return 1;
+    }
+    try {
+      // The text-level validator is the SAME engine the servers load with
+      // (parseGovernanceFileText is loadGovernanceFile's parse half), so
+      // error text stays identical.
+      config = parseGovernanceFileText(preexisting, file);
+      // Safe: parseGovernanceFileText already proved this text parses to a
+      // JSON object root (non-objects fail fast there). 32-1-R3: the raw
+      // root feeds unknown-top-level-key preservation on write.
+      rawRoot = JSON.parse(preexisting) as Record<string, unknown>;
     } catch (e: unknown) {
       deps.stderr.write(`Error: ${errorMessage(e)}\n`);
       return 1;
@@ -645,6 +777,8 @@ async function cmdSet(args: string[], deps: ResolvedDeps): Promise<number> {
     }
     config = {};
   }
+
+  if (rawRoot !== undefined) warnOnLayerShapedUnknownKeys(file, rawRoot, deps);
 
   // Mutate the loader-parsed config (its null-prototype layers preserve key
   // insertion order): create the addressed layer on demand, then define the
@@ -674,7 +808,11 @@ async function cmdSet(args: string[], deps: ResolvedDeps): Promise<number> {
   warnIfNotBaseline(key, deps);
 
   try {
-    writeGovernanceFileAtomic(file, serializeConfig(config), preexisting);
+    const content =
+      rawRoot === undefined
+        ? serializeConfig(config)
+        : serializeConfigPreservingUnknown(config, rawRoot);
+    writeGovernanceFileAtomic(file, content, preexisting);
   } catch (e: unknown) {
     deps.stderr.write(`Error: could not write ${file} — ${errorMessage(e)}\n`);
     return 1;
@@ -718,17 +856,36 @@ async function cmdUnset(args: string[], deps: ResolvedDeps): Promise<number> {
   if (file === undefined) return noFileError("unset", deps, UNSET_USAGE);
 
   let preexisting: string;
-  let config: GovernanceConfig;
   try {
-    // Load through the real loader FIRST so a missing/unreadable/invalid
-    // file fails with the server's exact error text; the raw bytes for a
-    // potential rollback are read only once the file is known to exist.
-    config = loadFileOrThrow(file);
     preexisting = readFileSync(file, "utf8");
+  } catch {
+    // A raw READ failure (ENOENT — unset never creates) carries no loader
+    // framing; re-run it through the real loader so the CLI prints the
+    // server's exact read-error text (naming IRIS_GOVERNANCE_FILE + path).
+    try {
+      loadGovernanceFile({ IRIS_GOVERNANCE_FILE: file });
+    } catch (loaderError: unknown) {
+      deps.stderr.write(`Error: ${errorMessage(loaderError)}\n`);
+      return 1;
+    }
+    deps.stderr.write(`Error: could not read ${file}.\n`);
+    return 1;
+  }
+  let config: GovernanceConfig;
+  let rawRoot: Record<string, unknown>;
+  try {
+    // 32-1-R7 (Story 32.4): the pre-image is read ONCE and used for BOTH
+    // the parse and a potential rollback (same rationale as `set`). The
+    // text-level validator IS the loader's parse half, so an invalid file
+    // fails with the server's exact error text.
+    config = parseGovernanceFileText(preexisting, file);
+    rawRoot = JSON.parse(preexisting) as Record<string, unknown>;
   } catch (e: unknown) {
     deps.stderr.write(`Error: ${errorMessage(e)}\n`);
     return 1;
   }
+
+  warnOnLayerShapedUnknownKeys(file, rawRoot, deps);
 
   const layer = layerFor(config, profile);
   if (ownFileValue(layer, key) === undefined) {
@@ -741,7 +898,7 @@ async function cmdUnset(args: string[], deps: ResolvedDeps): Promise<number> {
   delete (layer as Record<string, unknown>)[key];
 
   try {
-    writeGovernanceFileAtomic(file, serializeConfig(config), preexisting);
+    writeGovernanceFileAtomic(file, serializeConfigPreservingUnknown(config, rawRoot), preexisting);
   } catch (e: unknown) {
     deps.stderr.write(`Error: could not write ${file} — ${errorMessage(e)}\n`);
     return 1;
@@ -1309,6 +1466,36 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
 // ════════════════════════════════════════════════════════════════════
 
 /**
+ * 32-1-R4 (Story 32.4): help is honored only where the argv grammar puts it
+ * in OPTION position. A pre-dispatch `argv.includes("-h"/"--help")` broke
+ * the parser's own dash-value contract: `get -- -h` (a positional after the
+ * `--` terminator), `validate --file --help` (a valued option's VALUE), and
+ * `--profile -h` could never be addressed — help printed and the process
+ * exited 0, the exact opposite of the documented `--`/dash-value guarantee.
+ * This scanner mirrors `parseArgs`' state machine: the `--` terminator ends
+ * option scanning, and the token following a valued option is its value,
+ * never a flag.
+ */
+function helpRequested(args: string[]): boolean {
+  const valuedOptions = new Set(["--file", "--profile", "--root"]);
+  let optionsEnded = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    if (optionsEnded) continue;
+    if (arg === "--") {
+      optionsEnded = true;
+      continue;
+    }
+    if (valuedOptions.has(arg)) {
+      i++; // the next token is this option's VALUE, even one starting with "-"
+      continue;
+    }
+    if (arg === "-h" || arg === "--help") return true;
+  }
+  return false;
+}
+
+/**
  * Run the CLI for one invocation. Pure function of `argv`/`deps` — never
  * calls `process.exit`, so the caller (the sibling `governance-cli.ts` bin
  * entry, or a test) decides what to do with the returned exit code.
@@ -1319,7 +1506,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
 export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number> {
   const resolved = resolveDeps(deps);
 
-  if (argv.includes("-h") || argv.includes("--help")) {
+  if (helpRequested(argv)) {
     resolved.stdout.write(HELP_TEXT);
     return 0;
   }

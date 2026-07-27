@@ -1450,6 +1450,178 @@ describe("Story 32.3 — 31-6-1: repeated providePlannedDefinitions calls fire e
   });
 });
 
+describe("Story 32.4 — 32-3-R7: static-text warnings re-fire after a fix-then-rebreak (rising-edge dedupe)", () => {
+  it('stale-"all": warns once while the condition persists, stays silent after the fix, warns once more when re-introduced', async () => {
+    let stale = true;
+    const { deps, warnings } = makeDeps({
+      serverNames: ["a"],
+      getSettings: () => settings({ packages: ["dev"], hadStaleAllPackage: stale }),
+    });
+    const provider = new LauncherProvider(deps);
+    const staleAll = () => warnings.filter((w) => w.includes('lists the removed "all" package key'));
+
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+    expect(staleAll()).toHaveLength(1); // persistent condition: exactly once
+
+    stale = false; // the user fixes the setting
+    await provider.providePlannedDefinitions();
+    expect(staleAll()).toHaveLength(1); // no re-fire on the clear edge
+
+    stale = true; // …and later re-introduces it
+    await provider.providePlannedDefinitions();
+    expect(staleAll()).toHaveLength(2); // one NEW warning for the new occurrence
+
+    await provider.providePlannedDefinitions();
+    expect(staleAll()).toHaveLength(2); // …still deduped while it persists
+  });
+
+  it('reserved-"default": re-warns after the rename fix is undone', async () => {
+    let combine = true;
+    const { deps, warnings } = makeDeps({
+      serverNames: ["default"],
+      specs: { default: specFor("default", "SYS") },
+      getSettings: () => settings({ packages: ["dev"], combineProfiles: combine }),
+    });
+    const provider = new LauncherProvider(deps);
+    const shadow = () => warnings.filter((w) => w.includes("RESERVED"));
+
+    const planned = await provider.providePlannedDefinitions();
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(shadow()).toHaveLength(1);
+
+    combine = false; // the fix: no longer combining (no shadowing)
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(shadow()).toHaveLength(1);
+
+    combine = true; // the rebreak
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(shadow()).toHaveLength(2);
+  });
+});
+
+describe("Story 32.4 — 32-3-R14: coalesced-credential containment + shared-result freeze", () => {
+  it("an unexpected throw inside credential resolution degrades to ONE contained 'unavailable' warning — never a rejection out of resolveMcpServerDefinition", async () => {
+    const warnings: string[] = [];
+    const diagnostics: string[] = [];
+    // A spec WITHOUT an inline password AND without a username forces the
+    // authentication path with `specUsername === ""`, so the malformed
+    // session's missing `scopes` array (the "a bug or a new rejection mode"
+    // case the guard exists for, NOT a shape the real API is known to
+    // produce) makes resolveServerCredentials throw UNEXPECTEDLY
+    // (session.scopes[1]) outside every guarded region.
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "serverA", description: "", detail: "" }],
+      getServerSpec: async () => ({
+        name: "serverA",
+        webServer: { host: "serverA.example.com", port: 52773, scheme: "http" },
+      }),
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const authApi: AuthApi = {
+      getSession: async () =>
+        ({ id: "s1", accessToken: "tok", account: { id: "acct-1", label: "Account One" } }) as never,
+    };
+    const deps: ProviderDeps = {
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["serverA"] }),
+      showWarning: (m) => warnings.push(m),
+      logDiagnostic: (m) => diagnostics.push(m),
+    };
+    const provider = new LauncherProvider(deps);
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(1);
+
+    // Pre-Story-32.4 this REJECTED (the throw fanned out to every coalesced
+    // caller). Now: contained to the ordinary "unavailable" outcome.
+    const env = await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(env).toBeUndefined();
+    const unavailable = warnings.filter((w) => w.includes("could not provide a connection"));
+    expect(unavailable).toHaveLength(1);
+    expect(unavailable[0]).toContain("serverA");
+    // 32.4 review (Edge L4): the degraded surface is identical to an
+    // ordinary failure, so the underlying error leaves a diagnostic crumb
+    // (output channel) naming the server and the thrown error — never a
+    // toast, never the profile/session payload.
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain("serverA");
+    expect(diagnostics[0]).toContain("threw unexpectedly");
+    expect(diagnostics[0]).toContain("TypeError");
+    expect(diagnostics[0]).not.toContain("tok");
+  });
+
+  it("the coalesced result is frozen (shared-object mutation guard), and concurrent resolutions share ONE getSession round-trip", async () => {
+    const { deps } = makeDeps({
+      serverNames: ["serverA"],
+      specs: { serverA: specFor("serverA") }, // no password → auth path
+    });
+    const provider = new LauncherProvider(deps);
+    interface CoalescedAccess {
+      resolveCredentialsCoalesced(
+        api: ServerManagerApi,
+        serverName: string,
+        namespace: string,
+        scope?: unknown,
+      ): Promise<unknown>;
+    }
+    const internal = provider as unknown as CoalescedAccess;
+    const api = (await deps.getServerManagerApi()) as ServerManagerApi;
+
+    const [first, second] = await Promise.all([
+      internal.resolveCredentialsCoalesced(api, "serverA", "HSCUSTOM", undefined),
+      internal.resolveCredentialsCoalesced(api, "serverA", "HSCUSTOM", undefined),
+    ]);
+    // Same shared object for every coalesced caller…
+    expect(second).toBe(first);
+    // …and it (plus the profile it carries) is structurally read-only.
+    expect(Object.isFrozen(first)).toBe(true);
+    const result = first as { status: string; profile?: unknown };
+    expect(result.status).toBe("resolved");
+    expect(Object.isFrozen(result.profile)).toBe(true);
+  });
+
+  it("32.4 review: the contained 'unavailable' fallback is frozen too (same shared-object guard as the success branch)", async () => {
+    const warnings: string[] = [];
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "serverA", description: "", detail: "" }],
+      getServerSpec: async () => ({
+        name: "serverA",
+        webServer: { host: "serverA.example.com", port: 52773, scheme: "http" },
+      }),
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const authApi: AuthApi = {
+      getSession: async () =>
+        ({ id: "s1", accessToken: "tok", account: { id: "acct-1", label: "Account One" } }) as never,
+    };
+    const deps: ProviderDeps = {
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["serverA"] }),
+      showWarning: (m) => warnings.push(m),
+    };
+    const provider = new LauncherProvider(deps);
+    interface CoalescedAccess {
+      resolveCredentialsCoalesced(
+        api: ServerManagerApi,
+        serverName: string,
+        namespace: string,
+        scope?: unknown,
+      ): Promise<unknown>;
+    }
+    const internal = provider as unknown as CoalescedAccess;
+    const [first, second] = await Promise.all([
+      internal.resolveCredentialsCoalesced(api, "serverA", "HSCUSTOM", undefined),
+      internal.resolveCredentialsCoalesced(api, "serverA", "HSCUSTOM", undefined),
+    ]);
+    expect(second).toBe(first);
+    expect((first as { status: string }).status).toBe("unavailable");
+    expect(Object.isFrozen(first)).toBe(true);
+  });
+});
+
 describe("Story 32.3 — 31-6-3: local-build plans spawn the extension host's own interpreter", () => {
   it("resolveEnvForLabel adds ELECTRON_RUN_AS_NODE=1 for a local (process.execPath) plan, and NOT for an npx plan", async () => {
     // Self-contained fake "built checkout" (makeRepoDir/buildPackage are

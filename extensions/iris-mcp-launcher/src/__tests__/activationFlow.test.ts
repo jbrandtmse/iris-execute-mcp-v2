@@ -230,4 +230,111 @@ describe("Story 32.3 QA — activation flow (real extension.ts, faked editor)", 
     // The refusal happens before any credential prompt: getSession never ran.
     expect(mockState.getSessionCalls).toHaveLength(0);
   });
+
+  it("32-3-R3: a mis-shaped Server Manager API warns ONCE per session (version mismatch), and the downstream 'should be installed automatically' misattribution is suppressed", async () => {
+    mockState.configStore.set(`${CONFIG}.servers`, ["prod"]);
+    // Exports present but WRONG-SHAPED (no getServerSpec/getAccount) — the
+    // 31-4-8 duck-type check fails on every call (nothing is cached).
+    mockState.serverManager = {
+      isActive: true,
+      activate: async () => undefined,
+      exports: { getServerNames: () => [] } as unknown as ServerManagerApi,
+    };
+
+    activate(fakeContext());
+    await flushEditor();
+
+    const versionMismatch = () =>
+      mockState.warnings.filter((message) => message.includes("a version mismatch"));
+    const misattributed = () =>
+      mockState.warnings.filter((message) => message.includes("should be installed automatically"));
+    expect(versionMismatch()).toHaveLength(1);
+    // The provider's generic "not available" warning was SUPPRESSED — the
+    // real cause already got its own accurate message.
+    expect(misattributed()).toHaveLength(0);
+
+    // A second provide (MCP refresh) AND a config-change refresh must NOT
+    // re-fire the shape warning (32-3-R3: once per session).
+    await theMcpProvider().provideMcpServerDefinitions({ isCancellationRequested: false });
+    for (const listener of mockState.configChangeListeners) {
+      listener({ affectsConfiguration: () => true });
+    }
+    await flushEditor();
+    expect(versionMismatch()).toHaveLength(1);
+    expect(misattributed()).toHaveLength(0);
+  });
+
+  it("32-3-R5: the zero-state (servers: [] = expose ALL) reports the EFFECTIVE registered count, keeping the AC 31.5.3 tooltip", async () => {
+    mockState.configStore.set(`${CONFIG}.servers`, []);
+    mockState.serverManager = serverManagerWith({
+      alpha: specFor("alpha", "SYS"),
+      beta: specFor("beta", "SYS"),
+    });
+
+    activate(fakeContext());
+    await flushEditor();
+
+    // Expose-all with two live servers — "none" here inverted the count
+    // contract (32-3-R5); the fresh-install signal stays in the tooltip.
+    expect(theStatusBarItem().text).toBe("$(server) IRIS MCP: 2");
+    expect(theStatusBarItem().tooltip).toContain("no servers selected yet");
+    expect(theStatusBarItem().tooltip).toContain("2 currently registered");
+  });
+
+  it("32-3-R8: an older in-flight status-bar refresh never overwrites a newer one (monotonic refresh guard)", async () => {
+    // Two manually-gated activations: refresh #1 (servers: ["a","b","c"] —
+    // count 3) awaits gate1; a config change starts refresh #2 (servers:
+    // ["x"] — count 1) which awaits gate2. Completing gate2 FIRST then gate1
+    // would, without the guard, render the STALE three-server text over the
+    // newer one-server state.
+    let gate1!: () => void;
+    let gate2!: () => void;
+    const gate1Promise = new Promise<void>((resolve) => { gate1 = resolve; });
+    const gate2Promise = new Promise<void>((resolve) => { gate2 = resolve; });
+    let activateCalls = 0;
+    const roster = ["a", "b", "c", "x"];
+    mockState.serverManager = {
+      isActive: false,
+      activate: () => {
+        activateCalls++;
+        const promise = activateCalls === 1 ? gate1Promise : gate2Promise;
+        return promise.then(() => {
+          (mockState.serverManager as { isActive: boolean }).isActive = true;
+        });
+      },
+      exports: {
+        getServerNames: () => roster.map((name) => ({ name, description: "", detail: "" })),
+        getServerSpec: async (name: string) => specFor(name, "SYS"),
+        getAccount: () => ({ id: "acct-1", label: "Account One" }),
+      } as ServerManagerApi,
+    };
+    mockState.configStore.set(`${CONFIG}.servers`, ["a", "b", "c"]);
+
+    activate(fakeContext());
+    // Let refresh #1 reach its await (it has read the OLD settings by now).
+    await flushEditor();
+
+    // The config change starts refresh #2 with the NEW settings.
+    mockState.configStore.set(`${CONFIG}.servers`, ["x"]);
+    for (const listener of mockState.configChangeListeners) {
+      listener({ affectsConfiguration: () => true });
+    }
+    await flushEditor();
+
+    // Complete #2 first (renders the newer one-server state), then #1 — the
+    // stale refresh must BAIL rather than overwrite. (The TEXT alone cannot
+    // distinguish: the provider re-reads settings at provide time, so both
+    // refreshes render the same count. The stale render betrays itself in
+    // the TOOLTIP — refresh #1 captured ["a","b","c"], whose divergence note
+    // reads "1 of 3 selected servers".)
+    gate2();
+    await flushEditor();
+    expect(theStatusBarItem().text).toBe("$(server) IRIS MCP: 1");
+    expect(theStatusBarItem().tooltip).toContain("Servers: x");
+    gate1();
+    await flushEditor();
+    expect(theStatusBarItem().text).toBe("$(server) IRIS MCP: 1");
+    expect(theStatusBarItem().tooltip).toContain("Servers: x");
+    expect(theStatusBarItem().tooltip).not.toContain("1 of 3 selected");
+  });
 });

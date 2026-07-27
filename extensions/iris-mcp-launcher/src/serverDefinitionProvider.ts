@@ -29,6 +29,7 @@ import type {
   LauncherSettings,
   ResolvedConnectionProfile,
   ServerManagerApi,
+  ServerManagerApiFailureReason,
   SuitePackageKey,
 } from "./types.js";
 
@@ -42,10 +43,27 @@ export interface PlannedDefinition {
 /** Dependencies injected into {@link LauncherProvider} — real implementations come from `extension.ts`; fakes come from tests. */
 export interface ProviderDeps {
   getServerManagerApi: () => Promise<ServerManagerApi | undefined>;
+  /**
+   * 32-3-R3 (Story 32.4): WHY the most recent `getServerManagerApi()` call
+   * failed — when it reports `"shape-mismatch"`, the accurate version-
+   * mismatch warning already fired at the source, so this provider's generic
+   * "not available (should be installed automatically)" warning is
+   * suppressed (it would misattribute the cause). Optional: fakes that omit
+   * it keep the pre-Story-32.4 always-warn behavior.
+   */
+  getServerManagerApiFailureReason?: () => ServerManagerApiFailureReason | undefined;
   authApi: AuthApi;
   getSettings: () => LauncherSettings;
   /** Surfaces ONE clear message to the user (and wherever else the caller wants it logged) — never a toast storm, never thrown. */
   showWarning: (message: string) => void;
+  /**
+   * 32.4 review (Edge L4): a diagnostic crumb for an UNEXPECTED internal
+   * failure that the user-facing surface deliberately renders as an ordinary
+   * one (the 32-3-R14 credential-resolution containment) — wired to the
+   * extension's output channel, never a toast. Optional: fakes that omit it
+   * lose only the crumb, not the containment.
+   */
+  logDiagnostic?: (message: string) => void;
 }
 
 const NPX_COMMAND = "npx";
@@ -124,6 +142,30 @@ export class LauncherProvider {
   }
 
   /**
+   * Condition keys whose rising edge has already fired (32-3-R7, Story
+   * 32.4). For STATIC-text warnings (no variable content to re-key on),
+   * full-text `warnOnce` dedupe meant "once per SESSION, never again" — a
+   * problem the user fixed and later re-introduced never re-warned.
+   * Rising-edge semantics instead: the dedupe entry is CLEARED whenever the
+   * condition is observed false, so a persistent problem warns exactly once
+   * (the 31-6-1 re-toast bar) while a fix-then-rebreak warns once per
+   * occurrence. The message is a thunk so a non-firing evaluation costs no
+   * string building.
+   */
+  private readonly firedConditions = new Set<string>();
+
+  /** Warn only on the false→true edge of `condition` (32-3-R7) — see the field doc. */
+  private warnOnRisingEdge(conditionKey: string, condition: boolean, message: () => string): void {
+    if (!condition) {
+      this.firedConditions.delete(conditionKey);
+      return;
+    }
+    if (this.firedConditions.has(conditionKey)) return;
+    this.firedConditions.add(conditionKey);
+    this.deps.showWarning(message());
+  }
+
+  /**
    * The number of DISTINCT Server Manager servers covered by the currently
    * accepted plans (31-5-2) — the "effective registered" count the status bar
    * reports, as opposed to the raw `irisMcpLauncher.servers.length`, which
@@ -159,6 +201,41 @@ export class LauncherProvider {
       serverName,
       namespace,
       scope,
+    ).then(
+      (result) => {
+        // 32-3-R14 (Story 32.4): the SAME result object is handed to every
+        // coalesced caller — freeze it (and the resolved profile it carries)
+        // so a future consumer mutating `result.profile` throws in strict
+        // mode instead of silently corrupting every other caller's
+        // resolution. Nothing in this extension mutates a CredentialResult
+        // (verified: synthesizeIrisEnv reads profiles only).
+        if (result.status === "resolved") Object.freeze(result.profile);
+        return Object.freeze(result) as CredentialResult;
+      },
+      (error: unknown) => {
+        // 32-3-R14: an UNEXPECTED throw (resolveServerCredentials' contract
+        // is never-throw for its known outcomes; this catches a bug or a new
+        // rejection mode) must not reject EVERY coalesced
+        // resolveMcpServerDefinition call with an unhandled third-party
+        // error. Degrade to the contained "unavailable" outcome, which
+        // resolveEnvForLabel already renders as ONE clear warning naming the
+        // server — the same surface an ordinary resolution failure gets.
+        // 32.4 review: the degraded surface is identical to an ordinary
+        // failure, so leave a diagnostic crumb (output channel, never a
+        // toast) with the underlying error — otherwise a real bug here is
+        // undiagnosable from user reports. The detail is bounded (name +
+        // truncated message): it comes from this extension's own resolution
+        // code or the VS Code auth API, never from a resolved profile, env
+        // map, or session/token value (the containment bar). Frozen like
+        // the success branch: the same object is handed to every coalesced
+        // caller.
+        const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        const detail = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+        this.deps.logDiagnostic?.(
+          `Credential resolution for "${serverName}" threw unexpectedly (degraded to "unavailable"): ${detail}`,
+        );
+        return Object.freeze({ status: "unavailable" }) as CredentialResult;
+      },
     ).finally(() => {
       this.inFlightCredentials.delete(serverName);
     });
@@ -172,16 +249,27 @@ export class LauncherProvider {
    */
   async providePlannedDefinitions(): Promise<PlannedDefinition[]> {
     const api = await this.deps.getServerManagerApi();
-    if (!api) {
-      // 31-6-1's dedupe discipline covers this warning too (Story 32.3 code
-      // review): 31-5-2's status-bar refresh replans on EVERY configuration
-      // change, so an unavailable Server Manager would otherwise re-toast per
-      // change — the exact re-fire class 31-6-1 burned down.
-      this.warnOnce(
+    // 32-3-R3 (Story 32.4): when the API failure was a shape/version
+    // mismatch, the accurate warning already fired at the source
+    // (extension.ts, once per session) — the generic "not available (should
+    // be installed automatically)" message would misattribute the cause, so
+    // it stays silent for that reason.
+    const apiIsShapeMismatch =
+      !api && this.deps.getServerManagerApiFailureReason?.() === "shape-mismatch";
+    // 31-6-1's dedupe discipline covers this warning too (Story 32.3 code
+    // review): 31-5-2's status-bar refresh replans on EVERY configuration
+    // change, so an unavailable Server Manager would otherwise re-toast per
+    // change — the exact re-fire class 31-6-1 burned down. 32-3-R7: rising-
+    // edge keyed, so a fixed-then-rebroken dependency re-warns once.
+    this.warnOnRisingEdge(
+      "server-manager-api-unavailable",
+      !api && !apiIsShapeMismatch,
+      () =>
         "IRIS MCP Launcher: the InterSystems Server Manager extension is not available " +
-          "(it should be installed automatically as a dependency of this extension). " +
-          "No IRIS MCP servers were registered.",
-      );
+        "(it should be installed automatically as a dependency of this extension). " +
+        "No IRIS MCP servers were registered.",
+    );
+    if (!api) {
       this.plansByLabel = new Map();
       return [];
     }
@@ -191,19 +279,23 @@ export class LauncherProvider {
     // exception here would reject `provideMcpServerDefinitions`, so VS Code
     // would surface a generic extension error and register NOTHING — with
     // none of this extension's own messages ever shown.
-    let settings: LauncherSettings;
-    let availableServers: { name: string; scope?: ConfigScope }[];
+    let settings: LauncherSettings | undefined;
+    let availableServers: { name: string; scope?: ConfigScope }[] = [];
     try {
       settings = this.deps.getSettings();
       availableServers = api.getServerNames().map((s) => ({ name: s.name, scope: s.scope }));
     } catch {
-      // Same dedupe discipline as the unavailable-API warning above.
-      this.warnOnce(
-        "IRIS MCP Launcher: could not read the IRIS MCP Launcher settings or the InterSystems " +
-          "Server Manager server list. Check that irisMcpLauncher.servers and " +
-          "irisMcpLauncher.packages are arrays of strings in your settings. No IRIS MCP servers " +
-          "were registered.",
-      );
+      settings = undefined;
+    }
+    // Same dedupe discipline as the unavailable-API warning above (32-3-R7:
+    // rising-edge, so a fixed-then-rebroken settings file re-warns once).
+    this.warnOnRisingEdge("settings-or-roster-read-failed", settings === undefined, () =>
+      "IRIS MCP Launcher: could not read the IRIS MCP Launcher settings or the InterSystems " +
+        "Server Manager server list. Check that irisMcpLauncher.servers and " +
+        "irisMcpLauncher.packages are arrays of strings in your settings. No IRIS MCP servers " +
+        "were registered.",
+    );
+    if (settings === undefined) {
       this.plansByLabel = new Map();
       this.scopesByServerName = new Map();
       return [];
@@ -217,15 +309,14 @@ export class LauncherProvider {
     // exactly one warning naming the removal, independent of everything else
     // below — including when "all" was the user's ONLY selected package (so
     // `settings.packages`/`plans` end up empty after filtering). 31-6-1: via
-    // `warnOnce`, so a second provide call cannot re-fire it.
-    if (settings.hadStaleAllPackage) {
-      this.warnOnce(
-        `IRIS MCP Launcher: irisMcpLauncher.packages lists the removed "all" package key. ` +
-          `"all" (@iris-mcp/all) ships no dist/bin and could never be started, so it has been ` +
-          `dropped. Select the five individual packages instead: admin, data, dev, interop, ops. ` +
-          `Any other packages you selected still register normally.`,
-      );
-    }
+    // dedupe, so a second provide call cannot re-fire it. 32-3-R7:
+    // rising-edge — removing "all" and later re-adding it re-warns once.
+    this.warnOnRisingEdge("stale-all-package", settings.hadStaleAllPackage, () =>
+      `IRIS MCP Launcher: irisMcpLauncher.packages lists the removed "all" package key. ` +
+        `"all" (@iris-mcp/all) ships no dist/bin and could never be started, so it has been ` +
+        `dropped. Select the five individual packages instead: admin, data, dev, interop, ops. ` +
+        `Any other packages you selected still register normally.`,
+    );
 
     // An explicit `servers` list that matches nothing is a misconfiguration
     // worth naming. An empty `packages`/`servers` list is NOT — that is the
@@ -521,15 +612,18 @@ export class LauncherProvider {
     // so every tool call omitting the `server` parameter would silently
     // target it. Deliberately NOT auto-renamed here — that would make the
     // `server` parameter disagree with the Server Manager UI.
-    if (settings.combineProfiles && profiles.some((profile) => profile.name === "default")) {
-      this.warnOnce(
+    // 32-3-R7: rising-edge — renaming the server (the fix) clears the edge,
+    // so later adding another "default"-named one re-warns once.
+    this.warnOnRisingEdge(
+      "reserved-default-shadow",
+      settings.combineProfiles && profiles.some((profile) => profile.name === "default"),
+      () =>
         `IRIS MCP Launcher: server "default" — that name is RESERVED by the IRIS MCP suite. ` +
           `Under combineProfiles it is emitted as an IRIS_PROFILES key that overrides the reserved ` +
           `default profile, so every tool call that omits the "server" parameter silently targets ` +
           `THIS server with its credentials. Rename the server in Server Manager ` +
           `(intersystems.servers) to avoid the shadowing.`,
-      );
-    }
+    );
 
     const env = withOwnedVarsCleared({
       ...synthesizeIrisEnv(profiles, settings.namespace, {

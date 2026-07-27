@@ -466,6 +466,117 @@ describe("31-3-7 — mergeProfile host validation rejects URL userinfo, slashes,
     const registry = buildProfileRegistry(defaultConfig, env);
     expect(registry.get("prod")?.host).toBe("iris-prod-01.example.com");
   });
+
+  // ── 32-3-R6 (Story 32.4): the guard runs on the FINAL host — including the
+  // inherited IRIS_HOST default — and additionally rejects `\` and `:`.
+  it.each([
+    "example.com:8080", // inline port composes http://example.com:8080:52773
+    "example.com\\evil",
+    "example.com?x=1", // 32.4 review: query swallows the port (http://example.com?x=1:52773 parses with port "")
+    "example.com#frag", // same for a fragment
+    "[::1]:8080", // a bracketed IPv6 literal with an inline port is still host:port
+  ])("IRIS_PROFILES host %j is now also rejected (backslash / inline port / query / fragment), without echoing the value", (host) => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host } }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(() => buildProfileRegistry(defaultConfig, env)).toThrow(/must be a bare hostname/);
+  });
+
+  // 32.4 review: a bracketed IPv6 literal composed a VALID baseUrl before the
+  // guard existed (`http://[::1]:52773`) — rejecting it would be a Rule #19
+  // back-compat break on a working configuration, so the `:` rejection
+  // carves it out at BOTH layers (loadConfig and the IRIS_PROFILES override).
+  it("32-3-R6 (review carve-out): a bracketed IPv6 literal is accepted at both layers and composes a valid baseUrl", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "[::1]",
+      IRIS_PROFILES: JSON.stringify({ v6: { host: "[fe80::1]", username: "u", password: "p" } }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(defaultConfig.host).toBe("[::1]");
+    expect(defaultConfig.baseUrl).toBe("http://[::1]:52773");
+    // A bracketed literal parses as a valid URL with the port intact.
+    const parsed = new URL(defaultConfig.baseUrl);
+    expect(parsed.hostname).toBe("[::1]");
+    expect(parsed.port).toBe("52773");
+    const registry = buildProfileRegistry(defaultConfig, env);
+    expect(registry.get("v6")?.baseUrl).toBe("http://[fe80::1]:52773");
+    // …and a host-less entry inherits the bracketed default host untouched.
+    const inherited = buildProfileRegistry(defaultConfig, {
+      ...env,
+      IRIS_PROFILES: JSON.stringify({ inh: { username: "u", password: "p" } }),
+    });
+    expect(inherited.get("inh")?.host).toBe("[::1]");
+  });
+
+  it("32-3-R6 (review): IRIS_HOST carrying a query or fragment is rejected — the port would be silently swallowed", () => {
+    for (const host of ["example.com?x=1", "example.com#frag"]) {
+      expect(() =>
+        loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_HOST: host }),
+      ).toThrow(/IRIS_HOST must be a bare hostname/);
+    }
+  });
+
+  it("32-3-R6: a userinfo-carrying IRIS_HOST fails loadConfig fast — the reserved default profile's baseUrl can never carry it", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "admin:hunter2@remote.example.com",
+    };
+    let caught: unknown;
+    try {
+      loadConfig(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_HOST");
+    expect(message).toContain("bare hostname");
+    // The received value (which can embed a credential) is never echoed.
+    expect(message).not.toContain("hunter2");
+  });
+
+  it("32-3-R6: a host-less IRIS_PROFILES entry inheriting a hostile IRIS_HOST fails naming IRIS_PROFILES and the inherited origin", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_HOST: "admin:hunter2@remote.example.com",
+      IRIS_PROFILES: JSON.stringify({ prod: { namespace: "USER" } }),
+    };
+    // loadConfig throws FIRST (the inherited-default path is guarded at the
+    // source), so the mergeProfile inherited-host guard is unreachable from
+    // real flows — defense in depth. Both layers are pinned.
+    expect(() => loadConfig(env)).toThrow(/IRIS_HOST must be a bare hostname/);
+    // Direct mergeProfile proof of the inner guard (the layer a future caller
+    // with a hand-built base would hit): the error names the profile and the
+    // inherited origin, never the received value.
+    const base = {
+      host: "admin:hunter2@remote.example.com",
+      port: 52773,
+      username: "admin",
+      password: "secret",
+      namespace: "HSCUSTOM",
+      https: false,
+      baseUrl: "http://admin:hunter2@remote.example.com:52773",
+      timeout: 60000,
+    };
+    let caught: unknown;
+    try {
+      mergeProfile("prod", base, {});
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain('"prod"');
+    expect(message).toContain("inherited default host");
+    expect(message).not.toContain("hunter2");
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════

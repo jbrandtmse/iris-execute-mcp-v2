@@ -424,6 +424,26 @@ export function loadGovernanceFile(
     throw fail(`could not read the file (${reason}).`);
   }
 
+  return parseGovernanceFileText(text, raw);
+}
+
+/**
+ * Validate the TEXT of a governance file — the parse+shape half of
+ * {@link loadGovernanceFile} with the file read factored out, so a caller
+ * that has ALREADY read the bytes (the CLI's write commands, which need the
+ * pre-image for a potential rollback — 32-1-R7) validates the SAME bytes it
+ * would restore rather than re-reading the file a second time (under
+ * concurrent modification the rollback would otherwise restore content the
+ * caller never parsed). Error text is identical to the loader's (naming
+ * `IRIS_GOVERNANCE_FILE` + `path`).
+ *
+ * @param text - The file's raw UTF-8 text.
+ * @param path - The path the text was read from (error attribution only).
+ * @throws {Error} (naming `IRIS_GOVERNANCE_FILE` + `path`) on any failure.
+ */
+export function parseGovernanceFileText(text: string, path: string): GovernanceConfig {
+  const fail = (detail: string): Error => governanceFileError(path, detail);
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

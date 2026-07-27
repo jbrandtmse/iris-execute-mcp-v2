@@ -104,7 +104,7 @@ function makeHarness(options: {
   let panelCount = 0;
 
   const engine: GovernanceEngineHost = {
-    describe: () =>
+    describe: async () =>
       options.engineDescribeError !== undefined
         ? { ok: false, error: options.engineDescribeError }
         : { ok: true, mode: options.engineMode ?? "local" },
@@ -169,7 +169,7 @@ function makeHarness(options: {
     getSettings: () => options.settings ?? settings(),
     getServerManagerNames: async () => options.serverManagerNames ?? ["prod"],
     engine,
-    fileExists: () => options.fileExists ?? true,
+    fileExists: async () => options.fileExists ?? true,
     chooseFile: async () => undefined,
     updateGovernanceFileSetting: (path) => {
       settingWrites.push(path);

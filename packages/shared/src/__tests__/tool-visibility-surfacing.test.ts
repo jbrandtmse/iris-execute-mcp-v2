@@ -190,6 +190,11 @@ function discoveryOf(result: any): ServerDiscoveryResult {
 function expectToolNameAbsent(value: unknown, name: string): void {
   if (typeof value === "string") {
     expect(value).not.toBe(name);
+    // 32-3-R10 (Story 32.4): the same composite-key check the object-KEY
+    // branch applies — a future surface serializing governance keys as
+    // STRING VALUES (e.g. `["iris_hidden_tool:read"]` in an array) must not
+    // slip a `tool:action` leak past an exact-equality-only check.
+    expect(value.startsWith(`${name}:`)).toBe(false);
     return;
   }
   if (Array.isArray(value)) {
@@ -204,6 +209,20 @@ function expectToolNameAbsent(value: unknown, name: string): void {
     }
   }
 }
+
+describe("expectToolNameAbsent — the walker itself (32-3-R10)", () => {
+  it("catches a composite tool:action leak in a string VALUE, not only exact values and object keys", () => {
+    expect(() =>
+      expectToolNameAbsent({ keys: ["iris_hidden_tool:read"] }, "iris_hidden_tool"),
+    ).toThrow();
+    // …and still passes a clean shape, including a LONGER name that merely
+    // shares the hidden name as a prefix (the 30-2-1 anti-substring bar).
+    expectToolNameAbsent(
+      { keys: ["iris_other:read", "iris_hidden_tool_extra"] },
+      "iris_hidden_tool",
+    );
+  });
+});
 
 function makeEnvHarness() {
   let fetchMock: ReturnType<typeof vi.fn>;

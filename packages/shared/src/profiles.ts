@@ -229,21 +229,40 @@ export function mergeProfile(
         sourceLabel,
       );
     }
-    // 31-3-7 (Story 32.3): a host is not a URL. URL userinfo
-    // (`admin:hunter2@host`), a scheme/slash, or whitespace would land
-    // verbatim in `baseUrl` — hence in the `iris_server_profiles` roster,
-    // which the docs describe as never containing a password. Reject it. The
-    // message deliberately does NOT echo the received value: a userinfo host
-    // can embed a credential, and this error must not become the leak it
-    // prevents (asserted in tests).
-    if (/[@/\s]/.test(override.host)) {
-      throw profilesError(
-        `profile "${name}": "host" must be a bare hostname — it must not contain ` +
-          `"@", "/", or whitespace (URL userinfo or a scheme is not a host).`,
-        sourceLabel,
-      );
-    }
     host = override.host;
+  }
+  // 31-3-7 (Story 32.3): a host is not a URL. URL userinfo
+  // (`admin:hunter2@host`), a scheme/slash, or whitespace would land
+  // verbatim in `baseUrl` — hence in the `iris_server_profiles` roster,
+  // which the docs describe as never containing a password. Reject it. The
+  // message deliberately does NOT echo the received value: a userinfo host
+  // can embed a credential, and this error must not become the leak it
+  // prevents (asserted in tests).
+  //
+  // 32-3-R6 (Story 32.4): the guard now runs on the FINAL host — the
+  // override's when present, else the INHERITED default (`base.host`, i.e.
+  // `IRIS_HOST`) — and additionally rejects `\` and `:`. Pre-Story-32.4 only
+  // the override was checked, so a userinfo-carrying `IRIS_HOST` landed
+  // verbatim in the reserved default profile's `baseUrl` and in every
+  // host-less `IRIS_PROFILES` entry — the same roster-leak class via the
+  // inherited path. `:` is rejected because a host is not host:port
+  // (`host: "example.com:8080"` composed `http://example.com:8080:52773`)
+  // EXCEPT inside a bracketed IPv6 literal (`[::1]`), which composes a valid
+  // baseUrl and worked before this guard existed (Rule #19 — a bare `::1`
+  // never worked: `deriveBaseUrl` does not bracket it). `?`/`#` are rejected
+  // too (32.4 review): they compose a baseUrl whose query/fragment swallows
+  // the port and every request path, so no working configuration used them.
+  const isBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(host);
+  if (/[@/\s\\?#]/.test(host) || (!isBracketedIpv6 && host.includes(":"))) {
+    const origin =
+      override.host !== undefined ? `"host"` : `the inherited default host (from IRIS_HOST)`;
+    throw profilesError(
+      `profile "${name}": ${origin} must be a bare hostname — it must not contain ` +
+        `"@", "/", "\\", "?", "#", or whitespace, and no ":" outside a bracketed IPv6 ` +
+        `literal like "[::1]" (URL userinfo, a scheme, or an inline port is not ` +
+        `a host; use "port" for the port).`,
+      sourceLabel,
+    );
   }
 
   // port

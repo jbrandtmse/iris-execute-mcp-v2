@@ -56,6 +56,13 @@
  *      the CLI's key universe is exactly the frozen baseline ∪ mentioned
  *      keys (asserted against the built `GOVERNANCE_BASELINE`), and the
  *      server's universe is a superset. One engine, two processes, no drift.
+ *   J. **32-1-R3 (Story 32.4) unknown top-level keys survive a write, through
+ *      the REAL bin.** A policy file carrying a `"comment"` annotation and a
+ *      typo'd layer (`"globals"`) round-trips through `set` AND `unset`:
+ *      both unknown keys are preserved VERBATIM at their original positions
+ *      (pre-Story-32.4 the first write silently dropped them), stderr warns
+ *      on the layer-shaped typo, and `validate` still passes. Dist-only —
+ *      no live IRIS needed.
  *
  * **Keychain note:** no test touches the OS keychain — the default profile is
  * configured entirely from `IRIS_*` env vars, and every denied call is refused
@@ -159,11 +166,15 @@ interface DiscoveryGovernance {
  * (in particular a real `IRIS_GOVERNANCE` / `IRIS_GOVERNANCE_FILE`) can never
  * leak into a spawned gate server, then layer the test's explicit IRIS_*
  * values on top. (Mirrors `server-manager-precedence-gate.test.ts`.)
+ *
+ * 32-3-R9 (Story 32.4): the scrub is CASE-INSENSITIVE — Windows environment
+ * variables are case-insensitive, so an ambient lowercase `iris_governance`
+ * would otherwise survive the scrub and still be seen by the child.
  */
 function childEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.startsWith("IRIS_")) env[key] = value;
+    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
   }
   return {
     ...env,
@@ -179,6 +190,7 @@ function childEnv(extra: Record<string, string>): Record<string, string> {
 let distSkipReason: string | undefined;
 let liveSkipReason: string | undefined;
 let cliSkipReason: string | undefined;
+let cliDistSkipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir: string | undefined;
 let policyPath: string;
@@ -187,6 +199,11 @@ let policyGate4Path: string;
 let malformedPath: string;
 
 beforeAll(async () => {
+  // Dist-only CLI gate (Case J — 32-1-R3): needs the BUILT bin, never a live
+  // IRIS. Computed FIRST so the early return below cannot leave it unset.
+  if (!existsSync(GOVERNANCE_CLI_BIN)) {
+    cliDistSkipReason = `packages/shared/dist/cli/governance-cli.js is not built (run "pnpm turbo run build" first). Looked at: ${GOVERNANCE_CLI_BIN}`;
+  }
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
     distSkipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm turbo run build" first). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     liveSkipReason = distSkipReason;
@@ -524,7 +541,7 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
   );
 
   it(
-    "F: iris_env_promote Gate 4 honors the file channel — a baseline write-family key disabled ONLY in the file refuses execute (other three gates pass)",
+    "F: iris_env_promote Gate 4 honors the file channel — a baseline write-family key disabled ONLY in the file refuses execute (other three gates pass), AND keeps refusing after the file is rewritten mid-session (the process-level startup-snapshot proof for Gate 4 — 32-1-R5)",
     async (ctx) => {
       if (skipIf(ctx, liveSkipReason, "env_promote Gate 4")) return;
 
@@ -595,6 +612,35 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
           // Refused BEFORE any profile client is resolved — nothing was
           // fetched and nothing was written (the refusal names it).
           expect(text).toContain("No changes were made");
+
+          // 32-1-R5 (Story 32.4): the process-level Gate-4 MID-SESSION proof
+          // Case H could not give (Case H's surfaces never re-read by design).
+          // Rewrite the file mid-session to RE-ENABLE iris_config_manage:set;
+          // if Gate 4 re-read the file, the re-execute below would now PASS
+          // the gate — and (source == target == default here) attempt a
+          // same-value config write on this dev instance. The startup
+          // snapshot must keep refusing. The plan stays valid: planHash is a
+          // function of the diff alone, and the diff is unchanged.
+          writeFileSync(policyGate4Path, "{}\n", "utf8");
+          expect(readFileSync(policyGate4Path, "utf8")).toBe("{}\n");
+
+          const executeAfter = await client.callTool({
+            name: "iris_env_promote",
+            arguments: {
+              action: "execute",
+              source: "default",
+              target: "default",
+              diff,
+              plan,
+              steps: [configStep!.index],
+              confirm: true,
+            },
+          });
+          expect(executeAfter.isError).toBe(true);
+          const textAfter = executeAfter.content?.[0]?.text ?? "";
+          expect(textAfter).toContain("Gate 4");
+          expect(textAfter).toContain("iris_config_manage:set");
+          expect(textAfter).toContain("No changes were made");
         },
       );
     },
@@ -609,12 +655,16 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
       // 1. The BUILT bin CREATES the file and sets a write-tool key false
       //    (spawnSync against dist — the 31-2 review lesson; expected values
       //    here are the CLI's REAL output contract, pinned by the shared
-      //    package's own bin-packaging tests).
+      //    package's own bin-packaging tests). 32-1-R1 (Story 32.4): the CLI
+      //    spawns use the SAME case-insensitively-scrubbed childEnv as Case I
+      //    — an ambient IRIS_GOVERNANCE / IRIS_GOVERNANCE_PRESET in the
+      //    developer shell must never flip the asserted render or fail the
+      //    CLI outright (environment-dependent false failure).
       const cliFile = path.join(fixtureDir!, "governance-cli-roundtrip.json");
       const setResult = spawnSync(
         process.execPath,
         [GOVERNANCE_CLI_BIN, "set", "iris_doc_put", "false", "--file", cliFile],
-        { encoding: "utf8" },
+        { encoding: "utf8", env: childEnv({}) },
       );
       expect(setResult.error).toBeUndefined();
       expect(setResult.status).toBe(0);
@@ -624,14 +674,14 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
       const validateResult = spawnSync(
         process.execPath,
         [GOVERNANCE_CLI_BIN, "validate", "--file", cliFile],
-        { encoding: "utf8" },
+        { encoding: "utf8", env: childEnv({}) },
       );
       expect(validateResult.status).toBe(0);
 
       const effectiveResult = spawnSync(
         process.execPath,
         [GOVERNANCE_CLI_BIN, "effective", "--file", cliFile, "--json"],
-        { encoding: "utf8" },
+        { encoding: "utf8", env: childEnv({}) },
       );
       expect(effectiveResult.status).toBe(0);
       const cliRender = JSON.parse(effectiveResult.stdout) as {
@@ -654,7 +704,7 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
   );
 
   it(
-    "H: startup snapshot at process level (32-0-1 restart-only contract) — rewriting the file mid-session changes NEITHER iris_server_profiles NOR the call-time gate",
+    "H: startup snapshot at process level (32-0-1 restart-only contract) — rewriting the file mid-session changes NEITHER iris_server_profiles NOR the D5 dispatch gate (the two surfaces this case exercises; env_promote's Gate-4 mid-session proof is Case F — 32-1-R5)",
     async (ctx) => {
       if (skipIf(ctx, liveSkipReason, "startup snapshot")) return;
 
@@ -774,6 +824,85 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
         expect(cliRender.policy["iris_sql_execute"]).toBe(false);
         expect(cliRender.configSource["iris_sql_execute"]).toBe("file");
       });
+    },
+    { timeout: 60000 },
+  );
+
+  it(
+    "J: 32-1-R3 through the REAL bin — set/unset preserve unknown top-level keys verbatim (comment + typo'd layer), warn on the layer-shaped typo, and validate still passes",
+    async (ctx) => {
+      // Dist-only: fixtureDir is created whenever the dev-mcp dist exists, so
+      // distSkipReason also covers the fixture-dir-unavailable case.
+      if (skipIf(ctx, cliDistSkipReason ?? distSkipReason, "32-1-R3 unknown-key preservation")) return;
+
+      const r3File = path.join(fixtureDir!, "governance-r3-unknown-keys.json");
+      const commentValue = "operator annotation — must survive CLI writes";
+      const typoLayer = { "iris_doc_put": false };
+      writeFileSync(
+        r3File,
+        `${JSON.stringify(
+          { comment: commentValue, globals: typoLayer, global: { "iris_doc_compile": false } },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      // `set` via the BUILT bin (scrubbed env — 32-1-R1's lesson: an ambient
+      // IRIS_GOVERNANCE* in the developer shell must never leak in).
+      // iris_global_get is a frozen-baseline key, so no not-baseline warning
+      // confounds the typo-warning assertion.
+      const setResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "set", "iris_global_get", "false", "--file", r3File],
+        { encoding: "utf8", env: childEnv({}) },
+      );
+      expect(setResult.error).toBeUndefined();
+      expect(setResult.status).toBe(0);
+      // The layer-shaped typo earns ONE stderr warning naming the key and the
+      // two recognized layers…
+      expect(setResult.stderr).toContain('unrecognized top-level key "globals"');
+      expect(setResult.stderr).toContain('the recognized layers are "global" and "profiles"');
+      expect(setResult.stderr).toContain("preserved as-is on write");
+      // …and nothing else warns (baseline key, valid file).
+      expect(setResult.stderr).not.toContain("is not a pre-foundation");
+
+      // BOTH unknown keys survive the write VERBATIM, at their original
+      // positions; the mutation lands in the real layer only. Pre-Story-32.4
+      // the first write re-serialized the parsed config alone and VANISHED
+      // "comment" and "globals" (silent data loss).
+      const afterSet = JSON.parse(readFileSync(r3File, "utf8")) as Record<string, unknown>;
+      expect(Object.keys(afterSet)).toEqual(["comment", "globals", "global"]);
+      expect(afterSet.comment).toBe(commentValue);
+      expect(afterSet.globals).toEqual(typoLayer);
+      expect(afterSet.global).toEqual({ "iris_doc_compile": false, "iris_global_get": false });
+
+      // `validate` still passes on the preserved-shape file — unknown keys
+      // are not policy, and not errors.
+      const validateResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "validate", "--file", r3File],
+        { encoding: "utf8", env: childEnv({}) },
+      );
+      expect(validateResult.error).toBeUndefined();
+      expect(validateResult.status).toBe(0);
+      expect(validateResult.stdout).toContain("OK:");
+
+      // `unset` round-trips through the SAME preservation path (32-1-R3's fix
+      // covers both write commands, not just set).
+      const unsetResult = spawnSync(
+        process.execPath,
+        [GOVERNANCE_CLI_BIN, "unset", "iris_global_get", "--file", r3File],
+        { encoding: "utf8", env: childEnv({}) },
+      );
+      expect(unsetResult.error).toBeUndefined();
+      expect(unsetResult.status).toBe(0);
+      expect(unsetResult.stderr).toContain('unrecognized top-level key "globals"');
+      const afterUnset = JSON.parse(readFileSync(r3File, "utf8")) as Record<string, unknown>;
+      expect(Object.keys(afterUnset)).toEqual(["comment", "globals", "global"]);
+      expect(afterUnset.comment).toBe(commentValue);
+      expect(afterUnset.globals).toEqual(typoLayer);
+      expect(afterUnset.global).toEqual({ "iris_doc_compile": false });
     },
     { timeout: 60000 },
   );

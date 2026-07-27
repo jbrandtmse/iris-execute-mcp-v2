@@ -47,8 +47,8 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
 }
 
 describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
-  it("published mode (default): npx -y -p @iris-mcp/shared iris-mcp-governance", () => {
-    const resolution = resolveGovernanceCli(settings(), false);
+  it("published mode (default): npx -y -p @iris-mcp/shared iris-mcp-governance", async () => {
+    const resolution = await resolveGovernanceCli(settings(), false);
     expect(resolution).toEqual({
       ok: true,
       target: {
@@ -60,8 +60,8 @@ describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
     });
   });
 
-  it("published mode for `universe` additionally -p-installs the five server packages (DERIVED from PACKAGE_NPM_NAME — never a hand-maintained roster), so the CLI finds their built dist as npm siblings", () => {
-    const resolution = resolveGovernanceCli(settings(), true);
+  it("published mode for `universe` additionally -p-installs the five server packages (DERIVED from PACKAGE_NPM_NAME — never a hand-maintained roster), so the CLI finds their built dist as npm siblings", async () => {
+    const resolution = await resolveGovernanceCli(settings(), true);
     if (!resolution.ok) throw new Error("expected ok resolution");
     const expectedPackages = [
       GOVERNANCE_CLI_NPM_PACKAGE,
@@ -75,11 +75,11 @@ describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
     expect(Object.keys(PACKAGE_NPM_NAME)).toHaveLength(5);
   });
 
-  it("local mode: developmentRepoPath → process.execPath + packages/shared/dist/cli/governance-cli.js + ELECTRON_RUN_AS_NODE=1", () => {
-    const resolution = resolveGovernanceCli(
+  it("local mode: developmentRepoPath → process.execPath + packages/shared/dist/cli/governance-cli.js + ELECTRON_RUN_AS_NODE=1", async () => {
+    const resolution = await resolveGovernanceCli(
       settings({ developmentRepoPath: "C:\\dev\\iris-execute-mcp-v2" }),
       false,
-      () => true,
+      async () => true,
     );
     if (!resolution.ok) throw new Error("expected ok resolution");
     expect(resolution.target.command).toBe(process.execPath);
@@ -93,22 +93,22 @@ describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
     );
   });
 
-  it("fail-closed: a RELATIVE developmentRepoPath is rejected, never resolved or fallen back to npx (the 31.6 discipline — a silent fallback would run a different engine than the user pinned)", () => {
-    const resolution = resolveGovernanceCli(
+  it("fail-closed: a RELATIVE developmentRepoPath is rejected, never resolved or fallen back to npx (the 31.6 discipline — a silent fallback would run a different engine than the user pinned)", async () => {
+    const resolution = await resolveGovernanceCli(
       settings({ developmentRepoPath: "relative\\repo" }),
       false,
-      () => true,
+      async () => true,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected failed resolution");
     expect(resolution.error).toContain("not an absolute path");
   });
 
-  it("fail-closed: an unbuilt CLI (no dist/cli/governance-cli.js) is an actionable error, never a silent npx fallback", () => {
-    const resolution = resolveGovernanceCli(
+  it("fail-closed: an unbuilt CLI (no dist/cli/governance-cli.js) is an actionable error, never a silent npx fallback", async () => {
+    const resolution = await resolveGovernanceCli(
       settings({ developmentRepoPath: "C:\\dev\\repo" }),
       false,
-      () => false,
+      async () => false,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected failed resolution");

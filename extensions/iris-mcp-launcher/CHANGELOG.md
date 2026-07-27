@@ -4,6 +4,21 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ## [0.1.0] — Unreleased (not yet published)
 
+### Changed
+
+- **Status bar zero-state now reports the effective count** (Story 32.4, aligned with the 31-5-2/31-6-4
+  decisions): with `irisMcpLauncher.servers: []` — expose-ALL, the documented default — the status bar text
+  shows the number of servers actually registered (e.g. `IRIS MCP: 3`) instead of `IRIS MCP: none`, which
+  contradicted the expose-all semantics the picker teaches. The fresh-install guidance ("no servers selected
+  yet… Click to choose specific servers") stays in the tooltip, and `none` is still shown when zero servers
+  are registered or the count cannot be computed.
+- Warning behavior hardening (Story 32.4): a mis-shaped Server Manager API now warns once per session (named
+  as the version mismatch it is) instead of re-toasting on every refresh, and the generic "Server Manager is
+  not available" warning is suppressed in that case so the cause is never misattributed; warnings for a fixed-
+  then-reintroduced problem (a removed `"all"` package key, a `default`-named server) warn once per occurrence
+  instead of once per session; the status bar refresh can no longer render a stale settings read over a newer
+  one.
+
 ### Added
 
 - **Governance editor** (Story 32.2): a new command "IRIS MCP Launcher: Open Governance Editor" opens a webview

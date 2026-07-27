@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -413,6 +413,121 @@ describe("writeGovernanceFileAtomic", () => {
     const config = writeGovernanceFileAtomic(file, '{"global":{"iris_doc_put":false}}\n', undefined);
     expect(config).toEqual({ global: { iris_doc_put: false } });
     expect(readdirSync(dir).filter((name) => name.includes(".tmp-"))).toEqual([]);
+  });
+});
+
+// ── 32-1-R3 (Story 32.4): unknown top-level keys survive set/unset ──────
+
+describe("32-1-R3 — unknown top-level keys are preserved on write; layer-shaped typos warn", () => {
+  it("set preserves unknown top-level keys verbatim (annotation keys are NOT dropped on rewrite)", async () => {
+    writeGovernance({ version: 1, comment: "team policy", global: { iris_doc_put: true } });
+    const { deps, stderr } = baseDeps();
+    const code = await runCli(["set", "iris_sql_execute", "false", "--file", file], deps);
+    expect(code).toBe(0);
+    // Non-layer-shaped unknown keys are preserved SILENTLY (no warning).
+    expect(stderr.text).toBe("");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+      version: 1,
+      comment: "team policy",
+      global: { iris_doc_put: true, iris_sql_execute: false },
+    });
+  });
+
+  it("unset preserves unknown top-level keys too", async () => {
+    writeGovernance({ comment: "keep me", global: { iris_doc_put: true, iris_sql_execute: false } });
+    const { deps } = baseDeps();
+    const code = await runCli(["unset", "iris_doc_put", "--file", file], deps);
+    expect(code).toBe(0);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+      comment: "keep me",
+      global: { iris_sql_execute: false },
+    });
+  });
+
+  it("a layer-SHAPED unknown key (\"globals\") warns that it has no effect, and is still preserved", async () => {
+    writeGovernance({ globals: { iris_doc_put: false }, global: { iris_sql_execute: true } });
+    const { deps, stderr } = baseDeps();
+    const code = await runCli(["set", "iris_doc_put", "true", "--file", file], deps);
+    expect(code).toBe(0);
+    expect(stderr.text).toContain('"globals"');
+    expect(stderr.text).toContain("NO effect");
+    expect(stderr.text).toContain("preserved as-is");
+    // The typo'd layer is preserved (never silently dropped), and the real
+    // layer got the write.
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+      globals: { iris_doc_put: false },
+      global: { iris_sql_execute: true, iris_doc_put: true },
+    });
+  });
+
+  it("unknown keys keep their original position; mutated layers keep theirs", async () => {
+    writeGovernance({ global: { iris_doc_put: true }, comment: "middle", profiles: { prod: {} } });
+    const { deps } = baseDeps();
+    const code = await runCli(["set", "iris_sql_execute", "false", "--file", file], deps);
+    expect(code).toBe(0);
+    expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toEqual([
+      "global",
+      "comment",
+      "profiles",
+    ]);
+  });
+});
+
+// ── 32-1-R4 (Story 32.4): the help check honors the dash-value contract ──
+
+describe("32-1-R4 — help is honored only in option position", () => {
+  it("get -- -h addresses the KEY \"-h\" (the -- terminator), it does NOT print help", async () => {
+    writeGovernance({ global: { iris_doc_put: true } });
+    const { deps, stdout, stderr } = baseDeps();
+    const code = await runCli(["get", "--file", file, "--", "-h"], deps);
+    // The key "-h" is simply not set — the ordinary not-set report, NO help text.
+    expect(code).toBe(0);
+    expect(stdout.text).toContain('"-h" is not set');
+    expect(stdout.text).not.toContain("Usage: iris-mcp-governance <command>");
+    expect(stderr.text).toBe("");
+  });
+
+  it("validate --file --help treats --help as the --file VALUE (dash-value contract), not as a help request", async () => {
+    const { deps, stdout, stderr } = baseDeps();
+    const code = await runCli(["validate", "--file", "--help"], deps);
+    // "--help" is the file path — unreadable, so exit 1 with the loader text.
+    expect(code).toBe(1);
+    expect(stdout.text).not.toContain("Usage: iris-mcp-governance <command>");
+    expect(stderr.text).toContain("could not read the file");
+  });
+
+  it("set -h still prints help (option position is honored)", async () => {
+    const { deps, stdout } = baseDeps();
+    const code = await runCli(["set", "-h"], deps);
+    expect(code).toBe(0);
+    expect(stdout.text).toContain("Usage: iris-mcp-governance <command>");
+  });
+});
+
+// ── 32-1-R6 (Story 32.4): writing through a symlinked governance file ────
+
+describe("32-1-R6 — set/unset write THROUGH a symlink (the link survives)", () => {
+  it("set on a symlinked file updates the TARGET and leaves the link a link", async () => {
+    const target = path.join(dir, "real-governance.json");
+    writeGovernance({ global: { iris_doc_put: true } }, target);
+    const link = path.join(dir, "linked-governance.json");
+    let symlinked = true;
+    try {
+      symlinkSync(target, link);
+    } catch {
+      // Windows without Developer Mode / privileges cannot create symlinks —
+      // the nix/etckeeper scenario this pins is a posix one; skip there.
+      symlinked = false;
+    }
+    if (!symlinked) return;
+
+    const { deps } = baseDeps();
+    const code = await runCli(["set", "iris_sql_execute", "false", "--file", link], deps);
+    expect(code).toBe(0);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(target, "utf8"))).toEqual({
+      global: { iris_doc_put: true, iris_sql_execute: false },
+    });
   });
 });
 

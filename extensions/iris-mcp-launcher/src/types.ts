@@ -127,6 +127,17 @@ export interface ServerManagerApi {
 }
 
 /**
+ * WHY `getServerManagerApi()` returned `undefined` on its most recent call
+ * (32-3-R3, Story 32.4): lets a downstream "Server Manager is not available"
+ * warning distinguish a genuinely missing/inactive dependency from a
+ * VERSION MISMATCH — the latter already produced its own accurate warning at
+ * the source (`extension.ts`'s shape check), so re-warning with "it should
+ * be installed automatically" would misattribute the cause. Optional on the
+ * injected deps: test fakes that omit it keep the pre-Story-32.4 behavior.
+ */
+export type ServerManagerApiFailureReason = "not-available" | "shape-mismatch";
+
+/**
  * Which @iris-mcp suite package a registered definition spawns.
  *
  * Deliberately excludes `"all"` (AC 31.6.5): `@iris-mcp/all` declares no

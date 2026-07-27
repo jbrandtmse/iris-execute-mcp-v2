@@ -193,7 +193,7 @@ beforeAll(async () => {
   }
 
   // The extension's REAL local-mode engine resolution against this checkout.
-  const resolution = resolveGovernanceCli(settings(), false);
+  const resolution = await resolveGovernanceCli(settings(), false);
   if (!resolution.ok) {
     skipReason = `the engine's local-mode resolution failed against a built checkout: ${resolution.error}`;
     return;

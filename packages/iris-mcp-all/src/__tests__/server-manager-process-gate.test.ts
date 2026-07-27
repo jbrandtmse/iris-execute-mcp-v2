@@ -22,7 +22,7 @@
  * (the `31-6-5` convention, Story 32.3).
  */
 
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -161,7 +161,18 @@ async function rosterWithSwitch(serverManager: "auto" | "unset"): Promise<Roster
     }) => unknown;
   };
 
-  const env: Record<string, string> = {
+  // 32-3-R9 (Story 32.4): inherit the ambient env (PATH, and SystemRoot on
+  // Windows) with EVERY IRIS_* variable scrubbed CASE-INSENSITIVELY, then
+  // layer the test's explicit values. The pre-Story-32.4 fresh-built env had
+  // NO PATH at all — resolving the spawned `node` (and any credential
+  // helper) survived only via a Windows CreateProcess quirk and broke on
+  // POSIX/nvm — and an uppercase-only scrub missed lowercase ambient IRIS_*
+  // vars on Windows's case-insensitive environment.
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
+  }
+  Object.assign(env, {
     IRIS_HOST,
     IRIS_PORT: String(IRIS_PORT),
     IRIS_USERNAME,
@@ -169,7 +180,7 @@ async function rosterWithSwitch(serverManager: "auto" | "unset"): Promise<Roster
     IRIS_NAMESPACE,
     IRIS_SM_WORKSPACE: fixtureDir!,
     ...(serverManager === "auto" ? { IRIS_SERVER_MANAGER: "auto" } : {}),
-  };
+  });
 
   const transport = new StdioClientTransport({
     command: "node",
@@ -189,10 +200,6 @@ async function rosterWithSwitch(serverManager: "auto" | "unset"): Promise<Roster
 }
 
 describe("Story 32.3 (31-3-8) — Server Manager process-level gate (built server, real handshake)", () => {
-  afterEach(() => {
-    // Fixture cleanup happens once per file, not per test — see afterAll below.
-  });
-
   it(
     "the roster GAINS the Server-Manager profile with IRIS_SERVER_MANAGER=auto (Run A) and LOSES it with the switch unset (Run B)",
     async (ctx) => {

@@ -44,7 +44,7 @@
  * plain Node process.
  */
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { PACKAGE_NPM_NAME } from "./definitions.js";
 import type { LauncherSettings, SuitePackageKey } from "./types.js";
@@ -83,12 +83,12 @@ export type GovernanceCliResolution =
   | { ok: true; target: GovernanceCliTarget }
   | { ok: false; error: string };
 
-/** Injectable filesystem probe (sync, mirrors `statSync` semantics). */
-export type FileExistsProbe = (path: string) => boolean;
+/** Injectable filesystem probe — ASYNC (32-2-R1, the 31-6-2 discipline: no synchronous stat on the extension host, where a UNC/network path stalls the single-threaded host). */
+export type FileExistsProbe = (path: string) => Promise<boolean>;
 
-const defaultFileExists: FileExistsProbe = (candidatePath) => {
+const defaultFileExists: FileExistsProbe = async (candidatePath) => {
   try {
-    return statSync(candidatePath).isFile();
+    return (await stat(candidatePath)).isFile();
   } catch {
     return false;
   }
@@ -97,13 +97,16 @@ const defaultFileExists: FileExistsProbe = (candidatePath) => {
 /**
  * Resolve how to spawn the governance CLI for the current settings
  * (resolution order documented in the module banner). `fileExists` is
- * injectable for tests; the production default is a guarded `statSync`.
+ * injectable for tests; the production default is a guarded
+ * `fs/promises.stat` (32-2-R1 — the same fs/promises conversion 31-6-2 made
+ * for the spawn-validation stats; a UNC `developmentRepoPath` must never
+ * stall the extension host on panel open/refresh).
  */
-export function resolveGovernanceCli(
+export async function resolveGovernanceCli(
   settings: LauncherSettings,
   forUniverse: boolean,
   fileExists: FileExistsProbe = defaultFileExists,
-): GovernanceCliResolution {
+): Promise<GovernanceCliResolution> {
   if (settings.developmentRepoPath !== "") {
     if (!isAbsolute(settings.developmentRepoPath)) {
       return {
@@ -115,7 +118,7 @@ export function resolveGovernanceCli(
       };
     }
     const cliPath = join(settings.developmentRepoPath, GOVERNANCE_CLI_REPO_PATH);
-    if (!fileExists(cliPath)) {
+    if (!(await fileExists(cliPath))) {
       return {
         ok: false,
         error:

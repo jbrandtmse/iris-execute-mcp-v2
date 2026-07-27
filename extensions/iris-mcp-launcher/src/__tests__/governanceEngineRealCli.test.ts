@@ -90,7 +90,7 @@ let target: GovernanceCliTarget;
 let cliEnv: Record<string, string>;
 let fixtureDir: string;
 
-beforeAll(() => {
+beforeAll(async () => {
   if (!existsSync(GOVERNANCE_CLI_BIN)) {
     skipReason = `packages/shared/dist/cli/governance-cli.js is not built (run "pnpm turbo run build" first). Looked at: ${GOVERNANCE_CLI_BIN}`;
     return;
@@ -108,7 +108,7 @@ beforeAll(() => {
   // Resolve through the engine's REAL local-mode path (the extension host's
   // own interpreter + the repo's built CLI), exactly as extension.ts composes
   // it. ELECTRON_RUN_AS_NODE=1 is inert under plain node.
-  const resolution = resolveGovernanceCli(settings(), true);
+  const resolution = await resolveGovernanceCli(settings(), true);
   if (!resolution.ok) {
     skipReason = `the engine's local-mode resolution failed against a built checkout: ${resolution.error}`;
     return;

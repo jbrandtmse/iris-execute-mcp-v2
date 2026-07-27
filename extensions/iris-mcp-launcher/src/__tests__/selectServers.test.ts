@@ -434,6 +434,29 @@ describe("buildStatusBarState — AC 31.5.3", () => {
     expect(state.tooltip).toContain("(none configured)");
   });
 
+  // ── 32-3-R5 (Story 32.4 — product decision, aligned with 31-5-2/31-6-4):
+  // `[]` = expose-all, so a known non-zero effective count is reported even
+  // in the zero-state; the raw "none" is now only the count-unknown
+  // fallback.
+  it("32-3-R5: the zero-state reports a KNOWN non-zero effective count (expose-all is not 'none'), keeping the fresh-install tooltip", () => {
+    const state = buildStatusBarState(settings({ servers: [], packages: ["dev"] }), 3);
+    expect(state.text).toBe("$(server) IRIS MCP: 3");
+    expect(state.tooltip).toContain("no servers selected yet");
+    expect(state.tooltip).toContain("every server");
+    expect(state.tooltip).toContain("3 currently registered");
+    expect(state.tooltip).toContain("Click to choose specific servers");
+  });
+
+  it("32-3-R5: zero-state with a known ZERO effective count keeps the 'none' text (nothing registered is genuinely none)", () => {
+    const state = buildStatusBarState(settings({ servers: [], packages: ["dev"] }), 0);
+    expect(state.text).toBe("$(server) IRIS MCP: none");
+  });
+
+  it("32-3-R5: zero-state with NO count supplied keeps the raw 'none' fallback (AC 31.5.3's pinned zero-state is unchanged for count-less callers)", () => {
+    const state = buildStatusBarState(settings({ servers: [], packages: ["dev"] }));
+    expect(state.text).toBe("$(server) IRIS MCP: none");
+  });
+
   describe("AC 31.6.7 — development mode surfaced in the tooltip only, text/count/zero-state untouched", () => {
     it("developmentRepoPath set -> tooltip names development mode and the path, in BOTH the zero-state and populated-count tooltips", () => {
       const zeroState = buildStatusBarState(

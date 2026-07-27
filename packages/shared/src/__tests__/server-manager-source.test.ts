@@ -434,6 +434,21 @@ describe("discoverSettingsFiles", () => {
     expect(files[0]).toBe(posix.resolve("relws", ".vscode", "settings.json"));
   });
 
+  // ── 32-3-R2 (Story 32.4): the either-convention-absolute passthrough is
+  // pinned EXPLICITLY on every host OS — a posix-absolute candidate survives
+  // win32 simulation verbatim, because toAbsolute consults both conventions'
+  // isAbsolute. (The win32-isAbsolute-treats-"/x"-as-rooted subtlety already
+  // made this true; the explicit posix disjunct removes the reliance on it.
+  // The reverse direction is not pinnable: a win32 drive path contains ":",
+  // which IS the posix-platform IRIS_SM_SETTINGS_PATHS delimiter.)
+  it("32-3-R2: a posix-absolute candidate is kept VERBATIM under win32 simulation (any host OS)", () => {
+    const files = discoverSettingsFiles(
+      { IRIS_SM_SETTINGS_PATHS: "/tmp/x/settings.json" },
+      "win32",
+    );
+    expect(files).toEqual(["/tmp/x/settings.json"]);
+  });
+
   it("win32: workspace + all 4 product user-settings paths, from APPDATA", () => {
     const files = discoverSettingsFiles(
       { APPDATA: "C:\\Users\\test\\AppData\\Roaming", IRIS_SM_WORKSPACE: "C:\\myworkspace" },
@@ -989,9 +1004,92 @@ describe("resolveServerManagerProfiles", () => {
     expect((caught as Error).message).toContain("NOT reconsidered");
   });
 
+  // ── 32-3-R1 (Story 32.4 — PD-1 alignment): a PARSER-LEVEL drop is a
+  // terminal first sighting, exactly like a mergeProfile-invalid one. The
+  // cross-file fixture runs in BOTH directions.
+  it("32-3-R1: a name parser-dropped in the HIGHER-precedence file is NOT imported from a VALID lower-precedence definition (terminal invalid, PD-1)", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          // Structurally unusable: no webServer block at all — a parser drop.
+          dup: { username: "u", password: "pw" },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    // PD-1: the name's fate was decided at its first sighting (the parser
+    // drop) — the valid lower-precedence definition is NOT imported.
+    expect(result.find((r) => r.name === "dup")).toBeUndefined();
+    // …and the per-drop warning named the file + server + reason (31-3-2).
+    const warnSpy = vi.mocked(logger.warn);
+    const dropWarnings = warnSpy.mock.calls.filter(
+      (c) => String(c[0]).includes(higherFile) && String(c[0]).includes('"dup"'),
+    );
+    expect(dropWarnings.length).toBeGreaterThan(0);
+  });
+
+  it("32-3-R1 (reverse direction): a VALID higher-precedence definition wins over a parser-dropped lower-precedence sighting of the same name", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "higher.example.com", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: { username: "u", password: "pw" }, // parser drop: no webServer
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    const dup = result.find((r) => r.name === "dup");
+    expect(dup).toBeDefined();
+    expect(dup?.host).toBe("higher.example.com");
+  });
+
   // ── 31-3-7 (Story 32.3): a host carrying URL userinfo (or any `@`, `/`,
   // whitespace) is rejected by mergeProfile's host validation — it must never
   // land verbatim in baseUrl, the roster, or warning text.
+
   it("31-3-7: a webServer.host containing URL userinfo is rejected — the entry is skipped with a warning that never echoes the embedded credential", () => {
     const dir = tmpDir();
     const file = writeSettings(

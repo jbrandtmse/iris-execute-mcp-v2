@@ -16,3 +16,10 @@ Other hardening in the same pass:
 - The "N profile(s) have no password yet" debug summary moved to `loadProfileRegistry` (post collision-filter), so names discarded before the credential chain are no longer counted as "will be attempted".
 
 With `IRIS_SERVER_MANAGER` unset (the default) nothing here runs: no settings file is read and the profile registry is byte-for-byte unchanged.
+
+The same burn-down also hardened the `iris-mcp-credentials` CLI (32-3-R12 — these user-facing changes ship under this same bump and were previously omitted here):
+
+- **`set --stdin` input guards.** Stdin past 64 KiB now fails with exit 2 naming the cap (previously an unbounded allocation), and input whose decoded text contains a NUL (U+0000) — almost certainly UTF-16, what PowerShell's `Out-File` produces on some hosts — is rejected with exit 2 naming the likely cause and the fix (previously stored NUL-interleaved and reported as success). Both are new exit-2 error paths; neither writes the keychain.
+- **`test --connect` reports the real credential provenance** via a new `connect.credentialSource` field (`env`/`server-manager`), and `connect.ok` is now `boolean | null` — `null` (with `attempted: false`) when the probe never ran because registry resolution already failed (previously `ok: false` conflated "probe failed" with "probe never ran" — a wire-shape change to the JSON output).
+- **`set` distinguishes create from replace**: "Replaced the existing password for …" vs "Stored a password for …", so a silent overwrite is no longer indistinguishable from a fresh store.
+- `test --connect` now says WHICH credential the probe exercised — the registry profile's password (named in the human output, with its provenance in `connect.credentialSource`) — which can differ from the chain-resolved credential reported in `source` (e.g. a stale `IRIS_PASSWORD` vs a fresh keychain entry).

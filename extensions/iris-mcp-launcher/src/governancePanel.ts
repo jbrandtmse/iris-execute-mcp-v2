@@ -45,8 +45,8 @@ export const OPEN_GOVERNANCE_EDITOR_COMMAND_ID = "irisMcpLauncher.openGovernance
 export interface GovernanceEngineHost {
   /** Run one CLI command; resolution/spawn failures come back as `spawnError` (never throws). */
   run(command: GovernanceCliCommand): Promise<GovernanceCliResult>;
-  /** The resolution mode for display, or the resolution error to render. */
-  describe(): { ok: true; mode: "local" | "npx" } | { ok: false; error: string };
+  /** The resolution mode for display, or the resolution error to render. Async (32-2-R1: the resolution probes the filesystem — no sync stat on the extension host, the 31-6-2 discipline). */
+  describe(): Promise<{ ok: true; mode: "local" | "npx" } | { ok: false; error: string }>;
 }
 
 /** The adapted webview panel surface this module drives. */
@@ -62,8 +62,8 @@ export interface GovernancePanelDeps {
   /** Server Manager server NAMES only (public metadata — never a spec, never a credential). Failure degrades to []. */
   getServerManagerNames: () => Promise<string[]>;
   engine: GovernanceEngineHost;
-  /** Whether the governance file exists on disk (a missing file fails server startup — the view warns). */
-  fileExists: (path: string) => boolean;
+  /** Whether the governance file exists on disk (a missing file fails server startup — the view warns). Async (32-2-R1: no sync stat on the extension host). */
+  fileExists: (path: string) => Promise<boolean>;
   /** Adapted `window.showOpenDialog` — resolves the chosen path, or undefined when dismissed. */
   chooseFile: () => Promise<string | undefined>;
   /** Adapted `WorkspaceConfiguration.update("governanceFile", path, Global)`. May reject — guarded. */
@@ -108,15 +108,15 @@ export function createGovernancePanelOpener(deps: GovernancePanelDeps): () => Pr
     if (panel === undefined) return;
     panel.setHtml(
       state === undefined
-        ? renderEmptyStateHtml(nonce(), engineDescribeError())
+        ? renderEmptyStateHtml(nonce(), emptyStateDescribeError)
         : renderGovernanceHtml(state, nonce()),
     );
   };
 
-  const engineDescribeError = (): string | undefined => {
-    const described = deps.engine.describe();
-    return described.ok ? undefined : described.error;
-  };
+  // 32-2-R1: `describe()` is async (its resolution probes the filesystem),
+  // while `render()` is sync — so the empty state renders the error the
+  // most recent async `refresh()` computed, never a stale sync probe.
+  let emptyStateDescribeError: string | undefined;
 
   /** Run a read command and parse its single-JSON-object stdout; returns undefined + records loadError on failure. */
   const runRead = async <T>(command: GovernanceCliCommand): Promise<T | undefined> => {
@@ -183,13 +183,24 @@ export function createGovernancePanelOpener(deps: GovernancePanelDeps): () => Pr
     try {
       settings = deps.getSettings();
     } catch {
+      // 32.4 review (Edge L3): keep the empty-state describe snapshot current
+      // even here — the 32-2-R1 async refactor moved it from an always-current
+      // sync probe at render time to a per-refresh snapshot, so a settings-
+      // read failure must not leave a stale (or missing) resolution error for
+      // the next empty-state render. describe() has its own containment (it
+      // reports a resolution error object, never throws); the .catch guard
+      // covers a non-conforming host.
+      const described = await deps.engine.describe().catch(() => undefined);
+      emptyStateDescribeError =
+        described !== undefined && !described.ok ? described.error : undefined;
       deps.showWarning(
         "IRIS MCP Launcher: could not read the irisMcpLauncher settings for the governance editor. " +
           "Check your settings.json.",
       );
       return;
     }
-    const described = deps.engine.describe();
+    const described = await deps.engine.describe();
+    emptyStateDescribeError = described.ok ? undefined : described.error;
 
     if (settings.governanceFile === "") {
       state = undefined;
@@ -197,7 +208,7 @@ export function createGovernancePanelOpener(deps: GovernancePanelDeps): () => Pr
       return;
     }
     const file = settings.governanceFile;
-    const fileExists = deps.fileExists(file);
+    const fileExists = await deps.fileExists(file);
 
     let serverManagerNames: string[] = [];
     try {

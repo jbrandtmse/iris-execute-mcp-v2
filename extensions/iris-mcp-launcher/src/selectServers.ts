@@ -22,7 +22,7 @@
  * reach a QuickPick item, tooltip, status-bar text, or message here —
  * verified structurally in `containment.test.ts`.
  */
-import type { LauncherSettings, ServerManagerApi, ServerName } from "./types.js";
+import type { LauncherSettings, ServerManagerApi, ServerManagerApiFailureReason, ServerName } from "./types.js";
 
 /**
  * Command id for "IRIS MCP Launcher: Select Servers…" — the single source of
@@ -116,6 +116,15 @@ export interface ConfigWriter {
  */
 export interface SelectServersDeps {
   getServerManagerApi: () => Promise<ServerManagerApi | undefined>;
+  /**
+   * 32-3-R3 (Story 32.4): WHY the most recent `getServerManagerApi()` call
+   * failed — when it reports `"shape-mismatch"`, the accurate version-
+   * mismatch warning already fired at the source, so this command's generic
+   * "not available (should be installed automatically)" warning is
+   * suppressed (it would misattribute the cause). Optional: fakes that omit
+   * it keep the pre-Story-32.4 always-warn behavior.
+   */
+  getServerManagerApiFailureReason?: () => ServerManagerApiFailureReason | undefined;
   getSettings: () => LauncherSettings;
   configWriter: ConfigWriter;
   /**
@@ -230,11 +239,16 @@ export async function selectServers(deps: SelectServersDeps): Promise<void> {
     api = undefined;
   }
   if (!api) {
-    deps.showWarning(
-      "IRIS MCP Launcher: the InterSystems Server Manager extension is not available " +
-        "(it should be installed automatically as a dependency of this extension). " +
-        "No servers to select.",
-    );
+    // 32-3-R3 (Story 32.4): a shape/version mismatch already produced its
+    // own accurate warning at the source — re-warning here with "should be
+    // installed automatically" would misattribute the cause.
+    if (deps.getServerManagerApiFailureReason?.() !== "shape-mismatch") {
+      deps.showWarning(
+        "IRIS MCP Launcher: the InterSystems Server Manager extension is not available " +
+          "(it should be installed automatically as a dependency of this extension). " +
+          "No servers to select.",
+      );
+    }
     return;
   }
 
@@ -453,10 +467,10 @@ export function buildStatusBarState(
   // on hand-edited duplicates (`["prod","prod"]` showed "2" for one
   // registered server) and mistyped names (showed "1" for zero). When it is
   // not known (planning failed, or a unit test passes no count), fall back
-  // to the raw count rather than showing nothing. The zero-state below is
-  // deliberately RAW-semantics: a fresh install has `servers: []` by
-  // definition, and AC 31.5.3's "only signal a fresh install gives" is about
-  // that state, independent of what Server Manager currently reports.
+  // to the raw count rather than showing nothing. 32-3-R5 (Story 32.4 —
+  // aligned decision): the zero-state below follows the SAME rule — a known
+  // non-zero effective count is shown even when `servers: []` (expose-all);
+  // the raw-semantics "none" is now only the count-unknown fallback.
   const shownCount = registeredCount ?? rawCount;
 
   // 31-6-4 (Story 32.3): the dev-mode line is worded from the registered
@@ -471,12 +485,25 @@ export function buildStatusBarState(
       : "";
 
   if (rawCount === 0) {
+    // 32-3-R5 (Story 32.4 — product decision, aligned with 31-5-2/31-6-4):
+    // `[]` MEANS expose-all — 31-5-3's confirm dialog teaches exactly that —
+    // so when the EFFECTIVE registered count is known and non-zero, the text
+    // reports it: "none" while N definitions are live inverted the status
+    // bar's own count contract in the one state 31-5-2 exists to keep
+    // honest, and contradicted the expose-all lesson. The fresh-install
+    // "waiting for input" signal (AC 31.5.3) lives in the tooltip, which is
+    // unchanged. When the count is unknown (planning failed, or no count
+    // supplied) the text falls back to the raw-semantics "none" — the
+    // pre-Story-32.4 zero-state.
+    const showEffectiveCount = registeredCount !== undefined && registeredCount > 0;
     return {
-      text: "$(server) IRIS MCP: none",
+      text: showEffectiveCount ? `$(server) IRIS MCP: ${registeredCount}` : "$(server) IRIS MCP: none",
       tooltip:
         "IRIS MCP Launcher — no servers selected yet.\n" +
         "irisMcpLauncher.servers is empty, so every server InterSystems Server Manager currently " +
-        "reports will be exposed (the documented default).\n" +
+        "reports will be exposed (the documented default)" +
+        (showEffectiveCount ? ` — ${registeredCount} currently registered` : "") +
+        ".\n" +
         `Packages: ${packagesText}\n` +
         devModeLine +
         "Click to choose specific servers.",
