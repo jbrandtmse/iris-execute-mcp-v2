@@ -499,7 +499,7 @@ development_status:
   32-2-governance-ui: done
   32-3-deferred-work-burn-down: done
   32-4-late-findings-cleanup: done
-  epic-32-retrospective: optional
+  epic-32-retrospective: done
 
   # Epic 33: Multi-Client MCP Configuration Manager (FR141). New @iris-mcp/client-config package (NOT a server-runtime dep): declarative ClientAdapter registry for 13 verified clients (Claude Code, Claude Desktop, Cursor, VS Code/Copilot, Cline, Roo Code, Windsurf, Codex CLI, Gemini CLI, Zed, Goose, Kimi CLI, Kimi Code) — format/rootKey/paths/scopes/env-expansion/disable/restart-hint per client. Detection; per-client × per-server ENABLE/DISABLE (native flags where present, else byte-preserving stash-and-remove); format-preserving writes (jsonc-parser edits, TOML section splices, comment-preserving YAML) under validate→backup→edit→re-parse→auto-restore→diff-confirm; four env modes (server-manager[Epic31], env-reference, governance-file[Epic32], explicit w/ typed secret confirmation); manager modifies only entries it owns. iris-mcp-clients CLI + extension "MCP Clients" view with user-selectable client roster + per-server toggle matrix. Pi documented not-MCP-capable (excluded w/ rationale); JetBrains/Kilo Code = roadmap adapters pending verification.
   epic-33: backlog

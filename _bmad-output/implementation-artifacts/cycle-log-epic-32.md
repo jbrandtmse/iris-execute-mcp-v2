@@ -42,3 +42,4 @@
 2026-07-27T13:04:51Z	Story 32.4	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=dist_smoke_9x9_r1_both_directions_r6_userinfo_ipv6_query_r3_preserve_typo_validate;script_deleted model=k3[1m]
 2026-07-27T13:05:34Z	Story 32.4	committed	sha=b2a5b78 submodules=
 2026-07-27T13:05:48Z	Epic 32	epic_status_done	stories=5 model=k3[1m] note=32.3_burndown_44+32.0_loader+32.1_cli+32.2_ui+32.4_late_cleanup_23;ac_32.2.4_gui_smoke_open_for_project_lead;publish_decision_resurfaces_at_merge_gate
+2026-07-27T14:28:17Z	Epic 32	epic_retro_complete	model=k3[1m] note=interactive;0_rules_codified_stays_at_56;5_action_items;record_and_observe_layer_latency_with_recurrence_trigger
