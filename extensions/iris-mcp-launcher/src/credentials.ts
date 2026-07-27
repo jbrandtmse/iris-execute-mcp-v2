@@ -53,6 +53,7 @@ export type CredentialResult =
   | { status: "resolved"; profile: ResolvedConnectionProfile; ignoredPathPrefix?: string }
   | { status: "no-spec" }
   | { status: "cancelled" }
+  | { status: "no-username" }
   | { status: "unavailable" };
 
 /**
@@ -102,6 +103,15 @@ export async function resolveServerCredentials(
   // The spec may already carry a password (e.g. Server Manager resolved it
   // through its own cache) — use it directly, no authentication round-trip.
   if (spec.password) {
+    // 31-4-3 (Story 32.3 — DECISION (a), refuse-with-message): an empty
+    // username is REFUSED, not passed through. `synthesizeIrisEnv` always
+    // emits the field, and `packages/shared`'s `mergeProfile` rejects an
+    // empty `username` inside IRIS_PROFILES — so under `combineProfiles` one
+    // empty-username server would take down every other, correctly-resolved
+    // profile in the same spawned process. Refusing strands only THIS server.
+    if (!spec.username || spec.username.trim() === "") {
+      return { status: "no-username" };
+    }
     return {
       status: "resolved",
       profile: {
@@ -109,7 +119,7 @@ export async function resolveServerCredentials(
         host: connection.host,
         port: connection.port,
         https: connection.https,
-        username: spec.username ?? "",
+        username: spec.username,
         password: spec.password,
         namespace,
       },
@@ -160,6 +170,14 @@ export async function resolveServerCredentials(
   }
 
   const finalUsername = specUsername || session.scopes[1] || session.account.id;
+
+  // 31-4-3: the whole fallback chain (spec username -> session.scopes[1] ->
+  // session.account.id) can still end empty — `scopes[1]` is "" by
+  // construction whenever the spec omits username, and an account id may be
+  // "". Same refusal as the inline-password branch above.
+  if (finalUsername.trim() === "") {
+    return { status: "no-username" };
+  }
 
   return {
     status: "resolved",

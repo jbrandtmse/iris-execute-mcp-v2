@@ -49,6 +49,9 @@ function createSharedFakeKeyringStore(): { keyring: KeyringPort; store: Map<stri
       deleteCredential(account: string): boolean {
         return store.delete(account);
       },
+      exists(account: string): boolean {
+        return store.has(account);
+      },
       listCredentials(): KeyringCredential[] {
         return [...store.entries()].map(([account, password]) => ({ account, password }));
       },

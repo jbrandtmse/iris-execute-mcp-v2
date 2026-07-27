@@ -47,13 +47,16 @@ function makeDeps(opts: {
   pickResult?: SelectServersQuickPickItem[] | undefined;
   inspection?: ConfigInspection<string[]> | undefined;
   updateServersImpl?: (value: string[], target: ConfigWriteTarget) => PromiseLike<void>;
+  confirmExposeAllImpl?: () => PromiseLike<boolean>;
 }): {
   deps: SelectServersDeps;
   warnings: string[];
   infos: string[];
   updateCalls: { value: string[]; target: ConfigWriteTarget }[];
   quickPickCalls: SelectServersQuickPickItem[][];
+  confirmCalls: number;
 } {
+  const confirmState = { confirmCalls: 0 };
   const warnings: string[] = [];
   const infos: string[] = [];
   const updateCalls: { value: string[]; target: ConfigWriteTarget }[] = [];
@@ -86,11 +89,29 @@ function makeDeps(opts: {
       quickPickCalls.push(items);
       return Promise.resolve(opts.pickResult);
     },
+    ...(opts.confirmExposeAllImpl
+      ? {
+          confirmExposeAll: () => {
+            confirmState.confirmCalls++;
+            return opts.confirmExposeAllImpl!();
+          },
+        }
+      : {}),
     showWarning: (message) => warnings.push(message),
     showInfo: (message) => infos.push(message),
   };
 
-  return { deps, warnings, infos, updateCalls, quickPickCalls };
+  return {
+    deps,
+    warnings,
+    infos,
+    updateCalls,
+    quickPickCalls,
+    // Read at assertion time (not at makeDeps time) — the count of confirmExposeAll invocations.
+    get confirmCalls() {
+      return confirmState.confirmCalls;
+    },
+  };
 }
 
 describe("selectServers — happy path", () => {
@@ -842,5 +863,119 @@ describe("Rule #19 back-compat — selectServers.ts has zero effect on the 31.4 
       IRIS_SM_WORKSPACE: null,
       IRIS_CREDENTIAL_HELPER: null,
     });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Story 32.3 deferred-item burn-down: 31-5-3 confirm-before-empty, 31-5-5
+// theme-icon escaping, 31-5-2 effective status-bar count, 31-6-4 dev-mode
+// wording from the registered count.
+// ══════════════════════════════════════════════════════════════════════════
+
+describe("Story 32.3 — 31-5-3: uncheck-all means expose-ALL (the inverse gesture), so it is confirmed first", () => {
+  it("confirm DECLINED: no write happens at all (same byte-unchanged contract as dismissing the picker)", async () => {
+    const harness = makeDeps({
+      getSettings: () => settings({ servers: ["a"] }),
+      pickResult: [],
+      confirmExposeAllImpl: async () => false,
+    });
+
+    await selectServers(harness.deps);
+
+    // Read AFTER the command ran — the getter snapshots at access time.
+    expect(harness.confirmCalls).toBe(1);
+    expect(harness.updateCalls).toEqual([]);
+    expect(harness.infos).toEqual([]);
+  });
+
+  it("confirm ACCEPTED: the empty selection is written (expose-all is the documented default)", async () => {
+    const harness = makeDeps({
+      getSettings: () => settings({ servers: ["a"] }),
+      pickResult: [],
+      confirmExposeAllImpl: async () => true,
+    });
+
+    await selectServers(harness.deps);
+
+    expect(harness.confirmCalls).toBe(1);
+    expect(harness.updateCalls).toEqual([{ value: [], target: "global" }]);
+  });
+
+  it("an empty-first gesture (nothing was pre-selected) needs no confirmation — there is nothing to undo", async () => {
+    const harness = makeDeps({
+      getSettings: () => settings({ servers: [] }),
+      pickResult: [],
+      confirmExposeAllImpl: () => {
+        throw new Error("must not be called for an empty-first gesture");
+      },
+    });
+
+    await selectServers(harness.deps);
+
+    expect(harness.confirmCalls).toBe(0);
+    expect(harness.updateCalls).toEqual([{ value: [], target: "global" }]);
+  });
+});
+
+describe("Story 32.3 — 31-5-5: a server named $(zap)prod renders as TEXT in the picker but is written back RAW", () => {
+  it("labels/description/detail are icon-escaped for display; the written value is the raw server name", async () => {
+    const { deps, quickPickCalls, updateCalls } = makeDeps({
+      serverNames: [
+        { name: "$(zap)prod", description: "$(star) desc", detail: "$(gear) detail" },
+        serverName("plain"),
+      ],
+      pickResult: [{ label: "\\$(zap)prod" }],
+    });
+
+    await selectServers(deps);
+
+    const items = quickPickCalls[0]!;
+    expect(items[0]!.label).toBe("\\$(zap)prod");
+    expect(items[0]!.description).toBe("\\$(star) desc");
+    expect(items[0]!.detail).toBe("\\$(gear) detail");
+    expect(items[1]!.label).toBe("plain");
+
+    // The RAW name — backslash-free — is what lands in settings.
+    expect(updateCalls).toEqual([{ value: ["$(zap)prod"], target: "global" }]);
+  });
+});
+
+describe("Story 32.3 — 31-5-2: buildStatusBarState reports the EFFECTIVE registered count when known", () => {
+  it("uses registeredCount over the raw servers.length, with a divergence note in the tooltip", () => {
+    const state = buildStatusBarState(settings({ servers: ["prod", "prod2", "typo"], packages: ["dev"] }), 2);
+    expect(state.text).toBe("$(server) IRIS MCP: 2");
+    expect(state.tooltip).toContain("2 of 3 selected servers currently registered");
+  });
+
+  it("falls back to the raw count when registeredCount is not supplied (planning failed or unavailable)", () => {
+    const state = buildStatusBarState(settings({ servers: ["prod", "prod2"], packages: ["dev"] }));
+    expect(state.text).toBe("$(server) IRIS MCP: 2");
+    expect(state.tooltip).not.toContain("currently registered");
+  });
+
+  it("the zero-state stays RAW-semantics (fresh install has servers: [] by definition) even when a count is supplied", () => {
+    const state = buildStatusBarState(settings({ servers: [], packages: ["dev"] }), 0);
+    expect(state.text).toBe("$(server) IRIS MCP: none");
+    expect(state.tooltip).toContain("no servers selected yet");
+  });
+});
+
+describe("Story 32.3 — 31-6-4: the dev-mode tooltip line is worded from the registered count", () => {
+  it("registeredCount 0 with developmentRepoPath set: says NO servers were registered (never claims spawning from local build)", () => {
+    const state = buildStatusBarState(
+      settings({ servers: ["prod"], packages: ["dev"], developmentRepoPath: "C:\\typo" }),
+      0,
+    );
+    expect(state.tooltip).toContain("NO servers were registered");
+    expect(state.tooltip).toContain("C:\\typo");
+    expect(state.tooltip).not.toContain("spawning from local build");
+  });
+
+  it("registeredCount > 0 with developmentRepoPath set: claims spawning from local build (the honest case)", () => {
+    const state = buildStatusBarState(
+      settings({ servers: ["prod"], packages: ["dev"], developmentRepoPath: "C:\\repo" }),
+      1,
+    );
+    expect(state.tooltip).toContain("spawning from local build at C:\\repo");
   });
 });

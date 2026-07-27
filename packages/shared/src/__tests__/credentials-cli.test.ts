@@ -38,6 +38,9 @@ function createFakeKeyring(initial: Record<string, string> = {}): KeyringPort & 
     deleteCredential(account: string): boolean {
       return store.delete(account);
     },
+    exists(account: string): boolean {
+      return store.has(account);
+    },
     listCredentials(): KeyringCredential[] {
       return [...store.entries()].map(([account, password]) => ({ account, password }));
     },
@@ -258,6 +261,23 @@ describe("set", () => {
     expect(code).toBe(1);
     expect(stderr.text).toContain("could not write to the OS keychain");
     expect(stderr.text).not.toContain("topsecretvalue");
+  });
+
+  // ── 31-2-4 (Story 32.3): create vs replace is meaningful information for a
+  // tool whose worst failure mode is "the wrong password is stored".
+  it("31-2-4: a fresh entry reports 'Stored', and replacing an existing entry reports 'Replaced the existing password'", async () => {
+    const keyring = createFakeKeyring();
+    const first = baseDeps({ loadKeyring: async () => keyring, stdin: Readable.from(["pw-one\n"]) });
+    const code1 = await runCli(["set", "myserver", "--stdin"], first.deps);
+    expect(code1).toBe(0);
+    expect(first.stdout.text).toContain('Stored a password for "myserver"');
+    expect(first.stdout.text).not.toContain("Replaced");
+
+    const second = baseDeps({ loadKeyring: async () => keyring, stdin: Readable.from(["pw-two\n"]) });
+    const code2 = await runCli(["set", "myserver", "--stdin"], second.deps);
+    expect(code2).toBe(0);
+    expect(second.stdout.text).toContain('Replaced the existing password for "myserver"');
+    expect(keyring.store.get("myserver")).toBe("pw-two");
   });
 });
 
@@ -493,7 +513,9 @@ describe("test --connect", () => {
       resolved: false,
       source: null,
       error: expect.any(String),
-      connect: { attempted: false, ok: false, error: expect.any(String) },
+      // 31-2-3 (Story 32.3): `ok` is NULL — "the probe never ran" is no longer
+      // indistinguishable from "the probe failed".
+      connect: { attempted: false, ok: null, error: expect.any(String) },
     });
     expect(loadProfileRegistryFn).not.toHaveBeenCalled();
   });
@@ -525,9 +547,89 @@ describe("test --connect", () => {
     expect(code).toBe(0);
     expect(connectFn).toHaveBeenCalledWith(profile);
     const payload = JSON.parse(stdout.text.trim());
-    expect(payload).toEqual({ name: "myserver", resolved: true, source: "keychain", connect: { attempted: true, ok: true } });
+    // 31-2-1/31-2-3 (Story 32.3): `connect.credentialSource` names WHICH
+    // password the probe exercised — the registry profile's (provenance
+    // "env" here), not necessarily the chain-resolved one reported in
+    // `source` — and `ok` is a real boolean on an attempted probe.
+    expect(payload).toEqual({
+      name: "myserver",
+      resolved: true,
+      source: "keychain",
+      connect: { attempted: true, ok: true, credentialSource: "env" },
+    });
     expect(stdout.text).not.toContain("chainsecretvalue");
     expect(stdout.text).not.toContain("registrysecretvalue");
+  });
+
+  it("31-2-1: when the chain and the registry disagree (stale env password vs keychain), credentialSource makes the two halves visibly distinct", async () => {
+    // The fixture the deferred item asks for: the chain resolves via the
+    // KEYCHAIN (a fresh password), while the registry profile is env-sourced
+    // and carries a DIFFERENT (stale) one. `source: "keychain"` and
+    // `connect.credentialSource: "env"` side by side say exactly which
+    // credential each half of the report exercised.
+    const resolveCredentialFn = vi.fn(
+      async (): Promise<CredentialLinkResult | undefined> => ({ password: "freshkeychainpw", source: "keychain" }),
+    );
+    const profile = fakeProfile("myserver", "staleregistrypw");
+    const registry: ProfileRegistry = new Map([["myserver", profile]]);
+    const loadProfileRegistryFn = vi.fn(async () => registry);
+    const connectFn = vi.fn(async () => {
+      /* success */
+    });
+    const { deps, stdout } = baseDeps({ resolveCredentialFn, loadProfileRegistryFn, connectFn });
+
+    const code = await runCli(["test", "myserver", "--connect", "--json"], deps);
+
+    expect(code).toBe(0);
+    // The probe exercised the REGISTRY's password, not the chain-resolved one —
+    // deep-equality on the exact registry profile object, whose password is
+    // "staleregistrypw" (fakeProfile above), never "freshkeychainpw".
+    expect(connectFn).toHaveBeenCalledWith(profile);
+    const payload = JSON.parse(stdout.text.trim());
+    expect(payload.source).toBe("keychain");
+    expect(payload.connect.credentialSource).toBe("env");
+    expect(payload.connect.ok).toBe(true);
+    expect(stdout.text).not.toContain("freshkeychainpw");
+    expect(stdout.text).not.toContain("staleregistrypw");
+  });
+
+  it("31-2-1: a Server-Manager-sourced registry profile reports credentialSource \"server-manager\"", async () => {
+    const resolveCredentialFn = vi.fn(
+      async (): Promise<CredentialLinkResult | undefined> => ({ password: "chainpw", source: "keychain" }),
+    );
+    const profile: IrisProfile = { ...fakeProfile("myserver", "smpw"), source: "server-manager" };
+    const registry: ProfileRegistry = new Map([["myserver", profile]]);
+    const loadProfileRegistryFn = vi.fn(async () => registry);
+    const connectFn = vi.fn(async () => {
+      /* success */
+    });
+    const { deps, stdout } = baseDeps({ resolveCredentialFn, loadProfileRegistryFn, connectFn });
+
+    const code = await runCli(["test", "myserver", "--connect", "--json"], deps);
+
+    expect(code).toBe(0);
+    const payload = JSON.parse(stdout.text.trim());
+    expect(payload.connect.credentialSource).toBe("server-manager");
+  });
+
+  it("31-2-3: a registry-mapping failure (no HTTP call made) reports attempted: false and ok: null — the probe never ran", async () => {
+    const resolveCredentialFn = vi.fn(
+      async (): Promise<CredentialLinkResult | undefined> => ({ password: "chainpw", source: "keychain" }),
+    );
+    const loadProfileRegistryFn = vi.fn(async () => {
+      throw new ProfileResolutionError("myserver", ["default"]);
+    });
+    const connectFn = vi.fn();
+    const { deps, stdout } = baseDeps({ resolveCredentialFn, loadProfileRegistryFn, connectFn });
+
+    const code = await runCli(["test", "myserver", "--connect", "--json"], deps);
+
+    expect(code).toBe(1);
+    expect(connectFn).not.toHaveBeenCalled();
+    const payload = JSON.parse(stdout.text.trim());
+    expect(payload.connect.attempted).toBe(false);
+    expect(payload.connect.ok).toBeNull();
+    expect(payload.connect.error).toContain("IRIS_SERVER_MANAGER=auto");
   });
 
   it("resolved + connect FAILS: exit 1, error surfaced, password never leaked even if the thrown error happened to echo it", async () => {
@@ -624,7 +726,10 @@ describe("test --connect", () => {
     const code = await runCli(["test", "myserver", "--connect"], deps);
 
     expect(code).toBe(1);
-    expect(stderr.text).toContain("connect FAILED");
+    // 31-2-3 (Story 32.3 code review): the probe never RAN (no profile was
+    // mapped, so no HTTP call was made) — attempted:false/ok:null reads as
+    // SKIPPED on the human surface too, never "FAILED".
+    expect(stderr.text).toContain("connect SKIPPED");
     expect(connectFn).not.toHaveBeenCalled();
     // AC 31.2.2: this is the MOST likely --connect failure for the CLI's
     // target user (fresh machine, IRIS_SERVER_MANAGER not set in the shell),
@@ -1106,6 +1211,74 @@ describe("set --stdin byte handling", () => {
     // `.trim()` in the empty-input guard absorbs, so `set` reported success
     // and every later authentication failed.
     expect(keyring.store.get("myserver")).toBe("bomprefixedpw");
+  });
+
+  // \u2500\u2500 31-2-5 (Story 32.3): a misdirected pipe is a clean error, not an
+  // unbounded allocation.
+  it("31-2-5: input past the 64 KiB cap is a usage error (exit 2) naming the cap, and the keyring is never written", async () => {
+    const keyring = createFakeKeyring();
+    const setPasswordSpy = vi.spyOn(keyring, "setPassword");
+    const oversized = Buffer.alloc(70 * 1024, "x"); // 70 KiB \u2014 past the 64 KiB cap
+    const { deps, stderr } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([oversized]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(2);
+    expect(stderr.text).toContain("64 KiB");
+    expect(setPasswordSpy).not.toHaveBeenCalled();
+  });
+
+  it("31-2-5: input exactly AT the 64 KiB cap is accepted", async () => {
+    const keyring = createFakeKeyring();
+    const atCap = Buffer.alloc(64 * 1024, "y");
+    const { deps } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([atCap]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(0);
+    expect(keyring.store.get("myserver")).toHaveLength(64 * 1024);
+  });
+
+  // \u2500\u2500 31-2-6 (Story 32.3): UTF-16 input is REJECTED (never transcoded \u2014
+  // encoding-guessing can misfire on a legitimate password).
+  it("31-2-6: a UTF-16LE input WITH a BOM is rejected with exit 2 naming UTF-16 as the likely cause", async () => {
+    const keyring = createFakeKeyring();
+    const setPasswordSpy = vi.spyOn(keyring, "setPassword");
+    const utf16leBom = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("hunter2\n", "utf16le"),
+    ]);
+    const { deps, stderr } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([utf16leBom]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(2);
+    expect(stderr.text).toContain("UTF-16");
+    expect(setPasswordSpy).not.toHaveBeenCalled();
+  });
+
+  it("31-2-6: a UTF-16LE input WITHOUT a BOM is rejected the same way", async () => {
+    const keyring = createFakeKeyring();
+    const utf16le = Buffer.from("hunter2", "utf16le");
+    const { deps, stderr } = baseDeps({
+      loadKeyring: async () => keyring,
+      stdin: Readable.from([utf16le]),
+    });
+
+    const code = await runCli(["set", "myserver", "--stdin"], deps);
+
+    expect(code).toBe(2);
+    expect(stderr.text).toContain("UTF-16");
+    expect(keyring.store.has("myserver")).toBe(false);
   });
 });
 

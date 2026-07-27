@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 // Wrap the REAL node:fs implementation in vi.fn() (profiles-bootstrap.test.ts's
 // established pattern) so on-disk fixture reads keep working while calls remain
@@ -189,6 +189,16 @@ describe("parseIntersystemsServers", () => {
     ["prefix//", "/prefix"],
     ["", undefined],
     ["/", undefined],
+    // 31-0-5 (Story 32.3): a prefix still containing `?`, `#`, `//`, or `:`
+    // after normalization is invalid — it would compose a malformed baseUrl
+    // authority (`http://h:52773/?debug=1/api/...` lets the query string
+    // swallow the path). Warned about (with a fileLabel) and IGNORED, never
+    // applied.
+    ["?debug=1", undefined],
+    ["/prefix?x=1", undefined],
+    ["/pre#frag", undefined],
+    ["//double", undefined],
+    ["/csp:8680", undefined],
   ])("normalizes pathPrefix %j to %j", (raw, expected) => {
     const text = JSON.stringify({
       "intersystems.servers": {
@@ -197,6 +207,29 @@ describe("parseIntersystemsServers", () => {
     });
     const result = parseIntersystemsServers(text);
     expect(result.srv?.pathPrefix).toBe(expected);
+  });
+
+  it("31-0-5: an invalid pathPrefix is ignored with a warning naming the file, server, and offending value (the entry itself survives)", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        srv: {
+          webServer: { scheme: "http", host: "h", port: 52773, pathPrefix: "?debug=1" },
+          username: "u",
+        },
+      },
+    });
+    const result = parseIntersystemsServers(text, { fileLabel: "C:\\ws\\settings.json" });
+    expect(result.srv?.pathPrefix).toBeUndefined();
+    expect(result.srv).toBeDefined(); // the entry is NOT dropped — only the prefix
+    const prefixWarnings = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("pathPrefix"),
+    );
+    expect(prefixWarnings).toHaveLength(1);
+    const message = String(prefixWarnings[0]?.[0]);
+    expect(message).toContain("C:\\ws\\settings.json");
+    expect(message).toContain('"srv"');
+    expect(message).toContain("?debug=1");
   });
 
   it("absent intersystems.servers key returns {} with no error (common case)", () => {
@@ -303,6 +336,50 @@ describe("parseIntersystemsServers", () => {
       /malformed JSONC/,
     );
   });
+
+  // ── 31-3-2 (Story 32.3): parser-level drops become VISIBLE with a fileLabel
+  it("31-3-2: with a fileLabel, each structurally-unusable entry produces ONE warning naming file + server + reason, and fills `dropped`", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const text = JSON.stringify({
+      "intersystems.servers": {
+        nonObject: "not-an-object",
+        noWebServer: { username: "u" },
+        blankHost: { webServer: { scheme: "http", host: "  ", port: 443 }, username: "u" },
+        ok: { webServer: { scheme: "http", host: "h", port: 1 }, username: "u" },
+      },
+    });
+    const dropped: { name: string; reason: string }[] = [];
+    const result = parseIntersystemsServers(text, {
+      fileLabel: "C:\\ws\\settings.json",
+      dropped,
+    });
+    expect(Object.keys(result)).toEqual(["ok"]);
+    expect(dropped.map((d) => d.name).sort()).toEqual(["blankHost", "noWebServer", "nonObject"]);
+    expect(dropped.find((d) => d.name === "noWebServer")?.reason).toContain("webServer");
+    expect(dropped.find((d) => d.name === "blankHost")?.reason).toContain("host");
+
+    const dropWarnings = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("C:\\ws\\settings.json"),
+    );
+    // One warning per dropped entry (3) — and each names its server.
+    expect(dropWarnings).toHaveLength(3);
+    const joined = dropWarnings.map((c) => String(c[0])).join("\n");
+    expect(joined).toContain('"nonObject"');
+    expect(joined).toContain('"noWebServer"');
+    expect(joined).toContain('"blankHost"');
+  });
+
+  it("31-3-2: WITHOUT a fileLabel the parser stays a pure silent parser (back-compat), but still reports via `dropped` when asked", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dropped: { name: string; reason: string }[] = [];
+    const result = parseIntersystemsServers(
+      JSON.stringify({ "intersystems.servers": { broken: "not-an-object" } }),
+      { dropped },
+    );
+    expect(result).toEqual({});
+    expect(dropped).toHaveLength(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -327,6 +404,34 @@ describe("discoverSettingsFiles", () => {
       "linux",
     );
     expect(files).toEqual(["/a/settings.json", "/b/settings.json"]);
+  });
+
+  // ── 31-3-5 (Story 32.3): candidates are always ABSOLUTE (path.resolve) — a
+  // relative IRIS_SM_SETTINGS_PATHS entry or IRIS_SM_WORKSPACE no longer
+  // produces a sourceFile resolvable only against the server process's CWD.
+  it("31-3-5: a relative IRIS_SM_SETTINGS_PATHS entry is resolved to an absolute path", () => {
+    const files = discoverSettingsFiles(
+      { IRIS_SM_SETTINGS_PATHS: "rel\\settings.json" },
+      "win32",
+    );
+    expect(files).toEqual([win32.resolve("rel\\settings.json")]);
+    expect(win32.isAbsolute(files[0]!)).toBe(true);
+  });
+
+  it("31-3-5: a relative IRIS_SM_WORKSPACE yields an absolute workspace candidate", () => {
+    const files = discoverSettingsFiles(
+      { APPDATA: "C:\\Users\\test\\AppData\\Roaming", IRIS_SM_WORKSPACE: "relws" },
+      "win32",
+    );
+    expect(files[0]).toBe(win32.resolve("relws", ".vscode", "settings.json"));
+  });
+
+  it("31-3-5: a relative IRIS_SM_WORKSPACE yields an absolute workspace candidate (posix)", () => {
+    const files = discoverSettingsFiles(
+      { HOME: "/home/test", IRIS_SM_WORKSPACE: "relws" },
+      "linux",
+    );
+    expect(files[0]).toBe(posix.resolve("relws", ".vscode", "settings.json"));
   });
 
   it("win32: workspace + all 4 product user-settings paths, from APPDATA", () => {
@@ -569,7 +674,7 @@ describe("resolveServerManagerProfiles", () => {
     expect(result).toEqual([]);
   });
 
-  it("auto: unresolved profiles are all INCLUDED (tagged) and produce exactly ONE debug-level pending-resolution log line regardless of count (Story 31.1 widened contract)", () => {
+  it("auto: unresolved profiles are all INCLUDED (tagged) — the pending-resolution summary is NOT emitted at this layer (31-1-5: it moved to loadProfileRegistry, post-filter)", () => {
     const dir = tmpDir();
     const file = writeSettings(
       dir,
@@ -590,12 +695,15 @@ describe("resolveServerManagerProfiles", () => {
     expect(result).toHaveLength(3);
     expect(result.every((r) => r.credentialStatus === "unresolved")).toBe(true);
 
+    // 31-1-5 (Story 32.3): this layer cannot see loadProfileRegistry's
+    // registry-shadow filter, so its count could include entries discarded one
+    // call later. The summary now lives in loadProfileRegistry (post-filter,
+    // pinned in profiles.test.ts); this function emits NO such line.
     const debugSpy = vi.mocked(logger.debug);
     const summaryCalls = debugSpy.mock.calls.filter((c) =>
       String(c[0]).includes("have no password yet"),
     );
-    expect(summaryCalls).toHaveLength(1);
-    expect(String(summaryCalls[0]?.[0])).toContain("3 server profile(s) have no password yet");
+    expect(summaryCalls).toHaveLength(0);
   });
 
   it("auto: malformed JSONC in one file logs a warning naming that file and skips ONLY it — the other file's valid entries still resolve", () => {
@@ -805,6 +913,114 @@ describe("resolveServerManagerProfiles", () => {
     }).not.toThrow();
     expect(result.map((p) => p.name)).toEqual(["good"]);
   });
+
+  // ── 31-3-2 (Story 32.3): parser-level drops are COUNTED, so `required`'s
+  // third check — not the misleading first ("zero definitions found", blaming
+  // the very file that defined the server) — is the one that fires.
+  it("required: a definition dropped by the PARSER (no webServer.host) trips the third check, not 'zero definitions found' (31-3-2)", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          prod: { webServer: { scheme: "https", port: 443 }, username: "u" }, // no host
+        },
+      }),
+    );
+    let caught: unknown;
+    try {
+      resolveServerManagerProfiles(
+        { ...BASE_ENV, IRIS_SERVER_MANAGER: "required", IRIS_SM_SETTINGS_PATHS: file },
+        "win32",
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("NONE could be imported");
+    expect(message).not.toContain("zero server definitions were found");
+    // …and the per-entry drop warning named the file + server + reason.
+    const warnSpy = vi.mocked(logger.warn);
+    const dropWarnings = warnSpy.mock.calls.filter(
+      (c) => String(c[0]).includes(file) && String(c[0]).includes('"prod"'),
+    );
+    expect(dropWarnings.length).toBeGreaterThan(0);
+  });
+
+  it("required: the third check's message notes that a rejected name is NOT reconsidered in lower-precedence files (31-3-3)", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: { webServer: { scheme: "http", host: "h", port: "not-a-port" }, username: "u" },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "h2", port: 52773 },
+            username: "u",
+            password: "pw",
+          },
+        },
+      }),
+    );
+    let caught: unknown;
+    try {
+      resolveServerManagerProfiles(
+        {
+          ...BASE_ENV,
+          IRIS_SERVER_MANAGER: "required",
+          IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+        },
+        "win32",
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("NONE could be imported");
+    expect((caught as Error).message).toContain("NOT reconsidered");
+  });
+
+  // ── 31-3-7 (Story 32.3): a host carrying URL userinfo (or any `@`, `/`,
+  // whitespace) is rejected by mergeProfile's host validation — it must never
+  // land verbatim in baseUrl, the roster, or warning text.
+  it("31-3-7: a webServer.host containing URL userinfo is rejected — the entry is skipped with a warning that never echoes the embedded credential", () => {
+    const dir = tmpDir();
+    const file = writeSettings(
+      dir,
+      JSON.stringify({
+        "intersystems.servers": {
+          leaky: {
+            webServer: { scheme: "http", host: "admin:hunter2@remote.example.com", port: 52773 },
+            username: "u",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      { ...BASE_ENV, IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: file },
+      "win32",
+    );
+    expect(result).toHaveLength(0);
+    const warnSpy = vi.mocked(logger.warn);
+    const skipWarnings = warnSpy.mock.calls.filter(
+      (c) => String(c[0]).includes(file) && String(c[0]).includes('"leaky"'),
+    );
+    expect(skipWarnings.length).toBeGreaterThan(0);
+    // Secret discipline: the userinfo password embedded in the host is never echoed.
+    for (const call of warnSpy.mock.calls) {
+      expect(call.map(String).join(" ")).not.toContain("hunter2");
+    }
+  });
+
 
   it("pathPrefix is applied as a post-merge baseUrl suffix (composed URL)", () => {
     const dir = tmpDir();
@@ -1207,14 +1423,21 @@ describe("resolveServerManagerProfiles", () => {
     expect((caught as Error).message).not.toContain("defaultsupersecret");
   });
 
-  // ── Story 31.1, Task 5 — deferred item 31-0-1 (`seenNames` shadowing) ────
+  // ── Deferred items 31-1-2 + 31-3-3 (burned down in Story 32.3) ───────────
   //
-  // Decision (documented in the module doc comment): a later file's entry
-  // for a name already claimed but still UNRESOLVED may "rescue" the slot by
-  // overwriting it, but ONLY when the later entry itself resolves (a later
-  // entry that is ALSO unresolved changes nothing).
+  // PAIRED DECISION (recorded 2026-07-26, applied uniformly — AC 32.3.4):
+  // FIRST-FILE-WINS, always. A name's fate is decided at its FIRST sighting
+  // across the precedence-ordered files and is never reconsidered: the 31-0-1
+  // "rescue" (a lower-precedence RESOLVED entry overwriting an UNRESOLVED
+  // higher-precedence slot) is REMOVED, and the terminal-"invalid" rule stays.
+  // Rationale: the credential chain resolves by NAME, so an unresolved
+  // higher-precedence entry is the RECOMMENDED shape (password in the OS
+  // keychain via `iris-mcp-credentials set <name>`), not a dead one; the
+  // rescue silently overrode the documented discovery precedence (and VS
+  // Code's own folder > workspace > user ranking) and could move the
+  // connection TARGET to a stale lower-precedence host.
 
-  it("31-0-1: a lower-precedence file's RESOLVED entry rescues a higher-precedence file's UNRESOLVED entry of the same name", () => {
+  it("31-1-2: a lower-precedence file's RESOLVED entry does NOT rescue — first-file-wins, with one warning naming both hosts and the remedy", () => {
     const dir1 = tmpDir();
     const dir2 = tmpDir();
     const higherFile = writeSettings(
@@ -1235,7 +1458,7 @@ describe("resolveServerManagerProfiles", () => {
           dup: {
             webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
             username: "u2",
-            password: "lowerpw", // legacy inline password — immediately resolvable
+            password: "lowerpw", // legacy inline password — would have rescued pre-decision
           },
         },
       }),
@@ -1248,37 +1471,38 @@ describe("resolveServerManagerProfiles", () => {
       },
       "win32",
     );
-    // Exactly one "dup" entry, using the LOWER file's full definition
-    // (structure + password) — not a mix of the higher file's host with the
-    // lower file's password.
+    // Exactly one "dup" entry — the HIGHER file's definition, still
+    // unresolved. The lower file's whole definition (host AND password) is
+    // ignored: first-file-wins.
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       name: "dup",
-      credentialStatus: "resolved",
-      host: "lower.example.com",
-      username: "u2",
-      password: "lowerpw",
+      credentialStatus: "unresolved",
+      host: "higher.example.com",
+      username: "u",
+      password: "",
     });
 
-    // Code review 2026-07-25 (MEDIUM): the rescue replaces the WHOLE
-    // higher-precedence definition — host included — so it must never be
-    // silent. The warning names both hosts and the remedy.
+    // The skip must never be silent (a password-bearing definition was
+    // IGNORED — the operator very likely does not know): ONE warning naming
+    // both hosts and the remedy that completes the winning definition.
     const warnSpy = vi.mocked(logger.warn);
-    const rescueWarnings = warnSpy.mock.calls.filter((c) =>
+    const firstWinsWarnings = warnSpy.mock.calls.filter((c) =>
       String(c[0]).includes("defined in more than one settings file"),
     );
-    expect(rescueWarnings).toHaveLength(1);
-    const message = String(rescueWarnings[0]?.[0]);
+    expect(firstWinsWarnings).toHaveLength(1);
+    const message = String(firstWinsWarnings[0]?.[0]);
     expect(message).toContain("higher.example.com");
     expect(message).toContain("lower.example.com");
+    expect(message).toContain("IGNORED");
     expect(message).toContain("iris-mcp-credentials set dup");
-    // Secret discipline: the rescuing entry's password is never echoed.
+    // Secret discipline: the ignored entry's password is never echoed.
     for (const call of warnSpy.mock.calls) {
       expect(call.map(String).join(" ")).not.toContain("lowerpw");
     }
   });
 
-  it("31-0-1: a lower-precedence file's ALSO-unresolved entry does NOT rescue — the higher-precedence structural definition remains authoritative", () => {
+  it("31-1-2: a lower-precedence file's ALSO-unresolved entry changes nothing — the higher-precedence definition remains authoritative (no warning needed: nothing of value was skipped)", () => {
     const dir1 = tmpDir();
     const dir2 = tmpDir();
     const higherFile = writeSettings(
@@ -1299,7 +1523,7 @@ describe("resolveServerManagerProfiles", () => {
           dup: {
             webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
             username: "u2",
-            // No password here either — nothing to rescue with.
+            // No password here either — nothing to win with.
           },
         },
       }),
@@ -1318,6 +1542,51 @@ describe("resolveServerManagerProfiles", () => {
       credentialStatus: "unresolved",
       host: "higher.example.com", // higher-precedence structure wins, unchanged
     });
+  });
+
+  it("31-3-3: a name marked terminally invalid on first sighting is never reconsidered — a VALID lower-precedence definition for the same name is not examined", () => {
+    const dir1 = tmpDir();
+    const dir2 = tmpDir();
+    const higherFile = writeSettings(
+      dir1,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "higher.example.com", port: "not-a-port" },
+            username: "u",
+          },
+        },
+      }),
+    );
+    const lowerFile = writeSettings(
+      dir2,
+      JSON.stringify({
+        "intersystems.servers": {
+          dup: {
+            webServer: { scheme: "http", host: "lower.example.com", port: 52773 },
+            username: "u2",
+            password: "lowerpw",
+          },
+        },
+      }),
+    );
+    const result = resolveServerManagerProfiles(
+      {
+        ...BASE_ENV,
+        IRIS_SERVER_MANAGER: "auto",
+        IRIS_SM_SETTINGS_PATHS: `${higherFile};${lowerFile}`,
+      },
+      "win32",
+    );
+    // The invalid first sighting claims the name permanently: nothing is
+    // imported for "dup", and the per-entry validation warning (naming the
+    // offending file) is the operator's signal.
+    expect(result).toHaveLength(0);
+    const warnSpy = vi.mocked(logger.warn);
+    const skipWarnings = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes(higherFile),
+    );
+    expect(skipWarnings.length).toBeGreaterThan(0);
   });
 
   // ── Story 31.1, Task 6 — deferred item 31-0-2 (`username` inheritance) ───

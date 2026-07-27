@@ -136,6 +136,15 @@ export interface SelectServersDeps {
   showQuickPick: (
     items: SelectServersQuickPickItem[],
   ) => PromiseLike<SelectServersQuickPickItem[] | undefined>;
+  /**
+   * Confirmation shown when the user unchecks EVERY server after starting
+   * from a non-empty selection (31-5-3). Returns `true` to proceed with the
+   * write (an empty selection = expose ALL, the documented default), `false`
+   * to cancel. Optional: when absent, the empty write proceeds unconfirmed
+   * (back-compat for existing callers/tests). `extension.ts` wires a modal
+   * `showWarningMessage` with explicit "Expose All" / "Cancel" choices.
+   */
+  confirmExposeAll?: () => PromiseLike<boolean>;
   /** Surfaces ONE clear failure message (AC 31.5.5) — never a toast storm, never thrown. Same shape as `ProviderDeps.showWarning`. */
   showWarning: (message: string) => void;
   /**
@@ -152,6 +161,24 @@ const TARGET_LABEL: Record<ConfigWriteTarget, string> = {
   workspace: "this workspace's",
   global: "your user (global)",
 };
+
+/**
+ * Escape `$(` so a Server Manager server literally named e.g. `$(zap)prod`
+ * renders as TEXT in the QuickPick row instead of a theme icon (31-5-5).
+ *
+ * Probe result (AC 32.3.3 — empirical, 2026-07-26): an escape IS honored.
+ * The QuickPick row renderer (`IconLabel` -> `HighlightedLabel` ->
+ * `renderLabelWithIcons` in VS Code's `vs/base/browser/ui/iconLabel/iconLabels.ts`)
+ * matches icon syntax with `(\)?\$\((iconName)(modifier)?\)` — a
+ * preceding backslash is captured as `escaped`, and escaped matches are
+ * pushed as the LITERAL string `$(name)` (backslash stripped) instead of an
+ * icon span. So writing the label as `\$(zap)prod` renders exactly
+ * `$(zap)prod`. The escape is display-only: the RAW name is what gets
+ * written back to settings (see the `rawNameByLabel` map in selectServers).
+ */
+export function escapeThemeIcons(text: string): string {
+  return text.replace(/\$\(/g, "\\$(");
+}
 
 /**
  * Choose which scope to write `irisMcpLauncher.servers` to: the scope it is
@@ -269,19 +296,40 @@ export async function selectServers(deps: SelectServersDeps): Promise<void> {
     (name) => !reportedNames.has(name) && name.trim() !== "",
   );
 
+  // 31-5-5: labels/descriptions/details are icon-ESCAPED for display (a
+  // server literally named `$(zap)prod` renders as text, not an icon), while
+  // `rawNameByLabel` maps the escaped display label back to the RAW name —
+  // the raw name is what is written to settings and matched against
+  // `currentlySelected`, never the escaped form.
+  const rawNameByLabel = new Map<string, string>();
+  const toItem = (
+    rawName: string,
+    description: string,
+    detail: string,
+    picked: boolean,
+  ): SelectServersQuickPickItem => {
+    const label = escapeThemeIcons(rawName);
+    rawNameByLabel.set(label, rawName);
+    return {
+      label,
+      description: escapeThemeIcons(description),
+      detail: escapeThemeIcons(detail),
+      picked,
+    };
+  };
+
   const items: SelectServersQuickPickItem[] = [
-    ...uniqueServers.map((server) => ({
-      label: server.name,
-      description: server.description,
-      detail: server.detail,
-      picked: currentlySelected.has(server.name),
-    })),
-    ...unreportedSelected.map((name) => ({
-      label: name,
-      description: "(not currently reported by InterSystems Server Manager)",
-      detail: "Already in irisMcpLauncher.servers. Uncheck to remove it.",
-      picked: true,
-    })),
+    ...uniqueServers.map((server) =>
+      toItem(server.name, server.description, server.detail, currentlySelected.has(server.name)),
+    ),
+    ...unreportedSelected.map((name) =>
+      toItem(
+        name,
+        "(not currently reported by InterSystems Server Manager)",
+        "Already in irisMcpLauncher.servers. Uncheck to remove it.",
+        true,
+      ),
+    ),
   ];
 
   // Both this call and `deps.configWriter.inspectServers()` below are
@@ -312,7 +360,30 @@ export async function selectServers(deps: SelectServersDeps): Promise<void> {
 
   // Defensive de-dupe on the way out too (belt-and-suspenders with the
   // de-duped `items` list above) — never let the QuickPick write duplicates.
-  const selectedNames = [...new Set(picked.map((item) => item.label))];
+  // Labels are icon-escaped for display (31-5-5): map back to the RAW names
+  // before anything is written to settings.
+  const selectedNames = [
+    ...new Set(picked.map((item) => rawNameByLabel.get(item.label) ?? item.label)),
+  ];
+
+  // 31-5-3 (Story 32.3 — settings-contract decision): unchecking EVERY item
+  // writes `[]`, which means "expose ALL servers" — the inverse of the
+  // gesture. When the user started from a non-empty selection and unchecked
+  // everything, CONFIRM before writing (an empty-first-gesture — nothing was
+  // pre-checked — needs no confirmation: nothing is being undone).
+  if (selectedNames.length === 0 && currentlySelected.size > 0 && deps.confirmExposeAll) {
+    let confirmed = false;
+    try {
+      confirmed = await deps.confirmExposeAll();
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) {
+      // Cancelled at the confirmation: no write, no message — same
+      // byte-unchanged contract as dismissing the picker itself.
+      return;
+    }
+  }
 
   let target: ConfigWriteTarget;
   try {
@@ -370,19 +441,36 @@ export interface StatusBarState {
  * gives that the extension is installed and waiting for input", independent
  * of whether Server Manager currently reports any servers at all.
  */
-export function buildStatusBarState(settings: LauncherSettings): StatusBarState {
-  const count = settings.servers.length;
+export function buildStatusBarState(
+  settings: LauncherSettings,
+  registeredCount?: number,
+): StatusBarState {
+  const rawCount = settings.servers.length;
   const packagesText = settings.packages.length > 0 ? settings.packages.join(", ") : "(none configured)";
-  // AC 31.6.7: surface when development mode is active, so a user cannot
-  // forget the extension is running local builds rather than published
-  // packages. Deliberately tooltip-only — `text` and the count/zero-state
-  // shape are pinned by AC 31.5.3's tests and must not change here.
+  // 31-5-2 (Story 32.3 — product decision): when the caller knows the
+  // EFFECTIVE registered-server count (distinct servers in the accepted
+  // plans), report THAT — the raw `irisMcpLauncher.servers.length` diverges
+  // on hand-edited duplicates (`["prod","prod"]` showed "2" for one
+  // registered server) and mistyped names (showed "1" for zero). When it is
+  // not known (planning failed, or a unit test passes no count), fall back
+  // to the raw count rather than showing nothing. The zero-state below is
+  // deliberately RAW-semantics: a fresh install has `servers: []` by
+  // definition, and AC 31.5.3's "only signal a fresh install gives" is about
+  // that state, independent of what Server Manager currently reports.
+  const shownCount = registeredCount ?? rawCount;
+
+  // 31-6-4 (Story 32.3): the dev-mode line is worded from the registered
+  // count — claiming "spawning from local build at X" while ZERO definitions
+  // were registered (a typo'd path) inverted AC 31.6.7's purpose in exactly
+  // the state where it matters most.
   const devModeLine =
     settings.developmentRepoPath !== ""
-      ? `Development mode: spawning from local build at ${settings.developmentRepoPath}\n`
+      ? shownCount === 0
+        ? `Development mode: irisMcpLauncher.developmentRepoPath is set to ${settings.developmentRepoPath}, but NO servers were registered from it — check the path and that the packages are built.\n`
+        : `Development mode: spawning from local build at ${settings.developmentRepoPath}\n`
       : "";
 
-  if (count === 0) {
+  if (rawCount === 0) {
     return {
       text: "$(server) IRIS MCP: none",
       tooltip:
@@ -395,10 +483,15 @@ export function buildStatusBarState(settings: LauncherSettings): StatusBarState 
     };
   }
 
+  const divergenceNote =
+    shownCount !== rawCount
+      ? ` (${shownCount} of ${rawCount} selected servers currently registered — the rest match no Server Manager server or failed validation)`
+      : "";
+
   return {
-    text: `$(server) IRIS MCP: ${count}`,
+    text: `$(server) IRIS MCP: ${shownCount}`,
     tooltip:
-      `IRIS MCP Launcher\nServers: ${settings.servers.join(", ")}\nPackages: ${packagesText}\n` +
+      `IRIS MCP Launcher\nServers: ${settings.servers.join(", ")}${divergenceNote}\nPackages: ${packagesText}\n` +
       devModeLine +
       "Click to change selection.",
   };

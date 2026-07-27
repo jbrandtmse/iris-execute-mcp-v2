@@ -8,7 +8,11 @@ extension at spawn time — **zero manual config, no password ever written to a 
 > **Status: not yet published.** This extension is an optional, standalone deliverable of the IRIS MCP Server
 > Suite (Epic 31, Story 31.4). It lives at `extensions/iris-mcp-launcher/` in the suite's repository, deliberately
 > _outside_ the npm workspace (`pnpm-workspace.yaml` globs only `packages/*`) — nothing in `packages/**` depends on
-> it, and it depends on nothing in `packages/**` at build time. It talks to the published `@iris-mcp/*` npm
+> it, and it depends on nothing in `packages/**` at build time or at runtime. (Its _test tier_ is the exception:
+> two unit/integration tests deliberately read the monorepo `packages/` tree and the pnpm store on disk as their
+> oracle, so the extension folder is not testable in isolation from a sparse checkout — see
+> `src/__tests__/definitions.test.ts` and `src/__tests__/localSpawnIntegration.test.ts`.) It talks to the
+> published `@iris-mcp/*` npm
 > packages only at _runtime_, via `npx`. **Because no `@iris-mcp/*` package is published yet, `npx -y @iris-mcp/<pkg>`
 > currently fails to start on every machine** — see [Development mode](#development-mode) below for the only way
 > to run this extension against a real server before publication.
@@ -31,8 +35,8 @@ extension at spawn time — **zero manual config, no password ever written to a 
      `username`, then `session.scopes[1]`, then `session.account.id`.
    - If the user declines the credential prompt, the server is reported as **not started**, with one clear
      message — never a repeated prompt, never an error toast storm.
-4. It spawns `npx -y @iris-mcp/<pkg>` (or, in [Development mode](#development-mode), `node
-   <developmentRepoPath>/packages/<dir>/dist/index.js`) with the resolved connection synthesized into the suite's
+4. It spawns `npx -y @iris-mcp/<pkg>` (or, in [Development mode](#development-mode),
+   `<developmentRepoPath>/packages/<dir>/dist/index.js` with the editor's own interpreter) with the resolved connection synthesized into the suite's
    own documented env contract (`IRIS_HOST`/`IRIS_PORT`/`IRIS_HTTPS`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`
    for a single server, or `IRIS_PROFILES` JSON for several — see [`irisMcpLauncher.combineProfiles`](#settings)
    below), plus whatever governance/audit/visibility variables you've set in this extension's own settings,
@@ -83,7 +87,9 @@ CLI, all documented in the suite's root README.
 
 `irisMcpLauncher.developmentRepoPath` (Story 31.6) makes this extension usable **before** any `@iris-mcp/*`
 package is published: set it to the absolute path of a local monorepo checkout, and every registered definition
-spawns `node <developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`. Empty
+spawns `<developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`, using the
+editor's own interpreter (`process.execPath` with `ELECTRON_RUN_AS_NODE=1` — the standard extension-host
+pattern, so no dependence on a `node` being on the host's PATH). Empty
 (the default) leaves spawning untouched — byte-identical `npx` behavior.
 
 - **Development only, opt-in, and security-relevant.** This setting makes the extension execute an **arbitrary
@@ -137,7 +143,7 @@ All settings live under `irisMcpLauncher.*` (Settings UI: search "IRIS MCP Launc
 | `irisMcpLauncher.packages`         | `["admin","data","dev","interop","ops"]` | Which `@iris-mcp` suite packages to register. (The `"all"` meta-package key was removed in Story 31.6 — `@iris-mcp/all` ships no `dist`/`bin` and could never be started; select the individual packages you need.)                                                              |
 | `irisMcpLauncher.namespace`        | `"HSCUSTOM"`                             | Default `IRIS_NAMESPACE` for every spawned server (matches the suite's own `loadConfig()` default). Server Manager has no per-server namespace concept, so this is the one connection field this extension cannot read from Server Manager.                                       |
 | `irisMcpLauncher.combineProfiles`  | `false`                                  | `false` (default): one definition per (package, server) pair, each single-profile. `true`: one definition **per package**, covering **every selected server** via the suite's multi-profile `IRIS_PROFILES` env var — address a specific server with the `server` tool parameter. |
-| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `node <path>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`.                                    |
+| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `<path>/packages/<dir>/dist/index.js` with the editor's own interpreter (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) instead of `npx -y @iris-mcp/<pkg>`.                                    |
 | `irisMcpLauncher.governance`       | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE`.                                                                                                                                                                                                                                    |
 | `irisMcpLauncher.governancePreset` | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE_PRESET`.                                                                                                                                                                                                                             |
 | `irisMcpLauncher.auditLog`         | `""` (unset)                             | Passed through unchanged as `IRIS_AUDIT_LOG`.                                                                                                                                                                                                                                     |

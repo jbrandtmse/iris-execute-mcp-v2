@@ -128,8 +128,22 @@ export class IrisHttpClient {
     if (this.csrfToken) return;
     await this.headRequest("/api/atelier/");
     if (!this.csrfToken) {
-      logger.warn(
-        "CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.",
+      // 31-7-1 (Story 32.3): this is EXPECTED on a stock Atelier endpoint —
+      // not a malfunction. Probed live 2026-07-26 (IRIS 2026.1): a HEAD to
+      // /api/atelier/ returns no X-CSRF-Token header, and the Atelier REST
+      // API has no documented CSRF-token contract — it authenticates via the
+      // Authorization header (Basic auth), which is not vulnerable to classic
+      // CSRF (that attack exploits ambient COOKIE auth). A token is only
+      // expected when the IRIS web application has CSRF protection explicitly
+      // enabled; on such a deployment a mutating request would 403, and this
+      // message is the breadcrumb explaining why. Downgraded from warn
+      // (2026-07-26): it fired twice on EVERY server start for a condition
+      // that blocks nothing on stock configurations.
+      logger.debug(
+        "CSRF preflight completed but no X-CSRF-Token header was returned. This is expected on a " +
+          "stock Atelier endpoint (Authorization-header auth; CSRF protection not enabled). If this " +
+          "IRIS web application has CSRF protection enabled, mutating requests will be rejected (403) " +
+          "without a token.",
       );
     }
   }

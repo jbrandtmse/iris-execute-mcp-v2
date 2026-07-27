@@ -421,6 +421,54 @@ describe("malformed IRIS_PROFILES fail-fast (AC 14.1.1)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+// 31-3-7 (Story 32.3) — host validation: URL userinfo / slashes / whitespace
+// are rejected in `host` (a host is not a URL). Shared by IRIS_PROFILES and
+// Server-Manager entries via the SAME mergeProfile validation. The error
+// deliberately does NOT echo the received value: a userinfo host can embed a
+// credential (`admin:hunter2@…`), and the message must not become the leak
+// it prevents.
+// ════════════════════════════════════════════════════════════════════
+
+describe("31-3-7 — mergeProfile host validation rejects URL userinfo, slashes, and whitespace", () => {
+  it.each([
+    "admin:hunter2@remote.example.com",
+    "https://remote.example.com",
+    "remote/example.com",
+    "remote example.com",
+    "remote\texample.com",
+  ])("IRIS_PROFILES host %j is rejected naming IRIS_PROFILES, without echoing the value", (host) => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host } }),
+    };
+    const defaultConfig = loadConfig(env);
+    let caught: unknown;
+    try {
+      buildProfileRegistry(defaultConfig, env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_PROFILES");
+    expect(message).toContain('"host"');
+    expect(message).not.toContain("hunter2");
+  });
+
+  it("a plain hostname (with dots, dashes, digits) still passes", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host: "iris-prod-01.example.com" } }),
+    };
+    const defaultConfig = loadConfig(env);
+    const registry = buildProfileRegistry(defaultConfig, env);
+    expect(registry.get("prod")?.host).toBe("iris-prod-01.example.com");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // AC 14.1.5 — resolveProfile(name?) + structured unknown-profile error.
 // ════════════════════════════════════════════════════════════════════
 
@@ -1258,6 +1306,108 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
     expect(message).toContain("1 definition(s) collided");
     expect(message).toContain("RESERVED profile name");
     expect(message).toContain("rename it in");
+  });
+
+  // ── 31-3-1 (Story 32.3, PAIRED DECISION with 31-4-4 — AC 32.3.4) ────────
+  // The reserved-name / collision policy, uniform on both sides of the
+  // process boundary: a collision is never silent (the aggregate warning
+  // above), and under IRIS_SERVER_MANAGER=required a settings file whose
+  // EVERY definition is discarded by a collision is a startup FAILURE —
+  // `required` means "at least one Server-Manager profile must reach the
+  // registry", not merely "the source produced definitions".
+  it("31-3-1: required mode throws when EVERY Server-Manager definition is discarded by a collision (here: the reserved \"default\")", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        default: {
+          webServer: { scheme: "https", host: "sm-default.example.com", port: 443 },
+          username: "smuser",
+          password: "smpass",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "required",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    let caught: unknown;
+    try {
+      await loadProfileRegistry(env);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("IRIS_SERVER_MANAGER=required");
+    expect(message).toContain("collided");
+    // The remedy for the reserved name: rename the Server Manager definition.
+    expect(message).toContain("rename");
+    // Secret discipline: the colliding definition's password is never echoed.
+    expect(message).not.toContain("smpass");
+  });
+
+  it("31-3-1: required mode does NOT throw when at least one Server-Manager definition survives the collision filter", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        prod: {
+          webServer: { scheme: "https", host: "sm-prod.example.com", port: 443 },
+          username: "smuser",
+          password: "smpass",
+        },
+        unique: {
+          webServer: { scheme: "https", host: "sm-unique.example.com", port: 443 },
+          username: "smuser2",
+          password: "smpass2",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ prod: { host: "env-prod.example.com" } }),
+      IRIS_SERVER_MANAGER: "required",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    const registry = await loadProfileRegistry(env);
+    expect(registry.has("unique")).toBe(true);
+    expect(registry.get("prod")?.host).toBe("env-prod.example.com");
+  });
+
+  // ── 31-1-5 (Story 32.3): the pending-resolution debug summary is emitted
+  // from THIS layer, post-filter, so names discarded by the collision filter
+  // (which never reach the chain) are not counted.
+  it("31-1-5: the pending-resolution debug summary counts only profiles that actually reach the chain (post-filter)", async () => {
+    const workspaceDir = tmpWorkspaceWithSettings({
+      "intersystems.servers": {
+        shadowed: {
+          webServer: { scheme: "https", host: "shadowed.example.com", port: 443 },
+          username: "u",
+        },
+        pending: {
+          webServer: { scheme: "https", host: "pending.example.com", port: 443 },
+          username: "u",
+        },
+      },
+    });
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ shadowed: { host: "env-shadowed.example.com" } }),
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceDir,
+    };
+    await loadProfileRegistry(env);
+
+    const debugSpy = vi.mocked(logger.debug);
+    const summaryCalls = debugSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("have no password yet"),
+    );
+    expect(summaryCalls).toHaveLength(1);
+    // "shadowed" was discarded by the collision filter BEFORE the chain — the
+    // pre-31-1-5 line (emitted inside resolveServerManagerProfiles) counted
+    // it anyway, claiming 2 profiles would be attempted.
+    expect(String(summaryCalls[0]?.[0])).toContain("1 server profile(s) have no password yet");
   });
 
   it("AC 31.3.1: ProfileClientRegistry session isolation behaves identically for a Server-Manager-sourced profile as for an env one", async () => {

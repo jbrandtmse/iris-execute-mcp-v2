@@ -229,6 +229,20 @@ export function mergeProfile(
         sourceLabel,
       );
     }
+    // 31-3-7 (Story 32.3): a host is not a URL. URL userinfo
+    // (`admin:hunter2@host`), a scheme/slash, or whitespace would land
+    // verbatim in `baseUrl` — hence in the `iris_server_profiles` roster,
+    // which the docs describe as never containing a password. Reject it. The
+    // message deliberately does NOT echo the received value: a userinfo host
+    // can embed a credential, and this error must not become the leak it
+    // prevents (asserted in tests).
+    if (/[@/\s]/.test(override.host)) {
+      throw profilesError(
+        `profile "${name}": "host" must be a bare hostname — it must not contain ` +
+          `"@", "/", or whitespace (URL userinfo or a scheme is not a host).`,
+        sourceLabel,
+      );
+    }
     host = override.host;
   }
 
@@ -531,6 +545,35 @@ export async function loadProfileRegistry(
         `NOT complete a Server Manager definition: give it the full connection fields, or ` +
         `store the password with "iris-mcp-credentials set <name>" and remove the ` +
         `IRIS_PROFILES entry.${reservedNote}`,
+    );
+    // 31-3-1 (Story 32.3, PAIRED DECISION with extension item 31-4-4 — AC
+    // 32.3.4): under `required`, a settings source whose EVERY definition was
+    // discarded by a collision is a startup FAILURE, not a degraded
+    // (default-only) start. `required` means "at least one Server-Manager
+    // profile must reach the registry" — collision-discard is a fourth
+    // rejection class, and the three `required` checks inside
+    // `resolveServerManagerProfiles` all passed before this filter ran.
+    if (mode === "required" && smEntries.length === 0) {
+      throw new Error(
+        `IRIS_SERVER_MANAGER=required but every Server Manager definition collided with an ` +
+          `existing profile name and was discarded (the "env" definition always wins): ${named}. ` +
+          `Rename the colliding intersystems.servers definition(s), or remove/rename the ` +
+          `conflicting IRIS_PROFILES entry, or set IRIS_SERVER_MANAGER=auto/off.${reservedNote}`,
+      );
+    }
+  }
+  // 31-1-5 (Story 32.3): the pending-resolution summary lives HERE — post
+  // collision-filter, immediately before the chain runs — so it counts only
+  // the profiles that will actually be attempted. (Pre-Story-32.3 it was
+  // emitted inside `resolveServerManagerProfiles`, which cannot see the
+  // shadow filter above and over-counted.)
+  const pendingCount = smEntries.filter(
+    (entry) => entry.credentialStatus === "unresolved",
+  ).length;
+  if (pendingCount > 0) {
+    logger.debug(
+      `IRIS_SERVER_MANAGER: ${pendingCount} server profile(s) have no password yet; ` +
+        `the credential chain (env, OS keychain, credential helper) will attempt resolution.`,
     );
   }
   const smProfiles = await resolveServerManagerCredentials(smEntries, {

@@ -51,6 +51,7 @@ import { z } from "zod";
 import { McpServerBase } from "../server-base.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 import type { ToolDefinition } from "../tool-types.js";
+import { PRE_FEATURE_SNAPSHOTS } from "./pre-feature-tool-snapshot.js";
 
 /** A minimal, representative read tool stub — visibility only cares about `name`. */
 function makeTool(name: string): ToolDefinition {
@@ -69,128 +70,12 @@ function makeTool(name: string): ToolDefinition {
 }
 
 /**
- * Each package's current tool-name roster, transcribed from the approved
- * spec table (11-tool-visibility-presets.md §2.5) — the pre-feature
- * snapshot this capstone protects. Counts cross-checked against each
- * package's own `index.test.ts` (`toHaveLength`/`toBeGreaterThanOrEqual`
- * assertions): dev 28, admin 26, interop 22, ops ≥20 (21 live), data 7.
+ * Each package's current tool-name roster — single-sourced from
+ * `./pre-feature-tool-snapshot.js` (see that module's header for provenance).
+ * Moved out of this file inline-literal form in Story 32.3 (deferred item
+ * 30-0-3) so the SAME constant also feeds `@iris-mcp/all`'s drift gate,
+ * which compares it against each package's LIVE built-dist `tools` array.
  */
-const PRE_FEATURE_SNAPSHOTS: Record<string, string[]> = {
-  "iris-dev-mcp": [
-    "iris_doc_get",
-    "iris_doc_put",
-    "iris_doc_delete",
-    "iris_doc_list",
-    "iris_doc_compile",
-    "iris_doc_index",
-    "iris_doc_search",
-    "iris_macro_info",
-    "iris_doc_convert",
-    "iris_doc_xml_export",
-    "iris_sql_execute",
-    "iris_sql_analyze",
-    "iris_server_info",
-    "iris_server_namespace",
-    "iris_global_get",
-    "iris_global_set",
-    "iris_global_kill",
-    "iris_global_list",
-    "iris_execute_command",
-    "iris_execute_classmethod",
-    "iris_execute_tests",
-    "iris_doc_load",
-    "iris_doc_export",
-    "iris_package_list",
-    "iris_routine_intermediate",
-    "iris_loc_count",
-    "iris_env_diff",
-    "iris_env_promote",
-  ],
-  "iris-admin-mcp": [
-    "iris_namespace_manage",
-    "iris_namespace_list",
-    "iris_database_manage",
-    "iris_database_list",
-    "iris_mapping_manage",
-    "iris_mapping_list",
-    "iris_user_manage",
-    "iris_user_get",
-    "iris_user_roles",
-    "iris_user_password",
-    "iris_role_manage",
-    "iris_role_list",
-    "iris_resource_manage",
-    "iris_resource_list",
-    "iris_permission_check",
-    "iris_webapp_manage",
-    "iris_webapp_get",
-    "iris_webapp_list",
-    "iris_ssl_manage",
-    "iris_ssl_list",
-    "iris_oauth_manage",
-    "iris_oauth_list",
-    "iris_service_manage",
-    "iris_ldap_manage",
-    "iris_x509_manage",
-    "iris_audit_manage",
-  ],
-  "iris-interop-mcp": [
-    "iris_production_manage",
-    "iris_production_control",
-    "iris_production_status",
-    "iris_production_summary",
-    "iris_production_item",
-    "iris_production_autostart",
-    "iris_production_logs",
-    "iris_production_queues",
-    "iris_production_messages",
-    "iris_production_adapters",
-    "iris_credential_manage",
-    "iris_credential_list",
-    "iris_lookup_manage",
-    "iris_lookup_transfer",
-    "iris_rule_list",
-    "iris_rule_get",
-    "iris_transform_list",
-    "iris_transform_test",
-    "iris_interop_rest",
-    "iris_default_settings_manage",
-    "iris_message_diagram",
-    "iris_message_resend",
-  ],
-  "iris-ops-mcp": [
-    "iris_metrics_system",
-    "iris_metrics_alerts",
-    "iris_metrics_interop",
-    "iris_alerts_manage",
-    "iris_jobs_list",
-    "iris_locks_list",
-    "iris_process_manage",
-    "iris_journal_info",
-    "iris_mirror_status",
-    "iris_audit_events",
-    "iris_database_check",
-    "iris_database_action",
-    "iris_backup_manage",
-    "iris_license_info",
-    "iris_ecp_status",
-    "iris_task_manage",
-    "iris_task_list",
-    "iris_task_run",
-    "iris_task_history",
-    "iris_config_manage",
-    "iris_health_check",
-  ],
-  "iris-data-mcp": [
-    "iris_docdb_manage",
-    "iris_docdb_document",
-    "iris_docdb_find",
-    "iris_docdb_property",
-    "iris_analytics_mdx",
-    "iris_analytics_cubes",
-    "iris_rest_manage",
-  ],
-};
 
 describe("AC 30.0.4 — Rule #19 back-compat capstone: no visibility env vars ⇒ every server's tool set is unchanged", () => {
   const savedEnv = {

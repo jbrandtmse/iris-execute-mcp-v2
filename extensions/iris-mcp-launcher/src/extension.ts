@@ -29,9 +29,11 @@
  * first asked for definitions. That cost is accepted because AC 31.5.3's
  * zero-state status bar item is "the only signal a fresh install gives that
  * the extension is installed and waiting for input", and a lazily-activated
- * extension cannot render one. Activation itself stays cheap: `activate()`
- * performs no I/O and no Server Manager API call — `getServerManagerApi()` is
- * only ever awaited from a command handler or the provider.
+ * extension cannot render one. Activation cost: the initial status-bar
+ * refresh awaits one `providePlannedDefinitions()` (31-5-2 — the status bar
+ * reports the EFFECTIVE registered count), which activates Server Manager
+ * and enumerates its roster once; the fs validation that path can trigger is
+ * fully async (31-6-2), so the extension host is never blocked on I/O.
  */
 import * as vscode from "vscode";
 
@@ -76,9 +78,39 @@ async function getServerManagerApi(): Promise<ServerManagerApi | undefined> {
     return undefined;
   }
 
-  cachedApi = extension.exports;
+  // 31-4-8 (Story 32.3): duck-type the exports BEFORE caching. A truthy-but-
+  // wrong-shaped exports object (an API change, a partial activation) was
+  // previously cached permanently — `if (cachedApi) return cachedApi` would
+  // short-circuit for the rest of the session, so the "not available" branch
+  // could never fire and the user got only a downstream "could not read the
+  // server list". On a mismatch: do NOT cache (a later, fully-activated
+  // exports object can still succeed), and say what actually happened.
+  const candidate = extension.exports;
+  if (
+    typeof candidate?.getServerNames !== "function" ||
+    typeof candidate?.getServerSpec !== "function" ||
+    typeof candidate?.getAccount !== "function"
+  ) {
+    const message =
+      "IRIS MCP Launcher: the InterSystems Server Manager extension activated, but its API is " +
+      "not the shape this extension expects (missing getServerNames/getServerSpec/getAccount) — " +
+      "a version mismatch. No IRIS MCP servers were registered.";
+    apiShapeWarningSink?.(message);
+    return undefined;
+  }
+
+  cachedApi = candidate;
   return cachedApi;
 }
+
+/**
+ * Where the 31-4-8 shape-mismatch message goes (31-4-8). `getServerManagerApi`
+ * is module-level (its cache outlives any single activation path), so the
+ * `showWarning` closure — which exists only inside `activate()` — is handed
+ * over once activation runs. Until then the message is dropped (activation
+ * itself is the only earlier caller, and it registers the sink first).
+ */
+let apiShapeWarningSink: ((message: string) => void) | undefined;
 
 const authApi: AuthApi = {
   getSession: (providerId, scopes, options) =>
@@ -163,6 +195,8 @@ export function activate(context: vscode.ExtensionContext): void {
     void vscode.window.showInformationMessage(message);
   };
 
+  apiShapeWarningSink = showWarning;
+
   const getSettings = () =>
     readSettings((section) => toConfigReader(vscode.workspace.getConfiguration(section)));
 
@@ -202,6 +236,18 @@ export function activate(context: vscode.ExtensionContext): void {
         ignoreFocusOut: true,
         placeHolder: "Select the IRIS servers to expose as MCP servers",
       }),
+    // 31-5-3: confirm before writing an empty selection ([] = expose ALL,
+    // the inverse of the uncheck-everything gesture).
+    confirmExposeAll: async () => {
+      const choice = await vscode.window.showWarningMessage(
+        "IRIS MCP Launcher: you unchecked every server. An empty irisMcpLauncher.servers means " +
+          "EVERY server InterSystems Server Manager reports will be exposed (the documented " +
+          "default) — not that no servers are exposed.",
+        { modal: true },
+        "Expose All",
+      );
+      return choice === "Expose All";
+    },
     showWarning,
     showInfo,
   };
@@ -225,7 +271,14 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBarItem.command = SELECT_SERVERS_COMMAND_ID;
   context.subscriptions.push(statusBarItem);
 
-  const refreshStatusBar = (): void => {
+  const provider = new LauncherProvider({
+    getServerManagerApi,
+    authApi,
+    getSettings,
+    showWarning,
+  });
+
+  const refreshStatusBar = async (): Promise<void> => {
     let settings;
     try {
       settings = getSettings();
@@ -248,32 +301,43 @@ export function activate(context: vscode.ExtensionContext): void {
       statusBarItem.show();
       return;
     }
-    const state = buildStatusBarState(settings);
+    // 31-5-2 (Story 32.3 — product decision): the status bar reports the
+    // EFFECTIVE registered-server count (distinct servers in the accepted
+    // plans), not the raw `irisMcpLauncher.servers.length`, which diverges on
+    // hand-edited duplicates and mistyped names. Replanning here also keeps
+    // `plansByLabel` fresh on every config change; the one-time-warning
+    // dedupe (31-6-1) keeps repeated replans silent. A planning failure
+    // degrades to the raw count (registeredCount undefined) rather than
+    // breaking the status bar.
+    let registeredCount: number | undefined;
+    try {
+      await provider.providePlannedDefinitions();
+      registeredCount = provider.registeredServerCount();
+    } catch {
+      registeredCount = undefined;
+    }
+    const state = buildStatusBarState(settings, registeredCount);
     statusBarItem.text = state.text;
     statusBarItem.tooltip = state.tooltip;
     statusBarItem.show();
   };
 
-  refreshStatusBar();
+  void refreshStatusBar();
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration(CONFIG_SECTION)) {
-        refreshStatusBar();
+        void refreshStatusBar();
       }
     }),
   );
 
-  const provider = new LauncherProvider({
-    getServerManagerApi,
-    authApi,
-    getSettings,
-    showWarning,
-  });
-
   try {
     const registration = vscode.lm.registerMcpServerDefinitionProvider(PROVIDER_ID, {
-      provideMcpServerDefinitions: async () => {
+      provideMcpServerDefinitions: async (_token) => {
+        // 31-4-6: the editor's CancellationToken is honored on the resolve
+        // path (the multi-server credential loop); the provide path resolves
+        // no credentials, so the token is not needed here.
         const planned = await provider.providePlannedDefinitions();
         return planned.map(
           (definition) =>
@@ -285,8 +349,8 @@ export function activate(context: vscode.ExtensionContext): void {
             ),
         );
       },
-      resolveMcpServerDefinition: async (server) => {
-        const env = await provider.resolveEnvForLabel(server.label);
+      resolveMcpServerDefinition: async (server, token) => {
+        const env = await provider.resolveEnvForLabel(server.label, token);
         if (!env) {
           // First-class cancellation/error outcome: return undefined so the
           // editor quietly does not start this server (Task 3) — no exception,
@@ -326,4 +390,5 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   cachedApi = undefined;
+  apiShapeWarningSink = undefined;
 }

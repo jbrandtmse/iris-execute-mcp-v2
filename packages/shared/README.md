@@ -89,6 +89,26 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ---
 
+## Server Manager Connections & the `iris-mcp-credentials` CLI
+
+`server-manager-source.ts`, `credential-chain.ts`, and `cli/credentials.ts` implement the suite's [Server Manager connections](../../README.md#server-manager-connections-iris_server_manager) feature (Epic 31): importing `intersystems.servers` definitions from VS Code Server Manager settings files instead of duplicating host/port/username into every MCP client's config. All four env vars are **optional and default off/unset** (unset `IRIS_SERVER_MANAGER` ⇒ the module is never invoked and the filesystem is never touched — the Rule #19 back-compat gate):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `IRIS_SERVER_MANAGER` | `off` | `off` / `auto` / `required`. Unknown values fail fast at startup naming the valid set. |
+| `IRIS_SM_SERVERS` | unset (import all) | Comma-separated allow-list of server names to import. **Set-but-empty (`""`, `","`, whitespace) means unset — import all** (RECORDED DECISION 2026-07-26, deferred item 31-3-6: this matches the suite-wide empty-string convention — `IRIS_PROFILES=""` is likewise treated as absent, pinned by a dedicated back-compat test — so this one variable is deliberately NOT given a divergent "set-empty means none" reading). |
+| `IRIS_SM_SETTINGS_PATHS` | unset (full discovery) | `path.delimiter`-separated list of settings files that REPLACES discovery (workspace `.vscode/settings.json` → `*.code-workspace` → per-product user settings). |
+| `IRIS_SM_WORKSPACE` | process CWD | Workspace directory for the workspace-scope candidates. The CWD default means the MCP *client* chooses which repo's `.vscode/settings.json` is read — see the trust decision below. |
+| `IRIS_CREDENTIAL_HELPER` | unset (link skipped) | External command run to resolve a Server Manager server's password (server name appended as its FINAL argv entry; 10s per-profile timeout, sequential per profile — a configured-but-unreachable helper can cost up to 10s × password-less profiles at startup; narrow with `IRIS_SM_SERVERS`. RECORDED DECISION 2026-07-26, deferred item 31-1-3: no aggregate budget in v1 — the per-link 10s timeout is AC-mandated, the feature is opt-in, and `iris-mcp-credentials test` validates a helper before it reaches startup). |
+
+- **`resolveServerManagerProfiles()`** -- Discovery + JSONC parse + `mergeProfile` validation, returning one tagged (`resolved`/`unresolved`) profile per unique name. Precedence is **first-file-wins, always** (RECORDED DECISION 2026-07-26, deferred items 31-1-2/31-3-3: a name's fate is decided at its first sighting across the precedence-ordered files and never reconsidered; a password-bearing lower-precedence definition skipped by this rule is announced with a warning naming both files' hosts and the remedy).
+- **`resolveCredential()` / `resolveServerManagerCredentials()`** -- The credential chain: `IRIS_PROFILES.<name>.password` / `IRIS_PASSWORD` → OS keychain (service `iris-mcp`, account `<serverName>`, via `@napi-rs/keyring` optionalDependency) → `IRIS_CREDENTIAL_HELPER` → exhausted (excluded with all remediations named; `required` escalates to startup failure).
+- **`iris-mcp-credentials` bin** -- `set <name>` (hidden prompt or `--stdin`, never argv), `delete <name>`, `list [--json]` (names only), `test <name> [--connect] [--json]` (runs the real chain and reports which link resolved). Exit codes: 0 success / 1 not-found-unresolved-or-failed-connect / 2 usage error.
+
+**Which directory do we trust? (the CWD workspace candidate).** With `IRIS_SM_WORKSPACE` unset, the workspace candidate is derived from the server process's CWD — which the MCP *client*, not the operator, chooses — so a merely-cloned third-party repo's `.vscode/settings.json` can contribute connection profiles. RECORDED DECISION 2026-07-26 (deferred item 31-3-9, architecture decision **J1** in [`../../_bmad-output/planning-artifacts/architecture.md`](../../_bmad-output/planning-artifacts/architecture.md)): the CWD default stays in v1/v2 (it is AC-31.0.1-mandated, and the mitigations — `IRIS_SM_WORKSPACE`, `IRIS_SM_SERVERS`, env/`IRIS_PROFILES` always win collisions, the candidate list logged at debug, `sourceFile` provenance in the `iris_server_profiles` roster — are all documented); requiring an explicit opt-in is a breaking change deferred to a future major. **New config channels never discover from the CWD** — `IRIS_GOVERNANCE_FILE` (Epic 32) is an explicit operator-supplied path only.
+
+---
+
 ## Audit Logging (framework surface, not part of the public barrel)
 
 `audit.ts` implements the opt-in, structured, secrets-free session audit log described in the suite's [Compliance & Auditability](../../README.md#compliance--auditability) section (`IRIS_AUDIT_LOG` / `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS`). Unlike everything in [Public API](#public-api) above, its exports (`AuditLogger`, `parseAuditConfig()`, `redactValue()`, `AuditConfig`/`AuditEntryInput`/`AuditOutcome`) are **not** re-exported from this package's barrel (`index.ts`) — the module is consumed internally, exclusively by `server-base.ts`.

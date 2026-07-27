@@ -46,11 +46,19 @@ import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 
-const IRIS_HOST = "localhost";
-const IRIS_PORT = 52773;
-const IRIS_USERNAME = "_SYSTEM";
-const IRIS_PASSWORD = "SYS";
-const IRIS_NAMESPACE = "HSCUSTOM";
+// 31-6-5 (Story 32.3): credentials come from IRIS_TEST_* env vars with the
+// documented local dev defaults as fallback — a failure prints the fallback,
+// not an operator's real credential, and CI can point at a different instance
+// without editing a committed file.
+// REPO-WIDE DECISION (recorded in deferred-work.md, 31-6-5): `__tests__/`
+// stays OUT of containment.test.ts's credential-grep roster — test fixtures
+// are not shipped code, and env-with-fallback (not grep enforcement) is the
+// containment mechanism for test-tier credentials.
+const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
+const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
+const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
+const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
+const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   return {
@@ -222,8 +230,13 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
 
       const planned = await provider.providePlannedDefinitions();
       expect(providerWarnings).toEqual([]); // the real dev-mcp package IS built (guarded by skipReason above)
+      // 31-6-3 (Story 32.3): the planned command is the extension host's own
+      // interpreter (process.execPath + ELECTRON_RUN_AS_NODE=1 in the env),
+      // never a bare "node" resolved from the host's PATH. In THIS process
+      // (vitest, plain Node) execPath IS node, and ELECTRON_RUN_AS_NODE is
+      // inert — the real spawn below is unaffected.
       expect(planned).toEqual([
-        { label: "IRIS Dev Tools — local-iris", command: "node", args: [DEV_MCP_ENTRY_POINT] },
+        { label: "IRIS Dev Tools — local-iris", command: process.execPath, args: [DEV_MCP_ENTRY_POINT] },
       ]);
 
       // ── 2. REAL synthesized env, via the REAL resolveEnvForLabel ──
@@ -234,6 +247,7 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
       expect(env?.IRIS_USERNAME).toBe(IRIS_USERNAME);
       expect(env?.IRIS_PASSWORD).toBe(IRIS_PASSWORD);
       expect(env?.IRIS_NAMESPACE).toBe(IRIS_NAMESPACE);
+      expect(env?.ELECTRON_RUN_AS_NODE).toBe("1"); // 31-6-3
 
       const spawnEnv = toSpawnEnv(env!);
 

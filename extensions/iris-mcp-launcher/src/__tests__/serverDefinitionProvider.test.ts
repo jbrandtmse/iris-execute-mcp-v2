@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,50 +11,38 @@ import type {
   ServerSpec,
 } from "../types.js";
 
-// `node:fs`'s built-in module namespace object cannot be spied on directly
-// (`vi.spyOn(fs, "statSync")` throws "Cannot redefine property" — its
+// `node:fs/promises`'s built-in module namespace object cannot be spied on
+// directly (`vi.spyOn(fsp, "stat")` throws "Cannot redefine property" — its
 // properties are non-configurable). `vi.mock` with an `importOriginal`
 // passthrough replaces the module's exports with a real, spyable `vi.fn()`
-// wrapper instead, scoped to THIS test file only — `definitions.test.ts` and
-// every other file's own `node:fs` usage (readdirSync, etc.) is unaffected.
-// `statSync`/`existsSync` are the only exports wrapped (both are used by
-// `isExistingDirectory`/`isExistingFile` in `serverDefinitionProvider.ts`);
-// everything else (including the `mkdtempSync`/`mkdirSync`/`rmSync`/
-// `writeFileSync` this file's own fixture helpers use below) passes through
-// to the real implementation. Both wrappers default to calling the real
-// function, so every test that doesn't explicitly override them (the vast
-// majority) is unaffected.
-vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, statSync: vi.fn(actual.statSync), existsSync: vi.fn(actual.existsSync) };
+// wrapper instead, scoped to THIS test file only. `stat` is the only export
+// wrapped (it backs `isExistingDirectory`/`isExistingFile` in
+// `serverDefinitionProvider.ts` — converted from `existsSync`/`statSync` to
+// `fs/promises.stat` in Story 32.3 (31-6-2), so validation no longer blocks
+// the extension host); everything else passes through to the real
+// implementation. The wrapper defaults to calling the real function, so
+// every test that doesn't explicitly override it (the vast majority) is
+// unaffected.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, stat: vi.fn(actual.stat) };
 });
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 
 /**
- * Restore BOTH `node:fs` wrappers to real behavior after every test.
- *
- * `mockClear()` is not enough: it clears call history but leaves an
- * UNCONSUMED `mockImplementationOnce` queued, which would then be consumed by
- * whichever later test makes the next `fs` call — an unrelated `EACCES`/`EIO`
- * failure with a baffling message. Today every queued once-impl happens to be
- * consumed by its own test, but that is an accident of the current control
- * flow (the Story 31.6 review added an `isAbsolute` short-circuit that could
- * easily have broken it).
- *
- * `mockReset()` alone is WORSE in vitest 2.1.9: it drains the queue but also
- * clears the base implementation, so `statSync` starts returning `undefined`
- * and every subsequent test silently sees "path does not exist". Verified
- * during the review — it turned six passing tests red. So: reset to drain,
- * then explicitly reinstate the real implementation.
+ * Restore the `node:fs/promises.stat` wrapper to real behavior after every
+ * test. `mockReset()` alone is WORSE in vitest 2.1.9: it drains the
+ * once-impl queue but also clears the base implementation, so `stat` starts
+ * returning `undefined` and every subsequent test silently sees "path does
+ * not exist" (verified during the Story 31.6 review — it turned six passing
+ * tests red). So: reset to drain, then explicitly reinstate the real
+ * implementation.
  */
 afterEach(async () => {
-  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-  const statMock = vi.mocked(fs.statSync);
-  const existsMock = vi.mocked(fs.existsSync);
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  const statMock = vi.mocked(fsp.stat);
   statMock.mockReset();
-  statMock.mockImplementation(actual.statSync);
-  existsMock.mockReset();
-  existsMock.mockImplementation(actual.existsSync);
+  statMock.mockImplementation(actual.stat);
 });
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
@@ -187,6 +175,34 @@ describe("LauncherProvider.providePlannedDefinitions", () => {
     expect(planned).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/Server Manager/i);
+  });
+
+  it("31-6-1 (code review): the unavailable-API warning does NOT re-fire across repeated provides — the 31-5-2 status-bar refresh replans on every config change", async () => {
+    const { deps, warnings } = makeDeps({ smAvailable: false });
+    const provider = new LauncherProvider(deps);
+
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/Server Manager/i);
+  });
+
+  it("31-6-1 (code review): the could-not-read-settings warning does NOT re-fire across repeated provides either", async () => {
+    const { deps, warnings } = makeDeps({
+      serverNames: ["a"],
+      getSettings: () => {
+        throw new Error("hand-edited settings.json broke the read");
+      },
+    });
+    const provider = new LauncherProvider(deps);
+
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/could not read/i);
   });
 });
 
@@ -628,7 +644,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect(planned).toEqual([
       {
         label: "IRIS Dev Tools — a",
-        command: "node",
+        command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
       },
     ]);
@@ -699,7 +715,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect(planned).toEqual([
       {
         label: "IRIS Dev Tools — a",
-        command: "node",
+        command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
       },
     ]);
@@ -728,14 +744,14 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect(warnings[0]!.split('package "dev"').length - 1).toBe(1);
   });
 
-  it("guards a throwing fs call: statSync throwing (e.g. a permission error on a path existsSync already confirmed) degrades to one warning, never an unhandled exception, and never forwards the raw error text (Task 2's fs-guard requirement)", async () => {
+  it("guards a REJECTING fs.promises.stat (e.g. a permission error on the repo-path check) — degrades to one warning, never an unhandled exception, and never forwards the raw error text (31-6-2's async fs guard)", async () => {
     const repoDir = makeRepoDir();
     buildPackage(repoDir, "iris-dev-mcp");
 
-    const statMock = vi.mocked(fs.statSync);
-    statMock.mockImplementationOnce(() => {
-      throw new Error("EACCES: permission denied, stat 'secret-detail'");
-    });
+    const statMock = vi.mocked(fsp.stat);
+    statMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("EACCES: permission denied, stat 'secret-detail'")),
+    );
 
     {
       const { deps, warnings } = makeDeps({
@@ -751,59 +767,85 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     }
   });
 
-  /**
-   * DEFENSE-IN-DEPTH ONLY — deliberately NOT a second independent "guard every
-   * fs call" proof. Node's `fs.existsSync` is contractually total: it wraps
-   * path validation and the `stat` in its own try/catch and returns `false` on
-   * ANY error. Probed on this machine (Node v24.16.0) with a NUL-byte path, a
-   * 70 000-char path, `C:\<>|?*`, `""`, and non-string arguments — every case
-   * returned `false`, none threw. So the state this test forces is one the
-   * real filesystem cannot produce, and `isExistingDirectory`/`isExistingFile`'s
-   * try/catch is reachable in production ONLY via `statSync` (EACCES/EPERM/
-   * ELOOP/EIO on a path `existsSync` just confirmed) — which the preceding two
-   * tests cover for real. Kept because the guard is free and the behavior it
-   * pins (fail closed, no raw error text) is identical to the reachable path;
-   * recorded as unreachable here so a future reader does not bank it as
-   * evidence that a real `existsSync` failure is handled.
-   */
-  it("if existsSync could throw (it cannot — Node returns false on any error; see the note above), the guard would still degrade to one warning, never an unhandled exception, and never forward the raw error text", async () => {
-    const existsMock = vi.mocked(fs.existsSync);
-    existsMock.mockImplementationOnce(() => {
-      throw new Error("EIO: i/o error, stat 'network-share-detail'");
-    });
-
-    {
-      const { deps, warnings } = makeDeps({
-        serverNames: ["a"],
-        getSettings: () =>
-          settings({ packages: ["dev"], developmentRepoPath: "\\\\some\\unc\\path" }),
-      });
-      const provider = new LauncherProvider(deps);
-
-      await expect(provider.providePlannedDefinitions()).resolves.toEqual([]);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).not.toContain("EIO");
-      expect(warnings[0]).not.toContain("network-share-detail");
-    }
-  });
-
-  it("guards a throwing statSync specifically on a PER-PACKAGE dist/index.js check (a distinct code path from the repo-path check above): degrades to one warning naming only the affected package, never a raw error, and the OTHER selected (built, unaffected) package still registers", async () => {
+  it("31-6-2: the per-package dist/index.js validations do NOT run serially — both package probes are in flight at once", async () => {
     const repoDir = makeRepoDir();
     buildPackage(repoDir, "iris-dev-mcp");
     buildPackage(repoDir, "iris-admin-mcp");
 
-    const { statSync: realStatSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const statMock = vi.mocked(fs.statSync);
+    // Defer every stat call behind a manually-released promise, tracking the
+    // peak number of PER-PACKAGE probes IN FLIGHT at once. Serial validation
+    // peaks at 1; Promise.all fans the two distinct package probes out
+    // together (peak 2). Deterministic formulation (Story 32.3 code review —
+    // the original "release-as-they-arrive behind a 50-tick loop" version
+    // flaked under full-suite parallel load, ~2/9 runs red): repo-level
+    // checks pass straight through to the real stat; per-package dist probes
+    // are HELD until the test releases them, so two unsettled dist probes at
+    // once is the fan-out proof by construction — no tick-count race. A
+    // serial implementation would leave the first probe held forever; the
+    // wall-clock bound below expires and the assertion fails legibly instead
+    // of deadlocking.
+    const { stat: realStat } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    let distInFlight = 0;
+    let maxDistInFlight = 0;
+    const distResolvers: (() => void)[] = [];
+    const statMock = vi.mocked(fsp.stat);
+    statMock.mockImplementation(((candidate: unknown) => {
+      if (typeof candidate === "string" && candidate.endsWith("index.js")) {
+        distInFlight++;
+        maxDistInFlight = Math.max(maxDistInFlight, distInFlight);
+        return new Promise<import("node:fs").Stats>((resolve, reject) => {
+          distResolvers.push(() => {
+            distInFlight--;
+            // Rejection MUST flow through: without it an ENOENT (or any real-stat
+            // failure) leaves the deferred promise unsettled forever and the test
+            // deadlocks instead of failing legibly (isExistingFile's own catch
+            // then degrades it to exists:false, exactly like production).
+            void (realStat as (c: unknown) => Promise<import("node:fs").Stats>)(candidate).then(resolve, reject);
+          });
+        });
+      }
+      // Repo-level checks run first (serial by nature) and are not what this
+      // test measures — pass them straight through.
+      return (realStat as (c: unknown) => Promise<import("node:fs").Stats>)(candidate);
+    }) as typeof fsp.stat);
+
+    const { deps } = makeDeps({
+      serverNames: ["a"],
+      getSettings: () =>
+        settings({ packages: ["dev", "admin"], developmentRepoPath: repoDir }),
+    });
+    const provider = new LauncherProvider(deps);
+
+    const plannedPromise = provider.providePlannedDefinitions();
+    // Wall-clock bound, not a tick count: generous enough for a loaded
+    // worker, finite enough to fail (not hang) on a serial implementation.
+    const deadline = Date.now() + 10_000;
+    while (distResolvers.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(maxDistInFlight).toBeGreaterThanOrEqual(2);
+    while (distResolvers.length > 0) distResolvers.shift()!();
+    const planned = await plannedPromise;
+    expect(planned).toHaveLength(2);
+  });
+
+  it("guards a REJECTING stat specifically on a PER-PACKAGE dist/index.js check (a distinct code path from the repo-path check above): degrades to one warning naming only the affected package, never a raw error, and the OTHER selected (built, unaffected) package still registers", async () => {
+    const repoDir = makeRepoDir();
+    buildPackage(repoDir, "iris-dev-mcp");
+    buildPackage(repoDir, "iris-admin-mcp");
+
+    const { stat: realStat } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const statMock = vi.mocked(fsp.stat);
     statMock.mockImplementation(((candidate: unknown, options?: unknown) => {
       if (
         typeof candidate === "string" &&
         candidate.includes("iris-dev-mcp") &&
         candidate.endsWith("index.js")
       ) {
-        throw new Error("EACCES: permission denied, stat 'dev-dist-detail'");
+        return Promise.reject(new Error("EACCES: permission denied, stat 'dev-dist-detail'"));
       }
-      return (realStatSync as (...args: unknown[]) => unknown)(candidate, options);
-    }) as typeof fs.statSync);
+      return (realStat as (...args: unknown[]) => Promise<unknown>)(candidate, options);
+    }) as typeof fsp.stat);
 
     {
       const { deps, warnings } = makeDeps({
@@ -818,7 +860,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
       expect(planned).toEqual([
         {
           label: "IRIS Admin Tools — a",
-          command: "node",
+          command: process.execPath,
           args: [path.join(repoDir, "packages", "iris-admin-mcp", "dist", "index.js")],
         },
       ]);
@@ -862,7 +904,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect(planned).toEqual([
       {
         label: "IRIS Dev Tools — a",
-        command: "node",
+        command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
       },
     ]);
@@ -909,7 +951,7 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
       // Precondition: this relative path really does resolve to the built
       // checkout, so the test is not passing merely because nothing is there.
       expect(
-        fs.existsSync(path.join(relativeButReal, "packages", "iris-dev-mcp", "dist", "index.js")),
+        existsSync(path.join(relativeButReal, "packages", "iris-dev-mcp", "dist", "index.js")),
       ).toBe(true);
 
       const { deps, warnings } = makeDeps({
@@ -989,12 +1031,12 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect([...planned].sort((x, y) => x.label.localeCompare(y.label))).toEqual([
       {
         label: "IRIS Admin Tools (a, b)",
-        command: "node",
+        command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-admin-mcp", "dist", "index.js")],
       },
       {
         label: "IRIS Dev Tools (a, b)",
-        command: "node",
+        command: process.execPath,
         args: [path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js")],
       },
     ]);
@@ -1004,10 +1046,10 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     expect(Object.keys(JSON.parse(env!.IRIS_PROFILES as string)).sort()).toEqual(["a", "b"]);
   });
 
-  it("a UNC-style developmentRepoPath (\\\\server\\share\\repo) that does not resolve is treated exactly like any other missing path — fails closed with one warning, no special-casing, and (via a mocked existsSync) no real network filesystem call is made", async () => {
+  it("a UNC-style developmentRepoPath (\\\\server\\share\\repo) that does not resolve is treated exactly like any other missing path — fails closed with one warning, no special-casing, and (via a mocked, rejecting stat) no real network filesystem call is made", async () => {
     const uncPath = "\\\\nonexistent-host-31-6\\share\\repo";
-    const existsMock = vi.mocked(fs.existsSync);
-    existsMock.mockImplementationOnce(() => false);
+    const statMock = vi.mocked(fsp.stat);
+    statMock.mockImplementationOnce(() => Promise.reject(new Error("ENETUNREACH (simulated)")));
 
     {
       const { deps, warnings } = makeDeps({
@@ -1221,5 +1263,215 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset is byt
     const env = await provider.resolveEnvForLabel(planned!.label);
 
     expect(Object.keys(env ?? {}).sort()).toEqual(allOwnedKeys);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Story 32.3 deferred-item burn-down: 31-4-1 coalescing, 31-4-6 cancellation
+// token, 31-4-4 reserved-name warning, 31-6-1 warning dedupe, 31-6-3
+// Electron-as-node env.
+// ══════════════════════════════════════════════════════════════════════════
+
+describe("Story 32.3 — 31-4-1: concurrent credential resolutions of the SAME server are coalesced", () => {
+  it("5 parallel resolveEnvForLabel calls (one per package) share ONE getSession round-trip; the in-flight entry is evicted on settle so a later start re-resolves", async () => {
+    let getSessionCalls = 0;
+    const countingAuth: AuthApi = {
+      getSession: async () => {
+        getSessionCalls++;
+        // Yield so the parallel callers genuinely overlap on the in-flight promise.
+        await new Promise((resolve) => setImmediate(resolve));
+        return {
+          id: "s1",
+          accessToken: "resolved-token",
+          account: { id: "acct-1", label: "Account One" },
+          scopes: ["a", "sessionUser"],
+        };
+      },
+    };
+    const serverNames = ["a"];
+    const api: ServerManagerApi = {
+      getServerNames: () => serverNames.map((name) => ({ name, description: "", detail: "" })),
+      getServerSpec: async () => specFor("a"), // no password — the auth path runs
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const deps: ProviderDeps = {
+      getServerManagerApi: async () => api,
+      authApi: countingAuth,
+      getSettings: () =>
+        settings({ packages: ["dev", "admin", "data", "interop", "ops"] }),
+      showWarning: () => {},
+    };
+    const provider = new LauncherProvider(deps);
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(5);
+
+    const envs = await Promise.all(planned.map((def) => provider.resolveEnvForLabel(def.label)));
+    expect(envs.every((env) => env !== undefined)).toBe(true);
+    // Coalesced: ONE getSession for all five concurrent resolutions (the
+    // silent probe succeeds, so no prompting second call). Un-coalesced this
+    // would be 5.
+    expect(getSessionCalls).toBe(1);
+
+    // Evicted on settle: a fresh resolve AFTER the in-flight promise settled
+    // re-resolves (a cancellation is never cached as a permanent "no").
+    const env = await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(env).toBeDefined();
+    expect(getSessionCalls).toBe(2);
+  });
+});
+
+describe("Story 32.3 — 31-4-6: CancellationToken is honored in the multi-server resolve loop", () => {
+  it("a cancelled token stops the loop silently — returns undefined with NO warning and no further getSession calls", async () => {
+    let getSessionCalls = 0;
+    const countingAuth: AuthApi = {
+      getSession: async () => {
+        getSessionCalls++;
+        return {
+          id: "s1",
+          accessToken: "resolved-token",
+          account: { id: "acct-1", label: "Account One" },
+          scopes: ["x", "sessionUser"],
+        };
+      },
+    };
+    const serverNames = ["a", "b"];
+    const api: ServerManagerApi = {
+      getServerNames: () => serverNames.map((name) => ({ name, description: "", detail: "" })),
+      getServerSpec: async (name: string) => specFor(name),
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const warnings: string[] = [];
+    const deps: ProviderDeps = {
+      getServerManagerApi: async () => api,
+      authApi: countingAuth,
+      getSettings: () =>
+        settings({ packages: ["dev"], servers: ["a", "b"], combineProfiles: true }),
+      showWarning: (message) => warnings.push(message),
+    };
+    const provider = new LauncherProvider(deps);
+    const planned = await provider.providePlannedDefinitions();
+    expect(planned).toHaveLength(1);
+
+    const env = await provider.resolveEnvForLabel(planned[0]!.label, {
+      isCancellationRequested: true,
+    });
+    expect(env).toBeUndefined();
+    expect(getSessionCalls).toBe(0);
+    // A cancellation is not a user error: NO warning at all.
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe("Story 32.3 — 31-4-4: a \"default\"-named server under combineProfiles warns once (paired decision with suite item 31-3-1)", () => {
+  it("one warning naming the reserved-name shadowing and the rename remedy", async () => {
+    const { deps, warnings } = makeDeps({
+      serverNames: ["default"],
+      specs: { default: specFor("default", "SYS") },
+      getSettings: () => settings({ packages: ["dev"], combineProfiles: true }),
+    });
+    const provider = new LauncherProvider(deps);
+    const planned = await provider.providePlannedDefinitions();
+
+    const env = await provider.resolveEnvForLabel(planned[0]!.label);
+    // The server IS still emitted (not silently renamed or dropped) — the
+    // warning is the honest signal, mirroring the suite-side notice.
+    expect(env).toBeDefined();
+    const shadowWarnings = warnings.filter((w) => w.includes("RESERVED"));
+    expect(shadowWarnings).toHaveLength(1);
+    expect(shadowWarnings[0]).toContain('"default"');
+    expect(shadowWarnings[0]).toContain("Rename");
+
+    // A second resolve does not re-fire (31-6-1's warnOnce covers it).
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(warnings.filter((w) => w.includes("RESERVED"))).toHaveLength(1);
+  });
+
+  it("no reserved-name warning in single-profile mode (combineProfiles off)", async () => {
+    const { deps, warnings } = makeDeps({
+      serverNames: ["default"],
+      specs: { default: specFor("default", "SYS") },
+      getSettings: () => settings({ packages: ["dev"], combineProfiles: false }),
+    });
+    const provider = new LauncherProvider(deps);
+    const planned = await provider.providePlannedDefinitions();
+    await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(warnings.filter((w) => w.includes("RESERVED"))).toHaveLength(0);
+  });
+});
+
+describe("Story 32.3 — 31-6-1: repeated providePlannedDefinitions calls fire each warning ONCE", () => {
+  it("stale-all + no-match warnings each appear exactly once across three provides (empty-plan case)", async () => {
+    const { deps, warnings } = makeDeps({
+      serverNames: ["a"],
+      getSettings: () =>
+        settings({
+          packages: ["dev"],
+          servers: ["zzz-no-such-server"],
+          hadStaleAllPackage: true,
+        }),
+    });
+    const provider = new LauncherProvider(deps);
+
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+
+    const staleAll = warnings.filter((w) => w.includes('lists the removed "all" package key'));
+    const noMatch = warnings.filter((w) => w.includes("none of the configured irisMcpLauncher.servers"));
+    expect(staleAll).toHaveLength(1);
+    expect(noMatch).toHaveLength(1);
+    expect(warnings).toHaveLength(2);
+  });
+
+  it("stale-all + devRepoPath warnings each appear exactly once across three provides (non-empty-plan case)", async () => {
+    const missingPath = path.join(tmpdir(), "iris-mcp-launcher-dedupe-31-6-1");
+    const { deps, warnings } = makeDeps({
+      serverNames: ["a"],
+      getSettings: () =>
+        settings({
+          packages: ["dev"],
+          hadStaleAllPackage: true,
+          developmentRepoPath: missingPath,
+        }),
+    });
+    const provider = new LauncherProvider(deps);
+
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+    await provider.providePlannedDefinitions();
+
+    const staleAll = warnings.filter((w) => w.includes('lists the removed "all" package key'));
+    const devPath = warnings.filter((w) => w.includes("irisMcpLauncher.developmentRepoPath is set to"));
+    expect(staleAll).toHaveLength(1);
+    expect(devPath).toHaveLength(1);
+    expect(warnings).toHaveLength(2);
+  });
+});
+
+describe("Story 32.3 — 31-6-3: local-build plans spawn the extension host's own interpreter", () => {
+  it("resolveEnvForLabel adds ELECTRON_RUN_AS_NODE=1 for a local (process.execPath) plan, and NOT for an npx plan", async () => {
+    // Self-contained fake "built checkout" (makeRepoDir/buildPackage are
+    // scoped to the Story 31.6 describe above).
+    const repoDir = mkdtempSync(path.join(tmpdir(), "iris-mcp-launcher-31-6-3-"));
+    mkdirSync(path.join(repoDir, "packages", "iris-dev-mcp", "dist"), { recursive: true });
+    writeFileSync(path.join(repoDir, "packages", "iris-dev-mcp", "dist", "index.js"), "// fake entry\n", "utf8");
+
+    // Local plan.
+    const local = makeDeps({
+      serverNames: ["a"],
+      getSettings: () => settings({ packages: ["dev"], developmentRepoPath: repoDir }),
+    });
+    const localProvider = new LauncherProvider(local.deps);
+    const localPlanned = await localProvider.providePlannedDefinitions();
+    expect(localPlanned[0]!.command).toBe(process.execPath);
+    const localEnv = await localProvider.resolveEnvForLabel(localPlanned[0]!.label);
+    expect(localEnv).toMatchObject({ ELECTRON_RUN_AS_NODE: "1" });
+
+    // npx plan (default) — no such variable.
+    const npxDeps = makeDeps({ serverNames: ["a"] });
+    const npxProvider = new LauncherProvider(npxDeps.deps);
+    const npxPlanned = await npxProvider.providePlannedDefinitions();
+    const npxEnv = await npxProvider.resolveEnvForLabel(npxPlanned[0]!.label);
+    expect(npxEnv).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
   });
 });

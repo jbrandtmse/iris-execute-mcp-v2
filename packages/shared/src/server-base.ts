@@ -564,6 +564,19 @@ export class McpServerBase {
         .map((tool) => tool.name)
         .filter((name) => !toolVisibilityResolution.visible.has(name)),
     );
+    // Spec §2.2 (deferred item 30-0-4, burned down in Story 32.3): a config
+    // that hides EVERY package tool leaves the server with only the reserved
+    // discovery tool — almost certainly a misconfiguration — so startup says
+    // so loudly. Distinct from the per-entry warnings above: those flag
+    // individual suspect entries; this flags the aggregate outcome.
+    if (options.tools.length > 0 && visiblePackageToolCount === 0) {
+      logger.warn(
+        `Tool visibility: the active config hides EVERY one of this server's ` +
+          `${options.tools.length} package tool(s); only the reserved ` +
+          `${SERVER_DISCOVERY_TOOL_NAME} discovery tool remains visible. ` +
+          `If this is unintended, review IRIS_TOOLS_PRESET / IRIS_TOOLS_DISABLE / IRIS_TOOLS_ENABLE.`,
+      );
+    }
     logger.info(
       `Tool visibility: preset="${this.toolVisibility.preset}" ` +
         `visible=${this.toolVisibility.visibleCount} hidden=${this.toolVisibility.hiddenCount}` +
@@ -1714,6 +1727,19 @@ export class McpServerBase {
    * Applies the SAME tool-visibility filter (Epic 30) as the constructor: a
    * tool hidden by `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/
    * `IRIS_TOOLS_ENABLE` is not registered even when added dynamically.
+   *
+   * Named-preset roster curation deliberately does NOT extend to dynamic
+   * adds (RECORDED DECISION — deferred item 30-0-1, closed-by-decision in
+   * Story 32.3): a dynamically-added name is in no package roster, so
+   * `presetVisible` returns `undefined` and the documented resolution
+   * cascade (`ENABLE > DISABLE > preset > default-visible`, spec §2.2)
+   * leaves it visible. That is accepted because (1) this method has ZERO
+   * production callers across the suite — it is a framework extension point
+   * exercised by tests only (verified by grep 2026-07-26); (2)
+   * `assertPresetCoverage` structurally forbids the real risk (a SHIPPED
+   * roster naming a non-registered tool or missing a disposition); and (3)
+   * defaulting unlisted dynamic adds to hidden would invent policy the
+   * spec's cascade deliberately does not contain.
    */
   addTools(tools: ToolDefinition[]): void {
     let registeredCount = 0;

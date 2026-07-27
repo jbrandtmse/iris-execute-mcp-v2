@@ -64,6 +64,15 @@ export interface AccountInfo {
   label: string;
 }
 
+/**
+ * Minimal mirror of `vscode.CancellationToken` (only the member this
+ * extension reads, 31-4-6). Structural, so the real token satisfies it
+ * without a `vscode` value import, and tests can fake it with a plain object.
+ */
+export interface CancellationTokenLike {
+  readonly isCancellationRequested: boolean;
+}
+
 /** Mirrors `vscode.AuthenticationSession` (only the fields this extension reads). */
 export interface AuthSession {
   id: string;
