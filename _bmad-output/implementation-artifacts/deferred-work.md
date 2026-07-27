@@ -1772,6 +1772,14 @@ Story 32.2's review layers all returned (blind 13 / edge 14 / auditor 5) plus re
 
 **Note on layer hygiene:** the blind-hunter's duplicate 32.3 recaps (msgs confirming completion) contained no new items beyond the 32-3-R batch already triaged; the acceptance-auditor never delivered a findings list for any Epic 32 story (idle notifications only). The 32.2 review layers died on the same API-limit event as the review spawn (2026-07-27 ~08:32 UTC) with zero findings delivered.
 
+## Project Lead deferral decisions (2026-07-27, post-Epic-32 merge)
+
+Recorded at the Epic 32 close-out so the Epic 33 retro-review gate does not re-triage these as undecided:
+
+1. **npm publish of `@iris-mcp/*` — DEFERRED by Project Lead decision.** Nothing on npm; `npx -y @iris-mcp/<pkg>` fails for external users and the extension's published-mode paths (31.4 spawn, 32.2 governance engine npx mode) remain dev-mode-only. Consequences accepted: Epic 33's client-config docs snippets that assume published packages must be written against the local-path/dev-mode reality, and the post-publish smoke (win32 `cmd.exe` wrap, six-package sibling-dist derivation) stays unexercised. Re-surface when the publish checklist (Epic 9 Story 9.3 lineage + 31-4-7) is picked up.
+2. **Copilot consumer-hop verification (AC 31.4.4 residual) — DEFERRED by Project Lead decision.** Registration into VS Code's MCP registry is confirmed; only the final hop inside Copilot's own UI is unverified, and no project member uses Copilot. Remains a recorded residual risk, not an open defect.
+3. **32-4-R1 triage — deferred until AFTER the AC 32.2.4 GUI smoke** (Project Lead sequencing, 2026-07-27). The item (LOW: `helpRequested` valued-option mirror needs a mechanical pin against parseArgs) stays open in the ledger; triage happens alongside the smoke's findings rather than at a separate pass.
+
 ## Story 32.4 — late review-layer findings: TERMINAL dispositions (2026-07-27)
 
 All 23 carried items from the three late-review batches (32-3-R1…R15, 32-1-R1…R7, 32-2-R1) driven to terminal disposition. (The story AC says "22 items" but the three ranges enumerate 23 — the count includes 32-1-R2, whose triage-time closure this story VERIFIED rather than re-litigated. Flagged here per Rule #51 rather than silently harmonized.) Verify-before-patch (Rules #16/#48) applied throughout: every "resolved" was proven by a revert→red→restore mutation cycle named in the evidence, every "closed-with-evidence" cites the current-tree read, and the product decisions (32-3-R4, 32-3-R5, the 32-3-R13 TOCTOU half) are recorded explicitly with no GUI-observable claims.
