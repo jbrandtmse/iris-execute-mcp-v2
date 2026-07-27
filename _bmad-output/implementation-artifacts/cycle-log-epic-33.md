@@ -9,3 +9,9 @@
 2026-07-27T21:35:00Z	Story 33.0	cr_complete	spawn_at=2026-07-27T20:41:00Z model=claude-opus-5 resolved=3 deferred=0 dismissed=4 high=1 med=1 low=0 clarifications=0 closing_sections_present=true note=review-layers-silent-again
 2026-07-27T21:50:00Z	Story 33.0	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=dist-detect-status-diff-roundtrip model=claude-fable-5
 2026-07-27T21:55:00Z	Story 33.0	committed	sha=5ffa161 submodules=
+2026-07-27T22:05:00Z	Story 33.1	story_created	path=_bmad-output/implementation-artifacts/33-1-write-engine.md
+2026-07-27T23:05:00Z	Story 33.1	dev_complete	spawn_at=2026-07-27T22:06:00Z model=claude-sonnet-5 files=packages/client-config/src loc_added=na clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-07-27T23:05:00Z	Story 33.1	adr_verifications_complete	result=none_required model=claude-fable-5
+2026-07-27T23:35:00Z	Story 33.1	qa_complete	spawn_at=2026-07-27T23:06:00Z model=claude-sonnet-5 tests=packages/client-config/src/__tests__/engine-e2e.test.ts tests_added=23 defects_fixed=3 clarifications=0 closing_sections_present=true
+2026-07-28T00:05:00Z	Story 33.1	cr_complete	spawn_at=2026-07-27T23:36:00Z model=claude-opus-5 resolved=4 deferred=5 dismissed=1 high=1 med=2 low=1 clarifications=0 closing_sections_present=true note=review-layers-silent-2of2
+2026-07-28T00:20:00Z	Story 33.1	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=dist-full-lifecycle-plus-restore model=claude-fable-5

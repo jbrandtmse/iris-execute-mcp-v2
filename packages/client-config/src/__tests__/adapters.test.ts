@@ -67,12 +67,14 @@ describe("CLIENT_ADAPTERS registry", () => {
     }
   });
 
-  it("only Cline, Roo Code and Goose have native file-level disable flags", () => {
+  it("only Cline, Roo Code, Goose and Codex have native file-level disable flags", () => {
     // Spec §3.2: "only Cline/Roo/Goose have native per-entry disable flags"
-    // (Codex's flag is unverified ⇒ stash until the 33.1 live probe decides;
-    // VS Code's native disable is a UI gesture, not a file flag).
+    // in the ORIGINAL table; Codex's `enabled` flag was verified by the
+    // Story 33.1 Rule #16 probe (2026-07-27, official config reference —
+    // see the codex record in adapters.ts) and joined the native roster.
+    // VS Code's native disable is a UI gesture, not a file flag.
     const nativeIds = adapters.filter((a) => a.disableSupport === "native").map((a) => a.id);
-    expect(nativeIds.sort()).toEqual(["cline", "goose", "roo-code"]);
+    expect(nativeIds.sort()).toEqual(["cline", "codex", "goose", "roo-code"]);
   });
 
   it("the odd root keys match the spec capability table", () => {

@@ -22,7 +22,7 @@ import { Document } from "yaml";
 import { readConfigEntries, type RawEntry } from "./readers.js";
 import type { CanonicalEntry, ClientAdapter, ClientScope } from "./types.js";
 
-export type DiffAction = "apply" | "enable" | "disable";
+export type DiffAction = "apply" | "enable" | "disable" | "remove";
 
 export type DiffMechanism =
   | "add" // apply: entry absent â†’ insert
@@ -30,6 +30,7 @@ export type DiffMechanism =
   | "native-flag" // enable/disable via the client's own flag
   | "stash-add" // enable on a stash client with the entry absent â†’ insert
   | "stash-remove" // disable on a stash client â†’ remove the entry
+  | "remove" // remove: entry present â†’ delete it entirely (manager purge)
   | "already-in-state"; // requested state already holds â†’ empty edit
 
 /** JSON/JSONC edit â€” directly executable via jsonc-parser `applyEdits`. */
@@ -48,14 +49,20 @@ export interface JsoncNativeEdit {
  * ruled out because they drop comments elsewhere in the file, spec Â§3.5). */
 export interface TomlNativeEdit {
   kind: "toml-splice";
-  op: "insert" | "replace-region" | "remove-region";
+  op: "insert" | "replace-region" | "remove-region" | "set-flag";
   /** Owned table path, e.g. ["mcp_servers", "iris-dev-mcp"]. */
   tablePath: string[];
-  /** 0-based inclusive line range to replace/remove; null for op "insert". */
+  /**
+   * 0-based inclusive line range to replace/remove; null for op "insert".
+   * For op "set-flag": the single line of an EXISTING flag key to replace,
+   * or null when the flag line must be inserted after the table header.
+   */
   region: { startLine: number; endLine: number } | null;
-  /** For "insert": append the block after this 0-based line (-1 = file start). */
+  /** For "insert": append the block after this 0-based line (-1 = file start).
+   * For "set-flag" with a null region: the owned table's HEADER line. */
   insertAfterLine: number | null;
-  /** The TOML block for insert/replace; null for "remove-region". */
+  /** The TOML block for insert/replace; the flag line for "set-flag"
+   * (e.g. `enabled = false`); null for "remove-region". */
   insertText: string | null;
 }
 
@@ -96,6 +103,18 @@ export type DiffResult =
 
 /** Render the canonical entry into the adapter's native entry shape. */
 export function renderNativeEntry(adapter: ClientAdapter, entry: CanonicalEntry): RawEntry {
+  const shaped = shapeEntry(adapter, entry);
+  // A native-flag client gets the flag rendered explicitly at its ENABLED
+  // value on fresh entries (Goose `enabled: true`, Cline/Roo `disabled: false`,
+  // Codex `enabled = true`) so a disable -> enable round-trip restores the
+  // applied bytes exactly (Story 33.1 golden round-trip, AC 33.1.3).
+  const flag = adapter.nativeDisableFlag;
+  if (flag) shaped[flag.key] = flag.enabledValue;
+  return shaped;
+}
+
+/** The per-entryShape render (flag stamping lives in renderNativeEntry). */
+function shapeEntry(adapter: ClientAdapter, entry: CanonicalEntry): RawEntry {
   const env = entry.env && Object.keys(entry.env).length > 0 ? entry.env : undefined;
   switch (adapter.entryShape) {
     case "standard": {
@@ -127,6 +146,13 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+/** Render a scalar as TOML (boolean/number bare, anything else a quoted string). */
+function tomlScalar(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return tomlString(String(value));
+}
+
 /** Serialize the owned entry as a Codex `[mcp_servers.<name>]` TOML block. */
 export function serializeTomlEntry(adapter: ClientAdapter, entry: CanonicalEntry): string {
   const shaped = renderNativeEntry(adapter, entry);
@@ -135,6 +161,10 @@ export function serializeTomlEntry(adapter: ClientAdapter, entry: CanonicalEntry
   lines.push(`command = ${tomlString(entry.command)}`);
   const args = (shaped.args as string[]).map(tomlString).join(", ");
   lines.push(`args = [${args}]`);
+  // A native-flag client's flag is rendered explicitly at its enabled value
+  // (e.g. `enabled = true` for Codex) — see renderNativeEntry.
+  const flag = adapter.nativeDisableFlag;
+  if (flag) lines.push(`${flag.key} = ${tomlScalar(shaped[flag.key] ?? flag.enabledValue)}`);
   const env = shaped.env as Record<string, string> | undefined;
   if (env) {
     lines.push("");
@@ -261,7 +291,23 @@ function planAction(
       }
       if (!present) return { mechanism: "already-in-state" };
       return { mechanism: "stash-remove", removes: true };
+    case "remove":
+      if (!present) return { mechanism: "already-in-state" };
+      return { mechanism: "remove", removes: true };
   }
+}
+
+/**
+ * Optional render overrides for the write engine (Story 33.1).
+ *
+ * `nativeEntry`: render this PRE-SHAPED native entry instead of
+ * `renderNativeEntry(adapter, entry)`. The engine's stash-restore path passes
+ * the stashed (parsed) native entry so native-only keys the canonical model
+ * cannot express (Cline `autoApprove`, Codex `startup_timeout_sec`, ...)
+ * survive a disable -> enable round-trip without re-synthesis.
+ */
+export interface DiffOptions {
+  nativeEntry?: RawEntry;
 }
 
 /**
@@ -276,6 +322,7 @@ export function diff(
   adapter: ClientAdapter,
   scope: ClientScope,
   action: DiffAction,
+  options?: DiffOptions,
 ): DiffResult {
   const fail = (reason: string): DiffResult => ({ ok: false, client: adapter.id, scope, action, reason });
 
@@ -298,7 +345,7 @@ export function diff(
   const plan = planAction(adapter, entry, action, present, disabled);
   if ("error" in plan) return fail(plan.error);
 
-  const shaped = renderNativeEntry(adapter, entry);
+  const shaped = options?.nativeEntry ?? renderNativeEntry(adapter, entry);
   // already-in-state renders NO descriptor (native: null) â€” see DiffResult.
   let native: NativeEdit | null = null;
   if (plan.mechanism !== "already-in-state") {
@@ -346,12 +393,32 @@ function removalEdits(content: string, path: string[]): JsoncEdit[] {
   let i = end;
   while (i < content.length && (content[i] === " " || content[i] === "\t")) i++;
   if (content[i] === ",") {
-    i++;
-    while (i < content.length && (content[i] === " " || content[i] === "\t")) i++;
-    if (content[i] === "\r" && content[i + 1] === "\n") i += 2;
-    else if (content[i] === "\n") i++;
-    while (i < content.length && (content[i] === " " || content[i] === "\t")) i++;
-    end = i;
+    // A trailing comma only belongs to the removal span when ANOTHER property
+    // follows (it separates the two). When the next non-whitespace token is
+    // the closing bracket, this is the LAST property in a trailing-comma-
+    // styled JSONC document: swallow the comma plus the PRECEDING
+    // newline+indent instead and keep the whitespace before the closer, so
+    // add → remove stays a byte-exact inverse in trailing-comma-styled files
+    // (QA 33.1-F3 — the old span left the entry's indent glued to `}`).
+    let k = i + 1;
+    while (k < content.length && /\s/.test(content[k] ?? "")) k++;
+    if (content[k] === "}" || content[k] === "]") {
+      end = i + 1; // swallow the trailing comma itself
+      let j = start - 1;
+      while (j >= 0 && (content[j] === " " || content[j] === "\t")) j--;
+      if (content[j] === "\n") {
+        j--;
+        if (j >= 0 && content[j] === "\r") j--;
+        start = j + 1;
+      }
+    } else {
+      i++;
+      while (i < content.length && (content[i] === " " || content[i] === "\t")) i++;
+      if (content[i] === "\r" && content[i + 1] === "\n") i += 2;
+      else if (content[i] === "\n") i++;
+      while (i < content.length && (content[i] === " " || content[i] === "\t")) i++;
+      end = i;
+    }
   } else {
     // Last property: swallow the PRECEDING comma instead.
     let j = start - 1;
@@ -391,6 +458,45 @@ function tomlEdit(
 ): TomlNativeEdit | { error: string } {
   const tablePath = [adapter.rootKey, entry.name];
   const region = findTomlEntryRegion(content, adapter.rootKey, entry.name);
+  if (plan.mechanism === "native-flag") {
+    // Codex `enabled` flag (verified 2026-07-27 — Story 33.1 Rule #16 probe):
+    // replace the existing flag line when present (bounded to the MAIN table,
+    // never the `.env` sub-table), else insert it directly after the owned
+    // table header so the key belongs to the main table by construction.
+    const flag = adapter.nativeDisableFlag;
+    if (!flag) return { error: `adapter ${adapter.id} plans a native-flag edit but declares no nativeDisableFlag` };
+    if (!region) {
+      return {
+        error: `entry "${entry.name}" is present per the TOML parser but no [${adapter.rootKey}.${entry.name}] table header could be located (unsupported TOML form â€” e.g. dotted-key definition or quoted table name); refusing to render a flag toggle`,
+      };
+    }
+    const flagLine = `${flag.key} = ${tomlScalar(plan.flagValue)}`;
+    const keyRe = new RegExp(`^\\s*${flag.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`);
+    const anyHeader = /^\s*\[/;
+    const lines = content.split("\n");
+    for (let i = region.startLine + 1; i <= region.endLine; i++) {
+      const line = lines[i] ?? "";
+      if (anyHeader.test(line)) break; // sub-table header: main-table keys are above
+      if (keyRe.test(line)) {
+        return {
+          kind: "toml-splice",
+          op: "set-flag",
+          tablePath,
+          region: { startLine: i, endLine: i },
+          insertAfterLine: null,
+          insertText: flagLine,
+        };
+      }
+    }
+    return {
+      kind: "toml-splice",
+      op: "set-flag",
+      tablePath,
+      region: null,
+      insertAfterLine: region.startLine,
+      insertText: flagLine,
+    };
+  }
   if (plan.removes) {
     if (!region) {
       // Parser-present but no table header located (dotted-key definition,
@@ -475,6 +581,9 @@ function renderText(
     case "stash-remove":
       lines.push(`Remove entry "${entry.name}" (disable on a stash client; 33.1 preserves it in state.json).`);
       break;
+    case "remove":
+      lines.push(`Remove entry "${entry.name}" entirely (manager remove/purge).`);
+      break;
     case "native-flag":
       lines.push(
         `Set ${adapter.nativeDisableFlag?.key ?? ""} = ${JSON.stringify(plan.flagValue)} on entry "${entry.name}" (native disable flag).`,
@@ -493,6 +602,12 @@ function renderText(
     if (native.op === "insert") {
       lines.push(
         `Insert TOML block after line ${native.insertAfterLine === -1 ? "<file start>" : (native.insertAfterLine ?? 0) + 1}:`,
+      );
+    } else if (native.op === "set-flag") {
+      lines.push(
+        native.region
+          ? `Replace line ${native.region.startLine + 1} with \`${native.insertText ?? ""}\`:`
+          : `Insert \`${native.insertText ?? ""}\` after the [${native.tablePath.join(".")}] table header:`,
       );
     } else if (native.region) {
       lines.push(`${native.op === "remove-region" ? "Remove" : "Replace"} lines ${native.region.startLine + 1}â€“${native.region.endLine + 1}:`);

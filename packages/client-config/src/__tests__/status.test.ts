@@ -73,7 +73,7 @@ describe("status matrix over the sandbox tree", () => {
     expect(userScope?.foreign).toEqual(["aws-docs"]);
   });
 
-  it("codex (unverified flag): present ⇒ enabled (the 33.1 live probe decides)", () => {
+  it("codex (native flag verified by the 33.1 probe): an entry without `enabled` reads present-enabled", () => {
     const codex = run().clients.find((c) => c.client === "codex");
     const userScope = codex?.scopes.find((s) => s.scope === "user");
     expect(userScope?.file).toBe("ok");

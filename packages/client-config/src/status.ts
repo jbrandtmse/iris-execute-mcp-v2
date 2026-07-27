@@ -6,8 +6,8 @@
  * - iris-mcp-owned (name in the canonical server set) → one matrix row:
  *   present-enabled | present-disabled | absent. Enabled/disabled comes from
  *   the adapter's nativeDisableFlag when it has one (Cline/Roo `disabled`,
- *   Goose `enabled`); otherwise present ⇒ enabled (Codex's flag is
- *   UNVERIFIED — treat as present-enabled; the 33.1 live probe decides).
+ *   Goose `enabled`, Codex `enabled` — verified by the Story 33.1 live probe,
+ *   absent key ⇒ enabled); otherwise present ⇒ enabled.
  * - foreign third-party → surfaced as NAMES ONLY (AC 33.0.4 + spec §3.5.5:
  *   never values — foreign entries may hold other products' secrets).
  *

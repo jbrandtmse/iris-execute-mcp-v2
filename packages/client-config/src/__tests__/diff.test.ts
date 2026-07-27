@@ -72,6 +72,15 @@ function applyTomlSplice(content: string, edit: TomlNativeEdit): string {
     lines.splice(at, 0, "", ...block);
     return lines.join("\n");
   }
+  if (edit.op === "set-flag") {
+    // Mirror the 33.1 write engine's set-flag mechanics.
+    if (edit.region) {
+      lines.splice(edit.region.startLine, edit.region.endLine - edit.region.startLine + 1, edit.insertText ?? "");
+    } else {
+      lines.splice((edit.insertAfterLine ?? -1) + 1, 0, edit.insertText ?? "");
+    }
+    return lines.join("\n");
+  }
   if (!edit.region) throw new Error("region descriptor missing");
   const count = edit.region.endLine - edit.region.startLine + 1;
   if (edit.op === "remove-region") {
@@ -303,11 +312,11 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
   });
 
-  it("disable renders a remove-region covering ONLY the owned tables (env sub-table included)", () => {
+  it("remove renders a remove-region covering ONLY the owned tables (env sub-table included)", () => {
     const adapter = adapterOf("codex");
     const content = readFixture("codex/config.toml");
-    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
-    expect(result.mechanism).toBe("stash-remove");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    expect(result.mechanism).toBe("remove");
     const native = result.native as TomlNativeEdit;
     expect(native.op).toBe("remove-region");
     if (!native.region) throw new Error("region missing");
@@ -321,6 +330,85 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     expect(parsed["mcp_servers"]?.["iris-dev-mcp"]).toBeUndefined();
     expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
     expect(after).toContain("# A foreign third-party server");
+  });
+
+  it("disable renders a set-flag edit (Codex native `enabled` flag, 33.1 probe)", () => {
+    const adapter = adapterOf("codex");
+    const content = readFixture("codex/config.toml");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
+    expect(result.mechanism).toBe("native-flag");
+    const native = result.native as TomlNativeEdit;
+    expect(native.op).toBe("set-flag");
+    expect(native.insertText).toBe("enabled = false");
+    // The fixture entry has no flag line: insert directly after the owned
+    // table header so the key lands in the MAIN table, never `.env`.
+    expect(native.region).toBeNull();
+    const lines = content.split("\n");
+    expect(lines[native.insertAfterLine ?? -1]).toContain("[mcp_servers.iris-dev-mcp]");
+    const after = applyTomlSplice(content, native);
+    const parsed = parseToml(after) as Record<string, Record<string, Record<string, unknown>>>;
+    expect(parsed["mcp_servers"]?.["iris-dev-mcp"]?.["enabled"]).toBe(false);
+    // The env sub-table is untouched and still belongs to the entry.
+    expect((parsed["mcp_servers"]?.["iris-dev-mcp"]?.["env"] as Record<string, unknown>)?.["IRIS_NAMESPACE"]).toBe("HSCUSTOM");
+    expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
+  });
+
+  it("disable replaces an existing flag line; enable restores it (round-trip)", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "npx"',
+      'args = ["-y", "@iris-mcp/dev"]',
+      "enabled = true",
+      "",
+      "[mcp_servers.context7]",
+      'command = "npx"',
+      "",
+    ].join("\n");
+    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
+    const native = disable.native as TomlNativeEdit;
+    expect(native.op).toBe("set-flag");
+    // The existing `enabled = true` line (index 3) is the replace target.
+    expect(native.region).toEqual({ startLine: 3, endLine: 3 });
+    expect(native.insertText).toBe("enabled = false");
+    const afterDisable = applyTomlSplice(content, native);
+    expect(afterDisable).toContain("enabled = false");
+    expect(afterDisable).not.toContain("enabled = true");
+    const enable = expectOk(diff(afterDisable, canonicalEntry("iris-dev-mcp"), adapter, "user", "enable"));
+    const enableNative = enable.native as TomlNativeEdit;
+    expect(enableNative.insertText).toBe("enabled = true");
+    const afterEnable = applyTomlSplice(afterDisable, enableNative);
+    // Byte-exact round-trip through the flag toggle.
+    expect(afterEnable).toBe(content);
+  });
+
+  it("a flag-looking key inside the `.env` sub-table is never the toggle target", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "npx"',
+      'args = ["-y", "@iris-mcp/dev"]',
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      'enabled = "true"',
+      'IRIS_NAMESPACE = "HSCUSTOM"',
+      "",
+    ].join("\n");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
+    const native = result.native as TomlNativeEdit;
+    expect(native.op).toBe("set-flag");
+    // The scan stops at the `.env` header: no main-table flag line exists, so
+    // the flag is inserted after the OWNED header (index 0), and the env var
+    // named `enabled` survives verbatim.
+    expect(native.region).toBeNull();
+    expect(native.insertAfterLine).toBe(0);
+    const after = applyTomlSplice(content, native);
+    const lines = after.split("\n");
+    expect(lines[1]).toBe("enabled = false");
+    expect(after).toContain('enabled = "true"');
+    const parsed = parseToml(after) as Record<string, Record<string, Record<string, unknown>>>;
+    expect(parsed["mcp_servers"]?.["iris-dev-mcp"]?.["enabled"]).toBe(false);
+    expect((parsed["mcp_servers"]?.["iris-dev-mcp"]?.["env"] as Record<string, unknown>)?.["enabled"]).toBe("true");
   });
 
   it("region helpers bound the owned tables and the insert point", () => {
@@ -389,10 +477,10 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     expect(after).toContain("# context7 keeps its own comment.");
   });
 
-  it("disable on a comment-headed owned table renders a bounded remove-region (entry actually removed)", () => {
+  it("remove on a comment-headed owned table renders a bounded remove-region (entry actually removed)", () => {
     const adapter = adapterOf("codex");
-    const result = expectOk(diff(commented, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
-    expect(result.mechanism).toBe("stash-remove");
+    const result = expectOk(diff(commented, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    expect(result.mechanism).toBe("remove");
     const native = result.native as TomlNativeEdit;
     expect(native.op).toBe("remove-region");
     expect(native.region).not.toBeNull();
@@ -409,7 +497,7 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     expect(commented.split("\n")[insertLine]).toContain("@upstash/context7-mcp");
   });
 
-  it("a dotted-key-defined entry (no table header) REFUSES update and disable — never a redefining insert or silent no-op", () => {
+  it("a dotted-key-defined entry (no table header) REFUSES update, disable and remove — never a redefining insert or silent no-op", () => {
     const adapter = adapterOf("codex");
     // Legal TOML: defines mcp_servers.iris-dev-mcp WITHOUT a table header.
     const dotted = [
@@ -431,6 +519,9 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     const disable = diff(dotted, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable");
     expect(disable.ok).toBe(false);
     if (!disable.ok) expect(disable.reason).toContain("no [mcp_servers.iris-dev-mcp] table header");
+    const remove = diff(dotted, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove");
+    expect(remove.ok).toBe(false);
+    if (!remove.ok) expect(remove.reason).toContain("no [mcp_servers.iris-dev-mcp] table header");
   });
 });
 

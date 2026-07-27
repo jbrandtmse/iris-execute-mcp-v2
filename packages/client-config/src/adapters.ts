@@ -16,7 +16,7 @@ import type { ClientAdapter, ClientDisposition } from "./types.js";
  * adapter record changes; surfaced in `status` output so a drift report
  * always names the data vintage it was computed from (spec §3.7).
  */
-export const ADAPTER_DATA_VERSION = "2026-07-25.1";
+export const ADAPTER_DATA_VERSION = "2026-07-25.2";
 
 /** Shared VS Code user-profile roots (per-OS), under which several
  * VS Code-extension clients (Cline, Roo Code) keep their globalStorage. */
@@ -60,6 +60,11 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
     entryShape: "standard",
     envExpansion: "claude",
     disableSupport: "stash",
+    // Writer CLI (spec §3.5 point 6): `claude mcp add-json` is the PREFERRED
+    // non-interactive writer for this client; the v1 engine uses direct file
+    // edit only (a child-process spawn is out of Story 33.1's scope). The
+    // 33.2+ consumers should prefer this CLI where present, file edit as the
+    // fallback.
     restartHint:
       "Restart Claude Code (or start a new session) for MCP changes to take effect.",
     detection: [
@@ -334,10 +339,16 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
     ],
     entryShape: "codex-toml",
     envExpansion: "claude", // ${VAR} in args/headers (spec §3.2 table)
-    // A native `enabled` flag is UNVERIFIED (spec Confidence: Medium — the
-    // Story 33.1 live probe decides, Rule #16). Until then the file
-    // mechanism is stash; entries read as present ⇒ enabled.
-    disableSupport: "stash",
+    // Native `enabled` flag VERIFIED (Story 33.1 Rule #16 probe, 2026-07-27):
+    // no local Codex CLI on the probe machine, so the official docs were the
+    // oracle — learn.chatgpt.com/docs/config-file/config-reference (redirected
+    // from developers.openai.com/codex/config-reference, itself linked from
+    // the repo's docs/config.md) documents `mcp_servers.<id>.enabled`
+    // (boolean): "Disable an MCP server without removing its configuration.";
+    // learn.chatgpt.com/codex/extend/mcp: "enabled (optional): Set `false` to
+    // disable a server without deleting it." Absent key ⇒ enabled (default).
+    disableSupport: "native",
+    nativeDisableFlag: { key: "enabled", enabledValue: true, disabledValue: false },
     restartHint: "Start a new Codex CLI session for MCP changes to take effect.",
     detection: [
       { kind: "config", scope: "user" },
@@ -491,6 +502,11 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
     entryShape: "standard",
     envExpansion: "none",
     disableSupport: "stash",
+    // Writer CLI (spec §3.5 point 6): `kimi mcp add` is the PREFERRED
+    // non-interactive writer for this client; the v1 engine uses direct file
+    // edit only (a child-process spawn is out of Story 33.1's scope). The
+    // 33.2+ consumers should prefer this CLI where present, file edit as the
+    // fallback.
     restartHint: "Start a new Kimi CLI session for MCP changes to take effect.",
     detection: [
       { kind: "config", scope: "user" },

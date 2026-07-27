@@ -98,6 +98,14 @@ function applyTomlSplice(content: string, edit: TomlNativeEdit): string {
     lines.splice(at, 0, "", ...block);
     return lines.join("\n");
   }
+  if (edit.op === "set-flag") {
+    if (edit.region) {
+      lines.splice(edit.region.startLine, edit.region.endLine - edit.region.startLine + 1, edit.insertText ?? "");
+    } else {
+      lines.splice((edit.insertAfterLine ?? -1) + 1, 0, edit.insertText ?? "");
+    }
+    return lines.join("\n");
+  }
   if (!edit.region) throw new Error("region descriptor missing");
   const count = edit.region.endLine - edit.region.startLine + 1;
   if (edit.op === "remove-region") {
@@ -211,7 +219,7 @@ describe("E2E chain: detect → status → diff → execute → re-read (sandbox
     expect(parsed.entries["developer"]).toBeDefined();
   });
 
-  it("codex: apply inserts a new owned table; a follow-up disable splices only that table out", () => {
+  it("codex: apply inserts a new owned table (with an explicit `enabled = true`); a follow-up disable flips the flag in place", () => {
     const adapter = adapterOf("codex");
     const report = status(sandboxHomeCtx(), REAL_STATUS_FS);
     const userScope = scopeOf(report, "codex", "user");
@@ -225,17 +233,23 @@ describe("E2E chain: detect → status → diff → execute → re-read (sandbox
     const parsedAdd = readConfigEntries(adapter, afterAdd);
     if (!parsedAdd.ok) throw new Error("post-insert file must parse");
     expect(parsedAdd.entries["iris-admin-mcp"]).toBeDefined();
+    // Fresh applies carry the flag explicitly at its enabled value (33.1).
+    expect(parsedAdd.entries["iris-admin-mcp"]?.["enabled"]).toBe(true);
     expect(parsedAdd.entries["iris-ops-mcp"]).toBeDefined();
     expect(parsedAdd.entries["context7"]).toBeDefined();
 
+    // Codex is a NATIVE-flag client (33.1 probe): disable flips `enabled` in
+    // place — the entry (and its tables) stays in the file.
     const disable = expectOk(diff(afterAdd, canonicalEntry("iris-admin-mcp"), adapter, "user", "disable"));
-    expect(disable.mechanism).toBe("stash-remove");
-    const afterRemove = applyTomlSplice(afterAdd, disable.native as TomlNativeEdit);
-    const parsedRemove = readConfigEntries(adapter, afterRemove);
-    if (!parsedRemove.ok) throw new Error("post-remove file must parse");
-    expect(parsedRemove.entries["iris-admin-mcp"]).toBeUndefined();
-    expect(parsedRemove.entries["iris-ops-mcp"]).toBeDefined();
-    expect(parsedRemove.entries["context7"]).toBeDefined();
+    expect(disable.mechanism).toBe("native-flag");
+    const afterDisable = applyTomlSplice(afterAdd, disable.native as TomlNativeEdit);
+    const parsedDisable = readConfigEntries(adapter, afterDisable);
+    if (!parsedDisable.ok) throw new Error("post-disable file must parse");
+    const disabledEntry = parsedDisable.entries["iris-admin-mcp"];
+    if (!disabledEntry) throw new Error("entry vanished after a flag toggle");
+    expect(entryPresence(adapter, disabledEntry)).toBe("present-disabled");
+    expect(parsedDisable.entries["iris-ops-mcp"]).toBeDefined();
+    expect(parsedDisable.entries["context7"]).toBeDefined();
   });
 
   it("vscode: status unparseable and diff refusal AGREE — a malformed file is never guessed at", () => {
@@ -405,8 +419,8 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
     expect(parsed.entries["iris-dev-mcp-extras"]).toBeDefined();
     expect(CANONICAL_SERVERS).not.toContain("iris-dev-mcp-extras");
 
-    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
-    expect(disable.mechanism).toBe("stash-remove");
+    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    expect(disable.mechanism).toBe("remove");
     const native = disable.native as TomlNativeEdit;
     if (!native.region) throw new Error("region missing");
     const removedText = content
@@ -422,7 +436,7 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
     expect(reparsed.entries["iris-dev-mcp-extras"]).toBeDefined();
   });
 
-  it("codex: an unverified `enabled = false` key still reads present-enabled (the 33.1 probe decides)", () => {
+  it("codex: the verified `enabled = false` key reads present-disabled (33.1 probe)", () => {
     const adapter = adapterOf("codex");
     const content = [
       "[mcp_servers.iris-dev-mcp]",
@@ -435,9 +449,9 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
     if (!parsed.ok) throw new Error("fixture must parse");
     const entry = parsed.entries["iris-dev-mcp"];
     if (!entry) throw new Error("owned entry missing");
-    // Documented v1 semantics (adapter data comment): the Codex flag is
-    // UNVERIFIED, so presence ⇒ enabled until Story 33.1's live probe.
-    expect(entryPresence(adapter, entry)).toBe("present-enabled");
+    // The Codex `enabled` flag is VERIFIED (Story 33.1 Rule #16 probe,
+    // 2026-07-27 — official config reference), so the flag classifies.
+    expect(entryPresence(adapter, entry)).toBe("present-disabled");
   });
 });
 
@@ -458,8 +472,8 @@ describe("adversarial: encoding variants (CRLF / BOM) through the full diff chai
   it("CRLF TOML: region math stays correct with \\r\\n line endings", () => {
     const adapter = adapterOf("codex");
     const content = readFixture("codex/config.toml").replaceAll("\n", "\r\n");
-    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
-    expect(disable.mechanism).toBe("stash-remove");
+    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    expect(disable.mechanism).toBe("remove");
     const after = applyTomlSplice(content, disable.native as TomlNativeEdit);
     const parsed = readConfigEntries(adapter, after);
     if (!parsed.ok) throw new Error("post-removal CRLF file must parse");
@@ -484,8 +498,8 @@ describe("adversarial: encoding variants (CRLF / BOM) through the full diff chai
   it("BOM TOML: header matching and the splice tolerate a leading BOM", () => {
     const adapter = adapterOf("codex");
     const content = String.fromCharCode(0xfeff) + readFixture("codex/config.toml");
-    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
-    expect(disable.mechanism).toBe("stash-remove");
+    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    expect(disable.mechanism).toBe("remove");
     const native = disable.native as TomlNativeEdit;
     expect(native.region, "owned region must be found under a BOM").not.toBeNull();
     const after = applyTomlSplice(content, native);

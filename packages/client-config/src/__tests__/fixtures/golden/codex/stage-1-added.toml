@@ -1,0 +1,32 @@
+# Codex CLI configuration — TOML with comments.
+model = "gpt-5.2-codex"
+approval_policy = "on-request"
+
+# The iris-mcp dev server, managed by iris-mcp.
+[mcp_servers.iris-dev-mcp] # managed by iris-mcp
+command = "npx"
+args = ["-y", "@iris-mcp/dev"]
+
+[mcp_servers.iris-dev-mcp.env]
+IRIS_NAMESPACE = "HSCUSTOM"
+
+# A foreign third-party server (must never be touched).
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.iris-ops-mcp]
+command = "npx"
+args = ["-y", "@iris-mcp/ops"]
+enabled = true
+
+[mcp_servers.iris-ops-mcp.env]
+IRIS_HOST = "iris.example.com"
+IRIS_PORT = "52773"
+IRIS_USERNAME = "svc"
+IRIS_NAMESPACE = "PROD"
+IRIS_HTTPS = "true"
+IRIS_PASSWORD = "${IRIS_PASSWORD}"
+
+[projects."C:\\work\\iris-execute-mcp-v2"]
+trust_level = "trusted"

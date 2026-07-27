@@ -65,9 +65,65 @@ export {
   serializeTomlEntry,
   type DiffAction,
   type DiffMechanism,
+  type DiffOptions,
   type DiffResult,
   type JsoncNativeEdit,
   type NativeEdit,
   type TomlNativeEdit,
   type YamlNativeEdit,
 } from "./diff.js";
+
+export {
+  applyWrite,
+  backupDir,
+  backupPathFor,
+  executeNativeEdit,
+  listBackups,
+  restoreBackup,
+  REAL_WRITE_FS,
+  type ApplyWriteOptions,
+  type RestoreOptions,
+  type WriteFs,
+  type WriteResult,
+} from "./write.js";
+
+export {
+  addStash,
+  dropManaged,
+  dropStash,
+  findStash,
+  isManagerCreated,
+  readState,
+  recordManaged,
+  resolveStateDir,
+  stateFilePath,
+  writeState,
+  EMPTY_STATE,
+  type EngineHostContext,
+  type ManagedEntryRecord,
+  type ManagerState,
+  type ReadStateResult,
+  type StashRecord,
+} from "./state.js";
+
+export {
+  apply,
+  disable,
+  enable,
+  remove,
+  restore,
+  type EngineAction,
+  type EngineOptions,
+  type EngineResult,
+} from "./engine.js";
+
+export {
+  synthesizeEntry,
+  PKG_BY_SERVER,
+  VSCODE_PASSWORD_INPUT_ID,
+  type EnvMode,
+  type SynthesisOptions,
+  type SynthesisProfile,
+  type SynthesisResult,
+  type VscodeInput,
+} from "./synthesize.js";
