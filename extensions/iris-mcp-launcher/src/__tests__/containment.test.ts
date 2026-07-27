@@ -134,20 +134,23 @@ describe("credential containment — structural (source grep)", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the ONE configuration write this extension makes targets the plain irisMcpLauncher.servers key and nothing else — pinned POSITIVELY, because the shape-based grep above cannot see a two-statement write", () => {
+  it("the ONLY configuration writes this extension makes target the plain irisMcpLauncher.servers key and the (non-secret) irisMcpLauncher.governanceFile path — pinned POSITIVELY, because the shape-based grep above cannot see a two-statement write", () => {
     // Code review (Story 31.5). `SUSPICIOUS_WRITE_PATTERNS`'s
     // `getConfiguration(...).update(` pattern only matches a single-expression
     // chain, and `extension.ts`'s `updateServersConfig` deliberately splits it
     // across two statements — so the guard whose stated purpose is "a future
     // write-capable call cannot slip in silently" is structurally blind to
     // exactly the idiom this extension now models. Rather than restore the
-    // chain or blanket-exempt the file, the write is pinned from the other
+    // chain or blanket-exempt the file, the writes are pinned from the other
     // direction: enumerate EVERY `.update(` in every source file and assert
-    // the complete set is the single `irisMcpLauncher.servers` write. A second
-    // config write anywhere — including one carrying a credential — fails
-    // here, and so does a rename of the written key (which is also what makes
-    // Integration AC 31.5.8's "a rename on EITHER side must fail" true for the
-    // write side; the read side is covered in selectServers.test.ts).
+    // the complete set is exactly the two sanctioned, non-secret writes — the
+    // `irisMcpLauncher.servers` selection (Story 31.5) and the governance file
+    // PATH chosen in the governance editor (Story 32.2; a plain file path,
+    // never a credential). A third config write anywhere — including one
+    // carrying a credential — fails here, and so does a rename of either
+    // written key (which is also what makes Integration AC 31.5.8's "a rename
+    // on EITHER side must fail" true for the write side; the read side is
+    // covered in selectServers.test.ts / settings.test.ts).
     const updateArguments: string[] = [];
     for (const file of SOURCE_FILES) {
       const code = stripComments(readFileSync(path.join(SRC_DIR, file), "utf8"));
@@ -156,14 +159,20 @@ describe("credential containment — structural (source grep)", () => {
       }
     }
 
-    expect(updateArguments).toEqual(["extension.ts: update(SERVERS_SETTING_KEY)"]);
+    expect(updateArguments).toEqual([
+      "extension.ts: update(SERVERS_SETTING_KEY)",
+      "extension.ts: update(GOVERNANCE_FILE_SETTING_KEY)",
+    ]);
 
-    // ...and that constant is literally the `servers` key, cross-checked
-    // against `settings.ts`'s READ of the same key so the two can never drift.
+    // ...and those constants are literally the `servers` and `governanceFile`
+    // keys, cross-checked against `settings.ts`'s READ of the same keys so the
+    // two can never drift.
     const extensionCode = stripComments(readFileSync(path.join(SRC_DIR, "extension.ts"), "utf8"));
     expect(extensionCode).toMatch(/const SERVERS_SETTING_KEY\s*=\s*"servers"/);
+    expect(extensionCode).toMatch(/const GOVERNANCE_FILE_SETTING_KEY\s*=\s*"governanceFile"/);
     const settingsCode = stripComments(readFileSync(path.join(SRC_DIR, "settings.ts"), "utf8"));
     expect(settingsCode).toMatch(/config\.get<[^>]+>\(\s*"servers"/);
+    expect(settingsCode).toMatch(/config\.get<[^>]+>\(\s*"governanceFile"/);
   });
 });
 
@@ -177,6 +186,7 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
+    governanceFile: "",
     auditLog: "",
     auditLogMaxMb: "",
     auditLogParams: "",

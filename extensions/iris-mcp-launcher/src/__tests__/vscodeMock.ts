@@ -14,10 +14,21 @@
  *   `T[] | undefined` — `undefined` on cancel, `[]` when confirmed with
  *   nothing checked (the 31-5-3 gesture)
  * - `workspace.getConfiguration(section).get/inspect/update` — `inspect`
- *   returns `undefined` when the key is defined in no scope, and may carry a
- *   value in only one scope (here: `globalValue` only)
+ *   returns `undefined` when the key is defined in no scope and carries one
+ *   field per scope it IS defined in (`globalValue` from `configStore`,
+ *   `workspaceValue` from `configWorkspaceStore`); the merged `get` reads the
+ *   workspace value first (the real precedence)
  * - `extensions.getExtension(id)` returns `{ isActive, activate(), exports }`
  *   or `undefined`
+ * - `window.showOpenDialog({ canSelectFiles: true })` resolves `Uri[] | undefined`
+ *   — an array of `{ fsPath }` Uris when a file is chosen, `undefined` when
+ *   dismissed (scripted via `mockState.openDialogResponse`)
+ * - `window.createWebviewPanel(viewType, title, column, options)` returns a
+ *   panel whose `webview.html` is settable, whose
+ *   `webview.onDidReceiveMessage`/`onDidDispose` register listeners, and whose
+ *   `reveal()` is callable — the exact members `extension.ts`'s governance
+ *   panel adapter touches (Story 32.2). Recorded in `mockState.webviewPanels`.
+ * - `ViewColumn` enum members mirror the declared values (`One` = 1)
  * - `lm.registerMcpServerDefinitionProvider(id, provider)` returns a
  *   `Disposable`
  * - `authentication.getSession` resolves `undefined` ONLY for a silent probe
@@ -63,11 +74,39 @@ export interface MockMcpProviderRegistration {
   };
 }
 
+/**
+ * A recorded `window.createWebviewPanel` call. The panel OBJECT the mock
+ * returns (built in `window.createWebviewPanel` below) carries the live
+ * listeners; this record is the test-facing view of what the extension set.
+ */
+export interface MockWebviewPanel {
+  viewType: string;
+  title: string;
+  options: unknown;
+  /** The last HTML assigned to `webview.html`. */
+  html: string;
+  /** How many times `reveal()` was called (singleton-reveal proof). */
+  revealCount: number;
+  /** `webview.onDidReceiveMessage` listeners — fire these to drive the panel. */
+  messageListeners: ((message: unknown) => void)[];
+  /** `onDidDispose` listeners. */
+  disposeListeners: (() => void)[];
+  disposed: boolean;
+}
+
 export interface MockState {
   /** The Server Manager extension `extensions.getExtension` returns (undefined = absent). */
   serverManager: MockServerManagerExtension | undefined;
   /** Backing store for `workspace.getConfiguration(section).get/inspect/update`, keyed `"<section>.<key>"`. */
   configStore: Map<string, unknown>;
+  /**
+   * Workspace-scoped backing store (the real `.vscode/settings.json` layer).
+   * `get` returns this over `configStore` (the real merged-read precedence),
+   * `inspect` surfaces it as `workspaceValue`, and `update(…, Workspace)`
+   * writes here — shapes the real API produces (32.2 review: the governance
+   * choose-file write selects the OWNING scope via inspect).
+   */
+  configWorkspaceStore: Map<string, unknown>;
   /** Every `update(key, value, target)` the extension made. */
   configUpdates: { key: string; value: unknown; target: number | undefined }[];
   /** Non-modal `showWarningMessage` calls (the extension's user-facing warnings). */
@@ -90,6 +129,10 @@ export interface MockState {
   mcpProviders: MockMcpProviderRegistration[];
   /** Status bar items created via `window.createStatusBarItem`. */
   statusBarItems: MockStatusBarItem[];
+  /** Webview panels created via `window.createWebviewPanel`. */
+  webviewPanels: MockWebviewPanel[];
+  /** Scripted `showOpenDialog` resolution — an array of `{ fsPath }` Uris, or undefined (dismissed). */
+  openDialogResponse: { fsPath: string }[] | undefined;
   /** `workspace.onDidChangeConfiguration` listeners. */
   configChangeListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[];
 }
@@ -97,6 +140,7 @@ export interface MockState {
 export const mockState: MockState = {
   serverManager: undefined,
   configStore: new Map(),
+  configWorkspaceStore: new Map(),
   configUpdates: [],
   warnings: [],
   infos: [],
@@ -108,6 +152,8 @@ export const mockState: MockState = {
   commands: new Map(),
   mcpProviders: [],
   statusBarItems: [],
+  webviewPanels: [],
+  openDialogResponse: undefined,
   configChangeListeners: [],
 };
 
@@ -115,6 +161,7 @@ export const mockState: MockState = {
 export function resetMockState(): void {
   mockState.serverManager = undefined;
   mockState.configStore = new Map();
+  mockState.configWorkspaceStore = new Map();
   mockState.configUpdates = [];
   mockState.warnings = [];
   mockState.infos = [];
@@ -126,6 +173,8 @@ export function resetMockState(): void {
   mockState.commands = new Map();
   mockState.mcpProviders = [];
   mockState.statusBarItems = [];
+  mockState.webviewPanels = [];
+  mockState.openDialogResponse = undefined;
   mockState.configChangeListeners = [];
 }
 
@@ -180,12 +229,83 @@ export const window = {
     mockState.statusBarItems.push(item);
     return item;
   },
+
+  /**
+   * Mirrors the declared `window.showOpenDialog`: resolves `Uri[] | undefined`.
+   * The scripted Uri carries `fsPath` — the one member the extension reads
+   * (a real Uri always has it).
+   */
+  showOpenDialog: (_options?: unknown): Promise<{ fsPath: string }[] | undefined> =>
+    Promise.resolve(mockState.openDialogResponse),
+
+  /**
+   * Mirrors the declared `window.createWebviewPanel` shape as the extension's
+   * governance panel adapter uses it: a settable `webview.html`,
+   * `webview.onDidReceiveMessage`/`onDidDispose` event registrars (returning
+   * Disposables), and `reveal()`. The created panel is recorded in
+   * `mockState.webviewPanels` so tests can read the HTML and fire messages.
+   */
+  createWebviewPanel: (
+    viewType: string,
+    title: string,
+    _showOptions: unknown,
+    options?: unknown,
+  ): {
+    webview: {
+      html: string;
+      onDidReceiveMessage(listener: (message: unknown) => void): MockDisposable;
+    };
+    onDidDispose(listener: () => void): MockDisposable;
+    reveal(): void;
+    dispose(): void;
+  } => {
+    const recorded: MockWebviewPanel = {
+      viewType,
+      title,
+      options,
+      html: "",
+      revealCount: 0,
+      messageListeners: [],
+      disposeListeners: [],
+      disposed: false,
+    };
+    mockState.webviewPanels.push(recorded);
+    return {
+      webview: {
+        get html(): string {
+          return recorded.html;
+        },
+        set html(value: string) {
+          recorded.html = value;
+        },
+        onDidReceiveMessage: (listener: (message: unknown) => void): MockDisposable => {
+          recorded.messageListeners.push(listener);
+          return disposable();
+        },
+      },
+      onDidDispose: (listener: () => void): MockDisposable => {
+        recorded.disposeListeners.push(listener);
+        return disposable();
+      },
+      reveal: (): void => {
+        recorded.revealCount++;
+      },
+      dispose: (): void => {
+        recorded.disposed = true;
+        for (const listener of recorded.disposeListeners) listener();
+      },
+    };
+  },
 };
 
 export const workspace = {
   getConfiguration: (section: string) => ({
     get: <T>(key: string, defaultValue: T): T => {
       const fullKey = `${section}.${key}`;
+      // The real merged read: a workspace-scoped value shadows the global one.
+      if (mockState.configWorkspaceStore.has(fullKey)) {
+        return mockState.configWorkspaceStore.get(fullKey) as T;
+      }
       return mockState.configStore.has(fullKey)
         ? (mockState.configStore.get(fullKey) as T)
         : defaultValue;
@@ -193,15 +313,27 @@ export const workspace = {
     inspect: <T>(key: string): { globalValue?: T; workspaceValue?: T } | undefined => {
       const fullKey = `${section}.${key}`;
       // The real return shape carries one field per scope the value is
-      // defined in; a user-settings-only value yields `{ globalValue }` and a
-      // nowhere-defined value yields `undefined` — both real shapes.
-      return mockState.configStore.has(fullKey)
-        ? { globalValue: mockState.configStore.get(fullKey) as T }
+      // defined in; a nowhere-defined value yields `undefined` — both real
+      // shapes.
+      const globalValue = mockState.configStore.has(fullKey)
+        ? (mockState.configStore.get(fullKey) as T)
         : undefined;
+      const workspaceValue = mockState.configWorkspaceStore.has(fullKey)
+        ? (mockState.configWorkspaceStore.get(fullKey) as T)
+        : undefined;
+      if (globalValue === undefined && workspaceValue === undefined) return undefined;
+      return {
+        ...(globalValue !== undefined ? { globalValue } : {}),
+        ...(workspaceValue !== undefined ? { workspaceValue } : {}),
+      };
     },
     update: (key: string, value: unknown, target?: number): Promise<void> => {
       mockState.configUpdates.push({ key, value, target });
-      mockState.configStore.set(`${section}.${key}`, value);
+      if (target === ConfigurationTarget.Workspace) {
+        mockState.configWorkspaceStore.set(`${section}.${key}`, value);
+      } else {
+        mockState.configStore.set(`${section}.${key}`, value);
+      }
       return Promise.resolve();
     },
   }),
@@ -291,4 +423,13 @@ export const ConfigurationTarget = {
 export const StatusBarAlignment = {
   Left: 1,
   Right: 2,
+} as const;
+
+/** Mirrors the declared `vscode.ViewColumn` enum members the extension uses. */
+export const ViewColumn = {
+  Active: -1,
+  Beside: -2,
+  One: 1,
+  Two: 2,
+  Three: 3,
 } as const;

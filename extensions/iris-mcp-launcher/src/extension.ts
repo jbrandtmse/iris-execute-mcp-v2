@@ -36,8 +36,19 @@
  * fully async (31-6-2), so the extension host is never blocked on I/O.
  */
 import * as vscode from "vscode";
+import { statSync } from "node:fs";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
+import {
+  buildGovernanceCliEnv,
+  resolveGovernanceCli,
+  runGovernanceCli,
+} from "./governanceEngine.js";
+import {
+  createGovernancePanelOpener,
+  OPEN_GOVERNANCE_EDITOR_COMMAND_ID,
+  type GovernanceEngineHost,
+} from "./governancePanel.js";
 import {
   buildStatusBarState,
   selectServers,
@@ -140,6 +151,14 @@ function toConfigurationTarget(target: ConfigWriteTarget): vscode.ConfigurationT
  * uncovered).
  */
 const SERVERS_SETTING_KEY = "servers";
+
+/**
+ * The `irisMcpLauncher.governanceFile` section key, single-sourced so the
+ * choose-file write below and `settings.ts`'s read can never drift (the
+ * SERVERS_SETTING_KEY discipline; `containment.test.ts` pins BOTH writes
+ * positively).
+ */
+const GOVERNANCE_FILE_SETTING_KEY = "governanceFile";
 
 /**
  * `WorkspaceConfiguration.inspect("servers")`, scoped to `irisMcpLauncher`.
@@ -256,6 +275,119 @@ export function activate(context: vscode.ExtensionContext): void {
     selectServers(selectServersDeps),
   );
   context.subscriptions.push(selectServersCommand);
+
+  // Story 32.2: governance editor command (AC 32.2.1/32.2.2). Thin adapters
+  // over governancePanel.ts's injected-dependency orchestration — the real
+  // WebviewPanel, showOpenDialog, the governanceFile settings write, and the
+  // engine host that composes governanceEngine.ts's pure pieces (resolution,
+  // env scrub, subprocess). The panel edits the governance FILE only — never
+  // client configs, never env — and every write goes through the shared CLI.
+  const governanceEngineHost: GovernanceEngineHost = {
+    describe: () => {
+      try {
+        const resolution = resolveGovernanceCli(getSettings(), true);
+        return resolution.ok
+          ? { ok: true, mode: resolution.target.mode }
+          : { ok: false, error: resolution.error };
+      } catch {
+        return {
+          ok: false as const,
+          error: "could not read the irisMcpLauncher settings to resolve the governance CLI",
+        };
+      }
+    },
+    run: async (command) => {
+      let settings;
+      try {
+        settings = getSettings();
+      } catch {
+        return {
+          status: null,
+          stdout: "",
+          stderr: "",
+          spawnError: "could not read the irisMcpLauncher settings to run the governance CLI",
+        };
+      }
+      const resolution = resolveGovernanceCli(settings, command.kind === "universe");
+      if (!resolution.ok) {
+        return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
+      }
+      const env = buildGovernanceCliEnv(settings, resolution.target.extraEnv);
+      return runGovernanceCli(resolution.target, command, env);
+    },
+  };
+
+  const openGovernanceEditor = createGovernancePanelOpener({
+    getSettings,
+    getServerManagerNames: async () => {
+      const api = await getServerManagerApi();
+      if (!api) return [];
+      return api.getServerNames().map((server) => server.name);
+    },
+    engine: governanceEngineHost,
+    fileExists: (candidatePath) => {
+      try {
+        return statSync(candidatePath).isFile();
+      } catch {
+        return false;
+      }
+    },
+    chooseFile: async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: "Use as governance file",
+        filters: { "JSON files": ["json"], "All files": ["*"] },
+        title: "Choose the IRIS governance policy file",
+      });
+      return uris?.[0]?.fsPath;
+    },
+    updateGovernanceFileSetting: (filePath) => {
+      // Two-statement idiom (mirrors updateServersConfig): keeps the write
+      // legible to containment.test.ts's single-expression-chain grep.
+      // Scope: write to the scope that ALREADY carries the setting (the
+      // selectServers resolveWriteTarget discipline) — a hardcoded Global
+      // write is silently shadowed by a workspace-scoped value on the very
+      // next read, so the picker would appear to do nothing (32.2 review).
+      const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+      const inspection = config.inspect<string>(GOVERNANCE_FILE_SETTING_KEY);
+      const target =
+        inspection?.workspaceValue !== undefined
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+      return config.update(GOVERNANCE_FILE_SETTING_KEY, filePath, target);
+    },
+    createPanel: () => {
+      const webviewPanel = vscode.window.createWebviewPanel(
+        "irisMcpGovernance",
+        "IRIS Governance",
+        vscode.ViewColumn.One,
+        { enableScripts: true },
+      );
+      return {
+        setHtml: (html) => {
+          webviewPanel.webview.html = html;
+        },
+        onMessage: (listener) => {
+          webviewPanel.webview.onDidReceiveMessage(listener, undefined, context.subscriptions);
+        },
+        onDispose: (listener) => {
+          webviewPanel.onDidDispose(listener, undefined, context.subscriptions);
+        },
+        reveal: () => {
+          webviewPanel.reveal();
+        },
+      };
+    },
+    showWarning,
+  });
+
+  const openGovernanceEditorCommand = vscode.commands.registerCommand(
+    OPEN_GOVERNANCE_EDITOR_COMMAND_ID,
+    () => void openGovernanceEditor(),
+  );
+  context.subscriptions.push(openGovernanceEditorCommand);
 
   // Story 31.5: status bar item (AC 31.5.3/31.5.4) — created unconditionally
   // in `activate()`. `package.json`'s `onStartupFinished` activation event

@@ -192,7 +192,7 @@ describe("iris-mcp-governance bin — error-path e2e (built dist, spawned proces
     expect(strayTemps(scratch)).toEqual([]);
   });
 
-  it("--json on an invalid file still emits exactly one parseable JSON object to stdout with exit 1 — for ALL FOUR read commands", () => {
+  it("--json on an invalid file still emits exactly one parseable JSON object to stdout with exit 1 — for ALL FIVE read commands", () => {
     const badFile = path.join(scratch, "bad.json");
     writeFileSync(badFile, "{ not json", "utf8");
 
@@ -221,6 +221,16 @@ describe("iris-mcp-governance bin — error-path e2e (built dist, spawned proces
       {
         args: ["diff", "--json", "--file", badFile],
         assertShape: (parsed) => {
+          expect(typeof parsed.error).toBe("string");
+        },
+      },
+      {
+        // Story 32.2: universe fails on the file BEFORE it ever needs the
+        // dist packages, so the error path holds even in this e2e's bare
+        // scratch environment.
+        args: ["universe", "--json", "--file", badFile],
+        assertShape: (parsed) => {
+          expect(parsed.profile).toBe("default");
           expect(typeof parsed.error).toBe("string");
         },
       },

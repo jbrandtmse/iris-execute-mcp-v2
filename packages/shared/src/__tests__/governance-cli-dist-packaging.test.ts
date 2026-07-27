@@ -28,6 +28,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
+
 // This file lives at packages/shared/src/__tests__/ — two levels up is the
 // package root (packages/shared/), where package.json and dist/ both live.
 const packageRoot = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -106,5 +108,46 @@ describe("iris-mcp-governance bin packaging", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("IRIS_GOVERNANCE_FILE is invalid");
     expect(result.stderr).toContain(missing);
+  });
+
+  // Story 32.2: the `universe` command's dist-auto-detection (three levels up
+  // from dist/cli/) is exercised ONLY by the real bin's real install location
+  // — the unit suite injects the loader or an explicit --root for everything
+  // else. Expected values are the bin's REAL output contract, verified live
+  // against this checkout's built dist when the command shipped.
+  it("the built bin's universe command auto-detects the sibling dist packages from its own location (exit 0, full universe incl. the framework tool)", () => {
+    const pkg = readPackageJson();
+    const binPath = path.join(packageRoot, pkg.bin?.["iris-mcp-governance"] as string);
+
+    // Scrubbed child env (CASE-INSENSITIVE — the 32-3-R9/32-1-R1 lesson):
+    // `universe` parses the ambient IRIS_GOVERNANCE/IRIS_GOVERNANCE_PRESET/
+    // IRIS_GOVERNANCE_FILE channels as cascade inputs, so a developer shell's
+    // own values could change the render or fail the CLI outright on a
+    // correctly-configured machine.
+    const childEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) childEnv[key] = value;
+    }
+
+    const result = spawnSync(process.execPath, [binPath, "universe", "--json"], {
+      encoding: "utf8",
+      env: childEnv,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    const render = JSON.parse(result.stdout) as {
+      keys: string[];
+      frameworkTool: { name: string };
+      postFoundation: string[];
+      universeSource: string;
+    };
+    expect(render.universeSource.replace(/\\/g, "/")).toMatch(/\/packages$/);
+    expect(render.frameworkTool.name).toBe("iris_server_profiles");
+    expect(render.keys).toContain("iris_server_profiles");
+    // Strictly more than the frozen baseline — the baseline's own size is
+    // the mechanical floor (derived, never a hand-counted tally, Rule #51).
+    expect(render.keys.length).toBeGreaterThan(GOVERNANCE_BASELINE.size);
+    for (const key of GOVERNANCE_BASELINE) expect(render.keys).toContain(key);
+    expect(render.postFoundation.length).toBeGreaterThan(0);
   });
 });

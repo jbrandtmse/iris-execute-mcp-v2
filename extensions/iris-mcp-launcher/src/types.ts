@@ -182,6 +182,14 @@ export interface LauncherSettings {
   /** Pass-through governance/audit/visibility env — each "" means unset (do not emit the var). */
   governance: string;
   governancePreset: string;
+  /**
+   * Path to the shared governance policy file (Story 32.2). Passed through
+   * UNCHANGED as `IRIS_GOVERNANCE_FILE` to every spawned server AND used as
+   * the file the governance editor view edits (J1: explicit path only, never
+   * discovered). An inert JSON path — window scope suffices (unlike
+   * `developmentRepoPath`, nothing here is executed).
+   */
+  governanceFile: string;
   auditLog: string;
   auditLogMaxMb: string;
   auditLogParams: string;

@@ -70,6 +70,7 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     hadStaleAllPackage: false,
     governance: "",
     governancePreset: "",
+    governanceFile: "",
     auditLog: "",
     auditLogMaxMb: "",
     auditLogParams: "",

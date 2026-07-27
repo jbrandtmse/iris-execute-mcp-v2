@@ -75,6 +75,7 @@ export function synthesizeIrisEnv(
 const GOVERNANCE_PASSTHROUGH: readonly [keyof LauncherSettings, string][] = [
   ["governance", "IRIS_GOVERNANCE"],
   ["governancePreset", "IRIS_GOVERNANCE_PRESET"],
+  ["governanceFile", "IRIS_GOVERNANCE_FILE"],
   ["auditLog", "IRIS_AUDIT_LOG"],
   ["auditLogMaxMb", "IRIS_AUDIT_LOG_MAX_MB"],
   ["auditLogParams", "IRIS_AUDIT_LOG_PARAMS"],
@@ -128,6 +129,7 @@ const LAUNCHER_OWNED_VARS: readonly string[] = [
   "IRIS_PROFILES",
   "IRIS_GOVERNANCE",
   "IRIS_GOVERNANCE_PRESET",
+  "IRIS_GOVERNANCE_FILE",
   "IRIS_AUDIT_LOG",
   "IRIS_AUDIT_LOG_MAX_MB",
   "IRIS_AUDIT_LOG_PARAMS",
