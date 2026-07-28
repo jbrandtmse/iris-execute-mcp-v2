@@ -66,6 +66,7 @@ export {
 export {
   parseGovernanceConfig,
   parseGovernancePreset,
+  loadGovernanceFile,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
   unwrapActionOptions,
@@ -73,12 +74,16 @@ export {
   defaultSeed,
   effective,
   getEffectivePolicy,
+  hasExplicitOverride,
+  configSource,
+  getEffectiveConfigSources,
 } from "./governance.js";
 export type {
   MutationClass,
   GovernancePreset,
   GovernanceLayer,
   GovernanceConfig,
+  GovernanceConfigSource,
   MutatesLookup,
 } from "./governance.js";
 export { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
@@ -110,3 +115,28 @@ export type {
   ResolveVisibleToolsParams,
   ResolveVisibleToolsResult,
 } from "./tool-visibility.js";
+export {
+  SERVER_MANAGER_MODES,
+  discoverSettingsFiles,
+  parseIntersystemsServers,
+  parseServerManagerMode,
+  resolveServerManagerProfiles,
+} from "./server-manager-source.js";
+export type {
+  ServerManagerMode,
+  ParsedServerManagerEntry,
+  CredentialStatus,
+  ServerManagerProfileResult,
+} from "./server-manager-source.js";
+export {
+  CREDENTIAL_CHAIN_KEYCHAIN_SERVICE,
+  CREDENTIAL_HELPER_TIMEOUT_MS,
+  resolveCredential,
+  resolveServerManagerCredentials,
+} from "./credential-chain.js";
+export type {
+  CredentialLinkSource,
+  CredentialLinkResult,
+  CredentialChainOptions,
+  ResolveServerManagerCredentialsOptions,
+} from "./credential-chain.js";

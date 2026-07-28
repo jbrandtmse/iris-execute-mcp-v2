@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/alice/Documents"]
+    }
+  }
+}

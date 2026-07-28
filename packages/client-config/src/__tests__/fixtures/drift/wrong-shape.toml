@@ -1,0 +1,4 @@
+# Codex config — mcp_servers must be a TABLE of server entries, not a string
+# (a config-drift fixture: parses as TOML, wrong shape at the root key).
+mcp_servers = "not-a-table"
+model = "gpt-5"

@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "disabled": true,
+      "autoApprove": ["iris_doc_list"]
+    },
+    "iris-admin-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/admin"],
+      "autoApprove": []
+    },
+    "aws-docs": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "AWS_DOCUMENTATION_PARTITION": "aws"
+      },
+      "disabled": false
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // `.vscodeignore` excludes `**/*.map` from the VSIX, so emitting source
+    // maps here would ship every dist/*.js with a `//# sourceMappingURL=`
+    // comment pointing at a file that is not in the package.
+    "sourceMap": false
+  },
+  "exclude": ["node_modules", "dist", "src/__tests__"]
+}

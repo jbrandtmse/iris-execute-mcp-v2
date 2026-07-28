@@ -34,9 +34,9 @@
 
 import { z } from "zod";
 
-import type { GovernanceConfig, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
-import { getEffectivePolicy } from "./governance.js";
-import type { IrisProfile, ProfileRegistry } from "./profiles.js";
+import type { GovernanceConfig, GovernanceConfigSource, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
+import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
+import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
 import type { ToolDefinition, ToolResult } from "./tool-types.js";
 import type { ToolPresetName } from "./tool-visibility.js";
@@ -83,6 +83,29 @@ export interface ProfileRosterEntry {
   https: boolean;
   baseUrl: string;
   timeout: number;
+  /**
+   * Provenance (Story 31.3, AC 31.3.2): `"env"` (`IRIS_*`/`IRIS_PROFILES`) or
+   * `"server-manager"` (imported from an `intersystems.servers` settings
+   * file). Absent only for a hand-built {@link IrisProfile} that never went
+   * through {@link import("./profiles.js").mergeProfile}/
+   * {@link import("./profiles.js").buildProfileRegistry} — every profile a
+   * real server registry contains carries it.
+   */
+  source?: ProfileSource;
+  /**
+   * The settings FILE a `"server-manager"`-sourced profile was imported from
+   * (deferred item 31-0-3's resolution). Absent for `"env"`-sourced profiles.
+   *
+   * Secret-free — no credential can reach it — but NOT information-free: it is
+   * a real local filesystem path, so a user-scope discovery hit embeds the OS
+   * account name (`C:\Users\<account>\AppData\Roaming\Code\User\settings.json`)
+   * and a workspace hit embeds the workspace directory, and this roster is
+   * returned to the connected MCP client. Deliberate, reviewed trade-off (code
+   * review 2026-07-25): a basename is useless here — every candidate file is
+   * literally named `settings.json` — so the directory IS the information the
+   * field exists to convey. See {@link import("./profiles.js").IrisProfile.sourceFile}.
+   */
+  sourceFile?: string;
 }
 
 /**
@@ -114,8 +137,22 @@ export interface ServerDiscoveryResult {
     profile?: string;
     /** Single-profile effective policy map (absent when `allProfiles`). */
     policy?: Record<string, boolean>;
+    /**
+     * Per-key config channel that resolved the single profile's policy (Epic
+     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `preset` | `default`.
+     * Emitted UNCONDITIONALLY alongside `policy` (absent only when
+     * `allProfiles`), over the SAME visibility-filtered key set — the
+     * hidden-tool key omission (Epic 30) applies identically, so no hidden
+     * tool name can leak through this field.
+     */
+    configSource?: Record<string, GovernanceConfigSource>;
     /** Per-profile effective policy maps (present only when `allProfiles`). */
     policies?: Record<string, Record<string, boolean>>;
+    /**
+     * Per-profile `configSource` maps (present only when `allProfiles`) —
+     * the all-profiles sibling of {@link configSource}.
+     */
+    configSources?: Record<string, Record<string, GovernanceConfigSource>>;
   };
   preset: GovernancePreset | null;
   /**
@@ -138,6 +175,11 @@ export interface ServerDiscoveryResult {
  * spread (`{ ...profile }`) + delete — the whole point is that a NEW field added
  * to {@link IrisProfile} must require a deliberate edit here to ever appear in
  * discovery output, so a secret can never leak by accident.
+ *
+ * `source`/`sourceFile` (Story 31.3, AC 31.3.2/deferred item 31-0-3) are named
+ * explicitly, same discipline as every other field — conditional spread so a
+ * profile that never set them (e.g. a hand-built test fixture) does not gain
+ * an `undefined`-valued key.
  */
 export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
   return {
@@ -150,6 +192,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     https: profile.https,
     baseUrl: profile.baseUrl,
     timeout: profile.timeout,
+    ...(profile.source !== undefined ? { source: profile.source } : {}),
+    ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
   };
 }
 
@@ -181,6 +225,11 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  *   `McpServerBase`'s `this.toolVisibility`. Defaulted to the byte-for-byte
  *   pass-through state (`full`, 0 hidden) so existing direct callers/tests that
  *   omit it are unaffected; the real server always passes its own state.
+ * @param fileConfig - The parsed `IRIS_GOVERNANCE_FILE` config (Epic 32, Story
+ *   32.0), threaded into every {@link getEffectivePolicy}/
+ *   {@link getEffectiveConfigSources} call so the reported policy + per-key
+ *   `configSource` reflect the file layers exactly as the gate does. Default
+ *   `undefined` (no file) — byte-for-byte the pre-Epic-32 report's policy.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -198,6 +247,7 @@ export function computeServerDiscovery(
     visibleCount: number;
     hiddenCount: number;
   } = { preset: "full", visibleCount: 0, hiddenCount: 0 },
+  fileConfig?: GovernanceConfig,
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -212,6 +262,7 @@ export function computeServerDiscovery(
       resolveProfile(profiles, args.profile);
     }
     const policies: Record<string, Record<string, boolean>> = {};
+    const configSources: Record<string, Record<string, GovernanceConfigSource>> = {};
     for (const name of profiles.keys()) {
       // Use defineProperty so a profile name that collides with a prototype
       // member (e.g. "__proto__", "constructor") is written as a real own
@@ -229,13 +280,30 @@ export function computeServerDiscovery(
           defaultEnabledWrites,
           preset,
           classifications,
+          fileConfig,
+        ),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      // Story 32.0 (AC 32.0.3): the per-key channel map, same collision-safe
+      // construction, over the SAME (already visibility-filtered) key set.
+      Object.defineProperty(configSources, name, {
+        value: getEffectiveConfigSources(
+          name,
+          config,
+          governedKeys,
+          mutatesLookup,
+          preset,
+          classifications,
+          fileConfig,
         ),
         enumerable: true,
         writable: true,
         configurable: true,
       });
     }
-    governance = { policies };
+    governance = { policies, configSources };
   } else {
     // Resolve the single profile name (defaults to `default`). An unknown name
     // throws ProfileResolutionError — the caller maps it to a structured error.
@@ -251,6 +319,16 @@ export function computeServerDiscovery(
         defaultEnabledWrites,
         preset,
         classifications,
+        fileConfig,
+      ),
+      configSource: getEffectiveConfigSources(
+        profile.name,
+        config,
+        governedKeys,
+        mutatesLookup,
+        preset,
+        classifications,
+        fileConfig,
       ),
     };
   }
@@ -308,8 +386,10 @@ export const serverDiscoveryTool: ToolDefinition = {
     "enabled/disabled) — so you can choose the right `server` profile and avoid " +
     "calling disabled actions, without reading the client's config files. " +
     "Returns: (1) a profile roster with non-secret connection metadata " +
-    "(name, host, port, username, namespace, https, baseUrl, timeout; the " +
-    "password is NEVER included); and (2) the effective enabled/disabled action " +
+    "(name, host, port, username, namespace, https, baseUrl, timeout, source " +
+    "[\"env\" or \"server-manager\"], sourceFile [the settings file, for " +
+    "server-manager-sourced profiles only]; the password is NEVER included); " +
+    "and (2) the effective enabled/disabled action " +
     "map for a selected profile (optional `profile` arg; defaults to the " +
     "`default` profile), or for every profile when `allProfiles: true`. " +
     "Note: the optional `profile` arg selects which profile's POLICY to report; " +

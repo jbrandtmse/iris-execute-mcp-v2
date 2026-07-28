@@ -133,7 +133,7 @@ function readPolicy(result: any): Record<string, boolean> {
   const contents = result.contents as Array<{ text: string }>;
   const first = contents[0];
   if (!first) throw new Error("resources/read returned no contents");
-  return JSON.parse(first.text) as Record<string, boolean>;
+  return (JSON.parse(first.text) as { policy: Record<string, boolean> }).policy;
 }
 
 /**

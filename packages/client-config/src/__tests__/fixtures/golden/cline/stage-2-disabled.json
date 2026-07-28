@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "disabled": true,
+      "autoApprove": ["iris_doc_list"]
+    },
+    "aws-docs": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "AWS_DOCUMENTATION_PARTITION": "aws"
+      },
+      "disabled": false
+    },
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@iris-mcp/ops"
+      ],
+      "env": {
+        "IRIS_HOST": "iris.example.com",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "svc",
+        "IRIS_NAMESPACE": "PROD",
+        "IRIS_HTTPS": "true"
+      },
+      "disabled": true
+    }
+  }
+}

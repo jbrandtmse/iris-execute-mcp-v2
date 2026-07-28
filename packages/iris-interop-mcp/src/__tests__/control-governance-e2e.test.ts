@@ -127,7 +127,9 @@ function readResourcePolicy(result: any): Record<string, boolean> {
   const contents = result.contents as Array<{ text: string }>;
   const first = contents[0];
   if (!first) throw new Error("resources/read returned no contents");
-  return JSON.parse(first.text) as Record<string, boolean>;
+  // Story 32.0 (AC 32.0.3): the resource payload grew from a bare policy map
+  // to { policy, configSource } — unwrap `.policy` here.
+  return (JSON.parse(first.text) as { policy: Record<string, boolean> }).policy;
 }
 
 function makeServerOpts(tools: ToolDefinition[]): McpServerBaseOptions {

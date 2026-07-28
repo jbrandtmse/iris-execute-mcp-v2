@@ -9,6 +9,7 @@
 import type { ZodObject } from "zod";
 import type { IrisHttpClient } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
+import type { GovernanceConfig } from "./governance.js";
 
 /** Result shape from pagination helpers. */
 export interface PaginateResult<T> {
@@ -250,6 +251,28 @@ export interface ToolContext {
    *   profile.
    */
   resolveProfileClient(profileName: string): Promise<IrisHttpClient>;
+  /**
+   * The server's STARTUP-SNAPSHOT parsed `IRIS_GOVERNANCE_FILE` config
+   * (Epic 32, Story 32.1 — the terminal resolution of deferred item 32-0-1),
+   * or `undefined` when no governance file is configured.
+   *
+   * Every governance surface reads the SAME frozen view: the D5 gate, the
+   * `iris-governance://` resource, `iris_server_profiles`, and — via this
+   * field — `iris_env_promote`'s Gate 4, the one handler whose inner
+   * governance check runs OUTSIDE `handleToolCall`'s D5 gate. Handlers that
+   * need the file channel read THIS, never `loadGovernanceFile()` per call:
+   * the documented contract is "read once at startup; restart to apply (no
+   * hot-reload in v1)", and a per-call re-read would honor a mid-session
+   * file edit at exactly one enforcement point while every other surface
+   * still reports the old value (in both directions — silently enabling AND
+   * silently disabling).
+   *
+   * Optional and absent-by-default: a {@link ToolContext} built directly by
+   * a unit test (or by `buildToolContext` without the final argument) has no
+   * file config, which every cascade helper treats as byte-for-byte the
+   * pre-Epic-32 behavior (the AC 32.0.1 back-compat gate).
+   */
+  governanceFileConfig?: GovernanceConfig;
 }
 
 /**

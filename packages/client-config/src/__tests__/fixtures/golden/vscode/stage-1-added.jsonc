@@ -1,0 +1,36 @@
+// VS Code user MCP configuration (JSONC with comments).
+{
+  "servers": {
+    // The iris-mcp dev server, managed by iris-mcp.
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_SERVER_MANAGER": "auto"
+      }
+    },
+    // A foreign third-party server (must never be touched).
+    "microsoft-learn": {
+      "command": "npx",
+      "args": ["-y", "@microsoft/learn-mcp"],
+      "env": {
+        "API_KEY": "BSA_foreignKeyABC"
+      }
+    },
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@iris-mcp/ops"
+      ],
+      "env": {
+        "IRIS_HOST": "iris.example.com",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "svc",
+        "IRIS_NAMESPACE": "PROD",
+        "IRIS_HTTPS": "true",
+        "IRIS_PASSWORD": "${input:iris-password}"
+      }
+    }
+  }
+}

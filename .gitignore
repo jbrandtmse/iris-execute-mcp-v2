@@ -1,10 +1,16 @@
 # Dependencies
 node_modules/
 package-lock.json
+# extensions/iris-mcp-launcher is npm-managed and outside the pnpm workspace
+# (pnpm-workspace.yaml globs only packages/*) — its lockfile IS committed for
+# reproducible installs of that standalone extension.
+!extensions/iris-mcp-launcher/package-lock.json
 
 # Build output
 dist/
+out/
 *.tsbuildinfo
+*.vsix
 
 # Environment
 .env
@@ -29,3 +35,4 @@ coverage/
 sources/
 irislib/
 irissys/
+.claude/scratch/

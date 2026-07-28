@@ -21,6 +21,10 @@ import { appendFile, rename, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 import { logger } from "./logger.js";
+// Type-only (erased at compile time), so this adds NO runtime import edge to
+// `profiles.ts` and cannot deepen the profiles/server-manager-source cycle the
+// Story 31.3 Dev Notes warn about.
+import type { ProfileSource } from "./profiles.js";
 
 /** Case-insensitive key-name family redacted per spec §4. */
 const REDACT_KEY_PATTERN =
@@ -134,6 +138,25 @@ export interface AuditEntryInput {
   action: string | null;
   /** Resolved `server` profile name. */
   profile: string;
+  /**
+   * Provenance of the resolved profile (Story 31.3, AC 31.3.2): `"env"` or
+   * `"server-manager"`. Attribution ONLY — copied verbatim from the resolved
+   * profile's `source` field and never fed into any authorization decision
+   * (the governance join key stays the profile NAME).
+   *
+   * Absent in exactly one case: the call's `server` parameter named a profile
+   * that is not in the registry, so there was no profile to attribute (an
+   * unknown-profile call, which is rejected). Absence therefore means "no
+   * profile resolved" and must NOT be read as `"env"` — pinned by a
+   * regression test in `audit-interceptor.test.ts`. (Also absent for a
+   * hand-built registry whose profiles never went through
+   * `mergeProfile`/`buildProfileRegistry`.)
+   *
+   * Typed as the closed {@link ProfileSource} union rather than `string`
+   * (code review 2026-07-25) so the two values the README, `tool_support.md`
+   * and every per-server README promise are enforced by the compiler.
+   */
+  profileSource?: ProfileSource;
   /** Resolved namespace. */
   namespace: string;
   /** Call outcome. */
@@ -175,6 +198,7 @@ interface AuditEntry {
   tool: string;
   action: string | null;
   profile: string;
+  profileSource?: ProfileSource;
   namespace: string;
   outcome: AuditOutcome;
   durationMs: number;
@@ -252,6 +276,9 @@ export class AuditLogger {
       durationMs: input.durationMs,
       paramKeys: input.paramKeys,
     };
+    if (input.profileSource !== undefined) {
+      entry.profileSource = input.profileSource;
+    }
     if (this.config.includeParams && input.params !== undefined) {
       entry.params = redactValue(input.params);
     }

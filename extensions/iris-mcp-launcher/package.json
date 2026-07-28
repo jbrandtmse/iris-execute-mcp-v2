@@ -1,0 +1,175 @@
+{
+  "name": "iris-mcp-launcher",
+  "displayName": "IRIS MCP Launcher",
+  "description": "Registers the IRIS MCP Server Suite with VS Code, resolving credentials from the InterSystems Server Manager extension at spawn time. Copilot-family agents only — see README for the client-coverage boundary.",
+  "version": "0.1.0",
+  "publisher": "TBD-at-publish-time",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
+    "directory": "extensions/iris-mcp-launcher"
+  },
+  "bugs": {
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2/issues"
+  },
+  "homepage": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/extensions/iris-mcp-launcher#readme",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "Other",
+    "AI"
+  ],
+  "keywords": [
+    "iris",
+    "intersystems",
+    "mcp",
+    "model context protocol",
+    "objectscript"
+  ],
+  "extensionDependencies": [
+    "intersystems-community.servermanager"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "iris-mcp-launcher",
+        "label": "IRIS MCP Server Suite"
+      }
+    ],
+    "commands": [
+      {
+        "command": "irisMcpLauncher.selectServers",
+        "title": "Select Servers…",
+        "category": "IRIS MCP Launcher"
+      },
+      {
+        "command": "irisMcpLauncher.openGovernanceEditor",
+        "title": "Open Governance Editor",
+        "category": "IRIS MCP Launcher"
+      },
+      {
+        "command": "irisMcpLauncher.manageClients",
+        "title": "Manage MCP Clients…",
+        "category": "IRIS MCP Launcher"
+      }
+    ],
+    "configuration": {
+      "title": "IRIS MCP Launcher",
+      "properties": {
+        "irisMcpLauncher.servers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": [],
+          "description": "InterSystems Server Manager server names to expose as IRIS MCP servers. Empty = all servers currently configured in Server Manager."
+        },
+        "irisMcpLauncher.packages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "data",
+              "dev",
+              "interop",
+              "ops"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "admin",
+            "data",
+            "dev",
+            "interop",
+            "ops"
+          ],
+          "description": "Which @iris-mcp suite packages to register as MCP servers. (The former 'all' meta-package key was removed — @iris-mcp/all ships no dist/bin and could never be started; select the individual packages you need instead.)"
+        },
+        "irisMcpLauncher.namespace": {
+          "type": "string",
+          "default": "HSCUSTOM",
+          "description": "Default IRIS namespace (IRIS_NAMESPACE) for every spawned MCP server. Matches the suite's own loadConfig() default."
+        },
+        "irisMcpLauncher.combineProfiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, register ONE MCP server definition per package covering ALL selected Server Manager servers (via the suite's IRIS_PROFILES multi-profile env var, addressable with the 'server' tool parameter). When false (default), register one definition per (package, server) pair, each single-profile."
+        },
+        "irisMcpLauncher.developmentRepoPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "DEVELOPMENT ONLY. Absolute path to a local monorepo checkout of the IRIS MCP suite. Empty (default) spawns the published packages via 'npx -y @iris-mcp/<pkg>'. Non-empty spawns 'node <path>/packages/<dir>/dist/index.js' instead, for testing local changes before publishing. This executes an arbitrary local file path, so it is machine-scoped: it can only be set in your own User/Machine settings, never by a workspace's .vscode/settings.json. Only set it to a checkout you trust. A relative path is rejected — it must be absolute. A missing or unbuilt package registers no definition for that package and produces one warning; other selected packages still register."
+        },
+        "irisMcpLauncher.governance": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_GOVERNANCE to every spawned server. Empty = unset (today's default governance behavior)."
+        },
+        "irisMcpLauncher.governancePreset": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_GOVERNANCE_PRESET. Empty = unset."
+        },
+        "irisMcpLauncher.governanceFile": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_GOVERNANCE_FILE to every spawned server (path to the shared governance policy file). ALSO the file the 'IRIS MCP Launcher: Open Governance Editor' view edits. Empty = unset (no governance file; the editor shows an empty state). Explicit path only, never discovered; prefer an absolute path. Servers read the file once at startup — restart a server to apply edits."
+        },
+        "irisMcpLauncher.auditLog": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_AUDIT_LOG (audit log file path). Empty = unset (auditing disabled)."
+        },
+        "irisMcpLauncher.auditLogMaxMb": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_AUDIT_LOG_MAX_MB. Empty = unset (suite default applies)."
+        },
+        "irisMcpLauncher.auditLogParams": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_AUDIT_LOG_PARAMS ('true'/'false'). Empty = unset."
+        },
+        "irisMcpLauncher.toolsPreset": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_TOOLS_PRESET ('full'/'core'/'developer'). Empty = unset (suite default 'full' applies)."
+        },
+        "irisMcpLauncher.toolsDisable": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_TOOLS_DISABLE (comma-separated tool names, trailing-* wildcard supported). Empty = unset."
+        },
+        "irisMcpLauncher.toolsEnable": {
+          "type": "string",
+          "default": "",
+          "description": "Passed through UNCHANGED as IRIS_TOOLS_ENABLE (comma-separated tool names). Empty = unset."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "watch": "tsc --project tsconfig.build.json --watch",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@intersystems-community/intersystems-servermanager": "^3.10.2",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.101.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

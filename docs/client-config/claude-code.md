@@ -1,5 +1,13 @@
 # Claude Code Configuration
 
+> **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
+> `npx -y @iris-mcp/client-config iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
+> — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
+> verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
+> This page remains as the **manual fallback** (and as the reference for what the
+> manager writes). Claude Code's adapter is **certified-live** (2026-07-28) — see the
+> [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
+
 Connect the IRIS MCP Server Suite to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) -- both the CLI and the VS Code extension.
 
 ---
@@ -193,6 +201,70 @@ Un-escaped, the two values above are simply:
 ```
 
 With this config, `iris_global_list({ server: "prod" })` runs against the prod instance, while `iris_backup_manage({ action: "run", server: "prod" })` is blocked. Omit `server` and the call uses the `default` profile from your `IRIS_*` vars — exactly as before.
+
+### Governance File (optional)
+
+Instead of inlining `IRIS_GOVERNANCE` JSON per client, point every client at ONE shared policy file with `IRIS_GOVERNANCE_FILE` (an explicit absolute path — never discovered). **Default state: unset ⇒ inert** — nothing is read unless you set it.
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "env": {
+        "IRIS_HOST": "localhost",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "_SYSTEM",
+        "IRIS_PASSWORD": "your-password-here",
+        "IRIS_NAMESPACE": "USER",
+        "IRIS_GOVERNANCE_FILE": "C:\\governance\\iris-policy.json"
+      }
+    }
+  }
+}
+```
+
+Create and maintain the file with the `iris-mcp-governance` CLI (same engine the servers enforce with — what you write is what they compute):
+
+```bash
+node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js set iris_doc_put false --file C:\governance\iris-policy.json
+node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js effective --file C:\governance\iris-policy.json
+```
+
+The file's layers sit strictly BELOW any `IRIS_GOVERNANCE` env value in the cascade, and the file is read once at server startup — restart the client/server after editing. See [Governance file](../../README.md#governance-file-iris_governance_file) in the suite README for the full model.
+
+---
+
+## Standalone Setup: Server Manager + OS Keychain (optional)
+
+If you already curate IRIS connections in the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) VS Code extension, you can skip retyping `host`/`port`/`username` into `.mcp.json` entirely — two commands import them.
+
+1. Store the password for a connection in your OS keychain (Windows Credential Manager / macOS Keychain / libsecret) — never typed into a config file:
+
+   ```bash
+   npx -y -p @iris-mcp/shared iris-mcp-credentials set myserver
+   ```
+
+   > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
+
+2. Set `IRIS_SERVER_MANAGER` to `auto` in the server's `env` block:
+
+   ```json
+   {
+     "mcpServers": {
+       "iris-dev-mcp": {
+         "command": "npx",
+         "args": ["-y", "@iris-mcp/dev"],
+         "env": {
+           "IRIS_SERVER_MANAGER": "auto"
+         }
+       }
+     }
+   }
+   ```
+
+`IRIS_SERVER_MANAGER` defaults to `off` — nothing is read or imported unless you opt in. Once set, connection names from your Server Manager settings (including `myserver` above) become profiles you address with the tools' `server` parameter, exactly like an `IRIS_PROFILES` entry — no `IRIS_HOST`/`IRIS_PASSWORD` needed for those names. See [Server Manager connections](../../README.md#server-manager-connections-optional) in the suite README for the full discovery order, precedence rules, and the credential chain `iris-mcp-credentials set` feeds.
 
 ---
 

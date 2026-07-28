@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    }
+  }
+}

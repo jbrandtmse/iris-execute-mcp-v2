@@ -77,6 +77,7 @@ All servers use the same environment variables:
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |
+| `IRIS_GOVERNANCE_FILE` | *(unset — inert)* | **Optional.** Path to a JSON file of the same shape as `IRIS_GOVERNANCE`, so one policy is portable across every MCP client. The file's layers sit strictly *below* the `IRIS_GOVERNANCE` env layers (an env setting always wins). **Unset ⇒ inert**: no file is ever read and behavior is byte-for-byte today's. Read once at startup (restart to apply edits); a missing/unreadable/malformed file fails startup naming the var and the path. See [Governance file](#governance-file-iris_governance_file). |
 | `IRIS_AUDIT_LOG` | *(unset — OFF)* | **Optional.** Absolute path to a JSONL audit file recording every MCP tool call (who-ish/session, what, outcome, denials). Omit for today's behavior — a mechanical no-op, zero filesystem writes. See [Compliance & Auditability](#compliance--auditability). |
 | `IRIS_AUDIT_LOG_MAX_MB` | `50` | **Optional.** Rotates the audit file at this size — the current file is renamed to `<path>.1` (single generation, overwriting a prior one) and a fresh file is started. Only relevant when `IRIS_AUDIT_LOG` is set. |
 | `IRIS_AUDIT_LOG_PARAMS` | `false` | **Optional.** When `true`, audit entries also include each call's (redacted) parameter *values*; the default logs parameter *key names* only. Only relevant when `IRIS_AUDIT_LOG` is set. |
@@ -85,12 +86,161 @@ All servers use the same environment variables:
 | `IRIS_TOOLS_PRESET` | `full` | **Optional.** `"full"` (today's behavior) \| `"core"` (~10-tool small-model subset) \| `"developer"` (persona filter, security/enterprise admin hidden). Unknown value fails fast at startup naming the valid values. Omit for today's `tools/list`, byte-for-byte. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_DISABLE` | *(unset)* | **Optional.** Comma-separated tool names to hide from `tools/list`. Trailing-`*` wildcard supported (`iris_doc_*`); a bare `*` alone is rejected. Omit to hide nothing beyond the active preset. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_ENABLE` | *(unset)* | **Optional.** Comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE` (punches a hole in a hidden family). Omit for no overrides. See [Tool Visibility Presets](#tool-visibility-presets). |
+| `IRIS_SERVER_MANAGER` | `off` | **Optional.** `off` (default — today's behavior, no settings file is ever read) \| `auto` (import connection definitions from the InterSystems Server Manager VS Code extension) \| `required` (as `auto`, but fail startup if no definition is found). Unknown value fails fast at startup naming the valid values. See [Server Manager connections](#server-manager-connections-optional). |
+| `IRIS_SM_SERVERS` | *(unset — import all)* | **Optional.** Comma-separated allow-list of `intersystems.servers` names to import, so you get the two servers you want instead of your whole roster. A listed name that matches nothing warns (it fails only under `IRIS_SERVER_MANAGER=required`, where nothing would be imported at all). Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required`. |
+| `IRIS_SM_SETTINGS_PATHS` | *(unset — normal discovery)* | **Optional.** Escape hatch: a `;`-separated (Windows) / `:`-separated (macOS, Linux) list of `settings.json` paths that **replaces** discovery entirely. Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required`. |
+| `IRIS_SM_WORKSPACE` | *(unset — the process CWD)* | **Optional.** Directory whose `.vscode/settings.json` is used as the highest-precedence source. Set it explicitly when the MCP client's working directory is not the workspace you mean. Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required`. |
+| `IRIS_CREDENTIAL_HELPER` | *(unset)* | **Optional.** A command run with the Server-Manager profile name appended as its **final argument**; the command's trimmed stdout is the password. Because the name is always appended, point this at a small wrapper script that uses it (e.g. a script running `op read "op://vault/$1/password"` or `pass show "iris/$1"`) rather than at a bare `op read …`/`pass show …`, which would reject the extra argument. Run without a shell, so on Windows point it at a real `.exe` (a `.cmd`/`.bat` shim needs `cmd /c <your-helper.cmd>`). Runs synchronously per password-less profile with a 10s timeout, so keep `IRIS_SM_SERVERS` tight if the helper can hang. Link 3 of the credential chain — see [Server Manager connections](#server-manager-connections-optional). Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required` and a profile still lacks a password after the OS-keychain link. |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, and `IRIS_TOOLS_ENABLE` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_GOVERNANCE_FILE`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, `IRIS_TOOLS_ENABLE`, `IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_SM_WORKSPACE`, and `IRIS_CREDENTIAL_HELPER` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+
+#### Server Manager connections (optional)
+
+If you already curate IRIS connections in the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) VS Code extension, set `IRIS_SERVER_MANAGER=auto` and the suite reads those `intersystems.servers` definitions straight out of your VS Code settings files — no re-typing host/port/username into every MCP client config. Each imported definition becomes a named profile you address with the `server` parameter, exactly like an `IRIS_PROFILES` entry.
+
+> **⚠️ Read this first — Server Manager import is ADDITIVE, and the keychain does NOT cover your base credentials.**
+>
+> **The six base variables are still required.** `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE` and `IRIS_HTTPS` configure the reserved `default` profile, and `default` is built **before** any Server Manager import. Setting `IRIS_SERVER_MANAGER=auto` **does not let you omit them** — the server fails at startup with `IRIS_USERNAME environment variable is required` (then `IRIS_PASSWORD…`) if you try. Server Manager adds *extra* addressable profiles; it does not replace your primary connection.
+>
+> **The OS keychain serves Server-Manager-discovered profiles ONLY.** `iris-mcp-credentials set <name>` stores a password that the credential chain uses for an **imported** definition that has none. It is **not** consulted for `IRIS_PASSWORD`: storing an entry named `default` has no effect, because `loadConfig` reads the base credentials from the environment and never calls the chain. So today the keychain reduces plaintext for your *additional* servers — it cannot remove `IRIS_PASSWORD` from your client config.
+>
+> Worked example: with `IRIS_HOST`/`IRIS_USERNAME`/`IRIS_PASSWORD` set for `default`, `IRIS_PROFILES` adding `sademo`, `IRIS_SERVER_MANAGER=auto` importing `local` (inline password) and `localhost2` (keychain, via `iris-mcp-credentials set localhost2`), all four resolve and route — but removing `IRIS_PASSWORD` breaks startup for all of them.
+
+- **Default is `off`.** Nothing is read, nothing is imported, and no settings file is touched unless you opt in.
+- **Discovery order** (highest precedence first), mirroring VS Code's own folder > workspace > user scope ranking: (1) the workspace `.vscode/settings.json` (from `IRIS_SM_WORKSPACE`, else the process working directory); (2) every `*.code-workspace` file directly inside that same directory, sorted by filename — multi-root workspaces commonly keep `intersystems.servers` only there; (3) each product's user settings — `Code`, `Code - Insiders`, `VSCodium`, `Cursor` (`%APPDATA%\<Product>\User\settings.json` on Windows, `~/Library/Application Support/<Product>/User/settings.json` on macOS, `$XDG_CONFIG_HOME/<Product>/User/settings.json` then `~/.config/<Product>/User/settings.json` on Linux); (4) on Linux only, Flatpak sandboxes — `~/.var/app/{com.visualstudio.code,com.visualstudio.code.insiders,com.vscodium.codium}/config/<Product>/User/settings.json`. The first file to define a name wins. A name already defined by `IRIS_*` or `IRIS_PROFILES` always wins over a Server Manager definition.
+- **Linux specifics.** VS Code is Electron, whose Linux config root is `$XDG_CONFIG_HOME` *or* `~/.config` — so both are searched, XDG first. A Flatpak install cannot write `~/.config` at all (Flatpak redirects the app's `XDG_CONFIG_HOME` into its sandbox), so the three published Flathub apps are searched too, after the native paths. Cursor is not published on Flathub and therefore has no Flatpak entry; use `IRIS_SM_SETTINGS_PATHS` for any install layout not listed here, including VS Code portable mode.
+- **Both settings-file shapes are understood.** A `settings.json` holds `intersystems.servers` at the top level; a `.code-workspace` file nests every setting under a `settings` key. Either works, including when named explicitly in `IRIS_SM_SETTINGS_PATHS`.
+- **Passwords are not readable directly, but a credential chain completes them.** Server-Manager-saved passwords live in VS Code SecretStorage and are cryptographically unreachable from outside VS Code — by design, with no supported extraction path. For any imported definition that lacks a password, the suite tries, in order: (1) the OS keychain (Windows Credential Manager / macOS Keychain / libsecret), service `iris-mcp`, account `<name>` — set with the [`iris-mcp-credentials` CLI](#iris-mcp-credentials-cli) below; (2) `IRIS_CREDENTIAL_HELPER`. A definition carrying a legacy inline `password` still works too (with a deprecation warning), provided it also declares its own `username` — see the next bullet. If every link is exhausted, the profile is excluded at startup with a log line naming the remediations; under `IRIS_SERVER_MANAGER=required` this fails startup instead.
+- **`IRIS_PROFILES` replaces a Server Manager definition — it does not complete one.** If a name exists in both, the environment wins and the Server Manager definition is discarded *entirely*, host and username included (a warning names the collision). So an `IRIS_PROFILES` entry that supplies **only** a password will quietly give you a profile pointed at your **local** `IRIS_HOST`/`IRIS_USERNAME`, not at the Server Manager host. To supply a password for a Server Manager definition, use the OS keychain or `IRIS_CREDENTIAL_HELPER`; use `IRIS_PROFILES` only when you are defining the whole connection there.
+- **A Server-Manager entry needs its own `username`.** An entry that omits `username` (relying on the local default's username) is **not imported at all** — a warning names the file and the fix. Pairing an inherited username with a password destined for a different remote host risks repeated authentication failures that can lock out the account there. Add `"username"` to the `intersystems.servers` entry to opt in. *(Changed in this release: such an entry previously imported successfully when it carried an inline `password`.)*
+- **The same name in two settings files.** The first (highest-precedence) file wins. The one exception: if that definition has no password of its own and a lower-precedence file's definition carries an inline `password`, the lower-precedence definition is imported instead — **including its host, port and username** — and a warning names both hosts. Store a password for the name (`iris-mcp-credentials set <name>`) to make the higher-precedence definition win.
+- **`auto` reads the working directory.** Because the workspace candidate defaults to the process CWD, a repository you have merely cloned can contribute connection definitions. Set `IRIS_SM_WORKSPACE` explicitly, or pin `IRIS_SM_SERVERS`, when working in repositories you do not control.
+- **Changes require a restart**, exactly like the `IRIS_*` environment variables.
+- **See where every profile came from.** `iris_server_profiles` (the [discovery tool](#discovering-profiles-and-policy-call-this-first)) reports a `source` field on every roster entry — `"env"` (from `IRIS_*`/`IRIS_PROFILES`) or `"server-manager"` (imported from a settings file) — plus `sourceFile`, the exact settings file a Server-Manager-sourced profile came from. Both are attribution only: they never affect which actions governance allows, only where you look to change a connection's host/port/username. The optional `IRIS_AUDIT_LOG` audit trail (see [Compliance & Auditability](#compliance--auditability)) likewise records `profileSource` per call, for the same reason.
+- **`sourceFile` is a local path, and your AI client sees it.** It never contains a password — but it *is* a real filesystem path, so when a profile comes from a **user-scope** settings file it includes your OS account name (e.g. `C:\Users\jsmith\AppData\Roaming\Code\User\settings.json`), and when it comes from a workspace it includes that directory. Because the roster is returned to the connected MCP client, that path is visible to the model. This is deliberate: a bare filename would be useless — every candidate file is called `settings.json`, so the folder is the whole point. If you would rather not disclose local paths, define the connections you expose at workspace scope (`IRIS_SM_WORKSPACE`), or leave `IRIS_SERVER_MANAGER` off and use `IRIS_PROFILES`.
+
+#### VS Code extension: IRIS MCP Launcher (optional, Copilot-family only)
+
+If you're inside VS Code with GitHub Copilot (or another client that consumes VS Code's built-in MCP server
+registry), there's a **fourth** way to connect that sidesteps the credential chain above entirely:
+[`extensions/iris-mcp-launcher/`](extensions/iris-mcp-launcher/README.md), a standalone, optional VS Code
+extension (outside this repo's npm workspace) that registers the `@iris-mcp/*` servers directly with VS Code and
+resolves credentials from Server Manager's `vscode.authentication` session **inside the extension host** — the
+one place a Server-Manager-saved SecretStorage password actually is reachable. No OS keychain setup, no
+`IRIS_CREDENTIAL_HELPER`, no `IRIS_PROFILES` password entry required.
+
+**This only helps Copilot-family agents** *for launching servers*. Claude Code manages its own MCP configuration
+(`claude mcp add` / `.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
+`IRIS_SERVER_MANAGER`/credential-chain path documented above instead. See the extension's own README for the
+verified client-coverage boundary and citations.
+
+**The extension carries three surfaces**, and two of them help *every* client, not just Copilot:
+
+| Command (category "IRIS MCP Launcher") | What it does |
+| --- | --- |
+| **Select Servers…** | Choose which Server Manager servers become MCP servers; a status bar item shows how many are registered |
+| **Manage MCP Clients…** | Wire the suite into any of the 13 supported MCP clients — detect, per-server enable/disable, diff preview, backup/restore, doctor. The GUI front-end for [`iris-mcp-clients`](#the-manager-iris-mcp-clients-recommended); **useful to Claude Code / Cursor / Cline users too** |
+| **Open Governance Editor** | Visually edit the shared [governance policy file](#governance-file-iris_governance_file) that every client's servers read |
+
+**Installing it (not yet on any Marketplace).** Build a VSIX from this checkout and install it, then point it at
+your checkout — full steps, including the reload/reinstall gotchas, are in
+[the extension's install section](extensions/iris-mcp-launcher/README.md#installing-in-development-mode):
+
+```bash
+cd extensions/iris-mcp-launcher && npm install && npm run build
+npx vsce package --allow-missing-repository        # -> iris-mcp-launcher-0.1.0.vsix
+code --install-extension "$PWD/iris-mcp-launcher-0.1.0.vsix"
+# then: Developer: Reload Window, and set irisMcpLauncher.developmentRepoPath to this repo's absolute path
+```
+
+#### Where do Server Manager passwords come from? (the canonical answer)
+
+**Short version: a Server Manager password is never readable outside VS Code, by design — but the suite can still get one from you through three other doors.**
+
+VS Code's Server Manager extension stores passwords in its own encrypted SecretStorage (backed by the OS's `safeStorage`/keychain, app-bound to VS Code itself). There is no supported API, file, or database an external process — including this suite — can read to recover that value. If you set `IRIS_SERVER_MANAGER=auto`/`required` and a Server-Manager-sourced profile still shows no password at startup, this is why, and it is expected. Complete it one of these three ways instead:
+
+1. **OS keychain (recommended).** Run `iris-mcp-credentials set <name>` once per machine (see the [CLI](#iris-mcp-credentials-cli) below) — it stores the password in the same class of OS-native secure storage (Windows Credential Manager / macOS Keychain / libsecret) that VS Code itself uses, just under this suite's own service name (`iris-mcp`). This is the credential chain's link 2 and needs no config file.
+2. **`IRIS_CREDENTIAL_HELPER`.** Point this environment variable at a command (e.g. a wrapper around `op`, `pass`, or your organization's secret manager) that prints the password to stdout when given the server name. Useful when you already have a secrets tool and don't want a second, suite-specific store.
+3. **`IRIS_PROFILES` — but only as a *full replacement*, never a patch.** An `IRIS_PROFILES` entry for the same name does not "add a password" to the Server Manager definition; it **replaces it entirely**, including host/port/username. Use this only when you want to define the connection outside Server Manager altogether.
+
+If none of the three is set up, the profile is excluded at startup (a log line names all three remediations) rather than started with a missing or wrong credential; under `IRIS_SERVER_MANAGER=required` this fails startup instead of degrading silently.
+
+#### `iris-mcp-credentials` CLI
+
+A small command-line tool — ships as a `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/credentials-cli.js` — for the one-time per-machine setup referenced above: storing, listing, testing, and removing IRIS passwords in the OS keychain, so the OS-keychain link of the credential chain never needs a hand-edited config file containing a password. Not yet published to npm (see [Quick Start](#quick-start)), so invoke it directly with `node`:
+
+```bash
+node packages/shared/dist/cli/credentials-cli.js set myserver
+```
+
+| Command | Effect |
+|---------|--------|
+| `set <name>` | Store a password for `<name>` in the OS keychain. Interactive by default — prompts with echo suppressed; `--stdin` reads the password from a pipe or file instead (a leading UTF-8 BOM and a single trailing newline are stripped) for scripted/CI use. `--stdin` is **refused when stdin is a terminal**, because reading a TTY does not suppress echo and the password would appear in cleartext. A password is **never** accepted as a command-line argument — it would land in shell history and any same-user process listing. |
+| `delete <name>` | Remove the stored password for `<name>`. A missing entry is exit code 1, not an error. |
+| `list [--json]` | List stored server **names only** — no password value is ever printed, logged, or serialized. (The native `findCredentials(service)` API returns `{account, password}` pairs and offers no account-only entry point, so passwords do transit process memory during enumeration; the CLI discards them at the first opportunity and never touches them again.) Enumeration is verified against the Windows Credential Manager; macOS Keychain and libsecret back-ends may enumerate differently. `set`, `delete` and `test` are unaffected. |
+| `test <name> [--connect] [--json]` | Run the real credential chain for `<name>` (env → OS keychain → credential helper) and report which link resolved it. `--connect` additionally performs a live Atelier `HEAD /api/atelier/` check against the mapped profile, reusing the same health-check path the servers use at startup. `--connect` needs `<name>` to map to a connection profile **in the shell running the CLI** — i.e. `IRIS_SERVER_MANAGER=auto` (or an `IRIS_PROFILES` entry), plus `IRIS_USERNAME`/`IRIS_PASSWORD` for the reserved `default` profile. Without them the credential check still reports correctly and only the connectivity half fails, naming this remedy. |
+
+A `<name>` that is empty, whitespace-only, or contains a newline or control character is rejected (exit 2) before the keychain is touched. Use `--` to address a name that begins with `-`, e.g. `iris-mcp-credentials delete -- --json`.
+
+Every password is stored under OS-keychain service `iris-mcp`, account `<name>` — the exact key the credential chain's OS-keychain link (link 2, above) reads, so a name you `set` here is immediately usable once `IRIS_SERVER_MANAGER=auto`/`required` is set (default `off` — see the variable table above).
+
+Exit codes are consistent across all four commands: `0` success · `1` not found / credential unresolved / OS keychain unavailable (or a failed `--connect` check) · `2` usage or input error (unknown command, missing or extra argument, unknown option, invalid server name, empty password, aborted prompt).
+
+`--json` output is available on `list` and `test`. Its contract: an **operational** outcome (exit 0 or 1) always writes exactly one JSON object to stdout — on failure that is `{"error": "..."}` for `list`, and an `error` field alongside the usual fields for `test`. **Usage errors (exit 2) are always plain text on stderr**, because the flags themselves were not understood. Human-readable failures always go to stderr, so `... --json 2>/dev/null | jq` works while a human still sees the error.
+
+Every output path — human text, `--json`, `--help`, and error/failure messages, including a failed `--connect` — is secret-free: known secrets are substring-redacted, and a secret too short to redact safely causes the whole message body to be withheld. Unlike the credential chain's own OS-keychain link (which silently skips to the next link when the native keychain module is unavailable), this CLI's `set`/`delete`/`list` fail loudly with a non-zero exit and an actionable message, since operating on the OS keychain is the whole point of the command. Run `node packages/shared/dist/cli/credentials-cli.js --help` for full usage.
+
+#### `iris-mcp-governance` CLI
+
+A small command-line tool — ships as a second `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/governance-cli.js` — for validating, inspecting, and editing a [governance file](#governance-file-iris_governance_file) with the SAME engine the servers enforce with: every parse goes through the server's own loader (so `validate` prints the exact error text a server would fail startup with), and `effective`/`diff` compose the shared cascade functions directly rather than reimplementing them. Opt-in and agent-agnostic — with no file configured, the servers are unaffected. Not yet published to npm (see [Quick Start](#quick-start)), so invoke it directly with `node`:
+
+```bash
+node packages/shared/dist/cli/governance-cli.js validate --file C:\governance\iris-policy.json
+```
+
+| Command | Effect |
+|---------|--------|
+| `validate [--file <path>] [--json]` | Parse and validate the file with the same loader the servers use at startup. Exit 1 (the server's exact error text, naming `IRIS_GOVERNANCE_FILE` + the path) when invalid. |
+| `get <key> [--profile <name>] [--json]` | Print the key's explicit value **in the file** (`true`/`false`/unset) — the file's own layer, not the cascade. |
+| `set <key> true\|false [--profile <name>]` | Write the key into the file (creating the file when missing). Atomic write (temp + rename in the same directory), existing key order preserved, the written file automatically re-validated with rollback on failure. Reserved keys (`__proto__` etc.) are rejected; a key outside the frozen baseline warns on stderr but is still written (post-foundation keys like `iris_env_promote:execute` are legitimate). |
+| `unset <key> [--profile <name>]` | Remove the key from the file. Exit 1 when the key is not set (the `iris-mcp-credentials delete` not-found convention). |
+| `preset read-only\|full` | Print the env-level wiring for `IRIS_GOVERNANCE_PRESET` — **writes nothing**: the servers source the preset from their process environment only, never from a governance file. |
+| `effective [--profile <name>] [--json]` | Render the SAME cascade the servers compute (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`) for the CLI's own environment plus the resolved file, with the per-key `configSource` (`env`\|`file`\|`preset`\|`default`). |
+| `diff [--json]` | Compare every key the file sets against its default-seed value. |
+| `universe [--profile <name>] [--root <path>] [--json]` | Render the **full** governed-key universe — the frozen baseline ∪ the five server packages' registered tool keys (derived from their built dist, the same derivation the suite's cross-package tests use) ∪ the framework `iris_server_profiles` tool — with the real `mutates`/default-enabled classifications, per-key effective value, and `configSource`. This is the render a running server's `iris_server_profiles` computes over its own registered subset; post-foundation write keys seed default-DISABLED here (unlike `effective`/`diff`). Needs the packages' built dist locatable: `--root` names a monorepo root (or package container dir); otherwise auto-detected from the CLI's own install location. |
+
+**Default file resolution** — `--file <path>` wins; otherwise `IRIS_GOVERNANCE_FILE` from the environment. Explicit path only: the CLI never discovers or searches for a file (architecture decision J1). Exit codes: `0` success · `1` operational failure (file unreadable/invalid per the server loader, a key not set for `unset`) · `2` usage error. `--json` on the read commands (`validate`, `get`, `effective`, `diff`, `universe`) always emits exactly one parseable JSON object to stdout on an operational outcome — including failures; usage errors (exit 2) are always plain text on stderr.
+
+One caveat: the full governance-key universe is the frozen baseline plus each server's registered tool keys, which `validate`/`get`/`set`/`unset`/`effective`/`diff` cannot enumerate (importing a server package would be a circular dependency). `effective`/`diff` therefore render over the baseline plus keys mentioned in any config layer — a post-foundation key mentioned nowhere renders with the read-default seed (enabled) even when a real server would seed it disabled. The `universe` command closes that gap by deriving the registered half from built dist, and `iris_server_profiles` on a running server remains the authoritative render. Run `node packages/shared/dist/cli/governance-cli.js --help` for full usage.
 
 ### 3. Configure Your MCP Client
 
 Point your MCP client at the built server using `node` and the local `dist/index.js` path. Replace `/path/to/iris-execute-mcp-v2` with the actual path where you cloned the repo.
+
+> **📖 [MCP client configuration index](docs/client-config/README.md)** — copy-pasteable config for **13 clients** (Claude Code, VS Code/Copilot, Cline, Kimi Code, Kimi CLI, Codex CLI, Cursor, Claude Desktop, Windsurf, Roo Code, Gemini CLI, Zed, Goose), a format/root-key matrix (three formats and four different root keys between them), and the two credential caveats above restated where you need them.
+
+#### The manager: `iris-mcp-clients` (recommended)
+
+The [`@iris-mcp/client-config`](packages/client-config/README.md) package ships the **`iris-mcp-clients`** CLI — one tool that wires any of the 13 supported clients for you instead of hand-editing config files: it detects which clients are installed, previews the exact edit, writes through a backup-on-write engine, toggles entries, rolls back, and diagnoses the result. Not yet published to npm (see [Quick Start](#quick-start)), so invoke the built bin directly with `node`:
+
+```bash
+node packages/client-config/dist/cli/clients-cli.js detect                    # which clients are installed
+node packages/client-config/dist/cli/clients-cli.js diff --client claude-code --servers iris-dev-mcp
+node packages/client-config/dist/cli/clients-cli.js apply --client claude-code --servers iris-dev-mcp
+node packages/client-config/dist/cli/clients-cli.js doctor                    # env refs, parseability, drift, backups, stashes
+```
+
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint.
+
+**The zero-secrets end state** — three composable pieces, each covering a different secret class:
+
+1. **Server Manager + OS keychain** (Epic 31): `--mode server-manager` writes entries carrying `IRIS_SERVER_MANAGER=auto` — connections come from your InterSystems Server Manager profiles, passwords from the OS keychain via `iris-mcp-credentials set <name>`; nothing secret in the config file.
+2. **Governance file** (Epic 32): `--mode governance-file` writes entries carrying `IRIS_GOVERNANCE_FILE=<path>` — one shared policy file governs every server's tool surface; the file holds no credentials.
+3. **VS Code native inputs** (default `env-reference` mode on VS Code): the password is never stored — the manager merges a native `inputs` prompt (`${input:iris-password}`) so VS Code asks once and keeps it out of the file.
+
+Which clients/config surfaces are proven: the [adapter certification table](packages/client-config/README.md#certification-dispositions-generated) (Claude Code, VS Code, Cline and Kimi Code are certified-live as of 2026-07-28; the rest carry explicit fixture-only-with-residual-risk dispositions — re-provable anywhere with `node packages/client-config/scripts/certify.mjs run <client> --real-config`).
+
+The manual per-client snippets below remain as the fallback (and as the reference for what the manager writes).
 
 #### Claude Code (`.mcp.json`)
 
@@ -183,7 +333,7 @@ If the assistant returns results from your IRIS instance, you are connected.
 
 ## Multiple Servers & Governance
 
-Two optional environment variables — `IRIS_PROFILES` and `IRIS_GOVERNANCE` — let one MCP server process target **several IRIS instances** and **restrict which tool actions are allowed** per instance. Both are JSON values set in your MCP client's `env` block (no external files). **Neither is required**: with both unset, the suite behaves exactly as a single-server, fully-enabled install (see [Backward Compatibility](#backward-compatibility) below).
+Two optional environment variables — `IRIS_PROFILES` and `IRIS_GOVERNANCE` — let one MCP server process target **several IRIS instances** and **restrict which tool actions are allowed** per instance. Both are JSON values set in your MCP client's `env` block (or, for governance, in a JSON *file* referenced by `IRIS_GOVERNANCE_FILE` — see [Governance file](#governance-file-iris_governance_file)). **Neither is required**: with both unset, the suite behaves exactly as a single-server, fully-enabled install (see [Backward Compatibility](#backward-compatibility) below).
 
 > **Where to put the escaped JSON:** because `IRIS_PROFILES`/`IRIS_GOVERNANCE` are JSON *strings* that live inside your client's JSON config, the inner quotes must be escaped. See the per-client guides for copy-pasteable, correctly-escaped blocks: [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md).
 >
@@ -222,10 +372,10 @@ A governance **key** is the tool name for single-operation tools (e.g. `iris_met
 **Effective policy** for a given action on a given profile resolves in this order:
 
 ```
-effective = profile.explicit(key) ?? global.explicit(key) ?? defaultSeed(key)
+effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key) ?? presetSeed(key) ?? defaultSeed(key)
 ```
 
-That is: a per-profile setting wins; otherwise the global setting; otherwise the **default seed**.
+That is: a per-profile `IRIS_GOVERNANCE` setting wins; otherwise the global `IRIS_GOVERNANCE` setting; otherwise the governance *file's* per-profile setting; otherwise the file's global setting (see [Governance file](#governance-file-iris_governance_file) — with no file configured, both file layers are simply absent); otherwise the [preset](#read-only-mode-point-it-at-production-with-one-environment-variable); otherwise the **default seed**. **All env layers sit above all file layers** — a pre-existing `IRIS_GOVERNANCE` setting can never be overridden by a governance file introduced later.
 
 **The default seed** (what happens when neither `global` nor `profiles` mentions a key):
 
@@ -250,6 +400,23 @@ The "existing action" baseline is generated mechanically from the shipped tool c
 
 (the human-readable text reads `action 'iris_backup_manage:run' is disabled by governance policy for server 'prod'`).
 
+### Governance file (`IRIS_GOVERNANCE_FILE`)
+
+`IRIS_GOVERNANCE_FILE` points at a **JSON file of exactly the same shape as `IRIS_GOVERNANCE`** (`{"global": {...}, "profiles": {...}}`, booleans only). One file can be referenced from every MCP client's `env` block, so a single policy stays portable across Claude Code, Cursor, Copilot, and any other client that can pass a plain environment string — while the servers remain the sole enforcement authority.
+
+```json
+{ "env": { "IRIS_GOVERNANCE_FILE": "C:\\governance\\iris-policy.json" } }
+```
+
+- **Default state: unset ⇒ inert.** With the variable unset, no file is ever read (zero filesystem access) and behavior is byte-for-byte identical to an install without the feature. This channel is **opt-in**.
+- **Env always wins.** The file contributes two cascade layers strictly *below* both `IRIS_GOVERNANCE` env layers (`env.profile ?? env.global ?? file.profile ?? file.global ?? preset ?? default seed`): a file introduced later can never silently override a policy you already set inline.
+- **Explicit path only — never discovered.** The value is used literally; nothing is searched for in the working directory. A *relative* path resolves against the server process's current working directory, which the MCP *client* chooses — prefer an **absolute path**.
+- **Restart semantics (no hot-reload in v1).** The file is read once at startup; edits take effect on the next server restart.
+- **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file aborts startup with an error naming `IRIS_GOVERNANCE_FILE`, the path, and the underlying reason — an operator who pointed at a policy file never runs ungoverned by mistake.
+- **Attribution.** `iris_server_profiles` and the `iris-governance://<profile>` resource report a `configSource` per key (`env` | `file` | `preset` | `default`), so you can see which channel resolved each setting.
+
+Manage the file without hand-editing JSON: the [`iris-mcp-governance` CLI](#iris-mcp-governance-cli) (`validate` / `get` / `set` / `unset` / `effective` / `diff`) uses the same loader and cascade the servers enforce with, so what you write is what the servers will compute.
+
 ### Read-only mode — point it at production with one environment variable
 
 **Point it at production in read-only mode with one environment variable.** Set `IRIS_GOVERNANCE_PRESET=read-only` and every write-classified tool action — across all five servers — is blocked, while every read action keeps working, with zero `IRIS_GOVERNANCE` JSON to write:
@@ -272,7 +439,7 @@ Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_e
 { "env": { "IRIS_GOVERNANCE_PRESET": "read-only", "IRIS_SQL_MAX_ROWS": "1000", "IRIS_SQL_TIMEOUT": "30" } }
 ```
 
-See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ### Worked example — enable a write action globally, block it on `prod`
 
@@ -297,7 +464,7 @@ The same shape governs any action you can name today. To try it against a write 
 
 Every server provides a framework tool, **`iris_server_profiles`**, that an AI client should **call first** to learn its operating environment without reading the client's config files:
 
-- **Profile roster** — for each configured profile: `name`, `isDefault`, `host`, `port`, `username`, `namespace`, `https`, `baseUrl`, `timeout`. The **`password` is never included** (an allow-list of non-secret fields). Use this to pick the right `server` profile for subsequent calls.
+- **Profile roster** — for each configured profile: `name`, `isDefault`, `host`, `port`, `username`, `namespace`, `https`, `baseUrl`, `timeout`, `source` (`"env"` or `"server-manager"` — where the connection fields came from), and `sourceFile` (the settings file, for a `"server-manager"`-sourced profile only). The **`password` is never included** (an allow-list of non-secret fields). Use this to pick the right `server` profile for subsequent calls.
 - **Effective governance policy** — the enabled/disabled action map for a selected profile (optional `profile` arg; defaults to `default`), or for every profile with `allProfiles: true`. Computed from the same engine the governance resource uses, so the two never disagree.
 
 It does not connect to IRIS (it reports in-memory config), so it works even when the target instance is unreachable. It is a **read tool, enabled by default** — an operator can still disable it explicitly via `IRIS_GOVERNANCE`. The same call-first guidance is also surfaced via the MCP server `instructions` field at connect time.
@@ -468,7 +635,7 @@ For regulated environments — healthcare, finance, or any shop that has to answ
 {"ts":"2026-07-11T14:03:22.117Z","session":"1f2e3a9c-...","seq":42,"serverPkg":"@iris-mcp/ops","tool":"iris_database_action","action":"truncate","profile":"prod","namespace":"HSCUSTOM","outcome":"denied","denyReason":"GOVERNANCE_DISABLED","presetApplied":"read-only","durationMs":3,"paramKeys":["action","database"]}
 ```
 
-`session` is a UUID generated once per server process, so every line from one running server shares it; `seq` is a per-session monotonic counter (1, 2, 3, …), so a log file can be replayed in exact call order even under concurrent calls. `outcome` is one of `ok`, `error` (the entry's `error` field carries the same sanitized message the caller received — never a raw stack trace or an internal `^global` reference), or `denied` (the governance gate blocked it — see [Multiple Servers & Governance](#multiple-servers--governance) — with a structured `denyReason` and, when a safety preset rather than an explicit override caused the block, `presetApplied`).
+`session` is a UUID generated once per server process, so every line from one running server shares it; `seq` is a per-session monotonic counter (1, 2, 3, …), so a log file can be replayed in exact call order even under concurrent calls. `outcome` is one of `ok`, `error` (the entry's `error` field carries the same sanitized message the caller received — never a raw stack trace or an internal `^global` reference), or `denied` (the governance gate blocked it — see [Multiple Servers & Governance](#multiple-servers--governance) — with a structured `denyReason` and, when a safety preset rather than an explicit override caused the block, `presetApplied`). Each entry also carries `profileSource` — `"server-manager"` when the resolved `profile` came from [Server Manager connections](#server-manager-connections-optional), `"env"` for an `IRIS_*`/`IRIS_PROFILES` profile — so an auditor can filter by where a connection was defined, not just by its name. It mirrors the roster's `source` field exactly and is attribution only: it is never an input to any governance decision. The field is **omitted entirely in one case only** — when the call's `server` parameter named a profile that does not exist in the registry (an unknown-profile call, which is rejected). So treat a missing `profileSource` as "no profile resolved", **not** as `"env"`.
 
 **Secrets-free by construction, not by convention.** Before an entry is ever written — before it even reaches the write queue — the logger recursively walks the call's arguments (through nested objects and arrays of objects) and replaces the *value* of any key that looks like a credential (`password`, `passwd`, `secret`, `token`, `credential`, `apikey`/`api_key`, `authorization` — case-insensitive) with `"[REDACTED]"`, and truncates any other string over 2 KB to its first 256 characters. `IRIS_AUDIT_LOG_PARAMS` defaults to `false`: the safest posture, logging parameter *key names* only and never writing a single parameter value, redacted or not. Setting it to `true` includes the (still-redacted) values for deeper forensics.
 
@@ -478,7 +645,7 @@ For regulated environments — healthcare, finance, or any shop that has to answ
 
 **Disambiguation — this is not `iris_audit_manage` / `iris_audit_events`.** The suite already ships two *IRIS server-side* security-audit tools: `iris_audit_manage` (`@iris-mcp/admin`) manages IRIS's own `%SYS.Audit*` security-audit subsystem (login events, privilege changes, and similar — a feature of the IRIS instance itself), and `iris_audit_events` (`@iris-mcp/ops`) reads events from that same IRIS-native audit database. `IRIS_AUDIT_LOG` is a completely different thing: it is the **MCP server process's own record of the tool calls an AI client made through it**. It has nothing to do with IRIS's built-in auditing feature, doesn't read from or write to `%SYS.Audit*`, and works whether or not IRIS-native auditing is enabled at all. Don't conflate the two when scoping a compliance review — they answer different questions ("what did IRIS's security subsystem observe" vs. "what did the AI, through this MCP server, actually do").
 
-See the per-client guides ([Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md), [Cursor](docs/client-config/cursor.md)) for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ---
 

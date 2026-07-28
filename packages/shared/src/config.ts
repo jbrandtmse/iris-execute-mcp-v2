@@ -61,6 +61,25 @@ export function loadConfig(
   env: Record<string, string | undefined> = process.env,
 ): IrisConnectionConfig {
   const host = env.IRIS_HOST ?? "localhost";
+  // 32-3-R6 (Story 32.4): IRIS_HOST is a bare hostname, never a URL — a
+  // userinfo-carrying value (`admin:hunter2@host`) would land verbatim in
+  // `baseUrl`, hence in the `iris_server_profiles` roster of the reserved
+  // default profile and of every host-less `IRIS_PROFILES` entry. The value
+  // is deliberately NOT echoed in the message (it can embed a credential).
+  // `:` is rejected (a host is not host:port — use IRIS_PORT) EXCEPT inside
+  // a bracketed IPv6 literal (`[::1]`), which composes a valid baseUrl and
+  // worked before this guard existed (Rule #19 — a bare `::1` never worked:
+  // `baseUrl` derivation does not bracket it). `?`/`#` are rejected too
+  // (32.4 review): they compose a baseUrl whose query/fragment swallows the
+  // port and every request path, so no working configuration used them.
+  const isBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(host);
+  if (/[@/\s\\?#]/.test(host) || (!isBracketedIpv6 && host.includes(":"))) {
+    throw new Error(
+      `IRIS_HOST must be a bare hostname — it must not contain "@", "/", "\\", "?", "#", or ` +
+        `whitespace, and no ":" outside a bracketed IPv6 literal like "[::1]" (URL userinfo, ` +
+        `a scheme, or an inline port is not a host; use IRIS_PORT for the port).`,
+    );
+  }
   const port = Number(env.IRIS_PORT ?? "52773");
 
   if (Number.isNaN(port) || port <= 0 || port > 65535) {

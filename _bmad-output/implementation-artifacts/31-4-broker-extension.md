@@ -1,0 +1,267 @@
+# Story 31.4: Broker Extension MVP (`iris-mcp-launcher`)
+
+Status: done
+
+<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
+
+## Story
+
+As a **VS Code user who already has connections and saved passwords in the InterSystems Server Manager extension**,
+I want **an optional extension that registers the iris-mcp servers with VS Code and resolves my credentials at spawn time**,
+so that **Copilot-family agents get working IRIS tools with zero manual config and no password ever written to a file — the one path where SecretStorage credentials CAN be used.**
+
+## Acceptance Criteria
+
+1. **AC 31.4.1** — New VS Code extension (separate repo/package; not in the npm workspace): `extensionDependencies: ["intersystems-community.servermanager"]`; registers a `McpServerDefinitionProvider`; enumerates `api.getServerNames()`; extension settings select which Server Manager servers and which of the 5 suite servers (+ `@iris-mcp/all`) to expose.
+2. **AC 31.4.2** — `resolveMcpServerDefinition` resolves credentials per the verified pattern: `getServerSpec(name)` → if no password, `getAccount(spec)` + `vscode.authentication.getSession(AUTHENTICATION_PROVIDER, [name, username], {silent:true, account})` → fallback `{createIfNone:true, account}`; password = `session.accessToken`; user cancellation ⇒ definition unresolved with a clear message (no error toast storm); spawns `npx -y @iris-mcp/<pkg>` with synthesized `IRIS_*` env (single-profile) or `IRIS_PROFILES` (multi), plus pass-through governance/audit/visibility env from extension settings.
+3. **AC 31.4.3** — Credentials exist only in the spawned process env — never written to settings, globalState, or logs (code-review assertion + no-write test where feasible); README documents the client-coverage boundary (Copilot-family consumes VS Code-registered MCP servers; Claude Code does not — verified against current Claude Code docs at implementation time, Rule #16 spirit).
+4. **AC 31.4.4** — Manual smoke recorded in story notes: Copilot chat lists an iris-dev-mcp tool set via the extension with zero manual config on a machine with Server Manager profiles; cancel-the-prompt path verified; Marketplace/Open Exchange publish checklist drafted (publish itself may be a follow-on decision).
+
+### Integration ACs
+
+**No npm-package consumers.** This extension is a standalone optional deliverable — nothing in the workspace imports it, and it imports nothing from the workspace at build time (it spawns the published servers via `npx` at runtime).
+
+- **Integration AC 31.4.5** — The integration is *runtime, cross-process*: the extension synthesizes exactly the `IRIS_*` / `IRIS_PROFILES` env contract the suite already consumes (`loadConfig` / `buildProfileRegistry`). Prove the synthesized env shape matches that contract with a test that asserts against the real documented variable names and JSON shape, so a drift in either side is caught without needing VS Code.
+
+## Tasks / Subtasks
+
+- [x] **Task 1 — Scaffold the extension OUTSIDE the npm workspace (AC: 31.4.1)**
+  - [x] Create `extensions/iris-mcp-launcher/`. **`pnpm-workspace.yaml` globs only `packages/*`, so this path is already outside the workspace — do NOT add it to `pnpm-workspace.yaml`.** Adding it would pull it into turbo's task graph and move task counts. (Confirmed unchanged — `pnpm-workspace.yaml` still globs only `packages/*`.)
+  - [x] Its own `package.json` (name `iris-mcp-launcher`, `engines.vscode`, `main`, `contributes`, `activationEvents`), own `tsconfig.json`, own dev deps (`@types/vscode`, `typescript`). It builds and tests via its OWN scripts, not the root turbo pipeline.
+  - [x] `extensionDependencies: ["intersystems-community.servermanager"]` — this is what guarantees the Server Manager API is present.
+  - [x] Extension settings: which Server Manager servers to expose (`irisMcpLauncher.servers`), and which of the 5 suite servers (+ `@iris-mcp/all`) to register (`irisMcpLauncher.packages`).
+- [x] **Task 2 — Register the MCP server definition provider (AC: 31.4.1)**
+  - [x] Acquire the Server Manager API: `vscode.extensions.getExtension<ServerManagerAPI>("intersystems-community.servermanager")` → `await activate()` → `exports` (cache it) — `src/extension.ts`.
+  - [x] Register via `vscode.lm.registerMcpServerDefinitionProvider(providerId, provider)`; enumerate with `api.getServerNames()` and filter by the user's settings — `src/serverDefinitionProvider.ts`'s `planDefinitions`/`providePlannedDefinitions`.
+  - [x] Handle the Server Manager extension being absent/inactive gracefully with an actionable message (should not happen given `extensionDependencies`, but do not crash activation) — `getServerManagerApi` returns `undefined` on any failure (extension missing, `activate()` throws), never crashes; `providePlannedDefinitions`/`resolveEnvForLabel` both degrade to one warning + no servers registered.
+- [x] **Task 3 — Resolve credentials at spawn time (AC: 31.4.2)**
+  - [x] `getServerSpec(name)`; if the spec has no password: `account = api.getAccount(spec)`, then `vscode.authentication.getSession(AUTHENTICATION_PROVIDER, [name, username], { silent: true, account })`, falling back to `{ createIfNone: true, account }` — `src/credentials.ts`.
+  - [x] **Password is `session.accessToken`.** Username fallback chain: spec username → `session.scopes[1]` → `session.account.id` — implemented and unit-tested for all three fallback levels.
+  - [x] **User cancellation is a first-class outcome:** return the definition unresolved with ONE clear message. No error toast storm, no repeated re-prompting — `{status:"cancelled"}`, never throws; `resolveEnvForLabel` returns `undefined` with exactly one `showWarning` call.
+- [x] **Task 4 — Synthesize the spawn env (AC: 31.4.2, Integration AC 31.4.5)**
+  - [x] Command: `npx -y @iris-mcp/<pkg>` for each selected suite server — `src/serverDefinitionProvider.ts`.
+  - [x] Single-profile: `IRIS_HOST`, `IRIS_PORT`, `IRIS_HTTPS`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`. Multi-profile: synthesized `IRIS_PROFILES` JSON — `src/env.ts`'s `synthesizeIrisEnv`, exercised via the `irisMcpLauncher.combineProfiles` setting (one definition per package covering every selected server) — see Completion Notes for the design decision.
+  - [x] Pass through governance/audit/visibility env from extension settings (`IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_AUDIT_LOG*`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE`) **unchanged** — the extension is a launcher, not a policy authority. `src/env.ts`'s `buildGovernanceEnv`.
+  - [x] Derive `webServer.{scheme,host,port}` from the spec exactly as the suite's own mapping does (defaults http / localhost / 52773) — `src/connection.ts`'s `deriveConnection`; also surfaces a one-time warning for the unsupported `pathPrefix` case (see Completion Notes).
+- [x] **Task 5 — Credential containment (AC: 31.4.3)**
+  - [x] Credentials exist ONLY in the spawned process env. Never write them to settings, `globalState`, `workspaceState`, or any log/output channel.
+  - [x] Add a no-write test where feasible (assert the settings/globalState APIs are never called with a credential, and that no log call receives the token) — `src/__tests__/containment.test.ts`: a structural source-grep guard PLUS a behavioral test that flows a distinctive secret through the real resolve path and asserts it never reaches a `showWarning` call.
+- [x] **Task 6 — Docs + publish checklist (AC: 31.4.3, 31.4.4)**
+  - [x] Extension README: what it does, the `extensionDependencies` requirement, the settings, and — importantly — the **client-coverage boundary**: Copilot-family agents consume VS Code-registered MCP servers; **Claude Code manages its own MCP config and does NOT**. Claude Code users use the Story 31.0-31.2 path (settings discovery + credential chain + CLI) instead. **Verified against current Claude Code docs at implementation time (2026-07-25)** — `code.claude.com/docs/en/vs-code` (its "VS Code extension vs. Claude Code CLI" table + "Connect to external tools with MCP" section) and `github.com/anthropics/claude-code` issue #47344 — both cited in the extension README.
+  - [x] Draft the Marketplace / Open Exchange publish checklist (publisher id, icon, categories, `README`/`CHANGELOG`, `vsce package` steps, license). **Did not publish** — checklist lives in the extension README's "Marketplace / Open VSX publish checklist" section for the Project Lead.
+  - [x] Add a pointer from the root README to the extension as the optional in-VS-Code path — new "VS Code extension: IRIS MCP Launcher" subsection in the root README's Server Manager connections area.
+- [x] **Task 7 — Tests + verification**
+  - [x] Unit-test the pure logic that does not need a VS Code host: env synthesis (Integration AC 31.4.5), spec→connection mapping, server filtering by settings, the username fallback chain, and cancellation handling. Inject fakes for the `vscode` and Server Manager APIs — dev stage 52 tests / 8 files; QA pass 71 / 9; **code review 107 / 10**, all passing (`npx vitest run`, counted mechanically from the runner output per Rule #51).
+  - [x] Extension builds cleanly with its own `tsc` — `npm run build` (tsc --project tsconfig.build.json) and `npm run type-check` (tsc --noEmit, includes tests) both clean; `npx vsce package` produces a self-contained VSIX (verified: no npm runtime dependency needed at all — see Completion Notes).
+  - [x] **Root workspace must be unaffected:** `pnpm turbo run build test lint type-check` still 25/25 with the SAME task count (verified); `pnpm gen:governance-baseline:check` exit 0 (verified, 141 frozen keys unchanged, 201 live keys, 60 post-foundation — all pre-existing); no tool count moved (no `packages/**` file touched); no `packages/**` runtime change (`git status` confirms zero files under `packages/**` modified).
+
+### Review Findings
+
+**18 `patch` findings applied · 9 `defer` (8 findings + the sanctioned open AC 31.4.4, carried to
+`deferred-work.md` as `31-4-1` … `31-4-9`) · 5 dismissed · 0 decision-needed — 31 findings after dedupe across
+three adversarial layers plus reviewer verification.** Tallied mechanically per Rule #51
+(`grep -c '\[Review\]\[Patch\]'` / `'\[Review\]\[Defer\]'` over this section).
+
+All `patch` findings below were APPLIED during code review (patch-handling option 1) and are checked off. Every
+one was re-verified live afterwards: `npx tsc --noEmit` clean, `npx vitest run` **107/107 across 10 files**
+(up from 71/9), VSIX repackaged self-contained (15 files, 26.61 KB), root `pnpm turbo run build test lint
+type-check` **25/25 unchanged**, `pnpm gen:governance-baseline:check` exit 0.
+
+- [x] **[Review][Patch] HIGH — the entire cancellation contract was dead code: `getSession({createIfNone:true})` REJECTS on user cancel, it does not resolve `undefined`** [src/credentials.ts:79-92] — Raised INDEPENDENTLY by all three review layers and confirmed by the reviewer against the installed `@types/vscode@1.125.0`: `authentication.getSession`'s doc reads *"Rejects if a provider with providerId is not registered, or if the user does not consent to sharing authentication information with the extension"*, and the `createIfNone: true` overload returns `Thenable<AuthenticationSession>` — **without** `| undefined`. There was NO `try`/`catch` anywhere on the path (`credentials.ts` → `serverDefinitionProvider.ts` → `extension.ts`; the only `try` in `src/` was around `extension.activate()`), so a real cancel propagated an uncaught rejection out of `resolveMcpServerDefinition` — VS Code's own d.ts says it then "cancel[s the tool call] and return[s] an error message to the language model". The AC-required single `showWarning` never fired. Directly violates **AC 31.4.2** ("user cancellation ⇒ definition unresolved with a clear message (no error toast storm)") and Task 3. The mandated reference implementation (`iris-table-editor`'s `ServerConnectionManager._getServerSpecWithCredentials`) wraps the identical sequence in `try { … } catch { return undefined; }` — that enclosing catch is exactly what made its `if (!session)` safe, and it was dropped in the port (Rule #14/#16). **Fixed:** every third-party call on the path is guarded; a rejected `createIfNone` maps to `{status:"cancelled"}`, a rejected silent probe falls through to the prompt, Server Manager failures map to a new `{status:"unavailable"}` outcome with its own single warning. No catch forwards third-party error text to a user surface (containment, AC 31.4.3). **Mutation-verified:** restoring the pre-review shape turns **4** tests red across `credentials`/`serverDefinitionProvider`/`containment`; file restored byte-identical.
+- [x] **[Review][Patch] HIGH — every cancellation test faked cancel as `resolve(undefined)`, so the suite was green on a path that cannot occur (wrong oracle, Rule #36)** [src/__tests__/credentials.test.ts, serverDefinitionProvider.test.ts, containment.test.ts] — Not one fake rejected. The "cancellation must not storm" test asserted `sessionCalls === call * 2`, a property that only holds under the fake. **Fixed:** new regression blocks in all three files driving a **rejecting** `getSession`, with the oracle (the installed `@types/vscode` declaration) and its capture command cited in-file — asserting undefined + exactly ONE warning, no storm across three repeated calls, and no secret in any warning even when the thrown error text embeds one.
+- [x] **[Review][Patch] MEDIUM — Integration AC 31.4.5's drift-detection property was not achieved: no test executed the real consumer** [src/__tests__/env.test.ts] — `packages/shared/src/config.ts` / `profiles.ts` appeared only in COMMENTS; every expected name was a restated literal, so a rename on the consumer side would ship broken with both sides green — precisely the drift the AC names ("so a drift in **either** side is caught"). **Fixed:** new `src/__tests__/envContract.test.ts` feeds the synthesized env into the REAL `loadConfig` / `buildProfileRegistry` loaded from `packages/shared/dist/`, asserting on what they actually produce (round-tripped connection, `IRIS_HTTPS` string-boolean encoding, port stringification, per-profile field names/types, `default`+named registry keys). Test-time dynamic import of a built artifact only — `tsconfig.build.json` excludes `src/__tests__`, no dependency is declared, nothing reaches the VSIX, so "imports nothing from the workspace at build time" still holds; skips (with a path pin) when `packages/shared` is unbuilt. **Coverage proven additive:** a mutation that ignores `alwaysEmitProfiles` leaves the restated suite 12/12 GREEN while the real-oracle suite goes RED.
+- [x] **[Review][Patch] MEDIUM — ambient `IRIS_*` in the extension host leaked into every spawned server** [src/env.ts] — `McpStdioServerDefinition.env` is ADDITIVE ("will overwrite or remove (if null) the default environment variables of the editor's extension host"). The extension only ever SET variables, so a developer with `IRIS_PROFILES` / `IRIS_GOVERNANCE` / `IRIS_SERVER_MANAGER` exported in their shell got extra addressable profiles with ambient credentials, a governance policy the extension's settings said was unset, and a competing Server-Manager import path. **Fixed:** new `withOwnedVarsCleared` emits an explicit `null` for every launcher-owned variable not being set (the 6 `IRIS_*` + `IRIS_PROFILES` + the 8 governance/audit/visibility vars + the `IRIS_SERVER_MANAGER`/`IRIS_SM_*`/`IRIS_CREDENTIAL_HELPER` family). `IRIS_TIMEOUT`/`IRIS_SQL_*` are deliberately left inheriting — the extension exposes no setting for them, so they contradict nothing and stay an escape hatch.
+- [x] **[Review][Patch] MEDIUM — `combineProfiles: true` with exactly ONE selected server emitted no `IRIS_PROFILES`, breaking the setting's own documented promise** [src/env.ts:41] — The `rest.length > 0` gate made behavior flip on server count: the definition is labelled and documented as addressable via the `server` tool parameter, but the spawned registry contained only the reserved `default`, so every `server: "<name>"` call would fail with `ProfileResolutionError`. **Fixed:** `synthesizeIrisEnv` takes an `alwaysEmitProfiles` option, set from `settings.combineProfiles`; pinned by both a provider test and a real-`buildProfileRegistry` test.
+- [x] **[Review][Patch] MEDIUM — the multi-root configuration `scope` was discarded between enumerate and resolve** [src/types.ts, src/credentials.ts] — The real API is `getServerNames(scope?, sorted?)` returning `IServerName` **with `scope?: vscode.ConfigurationScope`**, and `getServerSpec(name, scope?, …)` (verified in the installed `@intersystems-community/intersystems-servermanager@3.10.2` `index.d.ts`). The local mirror omitted `scope` entirely despite its header claiming it was cross-checked. In a multi-root workspace a server defined in folder B is enumerated, planned and shown — then `getServerSpec(name)` returns `undefined` and the user gets the false, unactionable "Server Manager has no server named …". **Fixed:** `scope` added to the mirror, captured per server name at provide time, threaded back at resolve time; pinned by tests in both files.
+- [x] **[Review][Patch] MEDIUM — hand-edited settings could crash the provider, registering zero servers with no message** [src/settings.ts:44-48] — `WorkspaceConfiguration.get` returns whatever is literally in `settings.json`; the contributed JSON schema only drives an editor squiggle. `"irisMcpLauncher.servers": "prod"` reached `.filter(...)` → `TypeError` → rejected `provideMcpServerDefinitions`. **Fixed:** `readSettings` now coerces/validates every field (arrays, non-string members, numbers written where a string was declared, non-boolean `combineProfiles`), AND `providePlannedDefinitions`/`resolveEnvForLabel` guard the settings read and `getServerNames()` so any residual throw degrades to one actionable warning instead of a rejected promise.
+- [x] **[Review][Patch] MEDIUM — duplicate `servers`/`packages` entries produced colliding labels and redundant credential prompts** [src/definitions.ts:53-56] — `label` is the ONLY key VS Code round-trips, so two plans with the same label made the definitions indistinguishable while `new Map(...)` silently kept the last; under `combineProfiles` the duplicate caused a second auth round-trip for the same server and an overwritten profile entry. **Fixed:** both axes de-duplicated in `planDefinitions`; `uniqueItems: true` added to both JSON schemas.
+- [x] **[Review][Patch] MEDIUM — the shipped README misstated a cited source** [extensions/iris-mcp-launcher/README.md] — `anthropics/claude-code` issue #47344 was described as *"an open feature request"*. It is **CLOSED as NOT_PLANNED** (reviewer re-verified: `gh issue view 47344 --repo anthropics/claude-code` → `state: CLOSED, stateReason: NOT_PLANNED`). The conclusion is unaffected (in fact strengthened), but AC 31.4.3 conditions the boundary claim on live verification (Rule #16 spirit), so a wrong verifiable fact in a user-facing doc matters. **Fixed** in the README with the re-check command recorded. *Separately verified accurate:* the rest of the boundary claim — the `code.claude.com/docs/en/vs-code` comparison-table row ("MCP server config | Yes | Partial (add servers via CLI; manage existing servers with `/mcp` in the chat panel)") and the "run `claude mcp add`" instruction are quoted correctly, and nothing on that page consumes `contributes.mcpServerDefinitionProviders`.
+- [x] **[Review][Patch] LOW — README/CHANGELOG claimed a "one-time" path-prefix warning; it fired on every start and misattributed the prefix** [src/serverDefinitionProvider.ts:143-155] — `ignoredPathPrefix` was last-write-wins across the loop and the message named `plan.serverNames.join(", ")`, asserting that *every* server in the plan declared that one prefix. **Fixed:** tracked per server, de-duplicated for the provider's lifetime via a `Set`, and each warning now names the server that actually declared it; pinned by a repeated-resolve test and a two-different-prefixes test.
+- [x] **[Review][Patch] LOW — the `instanceof` guard failed OPEN, silently discarding freshly-resolved credentials** [src/extension.ts:106-109] — When `server instanceof vscode.McpStdioServerDefinition` was false, `server` was returned unmodified with the `{}` env it was constructed with — *after* the user had already been prompted for their password — and the child died with an opaque "IRIS_USERNAME environment variable is required". **Fixed:** fails CLOSED with one clear warning and `undefined`.
+- [x] **[Review][Patch] LOW — the containment source-grep used a HAND-MAINTAINED file roster while claiming to scan "every non-test source file"** [src/__tests__/containment.test.ts:30-40] — A new `src/*.ts` writing a credential would simply not be scanned (exactly the Rule #51 drift class the sibling `packaging.test.ts` avoids). The pattern set also had NO logging pattern at all despite the doc comment promising log-channel coverage. **Fixed:** roster enumerated from disk via `readdirSync`; added `console.*` / `appendLine` / file-write patterns, with `extension.ts`'s single sanctioned output channel explicitly exempted.
+- [x] **[Review][Patch] LOW — `deriveConnection` trusted the declared spec shape on hand-editable JSON** [src/connection.ts] — A missing `webServer` block or non-string `host`/`scheme` threw a `TypeError` into the (then-unguarded) resolve path; `port` had no upper bound, so `70000` passed and was rejected downstream by `loadConfig` instead of by the extension. **Fixed:** every field `typeof`-checked with the suite's own defaults, `port` bounded at 65535.
+- [x] **[Review][Patch] LOW — a whitespace-only `namespace` was accepted verbatim** [src/settings.ts:50] — The `|| DEFAULT_NAMESPACE` guard is falsy-only and both consumers reject only `""`, so `"   "` would target a nonexistent namespace on every request. **Fixed:** trimmed before the fallback.
+- [x] **[Review][Patch] LOW — `getServerSpec` polluted Server Manager's "Recent" list** [src/credentials.ts:46] — The real signature accepts `options?: { hideFromRecents?: boolean }`, provided precisely for programmatic callers; every MCP server start pushed the server onto the user's Recent list. **Fixed** (and pinned by the same test that pins `scope`).
+- [x] **[Review][Patch] LOW — the packaged VSIX shipped dangling sourcemap references** [tsconfig.build.json] — `tsconfig.json` set `"sourceMap": true` while `.vscodeignore` excludes `**/*.map`, so every shipped `dist/*.js` carried a `//# sourceMappingURL=` pointing at a file not in the package. **Fixed:** `"sourceMap": false` in the build config only (the dev/test config keeps maps). Re-verified: zero `sourceMappingURL` in `dist/`.
+- [x] **[Review][Patch] LOW — README over-claimed the containment guarantee, and the `combineProfiles` blast radius was undocumented** [extensions/iris-mcp-launcher/README.md] — *"no password ever written to a file"* / *"enforced by a source-grep regression test"* asserted more than any test in the repo can support once `env` leaves `resolveMcpServerDefinition`. Separately, `combineProfiles: true` puts EVERY selected server's password into EVERY spawned package process — a real security-relevant trade-off with no mention. **Fixed:** the guarantee is now scoped to what this extension does (with the child-process-environment caveat stated plainly), the blast radius is documented with a recommendation to prefer the default, and the ambient-variable clearing and the reload-required limitation are documented. CHANGELOG updated to match.
+- [x] **[Review][Patch] MEDIUM — the story's own record was stale after the QA pass (Rule #51)** [this file] — Task 7 and Completion Notes claimed *"52 tests across 8 files"* while the tree held 71/9; `src/__tests__/packaging.test.ts` was on disk and stageable but ABSENT from the File List. **Fixed:** counts, File List and Change Log reconciled mechanically against `npx vitest run` and `git add -A -n` (now 107 tests / 10 files / 29 extension files).
+
+**Deferred (carried to `deferred-work.md` as `31-4-1` … `31-4-9`; none blocks this story):**
+
+- [x] [Review][Defer] MEDIUM — concurrent `resolveEnvForLabel` calls are not coalesced, so a cold start can stack several credential prompts for the same server [src/serverDefinitionProvider.ts:97] — deferred, needs in-flight de-duplication design
+- [x] [Review][Defer] MEDIUM — no `onDidChangeMcpServerDefinitions` / `onDidChangeConfiguration` / `onDidChangePassword`; settings and password rotations need a window reload [src/extension.ts:85] — deferred, feature-shaped; now documented as a known limitation
+- [x] [Review][Defer] MEDIUM — an empty username is synthesized and passed through; `mergeProfile` rejects it, aborting the whole registry for a multi-profile definition [src/credentials.ts:67,94] — deferred, product decision (block vs pass through)
+- [x] [Review][Defer] MEDIUM — a Server Manager server named `default` silently overrides the reserved default profile under `combineProfiles` [src/env.ts:41-53] — deferred, same reserved-name class as ledger item `31-3-1`
+- [x] [Review][Defer] MEDIUM — `scopes = [serverName, spec.username ?? ""]` may miss a cached session whose scopes carry a real username, re-prompting every time [src/credentials.ts:77] — deferred, matches the mandated reference implementation; needs live verification (AC 31.4.4 smoke)
+- [x] [Review][Defer] LOW — `CancellationToken` is ignored in both provider methods [src/extension.ts:86,98] — deferred
+- [x] [Review][Defer] LOW — no `cwd` on the definition and `npx -y` is unpinned, so a local `node_modules/@iris-mcp/*` can shadow the published package [src/serverDefinitionProvider.ts:78-82] — deferred, needs a version-pinning product decision
+- [x] [Review][Defer] LOW — `extension.exports` is cached without shape validation [src/extension.ts:48] — deferred, largely mitigated by the new `getServerNames` guard
+- [x] [Review][Defer] — **AC 31.4.4's hands-on Copilot smoke + cancel-path verification remains OPEN by design** — sanctioned, requires a human in a real VS Code + Copilot Chat instance; steps recorded in Completion Notes
+
+## Dev Notes
+
+**⚠️ AC 31.4.4's Copilot smoke needs a human and is expected to be left open by this story.** It requires installing the built VSIX into VS Code, having GitHub Copilot chat available, and a person observing that Copilot lists an `iris-dev-mcp` tool set with zero manual config, plus exercising the cancel-the-credential-prompt path interactively. Do everything that does NOT need a human — build the extension, unit-test the logic, produce a packaged VSIX if `vsce` is available, and write the checklist — then record in Completion Notes exactly what remains for the Project Lead to verify by hand, with the precise steps. **Do not fake it, and do not mark AC 31.4.4 complete on the strength of unit tests.**
+
+**Nothing in the npm packages may import `vscode`** (binding spec, Deployment section). That rule is why this extension is a separate deliverable. The dependency arrow points one way: the extension knows about the suite's env contract; the suite knows nothing about the extension.
+
+**This is the ONE path where SecretStorage credentials are legitimately usable.** Everything in Stories 31.0-31.2 exists because SecretStorage is unreachable from outside VS Code. Inside an extension host it IS reachable through the authentication provider — that asymmetry is the whole reason this story exists. Do not try to reach SecretStorage any other way.
+
+**Verified API surface** (binding spec, cross-checked against `@intersystems-community/intersystems-servermanager@3.10.2` types and the working `iris-table-editor` implementation):
+```ts
+AUTHENTICATION_PROVIDER = "intersystems-server-credentials"
+api.getServerNames(scope?, sorted?): IServerName[]
+api.getServerSpec(name, scope?, flushCredentialCache?, options?): Promise<IServerSpec | undefined>
+api.getAccount(serverSpec): vscode.AuthenticationSessionAccountInformation | undefined
+```
+The npm package supplies **types/constants only** — the live API comes from `extension.exports` after `activate()`. **Re-verify these shapes against whatever is actually installed before coding** (Rule #14/#16); do not trust this story file as the source of truth for a third-party API.
+
+**Precedent to follow:** gjServAI (`github.com/gjsjohnmurray/gjServAI`) is a shipped extension doing exactly this — provider registration, silent-then-prompting `getSession`, `session.accessToken` as the password, env injection on the spawned stdio server. The local `C:\git\iris-table-editor` (`packages/vscode/src/providers/ServerConnectionManager.ts`) has the verified call sequence including the username fallback chain. Read them rather than inventing the flow.
+
+**Cancellation is a real user path, not an error.** A user who declines the credential prompt should get one clear "not configured" outcome, not a toast storm or a retry loop. Treat it as a first-class branch and test it.
+
+**Rules that do NOT apply:** no MCP tool, governance key, ObjectScript, or bootstrap change anywhere — this story adds no code to `packages/**`. Rules #28/#31/#39/#53 are untriggered; the frozen baseline `1e62c5ad5bf7` (141 keys) must remain unchanged and turbo's task count must not move (which is exactly why the extension stays out of `pnpm-workspace.yaml`).
+
+**No carried deferred items belong to this story.** The open ledger items (`31-0-5`, `31-1-2`…`31-1-5`, `31-2-1`…`31-2-6`, `31-3-1`…`31-3-9`) all concern `packages/shared` code paths this story does not touch; they are for the epic-close triage.
+
+### Project Structure Notes
+
+- New tree: `extensions/iris-mcp-launcher/` — `package.json`, `tsconfig.json`, `src/extension.ts`, `src/serverDefinitionProvider.ts`, `src/credentials.ts`, `README.md`, `CHANGELOG.md`, `.vscodeignore`, tests.
+- **Do NOT add it to `pnpm-workspace.yaml`** (globs `packages/*` today). It must not enter the turbo graph.
+- Its tests run under its own runner; keep them runnable without a VS Code host by injecting fakes for the `vscode` and Server Manager APIs.
+- Root `.gitignore`: make sure build output (`out/`, `dist/`, `*.vsix`) is ignored so a packaged VSIX is never committed.
+
+### References
+
+- [Source: _bmad-output/planning-artifacts/epics.md#Story-31.4] — AC 31.4.1-31.4.4.
+- [Source: research spec#Feature-1-Design] — F1-D5 (the broker extension design, spawn env synthesis, cancellation handling).
+- [Source: research spec#Pattern-A] — `registerMcpServerDefinitionProvider`, the gjServAI precedent and its verified credential call.
+- [Source: research spec#Local-Reference-Implementation] — the iris-table-editor call sequence + username fallback chain.
+- [Source: research spec#VS-Code-SecretStorage] — why in-extension resolution is the only path to SecretStorage credentials.
+- [Source: packages/shared/src/config.ts] / [profiles.ts] — the `IRIS_*` / `IRIS_PROFILES` env contract the extension must synthesize.
+- [Source: .claude/rules/project-rules.md] — #14/#16 verify third-party APIs live, #19 additive, #31 no tool-count change, #43 docs ship with the story.
+
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-sonnet-5 (Claude Sonnet 5)
+
+### Debug Log References
+
+None — no IRIS/ObjectScript involved; no debug globals used. All verification was `tsc`/`vitest`/`turbo` output, captured inline in Completion Notes below.
+
+### Completion Notes List
+
+- **Scope confirmed**: zero files under `packages/**` touched (`git status` clean there). `pnpm-workspace.yaml` unchanged (still globs only `packages/*`). New tree lives entirely at `extensions/iris-mcp-launcher/`.
+- **API verification (Rule #14/#16), done live rather than trusted from the story file**:
+  - `@intersystems-community/intersystems-servermanager@3.10.2` installed and its `index.d.ts`/`index.js` read directly: `ServerManagerAPI.getServerNames/getServerSpec/getAccount` and `IServerSpec`/`IWebServerSpec` match the story's binding spec exactly; runtime `index.js` exports only `EXTENSION_ID` and `AUTHENTICATION_PROVIDER` as plain string constants (no other runtime code) — see the `constants.ts` design decision below.
+  - `@types/vscode@1.125.0` installed and its `index.d.ts` grepped directly (a web fetch of the same 21k-line file was silently truncated before reaching the MCP section and incorrectly reported "not found" — downloading and grepping the real file was necessary to get ground truth) for the real, current `McpStdioServerDefinition`/`McpServerDefinitionProvider`/`lm.registerMcpServerDefinitionProvider` declarations. Key finding that CORRECTS an earlier (wrong) assumption from an official-docs code sample: `McpStdioServerDefinition`'s constructor is **positional** — `constructor(label: string, command: string, args?: string[], env?: Record<string, string | number | null>, version?: string)` — not object-shaped. `cwd` is a separate mutable property, not a constructor parameter. Implemented and compiled against this real signature.
+  - `vscode.authentication.getSession`'s options shape (`silent`, `createIfNone`, `account`) confirmed directly from `AuthenticationGetSessionOptions` in the same `.d.ts`.
+  - VS Code 1.101 (released 2025-06-12) is the version that stabilized `contributes.mcpServerDefinitionProviders` (confirmed via the official v1.101 release notes) — set as `engines.vscode`.
+  - Client-coverage boundary verified 2026-07-25 against `code.claude.com/docs/en/vs-code` (live fetch) — the "VS Code extension vs. Claude Code CLI" comparison table lists MCP server config as "Partial (add servers via CLI...)", and the page states `claude mcp add` is how servers are added from the integrated terminal; nothing mentions consuming `contributes.mcpServerDefinitionProviders`. Cross-checked against `anthropics/claude-code` issue #47344 (open feature request confirming the integration doesn't exist). Both cited in the extension README.
+- **Design decision — one definition per (package, server), with an opt-in multi-profile mode.** AC 31.4.2/Task 4 name BOTH a single-profile and a multi-profile (`IRIS_PROFILES`) spawn-env shape, but the story doesn't fully specify when each applies. Implemented: `irisMcpLauncher.combineProfiles` (default `false`) — when `false`, one MCP server definition is planned per (suite package, Server Manager server) pair, each single-profile (the simplest, most predictable default: "IRIS Dev Tools — myServer"); when `true`, one definition per package covers EVERY selected server via `IRIS_PROFILES`, addressable with the suite's existing `server` tool parameter. `synthesizeIrisEnv` (`src/env.ts`) is a pure function handling both shapes correctly regardless of caller, satisfying Integration AC 31.4.5's testability requirement independent of this UX choice. Flagged here for lead review since it's a product-shape decision the story left open, not a "reflagged per guardrail" ambiguity.
+- **Design decision — `AUTHENTICATION_PROVIDER` hardcoded, not imported at runtime.** Initial implementation imported `AUTHENTICATION_PROVIDER` from `@intersystems-community/intersystems-servermanager` at runtime (matching the `iris-table-editor` precedent). Packaging with `vsce package` then revealed the resulting VSIX did NOT bundle `node_modules` (verified by inspecting the "Files included in the VSIX" listing — no `node_modules` entry, `--dependencies`/`--no-dependencies` flags made no difference because `.vscodeignore`'s `node_modules/**` line excludes it, and this extension uses no bundler like `iris-table-editor`'s esbuild pipeline does). Rather than add an esbuild step for one two-constant CommonJS module, moved `@intersystems-community/intersystems-servermanager` to `devDependencies` and hardcoded `AUTHENTICATION_PROVIDER`/`SERVER_MANAGER_EXTENSION_ID` in `src/constants.ts` (consistent with already hardcoding the Server Manager extension id rather than importing `EXTENSION_ID`). `src/__tests__/constants.test.ts` imports the REAL package and asserts our hardcoded values still match it — a live regression guard, not a one-time snapshot. Repackaged VSIX confirmed self-contained (zero npm runtime dependency, `dist/*.js` only).
+- **`webServer.pathPrefix` gap surfaced, not silently dropped.** The suite's `IRIS_*`/`IRIS_PROFILES` env contract has no path-prefix field at all (verified by reading `packages/shared/src/config.ts` and `profiles.ts`'s `ProfileOverride`). `deriveConnection` (`src/connection.ts`) detects a non-root `pathPrefix` and the provider surfaces a one-time `showWarning` naming the limitation rather than connecting silently to the wrong path. Documented as a known limitation in the extension README/CHANGELOG.
+- **Verification performed** (all live, not assumed):
+  - `npx tsc --noEmit` — clean (0 errors) after full implementation.
+  - `npm run build` (`tsc --project tsconfig.build.json`) — clean, `dist/*.js` produced.
+  - `npx vitest run` — 52/52 tests passing across 8 files at the dev stage (connection, constants, containment, credentials, definitions, env, serverDefinitionProvider, settings). **Superseded:** the QA pass added `packaging.test.ts` (71/9) and code review added `envContract.test.ts` plus regression blocks (**107/10**) — see Review Findings.
+  - `npx vsce package --allow-missing-repository` — produced `iris-mcp-launcher-0.1.0.vsix` (self-contained, 15 files, ~21 KB); deleted after verification is not required since `*.vsix`/`out/` are gitignored (added to root `.gitignore`), but the file is left in place for the Project Lead to install manually for the AC 31.4.4 smoke (see below).
+  - `npx prettier --check`/`--write` against the extension's own files (root `prettier` config has no `extensions/` ignore, so root `pnpm format:check` would otherwise flag them) — reformatted 9 files (whitespace/line-width only), re-verified type-check/build/tests all still green afterward.
+  - `pnpm turbo run build test lint type-check` — **"Tasks: 25 successful, 25 total"** (turbo's own summary line), matching the story's stated pre-story baseline exactly.
+  - `pnpm gen:governance-baseline:check` — exit 0, "OK — every frozen foundation key still exists in the live surface" (141 frozen keys unchanged, 201 live, 60 post-foundation — none of this story's doing, pre-existing epic 28-30 growth).
+  - `git status` — confirmed zero `packages/**` files modified; only `README.md`, `.gitignore` (root), the story file, sprint-status.yaml, and the new `extensions/` tree changed/added.
+- **`package-lock.json` gitignore fix.** The root `.gitignore` blanket-ignores `package-lock.json` (any depth — presumably to prevent an accidental `npm install` at the workspace root from generating one alongside `pnpm-lock.yaml`). Since this extension deliberately uses `npm` (checkpoint #2) and its lockfile should be committed for reproducible builds, added a scoped negation: `!extensions/iris-mcp-launcher/package-lock.json`. Verified with `git add -n` that the file is now trackable.
+- **AC 31.4.4 — what remains for the Project Lead (hands-on, cannot be done by this agent):**
+  1. Install GitHub Copilot Chat (or another VS Code MCP-registry-consuming client) and the InterSystems Server Manager extension in a real VS Code instance, with at least one `intersystems.servers` definition configured (ideally one WITHOUT a cached password, to exercise the prompt).
+  2. `cd extensions/iris-mcp-launcher && npm install && npm run build` (already done and verified in this session, but re-run if any further changes are made), then `code --install-extension iris-mcp-launcher-0.1.0.vsix` (the VSIX built in this session is present in `extensions/iris-mcp-launcher/`) or `F5` (Extension Development Host) from that folder. **Code-review note:** the VSIX was REBUILT after the review patches (15 files, 26.61 KB, self-contained) — the file on disk is current. It is gitignored, so on a fresh clone run `npm install && npm run build && npm run package` first.
+  3. Reload VS Code, open Copilot Chat, and confirm the MCP server list (gear icon / `/mcp`-equivalent in Copilot's UI) shows entries like "IRIS Dev Tools — `<yourServerName>`" for each configured `irisMcpLauncher.packages` × Server Manager server pair (defaults: all 5 individual packages × all configured servers).
+  4. Ask Copilot to invoke an `iris-dev-mcp` tool (e.g. "list IRIS namespaces on `<yourServerName>`") and confirm: (a) if no cached Server Manager session exists, a VS Code credential prompt appears; (b) after providing/declining it, confirm the corresponding outcome — tool succeeds with real IRIS data, OR the server is reported as unavailable/not started with no repeated prompt or toast storm.
+  5. Specifically exercise the **cancel path**: pick a server whose Server Manager session is not cached, trigger a tool call, and click Cancel/Escape on the credential prompt. Confirm exactly one clear "not started" indication in Copilot's UI (or VS Code's own MCP server status), not a crash, not a retry loop, and not a repeated prompt on the SAME tool call. **Code-review note: this step was, before the review, the ONLY check that would have caught the HIGH cancel-path defect** (the real `getSession({createIfNone:true})` rejects rather than resolving `undefined`; see Review Findings). That defect is now fixed and covered by rejecting-fake regression tests, so this step is a live confirmation rather than the sole guard — but it remains the only real-runtime proof.
+  6. Record the pass/fail outcome (with any VS Code/Copilot version numbers) back into this story's Completion Notes or the epic retro, and only then consider AC 31.4.4 fully closed. **This agent has NOT performed steps 1-6 and does not claim AC 31.4.4 is complete — only the non-human-required portions (build, unit tests, packaged VSIX, checklist) are done.**
+- **Publish checklist**: drafted in the extension README ("Marketplace / Open VSX publish checklist" section) — publisher id (currently placeholder `"TBD-at-publish-time"`), icon, `vsce package`/`vsce publish`/`ovsx publish` steps, etc. **Not published anywhere** — that remains a separate Project Lead decision, per the story's explicit instruction.
+
+### File List
+
+**Modified (repo root):**
+- `README.md` — new "VS Code extension: IRIS MCP Launcher" subsection pointing to the extension.
+- `.gitignore` — added `out/`, `*.vsix`; added scoped negation `!extensions/iris-mcp-launcher/package-lock.json`.
+
+**New (`extensions/iris-mcp-launcher/`, all new):**
+- `package.json`
+- `package-lock.json`
+- `tsconfig.json`
+- `tsconfig.build.json`
+- `vitest.config.ts`
+- `.vscodeignore`
+- `LICENSE`
+- `README.md`
+- `CHANGELOG.md`
+- `src/types.ts`
+- `src/constants.ts`
+- `src/connection.ts`
+- `src/credentials.ts`
+- `src/env.ts`
+- `src/definitions.ts`
+- `src/settings.ts`
+- `src/serverDefinitionProvider.ts`
+- `src/extension.ts`
+- `src/__tests__/connection.test.ts`
+- `src/__tests__/constants.test.ts`
+- `src/__tests__/env.test.ts`
+- `src/__tests__/definitions.test.ts`
+- `src/__tests__/settings.test.ts`
+- `src/__tests__/credentials.test.ts`
+- `src/__tests__/serverDefinitionProvider.test.ts`
+- `src/__tests__/containment.test.ts`
+- `src/__tests__/packaging.test.ts` *(added by the QA pass; was missing from this list — corrected at code review)*
+- `src/__tests__/envContract.test.ts` *(added at code review — Integration AC 31.4.5 real-oracle round-trip)*
+
+**Reconciled at code review (counted mechanically, Rule #51):** `git add -A -n | grep -c extensions/iris-mcp-launcher` = **28** — the 26 originally listed, plus `packaging.test.ts` (QA, previously omitted) and `envContract.test.ts` (code review). Plus root `README.md`/`.gitignore` and the `_bmad-output` tracking artifacts = 34 stageable overall. No build output, `node_modules` or `*.vsix` is stageable.
+
+**Build artifacts present but gitignored (not part of the commit):** `extensions/iris-mcp-launcher/dist/**` (tsc output), `extensions/iris-mcp-launcher/node_modules/**`, `extensions/iris-mcp-launcher/iris-mcp-launcher-0.1.0.vsix` (left in place for the Project Lead's AC 31.4.4 smoke install).
+
+## Change Log
+
+| Date | Version | Description | Author |
+|------|---------|-------------|--------|
+| 2026-07-25 | 0.1 | Story created (Epic 31 optional trailing deliverable; AC 31.4.4's Copilot smoke flagged as requiring hands-on Project Lead verification) | Bob (SM) |
+| 2026-07-26 | 1.0 | Implemented (Tasks 1-7 complete): scaffolded `extensions/iris-mcp-launcher/` outside the npm workspace; MCP server definition provider with credential resolution, env synthesis (single + multi-profile), and credential containment; docs + publish checklist; 52 passing unit tests; root workspace verified unaffected (turbo 25/25, governance baseline exit 0, zero `packages/**` changes). AC 31.4.4 left open per Dev Notes — hands-on Copilot smoke steps recorded in Completion Notes for the Project Lead. Status set to `review`. | Dev (claude-sonnet-5) |
+| 2026-07-26 | 1.1 | QA automation pass: +19 tests (71 total / 9 files), new `packaging.test.ts`; two highest-value tests mutation-verified. See `tests/31-4-test-summary.md`. | QA |
+| 2026-07-25 | 1.2 | **Code review (3 adversarial layers + reviewer verification): 18 patches applied, 9 deferred (8 findings + the sanctioned open AC 31.4.4), 5 dismissed — 31 findings after dedupe, tallied mechanically per Rule #51.** Two HIGH findings, both on the cancellation path and raised independently by all three layers: `vscode.authentication.getSession({createIfNone:true})` REJECTS on user cancel (it does not resolve `undefined`), and there was no `try`/`catch` anywhere on the credential path — so AC 31.4.2's "one clear message, no toast storm" was dead code, and every cancellation test was green against a fake the real API contradicts. Both fixed and mutation-verified (4 tests red on revert). Also: Integration AC 31.4.5 now RUNS the real `loadConfig`/`buildProfileRegistry` as its oracle instead of restating them (Rule #36); ambient `IRIS_*` no longer leaks into spawned servers; multi-root `scope` threaded through; `combineProfiles` single-server `IRIS_PROFILES` gap closed; settings hardened against hand-edited JSON; docs corrected (issue #47344 is CLOSED-not-planned, containment guarantee scoped, `combineProfiles` blast radius documented). Tests 71 → **107 / 10 files**; turbo 25/25 and governance baseline unchanged; VSIX repackaged. AC 31.4.4 remains OPEN by design. Status → `done`. | Review |
+
+---
+
+## GUI smoke — Project Lead, 2026-07-26 (closes AC 31.4.4 and AC 31.5.4)
+
+Performed by the Project Lead in a real VS Code 1.128.0 session — the half no headless agent could reach. Extension installed from the Story-31.6 VSIX (16 files, 40.6 KB); `irisMcpLauncher.servers = ["localhost2","local"]`, `irisMcpLauncher.developmentRepoPath = "c:/git/iris-execute-mcp-v2"` (user scope — the setting is `machine`-scoped).
+
+**All six steps CONFIRMED WORKING:**
+
+1. **Status bar** — `$(server) IRIS MCP: 2` present after a plain window reload with MCP never exercised. **This closes AC 31.5.4's empirical half**, which the dev stage honestly flagged as unverifiable headlessly: it proves the `onStartupFinished` activation event actually fires and that the item is not gated behind the MCP subsystem first asking for definitions.
+2. **QuickPick** — both servers listed and pre-checked; Esc left configuration unchanged; confirming wrote the selection and reported the scope + reload requirement.
+3. **Registration** — `MCP: List Servers` showed the expected entries under "IRIS MCP Server Suite"; no `all` entry (removed in Story 31.6 as unspawnable).
+4. **Short-circuit path (`local`, inline password)** — server started with no credential prompt, exercising the `credentials.ts:104` early return.
+5. **Prompt path (`localhost2`, no stored password)** — Server Manager prompted, password accepted, server started. **This is the VS Code SecretStorage path**, which is cryptographically unreachable from outside VS Code and therefore could never be covered by any automated tier — the constraint the whole epic is built around.
+6. **⭐ Cancel path** — confirmed working. **This is the branch that carried Story 31.4's headline HIGH**: `authentication.getSession({createIfNone:true})` REJECTS on cancel rather than resolving `undefined`, there was no `try`/`catch` anywhere on the path, and every test faked the wrong shape — a green suite over an impossible path. Fixed at code review, mutation-verified (4 tests red on revert), and now confirmed against real VS Code.
+
+**Live evidence from the VS Code MCP output channel** (`IRIS Admin Tools — localhost2`, four start/stop cycles across steps 4-6):
+
+```
+Starting server from LocalProcess extension host
+Connection state: Running
+[INFO] Tool visibility: preset="full" visible=27 hidden=0
+[INFO] HEAD /api/atelier/ completed in 79ms
+[INFO] IRIS health check passed
+[INFO] Detected Atelier API v8
+[INFO] @iris-mcp/admin v0.0.2 starting with Atelier API v8
+[INFO] Bootstrap: REST service is current (version 6422caf6ec31), skipping deploy
+[INFO] Connected via stdio transport
+Discovered 27 tools
+```
+
+Confirms the full chain: extension resolves credentials → spawns the Story-31.6 local `node …/packages/iris-admin-mcp/dist/index.js` target → server reaches live IRIS → VS Code discovers 27 tools. Every start/stop cycle was clean, with no error toast, no repeated prompt, and no orphaned process.
+
+**Sanctioned residual — the Copilot half of AC 31.4.4 was NOT performed.** The original AC reads "Copilot chat lists an iris-dev-mcp tool set". The Project Lead does not use Copilot (verified: no `github.copilot-chat` extension installed; their clients are Claude Code, Cline and Kimi Code, none of which consume VS Code's MCP registry — see the client-coverage boundary in the extension README). Registration into VS Code's MCP registry IS confirmed by step 3, so what remains unverified is only the final consumer hop inside Copilot's own UI. Deferred to an external Copilot user; recorded as a residual risk rather than closed silently.
+
+**Observation, not a defect (pre-existing, unrelated to Stories 31.4-31.6):** every server start logs `[WARN] CSRF preflight completed but no X-CSRF-Token header was returned. Mutating requests may be rejected by IRIS.` twice. It predates this epic, appears on the Project Lead's live instance regardless of launch path, and did not prevent any operation during the smoke. Flagged for separate triage.

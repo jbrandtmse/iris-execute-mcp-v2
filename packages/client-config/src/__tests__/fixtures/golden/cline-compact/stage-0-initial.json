@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "aws-docs": { "command": "uvx", "args": ["awslabs.aws-documentation-mcp-server@latest"], "env": { "AWS_DOCUMENTATION_PARTITION": "aws" }, "disabled": false }
+  }
+}
