@@ -49,3 +49,4 @@
 2026-07-28T12:58:00Z	Epic 33	epic_status_done	stories=6
 2026-07-28T13:15:00Z	Epic 33	epic_retro_complete	path=_bmad-output/implementation-artifacts/epic-33-retro-2026-07-28.md rules_codified=57,58
 2026-07-28T13:20:00Z	Epic 33	epic_merged_to_feature	repos=. feature_sha=1cbd367 merge_sha=1cbd367 submodules=
+2026-07-28T19:30:00Z	Story 33.3	ac_33_3_4_smoke_pass	method=manual-gui result=pass steps=7 evidence=vscode-1.128.0_cline-4.0.11_claude-code-2.1.220 model=human-project-lead
