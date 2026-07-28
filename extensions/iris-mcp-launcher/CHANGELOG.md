@@ -21,13 +21,20 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Added
 
+- **README: install + usage documentation** (2026-07-28 docs rollup): a step-by-step
+  [Installing in development mode](README.md#installing-in-development-mode) section (build the VSIX,
+  `code --install-extension`, the same-version reinstall and window-reload gotchas, and pointing
+  `developmentRepoPath` at a checkout), a [Commands](README.md#commands) table covering all three commands, and
+  usage guides for [Selecting servers](README.md#selecting-servers) and the
+  [MCP Clients view](README.md#mcp-clients-view) (roster, matrix, apply/toggle/restore/doctor flow, the four
+  env modes, secret discipline, and the managed-entry boundary).
 - **MCP Clients view** (Story 33.3): a new command "IRIS MCP Launcher: Manage MCP Clients…" opens a webview
   for wiring the iris-mcp servers into any detected MCP client — no more hand-editing client config JSON.
   Detected clients render with user-selectable checkboxes (the roster persists across sessions in extension
   state; every detected client is selected by default); undetected v1 clients list collapsed with a
-  "not detected" note; considered-but-excluded clients (Pi — verified not MCP-capable — plus the JetBrains
-  and Kilo Code roadmap rows) show as info rows with their rationale. Per selected client: the iris-mcp
-  server matrix (the five servers + `@iris-mcp/all`) with enable/disable/remove actions, scope and env-mode
+  "not detected" note. Per selected client: the iris-mcp
+  server matrix (the five leaf servers — `iris-mcp-all` is unmanaged by design, since applying it alongside
+  the five would double-register every tool) with enable/disable/remove actions, scope and env-mode
   pickers (modes are offered exactly as the CLI's host probes allow), and third-party entries listed
   read-only, names only. Every write flows diff preview → explicit confirm → the `iris-mcp-clients` CLI as a
   subprocess (the same single code path as the terminal CLI — the VSIX stays self-contained with zero runtime

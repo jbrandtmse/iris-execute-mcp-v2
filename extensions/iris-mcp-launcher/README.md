@@ -57,6 +57,54 @@ Code settings, `globalState`, `workspaceState`, or any log/output channel — se
   Server Manager's own UI).
 - A Copilot-family agent that consumes VS Code's MCP registry — see the next section.
 
+## Installing in development mode
+
+This extension is **not on the Marketplace or Open VSX yet**, so you install it from a `.vsix` you build from
+this checkout. Two commands, then a reload:
+
+```bash
+cd extensions/iris-mcp-launcher
+npm install                                       # first time only
+npm run build                                     # tsc -> dist/
+npx vsce package --allow-missing-repository       # -> iris-mcp-launcher-0.1.0.vsix
+```
+
+Install the resulting file either way:
+
+- **GUI:** Extensions view -> `···` (top-right) -> **Install from VSIX…** -> pick the file.
+- **CLI:** `code --install-extension "<absolute path>/iris-mcp-launcher-0.1.0.vsix"`
+
+Then **two required follow-ups**:
+
+1. **Reload the window** (Command Palette -> **Developer: Reload Window**). Extension code loads at activation;
+   a running window keeps the old bundle in memory. When you reinstall the *same version* after a rebuild, VS
+   Code does not always replace the files — run `code --uninstall-extension tbd-at-publish-time.iris-mcp-launcher`
+   first, then install and reload. (Both were observed on Windows during the Story 33.3 acceptance smoke.)
+2. **Point it at your checkout** — set `irisMcpLauncher.developmentRepoPath` to this repo's absolute path in your
+   **User** settings (it is machine-scoped, so a workspace cannot set it):
+
+   ```json
+   "irisMcpLauncher.developmentRepoPath": "C:\\git\\iris-execute-mcp-v2"
+   ```
+
+   Without it, every spawn path resolves to `npx -y @iris-mcp/<pkg>`, which cannot work until the packages are
+   published — see [Development mode](#development-mode) for the full rationale and the fail-closed behavior.
+   Prefer setting it through the Settings UI (search "development repo path"); an editor writing the file
+   externally can be overwritten by the running instance's cached copy.
+
+Also build the packages you intend to launch (`pnpm --filter @iris-mcp/dev build`, etc., from the repo root) —
+a package with no `dist/index.js` registers no definition and produces one warning naming the path.
+
+## Commands
+
+All three live under the **IRIS MCP Launcher** category in the Command Palette.
+
+| Command | Title | What it does |
+| --- | --- | --- |
+| `irisMcpLauncher.selectServers` | **Select Servers…** | Pick which Server Manager servers this extension exposes as MCP servers (writes `irisMcpLauncher.servers`) — see [Selecting servers](#selecting-servers) |
+| `irisMcpLauncher.openGovernanceEditor` | **Open Governance Editor** | Visually edit the shared governance policy file — see [Governance editor](#governance-editor) |
+| `irisMcpLauncher.manageClients` | **Manage MCP Clients…** | Wire the suite into other MCP clients (Claude Code, Cursor, Cline, …) — see [MCP Clients view](#mcp-clients-view) |
+
 ## Client-coverage boundary
 
 **This extension only helps Copilot-family agents (GitHub Copilot Chat and anything else that reads VS Code's
@@ -132,6 +180,77 @@ published or not, and local mode has no `dist/index.js` to target for it either.
 from `irisMcpLauncher.packages`'s allowed values (Story 31.6). If your settings still list it, you'll see one
 warning naming the removal; select the five individual packages instead (`admin`, `data`, `dev`, `interop`,
 `ops` — already this setting's default).
+
+## Selecting servers
+
+**Command: "IRIS MCP Launcher: Select Servers…"** (Story 31.5), plus a **status bar item** showing
+`$(server) IRIS MCP: <n>` — the number of MCP server definitions currently registered (or `none` when nothing
+is selected or registration produced zero). Click the item to open the picker.
+
+- The picker is a multi-select QuickPick over the Server Manager roster, pre-checked with your current
+  `irisMcpLauncher.servers` selection; confirming writes the setting.
+- **Empty selection means "all servers"** — that is the shipped default (`[]`), so a fresh install exposes every
+  server Server Manager reports rather than nothing.
+- The status bar tooltip explains the current state (including the "N of M selected" case and a fresh-install
+  hint), and settings changes take effect after **Developer: Reload Window** (see the known limitation under
+  [Settings](#settings)).
+
+## MCP Clients view
+
+**Command: "IRIS MCP Launcher: Manage MCP Clients…"** (Story 33.3). A webview for wiring the suite into the
+**other** MCP clients on your machine — Claude Code, Cursor, Cline, Codex, Kimi Code and the rest of the
+[13-client roster](../../packages/client-config/README.md#v1-client-roster) — so you never hand-edit their MCP
+config JSON. This is the sibling of the [Governance editor](#governance-editor): that one edits *policy*, this
+one edits *wiring*.
+
+**The engine is the suite's own CLI, never a reimplementation.** Every action shells out to the
+`iris-mcp-clients` bin of [`@iris-mcp/client-config`](../../packages/client-config/README.md) with `--json` —
+the same single code path as the terminal CLI, so the UI and the CLI cannot diverge. With
+`irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
+(`packages/client-config/dist/cli/clients-cli.js`); otherwise `npx -y -p @iris-mcp/client-config iris-mcp-clients`,
+which cannot resolve until the packages are published. **Build it first:**
+`pnpm --filter @iris-mcp/client-config build`.
+
+### Using it
+
+1. **Open the view.** The header shows the adapter-data version, which engine resolved (local build vs npx), and
+   how many of the 13 clients were detected.
+2. **Pick your roster.** Detected clients render with checkboxes, all selected by default; unchecking one hides
+   its section. The selection persists across sessions (extension `globalState`, not settings). Undetected
+   clients are listed collapsed under "Not detected (N)".
+3. **Expand a client** to get its server matrix: the 5 iris-mcp servers with their state
+   (`enabled` / `disabled` / `absent`), plus **scope** (user/project) and **env-mode** pickers that respect that
+   adapter's capabilities. Third-party entries in the same file are listed **read-only, names only** — the
+   manager never touches them.
+4. **Apply a server:** check it in the apply row, click **Preview apply…** (renders the exact pending edit —
+   nothing is written yet), then **Confirm**. Every write takes a timestamped backup first and prints that
+   client's **restart hint** afterward.
+5. **Toggle or remove:** **Disable** / **Enable** / **Remove** per server row, each through the same
+   preview-confirm flow.
+6. **Recover:** **Restore backup…** rolls a client's config back to its latest backup. **Run doctor** surfaces
+   unresolvable env references, unparseable files, config-surface drift, stale backups and orphaned stashes.
+
+### Env modes
+
+The mode picker offers only what the host can actually support (the CLI probes and hides the rest):
+
+| Mode | What it writes | Needs |
+| --- | --- | --- |
+| `env-reference` (default) | `${IRIS_PASSWORD}`-style references, or a native `${input:iris-password}` prompt on VS Code | The client must see real `IRIS_*` env vars at launch (VS Code prompts instead) |
+| `server-manager` | `IRIS_SERVER_MANAGER=auto` — connections from Server Manager, passwords from the OS keychain | Epic 31 path; nothing secret in the file |
+| `governance-file` | `IRIS_GOVERNANCE_FILE=<path>` | An existing governance file (see the [Governance editor](#governance-editor)) |
+| `explicit` | A literal password | A typed confirmation; the entry is marked `contains-secret` |
+
+**Secret discipline:** in `explicit` mode the password travels on the child process's stdin — never in argv —
+and the diff preview shows the CLI's redacted render (masked, or withheld entirely below the length gate). No
+rendered HTML ever carries the value. As with the governance editor, the spawned CLI's environment has every
+`IRIS_*` variable scrubbed, re-adding only `IRIS_GOVERNANCE_FILE` from this extension's own setting.
+
+**Managed scope:** the manager only ever modifies entries it owns — the 5 canonical servers
+(`iris-dev-mcp`, `iris-admin-mcp`, `iris-ops-mcp`, `iris-interop-mcp`, `iris-data-mcp`) or entries recorded as
+manager-created. `iris-mcp-all` is deliberately **unmanaged** (it would double-register every tool alongside the
+five); hand-write it if you want the aggregate. Which clients are proven live vs fixture-only is in the
+package's [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
 
 ## Governance editor
 

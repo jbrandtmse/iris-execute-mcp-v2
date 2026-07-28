@@ -129,11 +129,29 @@ resolves credentials from Server Manager's `vscode.authentication` session **ins
 one place a Server-Manager-saved SecretStorage password actually is reachable. No OS keychain setup, no
 `IRIS_CREDENTIAL_HELPER`, no `IRIS_PROFILES` password entry required.
 
-**This only helps Copilot-family agents.** Claude Code manages its own MCP configuration (`claude mcp add` /
-`.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
+**This only helps Copilot-family agents** *for launching servers*. Claude Code manages its own MCP configuration
+(`claude mcp add` / `.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
 `IRIS_SERVER_MANAGER`/credential-chain path documented above instead. See the extension's own README for the
-verified client-coverage boundary and citations. Not yet published to any Marketplace — see its README for the
-draft publish checklist.
+verified client-coverage boundary and citations.
+
+**The extension carries three surfaces**, and two of them help *every* client, not just Copilot:
+
+| Command (category "IRIS MCP Launcher") | What it does |
+| --- | --- |
+| **Select Servers…** | Choose which Server Manager servers become MCP servers; a status bar item shows how many are registered |
+| **Manage MCP Clients…** | Wire the suite into any of the 13 supported MCP clients — detect, per-server enable/disable, diff preview, backup/restore, doctor. The GUI front-end for [`iris-mcp-clients`](#the-manager-iris-mcp-clients-recommended); **useful to Claude Code / Cursor / Cline users too** |
+| **Open Governance Editor** | Visually edit the shared [governance policy file](#governance-file-iris_governance_file) that every client's servers read |
+
+**Installing it (not yet on any Marketplace).** Build a VSIX from this checkout and install it, then point it at
+your checkout — full steps, including the reload/reinstall gotchas, are in
+[the extension's install section](extensions/iris-mcp-launcher/README.md#installing-in-development-mode):
+
+```bash
+cd extensions/iris-mcp-launcher && npm install && npm run build
+npx vsce package --allow-missing-repository        # -> iris-mcp-launcher-0.1.0.vsix
+code --install-extension "$PWD/iris-mcp-launcher-0.1.0.vsix"
+# then: Developer: Reload Window, and set irisMcpLauncher.developmentRepoPath to this repo's absolute path
+```
 
 #### Where do Server Manager passwords come from? (the canonical answer)
 

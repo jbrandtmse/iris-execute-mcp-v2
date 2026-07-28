@@ -74,6 +74,26 @@ async function flushEditor(): Promise<void> {
   }
 }
 
+/**
+ * Wait for a condition that depends on a REAL subprocess render.
+ *
+ * `flushEditor()` yields macrotask turns only — effectively instantaneous — so
+ * it can never be a correct wait for the 33-3-3 flow, whose every render awaits
+ * an actual `iris-mcp-clients` spawn (~1-3s). That test passed only when the
+ * spawn happened to beat the flush, and went red under full-suite parallel load
+ * (reproduced 2 of 3 uncached runs, 2026-07-28). Poll the observable condition
+ * against a deadline instead: deterministic regardless of host load, and it
+ * fails with the state it actually saw rather than an empty-string mismatch.
+ */
+async function waitFor(predicate: () => boolean, label: string, timeoutMs = 60000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect.fail(`timed out after ${timeoutMs}ms waiting for: ${label}`);
+}
+
 function theCommand(): (...args: unknown[]) => unknown {
   const command = mockState.commands.get(COMMAND_ID);
   expect(command, `${COMMAND_ID} must be registered by the real activate()`).toBeDefined();
@@ -156,7 +176,13 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       activate(fakeContext(memento.memento));
       await flushEditor();
       await theCommand()();
-      await flushEditor();
+      // Every render below awaits a REAL subprocess — wait on the observable
+      // outcome, never on macrotask turns (see waitFor's doc comment).
+      await waitFor(
+        () => thePanel().html.includes("Detected clients ("),
+        "the initial roster render to land",
+      );
+      await flushEditor(); // drain the promise tail so the busy guard has cleared
 
       // The REAL roster render: claude-code detected via the real subprocess.
       let html = thePanel().html;
@@ -171,13 +197,30 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       for (const listener of thePanel().messageListeners) {
         listener({ type: "toggleClient", client: "claude-code" });
       }
-      await flushEditor();
+      await waitFor(
+        () => Array.isArray(memento.store.get(CLIENT_ROSTER_STATE_KEY)),
+        "the toggled roster to persist through the REAL globalState adapter",
+      );
       expect(memento.store.get(CLIENT_ROSTER_STATE_KEY)).toEqual([]);
 
       // A refresh re-derives from the persisted roster: claude-code stays unchecked.
       for (const listener of thePanel().messageListeners) {
         listener({ type: "refresh" });
       }
+      // Compound condition: the positive half proves the re-render COMPLETED, so
+      // the negative half can never pass vacuously against an empty/stale html.
+      await waitFor(
+        () =>
+          thePanel().html.includes("Detected clients (") &&
+          !thePanel().html.includes(`&quot;toggleClient&quot;,&quot;client&quot;:&quot;claude-code&quot;}' checked`),
+        "the refreshed render to show claude-code unchecked",
+      );
+      // The panel holds `busy = true` across the WHOLE refresh, and the render
+      // happens INSIDE that window — a gesture sent the instant the html lands
+      // is silently dropped by the busy guard (clientsPanel.ts `if (busy)
+      // return`). Once the html is there the subprocess is done, so only the
+      // promise tail separates it from `busy = false`: macrotask turns are the
+      // right wait for THAT gap (unlike the subprocess itself).
       await flushEditor();
       html = thePanel().html;
       expect(html).not.toContain(`&quot;toggleClient&quot;,&quot;client&quot;:&quot;claude-code&quot;}' checked`);
@@ -186,7 +229,10 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       for (const listener of thePanel().messageListeners) {
         listener({ type: "toggleClient", client: "claude-code" });
       }
-      await flushEditor();
+      await waitFor(
+        () => (memento.store.get(CLIENT_ROSTER_STATE_KEY) as string[] | undefined)?.length === 1,
+        "the re-toggled roster to persist",
+      );
       expect(memento.store.get(CLIENT_ROSTER_STATE_KEY)).toEqual(["claude-code"]);
     } finally {
       process.env.HOME = prior.HOME;

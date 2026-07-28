@@ -10,6 +10,12 @@ How to point any MCP client at the IRIS MCP Server Suite, plus the two credentia
 > The per-client snippets below are the **manual
 > fallback** — and the reference for what the manager writes. Per-client adapter details and
 > certification dispositions: [packages/client-config README](../../packages/client-config/README.md).
+>
+> **Prefer a GUI?** The same engine drives the **"IRIS MCP Launcher: Manage MCP Clients…"** view in the
+> [VS Code extension](../../extensions/iris-mcp-launcher/README.md#mcp-clients-view) — client roster,
+> per-server toggles, diff preview, backup restore and doctor, all through the identical CLI code path.
+> It helps every client, not just Copilot: use it from VS Code to wire up Claude Code, Cursor, Cline, and
+> the rest. Install it [in development mode](../../extensions/iris-mcp-launcher/README.md#installing-in-development-mode).
 
 Detailed per-client guides: **[Claude Code](claude-code.md)** · **[Claude Desktop](claude-desktop.md)** · **[Cursor](cursor.md)**. Everything else is covered below.
 
