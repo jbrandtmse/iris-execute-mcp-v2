@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops"],
+      "env": {
+        "IRIS_HOST": "${IRIS_HOST}",
+        "IRIS_PORT": "${IRIS_PORT}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp"],
+      "env": {
+        "PLAYWRIGHT_KEY": "pw_foreignProjectValue789"
+      }
+    }
+  }
+}

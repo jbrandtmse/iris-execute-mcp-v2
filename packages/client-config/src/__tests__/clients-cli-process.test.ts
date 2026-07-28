@@ -50,6 +50,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, afterEach } from "vitest";
 
+import { ADAPTER_DATA_VERSION } from "../adapters.js";
+
 import { readFixture } from "./helpers.js";
 
 // ════════════════════════════════════════════════════════════════════
@@ -83,7 +85,7 @@ interface Sandbox {
   home: string;
   project: string;
   run: (args: string[], opts?: { input?: string; env?: Record<string, string> }) => RunResult;
-  configPath: (client: "claude-code" | "codex" | "goose") => string;
+  configPath: (client: "claude-code" | "codex" | "goose" | "vscode") => string;
   stateDir: string;
 }
 
@@ -142,6 +144,15 @@ function makeSandbox(): Sandbox {
         return process.platform === "win32"
           ? path.join(home, "AppData", "Roaming", "goose", "config.yaml")
           : path.join(home, ".config", "goose", "config.yaml");
+      case "vscode":
+        // The adapter's per-OS user-scope mcp.json paths (win32
+        // %APPDATA%/Code/User/mcp.json; darwin ~/Library/Application Support;
+        // linux ~/.config) — mirrored exactly, like the goose case.
+        return process.platform === "win32"
+          ? path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
+          : process.platform === "darwin"
+            ? path.join(home, "Library", "Application Support", "Code", "User", "mcp.json")
+            : path.join(home, ".config", "Code", "User", "mcp.json");
     }
   };
 
@@ -639,6 +650,73 @@ describe("E2E doctor finding classes (AC 33.2.1)", () => {
     result = sandbox.run(["doctor"], { env: IRIS_ENV });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("all checks passed");
+  }, T);
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 4b. doctor config-drift end-to-end (Story 33.4, Integration AC 33.4-I1):
+// wrong-shape fixtures per format family through the BUILT bin's envelope.
+// ════════════════════════════════════════════════════════════════════
+
+describe("E2E doctor config-drift (AC 33.4-I1, process level)", () => {
+  it.each([
+    ["claude-code", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
+    ["vscode", "drift/wrong-shape.jsonc", 'root key "servers" holding an object of server entries', "an array (3 item(s))"],
+    ["codex", "drift/wrong-shape.toml", 'root key "mcp_servers" holding a table of server entries', "a string"],
+    ["goose", "drift/wrong-shape.yaml", 'root key "extensions" holding a mapping of server entries', "an array (2 item(s))"],
+  ] as const)(
+    "%s: a wrong-shaped root key yields a config-drift finding naming client/path/expectation/ADAPTER_DATA_VERSION",
+    (client, fixtureRel, expected, found) => {
+      const sandbox = makeSandbox();
+      const target = sandbox.configPath(client);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, readFixture(fixtureRel));
+
+      const result = sandbox.run(["doctor", "--json"]);
+      expect(result.status).toBe(1);
+      const envelope = parseEnvelope(result);
+      expect(envelope.ok).toBe(false);
+      expect(envelope.command).toBe("doctor");
+      const data = envelope.data as {
+        findings: Array<{
+          check: string;
+          client: string;
+          path: string | null;
+          expected?: string;
+          found?: string;
+          adapterDataVersion?: string;
+          detail: string;
+        }>;
+        findingCount: number;
+      };
+      const drift = data.findings.filter((finding) => finding.check === "config-drift");
+      expect(drift).toHaveLength(1);
+      const finding = drift[0]!;
+      expect(finding.client).toBe(client);
+      expect(finding.path).toBe(target);
+      expect(finding.expected).toBe(expected);
+      expect(finding.found).toBe(found);
+      expect(finding.adapterDataVersion).toBe(ADAPTER_DATA_VERSION);
+      expect(finding.detail).toContain(ADAPTER_DATA_VERSION);
+      // DISTINCT from unparseable: no parseability finding for the same file.
+      expect(data.findings.some((row) => row.check === "parseability")).toBe(false);
+      expect(data.findingCount).toBe(data.findings.length);
+    },
+    T,
+  );
+
+  it("a parseable file WITHOUT the root key (a normal no-MCP-section config) is NOT drift", () => {
+    const sandbox = makeSandbox();
+    const target = sandbox.configPath("claude-code");
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, readFixture("drift/no-mcp-section.json"));
+
+    const result = sandbox.run(["doctor", "--json"]);
+    expect(result.status).toBe(0);
+    const envelope = parseEnvelope(result);
+    expect(envelope.ok).toBe(true);
+    const data = envelope.data as { findings: unknown[]; findingCount: number };
+    expect(data.findingCount).toBe(0);
   }, T);
 });
 

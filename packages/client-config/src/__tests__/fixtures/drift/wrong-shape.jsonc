@@ -1,0 +1,5 @@
+// VS Code MCP config — the root key must hold an object of server entries,
+// not an array (a config-drift fixture: parses as JSONC, wrong shape).
+{
+  "servers": ["not", "an", "object"],
+}

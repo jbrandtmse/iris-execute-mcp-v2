@@ -22,7 +22,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { runCli, VALUED_OPTIONS, type CliDeps } from "../cli/clients.js";
-import { CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
+import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
 import { detectClients } from "../detect.js";
 import { buildStatusMatrix } from "../status.js";
 import { readState, resolveStateDir, stateFilePath } from "../state.js";
@@ -777,6 +777,113 @@ describe("doctor", () => {
     await h.run(["doctor"]);
     expect(h.stdout.text).toContain("Restart hints:");
     expect(h.stdout.text).toContain(CLIENT_ADAPTERS["codex"]!.restartHint);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.4 Task 1 — doctor config-drift check (AC 33.4.2, Integration
+// AC 33.4-I1): parse-OK-but-wrong-shape is DISTINCT from unparseable.
+// ════════════════════════════════════════════════════════════════════
+
+describe("doctor config-drift (AC 33.4.2, 33.4-I1)", () => {
+  it("a wrong-shaped root key is a config-drift finding, NOT parseability, with expected/found/adapterDataVersion", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.claude.json`, readFixture("drift/wrong-shape.json"));
+    expect(await h.run(["doctor", "--json"])).toBe(1);
+    const payload = JSON.parse(h.stdout.text) as {
+      ok: boolean;
+      data: {
+        findings: Array<{
+          check: string;
+          client: string;
+          scope: string;
+          path: string | null;
+          expected?: string;
+          found?: string;
+          adapterDataVersion?: string;
+          detail: string;
+        }>;
+      };
+    };
+    expect(payload.ok).toBe(false);
+    const drift = payload.data.findings.filter((finding) => finding.check === "config-drift");
+    expect(drift).toHaveLength(1);
+    const finding = drift[0]!;
+    expect(finding.client).toBe("claude-code");
+    expect(finding.scope).toBe("user");
+    expect(finding.path).toBe(`${HOME}/.claude.json`);
+    expect(finding.expected).toBe('root key "mcpServers" holding an object of server entries');
+    expect(finding.found).toBe("an array (3 item(s))");
+    expect(finding.adapterDataVersion).toBe(ADAPTER_DATA_VERSION);
+    // The detail names the expectation + the data vintage (AC 33.4-I1).
+    expect(finding.detail).toContain("mcpServers");
+    expect(finding.detail).toContain(ADAPTER_DATA_VERSION);
+    // DISTINCT from unparseable: no parseability finding for the same file.
+    expect(payload.data.findings.some((f) => f.check === "parseability")).toBe(false);
+  });
+
+  it("wrong shapes are drift across the TOML and YAML families too (codex, goose)", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.codex/config.toml`, readFixture("drift/wrong-shape.toml"));
+    h.fs.seed(`${HOME}/.config/goose/config.yaml`, readFixture("drift/wrong-shape.yaml"));
+    expect(await h.run(["doctor", "--json"])).toBe(1);
+    const payload = JSON.parse(h.stdout.text) as {
+      data: { findings: Array<{ check: string; client: string; expected?: string; found?: string }> };
+    };
+    const drift = payload.data.findings.filter((finding) => finding.check === "config-drift");
+    expect(drift.map((finding) => finding.client).sort()).toEqual(["codex", "goose"]);
+    expect(drift.find((finding) => finding.client === "codex")?.expected).toContain('"mcp_servers"');
+    expect(drift.find((finding) => finding.client === "codex")?.found).toBe("a string");
+    expect(drift.find((finding) => finding.client === "goose")?.expected).toContain('"extensions"');
+    expect(payload.data.findings.some((f) => f.check === "parseability")).toBe(false);
+  });
+
+  it("a parseable top-level non-object is config-drift (every expectation fails)", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.claude.json`, readFixture("drift/top-array.json"));
+    expect(await h.run(["doctor", "--json"])).toBe(1);
+    const payload = JSON.parse(h.stdout.text) as {
+      data: { findings: Array<{ check: string; expected?: string; found?: string }> };
+    };
+    const drift = payload.data.findings.filter((finding) => finding.check === "config-drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.expected).toBe('a top-level object holding root key "mcpServers"');
+    expect(drift[0]!.found).toBe("an array (3 item(s))");
+  });
+
+  it("an ABSENT root key with other content is NOT drift (a normal no-MCP-section config)", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.claude.json`, readFixture("drift/no-mcp-section.json"));
+    expect(await h.run(["doctor"])).toBe(0);
+    expect(h.stdout.text).toContain("all checks passed");
+    expect(h.stdout.text).not.toContain("config-drift");
+  });
+
+  it("an empty file and a missing file produce no finding", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.claude.json`, "  \n");
+    // codex/goose simply not seeded (missing files).
+    expect(await h.run(["doctor"])).toBe(0);
+    expect(h.stdout.text).not.toContain("config-drift");
+  });
+
+  it("a syntax error stays a parseability finding (never config-drift)", async () => {
+    const h = harness();
+    seedFamilies(h.fs);
+    h.fs.seed(`${HOME}/.claude.json`, readFixture("malformed/bad.jsonc"));
+    expect(await h.run(["doctor"])).toBe(1);
+    expect(h.stdout.text).toContain("parseability");
+    expect(h.stdout.text).not.toContain("config-drift");
+  });
+
+  it("the text render prints the drift finding with the client/scope and a restart hint", async () => {
+    const h = harness();
+    h.fs.seed(`${HOME}/.claude.json`, readFixture("drift/wrong-shape.json"));
+    expect(await h.run(["doctor"])).toBe(1);
+    expect(h.stdout.text).toContain("config-drift (1):");
+    expect(h.stdout.text).toContain("[claude-code/user]");
+    expect(h.stdout.text).toContain("Restart hints:");
+    expect(h.stdout.text).toContain(CLIENT_ADAPTERS["claude-code"]!.restartHint);
   });
 });
 

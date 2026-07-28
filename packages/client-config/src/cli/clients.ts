@@ -51,7 +51,7 @@
 import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 
-import { CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
+import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
 import { detectClients } from "../detect.js";
 import { diff } from "../diff.js";
 import {
@@ -65,7 +65,11 @@ import {
   type EngineResult,
 } from "../engine.js";
 import { resolveScopePath } from "../paths.js";
-import { readConfigEntries } from "../readers.js";
+import {
+  diagnoseConfigSurface,
+  readConfigEntries,
+  type ConfigSurfaceDiagnosis,
+} from "../readers.js";
 import {
   findStash,
   isManagerCreated,
@@ -476,9 +480,11 @@ Commands:
   restore --client <id> [--scope user|project] [--backup <name>] [--json]
       Restore the latest (or a named) timestamped backup of the config file.
   doctor [--json] [--repair --yes-i-mean-it]
-      Diagnose: env-reference resolvability, file parseability, stale
-      backups, orphaned stashes, and present non-canonical entries that fail
-      ownership (re-recorded manager-created by --repair --yes-i-mean-it).
+      Diagnose: env-reference resolvability, file parseability, config-surface
+      drift (a parseable file whose root key fails the adapter's shape
+      expectations), stale backups, orphaned stashes, and present
+      non-canonical entries that fail ownership (re-recorded manager-created
+      by --repair --yes-i-mean-it).
 
 Options:
   --client <id>         Client id (see "detect" for the roster).
@@ -1238,6 +1244,12 @@ interface DoctorFinding {
   detail: string;
   /** 33-1-R5 repair candidates carry the entry name. */
   entry?: string;
+  /** config-drift (Story 33.4): the adapter's shape expectation. */
+  expected?: string;
+  /** config-drift (Story 33.4): what the file actually holds (type only — never content). */
+  found?: string;
+  /** config-drift (Story 33.4): the adapter-data vintage the expectation comes from. */
+  adapterDataVersion?: string;
 }
 
 /** Recursively walk a parsed entry, invoking `onString` for every string
@@ -1298,19 +1310,59 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
     });
   }
 
-  // Check 1: file parseability (from the status matrix's own classification).
+  // Check 1: file parseability + config-surface drift (Story 33.4, AC
+  // 33.4.2 / Integration AC 33.4-I1). The status matrix classifies BOTH a
+  // syntax error and a wrong-shaped root key as "unparseable"; the doctor
+  // re-diagnoses the file (the same shared parse path the reader uses) to
+  // keep the findings DISTINCT: a syntax error is "parseability" (repair or
+  // restore the file before any write), while a file that PARSES but fails
+  // the adapter's shape expectations is "config-drift" (the client's config
+  // surface moved away from the adapter data). The drift rule (documented in
+  // the README's drift-fix procedure): drift = the root key is PRESENT with
+  // the wrong shape, OR the file parses but its top level isn't the format's
+  // object form at all (every expectation fails). An ABSENT root key with
+  // other content is a normal no-MCP-section config — never drift; empty or
+  // missing files produce no finding.
   let parsedFiles = 0;
   for (const client of report.clients) {
+    const adapter = CLIENT_ADAPTERS[client.client];
     for (const scope of client.scopes) {
       if (scope.file === "ok") parsedFiles++;
       if (scope.file === "unparseable") {
-        findings.push({
-          check: "parseability",
-          client: client.client,
-          scope: scope.scope,
-          path: scope.path,
-          detail: `config file is unparseable: ${scope.error ?? "unknown"} (every write refuses until it is repaired or restored)`,
-        });
+        let diagnosis: ConfigSurfaceDiagnosis | null = null;
+        if (adapter !== undefined && scope.path !== null) {
+          try {
+            diagnosis = diagnoseConfigSurface(adapter, deps.fs.readFile(scope.path));
+          } catch {
+            diagnosis = null; // an unreadable file stays a parseability finding
+          }
+        }
+        if (
+          diagnosis !== null &&
+          (diagnosis.status === "root-wrong-shape" || diagnosis.status === "top-not-object")
+        ) {
+          findings.push({
+            check: "config-drift",
+            client: client.client,
+            scope: scope.scope,
+            path: scope.path,
+            expected: diagnosis.expected,
+            found: diagnosis.found,
+            adapterDataVersion: ADAPTER_DATA_VERSION,
+            detail:
+              `config file parses, but expected ${diagnosis.expected} — found ${diagnosis.found} ` +
+              `(adapter data ${ADAPTER_DATA_VERSION}; if ${adapter?.displayName ?? client.client} genuinely changed its config surface, ` +
+              `the fix is an adapter-data patch + fixture update, never engine code — see the README's drift-fix procedure)`,
+          });
+        } else {
+          findings.push({
+            check: "parseability",
+            client: client.client,
+            scope: scope.scope,
+            path: scope.path,
+            detail: `config file is unparseable: ${scope.error ?? "unknown"} (every write refuses until it is repaired or restored)`,
+          });
+        }
         restartClients.add(client.client);
       }
     }

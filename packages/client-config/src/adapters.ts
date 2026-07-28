@@ -16,7 +16,7 @@ import type { ClientAdapter, ClientDisposition } from "./types.js";
  * adapter record changes; surfaced in `status` output so a drift report
  * always names the data vintage it was computed from (spec §3.7).
  */
-export const ADAPTER_DATA_VERSION = "2026-07-25.2";
+export const ADAPTER_DATA_VERSION = "2026-07-28.1";
 
 /** Shared VS Code user-profile roots (per-OS), under which several
  * VS Code-extension clients (Cline, Roo Code) keep their globalStorage. */
@@ -536,21 +536,24 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
       },
       {
         scope: "project",
-        // Most specific wins (spec §3.2): `.kimi-code/mcp.json` first, then
-        // the Claude-Code-compatible repo-root `.mcp.json`.
+        // Official docs (moonshotai.github.io/kimi-code, MCP customization)
+        // document exactly ONE project path: `.kimi-code/mcp.json`. The
+        // binding spec's Claude-Code-compatible repo-root `.mcp.json`
+        // fallback was FALSIFIED by the Story 33.4 live certification probe
+        // (2026-07-28, kimi-code 0.29.0): a distinctive WORKING probe server
+        // placed in `.mcp.json` (and separately in `.kimi-code/mcp.json`)
+        // was NOT loaded in print mode (`mcp__iris-sharing-probe__*` →
+        // TOOL-NOT-LOADED, even in a TUI-registered workspace). The fallback
+        // was REMOVED (data patch, no engine change): writing a config the
+        // client may never read is worse than no fallback. Project-scope
+        // loading itself may be TUI-only — residual risk recorded in the
+        // certification table.
         paths: {
           win32: ".kimi-code/mcp.json",
           darwin: ".kimi-code/mcp.json",
           linux: ".kimi-code/mcp.json",
         },
         shareable: true,
-        fallbacks: [
-          {
-            win32: ".mcp.json",
-            darwin: ".mcp.json",
-            linux: ".mcp.json",
-          },
-        ],
       },
     ],
     entryShape: "standard",

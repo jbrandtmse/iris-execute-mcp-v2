@@ -103,19 +103,20 @@ describe("resolveScopePath — full registry × platforms matrix", () => {
     expect(withoutOverride).toBe("/home/fake/.kimi-code/mcp.json");
   });
 
-  it("kimi-code project scope prefers .kimi-code/mcp.json, falls back to .mcp.json (most specific wins)", () => {
+  it("kimi-code project scope is .kimi-code/mcp.json ONLY (the .mcp.json fallback was falsified live, Story 33.4)", () => {
     const adapter = CLIENT_ADAPTERS["kimi-code"];
     if (!adapter) throw new Error("registry missing kimi-code");
     const ctx = ctxFor("linux");
     const primary = "/work/repo/.kimi-code/mcp.json";
-    const fallback = "/work/repo/.mcp.json";
-    // No fs predicate: primary is returned as-is.
+    // No fs predicate: the primary is returned as-is.
     expect(resolveScopePath(adapter, "project", ctx)).toBe(primary);
-    // Only the fallback exists: the fallback wins.
-    expect(resolveScopePath(adapter, "project", ctx, (p) => p === fallback)).toBe(fallback);
-    // Both exist: the most specific wins.
-    expect(resolveScopePath(adapter, "project", ctx, () => true)).toBe(primary);
-    // Candidates enumerate both, primary first.
-    expect(resolveScopeCandidates(adapter, "project", ctx)).toEqual([primary, fallback]);
+    // Even when ONLY a repo-root .mcp.json exists, kimi-code resolves its own
+    // project path — NEVER the Claude-Code file (the fallback claimed by the
+    // binding spec was falsified by the 2026-07-28 live probe: kimi-code
+    // 0.29.0 loaded no probe server from .mcp.json; official docs document
+    // only .kimi-code/mcp.json).
+    expect(resolveScopePath(adapter, "project", ctx, (p) => p === "/work/repo/.mcp.json")).toBe(primary);
+    // Candidates enumerate exactly the primary.
+    expect(resolveScopeCandidates(adapter, "project", ctx)).toEqual([primary]);
   });
 });

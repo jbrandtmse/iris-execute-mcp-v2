@@ -11,13 +11,18 @@
  * `entries` is the rootKey's name → raw-entry map. Entry VALUES are opaque
  * `RawEntry` records here; classification (iris-mcp-owned vs foreign) and
  * enable/disable interpretation live in status.ts.
+ *
+ * Story 33.4 added {@link diagnoseConfigSurface}: the finer-grained surface
+ * diagnosis the doctor's config-drift check consumes (AC 33.4.2). Both
+ * public functions sit on ONE shared parse path (`parseSurface`), so the
+ * reader and the diagnoser can never disagree about what "parses".
  */
 
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { parse as parseToml } from "smol-toml";
 import { parseDocument } from "yaml";
 
-import type { ClientAdapter } from "./types.js";
+import type { ClientAdapter, ConfigFormat } from "./types.js";
 
 /** One raw server entry as parsed from the client file (shape unvalidated). */
 export type RawEntry = Record<string, unknown>;
@@ -30,6 +35,50 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The format's name for its object form ("object" / "table" / "mapping"). */
+function objectNoun(format: ConfigFormat): string {
+  switch (format) {
+    case "json":
+    case "jsonc":
+      return "object";
+    case "toml":
+      return "table";
+    case "yaml":
+      return "mapping";
+  }
+}
+
+/** The same noun with its article ("an object" / "a table" / "a mapping"). */
+function objectNounWithArticle(format: ConfigFormat): string {
+  const noun = objectNoun(format);
+  return `${noun === "object" ? "an" : "a"} ${noun}`;
+}
+
+/**
+ * Describe a value's TYPE only — never its content (a wrong-shaped root key
+ * could itself hold text; the drift finding reports shape, not bytes).
+ */
+function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `an array (${value.length} item(s))`;
+  return `a ${typeof value}`;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The shared top-level parse path (Story 33.4 — single-sourced so the
+// reader and the drift diagnoser classify the same file identically).
+// ════════════════════════════════════════════════════════════════════
+
+type SurfaceParse =
+  /** Whitespace/BOM-only input, or a null top level — a valid not-yet-configured file. */
+  | { kind: "empty" }
+  /** The format parser rejected the text (error names reason + offset/line, never content). */
+  | { kind: "syntax-error"; error: string }
+  /** Parses, but the top level is not the format's object form (error preserved for the reader). */
+  | { kind: "top-not-object"; error: string; found: string }
+  /** Parses; the top level is the format's object form. */
+  | { kind: "object"; top: Record<string, unknown> };
+
 function formatJsoncErrors(errors: ParseError[], content: string): string {
   const first = errors[0];
   if (!first) return "unknown parse error";
@@ -38,91 +87,88 @@ function formatJsoncErrors(errors: ParseError[], content: string): string {
   return `JSON parse error at line ${line} (offset ${first.offset}, code ${first.error})`;
 }
 
-function readJsonLike(content: string, rootKey: string): ReadEntriesResult {
+function parseJsonSurface(content: string): SurfaceParse {
   const errors: ParseError[] = [];
   let parsed: unknown;
   try {
     parsed = parseJsonc(content, errors, { allowTrailingComma: true, disallowComments: false });
   } catch (err) {
-    return { ok: false, error: `JSON parser threw: ${err instanceof Error ? err.message : String(err)}` };
+    return { kind: "syntax-error", error: `JSON parser threw: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (errors.length > 0) {
-    return { ok: false, error: formatJsoncErrors(errors, content) };
+    return { kind: "syntax-error", error: formatJsoncErrors(errors, content) };
   }
   if (parsed === undefined || parsed === null) {
     // Empty file: valid, zero entries (a fresh client config may not exist yet).
-    return { ok: true, entries: {} };
+    return { kind: "empty" };
   }
   if (!isPlainObject(parsed)) {
-    return { ok: false, error: "top-level JSON value is not an object" };
+    return {
+      kind: "top-not-object",
+      error: "top-level JSON value is not an object",
+      found: describeValue(parsed),
+    };
   }
-  const root = parsed[rootKey];
-  if (root === undefined) return { ok: true, entries: {} };
-  if (!isPlainObject(root)) {
-    return { ok: false, error: `root key "${rootKey}" is not an object` };
-  }
-  const entries: Record<string, RawEntry> = {};
-  for (const [name, value] of Object.entries(root)) {
-    if (isPlainObject(value)) entries[name] = value;
-  }
-  return { ok: true, entries };
+  return { kind: "object", top: parsed };
 }
 
-function readToml(content: string, rootKey: string): ReadEntriesResult {
+function parseTomlSurface(content: string): SurfaceParse {
   let parsed: unknown;
   try {
     parsed = parseToml(content);
   } catch (err) {
-    return { ok: false, error: `TOML parse error: ${err instanceof Error ? err.message : String(err)}` };
+    return { kind: "syntax-error", error: `TOML parse error: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (!isPlainObject(parsed)) {
-    return { ok: false, error: "top-level TOML value is not a table" };
+    return {
+      kind: "top-not-object",
+      error: "top-level TOML value is not a table",
+      found: describeValue(parsed),
+    };
   }
-  const root = parsed[rootKey];
-  if (root === undefined) return { ok: true, entries: {} };
-  if (!isPlainObject(root)) {
-    return { ok: false, error: `root key "${rootKey}" is not a table` };
-  }
-  const entries: Record<string, RawEntry> = {};
-  for (const [name, value] of Object.entries(root)) {
-    if (isPlainObject(value)) entries[name] = value;
-  }
-  return { ok: true, entries };
+  return { kind: "object", top: parsed };
 }
 
-function readYaml(content: string, rootKey: string): ReadEntriesResult {
+function parseYamlSurface(content: string): SurfaceParse {
   let doc;
   try {
     doc = parseDocument(content);
   } catch (err) {
-    return { ok: false, error: `YAML parse error: ${err instanceof Error ? err.message : String(err)}` };
+    return { kind: "syntax-error", error: `YAML parse error: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (doc.errors.length > 0) {
     const first = doc.errors[0];
     const linePos = first?.linePos?.[0];
     const where = linePos ? ` at line ${linePos.line}` : "";
-    return { ok: false, error: `YAML parse error${where}: ${first?.message ?? "unknown"}` };
+    return { kind: "syntax-error", error: `YAML parse error${where}: ${first?.message ?? "unknown"}` };
   }
   let parsed: unknown;
   try {
     parsed = doc.toJS();
   } catch (err) {
-    return { ok: false, error: `YAML materialization error: ${err instanceof Error ? err.message : String(err)}` };
+    return { kind: "syntax-error", error: `YAML materialization error: ${err instanceof Error ? err.message : String(err)}` };
   }
-  if (parsed === undefined || parsed === null) return { ok: true, entries: {} };
+  if (parsed === undefined || parsed === null) return { kind: "empty" };
   if (!isPlainObject(parsed)) {
-    return { ok: false, error: "top-level YAML value is not a mapping" };
+    return {
+      kind: "top-not-object",
+      error: "top-level YAML value is not a mapping",
+      found: describeValue(parsed),
+    };
   }
-  const root = parsed[rootKey];
-  if (root === undefined) return { ok: true, entries: {} };
-  if (!isPlainObject(root)) {
-    return { ok: false, error: `root key "${rootKey}" is not a mapping` };
+  return { kind: "object", top: parsed };
+}
+
+function parseSurface(adapter: ClientAdapter, text: string): SurfaceParse {
+  switch (adapter.format) {
+    case "json":
+    case "jsonc":
+      return parseJsonSurface(text);
+    case "toml":
+      return parseTomlSurface(text);
+    case "yaml":
+      return parseYamlSurface(text);
   }
-  const entries: Record<string, RawEntry> = {};
-  for (const [name, value] of Object.entries(root)) {
-    if (isPlainObject(value)) entries[name] = value;
-  }
-  return { ok: true, entries };
 }
 
 /**
@@ -138,13 +184,84 @@ export function readConfigEntries(adapter: ClientAdapter, content: string): Read
   if (text.trim() === "") {
     return { ok: true, entries: {} };
   }
-  switch (adapter.format) {
-    case "json":
-    case "jsonc":
-      return readJsonLike(text, adapter.rootKey);
-    case "toml":
-      return readToml(text, adapter.rootKey);
-    case "yaml":
-      return readYaml(text, adapter.rootKey);
+  const surface = parseSurface(adapter, text);
+  switch (surface.kind) {
+    case "empty":
+      return { ok: true, entries: {} };
+    case "syntax-error":
+    case "top-not-object":
+      return { ok: false, error: surface.error };
+    case "object": {
+      const root = surface.top[adapter.rootKey];
+      if (root === undefined) return { ok: true, entries: {} };
+      if (!isPlainObject(root)) {
+        return { ok: false, error: `root key "${adapter.rootKey}" is not ${objectNounWithArticle(adapter.format)}` };
+      }
+      const entries: Record<string, RawEntry> = {};
+      for (const [name, value] of Object.entries(root)) {
+        if (isPlainObject(value)) entries[name] = value;
+      }
+      return { ok: true, entries };
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.4 — config-surface drift diagnosis (AC 33.4.2).
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * The finer classification the doctor's config-drift check consumes. The
+ * status matrix collapses "syntax error" and "parses but wrong shape" into
+ * one `unparseable` bucket; this diagnosis keeps them DISTINCT (a syntax
+ * error means repair/restore the file; a wrong shape means the CLIENT's
+ * config surface moved away from the adapter data).
+ */
+export type ConfigSurfaceDiagnosis =
+  /** Empty/whitespace-only (or null top level) — a valid not-yet-configured file. */
+  | { status: "empty" }
+  /** The format parser rejected the text. */
+  | { status: "syntax-error"; error: string }
+  /** Parses, but the top level isn't the format's object form — every adapter expectation fails. */
+  | { status: "top-not-object"; expected: string; found: string }
+  /** Parses; the adapter's root key is absent (a normal no-MCP-section config — NOT drift). */
+  | { status: "root-absent" }
+  /** Parses; the adapter's root key is present with the expected shape. */
+  | { status: "root-ok" }
+  /** Parses; the adapter's root key is present but holds the wrong shape — drift. */
+  | { status: "root-wrong-shape"; expected: string; found: string };
+
+/**
+ * Diagnose `content` against the adapter's root-key expectation. Never
+ * throws. `expected`/`found` describe shapes only (type names, never file
+ * content — the same secrecy discipline as the parse errors).
+ */
+export function diagnoseConfigSurface(adapter: ClientAdapter, content: string): ConfigSurfaceDiagnosis {
+  const text = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+  if (text.trim() === "") return { status: "empty" };
+  const surface = parseSurface(adapter, text);
+  switch (surface.kind) {
+    case "empty":
+      return { status: "empty" };
+    case "syntax-error":
+      return { status: "syntax-error", error: surface.error };
+    case "top-not-object":
+      return {
+        status: "top-not-object",
+        expected: `a top-level ${objectNoun(adapter.format)} holding root key "${adapter.rootKey}"`,
+        found: surface.found,
+      };
+    case "object": {
+      const root = surface.top[adapter.rootKey];
+      if (root === undefined) return { status: "root-absent" };
+      if (!isPlainObject(root)) {
+        return {
+          status: "root-wrong-shape",
+          expected: `root key "${adapter.rootKey}" holding ${objectNounWithArticle(adapter.format)} of server entries`,
+          found: describeValue(root),
+        };
+      }
+      return { status: "root-ok" };
+    }
   }
 }

@@ -1,5 +1,13 @@
 # Claude Code Configuration
 
+> **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
+> `npx -y @iris-mcp/client-config iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
+> — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
+> verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
+> This page remains as the **manual fallback** (and as the reference for what the
+> manager writes). Claude Code's adapter is **certified-live** (2026-07-28) — see the
+> [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
+
 Connect the IRIS MCP Server Suite to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) -- both the CLI and the VS Code extension.
 
 ---

@@ -41,7 +41,13 @@ export {
   type DetectionReport,
 } from "./detect.js";
 
-export { readConfigEntries, type RawEntry, type ReadEntriesResult } from "./readers.js";
+export {
+  diagnoseConfigSurface,
+  readConfigEntries,
+  type ConfigSurfaceDiagnosis,
+  type RawEntry,
+  type ReadEntriesResult,
+} from "./readers.js";
 
 export {
   buildStatusMatrix,

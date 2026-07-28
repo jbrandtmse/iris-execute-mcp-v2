@@ -10,9 +10,11 @@
  *     and prove the status row would flip while foreign entries survive.
  *  2. A mechanical status↔diff agreement invariant: for every ok scope in
  *     the sandbox, the matrix row state dictates the diff mechanism.
- *  3. Project-scope chains: kimi-code's most-specific-wins fallback
- *     (`.kimi-code/mcp.json` > `.mcp.json`) exercised THROUGH status, and a
- *     mixed-state client (vscode user unparseable + project ok).
+ *  3. Project-scope chains: kimi-code's docs-verified `.kimi-code/mcp.json`
+ *     project path exercised THROUGH status (with a co-located repo-root
+ *     `.mcp.json` proving kimi-code NEVER consults the Claude-Code file —
+ *     the Story 33.4 falsification pin), and a mixed-state client (vscode
+ *     user unparseable + project ok).
  *  4. Adversarial fixtures: iris-LOOKING entry names that are NOT canonical
  *     (rootKey collisions), CRLF/BOM encoding variants, deeply-nested and
  *     unicode-named foreign entries, owned-entry-LAST surgical removal
@@ -310,20 +312,27 @@ describe("E2E chain: project scopes (sandbox-project fixture tree)", () => {
     return sandboxHomeCtx({ projectDir: fixturePath("sandbox-project") });
   }
 
-  it("kimi-code is detected through its .mcp.json fallback and status reads the fallback file", () => {
+  it("kimi-code is detected through its docs-verified .kimi-code/mcp.json project path — NEVER the repo-root .mcp.json (Story 33.4 falsification pin)", () => {
     const report = status(projectCtx(), REAL_STATUS_FS);
     const kimi = report.clients.find((c) => c.client === "kimi-code");
-    expect(kimi, "kimi-code detected via the project fallback").toBeDefined();
+    expect(kimi, "kimi-code detected via .kimi-code/mcp.json").toBeDefined();
     const projectScope = scopeOf(report, "kimi-code", "project");
     expect(projectScope.file).toBe("ok");
-    // Most specific wins: only .mcp.json exists, so the fallback resolves.
-    expect(projectScope.path).toBe(fixturePath("sandbox-project") + "/.mcp.json");
-    expect(projectScope.servers.find((s) => s.server === "iris-data-mcp")?.state).toBe("present-enabled");
-    // The iris-LOOKING names are NOT canonical — surfaced as foreign, names only.
-    expect(projectScope.foreign).toEqual(["IRIS-DEV-MCP", "iris-dev-mcp-backup"].sort());
-    expect(projectScope.servers.find((s) => s.server === "iris-dev-mcp")?.state).toBe("absent");
-    // Lookalike secret values never leak onto the status surface.
+    // The sandbox project holds BOTH .kimi-code/mcp.json (iris-ops-mcp) and a
+    // repo-root .mcp.json (iris-data-mcp). kimi-code resolves ONLY its own
+    // path — the binding spec's .mcp.json fallback was falsified by the
+    // 2026-07-28 live probe (kimi-code 0.29.0) and removed from the data.
+    expect(projectScope.path).toBe(fixturePath("sandbox-project") + "/.kimi-code/mcp.json");
+    expect(projectScope.servers.find((s) => s.server === "iris-ops-mcp")?.state).toBe("present-enabled");
+    // iris-data-mcp lives ONLY in .mcp.json — if kimi-code ever read the
+    // Claude-Code file, this row would flip present.
+    expect(projectScope.servers.find((s) => s.server === "iris-data-mcp")?.state).toBe("absent");
+    expect(projectScope.foreign).toEqual(["playwright"]);
+    // Foreign VALUES never leak onto the status surface — including the
+    // lookalike secrets in the neighboring .mcp.json (read by claude-code's
+    // project scope in the same report).
     const rendered = JSON.stringify(report);
+    expect(rendered).not.toContain("pw_foreignProjectValue789");
     expect(rendered).not.toContain("qb_lookalikeSecret456");
     expect(rendered).not.toContain("imp_lookalikeSecret789");
   });

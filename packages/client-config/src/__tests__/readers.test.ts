@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   CLIENT_ADAPTERS,
   CANONICAL_SERVERS,
+  diagnoseConfigSurface,
   readConfigEntries,
   type ClientAdapter,
 } from "../index.js";
@@ -140,6 +141,100 @@ describe("readConfigEntries — malformed inputs are ok:false, never exceptions 
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(Object.keys(result.entries)).toEqual(["a"]);
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.4 Task 1 / AC 33.4.2 — diagnoseConfigSurface (the drift
+// guard's finer classification; shares ONE parse path with the reader).
+// ════════════════════════════════════════════════════════════════════
+
+describe("diagnoseConfigSurface — the config-drift classification (AC 33.4.2)", () => {
+  it("wrong-shaped root keys are root-wrong-shape across ALL FOUR format families", () => {
+    const cases: Array<[string, string, string, string]> = [
+      // [adapterId, fixture, expected-fragment, found]
+      ["claude-code", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
+      ["vscode", "drift/wrong-shape.jsonc", 'root key "servers" holding an object of server entries', "an array (3 item(s))"],
+      ["codex", "drift/wrong-shape.toml", 'root key "mcp_servers" holding a table of server entries', "a string"],
+      ["goose", "drift/wrong-shape.yaml", 'root key "extensions" holding a mapping of server entries', "an array (2 item(s))"],
+    ];
+    for (const [adapterId, fixtureRel, expected, found] of cases) {
+      const diagnosis = diagnoseConfigSurface(adapterOf(adapterId), readFixture(fixtureRel));
+      expect(diagnosis.status, `${adapterId} must diagnose root-wrong-shape`).toBe("root-wrong-shape");
+      if (diagnosis.status === "root-wrong-shape") {
+        expect(diagnosis.expected, adapterId).toBe(expected);
+        expect(diagnosis.found, adapterId).toBe(found);
+      }
+    }
+  });
+
+  it("a parseable file whose top level is not an object is top-not-object (every expectation fails)", () => {
+    const diagnosis = diagnoseConfigSurface(adapterOf("claude-code"), readFixture("drift/top-array.json"));
+    expect(diagnosis.status).toBe("top-not-object");
+    if (diagnosis.status === "top-not-object") {
+      expect(diagnosis.expected).toBe('a top-level object holding root key "mcpServers"');
+      expect(diagnosis.found).toBe("an array (3 item(s))");
+    }
+  });
+
+  it("an absent root key with other content is root-absent — NOT drift (a normal no-MCP-section config)", () => {
+    const diagnosis = diagnoseConfigSurface(adapterOf("claude-code"), readFixture("drift/no-mcp-section.json"));
+    expect(diagnosis.status).toBe("root-absent");
+  });
+
+  it("a correct-shape root key is root-ok; every adapter's realistic fixture diagnoses root-ok", () => {
+    for (const id of Object.keys(CLIENT_ADAPTERS)) {
+      const fixtureRel = ADAPTER_FIXTURES[id];
+      if (!fixtureRel) throw new Error(`no fixture for ${id}`);
+      const diagnosis = diagnoseConfigSurface(adapterOf(id), readFixture(fixtureRel));
+      expect(diagnosis.status, `${id} fixture must diagnose root-ok`).toBe("root-ok");
+    }
+  });
+
+  it("empty/whitespace content is empty — never a finding", () => {
+    for (const id of ["claude-code", "codex", "goose"]) {
+      expect(diagnoseConfigSurface(adapterOf(id), "").status, id).toBe("empty");
+      expect(diagnoseConfigSurface(adapterOf(id), "  \n ").status, id).toBe("empty");
+    }
+  });
+
+  it("syntax errors stay syntax-error (the parseability finding's territory, never drift)", () => {
+    const cases: Array<[string, string]> = [
+      ["vscode", "malformed/bad.jsonc"],
+      ["codex", "malformed/bad.toml"],
+      ["goose", "malformed/bad.yaml"],
+    ];
+    for (const [adapterId, fixtureRel] of cases) {
+      const diagnosis = diagnoseConfigSurface(adapterOf(adapterId), readFixture(fixtureRel));
+      expect(diagnosis.status, adapterId).toBe("syntax-error");
+      if (diagnosis.status === "syntax-error") {
+        expect(diagnosis.error.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("the reader and the diagnoser agree: readConfigEntries ok ⇔ diagnosis not (syntax-error|top-not-object|root-wrong-shape)", () => {
+    // The single-parse-path invariant, probed across one fixture per class.
+    const probes: Array<[string, string]> = [
+      ["claude-code", "claude-code/user.json"],
+      ["claude-code", "drift/wrong-shape.json"],
+      ["claude-code", "drift/top-array.json"],
+      ["claude-code", "drift/no-mcp-section.json"],
+      ["vscode", "malformed/bad.jsonc"],
+      ["codex", "drift/wrong-shape.toml"],
+      ["goose", "drift/wrong-shape.yaml"],
+    ];
+    for (const [adapterId, fixtureRel] of probes) {
+      const adapter = adapterOf(adapterId);
+      const content = readFixture(fixtureRel);
+      const read = readConfigEntries(adapter, content);
+      const diagnosis = diagnoseConfigSurface(adapter, content);
+      const diagnosisBad =
+        diagnosis.status === "syntax-error" ||
+        diagnosis.status === "top-not-object" ||
+        diagnosis.status === "root-wrong-shape";
+      expect(read.ok === !diagnosisBad, `${adapterId}/${fixtureRel}`).toBe(true);
     }
   });
 });

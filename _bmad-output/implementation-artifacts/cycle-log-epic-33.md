@@ -31,3 +31,9 @@
 2026-07-28T05:20:00Z	Story 33.3	cr_complete	spawn_at=2026-07-28T04:56:00Z model=claude-opus-5 resolved=3 deferred=0 dismissed=3 high=0 med=0 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-4of4
 2026-07-28T06:05:00Z	Story 33.3	smoke_complete	method=cli result=pass iterations=3 defects_caught=0 evidence=vsix-packaged-plus-compiled-engine-journey-real-cli model=claude-fable-5
 2026-07-28T06:07:00Z	Story 33.3	committed	sha=2a62792 submodules=
+2026-07-28T06:15:00Z	Story 33.4	story_created	path=_bmad-output/implementation-artifacts/33-4-certification-docs.md
+2026-07-28T08:00:00Z	Story 33.4	dev_complete	spawn_at=2026-07-28T06:16:00Z model=claude-sonnet-5 files=packages/client-config+docs clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-07-28T08:00:00Z	Story 33.4	adr_verifications_complete	result=none_required model=claude-fable-5
+2026-07-28T08:25:00Z	Story 33.4	qa_complete	spawn_at=2026-07-28T08:01:00Z model=claude-sonnet-5 tests=packages/client-config/src/__tests__/certification-process.test.ts tests_added=21 defects_fixed=0 clarifications=0 closing_sections_present=true
+2026-07-28T08:50:00Z	Story 33.4	cr_complete	spawn_at=2026-07-28T08:26:00Z model=claude-opus-5 resolved=5 deferred=0 dismissed=4 high=0 med=1 low=4 clarifications=0 closing_sections_present=true note=review-layers-silent-5of5
+2026-07-28T09:00:00Z	Story 33.4	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=doctor-drift-json-envelope-plus-render-check model=claude-fable-5

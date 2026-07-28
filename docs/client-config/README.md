@@ -2,6 +2,15 @@
 
 How to point any MCP client at the IRIS MCP Server Suite, plus the two credential caveats that surprise people most.
 
+> **The fast path is the manager (Epic 33):** `npx -y @iris-mcp/client-config iris-mcp-clients`
+> detects your installed clients (`detect`), previews the exact edit (`diff`), writes it through the
+> backup-on-write engine (`apply`), toggles entries (`enable`/`disable`/`remove`), rolls back
+> (`restore`), and diagnoses the result (`doctor`). *(Not yet published to npm — until then run the
+> built bin directly: `node packages/client-config/dist/cli/clients-cli.js …` from a repo checkout.)*
+> The per-client snippets below are the **manual
+> fallback** — and the reference for what the manager writes. Per-client adapter details and
+> certification dispositions: [packages/client-config README](../../packages/client-config/README.md).
+
 Detailed per-client guides: **[Claude Code](claude-code.md)** · **[Claude Desktop](claude-desktop.md)** · **[Cursor](cursor.md)**. Everything else is covered below.
 
 ---
@@ -47,17 +56,20 @@ Worked example, verified end to end — four profiles resolving at once:
 
 ## Client matrix
 
-**Verified on a real machine 2026-07-26** (✅) versus **from the Epic 33 research spec, not yet hands-verified** (⚠️ — confirm before relying on it).
+Certification status (Story 33.4 — full dispositions in the
+[package README](../../packages/client-config/README.md#certification-dispositions-generated)):
+**certified-live 2026-07-28** (✅) versus **fixture-only-with-residual-risk** (⚠️ — adapter data +
+golden round-trips proven; the real client's config surface not yet hands-verified).
 
 | Client | Format | Root key | User-scope path | Project scope | Disable |
 |---|---|---|---|---|---|
 | ✅ Claude Code | JSON | `mcpServers` | `~/.claude.json` (prefer `claude mcp add`) | `.mcp.json` | stash |
 | ✅ Cline | JSON | `mcpServers` | `<VS Code globalStorage>/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` |
-| ✅ Kimi Code | JSON | `mcpServers` | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME`) | `.mcp.json`, `.kimi-code/mcp.json` | stash |
+| ✅ Kimi Code | JSON | `mcpServers` | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME`) | `.kimi-code/mcp.json` | stash |
 | ✅ VS Code (Copilot) | JSONC | `servers` (+`inputs`) | user `mcp.json` — *MCP: Open User Configuration* | `.vscode/mcp.json` | native UI |
 | ⚠️ Claude Desktop | JSON | `mcpServers` | Win `%APPDATA%\Claude\claude_desktop_config.json`; mac `~/Library/Application Support/Claude/…` | — | stash |
 | ⚠️ Cursor | JSON | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | stash |
-| ⚠️ Codex CLI | **TOML** | `[mcp_servers.<name>]` | `~/.codex/config.toml` | `.codex/config.toml` | `enabled` flag unconfirmed |
+| ⚠️ Codex CLI | **TOML** | `[mcp_servers.<name>]` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag (docs-verified) |
 | ⚠️ Kimi CLI | JSON | `mcpServers` | `~/.kimi/mcp.json` (`--mcp-config-file` override) | — | stash |
 | ⚠️ Roo Code | JSON | `mcpServers` | ext-storage `mcp_settings.json` | `.roo/mcp.json` | native `disabled` |
 | ⚠️ Windsurf | JSON | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | stash |
@@ -170,7 +182,12 @@ Windows path: `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings
 
 ## Kimi Code ✅
 
-`~/.kimi-code/mcp.json` (honors `$KIMI_CODE_HOME`). Also reads a repo `.mcp.json` (Claude-compatible) and `.kimi-code/mcp.json`, most specific winning:
+`~/.kimi-code/mcp.json` (honors `$KIMI_CODE_HOME`). The project-level path is `.kimi-code/mcp.json`
+— that is the ONLY project path the official docs document. **A repo-root `.mcp.json` is NOT read
+by Kimi Code** (a 2026-07-28 live probe of 0.29.0 falsified the earlier compatibility claim; Claude
+Code reads `.mcp.json`, Kimi Code does not — sharing one repo file between them does not work).
+Note also that Kimi Code does not expand `${VAR}` references in MCP config — entries need literal
+values or OS-environment injection.
 
 ```jsonc
 {

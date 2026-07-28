@@ -48,9 +48,10 @@ export interface ScopeDef {
   envOverride?: { var: string; pathSuffix: string };
   /**
    * Additional candidate locations consulted (in order) when the primary
-   * template's file does not exist — e.g. Kimi Code's project scope prefers
-   * `.kimi-code/mcp.json` but also honors the Claude-Code-compatible
-   * `.mcp.json` ("most specific wins", spec §3.2).
+   * template's file does not exist. Generic machinery, currently unused by
+   * the v1 roster: kimi-code's `.mcp.json` fallback (the one consumer) was
+   * removed in Story 33.4 after a live probe falsified the client's support
+   * for it — only re-add a fallback with certification evidence.
    */
   fallbacks?: PlatformPaths[];
 }

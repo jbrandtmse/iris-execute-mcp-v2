@@ -105,13 +105,17 @@ describe("CLIENT_ADAPTERS registry", () => {
     expect(ADAPTER_DATA_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("kimi-code models its env override and most-specific-wins project fallback", () => {
+  it("kimi-code models its env override and a docs-verified single project path (no .mcp.json fallback — falsified live in Story 33.4)", () => {
     const kimiCode: ClientAdapter | undefined = CLIENT_ADAPTERS["kimi-code"];
     const user = kimiCode?.scopes.find((s) => s.scope === "user");
     expect(user?.envOverride?.var).toBe("KIMI_CODE_HOME");
     const project = kimiCode?.scopes.find((s) => s.scope === "project");
     expect(project?.paths.linux).toBe(".kimi-code/mcp.json");
-    expect(project?.fallbacks?.[0]?.linux).toBe(".mcp.json");
+    // The binding spec's repo-root .mcp.json fallback was removed after the
+    // 2026-07-28 certification probe falsified it (kimi-code 0.29.0 loaded no
+    // probe server from .mcp.json; official docs document only
+    // .kimi-code/mcp.json). No adapter may silently re-grow it.
+    expect(project?.fallbacks).toBeUndefined();
   });
 });
 
