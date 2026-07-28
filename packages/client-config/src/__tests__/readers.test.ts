@@ -31,7 +31,7 @@ const EXPECTED_OWNED: Readonly<Record<string, string[]>> = {
   gemini: ["iris-dev-mcp"],
   zed: ["iris-dev-mcp"],
   goose: ["iris-data-mcp", "iris-ops-mcp"],
-  kimi: ["iris-mcp-all"],
+  kimi: ["iris-ops-mcp"],
   "kimi-code": ["iris-dev-mcp"],
 };
 

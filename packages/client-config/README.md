@@ -125,6 +125,14 @@ a drift fix: the engine handles FORMATS, the adapter data handles CLIENTS.
 Everything is driven by a declarative `ClientAdapter` record — code handles
 formats, data handles clients. Adding a client never touches engine code.
 
+**Managed servers:** the 5 leaf servers (`iris-dev-mcp`, `iris-admin-mcp`,
+`iris-ops-mcp`, `iris-interop-mcp`, `iris-data-mcp`). `iris-mcp-all` is
+deliberately **unmanaged** (Project Lead decision 2026-07-28): it is a real
+aggregate stdio server, but as a peer row it invites applying all 5 servers
+AND the aggregate, double-registering every tool. Entries named
+`iris-mcp-all` are surfaced read-only (foreign), never modified — hand-write
+the aggregate if you want it.
+
 - `CLIENT_ADAPTERS` — the 13-adapter registry (id, format, rootKey, per-OS
   scope path templates, entryShape, envExpansion, disableSupport, restartHint,
   detection probes, docsUrl), stamped with `ADAPTER_DATA_VERSION`.
@@ -195,7 +203,9 @@ Kimi session artifacts cleaned up). A bare invocation prints the plan and
 does nothing; a real pass needs both `run` and `--real-config`:
 
 ```text
-node scripts/certify.mjs run <clientId> --real-config [--server iris-mcp-all] [--skip-agent]
+node scripts/certify.mjs run <clientId> --real-config [--server iris-dev-mcp] [--skip-agent]
+
+_Note (2026-07-28): certification probes now default to `iris-dev-mcp`. The 2026-07-28 evidence blocks below used `iris-mcp-all` as the probe entry (a valid managed server at the time); the aggregate is now unmanaged by design (see "Managed servers" above) — re-runs use a real server._
 ```
 
 Re-run it after the first npm publish (the pre-publish residual risk named
@@ -220,13 +230,13 @@ GUI tool listing is never claimed by the harness (33-5-15).
 
 #### Claude Code (`claude-code`)
 
-**certified-live** (2026-07-28, win32/x64) — scripted pass via `scripts/certify.mjs` (server used: `iris-mcp-all`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
+**certified-live** (2026-07-28, win32/x64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
 
 Recorded evidence:
-- PASS snapshot — config 88585 bytes; state.json present; 2 pre-existing backup(s)
-- PASS add (engine apply) — iris-mcp-all written to C:\Users\Josh\.claude.json
-- PASS client surfaces the entry — `claude mcp list` listed the manager-written entry "iris-mcp-all"
-- $ claude mcp list → iris-mcp-all: npx -y @iris-mcp/all - × Failed to connect — -32000: MCP error -32000: Connection closed
+- PASS snapshot — config 139 bytes; state.json absent; 0 pre-existing backup(s)
+- PASS add (engine apply) — iris-dev-mcp written to C:\Users\Josh\AppData\Local\Temp\qa334-cert-home-M2ea0w\.claude.json
+- PASS client surfaces the entry — `claude mcp list` listed the manager-written entry "iris-dev-mcp"
+- $ claude mcp list → iris-dev-mcp: npx -y @iris-mcp/dev - × Failed to connect — -32000: MCP error -32000: Connection closed
 - PASS disable (engine)
 - PASS entry inactive after disable — state = absent
 - PASS remove (engine)

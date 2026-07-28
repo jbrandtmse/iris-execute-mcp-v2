@@ -84,7 +84,6 @@ function statusWith(devState: "present-enabled" | "present-disabled" | "absent")
               { server: "iris-ops-mcp", state: "absent" },
               { server: "iris-interop-mcp", state: "absent" },
               { server: "iris-data-mcp", state: "absent" },
-              { server: "iris-mcp-all", state: "absent" },
             ],
             foreign: ["github-mcp"],
           },
@@ -309,7 +308,7 @@ describe("createClientsPanelOpener", () => {
     const html = harness.lastHtml();
     expect(html).toContain("Detected clients (2 of 13)");
     expect(html).toContain("Claude Code");
-    expect(html).toContain("not MCP-capable");
+    expect(html).not.toContain("not MCP-capable"); // dispositions section removed (2026-07-28 lead decision)
     expect(html).toContain("local build");
   });
 

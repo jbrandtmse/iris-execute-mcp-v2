@@ -128,7 +128,6 @@ const STATUS: StatusData = {
             { server: "iris-ops-mcp", state: "absent" },
             { server: "iris-interop-mcp", state: "absent" },
             { server: "iris-data-mcp", state: "absent" },
-            { server: "iris-mcp-all", state: "absent" },
           ],
           foreign: ["github-mcp"],
         },
@@ -302,7 +301,6 @@ describe("server matrix + apply staging", () => {
       "iris-ops-mcp",
       "iris-interop-mcp",
       "iris-data-mcp",
-      "iris-mcp-all",
     ]);
     expect(absentServers(state, "claude-code", "project")).toEqual([]); // missing file
     expect(absentServers(state, "claude-desktop", "user")).toEqual([]); // unparseable
@@ -380,7 +378,7 @@ describe("pending actions (diff preview → explicit confirm → engine)", () =>
 describe("renderClientsHtml", () => {
   const NONCE = "TEST-NONCE";
 
-  it("renders the roster with checkboxes, derived counts, the collapsed undetected list, and the disposition info rows (Pi not-MCP-capable + roadmap)", () => {
+  it("renders the roster with checkboxes, derived counts, and the collapsed undetected list — and NOT the dispositions section (removed 2026-07-28, Project Lead decision; README documents supported clients)", () => {
     const html = renderClientsHtml(loaded(), NONCE);
     expect(html).toContain("Detected clients (2 of 13)");
     expect(html).toContain("Claude Code");
@@ -389,12 +387,11 @@ describe("renderClientsHtml", () => {
     expect(html.match(/type="checkbox" data-msg='[^']*' checked/g)?.length).toBeGreaterThanOrEqual(2);
     expect(html).toContain("Not detected (2)");
     expect(html).toContain("Cursor (cursor)");
-    // Pi info row with rationale (AC 33.3.1) + a roadmap row.
-    expect(html).toContain("not MCP-capable");
-    expect(html).toContain("Pi (pi CLI / pi-coding-agent)");
-    expect(html).toContain("no built-in MCP support");
-    expect(html).toContain("roadmap");
-    expect(html).toContain("JetBrains AI Assistant / Junie");
+    // The "Other clients considered" section is deliberately NOT rendered
+    // even though the envelope carries dispositions (AC 33.3.1 as amended).
+    expect(html).not.toContain("Other clients considered");
+    expect(html).not.toContain("not MCP-capable");
+    expect(html).not.toContain("Pi (pi CLI / pi-coding-agent)");
     // CSP nonce.
     expect(html).toContain(`script-src 'nonce-${NONCE}'`);
   });

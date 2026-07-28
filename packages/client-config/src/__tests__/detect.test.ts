@@ -143,7 +143,8 @@ describe("sandbox-home detection (real fs, fake HOME)", () => {
     // .config/Code/User/globalStorage/saoudrizwan.claude-dev/ (cline).
     expect(detected).toEqual(["claude-code", "cline", "codex", "goose", "vscode"]);
     expect(detected.length).toBeLessThan(Object.keys(CLIENT_ADAPTERS).length);
-    // And the canonical server set still has the documented width.
-    expect(CANONICAL_SERVERS).toHaveLength(6);
+    // And the canonical server set still has the documented width (5 —
+    // iris-mcp-all unmanaged per the 2026-07-28 Project Lead decision).
+    expect(CANONICAL_SERVERS).toHaveLength(5);
   });
 });

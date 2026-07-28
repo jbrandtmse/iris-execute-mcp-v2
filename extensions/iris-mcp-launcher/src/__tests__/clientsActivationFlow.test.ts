@@ -162,8 +162,9 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       let html = thePanel().html;
       expect(html).toContain("Detected clients (1 of 13)");
       expect(html).toContain("Claude Code");
-      // …and the sanctioned dispositions surface (Pi info row).
-      expect(html).toContain("not MCP-capable");
+      // …and the dispositions section is NOT rendered (removed 2026-07-28,
+      // Project Lead decision — README documents supported clients).
+      expect(html).not.toContain("not MCP-capable");
 
       // Toggle the one detected client OFF through the webview message — the
       // REAL memento adapter persists the new roster.

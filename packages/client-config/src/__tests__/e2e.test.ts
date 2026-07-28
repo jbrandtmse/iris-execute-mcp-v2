@@ -60,7 +60,6 @@ const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
   "iris-ops-mcp": "@iris-mcp/ops",
   "iris-interop-mcp": "@iris-mcp/interop",
   "iris-data-mcp": "@iris-mcp/data",
-  "iris-mcp-all": "@iris-mcp/all",
 };
 
 function canonicalEntry(name: CanonicalServerName): CanonicalEntry {

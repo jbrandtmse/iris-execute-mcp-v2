@@ -31,14 +31,14 @@
 
 import type { CanonicalEntry, CanonicalServerName, ClientAdapter } from "./types.js";
 
-/** Canonical server → npm package (the `npx -y <pkg>` launch target). */
+/** Canonical server → npm package (the `npx -y <pkg>` launch target).
+ * No `iris-mcp-all` row — the aggregate is unmanaged (see CANONICAL_SERVERS). */
 export const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
   "iris-dev-mcp": "@iris-mcp/dev",
   "iris-admin-mcp": "@iris-mcp/admin",
   "iris-ops-mcp": "@iris-mcp/ops",
   "iris-interop-mcp": "@iris-mcp/interop",
   "iris-data-mcp": "@iris-mcp/data",
-  "iris-mcp-all": "@iris-mcp/all",
 };
 
 export type EnvMode = "server-manager" | "env-reference" | "governance-file" | "explicit";

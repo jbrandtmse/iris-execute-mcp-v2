@@ -24,7 +24,7 @@
  *   `run` subcommand AND `--real-config`.
  *
  * Usage:
- *   node scripts/certify.mjs run <clientId> [--server iris-mcp-all] --real-config [--skip-agent]
+ *   node scripts/certify.mjs run <clientId> [--server iris-dev-mcp] --real-config [--skip-agent]
  *
  * Results are merged into scripts/certification-results.json (keyed by
  * client id; other clients' records untouched).
@@ -171,13 +171,13 @@ for (let i = 1; i < argv.length; i++) {
   }
 }
 const clientId = positional[0];
-const server = flags.server ?? "iris-mcp-all";
+const server = flags.server ?? "iris-dev-mcp";
 
 if (subcommand !== "run" || !flags.has("--real-config")) {
   console.log(
     `certify — adapter certification harness (Story 33.4)\n\n` +
       `A bare invocation does NOTHING. To run a REAL certification pass:\n\n` +
-      `  node scripts/certify.mjs run <clientId> --real-config [--server iris-mcp-all] [--skip-agent]\n\n` +
+      `  node scripts/certify.mjs run <clientId> --real-config [--server iris-dev-mcp] [--skip-agent]\n\n` +
       `clients: ${CLIENT_IDS.join(", ")}\n\n` +
       `The pass writes the REAL user-scope config of the named client through the\n` +
       `built iris-mcp-clients engine (backup-on-write), verifies the client surfaces\n` +

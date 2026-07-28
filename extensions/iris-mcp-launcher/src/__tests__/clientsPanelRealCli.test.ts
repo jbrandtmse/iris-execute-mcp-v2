@@ -301,7 +301,7 @@ describe("Story 33.3 QA — panel journeys through the REAL built CLI (E2E layer
       let html = await openPanel(harness);
       expect(html).toContain("Detected clients (1 of 13)");
       expect(html).toContain("Claude Code");
-      expect(html).toContain("not MCP-capable"); // the Pi disposition row
+      expect(html).not.toContain("not MCP-capable"); // dispositions section removed (2026-07-28 lead decision)
       expect(html).toContain("local build");
       expect(html).toContain("<details><summary>Not detected ("); // collapsed, never expanded rows
       // Default roster: claude-code checked.

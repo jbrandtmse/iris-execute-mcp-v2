@@ -104,6 +104,12 @@ Claude Code (k3[1m]) — dev stage re-spawn after the Option-1 clarification res
   7. Restore the disabled client's config via "Restore backup…" (staged → Confirm) and verify the entry returns after restart; record VS Code version, both client versions, the CLI's `adapterDataVersion`, and outcomes back into this story.
 - **Gates (all run 2026-07-28)**: extension `npx tsc --noEmit` clean; extension `npx vitest run` 25 files / 412 tests green (+5 files / +83 over HEAD's 20 / 329 — mechanically derived from the vitest JSON reporter, Rule #51); `pnpm turbo run build test lint type-check` 29/29; `pnpm gen:governance-baseline:check` (`:check` ONLY) exit 0 — frozen `1e62c5ad5bf7` / 141 / 201 / 60 unchanged (no new MCP tool/governance key — a CLI change is not an MCP tool; Rules #28/#31/#53 untriggered); NUL scan clean across all touched files; extension CHANGELOG entry added (Rule #43). No `bootstrap-classes.ts`/`BOOTSTRAP_VERSION`/`src/ExecuteMCPv2` contact. Changes left UNCOMMITTED for the lead's per-story smoke gate + commit.
 
+### Post-merge amendment (2026-07-28, Project Lead decisions during the AC 33.3.4 smoke)
+
+Two spec changes, epics.md amended in place (Rule #42), implemented in a post-merge patch on the feature branch:
+1. **`iris-mcp-all` removed from the managed server set** (AC 33.3.2): the matrix/apply surface is the 5 leaf servers; aggregate entries are foreign/read-only. Rationale: a peer row invited applying all 5 + the aggregate, double-registering every tool.
+2. **"Other clients considered" section removed from the view** (AC 33.3.1): Pi/roadmap dispositions live in the package README's adapter table, not the working surface. The CLI's `detect --json` keeps `dispositions` (read surface).
+
 ### File List
 
 - `packages/client-config/src/cli/clients.ts` (sanctioned additive: `dispositions` in `detect --json` + envelope doc; **QA**: `diff --json` redaction fix)

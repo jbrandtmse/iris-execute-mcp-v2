@@ -6,7 +6,7 @@
       "disposition": "certified-live",
       "date": "2026-07-28",
       "host": "win32/x64",
-      "server": "iris-mcp-all",
+      "server": "iris-dev-mcp",
       "steps": [
         "PASS snapshot",
         "PASS add (engine apply)",
@@ -17,10 +17,10 @@
         "PASS byte-exact restore + side-effect cleanup"
       ],
       "evidence": [
-        "PASS snapshot — config 88585 bytes; state.json present; 2 pre-existing backup(s)",
-        "PASS add (engine apply) — iris-mcp-all written to C:\\Users\\Josh\\.claude.json",
-        "PASS client surfaces the entry — `claude mcp list` listed the manager-written entry \"iris-mcp-all\"",
-        "$ claude mcp list → iris-mcp-all: npx -y @iris-mcp/all - × Failed to connect — -32000: MCP error -32000: Connection closed",
+        "PASS snapshot — config 139 bytes; state.json absent; 0 pre-existing backup(s)",
+        "PASS add (engine apply) — iris-dev-mcp written to C:\\Users\\Josh\\AppData\\Local\\Temp\\qa334-cert-home-M2ea0w\\.claude.json",
+        "PASS client surfaces the entry — `claude mcp list` listed the manager-written entry \"iris-dev-mcp\"",
+        "$ claude mcp list → iris-dev-mcp: npx -y @iris-mcp/dev - × Failed to connect — -32000: MCP error -32000: Connection closed",
         "PASS disable (engine)",
         "PASS entry inactive after disable — state = absent",
         "PASS remove (engine)",

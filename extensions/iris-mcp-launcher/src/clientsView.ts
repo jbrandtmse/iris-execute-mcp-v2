@@ -11,15 +11,16 @@
  * - the detected clients with USER-SELECTABLE checkboxes (the roster — AC
  *   33.3.1; persisted by the panel in extension globalState), each selected
  *   client expandable to its section;
- * - per selected client: the iris-mcp server matrix (5 servers +
- *   `@iris-mcp/all`, exactly the CLI's canonical rows) with enable/disable/
- *   remove actions, scope + env-mode pickers, an apply staging row for the
- *   absent servers, and the third-party entries as read-only names (AC
- *   33.3.2);
+ * - per selected client: the iris-mcp server matrix (the 5 servers, exactly
+ *   the CLI's canonical rows — `iris-mcp-all` is unmanaged by Project Lead
+ *   decision 2026-07-28) with enable/disable/ remove actions, scope +
+ *   env-mode pickers, an apply staging row for the absent servers, and the
+ *   third-party entries as read-only names (AC 33.3.2 as amended);
  * - undetected v1 clients, collapsed, with a "not detected" note;
- * - the considered-but-dispositioned clients as info rows with rationale —
- *   Pi ("not MCP-capable") plus the roadmap rows — from `detect --json`'s
- *   `dispositions` (AC 33.3.1);
+ * - NOT the considered-but-dispositioned clients (Pi / roadmap): the
+ *   "Other clients considered" section was removed by Project Lead decision
+ *   2026-07-28 — supported/dispositioned clients are documented in the
+ *   package README's adapter table (AC 33.3.1 as amended);
  * - the diff preview for every pending write and the post-write restart hint
  *   (AC 33.3.3), plus backup restore and doctor findings.
  *
@@ -472,26 +473,6 @@ function renderUndetected(state: ClientsViewState): string {
   );
 }
 
-function renderDispositions(state: ClientsViewState): string {
-  const detect = state.detect;
-  // `dispositions` is the Story-33.3 additive detect key: an OLDER CLI (npx
-  // version skew, or a stale developmentRepoPath checkout) omits it — render
-  // the section as empty rather than throwing the whole view away (33.3
-  // review; the wrapper casts the envelope without shape validation).
-  const dispositions = detect?.dispositions ?? [];
-  if (detect === undefined || dispositions.length === 0) return "";
-  const rows = dispositions
-    .map((row) => {
-      const label = row.disposition === "excluded-not-mcp-capable" ? "not MCP-capable" : row.disposition;
-      return (
-        `<div class="banner info"><span class="badge">${escapeHtml(label)}</span>` +
-        `<strong>${escapeHtml(row.displayName)}</strong> — ${escapeHtml(row.reason)}</div>`
-      );
-    })
-    .join("");
-  return `<h2>Other clients considered</h2>${rows}`;
-}
-
 function renderMatrix(state: ClientsViewState, clientId: string, scope: "user" | "project"): string {
   const scopeRow = statusScope(state, clientId, scope);
   if (scopeRow === undefined) {
@@ -678,7 +659,6 @@ ${renderBanners(state)}
 ${loading}
 ${renderRoster(state)}
 ${renderUndetected(state)}
-${renderDispositions(state)}
 ${renderDoctor(state)}
 <div class="note">Every write flows: diff preview → explicit confirm → the iris-mcp-clients engine (the same code path as the terminal CLI) — with a timestamped backup before any change. Clients read their MCP config once at startup; the post-write restart hint tells you how to apply.</div>
 <script nonce="${nonce}">${VIEW_SCRIPT}</script>

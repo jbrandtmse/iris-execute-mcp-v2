@@ -496,7 +496,7 @@ describe("QA 33.4: certify.mjs writes nothing without the full explicit pass", (
     const configPath = path.join(home, ".claude.json");
     writeFileSync(
       configPath,
-      JSON.stringify({ mcpServers: { "iris-mcp-all": { command: "npx", args: ["-y", "@iris-mcp/all"] } } }, null, 2),
+      JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev"] } } }, null, 2),
     );
     const originalBytes = readFileSync(configPath, "utf8");
     const before = md5(RESULTS_PATH);
