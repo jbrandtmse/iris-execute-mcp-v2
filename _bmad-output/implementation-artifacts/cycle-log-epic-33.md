@@ -45,3 +45,5 @@
 2026-07-28T12:10:00Z	Story 33.5	qa_complete	spawn_at=2026-07-28T11:31:00Z model=claude-sonnet-5 tests=qa-33-5-process+qa-33-5-unit tests_added=43 defects_fixed=2 clarifications=0 closing_sections_present=true
 2026-07-28T12:50:00Z	Story 33.5	cr_complete	spawn_at=2026-07-28T12:11:00Z model=claude-opus-5 resolved=3 deferred=2 dismissed=0 high=0 med=0 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-6of6
 2026-07-28T12:55:00Z	Story 33.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=p1-p2-reproductions-dead model=claude-fable-5
+2026-07-28T12:57:00Z	Story 33.5	committed	sha=a04cbbd submodules=
+2026-07-28T12:58:00Z	Epic 33	epic_status_done	stories=6
