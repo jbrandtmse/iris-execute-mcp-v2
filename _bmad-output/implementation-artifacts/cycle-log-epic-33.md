@@ -30,3 +30,4 @@
 2026-07-28T04:55:00Z	Story 33.3	qa_complete	spawn_at=2026-07-28T04:31:00Z model=claude-sonnet-5 tests=clientsPanelRealCli+clientsActivationFlowWrites tests_added=10 defects_fixed=1 clarifications=0 closing_sections_present=true
 2026-07-28T05:20:00Z	Story 33.3	cr_complete	spawn_at=2026-07-28T04:56:00Z model=claude-opus-5 resolved=3 deferred=0 dismissed=3 high=0 med=0 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-4of4
 2026-07-28T06:05:00Z	Story 33.3	smoke_complete	method=cli result=pass iterations=3 defects_caught=0 evidence=vsix-packaged-plus-compiled-engine-journey-real-cli model=claude-fable-5
+2026-07-28T06:07:00Z	Story 33.3	committed	sha=2a62792 submodules=
