@@ -37,3 +37,4 @@
 2026-07-28T08:25:00Z	Story 33.4	qa_complete	spawn_at=2026-07-28T08:01:00Z model=claude-sonnet-5 tests=packages/client-config/src/__tests__/certification-process.test.ts tests_added=21 defects_fixed=0 clarifications=0 closing_sections_present=true
 2026-07-28T08:50:00Z	Story 33.4	cr_complete	spawn_at=2026-07-28T08:26:00Z model=claude-opus-5 resolved=5 deferred=0 dismissed=4 high=0 med=1 low=4 clarifications=0 closing_sections_present=true note=review-layers-silent-5of5
 2026-07-28T09:00:00Z	Story 33.4	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=doctor-drift-json-envelope-plus-render-check model=claude-fable-5
+2026-07-28T09:02:00Z	Story 33.4	committed	sha=fa28220 submodules=
