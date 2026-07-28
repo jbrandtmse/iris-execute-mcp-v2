@@ -198,3 +198,84 @@ describe("golden round-trips (AC 33.1.1 + AC 33.1.3)", () => {
     expect(new Set(FAMILIES.map((f) => f.ext))).toEqual(new Set(["jsonc", "json", "toml", "yaml"]));
   });
 });
+
+/**
+ * 33.2 rework (smoke iteration 2) — the lead smoke caught the canonical
+ * goldens' blind spot: every fixture above is already pretty-printed, so
+ * jsonc-parser's sibling re-render was invisible. These COMPACT-foreign
+ * variants (one per JSON mechanism: vscode stash + cline native-flag) run
+ * the same lifecycle with the byte-equal-originals oracle as the assertion —
+ * convergence (stage 4 == stage 0, stage 3 == stage 1, foreign lines verbatim
+ * in every stage) is self-validating (Rule #49), so no per-stage captured
+ * goldens are committed for them.
+ */
+describe("compact-foreign golden lifecycle (33.2 byte-preservation regression)", () => {
+  const COMPACT_FAMILIES = [
+    {
+      client: "vscode-compact",
+      engineClient: "vscode",
+      server: "iris-ops-mcp" as const,
+      ext: "jsonc",
+      path: USER_PATHS.vscode ?? "",
+      mechanism: "stash" as const,
+      foreignLines: [
+        "    // A foreign third-party server (must never be touched).",
+        '    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" } }',
+      ],
+      foreignMarker: "BSA_foreignKeyABC",
+    },
+    {
+      client: "cline-compact",
+      engineClient: "cline",
+      server: "iris-ops-mcp" as const,
+      ext: "json",
+      path: USER_PATHS.cline ?? "",
+      mechanism: "native" as const,
+      foreignLines: [
+        '    "aws-docs": { "command": "uvx", "args": ["awslabs.aws-documentation-mcp-server@latest"], "env": { "AWS_DOCUMENTATION_PARTITION": "aws" }, "disabled": false }',
+      ],
+      foreignMarker: "AWS_DOCUMENTATION_PARTITION",
+    },
+  ];
+
+  for (const family of COMPACT_FAMILIES) {
+    it(`${family.client}: apply -> disable -> enable -> remove keeps compact foreign bytes untouched`, () => {
+      const adapter = adapterOf(family.engineClient);
+      const fs = new MemFs();
+      const stage0 = readFixture(`golden/${family.client}/stage-0-initial.${family.ext}`);
+      fs.seed(family.path, stage0);
+
+      const synthesis = synthesizeEntry(family.server, "env-reference", { adapter, profile: PROFILE });
+      if (!synthesis.ok) throw new Error(`synthesis failed: ${synthesis.reason}`);
+
+      const stages: string[] = [stage0];
+      const r1 = apply(ctx(), family.engineClient, "user", synthesis.entry, { fs });
+      expect(r1.ok, r1.reason ?? "").toBe(true);
+      stages.push(fs.readFile(family.path));
+      const r2 = disable(ctx(), family.engineClient, "user", family.server, { fs });
+      expect(r2.ok, r2.reason ?? "").toBe(true);
+      stages.push(fs.readFile(family.path));
+      const r3 = enable(ctx(), family.engineClient, "user", family.server, { fs });
+      expect(r3.ok, r3.reason ?? "").toBe(true);
+      stages.push(fs.readFile(family.path));
+      const r4 = remove(ctx(), family.engineClient, "user", family.server, { fs });
+      expect(r4.ok, r4.reason ?? "").toBe(true);
+      stages.push(fs.readFile(family.path));
+
+      // The byte-equal-originals oracles (AC 33.1.1 / AC 33.2.2).
+      if (family.mechanism === "stash") {
+        expect(stages[2], "stash disable must restore the initial bytes").toBe(stage0);
+      }
+      expect(stages[3], "enable must restore the applied bytes exactly").toBe(stages[1]);
+      expect(stages[4], "remove must restore the initial bytes exactly").toBe(stage0);
+
+      // The compact foreign entry's verbatim lines survive EVERY stage.
+      for (const [i, bytes] of stages.entries()) {
+        for (const line of family.foreignLines) {
+          expect(bytes ?? "", `stage ${i} lost/reformatted the compact foreign line`).toContain(line);
+        }
+        expect(bytes ?? "", `stage ${i} lost the foreign marker`).toContain(family.foreignMarker);
+      }
+    });
+  }
+});

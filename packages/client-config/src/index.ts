@@ -110,11 +110,14 @@ export {
   apply,
   disable,
   enable,
+  ensureInputs,
+  presentInputIds,
   remove,
   restore,
   type EngineAction,
   type EngineOptions,
   type EngineResult,
+  type EnsureInputsResult,
 } from "./engine.js";
 
 export {

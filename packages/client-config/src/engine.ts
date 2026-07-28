@@ -25,10 +25,13 @@
  * spy test — the diff/execute seams); no `process.*` reads.
  */
 
+import { applyEdits, parse as parseJsonc, type ParseError } from "jsonc-parser";
+
 import { CLIENT_ADAPTERS } from "./adapters.js";
-import { diff, type DiffMechanism, type DiffOptions } from "./diff.js";
+import { diff, insertionEdits, type DiffMechanism, type DiffOptions } from "./diff.js";
 import { resolveScopePath } from "./paths.js";
 import { readConfigEntries, type RawEntry } from "./readers.js";
+import type { VscodeInput } from "./synthesize.js";
 import {
   addStash,
   dropManaged,
@@ -555,6 +558,163 @@ function noopMissingFile(
     path,
     changed: false,
     note: `config file does not exist; nothing to ${action}`,
+    restartHint: adapter.restartHint,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// VS Code native `inputs` merge (Story 33.2 — the seam 33.1's review
+// assigned here: synthesizeEntry RETURNS the descriptor; THIS engine op is
+// the only writer that merges it into the file's top-level `inputs` array).
+// It is engine-side (never CLI-side, AC 33.2-I1) because it is format-aware
+// edit logic, and it goes through the SAME applyWrite safety protocol as
+// every other write.
+// ════════════════════════════════════════════════════════════════════
+
+export interface EnsureInputsResult {
+  ok: boolean;
+  client: string;
+  scope: ClientScope;
+  path: string | null;
+  /** True when the config file's bytes changed. */
+  changed: boolean;
+  /** The input ids this call merged (empty when none were missing). */
+  added: string[];
+  backupPath?: string;
+  restartHint?: string;
+  reason?: string;
+}
+
+/**
+ * The ids currently present in a JSON/JSONC document's top-level `inputs`
+ * array. Typed boundary mirroring the readers' discipline: an unparseable
+ * document (or a non-array `inputs` key) is `{ok:false}`, never a guess.
+ */
+export function presentInputIds(content: string): { ok: true; ids: string[] } | { ok: false; error: string } {
+  if (content.trim() === "") return { ok: true, ids: [] };
+  const errors: ParseError[] = [];
+  let parsed: unknown;
+  try {
+    parsed = parseJsonc(content, errors, { allowTrailingComma: true, disallowComments: false });
+  } catch (err) {
+    return { ok: false, error: `JSON parser threw: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (errors.length > 0) {
+    return { ok: false, error: `JSON parse error at offset ${errors[0]?.offset ?? 0}` };
+  }
+  if (parsed === undefined || parsed === null) return { ok: true, ids: [] };
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "top-level JSON value is not an object" };
+  }
+  const inputs = (parsed as Record<string, unknown>).inputs;
+  if (inputs === undefined) return { ok: true, ids: [] };
+  if (!Array.isArray(inputs)) {
+    return { ok: false, error: `the top-level "inputs" key is not an array` };
+  }
+  const ids: string[] = [];
+  for (const item of inputs) {
+    if (typeof item === "object" && item !== null) {
+      const id = (item as { id?: unknown }).id;
+      if (typeof id === "string") ids.push(id);
+    }
+  }
+  return { ok: true, ids };
+}
+
+/**
+ * Merge VS Code native `inputs` descriptors into one client's config file —
+ * idempotently (a descriptor whose id is already present is left untouched,
+ * so a user's customized prompt survives re-applies). Refuses for any
+ * adapter whose env expansion is not `vscode` (native inputs are a VS Code
+ * concept), and before touching an unparseable file. Every write is an
+ * applyWrite safety-protocol write (backup + post-write re-parse).
+ */
+export function ensureInputs(
+  ctx: EngineHostContext,
+  client: string,
+  scope: ClientScope,
+  inputs: VscodeInput[],
+  options: EngineOptions = {},
+): EnsureInputsResult {
+  const fs = options.fs ?? REAL_WRITE_FS;
+  const failInputs = (path: string | null, reason: string): EnsureInputsResult => ({
+    ok: false,
+    client,
+    scope,
+    path,
+    changed: false,
+    added: [],
+    reason,
+  });
+  const adapter = CLIENT_ADAPTERS[client];
+  if (!adapter) {
+    const known = Object.keys(CLIENT_ADAPTERS).join(", ");
+    return failInputs(null, `unknown client "${client}" (known clients: ${known})`);
+  }
+  if (adapter.envExpansion !== "vscode") {
+    return failInputs(null, `native inputs are a VS Code concept; ${client} (${adapter.envExpansion} expansion) does not use them`);
+  }
+  const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
+  if (path === null) {
+    return failInputs(null, `cannot resolve a ${scope}-scope config path for ${client} (project scope requires a projectDir)`);
+  }
+  const current = readCurrent(fs, path);
+  if (!current.ok) return failInputs(path, current.reason);
+  const content = current.content ?? "";
+  const present = presentInputIds(content);
+  if (!present.ok) {
+    return failInputs(path, `refusing to modify ${path}: the existing file is unparseable (${present.error})`);
+  }
+  const missing = inputs.filter((input) => !present.ids.includes(input.id));
+  if (missing.length === 0) {
+    return {
+      ok: true,
+      client,
+      scope,
+      path,
+      changed: false,
+      added: [],
+      restartHint: adapter.restartHint,
+    };
+  }
+
+  // Append each missing descriptor at the end of the existing array (or
+  // create the key) — sequential insert+applyEdits so every edit set is
+  // computed against the content it actually targets. The insert is the
+  // SURGICAL one (diff.ts): jsonc-parser's own modify() would re-render the
+  // user's existing (foreign) input descriptors with hardcoded formatting
+  // (the 33.2 lead-smoke byte-preservation defect).
+  let next = content;
+  for (const descriptor of missing) {
+    const soFar = presentInputIds(next);
+    const index = soFar.ok ? soFar.ids.length : 0;
+    next = applyEdits(next, insertionEdits(next, ["inputs", index], descriptor));
+  }
+
+  const now = options.now ?? (() => new Date());
+  const written = applyWrite(path, current.content, next, {
+    adapter,
+    client,
+    scope,
+    stateDir: resolveStateDir(ctx),
+    platform: ctx.platform,
+    fs,
+    now,
+  });
+  if (!written.ok) {
+    return {
+      ...failInputs(path, written.reason ?? "write failed"),
+      ...(written.backupPath !== undefined ? { backupPath: written.backupPath } : {}),
+    };
+  }
+  return {
+    ok: true,
+    client,
+    scope,
+    path,
+    changed: true,
+    added: missing.map((input) => input.id),
+    ...(written.backupPath !== undefined ? { backupPath: written.backupPath } : {}),
     restartHint: adapter.restartHint,
   };
 }

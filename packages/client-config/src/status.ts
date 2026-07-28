@@ -126,7 +126,7 @@ function scopeStatus(
   ctx: HostContext,
   fs: StatusFs,
 ): ScopeStatus {
-  const path = resolveScopePath(adapter, scope, ctx, fs.exists);
+  const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
   const empty: Pick<ScopeStatus, "servers" | "foreign"> = { servers: [], foreign: [] };
   if (path === null) {
     return { scope, path: null, file: "unresolved", ...empty };
