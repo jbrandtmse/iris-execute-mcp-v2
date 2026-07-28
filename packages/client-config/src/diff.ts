@@ -19,7 +19,7 @@
 import { parseTree, findNodeAtLocation, type Edit as JsoncEdit, type Node as JsoncNode } from "jsonc-parser";
 import { Document } from "yaml";
 
-import { readConfigEntries, type RawEntry } from "./readers.js";
+import { readConfigEntries, hasJsonTokens, ownEntry, type RawEntry } from "./readers.js";
 import type { CanonicalEntry, ClientAdapter, ClientScope } from "./types.js";
 
 export type DiffAction = "apply" | "enable" | "disable" | "remove";
@@ -49,7 +49,7 @@ export interface JsoncNativeEdit {
  * ruled out because they drop comments elsewhere in the file, spec §3.5). */
 export interface TomlNativeEdit {
   kind: "toml-splice";
-  op: "insert" | "replace-region" | "remove-region" | "set-flag";
+  op: "insert" | "replace-region" | "remove-region" | "set-flag" | "merge-update";
   /** Owned table path, e.g. ["mcp_servers", "iris-dev-mcp"]. */
   tablePath: string[];
   /**
@@ -62,18 +62,36 @@ export interface TomlNativeEdit {
    * For "set-flag" with a null region: the owned table's HEADER line. */
   insertAfterLine: number | null;
   /** The TOML block for insert/replace; the flag line for "set-flag"
-   * (e.g. `enabled = false`); null for "remove-region". */
+   * (e.g. `enabled = false`); null for "remove-region" and "merge-update". */
   insertText: string | null;
+  /**
+   * Op "merge-update" (Story 33.5, AC 33.5.2): the line-span replacements of
+   * the apply-update surgery. Each span replaces lines startLine..endLine
+   * INCLUSIVE with `lines`; a span with endLine < startLine is a pure
+   * INSERT at startLine. Spans are disjoint; the executor applies them
+   * bottom-up. Only manager-owned lines (command/args/env) appear here —
+   * every unmanaged line of the owned table stays byte-exact.
+   */
+  spans?: { startLine: number; endLine: number; lines: string[] }[];
 }
 
 /** YAML edit — a CST operation 33.1 executes via the yaml Document API. */
 export interface YamlNativeEdit {
   kind: "yaml-cst";
-  op: "set" | "delete" | "set-flag";
+  op: "set" | "delete" | "set-flag" | "merge-update";
   /** Node path under the document root. */
   path: string[];
-  /** The entry (op "set") or flag value (op "set-flag"); null for "delete". */
+  /** The entry (op "set") or flag value (op "set-flag"); null for "delete"
+   * and "merge-update" (the per-key ops carry the values). */
   value: unknown;
+  /**
+   * Op "merge-update" (Story 33.5 QA): the per-key sets of an apply-update.
+   * A whole-entry `set` re-rendered the owned subtree and dropped every
+   * comment INSIDE it; only a key whose merged value CHANGES appears here
+   * (path = [rootKey, name, key]), so untouched keys — and their comments —
+   * stay byte-exact (the TOML merge-update discipline).
+   */
+  ops?: { path: string[]; value: unknown }[];
   /** Preview snippet of just the owned entry (never the whole file). */
   renderedEntry: string | null;
 }
@@ -141,9 +159,116 @@ function shapeEntry(adapter: ClientAdapter, entry: CanonicalEntry): RawEntry {
   }
 }
 
-/** Quote a TOML basic string. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  // Prototype-checked (the readers.ts discipline): a smol-toml TomlDate is a
+  // class instance, NOT a re-renderable table — it must fall through to the
+  // documented refusal in tomlSourceValue, never render as an inline table
+  // of its internals.
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Merge a fresh manager render OVER an existing owned entry for an apply
+ * UPDATE (Story 33.5, AC 33.5.2 — the lead-probed HIGH: an apply-update
+ * REPLACED the whole entry, wiping unmanaged keys like Cline `autoApprove` /
+ * `timeout` and stamping the native flag back to enabled — an implicit
+ * re-enable the user never asked for).
+ *
+ * Semantics: manager-owned keys (command/args per the adapter's entry shape)
+ * are overwritten; the env carrier (`env` / `envs`, nested under `command`
+ * for zed) is merged KEY-WISE so user-added env extras survive; EVERY other
+ * key on the existing entry is preserved; and the native disable flag is
+ * NEVER stamped by an update — a `disabled: true` entry stays disabled
+ * through apply, and no flag appears on an entry that didn't have one.
+ *
+ * Documented seam: when the canonical render carries NO env at all, an
+ * existing env carrier is left untouched (the manager cannot distinguish
+ * "user extras" from "manager keys from an older mode" — preservation wins).
+ */
+export function mergeUpdateEntry(adapter: ClientAdapter, existing: RawEntry, fresh: RawEntry): RawEntry {
+  const merged: RawEntry = { ...existing };
+  const mergeEnvCarrier = (target: RawEntry, source: RawEntry, key: string): void => {
+    const freshEnv = source[key];
+    if (!isRecord(freshEnv)) return; // canonical render has no env: leave as-is
+    const existingEnv = isRecord(target[key]) ? (target[key] as Record<string, unknown>) : {};
+    target[key] = { ...existingEnv, ...freshEnv };
+  };
+  switch (adapter.entryShape) {
+    case "standard":
+    case "codex-toml":
+      merged.command = fresh.command;
+      merged.args = fresh.args;
+      mergeEnvCarrier(merged, fresh, "env");
+      break;
+    case "zed": {
+      const freshCommand = isRecord(fresh.command) ? (fresh.command as Record<string, unknown>) : {};
+      const mergedCommand = isRecord(merged.command) ? { ...(merged.command as Record<string, unknown>) } : {};
+      mergedCommand.path = freshCommand.path;
+      mergedCommand.args = freshCommand.args;
+      mergeEnvCarrier(mergedCommand, freshCommand, "env");
+      merged.command = mergedCommand;
+      break;
+    }
+    case "goose":
+      merged.type = fresh.type;
+      merged.cmd = fresh.cmd;
+      merged.args = fresh.args;
+      mergeEnvCarrier(merged, fresh, "envs");
+      break;
+  }
+  return merged;
+}
+
+/** Quote a TOML basic string, escaping backslashes, quotes, and control
+ * characters (Story 33.5, 33-5-13: a value bearing a newline/tab previously
+ * produced INVALID TOML — the raw control char landed inside the quotes).
+ * Keys are compared by code point so this SOURCE holds no control-char
+ * literals (the Rule #55 lesson). */
 function tomlString(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  let out = "";
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (ch === "\\") {
+      out += "\\\\";
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\"';
+      continue;
+    }
+    if (code === 0x0a) {
+      out += "\\n";
+      continue;
+    }
+    if (code === 0x0d) {
+      out += "\\r";
+      continue;
+    }
+    if (code === 0x09) {
+      out += "\\t";
+      continue;
+    }
+    if (code === 0x08) {
+      out += "\\b";
+      continue;
+    }
+    if (code === 0x0c) {
+      out += "\\f";
+      continue;
+    }
+    // Remaining C0/C1 control chars must not appear raw in a basic string.
+    out += code < 0x20 || (code >= 0x7f && code <= 0x9f) ? `\\u${code.toString(16).padStart(4, "0")}` : ch;
+  }
+  return `"${out}"`;
+}
+
+/** A TOML key: bare when it matches [A-Za-z0-9_-]+, a quoted basic string
+ * otherwise (33-5-13 — an env var or entry name with dots/spaces previously
+ * produced broken or mis-targeting TOML). */
+function tomlKey(key: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key);
 }
 
 /** Render a scalar as TOML (boolean/number bare, anything else a quoted string). */
@@ -157,23 +282,109 @@ function tomlScalar(value: unknown): string {
 export function serializeTomlEntry(adapter: ClientAdapter, entry: CanonicalEntry): string {
   const shaped = renderNativeEntry(adapter, entry);
   const lines: string[] = [];
-  lines.push(`[${adapter.rootKey}.${entry.name}]`);
+  lines.push(`[${[adapter.rootKey, entry.name].map(tomlKey).join(".")}]`);
   lines.push(`command = ${tomlString(entry.command)}`);
   const args = (shaped.args as string[]).map(tomlString).join(", ");
   lines.push(`args = [${args}]`);
   // A native-flag client's flag is rendered explicitly at its enabled value
   // (e.g. `enabled = true` for Codex) — see renderNativeEntry.
   const flag = adapter.nativeDisableFlag;
-  if (flag) lines.push(`${flag.key} = ${tomlScalar(shaped[flag.key] ?? flag.enabledValue)}`);
+  if (flag) lines.push(`${tomlKey(flag.key)} = ${tomlScalar(shaped[flag.key] ?? flag.enabledValue)}`);
   const env = shaped.env as Record<string, string> | undefined;
   if (env) {
     lines.push("");
-    lines.push(`[${adapter.rootKey}.${entry.name}.env]`);
+    lines.push(`[${[adapter.rootKey, entry.name, "env"].map(tomlKey).join(".")}]`);
     for (const [key, value] of Object.entries(env)) {
-      lines.push(`${key} = ${tomlString(value)}`);
+      lines.push(`${tomlKey(key)} = ${tomlString(value)}`);
     }
   }
   return lines.join("\n");
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TOML structure scanning (Story 33.5, AC 33.5.3 — the multiline region
+// corruption: a `"""`/`'''` string or a nested multi-line array inside an
+// owned table used to TRUNCATE the region at the first header-looking line
+// inside the construct, leaving orphaned lines behind on remove/replace).
+//
+// `scanTomlStructure` runs a line-anchored mini-lexer over the document and
+// reports, per line, whether the line STARTS at TOML top level (outside
+// every string and bracket nest). Only top-level lines may be table
+// headers, key lines, or structural blanks/comments — every consumer
+// (region math, insert-point math, flag/key scans) MUST gate on it.
+// ════════════════════════════════════════════════════════════════════
+
+type TomlLexState = "normal" | "basic" | "literal" | "mlbasic" | "mlliteral" | "comment";
+
+/**
+ * Per-line top-level flags for a TOML document. `result[i] === true` means
+ * line `i` begins OUTSIDE every multi-line string and bracket nest.
+ * Malformed input degrades gracefully (single-line strings reopened at EOL);
+ * callers always parse-validate before splicing, so this never has to be
+ * perfect on broken documents — only never wrong on VALID ones.
+ */
+export function scanTomlStructure(content: string): boolean[] {
+  const lines = content.split("\n");
+  const topLevel: boolean[] = [];
+  let state: TomlLexState = "normal";
+  let depth = 0;
+  for (const line of lines) {
+    topLevel.push(state === "normal" && depth === 0);
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i] as string;
+      switch (state) {
+        case "normal":
+          if (ch === "#") {
+            state = "comment";
+          } else if (ch === '"') {
+            if (line.startsWith('"""', i)) {
+              state = "mlbasic";
+              i += 2;
+            } else {
+              state = "basic";
+            }
+          } else if (ch === "'") {
+            if (line.startsWith("'''", i)) {
+              state = "mlliteral";
+              i += 2;
+            } else {
+              state = "literal";
+            }
+          } else if (ch === "[") {
+            depth++;
+          } else if (ch === "]") {
+            depth = Math.max(0, depth - 1);
+          }
+          break;
+        case "basic":
+          if (ch === "\\") i++;
+          else if (ch === '"') state = "normal";
+          break;
+        case "literal":
+          if (ch === "'") state = "normal";
+          break;
+        case "mlbasic":
+          if (ch === "\\") i++;
+          else if (line.startsWith('"""', i)) {
+            state = "normal";
+            i += 2;
+          }
+          break;
+        case "mlliteral":
+          if (line.startsWith("'''", i)) {
+            state = "normal";
+            i += 2;
+          }
+          break;
+        case "comment":
+          break; // runs to EOL
+      }
+      i++;
+    }
+    if (state === "comment" || state === "basic" || state === "literal") state = "normal";
+  }
+  return topLevel;
 }
 
 /** Find the owned `[<rootKey>.<name>]`(+sub-table) line region, 0-based
@@ -184,39 +395,51 @@ export function serializeTomlEntry(adapter: ClientAdapter, entry: CanonicalEntry
  * owned header is likewise outside the region (left in place on removal —
  * documented v1 choice). A trailing comment ON the owned header line itself
  * (`[root.name] # managed by iris-mcp`) is legal TOML and stays INSIDE the
- * region (it belongs to the owned table). Returns null when the entry is
- * absent — OR when it exists only in a form with no table header (e.g.
- * dotted-key definitions or quoted table names; callers treat a parser-present
- * but region-less entry as a REFUSAL, never an insert/removal guess). */
+ * region (it belongs to the owned table).
+ *
+ * Multi-line aware (AC 33.5.3): header detection is gated on the
+ * scanTomlStructure top-level flags, so a header-looking line inside a
+ * `"""`/`'''` string or a nested-array continuation line (`  ["a"],`) no
+ * longer truncates the region; trailing-blank/comment trimming also only
+ * touches top-level lines (a blank or `#`-looking line inside a multiline
+ * string is CONTENT).
+ *
+ * Returns null when the entry is absent — OR when it exists only in a form
+ * with no table header (e.g. dotted-key definitions or quoted table names;
+ * callers treat a parser-present but region-less entry as a REFUSAL, never
+ * an insert/removal guess). */
 export function findTomlEntryRegion(
   content: string,
   rootKey: string,
   name: string,
 ): { startLine: number; endLine: number } | null {
   const lines = content.split("\n");
+  const topLevel = scanTomlStructure(content);
   const escapedRoot = rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const ownedHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}\\.${escapedName}(\\..+)?\\]\\s*(#.*)?$`);
   const anyHeader = /^\s*\[/;
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
+    if (!topLevel[i]) continue;
     if (start === -1) {
       if (ownedHeader.test(lines[i] ?? "")) start = i;
       continue;
     }
     const line = lines[i] ?? "";
     if (anyHeader.test(line) && !ownedHeader.test(line)) {
-      return { startLine: start, endLine: trimRegionEnd(lines, start, i - 1) };
+      return { startLine: start, endLine: trimRegionEnd(lines, topLevel, start, i - 1) };
     }
   }
   if (start === -1) return null;
-  return { startLine: start, endLine: trimRegionEnd(lines, start, lines.length - 1) };
+  return { startLine: start, endLine: trimRegionEnd(lines, topLevel, start, lines.length - 1) };
 }
 
-/** Region end: trim the trailing run of blank and whole-line comment lines. */
-function trimRegionEnd(lines: string[], start: number, end: number): number {
+/** Region end: trim the trailing run of TOP-LEVEL blank and whole-line
+ * comment lines (string content is never trimmed — AC 33.5.3). */
+function trimRegionEnd(lines: string[], topLevel: boolean[], start: number, end: number): number {
   let e = end;
-  while (e > start) {
+  while (e > start && topLevel[e]) {
     const trimmed = (lines[e] ?? "").trim();
     if (trimmed !== "" && !trimmed.startsWith("#")) break;
     e--;
@@ -224,11 +447,11 @@ function trimRegionEnd(lines: string[], start: number, end: number): number {
   return e;
 }
 
-/** Insert-point end: trim trailing blank lines only (comments may belong to
- * the last section — inserting before them would split them off). */
-function trimTrailingBlank(lines: string[], start: number, end: number): number {
+/** Insert-point end: trim trailing TOP-LEVEL blank lines only (comments may
+ * belong to the last section — inserting before them would split them off). */
+function trimTrailingBlank(lines: string[], topLevel: boolean[], start: number, end: number): number {
   let e = end;
-  while (e > start && (lines[e] ?? "").trim() === "") e--;
+  while (e > start && topLevel[e] && (lines[e] ?? "").trim() === "") e--;
   return e;
 }
 
@@ -236,6 +459,7 @@ function trimTrailingBlank(lines: string[], start: number, end: number): number 
  * the end of the last existing `<rootKey>` table, else end of file. */
 export function findTomlInsertLine(content: string, rootKey: string): number {
   const lines = content.split("\n");
+  const topLevel = scanTomlStructure(content);
   const escapedRoot = rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rootHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}(\\..+)?\\]\\s*(#.*)?$`);
   const anyHeader = /^\s*\[/;
@@ -243,6 +467,7 @@ export function findTomlInsertLine(content: string, rootKey: string): number {
   let inRoot = false;
   let rootEnd = -1;
   for (let i = 0; i < lines.length; i++) {
+    if (!topLevel[i]) continue;
     const line = lines[i] ?? "";
     if (anyHeader.test(line)) {
       if (inRoot) rootEnd = i - 1;
@@ -250,7 +475,7 @@ export function findTomlInsertLine(content: string, rootKey: string): number {
     }
   }
   if (inRoot) rootEnd = lines.length - 1;
-  if (rootEnd !== -1) insertAfter = trimTrailingBlank(lines, 0, rootEnd);
+  if (rootEnd !== -1) insertAfter = trimTrailingBlank(lines, topLevel, 0, rootEnd);
   return insertAfter;
 }
 
@@ -332,10 +557,20 @@ export function diff(
   const content = currentContent ?? "";
   let present = false;
   let disabled = false;
+  let existing: RawEntry | undefined;
   if (content.trim() !== "") {
     const parsed = readConfigEntries(adapter, content);
     if (!parsed.ok) return fail(`config is unparseable: ${parsed.error}`);
-    const existing = parsed.entries[entry.name];
+    // 33-5-12: an array-of-tables entry is a documented REFUSAL on every
+    // write action (never a silent add/update/remove guess).
+    const unsupportedForm = ownEntry(parsed.unsupported, entry.name);
+    if (unsupportedForm !== undefined) {
+      return fail(
+        `entry "${entry.name}" exists in ${unsupportedForm} form (e.g. [[${adapter.rootKey}.${entry.name}]]), ` +
+          `which the manager cannot model as a single server entry; refusing — restructure it as one [${adapter.rootKey}.${entry.name}] table`,
+      );
+    }
+    existing = ownEntry(parsed.entries, entry.name);
     present = existing !== undefined;
     if (present && adapter.nativeDisableFlag && existing) {
       disabled = existing[adapter.nativeDisableFlag.key] === adapter.nativeDisableFlag.disabledValue;
@@ -345,18 +580,24 @@ export function diff(
   const plan = planAction(adapter, entry, action, present, disabled);
   if ("error" in plan) return fail(plan.error);
 
-  const shaped = options?.nativeEntry ?? renderNativeEntry(adapter, entry);
+  let shaped = options?.nativeEntry ?? renderNativeEntry(adapter, entry);
+  if (plan.mechanism === "update" && existing !== undefined && adapter.format !== "toml") {
+    // AC 33.5.2: an UPDATE merges over the existing entry (unmanaged keys +
+    // enablement preserved) — TOML merges at the TEXT layer instead (see
+    // tomlMergeUpdate; the text splice preserves unmanaged lines byte-exact).
+    shaped = mergeUpdateEntry(adapter, existing, shaped);
+  }
   // already-in-state renders NO descriptor (native: null) — see DiffResult.
   let native: NativeEdit | null = null;
   if (plan.mechanism !== "already-in-state") {
     if (adapter.format === "toml") {
-      const edit = tomlEdit(adapter, entry, content, plan);
+      const edit = tomlEdit(adapter, entry, content, plan, shaped, existing);
       if ("error" in edit) return fail(edit.error);
       native = edit;
     } else if (adapter.format === "yaml") {
-      native = yamlEdit(adapter, entry, shaped, plan);
+      native = yamlEdit(adapter, entry, shaped, plan, existing);
     } else {
-      const edit = jsoncEdit(adapter, entry, content, shaped, plan);
+      const edit = jsoncEdit(adapter, entry, content, shaped, plan, existing);
       if (edit.edits.length === 0) {
         return fail(`could not compute a JSON edit for "${entry.name}" (unsupported document shape); refusing to render an empty edit set`);
       }
@@ -424,12 +665,78 @@ function removalEdits(content: string, path: string[]): JsoncEdit[] {
       end = i;
     }
   } else {
-    // Last property: swallow the PRECEDING comma instead.
+    // Last property: swallow the PRECEDING comma. Comments sitting between
+    // the comma and the owned property (33-5-4 / AC 33.5.3, probe-verified
+    // 2026-07-28: the 33.2 rework did NOT cover it) made the old
+    // whitespace-only backward scan miss the comma — leaving a dangling
+    // `, }` behind (a syntax error for strict-JSON clients). Whole-line
+    // `//` and `/* */` comments are skipped upward; a trailing `//` on the
+    // comma's own line keeps its text. When any comment intervened, the
+    // comma and the property go as TWO edits so the comment survives.
     let j = start - 1;
     while (j >= 0 && /\s/.test(content[j] ?? "")) j--;
-    if (content[j] === ",") start = j;
+    let commentBetween = false;
+    for (;;) {
+      if (j < 0) break;
+      if (j >= 1 && content[j] === "/" && content[j - 1] === "*") {
+        // End of a block comment: skip it when nothing but whitespace
+        // precedes it on its line, then keep scanning upward.
+        const open = content.lastIndexOf("/*", j - 2);
+        const ls = content.lastIndexOf("\n", open) + 1;
+        if (open !== -1 && content.slice(ls, open).trim() === "") {
+          j = ls - 2;
+          while (j >= 0 && /\s/.test(content[j] ?? "")) j--;
+          commentBetween = true;
+          continue;
+        }
+        break;
+      }
+      const ls = content.lastIndexOf("\n", j) + 1;
+      const segment = content.slice(ls, j + 1);
+      const slashes = segment.indexOf("//");
+      if (slashes !== -1) {
+        if (segment.slice(0, slashes).trim() === "") {
+          // Whole-line comment: skip above it and keep scanning.
+          j = ls - 2;
+          while (j >= 0 && /\s/.test(content[j] ?? "")) j--;
+          commentBetween = true;
+          continue;
+        }
+        // A trailing comment on the previous property's own line: the
+        // separator comma (when present) sits BEFORE the comment text.
+        const comma = segment.slice(0, slashes).lastIndexOf(",");
+        if (comma !== -1) {
+          const propStart = propertyStartWithIndent(content, start);
+          return [
+            { offset: ls + comma, length: 1, content: "" },
+            { offset: propStart, length: end - propStart, content: "" },
+          ];
+        }
+        break;
+      }
+      break;
+    }
+    if (content[j] === ",") {
+      if (!commentBetween) {
+        start = j;
+      } else {
+        const propStart = propertyStartWithIndent(content, start);
+        return [
+          { offset: j, length: 1, content: "" },
+          { offset: propStart, length: end - propStart, content: "" },
+        ];
+      }
+    }
   }
   return [{ offset: start, length: end - start, content: "" }];
+}
+
+/** Walk a property's start offset back over its own line's indent (the
+ * indent goes with the property; the preceding newline stays). */
+function propertyStartWithIndent(content: string, start: number): number {
+  let s = start;
+  while (s > 0 && (content[s - 1] === " " || content[s - 1] === "\t")) s--;
+  return s;
 }
 
 /**
@@ -513,7 +820,17 @@ export function insertionEdits(content: string, path: (string | number)[], value
     return [{ offset: 0, length: content.length, content: JSON.stringify(buildNested(path, value), null, 2) }];
   }
   const tree = parseTree(content);
-  if (!tree) return [];
+  if (!tree) {
+    // A comment-only JSONC document (Story 33.5 QA, AC 33.5.4): a VALID empty
+    // document with NO parse tree — the add path treats it like an empty file
+    // (whole-document write) but preserves the user's trivia verbatim above
+    // the new document. Anything WITH real tokens and no tree is genuinely
+    // unsupported (empty edit set → refusal, as before).
+    if (hasJsonTokens(content)) return [];
+    const kept = content.trimEnd();
+    const rendered = JSON.stringify(buildNested(path, value), null, 2);
+    return [{ offset: 0, length: content.length, content: kept === "" ? rendered : `${kept}${detectEol(content)}${rendered}` }];
+  }
   // Walk to the deepest existing ancestor along the path.
   let container: JsoncNode = tree;
   let depth = 0;
@@ -633,12 +950,40 @@ function replacementEdits(content: string, path: (string | number)[], value: unk
   return [{ offset: node.offset, length: node.length, content: text }];
 }
 
+/**
+ * Structural JSON deep-equal (objects order-insensitive, arrays
+ * order-sensitive). Backs the per-key update surgery (Story 33.5 QA): a key
+ * whose merged value is IDENTICAL to the existing one gets NO edit, so its
+ * text — including any interior comment — stays byte-exact.
+ */
+function jsonDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => jsonDeepEqual(item, b[index]))
+    );
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(b, key) &&
+      jsonDeepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+  );
+}
+
 function jsoncEdit(
   adapter: ClientAdapter,
   entry: CanonicalEntry,
   content: string,
   shaped: RawEntry,
   plan: ActionPlan,
+  existing?: RawEntry,
 ): JsoncNativeEdit {
   if (plan.mechanism === "native-flag") {
     const path = [adapter.rootKey, entry.name, adapter.nativeDisableFlag?.key ?? ""];
@@ -652,6 +997,26 @@ function jsoncEdit(
     return { kind: "jsonc", path, value: undefined, edits: removalEdits(content, path) };
   }
   const path = [adapter.rootKey, entry.name];
+  if (plan.mechanism === "update" && existing !== undefined) {
+    // Story 33.5 QA: the update is PER-KEY surgery, never a whole-entry
+    // re-render — a whole-value replace dropped every comment INSIDE the
+    // owned entry and rewrote untouched keys' formatting. Only a key whose
+    // merged value actually CHANGES is edited (replaced, or inserted when
+    // newly managed); every other line of the entry stays byte-exact, the
+    // TOML merge-update discipline. Falls back to the whole-value replace
+    // when nothing differs (a genuine no-op keeps the historical render).
+    const edits: JsoncEdit[] = [];
+    for (const key of Object.keys(shaped)) {
+      if (jsonDeepEqual(existing[key], shaped[key])) continue;
+      const keyPath = [...path, key];
+      edits.push(
+        ...(Object.prototype.hasOwnProperty.call(existing, key)
+          ? replacementEdits(content, keyPath, shaped[key])
+          : insertionEdits(content, keyPath, shaped[key])),
+      );
+    }
+    if (edits.length > 0) return { kind: "jsonc", path, value: shaped, edits };
+  }
   const edits = plan.mechanism === "update" ? replacementEdits(content, path, shaped) : insertionEdits(content, path, shaped);
   return { kind: "jsonc", path, value: shaped, edits };
 }
@@ -661,6 +1026,8 @@ function tomlEdit(
   entry: CanonicalEntry,
   content: string,
   plan: ActionPlan,
+  shaped: RawEntry,
+  existing: RawEntry | undefined,
 ): TomlNativeEdit | { error: string } {
   const tablePath = [adapter.rootKey, entry.name];
   const region = findTomlEntryRegion(content, adapter.rootKey, entry.name);
@@ -676,11 +1043,13 @@ function tomlEdit(
         error: `entry "${entry.name}" is present per the TOML parser but no [${adapter.rootKey}.${entry.name}] table header could be located (unsupported TOML form — e.g. dotted-key definition or quoted table name); refusing to render a flag toggle`,
       };
     }
-    const flagLine = `${flag.key} = ${tomlScalar(plan.flagValue)}`;
+    const flagLine = `${tomlKey(flag.key)} = ${tomlScalar(plan.flagValue)}`;
     const keyRe = new RegExp(`^\\s*${flag.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`);
     const anyHeader = /^\s*\[/;
     const lines = content.split("\n");
+    const topLevel = scanTomlStructure(content);
     for (let i = region.startLine + 1; i <= region.endLine; i++) {
+      if (!topLevel[i]) continue; // string/array content is never a key line (AC 33.5.3)
       const line = lines[i] ?? "";
       if (anyHeader.test(line)) break; // sub-table header: main-table keys are above
       if (keyRe.test(line)) {
@@ -715,19 +1084,213 @@ function tomlEdit(
     }
     return { kind: "toml-splice", op: "remove-region", tablePath, region, insertAfterLine: null, insertText: null };
   }
+  if (plan.mechanism === "update") {
+    if (!region) {
+      // The parser says the entry EXISTS but no header region matched — an
+      // insert would REDEFINE the table and produce invalid TOML. Refuse.
+      return {
+        error: `entry "${entry.name}" is present per the TOML parser but no [${adapter.rootKey}.${entry.name}] table header could be located (unsupported TOML form — e.g. dotted-key definition or quoted table name); refusing to render an update as an insert`,
+      };
+    }
+    // AC 33.5.2: the update is a line-level surgery over manager-owned lines
+    // ONLY — unmanaged keys, comments, and the native flag stay byte-exact.
+    if (existing === undefined) {
+      return { error: `internal: update planned for "${entry.name}" but no existing entry was parsed` };
+    }
+    return tomlMergeUpdate(adapter, entry, content, region, shaped, existing);
+  }
   const block = serializeTomlEntry(adapter, entry);
   if (region) {
     return { kind: "toml-splice", op: "replace-region", tablePath, region, insertAfterLine: null, insertText: block };
   }
-  if (plan.mechanism === "update") {
-    // The parser says the entry EXISTS but no header region matched — an
-    // insert would REDEFINE the table and produce invalid TOML. Refuse.
-    return {
-      error: `entry "${entry.name}" is present per the TOML parser but no [${adapter.rootKey}.${entry.name}] table header could be located (unsupported TOML form — e.g. dotted-key definition or quoted table name); refusing to render an update as an insert`,
-    };
-  }
   const insertAfterLine = content.trim() === "" ? -1 : findTomlInsertLine(content, adapter.rootKey);
   return { kind: "toml-splice", op: "insert", tablePath, region: null, insertAfterLine, insertText: block };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The apply-update TOML surgery (Story 33.5, AC 33.5.2 — lead-probed HIGH:
+// the old replace-region dropped every unmanaged key on the owned table and
+// stamped the native flag back to enabled). Only manager-owned LINES are
+// touched: `command`/`args` (value spans, multi-line aware) and the env
+// carrier (sub-table or inline form, merged key-wise so user extras
+// survive). Everything else — unmanaged scalars, comments, the native flag,
+// other sub-tables — stays byte-exact.
+// ════════════════════════════════════════════════════════════════════
+
+/** Render a parsed TOML value back to source form for the merged env
+ * render. Datetime literals (smol-toml TomlDate) cannot round-trip (their
+ * toString is a JS Date string, probe 2026-07-28) — null marks the
+ * unsupported form and the caller REFUSES, never corrupts. */
+function tomlSourceValue(value: unknown): string | null {
+  if (typeof value === "string") return tomlString(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) {
+    const items: string[] = [];
+    for (const item of value) {
+      const rendered = tomlSourceValue(item);
+      if (rendered === null) return null;
+      items.push(rendered);
+    }
+    return `[${items.join(", ")}]`;
+  }
+  if (isRecord(value)) {
+    const pairs: string[] = [];
+    for (const [key, item] of Object.entries(value)) {
+      const rendered = tomlSourceValue(item);
+      if (rendered === null) return null;
+      pairs.push(`${tomlKey(key)} = ${rendered}`);
+    }
+    return `{ ${pairs.join(", ")} }`;
+  }
+  return null; // TomlDate / undefined / functions — unsupported
+}
+
+/** A key line's value span: the key line itself plus its continuation lines
+ * (a multi-line array/string value spans lines that are NOT top-level). */
+function tomlKeySpan(
+  lines: string[],
+  topLevel: boolean[],
+  fromLine: number,
+  mainEnd: number,
+  key: string,
+): { startLine: number; endLine: number } | null {
+  const keyLine = /^\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=/;
+  for (let i = fromLine; i <= mainEnd; i++) {
+    if (!topLevel[i]) continue;
+    const match = keyLine.exec(lines[i] ?? "");
+    if (match !== null && (match[1] ?? match[2] ?? match[3]) === key) {
+      let endLine = i;
+      while (endLine + 1 <= mainEnd && !topLevel[endLine + 1]) endLine++;
+      return { startLine: i, endLine };
+    }
+  }
+  return null;
+}
+
+function tomlMergeUpdate(
+  adapter: ClientAdapter,
+  entry: CanonicalEntry,
+  content: string,
+  region: { startLine: number; endLine: number },
+  fresh: RawEntry,
+  existing: RawEntry,
+): TomlNativeEdit | { error: string } {
+  const lines = content.split("\n");
+  const topLevel = scanTomlStructure(content);
+  const tablePath = [adapter.rootKey, entry.name];
+  const spans: { startLine: number; endLine: number; lines: string[] }[] = [];
+  const refuse = (reason: string): { error: string } => ({ error: reason });
+
+  // The MAIN table ends at the first sub-table header (or the region end).
+  const anyHeader = /^\s*\[/;
+  let mainEnd = region.endLine;
+  for (let i = region.startLine + 1; i <= region.endLine; i++) {
+    if (topLevel[i] && anyHeader.test(lines[i] ?? "")) {
+      mainEnd = i - 1;
+      break;
+    }
+  }
+
+  // command — must stay a plain string line (a dotted/inline form is an
+  // unsupported shape: refuse, never guess).
+  if (existing.command !== undefined && typeof existing.command !== "string") {
+    return refuse(
+      `entry "${entry.name}" defines "command" in an unsupported TOML form (dotted keys or an inline table); refusing the update — restructure it as a plain \`command = "..."\` line`,
+    );
+  }
+  const commandSpan = tomlKeySpan(lines, topLevel, region.startLine + 1, mainEnd, "command");
+  const commandLine = `command = ${tomlString(String(fresh.command ?? ""))}`;
+  // 33.5 review: skip the span when the value is UNCHANGED — re-rendering an
+  // identical command dropped its trailing comment and re-formatted the line
+  // for no reason (the JSONC/YAML per-key discipline: only changed keys are
+  // touched). A changed value is still replaced wholesale — a trailing
+  // comment on a CHANGED line is lost (documented seam, 33-5-R-ledger).
+  const commandUnchanged = typeof existing.command === "string" && existing.command === String(fresh.command ?? "");
+  if (commandSpan) {
+    if (!commandUnchanged) spans.push({ ...commandSpan, lines: [commandLine] });
+  } else {
+    spans.push({ startLine: region.startLine + 1, endLine: region.startLine, lines: [commandLine] });
+  }
+
+  // args — same discipline (an existing non-array args is unsupported).
+  if (existing.args !== undefined && !Array.isArray(existing.args)) {
+    return refuse(
+      `entry "${entry.name}" defines "args" in an unsupported TOML form (not an array); refusing the update — restructure it as \`args = [...]\``,
+    );
+  }
+  const freshArgs = Array.isArray(fresh.args) ? fresh.args.map((arg) => tomlString(String(arg))).join(", ") : "";
+  const argsSpan = tomlKeySpan(lines, topLevel, region.startLine + 1, mainEnd, "args");
+  const argsLine = `args = [${freshArgs}]`;
+  const argsUnchanged = Array.isArray(existing.args) && jsonDeepEqual(existing.args, fresh.args);
+  if (argsSpan) {
+    if (!argsUnchanged) spans.push({ ...argsSpan, lines: [argsLine] });
+  } else {
+    const after = commandSpan ? commandSpan.endLine : region.startLine;
+    spans.push({ startLine: after + 1, endLine: after, lines: [argsLine] });
+  }
+
+  // env — merged KEY-WISE (existing extras survive) when the fresh render
+  // carries env at all; untouched otherwise (the documented 33.5.2 seam).
+  // 33.5 review: skip the env surgery when the merge is a no-op (fresh env
+  // already ⊆ existing env) — re-rendering an unchanged env table dropped
+  // its interior comments for zero effect.
+  const mergedEnv: Record<string, unknown> | undefined = isRecord(fresh.env)
+    ? { ...(isRecord(existing.env) ? (existing.env as Record<string, unknown>) : {}), ...fresh.env }
+    : undefined;
+  const envUnchanged = mergedEnv !== undefined && isRecord(existing.env) && jsonDeepEqual(existing.env, mergedEnv);
+  if (mergedEnv !== undefined && !envUnchanged) {
+    const envLines: string[] = [];
+    for (const [key, value] of Object.entries(mergedEnv)) {
+      const rendered = tomlSourceValue(value);
+      if (rendered === null) {
+        return refuse(
+          `entry "${entry.name}" holds an env value in a TOML form the update cannot re-render (e.g. a datetime literal — its parsed form does not round-trip); refusing the update rather than corrupting the key`,
+        );
+      }
+      envLines.push(`${tomlKey(key)} = ${rendered}`);
+    }
+    const envHeader = new RegExp(
+      `^\\s*\\[\\s*${adapter.rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.${entry.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.env\\s*\\]\\s*(#.*)?$`,
+    );
+    let envTableStart = -1;
+    let envTableEnd = -1;
+    for (let i = region.startLine + 1; i <= region.endLine; i++) {
+      if (!topLevel[i]) continue;
+      if (envHeader.test(lines[i] ?? "")) {
+        envTableStart = i;
+        envTableEnd = i;
+        for (let j = i + 1; j <= region.endLine; j++) {
+          if (topLevel[j] && anyHeader.test(lines[j] ?? "")) break;
+          envTableEnd = j;
+        }
+        break;
+      }
+    }
+    // The env table's span stops at its last CONTENT line — trailing blanks
+    // and comment lines before the next header belong to the following
+    // section (the region-math convention), never to the replaced block.
+    while (envTableEnd > envTableStart && topLevel[envTableEnd]) {
+      const trimmed = (lines[envTableEnd] ?? "").trim();
+      if (trimmed !== "" && !trimmed.startsWith("#")) break;
+      envTableEnd--;
+    }
+    const envBlock = [`[${tablePath.map(tomlKey).join(".")}.env]`, ...envLines];
+    if (envTableStart !== -1) {
+      spans.push({ startLine: envTableStart, endLine: envTableEnd, lines: envBlock });
+    } else {
+      const inlineSpan = tomlKeySpan(lines, topLevel, region.startLine + 1, mainEnd, "env");
+      if (inlineSpan) {
+        // Inline form (`env = { A = "1" }`): replace with the merged inline render.
+        const inlinePairs = envLines.join(", ");
+        spans.push({ ...inlineSpan, lines: [`env = { ${inlinePairs} }`] });
+      } else {
+        spans.push({ startLine: region.endLine + 1, endLine: region.endLine, lines: ["", ...envBlock] });
+      }
+    }
+  }
+
+  return { kind: "toml-splice", op: "merge-update", tablePath, region, insertAfterLine: null, insertText: null, spans };
 }
 
 function yamlEdit(
@@ -735,6 +1298,7 @@ function yamlEdit(
   entry: CanonicalEntry,
   shaped: RawEntry,
   plan: ActionPlan,
+  existing?: RawEntry,
 ): YamlNativeEdit {
   const basePath = [adapter.rootKey, entry.name];
   if (plan.mechanism === "native-flag") {
@@ -750,12 +1314,26 @@ function yamlEdit(
     return { kind: "yaml-cst", op: "delete", path: basePath, value: null, renderedEntry: null };
   }
   const snippetDoc = new Document({ [entry.name]: shaped });
+  const renderedEntry = snippetDoc.toString().trimEnd();
+  if (plan.mechanism === "update" && existing !== undefined) {
+    // Story 33.5 QA: per-key sets, never a whole-entry re-render (comments
+    // INSIDE the owned entry survive — see YamlNativeEdit.ops). Falls back
+    // to the whole-entry set when nothing differs.
+    const ops: { path: string[]; value: unknown }[] = [];
+    for (const key of Object.keys(shaped)) {
+      if (jsonDeepEqual(existing[key], shaped[key])) continue;
+      ops.push({ path: [...basePath, key], value: shaped[key] });
+    }
+    if (ops.length > 0) {
+      return { kind: "yaml-cst", op: "merge-update", path: basePath, value: null, ops, renderedEntry };
+    }
+  }
   return {
     kind: "yaml-cst",
     op: "set",
     path: basePath,
     value: shaped,
-    renderedEntry: snippetDoc.toString().trimEnd(),
+    renderedEntry,
   };
 }
 
@@ -779,7 +1357,11 @@ function renderText(
       lines.push(`Add entry "${entry.name}" (not currently present).`);
       break;
     case "update":
-      lines.push(`Replace entry "${entry.name}" (currently present).`);
+      // AC 33.5.2: the confirm text surfaces the preservation contract.
+      lines.push(
+        `Update entry "${entry.name}" in place (currently present): manager-owned keys (command/args/env) are overwritten; ` +
+          `unmanaged keys on the entry (e.g. autoApprove, timeout) and its enablement state are preserved.`,
+      );
       break;
     case "stash-add":
       lines.push(`Re-add stashed entry "${entry.name}" (enable on a stash client).`);
@@ -815,6 +1397,8 @@ function renderText(
           ? `Replace line ${native.region.startLine + 1} with \`${native.insertText ?? ""}\`:`
           : `Insert \`${native.insertText ?? ""}\` after the [${native.tablePath.join(".")}] table header:`,
       );
+    } else if (native.op === "merge-update") {
+      lines.push(`Update ${native.spans?.length ?? 0} manager-owned line span(s) in the [${native.tablePath.join(".")}] table:`);
     } else if (native.region) {
       lines.push(`${native.op === "remove-region" ? "Remove" : "Replace"} lines ${native.region.startLine + 1}–${native.region.endLine + 1}:`);
     }
@@ -823,7 +1407,9 @@ function renderText(
   }
   // Show ONLY the owned entry's rendered form — never other entries.
   if (plan.setsEntry) {
-    if (native.kind === "toml-splice" && native.insertText !== null) {
+    if (native.kind === "toml-splice" && native.op === "merge-update") {
+      for (const span of native.spans ?? []) lines.push(...span.lines);
+    } else if (native.kind === "toml-splice" && native.insertText !== null) {
       lines.push(native.insertText);
     } else if (native.kind === "yaml-cst" && native.renderedEntry !== null) {
       lines.push(native.renderedEntry);

@@ -156,7 +156,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is unpublished as of 2026-07-28, so its in-session launch fails — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs after publish/extension install.",
+      "residualRisk": "CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is unpublished as of 2026-07-28, so its in-session launch fails — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.",
       "ac3344": {
         "cliTuiHalf": {
           "verdict": "verified-live",

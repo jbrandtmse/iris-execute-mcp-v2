@@ -30,7 +30,7 @@ import { applyEdits, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CLIENT_ADAPTERS } from "./adapters.js";
 import { diff, insertionEdits, type DiffMechanism, type DiffOptions } from "./diff.js";
 import { resolveScopePath } from "./paths.js";
-import { readConfigEntries, type RawEntry } from "./readers.js";
+import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
 import type { VscodeInput } from "./synthesize.js";
 import {
   addStash,
@@ -322,7 +322,7 @@ export function apply(
   let present = false;
   if (current.content !== null && current.content.trim() !== "") {
     const parsed = readConfigEntries(target.adapter, current.content);
-    if (parsed.ok) present = parsed.entries[entry.name] !== undefined;
+    if (parsed.ok) present = ownEntry(parsed.entries, entry.name) !== undefined;
   }
   const refusal = ownershipRefusal(target.state, client, scope, entry.name, present);
   if (refusal) return fail(client, scope, "apply", target.path, refusal);
@@ -370,7 +370,7 @@ export function enable(
     // Stash client, entry absent, nothing stashed: distinguish "already
     // enabled" (present) from "nothing to enable" (absent, never stashed).
     const parsed = readConfigEntries(target.adapter, current.content);
-    if (parsed.ok && parsed.entries[name] === undefined) {
+    if (parsed.ok && ownEntry(parsed.entries, name) === undefined) {
       return fail(client, scope, "enable", target.path, `entry "${name}" is not present and no disabled entry is stashed; nothing to enable`);
     }
   }
@@ -416,7 +416,7 @@ export function disable(
   let stashEntry: RawEntry | undefined;
   if (!target.adapter.nativeDisableFlag) {
     const parsed = readConfigEntries(target.adapter, current.content);
-    if (parsed.ok) stashEntry = parsed.entries[name];
+    if (parsed.ok) stashEntry = ownEntry(parsed.entries, name);
   }
 
   return runEdit({
@@ -473,7 +473,7 @@ export function remove(
   // apply → disable → remove → enable brought the "removed" server back).
   {
     const parsed = readConfigEntries(target.adapter, current.content);
-    if (parsed.ok && parsed.entries[name] === undefined) {
+    if (parsed.ok && ownEntry(parsed.entries, name) === undefined) {
       const next = dropStash(dropManaged(target.state, client, scope, name), client, scope, name);
       const warnings: string[] = [];
       persistState(ctx, fs, target.stateDir, next, warnings);

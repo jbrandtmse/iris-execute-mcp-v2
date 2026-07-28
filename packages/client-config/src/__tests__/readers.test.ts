@@ -146,6 +146,153 @@ describe("readConfigEntries — malformed inputs are ok:false, never exceptions 
 });
 
 // ════════════════════════════════════════════════════════════════════
+// Story 33.5 Task 1 / AC 33.5.1 (HIGH, lead-probed live 2026-07-28) — parse
+// errors carry reason + line:col/code ONLY, never file content. smol-toml's
+// codeblock echoes the offending line AND the line above it; yaml's message
+// appends the offending line + caret. A secret marker planted on/near the
+// offending line must appear NOWHERE in the error text.
+// ════════════════════════════════════════════════════════════════════
+
+describe("parse-error sanitization — no source content on the error surface (AC 33.5.1)", () => {
+  const SECRET = "SECRETVALUE123_MARKER";
+
+  it("TOML: a secret on the offending line AND the line above it never leaks (lead probe P1)", () => {
+    // The exact lead-probed leak shape: the secret sits on the line ABOVE the
+    // offending one (smol-toml's codeblock prints both).
+    const content = `[mcp_servers.my-server]\napi_key = "${SECRET}"\nbad = = =\n`;
+    const read = readConfigEntries(adapterOf("codex"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.error).not.toContain(SECRET);
+      expect(read.error).not.toContain("api_key");
+      expect(read.error).toContain("line"); // reason + line:col only
+    }
+    const diagnosis = diagnoseConfigSurface(adapterOf("codex"), content);
+    expect(diagnosis.status).toBe("syntax-error");
+    if (diagnosis.status === "syntax-error") {
+      expect(diagnosis.error).not.toContain(SECRET);
+      expect(diagnosis.error).not.toContain("api_key");
+    }
+  });
+
+  it("TOML: a secret ON the offending line itself never leaks", () => {
+    const content = `[mcp_servers]\nbad = "${SECRET}\n`;
+    const read = readConfigEntries(adapterOf("codex"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.error).not.toContain(SECRET);
+  });
+
+  it("YAML: a secret on the offending line never leaks (message carries line + caret in the raw library error)", () => {
+    const content = `extensions:\n  my-server:\n    api_key: "${SECRET}"\n  bad: [ unclosed\n`;
+    const read = readConfigEntries(adapterOf("goose"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.error).not.toContain(SECRET);
+      expect(read.error).not.toContain("unclosed");
+      expect(read.error).toContain("line");
+    }
+    const diagnosis = diagnoseConfigSurface(adapterOf("goose"), content);
+    expect(diagnosis.status).toBe("syntax-error");
+    if (diagnosis.status === "syntax-error") {
+      expect(diagnosis.error).not.toContain(SECRET);
+      expect(diagnosis.error).not.toContain("unclosed");
+    }
+  });
+
+  it("YAML: an offending TOKEN quoted in the library reason is stripped (Unexpected ... token: \"...\")", () => {
+    // yaml quotes one offending scalar token in the reason's first line —
+    // that token is file content and must not survive sanitization.
+    const content = `- a\n: ${SECRET}\n`;
+    const read = readConfigEntries(adapterOf("goose"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.error).not.toContain(SECRET);
+  });
+
+  it("JSONC: the already-disciplined error stays content-free (marker on the offending line)", () => {
+    const content = `{"mcpServers": {"a": "${SECRET}"} bad}\n`;
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.error).not.toContain(SECRET);
+  });
+
+  it("YAML: an unresolved ALIAS name is file content too — the materialization throw strips the unquoted tail (33.5 review)", () => {
+    // doc.toJS() throws `Unresolved alias (...): <name>` OUTSIDE the errors
+    // array — sanitizeThrownError's quoted-token strip never matched the
+    // unquoted alias name, leaking it (probe 2026-07-28, yaml 2.9.0).
+    const content = `extensions:\n  my-server: *${SECRET}\n`;
+    const read = readConfigEntries(adapterOf("goose"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.error).not.toContain(SECRET);
+      expect(read.error).toContain("Unresolved alias"); // the generic reason survives
+    }
+    const diagnosis = diagnoseConfigSurface(adapterOf("goose"), content);
+    expect(diagnosis.status).toBe("syntax-error");
+    if (diagnosis.status === "syntax-error") expect(diagnosis.error).not.toContain(SECRET);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.5 / AC 33.5.4 — comment-only JSONC is a VALID empty document;
+// a TOML datetime literal is NOT a table (isPlainObject rejects class
+// instances); a foreign entry named __proto__ is surfaced (33-5-11).
+// ════════════════════════════════════════════════════════════════════
+
+describe("shape-guard and empty-document edge cases (AC 33.5.4, AC 33.5.7)", () => {
+  it("a comment-only JSONC file is a valid empty document (VS Code accepts it), not unparseable", () => {
+    for (const content of ["// just a comment\n", "/* block only */", "// a\n// b\n"]) {
+      const read = readConfigEntries(adapterOf("vscode"), content);
+      expect(read.ok, JSON.stringify(content)).toBe(true);
+      if (read.ok) expect(Object.keys(read.entries)).toHaveLength(0);
+      expect(diagnoseConfigSurface(adapterOf("vscode"), content).status).toBe("empty");
+    }
+  });
+
+  it("a real syntax error WITH tokens is still a syntax error (the comment-only carve-out is narrow)", () => {
+    const read = readConfigEntries(adapterOf("vscode"), `// note\n{"mcpServers": ,}\n`);
+    expect(read.ok).toBe(false);
+  });
+
+  it("a TOML datetime at the root key defeats neither the drift guard nor the reader (TomlDate is not a table)", () => {
+    const content = "mcp_servers = 2026-07-28T10:00:00Z\n";
+    const read = readConfigEntries(adapterOf("codex"), content);
+    expect(read.ok).toBe(false); // wrong-shaped root key, not "zero entries"
+    const diagnosis = diagnoseConfigSurface(adapterOf("codex"), content);
+    expect(diagnosis.status).toBe("root-wrong-shape");
+    if (diagnosis.status === "root-wrong-shape") {
+      expect(diagnosis.found).toBe("a object"); // type name only — never the datetime's fields
+    }
+  });
+
+  it("a TOML datetime VALUE inside the root table is skipped as an entry, not classified as one", () => {
+    const content = '[mcp_servers]\nnot-a-server = 2026-07-28T10:00:00Z\n';
+    const read = readConfigEntries(adapterOf("codex"), content);
+    expect(read.ok).toBe(true);
+    if (read.ok) expect(Object.keys(read.entries)).toHaveLength(0);
+  });
+
+  it("a foreign entry literally named __proto__ is surfaced as an own key (33-5-11)", () => {
+    const content = '{"mcpServers": {"__proto__": {"command": "x"}, "iris-dev-mcp": {"command": "y"}}}';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(Object.keys(read.entries).sort()).toEqual(["__proto__", "iris-dev-mcp"]);
+      expect(Object.prototype.hasOwnProperty.call(read.entries, "__proto__")).toBe(true);
+    }
+  });
+
+  it("a TOML array-of-tables entry is surfaced as unsupported (33-5-12), never invisible", () => {
+    const content = '[[mcp_servers.iris-dev-mcp]]\ncommand = "x"\n';
+    const read = readConfigEntries(adapterOf("codex"), content);
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(Object.keys(read.entries)).toHaveLength(0);
+      expect(read.unsupported["iris-dev-mcp"]).toBe("array-of-tables");
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // Story 33.4 Task 1 / AC 33.4.2 — diagnoseConfigSurface (the drift
 // guard's finer classification; shares ONE parse path with the reader).
 // ════════════════════════════════════════════════════════════════════

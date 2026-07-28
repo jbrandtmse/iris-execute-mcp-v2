@@ -112,6 +112,49 @@ describe("status matrix over the sandbox tree", () => {
   it("stamps the report with the adapter data version", () => {
     expect(run().adapterDataVersion).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
+
+  it("never throws when an exists probe throws — per-probe degradation (AC 33.5.5)", () => {
+    // Model the REAL reachable shape (Rule #54): detection probes each path
+    // once (succeeds → client detected), then the status matrix's scope-path
+    // resolution probes the SAME path AGAIN and the fs now throws (transient
+    // EACCES on a removable drive). The per-probe guard must degrade that
+    // probe to not-exists — never let it escape as an exception.
+    const home = fixturePath("sandbox-home");
+    const configPath = home + "/.codex/config.toml";
+    const callsPerPath = new Map<string, number>();
+    const fs = {
+      exists: (p: string) => {
+        const calls = (callsPerPath.get(p) ?? 0) + 1;
+        callsPerPath.set(p, calls);
+        if (calls > 1) throw new Error("EACCES: permission denied (transient)");
+        return p === configPath;
+      },
+      readFile: () => {
+        throw new Error("unreachable — the degraded probe reports missing");
+      },
+    };
+    let report: StatusReport | undefined;
+    expect(() => {
+      report = status({ platform: "linux", env: {}, homeDir: home }, fs);
+    }).not.toThrow();
+    const codex = report?.clients.find((c) => c.client === "codex");
+    expect(codex?.scopes.find((s) => s.scope === "user")?.file).toBe("missing");
+  });
+
+  it("a TOML parse error with a secret on the offending line stays content-free through the FULL report (AC 33.5.1)", () => {
+    const SECRET = "SECRETVALUE123_MARKER";
+    const home = fixturePath("sandbox-home");
+    const fs = {
+      exists: (p: string) => p === home + "/.codex/config.toml",
+      readFile: () => `[mcp_servers.my-server]\napi_key = "${SECRET}"\nbad = = =\n`,
+    };
+    const report = status({ platform: "linux", env: {}, homeDir: home }, fs);
+    const codex = report.clients.find((c) => c.client === "codex");
+    expect(codex?.scopes.find((s) => s.scope === "user")?.file).toBe("unparseable");
+    const rendered = JSON.stringify(report);
+    expect(rendered).not.toContain(SECRET);
+    expect(rendered).not.toContain("api_key");
+  });
 });
 
 describe("entryPresence", () => {

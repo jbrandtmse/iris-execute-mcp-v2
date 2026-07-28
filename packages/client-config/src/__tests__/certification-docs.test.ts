@@ -66,4 +66,28 @@ describe("certification docs are generated + exhaustive (AC 33.4.1/33.4.3, Rule 
       }
     }
   });
+
+  it("33-5-15: the generated certification cells carry the file-level-vs-agent-side qualifier", () => {
+    const readme = readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8");
+    // Derived per client from the recorded evidence: an agent CLI probe
+    // (`claude mcp list`, `kimi -p`) upgrades the cell's qualifier.
+    for (const id of ["vscode", "cline"]) {
+      const row = readme.split("\n").find((line) => line.startsWith(`| `) && line.includes(`(\`${id}\`)`));
+      expect(row, id).toContain("(file-level; agent-side GUI stays manual)");
+    }
+    for (const id of ["claude-code", "kimi-code"]) {
+      const row = readme.split("\n").find((line) => line.startsWith(`| `) && line.includes(`(\`${id}\`)`));
+      expect(row, id).toContain("(incl. agent CLI probe)");
+    }
+    // The details intro states the qualifier rule itself.
+    expect(readme).toContain("a FILE-LEVEL status read otherwise");
+  });
+
+  it("33-5-16: the CLI npx header carries the not-yet-published caveat", () => {
+    const readme = readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8");
+    const header = readme.split("\n").find((line) => line.includes("npx -y @iris-mcp/client-config iris-mcp-clients <command>"));
+    expect(header).toBeDefined();
+    const nextLines = readme.slice(readme.indexOf(header ?? ""), (readme.indexOf(header ?? "")) + 300);
+    expect(nextLines).toContain("Not yet published to npm");
+  });
 });

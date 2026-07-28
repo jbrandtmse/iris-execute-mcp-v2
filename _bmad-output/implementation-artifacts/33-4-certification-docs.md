@@ -131,6 +131,7 @@ Claude Code (k3[1m]) — bmad-dev-story, 2026-07-28.
 
 - 2026-07-28 (dev): Story 33.4 implemented — doctor config-drift guard (AC 33.4.2/I1), certification harness + 4 certified-live passes + Kimi dual-surface verification with the `.mcp.json`-fallback falsification and adapter-data correction (AC 33.4.1/33.4.4), generated adapter/certification docs + docs rollup (AC 33.4.3). All gates green; changes uncommitted for the lead smoke gate.
 - 2026-07-28 (review): bmad-code-review — all three spawned layers (bh-33-4, eh-33-4, aa-33-4) failed to return (FIFTH consecutive Epic-33 story); executed reviewer-direct per the 32.3 precedent. 0 decision-needed / 5 patch (1 MEDIUM + 4 LOW, all applied + verified) / 0 defer / 4 dismissed / 0 HIGH. Suite 18 files / 372 tests green post-patch (+1 R1 pin); render --check in sync; lint + type-check clean; NUL scan clean. Findings below.
+- 2026-07-28 (correction, Story 33.5 close, Rule #51): the dev Task-4 note above ("17 files/350 tests, +22") was a hand-tally error — mechanically reconstructed from the trees: the 33.3-close tree had 16 client-config test files and the 33.4-close tree has 18 (certification-docs.test.ts AND certification-process.test.ts both new in this story, not one), and the runner's count at close was 372 (371 pre-review-pin + the +1 R1 pin). The dev note undercounted by 1 file and 21 tests; the review note's figures stand. Mirrored as ledger row 33-5-L12.
 
 ### Review Findings
 

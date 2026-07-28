@@ -318,6 +318,47 @@ describe("status", () => {
     const payload = JSON.parse(h.stdout.text) as { ok: boolean; command: string };
     expect(payload).toMatchObject({ ok: true, command: "status" });
   });
+
+  it("a secret-marked TOML parse error leaks NOTHING on the text or --json surfaces (AC 33.5.1, lead probe P1)", async () => {
+    const SECRET = "SECRETVALUE123_MARKER";
+    const h = harness();
+    h.fs.seed(`${HOME}/.codex/config.toml`, `[mcp_servers.my-server]\napi_key = "${SECRET}"\nbad = = =\n`);
+    expect(await h.run(["status"])).toBe(0);
+    expect(h.stdout.text).toContain("UNPARSEABLE");
+    expect(h.stdout.text).not.toContain(SECRET);
+    expect(h.stdout.text).not.toContain("api_key");
+    const h2 = harness();
+    h2.fs.seed(`${HOME}/.codex/config.toml`, `[mcp_servers.my-server]\napi_key = "${SECRET}"\nbad = = =\n`);
+    expect(await h2.run(["status", "--json"])).toBe(0);
+    expect(h2.stdout.text).not.toContain(SECRET);
+    expect(h2.stdout.text).not.toContain("api_key");
+    // doctor's parseability finding carries the same sanitized reason.
+    const h3 = harness();
+    h3.fs.seed(`${HOME}/.codex/config.toml`, `[mcp_servers.my-server]\napi_key = "${SECRET}"\nbad = = =\n`);
+    expect(await h3.run(["doctor", "--json"])).toBe(1);
+    expect(h3.stdout.text).toContain("parseability");
+    expect(h3.stdout.text).not.toContain(SECRET);
+    expect(h3.stdout.text).not.toContain("api_key");
+  });
+
+  it("a secret-marked YAML parse error leaks NOTHING on any surface (AC 33.5.1)", async () => {
+    // The marker sits ON the offending line — the yaml library's raw error
+    // echoes exactly that line + caret (probe 2026-07-28, yaml 2.9.0).
+    const SECRET = "SECRETYAML456_MARKER";
+    const content = `extensions:\n  my-server:\n    api_key: x\n  bad: [ "${SECRET}"\n`;
+    const h = harness();
+    h.fs.seed(`${HOME}/.config/goose/config.yaml`, content);
+    expect(await h.run(["status"])).toBe(0);
+    expect(h.stdout.text).not.toContain(SECRET);
+    const h2 = harness();
+    h2.fs.seed(`${HOME}/.config/goose/config.yaml`, content);
+    expect(await h2.run(["status", "--json"])).toBe(0);
+    expect(h2.stdout.text).not.toContain(SECRET);
+    const h3 = harness();
+    h3.fs.seed(`${HOME}/.config/goose/config.yaml`, content);
+    expect(await h3.run(["doctor", "--json"])).toBe(1);
+    expect(h3.stdout.text).not.toContain(SECRET);
+  });
 });
 
 describe("diff", () => {
@@ -876,14 +917,20 @@ describe("doctor config-drift (AC 33.4.2, 33.4-I1)", () => {
     expect(h.stdout.text).not.toContain("config-drift");
   });
 
-  it("the text render prints the drift finding with the client/scope and a restart hint", async () => {
+  it("the text render prints the drift finding WITHOUT a restart-hint block (33-5-14: a restart does not remedy drift)", async () => {
     const h = harness();
     h.fs.seed(`${HOME}/.claude.json`, readFixture("drift/wrong-shape.json"));
     expect(await h.run(["doctor"])).toBe(1);
     expect(h.stdout.text).toContain("config-drift (1):");
     expect(h.stdout.text).toContain("[claude-code/user]");
-    expect(h.stdout.text).toContain("Restart hints:");
-    expect(h.stdout.text).toContain(CLIENT_ADAPTERS["claude-code"]!.restartHint);
+    expect(h.stdout.text).not.toContain("Restart hints:");
+    // A parseability finding (a repairable file state) STILL earns the hint.
+    const h2 = harness();
+    h2.fs.seed(`${HOME}/.claude.json`, readFixture("malformed/bad.jsonc"));
+    expect(await h2.run(["doctor"])).toBe(1);
+    expect(h2.stdout.text).toContain("parseability");
+    expect(h2.stdout.text).toContain("Restart hints:");
+    expect(h2.stdout.text).toContain(CLIENT_ADAPTERS["claude-code"]!.restartHint);
   });
 });
 

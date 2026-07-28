@@ -67,6 +67,7 @@ import {
 import { resolveScopePath } from "../paths.js";
 import {
   diagnoseConfigSurface,
+  ownEntry,
   readConfigEntries,
   type ConfigSurfaceDiagnosis,
 } from "../readers.js";
@@ -1354,6 +1355,9 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
               `(adapter data ${ADAPTER_DATA_VERSION}; if ${adapter?.displayName ?? client.client} genuinely changed its config surface, ` +
               `the fix is an adapter-data patch + fixture update, never engine code — see the README's drift-fix procedure)`,
           });
+          // 33-5-14: NO restart hint for config-drift — a restart does not
+          // remedy drift (the fix is an adapter-data patch), so hinting one
+          // is a non-remedy that misdirects the user.
         } else {
           findings.push({
             check: "parseability",
@@ -1362,8 +1366,8 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
             path: scope.path,
             detail: `config file is unparseable: ${scope.error ?? "unknown"} (every write refuses until it is repaired or restored)`,
           });
+          restartClients.add(client.client);
         }
-        restartClients.add(client.client);
       }
     }
   }
@@ -1544,7 +1548,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
       }
       const entries = readConfigEntries(adapter, content);
       if (!entries.ok) continue; // unparseable is check 1's finding
-      const present = entries.entries[stash.name];
+      const present = ownEntry(entries.entries, stash.name);
       if (present !== undefined) {
         const flag = adapter.nativeDisableFlag;
         const disabled = flag !== undefined && present[flag.key] === flag.disabledValue;

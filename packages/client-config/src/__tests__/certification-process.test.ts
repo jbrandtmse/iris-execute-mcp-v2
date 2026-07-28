@@ -9,7 +9,8 @@
  *     non-object (`top-not-object`), empty/whitespace files (never a
  *     finding), a BOM-prefixed wrong-shape file, drift at PROJECT scope (cwd
  *     resolution), and drift COMPOSING with other finding classes in one
- *     report (envelope + plain-text restart hints).
+ *     report (envelope + plain-text renders; 33-5-14: drift earns no
+ *     restart-hint block — a restart is a non-remedy for drift).
  *  2. `scripts/render-certification-table.mjs --check` is a GENUINE guard:
  *     run against a sandbox COPY of the package (script + results JSON +
  *     built dist/adapters.js + README), a hand-edit to either generated
@@ -150,7 +151,7 @@ function parseDoctor(result: RunResult): DoctorData {
 // ════════════════════════════════════════════════════════════════════
 
 describe("QA 33.4: doctor config-drift edges (process level)", () => {
-  it("a top-level NON-OBJECT file is config-drift (top-not-object), never parseability, with a restart hint", () => {
+  it("a top-level NON-OBJECT file is config-drift (top-not-object), never parseability, and NO restart hint (33-5-14)", () => {
     const sandbox = makeCliSandbox();
     const target = sandbox.configPath("claude-code");
     writeFileSync(target, readFixture("drift/top-array.json"));
@@ -171,8 +172,9 @@ describe("QA 33.4: doctor config-drift edges (process level)", () => {
     });
     expect(drift[0]!.detail).toContain("adapter-data patch + fixture update, never engine code");
     expect(data.findings.some((finding) => finding.check === "parseability")).toBe(false);
-    // The drifted client appears in the JSON restart hints.
-    expect(data.restartHints.map((hint) => hint.client)).toContain("claude-code");
+    // 33-5-14: drift earns NO restart hint — a restart does not remedy drift
+    // (the fix is an adapter-data patch); only parseability/present-disabled do.
+    expect(data.restartHints.map((hint) => hint.client)).not.toContain("claude-code");
     expect(data.findingCount).toBe(data.findings.length);
   }, T);
 
@@ -238,24 +240,24 @@ describe("QA 33.4: doctor config-drift edges (process level)", () => {
     mkdirSync(backupDir, { recursive: true });
     writeFileSync(path.join(backupDir, ".claude.json.2020-01-01T00-00-00-000Z"), "{}");
 
-    // --json: both classes in ONE envelope, derived count, restart hint.
+    // --json: both classes in ONE envelope, derived count. 33-5-14: neither
+    // config-drift nor stale-backups earns a restart hint (non-remedies).
     const json = sandbox.run(["doctor", "--json"]);
     expect(json.status).toBe(1);
     const data = parseDoctor(json);
     const checks = data.findings.map((finding) => finding.check).sort();
     expect(checks).toEqual(["config-drift", "stale-backups"]);
     expect(data.findingCount).toBe(2);
-    expect(data.restartHints.map((hint) => hint.client)).toEqual(["claude-code"]);
+    expect(data.restartHints).toEqual([]);
 
-    // Plain text: both groups render with per-class counts + the hint block.
+    // Plain text: both groups render with per-class counts; no hint block.
     const text = sandbox.run(["doctor"]);
     expect(text.status).toBe(1);
     expect(text.stdout).toContain("config-drift (1):");
     expect(text.stdout).toContain("stale-backups (1):");
     expect(text.stdout).toContain("2 finding(s).");
     expect(text.stdout).toContain(ADAPTER_DATA_VERSION);
-    expect(text.stdout).toContain("Restart hints:");
-    expect(text.stdout).toContain("Claude Code: Restart Claude Code");
+    expect(text.stdout).not.toContain("Restart hints:");
   }, T);
 });
 
@@ -305,7 +307,7 @@ describe("QA 33.4: render-certification-table --check guard (real script, sandbo
 
     mutateReadme(
       sandbox.readmePath,
-      "| **certified-live** 2026-07-28 |",
+      "| **certified-live** 2026-07-28 (incl. agent CLI probe) |",
       "| fixture-only (residual risk) |",
     );
     const result = sandbox.run(["--check"]);
@@ -329,7 +331,7 @@ describe("QA 33.4: render-certification-table --check guard (real script, sandbo
     const sandbox = makePkgSandbox();
     mutateReadme(
       sandbox.readmePath,
-      "| **certified-live** 2026-07-28 |",
+      "| **certified-live** 2026-07-28 (incl. agent CLI probe) |",
       "| fixture-only (residual risk) EDITED |",
     );
     expect(sandbox.run(["--check"]).status).toBe(1);
@@ -502,10 +504,35 @@ describe("QA 33.4: certify.mjs writes nothing without the full explicit pass", (
     const result = runCertify(["run", "claude-code", "--real-config"], home);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("refusing to clobber a real entry");
+    // AC 33.5.6d: the refusal names the restore recovery path.
+    expect(result.stderr).toContain("iris-mcp-clients restore --client claude-code");
     expect(readFileSync(configPath, "utf8")).toBe(originalBytes);
     expect(md5(RESULTS_PATH)).toBe(before);
     // Only the config we planted exists — no manager state, no backups.
     expect(treeEntries(home)).toEqual([".claude.json"]);
+  }, T);
+
+  it("AC 33.5.6c: a client with no scripted verification surface fails BEFORE detection/writes (exit 2)", () => {
+    const home = mkTmp("qa334-cert-home-");
+    const before = md5(RESULTS_PATH);
+    // cursor IS in the adapter roster but has no scripted verifier; the gate
+    // fires before the detect probe (cursor would otherwise fail "not
+    // detected" — the unsupported-surface message proves the ordering).
+    const result = runCertify(["run", "cursor", "--real-config"], home);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("no scripted verification surface");
+    expect(result.stderr).toContain("BEFORE any real-config write");
+    expect(md5(RESULTS_PATH)).toBe(before);
+    expect(treeEntries(home)).toEqual([]);
+  }, T);
+
+  it("33-5-17: the usage roster is derived from CLIENT_ADAPTERS (the full 13, never a hand-mirrored subset)", async () => {
+    const { CLIENT_ADAPTERS } = await import("../adapters.js");
+    const result = runCertify([]);
+    expect(result.status).toBe(0);
+    for (const id of Object.keys(CLIENT_ADAPTERS)) {
+      expect(result.stdout).toContain(id);
+    }
   }, T);
 });
 

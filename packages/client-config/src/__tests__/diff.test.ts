@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { applyEdits } from "jsonc-parser";
+import { applyEdits, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { parse as parseToml } from "smol-toml";
 import { parseDocument } from "yaml";
 
@@ -20,9 +20,11 @@ import {
   CANONICAL_SERVERS,
   diff,
   entryPresence,
+  executeNativeEdit,
   readConfigEntries,
   findTomlEntryRegion,
   findTomlInsertLine,
+  scanTomlStructure,
   serializeTomlEntry,
   renderNativeEntry,
   type CanonicalEntry,
@@ -64,6 +66,14 @@ function expectOk(result: DiffResult): Extract<DiffResult, { ok: true }> {
  * Story 33.1's write engine will perform (test-local: the write engine owns
  * the fs/backup protocol; this proves the descriptor is directly executable).
  */
+/** Assert no dangling comma: jsonc parses clean with trailing commas
+ * DISALLOWED (comments allowed — the kept comment is the point of the fix). */
+function expectJsoncNoDanglingComma(text: string): void {
+  const errors: ParseError[] = [];
+  parseJsonc(text, errors, { allowTrailingComma: false, disallowComments: false });
+  expect(errors).toEqual([]);
+}
+
 function applyTomlSplice(content: string, edit: TomlNativeEdit): string {
   const lines = content.split("\n");
   if (edit.op === "insert") {
@@ -78,6 +88,16 @@ function applyTomlSplice(content: string, edit: TomlNativeEdit): string {
       lines.splice(edit.region.startLine, edit.region.endLine - edit.region.startLine + 1, edit.insertText ?? "");
     } else {
       lines.splice((edit.insertAfterLine ?? -1) + 1, 0, edit.insertText ?? "");
+    }
+    return lines.join("\n");
+  }
+  if (edit.op === "merge-update") {
+    // Mirror the 33.5 executor exactly: disjoint spans applied BOTTOM-UP; a
+    // span with endLine < startLine is a pure insert.
+    const ordered = [...(edit.spans ?? [])].sort((a, b) => b.startLine - a.startLine);
+    for (const span of ordered) {
+      const count = Math.max(0, span.endLine - span.startLine + 1);
+      lines.splice(span.startLine, count, ...span.lines);
     }
     return lines.join("\n");
   }
@@ -298,18 +318,24 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     expect(after).toContain("# A foreign third-party server");
   });
 
-  it("apply on an existing entry renders a bounded replace-region", () => {
+  it("apply on an existing entry renders merge-update span surgery (33.5.2), executable and valid", () => {
     const adapter = adapterOf("codex");
     const content = readFixture("codex/config.toml");
     const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const native = result.native as TomlNativeEdit;
-    expect(native.op).toBe("replace-region");
+    expect(native.op).toBe("merge-update");
     expect(native.region).not.toBeNull();
+    // 33.5 review: an update whose values are all UNCHANGED renders ZERO
+    // spans — the no-op surgery touches nothing (re-rendering identical
+    // managed lines only ever dropped their trailing comments).
+    expect(native.spans ?? []).toHaveLength(0);
     const after = applyTomlSplice(content, native);
     const parsed = parseToml(after) as Record<string, Record<string, Record<string, unknown>>>;
     expect(parsed["mcp_servers"]?.["iris-dev-mcp"]).toBeDefined();
     expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
+    // The fixture's canonical entry matches the file: a byte-preserving no-op.
+    expect(after).toBe(content);
   });
 
   it("remove renders a remove-region covering ONLY the owned tables (env sub-table included)", () => {
@@ -456,12 +482,12 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     "",
   ].join("\n");
 
-  it("update on a comment-headed owned table renders replace-region, executable and valid", () => {
+  it("update on a comment-headed owned table renders merge-update, executable and valid", () => {
     const adapter = adapterOf("codex");
     const result = expectOk(diff(commented, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const native = result.native as TomlNativeEdit;
-    expect(native.op).toBe("replace-region");
+    expect(native.op).toBe("merge-update");
     if (!native.region) throw new Error("region missing");
     // The region starts ON the commented header line (the comment belongs to
     // the owned table) and never reaches the foreign table.
@@ -473,6 +499,7 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     const parsed = parseToml(after) as Record<string, Record<string, Record<string, unknown>>>;
     expect(parsed["mcp_servers"]?.["iris-dev-mcp"]).toBeDefined();
     expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
+    expect(after).toContain("# managed by iris-mcp"); // header comment preserved (33.5.2 surgery)
     expect(after).toContain("# foreign, never touched");
     expect(after).toContain("# context7 keeps its own comment.");
   });
@@ -636,6 +663,372 @@ describe("refusals and the full-registry sweep (AC 33.0.4)", () => {
       for (const result of results) {
         expectNoForeignLeaks(renderSurface(result), `${id}/${result.action}/${result.mechanism}`);
       }
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.5 Task 2 / AC 33.5.2 (HIGH, lead-probed live 2026-07-28) —
+// apply-UPDATE preservation: unmanaged keys survive, enablement never
+// changes on apply, the native flag is never stamped by an update, and the
+// confirm text states the preservation contract.
+// ════════════════════════════════════════════════════════════════════
+
+describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
+  it("JSONC (cline): unmanaged keys + disabled:true + env extras survive an apply-update", () => {
+    const adapter = adapterOf("cline");
+    const content = JSON.stringify(
+      {
+        mcpServers: {
+          "iris-dev-mcp": {
+            command: "old",
+            args: ["--old"],
+            disabled: true,
+            autoApprove: ["iris_server_info"],
+            timeout: 45,
+            env: { IRIS_PASSWORD: "old-secret", USER_EXTRA: "keep-me" },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_PASSWORD: "new" } }, adapter, "user", "apply"),
+    );
+    expect(result.mechanism).toBe("update");
+    // The confirm text surfaces the preservation contract.
+    expect(result.text).toContain("preserved");
+    const after = executeNativeEdit(content, result.native);
+    const parsed = JSON.parse(after) as { mcpServers: Record<string, Record<string, unknown>> };
+    const entry = parsed.mcpServers["iris-dev-mcp"] as Record<string, unknown>;
+    expect(entry.command).toBe("npx"); // manager-owned overwritten
+    expect(entry.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(entry.disabled).toBe(true); // enablement NEVER changes on apply
+    expect(entry.autoApprove).toEqual(["iris_server_info"]); // unmanaged preserved
+    expect(entry.timeout).toBe(45);
+    expect((entry.env as Record<string, unknown>).IRIS_PASSWORD).toBe("new"); // canonical env wins
+    expect((entry.env as Record<string, unknown>).USER_EXTRA).toBe("keep-me"); // env extras survive
+  });
+
+  it("JSONC: an update never stamps the native flag onto an entry that lacks one", () => {
+    const adapter = adapterOf("cline");
+    const content = JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "old", args: [] } } });
+    const result = expectOk(diff(content, { name: "iris-dev-mcp", command: "npx", args: [] }, adapter, "user", "apply"));
+    const after = executeNativeEdit(content, result.native);
+    const parsed = JSON.parse(after) as { mcpServers: Record<string, Record<string, unknown>> };
+    expect("disabled" in (parsed.mcpServers["iris-dev-mcp"] as Record<string, unknown>)).toBe(false);
+  });
+
+  it("TOML (codex): unmanaged keys, comments, and enabled=false survive; multiline forms byte-exact", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp] # managed",
+      'command = "old"',
+      "# tuned for the slow VPN",
+      "args = [",
+      '  "--old",',
+      "]",
+      "enabled = false",
+      "startup_timeout_sec = 30",
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      'EXTRA_KEY = "keep-me"',
+      "",
+      "[mcp_servers.context7]",
+      'command = "npx"',
+      "",
+    ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+    );
+    expect(result.mechanism).toBe("update");
+    const native = result.native as TomlNativeEdit;
+    expect(native.op).toBe("merge-update");
+    const after = executeNativeEdit(content, native);
+    const lines = after.split("\n");
+    expect(lines).toContain("enabled = false"); // enablement preserved
+    expect(lines).toContain("startup_timeout_sec = 30"); // unmanaged scalar preserved
+    expect(lines).toContain("# tuned for the slow VPN"); // interior comment preserved
+    expect(lines).toContain("[mcp_servers.iris-dev-mcp] # managed"); // header comment preserved
+    expect(lines).toContain('command = "npx"'); // manager-owned overwritten
+    expect(lines).toContain('args = ["-y", "@iris-mcp/dev"]'); // multiline args collapsed to the fresh render
+    const envStart = lines.indexOf("[mcp_servers.iris-dev-mcp.env]");
+    expect(envStart).toBeGreaterThan(-1);
+    expect(lines[envStart + 1]).toBe('EXTRA_KEY = "keep-me"'); // existing env extras first
+    expect(lines[envStart + 2]).toBe('IRIS_NAMESPACE = "HSCUSTOM"'); // canonical env appended
+    expect(parseToml(after)).toBeDefined(); // the result is valid TOML
+  });
+
+  it("TOML: an unmanaged datetime env value is a documented REFUSAL, never a corruption", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "old"',
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      "CREATED = 2026-01-01T00:00:00Z",
+      "",
+    ].join("\n");
+    const result = diff(content, { name: "iris-dev-mcp", command: "npx", args: [], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("datetime");
+  });
+
+  it("YAML (goose): unmanaged keys + enabled:false survive an apply-update", () => {
+    const adapter = adapterOf("goose");
+    const content = [
+      "extensions:",
+      "  iris-data-mcp:",
+      "    type: stdio",
+      "    cmd: old",
+      "    args: [--old]",
+      "    enabled: false",
+      "    timeout: 90",
+      "",
+    ].join("\n");
+    const result = expectOk(diff(content, { name: "iris-data-mcp", command: "npx", args: ["-y", "@iris-mcp/data"] }, adapter, "user", "apply"));
+    expect(result.mechanism).toBe("update");
+    const after = executeNativeEdit(content, result.native);
+    const doc = parseDocument(after);
+    const entry = (doc.toJS() as { extensions: Record<string, Record<string, unknown>> }).extensions["iris-data-mcp"] as Record<string, unknown>;
+    expect(entry.cmd).toBe("npx");
+    expect(entry.enabled).toBe(false); // enablement preserved
+    expect(entry.timeout).toBe(90); // unmanaged preserved
+  });
+
+  it("TOML: an unchanged managed value renders NO span — trailing comments and the env table's interior comments stay byte-exact (33.5 review)", () => {
+    // The merge-update previously re-rendered command/args/env UNCONDITIONALLY,
+    // dropping a trailing comment on an unchanged managed line and every
+    // comment inside an unchanged env table for zero effect.
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "npx" # pinned to the corporate registry mirror',
+      'args = ["-y", "@iris-mcp/dev"] # do not reorder',
+      "enabled = false",
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      "# IRIS_NAMESPACE is required by policy",
+      'IRIS_NAMESPACE = "HSCUSTOM" # per-team override',
+      "",
+    ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+    );
+    expect(result.mechanism).toBe("update");
+    const native = result.native as TomlNativeEdit;
+    expect(native.op).toBe("merge-update");
+    expect(native.spans ?? []).toHaveLength(0); // nothing changed → nothing touched
+    expect(executeNativeEdit(content, native)).toBe(content); // BYTE-IDENTICAL
+  });
+
+  it("TOML: a no-op env merge (fresh env ⊆ existing env) leaves the env table untouched", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "old"',
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      "# keep this note",
+      'IRIS_NAMESPACE = "HSCUSTOM"',
+      'USER_EXTRA = "keep-me"',
+      "",
+    ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: [], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+    );
+    const after = executeNativeEdit(content, result.native);
+    const lines = after.split("\n");
+    expect(lines).toContain('command = "npx"'); // changed value replaced
+    expect(lines).toContain("# keep this note"); // env-table interior comment preserved
+    expect(lines).toContain('USER_EXTRA = "keep-me"');
+  });
+});
+
+describe("prototype-chain lookup guards on the entries/unsupported maps (33.5 review — the READ side of 33-5-11)", () => {
+  it("an apply for a name ABSENT from the file but present on Object.prototype plans an add, never a bogus refusal/update", () => {
+    // Bare `entries["__proto__"]` resolves Object.prototype via the chain —
+    // the entry was misread as PRESENT (and `unsupported["__proto__"]` as a
+    // garbage `[object Object]` refusal). Names are CLI-validated in the bin,
+    // but diff() is a library surface.
+    const adapter = adapterOf("cline");
+    const content = JSON.stringify({ mcpServers: {} });
+    const result = expectOk(diff(content, { name: "__proto__" as CanonicalServerName, command: "npx", args: [] }, adapter, "user", "apply"));
+    expect(result.mechanism).toBe("add");
+    const after = executeNativeEdit(content, result.native);
+    const reparsed = readConfigEntries(adapter, after);
+    expect(reparsed.ok).toBe(true);
+    if (reparsed.ok) expect(Object.keys(reparsed.entries)).toContain("__proto__");
+  });
+
+  it("an apply-update over an OWN __proto__ entry preserves its unmanaged keys", () => {
+    const adapter = adapterOf("cline");
+    const content = '{\n  "mcpServers": {\n    "__proto__": { "command": "old", "args": [], "autoApprove": ["x"], "disabled": true }\n  }\n}';
+    const result = expectOk(diff(content, { name: "__proto__" as CanonicalServerName, command: "npx", args: ["new"] }, adapter, "user", "apply"));
+    expect(result.mechanism).toBe("update");
+    const after = executeNativeEdit(content, result.native);
+    const reparsed = readConfigEntries(adapter, after);
+    expect(reparsed.ok).toBe(true);
+    if (reparsed.ok) {
+      const entry = reparsed.entries["__proto__"] as Record<string, unknown>;
+      expect(entry.command).toBe("npx");
+      expect(entry.autoApprove).toEqual(["x"]); // unmanaged preserved
+      expect(entry.disabled).toBe(true); // enablement preserved
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.5 Task 3 / AC 33.5.3 — TOML region math is multi-line aware;
+// the comment-between-comma dangling comma (33-5-4, probe-verified live).
+// ════════════════════════════════════════════════════════════════════
+
+describe("TOML multiline region math (AC 33.5.3)", () => {
+  it("a nested multi-line array inside the owned table does not truncate the region", () => {
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "node"',
+      "matrix = [",
+      '  ["a"],',
+      '  ["b"]',
+      "]",
+      "enabled = true",
+      "",
+      "[mcp_servers.other]",
+      'command = "x"',
+      "",
+    ].join("\n");
+    const region = findTomlEntryRegion(content, "mcp_servers", "iris-dev-mcp");
+    expect(region).not.toBeNull();
+    if (!region) return;
+    const lines = content.split("\n");
+    expect(lines[region.endLine]).toBe("enabled = true"); // not truncated at the nested [ lines
+  });
+
+  it("a triple-quoted string with a header-looking line inside does not truncate the region", () => {
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "node"',
+      'notes = """',
+      "[mcp_servers.notreal]",
+      "still string",
+      '"""',
+      "enabled = true",
+      "",
+    ].join("\n");
+    const region = findTomlEntryRegion(content, "mcp_servers", "iris-dev-mcp");
+    expect(region).not.toBeNull();
+    if (!region) return;
+    const lines = content.split("\n");
+    expect(lines[region.endLine]).toBe("enabled = true");
+    // The remove executes cleanly: nothing orphaned behind.
+    const adapter = adapterOf("codex");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "remove"));
+    const after = executeNativeEdit(content, result.native);
+    expect(after).not.toContain("notreal");
+    expect(after).not.toContain("enabled");
+  });
+
+  it("scanTomlStructure flags continuation lines as non-top-level", () => {
+    const flags = scanTomlStructure(['a = """', "[fake]", '"""', "[real]", "x = [", '["y"]', "]"].join("\n"));
+    expect(flags).toEqual([true, false, false, true, true, false, false]);
+  });
+});
+
+describe("comment-between-comma removal (33-5-4, AC 33.5.3)", () => {
+  const adapter = () => adapterOf("claude-code");
+
+  it("a whole-line comment before the owned LAST property: comma gone, comment kept, valid strict JSON", () => {
+    const content = [
+      "{",
+      '  "mcpServers": {',
+      '    "github-mcp": { "command": "gh" },',
+      "    // keep this comment",
+      '    "iris-dev-mcp": { "command": "node" }',
+      "  }",
+      "}",
+    ].join("\n");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter(), "user", "remove"));
+    const after = executeNativeEdit(content, result.native);
+    expect(after).toContain("// keep this comment");
+    expect(after).not.toContain("iris-dev-mcp");
+    expect(after).not.toMatch(/,\s*\n\s*\}/); // no dangling comma
+    expectJsoncNoDanglingComma(after);
+  });
+
+  it("a trailing comment on the previous property's line: comma gone, comment kept", () => {
+    const content = [
+      "{",
+      '  "mcpServers": {',
+      '    "github-mcp": { "command": "gh" }, // gh note',
+      '    "iris-dev-mcp": { "command": "node" }',
+      "  }",
+      "}",
+    ].join("\n");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter(), "user", "remove"));
+    const after = executeNativeEdit(content, result.native);
+    expect(after).toContain("// gh note");
+    expect(after).not.toContain("iris-dev-mcp");
+    expectJsoncNoDanglingComma(after);
+  });
+
+  it("a block-comment line before the owned LAST property: comma gone, comment kept", () => {
+    const content = [
+      "{",
+      '  "mcpServers": {',
+      '    "github-mcp": { "command": "gh" },',
+      "    /* block note */",
+      '    "iris-dev-mcp": { "command": "node" }',
+      "  }",
+      "}",
+    ].join("\n");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter(), "user", "remove"));
+    const after = executeNativeEdit(content, result.native);
+    expect(after).toContain("/* block note */");
+    expect(after).not.toContain("iris-dev-mcp");
+    expectJsoncNoDanglingComma(after);
+  });
+
+  it("the no-comment last-property removal stays byte-identical to the pre-33.5 behavior", () => {
+    const content = ["{", '  "mcpServers": {', '    "github-mcp": { "command": "gh" },', '    "iris-dev-mcp": { "command": "node" }', "  }", "}"].join("\n");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter(), "user", "remove"));
+    const after = executeNativeEdit(content, result.native);
+    expect(after).toBe(["{", '  "mcpServers": {', '    "github-mcp": { "command": "gh" }', "  }", "}"].join("\n"));
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 33.5 / AC 33.5.7 — serializeTomlEntry quoting/escaping (33-5-13).
+// ════════════════════════════════════════════════════════════════════
+
+describe("TOML serialization quoting (33-5-13)", () => {
+  it("env keys outside [A-Za-z0-9_-] are quoted; control chars in values are escaped", () => {
+    const adapter = adapterOf("codex");
+    const entry: CanonicalEntry = {
+      name: "iris-dev-mcp",
+      command: "node",
+      args: [],
+      env: { "MY.ODD KEY": "line1\nline2\ttab" },
+    };
+    const block = serializeTomlEntry(adapter, entry);
+    expect(block).toContain('"MY.ODD KEY" = ');
+    expect(block).not.toContain("line1\nline2"); // no RAW newline inside the string
+    expect(block).toContain("line1\\nline2\\ttab");
+    // The block re-parses to the exact values.
+    const parsed = parseToml(block) as Record<string, Record<string, Record<string, Record<string, string>>>>;
+    expect(parsed["mcp_servers"]?.["iris-dev-mcp"]?.["env"]?.["MY.ODD KEY"]).toBe("line1\nline2\ttab");
+  });
+});
+
+describe("TOML array-of-tables entries (33-5-12)", () => {
+  it("every write action is a documented REFUSAL naming the form", () => {
+    const adapter = adapterOf("codex");
+    const content = '[[mcp_servers.iris-dev-mcp]]\ncommand = "x"\n';
+    for (const action of ["apply", "enable", "disable", "remove"] as const) {
+      const result = diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", action);
+      expect(result.ok, action).toBe(false);
+      if (!result.ok) expect(result.reason, action).toContain("array-of-tables");
     }
   });
 });

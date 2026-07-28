@@ -39,3 +39,9 @@
 2026-07-28T09:00:00Z	Story 33.4	smoke_complete	method=cli result=pass iterations=2 defects_caught=0 evidence=doctor-drift-json-envelope-plus-render-check model=claude-fable-5
 2026-07-28T09:02:00Z	Story 33.4	committed	sha=fa28220 submodules=
 2026-07-28T09:05:00Z	Epic 33	epic_status_done	stories=5
+2026-07-28T09:40:00Z	Story 33.5	story_created	path=_bmad-output/implementation-artifacts/33-5-late-findings-cleanup.md
+2026-07-28T11:30:00Z	Story 33.5	dev_complete	spawn_at=2026-07-28T09:41:00Z model=claude-sonnet-5 files=packages/client-config loc_added=na clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-07-28T11:30:00Z	Story 33.5	adr_verifications_complete	result=none_required model=claude-fable-5
+2026-07-28T12:10:00Z	Story 33.5	qa_complete	spawn_at=2026-07-28T11:31:00Z model=claude-sonnet-5 tests=qa-33-5-process+qa-33-5-unit tests_added=43 defects_fixed=2 clarifications=0 closing_sections_present=true
+2026-07-28T12:50:00Z	Story 33.5	cr_complete	spawn_at=2026-07-28T12:11:00Z model=claude-opus-5 resolved=3 deferred=2 dismissed=0 high=0 med=0 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-6of6
+2026-07-28T12:55:00Z	Story 33.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=p1-p2-reproductions-dead model=claude-fable-5

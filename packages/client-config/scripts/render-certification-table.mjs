@@ -94,8 +94,19 @@ function disableCell(adapter) {
 function certCell(id) {
   const record = results.clients[id];
   switch (record.disposition) {
-    case "certified-live":
-      return `**certified-live** ${record.date}`;
+    case "certified-live": {
+      // 33-5-15 (aa-33-4 #1): the cell carries the file-level-vs-agent-side
+      // qualifier — a certified-live pass proves the agent-side CLI listing
+      // only where the evidence holds an agent probe (`claude mcp list`,
+      // `kimi -p`); everywhere else it is a FILE-LEVEL lifecycle proof and
+      // the agent-side tool listing stays a manual GUI step.
+      const agentProbe = (record.evidence ?? []).some(
+        (line) => line.startsWith("$ claude mcp list") || line.startsWith("$ kimi -p"),
+      );
+      return agentProbe
+        ? `**certified-live** ${record.date} (incl. agent CLI probe)`
+        : `**certified-live** ${record.date} (file-level; agent-side GUI stays manual)`;
+    }
     case "fixture-only-with-residual-risk":
       return "fixture-only (residual risk)";
     default:
@@ -137,7 +148,11 @@ function renderCertificationDetails() {
     `Dispositions are GENERATED from \`scripts/certification-results.json\` (real recorded`,
     `runs — commands + outputs, never edited to match) ⨝ the \`CLIENT_ADAPTERS\` roster by`,
     `\`scripts/render-certification-table.mjs\` — never hand-edit this section. Every client`,
-    `has an explicit disposition (Rule #34 — no silent certification):`,
+    `has an explicit disposition (Rule #34 — no silent certification). A **certified-live**`,
+    `pass proves the scripted lifecycle against the real config; the "client surfaces the`,
+    `entry" step is the client's own agent CLI listing where the evidence shows one`,
+    `(\`claude mcp list\`, \`kimi -p\`) and a FILE-LEVEL status read otherwise — an agent-side`,
+    `GUI tool listing is never claimed by the harness (33-5-15).`,
     ``,
   ];
   for (const id of adapterIds) {

@@ -43,9 +43,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { mergeCertificationRecord, passCreatedPaths } from "./certify-record.mjs";
+
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "dist", "cli", "clients-cli.js");
 const RESULTS_PATH = path.join(PACKAGE_ROOT, "scripts", "certification-results.json");
+
+// 33-5-17 (AC 33.5.7): the client roster is DERIVED from CLIENT_ADAPTERS —
+// never a hand-mirrored literal (a 14th adapter would have been invisible
+// here). Requires a built dist, same as render-certification-table.mjs.
+const { CLIENT_ADAPTERS } = await import("../dist/adapters.js");
+const CLIENT_IDS = Object.keys(CLIENT_ADAPTERS);
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const DUMMY_PASSWORD = "cert-pass-not-a-real-credential"; // explicit mode (vscode): a placeholder, never a real secret
@@ -165,11 +173,6 @@ for (let i = 1; i < argv.length; i++) {
 const clientId = positional[0];
 const server = flags.server ?? "iris-mcp-all";
 
-const CLIENT_IDS = [
-  "claude-code", "claude-desktop", "cursor", "vscode", "cline", "roo-code",
-  "windsurf", "codex", "gemini", "zed", "goose", "kimi", "kimi-code",
-];
-
 if (subcommand !== "run" || !flags.has("--real-config")) {
   console.log(
     `certify — adapter certification harness (Story 33.4)\n\n` +
@@ -199,86 +202,106 @@ const KIMI_BIN = process.platform === "win32"
   ? path.join(HOME, ".kimi-code", "bin", "kimi.exe")
   : path.join(HOME, ".kimi-code", "bin", "kimi");
 
+/** File-level status probe shared by the clients whose agent-side tool
+ * listing is a manual GUI step (never claimed here). */
+function verifyFileLevel(client, entryName, agentNote) {
+  const status = cli(["status", "--json"]);
+  const payload = envelope(status, "status");
+  const row = payload.data.clients
+    .find((entry) => entry.client === client)
+    ?.scopes.flatMap((scope) => scope.servers)
+    .find((s) => s.server === entryName);
+  const fileLevel = row?.state === "present-enabled";
+  return {
+    ok: fileLevel,
+    summary: fileLevel
+      ? `file-level: "${entryName}" present-enabled${agentNote}`
+      : `file-level: "${entryName}" NOT present-enabled`,
+    evidence: [`$ iris-mcp-clients status --json → ${client} ${entryName} = ${row?.state ?? "missing"}`],
+  };
+}
+
+/**
+ * The scripted verification surfaces, keyed by client id — the SINGLE
+ * source for "which clients can be certified live" (AC 33.5.6c: the
+ * fail-fast gate derives from THIS map, so a surface added here is
+ * immediately certifiable and a missing one is refused BEFORE any write).
+ */
+const VERIFIERS = {
+  "claude-code": (entryName) => {
+    const result = runMaybeShim("claude", ["mcp", "list"], { timeout: 240_000 });
+    // 33-4-R3: line-anchored ("name:" at a line start), never a bare
+    // substring — "iris-mcp-all" also matches "iris-mcp-all-2".
+    const listed = result.stdout
+      .split("\n")
+      .some((line) => line.trimStart().startsWith(`${entryName}:`) || line.trim() === entryName);
+    return {
+      ok: listed,
+      summary: listed
+        ? `\`claude mcp list\` listed the manager-written entry "${entryName}"`
+        : `\`claude mcp list\` did NOT list "${entryName}"${result.spawnError ? ` (spawn error: ${result.spawnError})` : ""}`,
+      evidence: [
+        `$ claude mcp list → ${excerpt(result.stdout.split("\n").find((line) => line.includes(entryName)) ?? result.stdout)}`,
+      ],
+    };
+  },
+  "kimi-code": (entryName, skipAgent) => {
+    // File-level first (deterministic): the engine's own matrix reads the
+    // file the manager wrote.
+    const base = verifyFileLevel("kimi-code", entryName, "");
+    const evidence = [...base.evidence];
+    let agentNote = "agent-surface probe skipped (--skip-agent)";
+    if (!skipAgent && existsSync(KIMI_BIN)) {
+      // The agent surface: kimi answers which MCP servers it has. The added
+      // entry's npx target is unpublished pre-release, so the honest
+      // expectation is recorded, not forced.
+      const probe = run(
+        KIMI_BIN,
+        ["-p", `List the MCP servers available in this session as a bare comma-separated list of names, then stop.`, "--output-format", "stream-json"],
+        { timeout: 240_000, cwd: scratchWorkdir() },
+      );
+      agentNote = excerpt(`${probe.stdout} ${probe.stderr}`, 600);
+      evidence.push(`$ kimi -p "list MCP servers" → ${excerpt(probe.stdout || probe.stderr, 300)}`);
+    }
+    return {
+      ok: base.ok,
+      summary: base.ok
+        ? `file-level: "${entryName}" present-enabled in ~/.kimi-code/mcp.json (agent surface: ${agentNote})`
+        : base.summary,
+      evidence,
+    };
+  },
+  vscode: (entryName) =>
+    // File-level round-trip; the agent-side tool listing is a manual GUI
+    // step (AC 33.3.4 pattern) and is NEVER claimed here.
+    verifyFileLevel("vscode", entryName, " (agent-side tool listing stays a manual GUI step — not claimed)"),
+  cline: (entryName) =>
+    verifyFileLevel("cline", entryName, " (agent-side tool listing stays a manual GUI step — not claimed)"),
+};
+
+// AC 33.5.6c: a client with NO scripted verification surface fails fast —
+// BEFORE detection, snapshots, or any engine write (previously the pass
+// discovered this AFTER the real-config write had already landed).
+if (!(clientId in VERIFIERS)) {
+  fail(
+    `${clientId} has no scripted verification surface (scripted: ${Object.keys(VERIFIERS).join(", ")}) — ` +
+      `its disposition stays fixture-only-with-residual-risk; refusing BEFORE any real-config write`,
+  );
+}
+
 /**
  * Verify the client surfaces the added entry. Returns
  * { ok, summary, evidence[] } — evidence strings are quoted command/output
  * pairs for the results record (never file contents, never secrets).
  */
 function verifyPresent(client, entryName, skipAgent) {
-  switch (client) {
-    case "claude-code": {
-      const result = runMaybeShim("claude", ["mcp", "list"], { timeout: 240_000 });
-      // 33-4-R3: line-anchored ("name:" at a line start), never a bare
-      // substring — "iris-mcp-all" also matches "iris-mcp-all-2".
-      const listed = result.stdout
-        .split("\n")
-        .some((line) => line.trimStart().startsWith(`${entryName}:`) || line.trim() === entryName);
-      return {
-        ok: listed,
-        summary: listed
-          ? `\`claude mcp list\` listed the manager-written entry "${entryName}"`
-          : `\`claude mcp list\` did NOT list "${entryName}"${result.spawnError ? ` (spawn error: ${result.spawnError})` : ""}`,
-        evidence: [
-          `$ claude mcp list → ${excerpt(result.stdout.split("\n").find((line) => line.includes(entryName)) ?? result.stdout)}`,
-        ],
-      };
-    }
-    case "kimi-code": {
-      // File-level first (deterministic): the engine's own matrix reads the
-      // file the manager wrote.
-      const status = cli(["status", "--json"]);
-      const payload = envelope(status, "status");
-      const row = payload.data.clients
-        .find((entry) => entry.client === "kimi-code")
-        ?.scopes.flatMap((scope) => scope.servers)
-        .find((s) => s.server === entryName);
-      const fileLevel = row?.state === "present-enabled";
-      const evidence = [
-        `$ iris-mcp-clients status --json → kimi-code ${entryName} = ${row?.state ?? "missing"}`,
-      ];
-      let agentNote = "agent-surface probe skipped (--skip-agent)";
-      if (!skipAgent && existsSync(KIMI_BIN)) {
-        // The agent surface: kimi answers which MCP servers it has. The added
-        // entry's npx target is unpublished pre-release, so the honest
-        // expectation is recorded, not forced.
-        const probe = run(
-          KIMI_BIN,
-          ["-p", `List the MCP servers available in this session as a bare comma-separated list of names, then stop.`, "--output-format", "stream-json"],
-          { timeout: 240_000, cwd: scratchWorkdir() },
-        );
-        agentNote = excerpt(`${probe.stdout} ${probe.stderr}`, 600);
-        evidence.push(`$ kimi -p "list MCP servers" → ${excerpt(probe.stdout || probe.stderr, 300)}`);
-      }
-      return {
-        ok: fileLevel,
-        summary: fileLevel
-          ? `file-level: "${entryName}" present-enabled in ~/.kimi-code/mcp.json (agent surface: ${agentNote})`
-          : `file-level: "${entryName}" NOT present-enabled`,
-        evidence,
-      };
-    }
-    case "vscode":
-    case "cline": {
-      // File-level round-trip; the agent-side tool listing is a manual GUI
-      // step (AC 33.3.4 pattern) and is NEVER claimed here.
-      const status = cli(["status", "--json"]);
-      const payload = envelope(status, "status");
-      const row = payload.data.clients
-        .find((entry) => entry.client === client)
-        ?.scopes.flatMap((scope) => scope.servers)
-        .find((s) => s.server === entryName);
-      const fileLevel = row?.state === "present-enabled";
-      return {
-        ok: fileLevel,
-        summary: fileLevel
-          ? `file-level: "${entryName}" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)`
-          : `file-level: "${entryName}" NOT present-enabled`,
-        evidence: [`$ iris-mcp-clients status --json → ${client} ${entryName} = ${row?.state ?? "missing"}`],
-      };
-    }
-    default:
-      return { ok: false, summary: `no scripted verification surface for ${client}`, evidence: [] };
+  const verifier = VERIFIERS[client];
+  if (!verifier) {
+    // Unreachable through the pass (the fail-fast gate above); defensive for
+    // direct import.
+    return { ok: false, summary: `no scripted verification surface for ${client}`, evidence: [] };
   }
+  return verifier(entryName, skipAgent);
 }
 
 /** A scratch working directory for kimi -p probes (session artifacts land here). */
@@ -322,7 +345,10 @@ const preRow = preStatus.data.clients
   ?.scopes.flatMap((scope) => scope.servers)
   .find((s) => s.server === server);
 if (preRow && preRow.state !== "absent") {
-  fail(`"${server}" already exists in ${configPath} (state: ${preRow.state}) — refusing to clobber a real entry; pick a different --server`);
+  fail(
+    `"${server}" already exists in ${configPath} (state: ${preRow.state}) — refusing to clobber a real entry; pick a different --server ` +
+      `(to roll the file back to a pre-write state instead, use: iris-mcp-clients restore --client ${clientId})`,
+  );
 }
 
 // 1. Snapshots (BEFORE any write). The config bytes are captured as a
@@ -335,6 +361,9 @@ const statePath = path.join(stateDir, "state.json");
 const preStateBytes = existsSync(statePath) ? readFileSync(statePath, "utf8") : null;
 const backupRoot = path.join(stateDir, "backups");
 const preBackups = listFiles(backupRoot);
+// 33-5-18: pass-created empty DIRECTORIES strand even after every file is
+// deleted — snapshot the dir listing too so they are cleaned as well.
+const preBackupDirs = listDirs(backupRoot);
 const kimiSessionIndex = path.join(HOME, ".kimi-code", "session_index.jsonl");
 const preKimiIndex = existsSync(kimiSessionIndex) ? readFileSync(kimiSessionIndex, "utf8") : null;
 const kimiSessionsRoot = path.join(HOME, ".kimi-code", "sessions");
@@ -387,9 +416,13 @@ function restoreAndClean() {
       report.push("state.json restored to pre-pass bytes");
     }
   }
-  // (c) Pass-created backups.
-  for (const file of listFiles(backupRoot).filter((f) => !preBackups.includes(f))) {
+  // (c) Pass-created backups, then the pass-created backup DIRECTORIES
+  // (deepest-first — file deletion alone leaves empty shells, 33-5-18).
+  for (const file of passCreatedPaths(preBackups, listFiles(backupRoot))) {
     rmSync(path.join(backupRoot, file), { force: true });
+  }
+  for (const dir of passCreatedPaths(preBackupDirs, listDirs(backupRoot))) {
+    rmSync(path.join(backupRoot, dir), { recursive: true, force: true });
   }
   // (d) Kimi session artifacts from the pass (kimi-code only): pass-created
   // session FILES, then any pass-created DIRECTORY (session dirs hold their
@@ -450,7 +483,10 @@ try {
   step("byte-exact restore + side-effect cleanup", configOk, configOk ? "config bytes identical to pre-pass" : "CONFIG BYTES DIFFER — MANUAL CHECK REQUIRED");
 }
 
-// 7. Record the result.
+// 7. Record the result (AC 33.5.6a/b): a FAILED pass never overwrites a
+// certified-live record (keep-passing guard); a written record is MERGED
+// over the existing one so hand-authored evidence keys (sharing, ac3344)
+// survive a re-run.
 const results = JSON.parse(readFileSync(RESULTS_PATH, "utf8"));
 const record = {
   disposition: passOk ? "certified-live" : "certification-failed-see-story",
@@ -462,6 +498,14 @@ const record = {
 };
 if (flags.residualRisk) record.residualRisk = flags.residualRisk;
 if (!passOk) process.exitCode = 1;
-results.clients[clientId] = record;
-writeFileSync(RESULTS_PATH, `${JSON.stringify(results, null, 2)}\n`, "utf8");
-console.log(`\ncertify: ${clientId} → ${record.disposition} (recorded in scripts/certification-results.json)`);
+const decision = mergeCertificationRecord(results.clients[clientId], record, passOk);
+if (decision.action === "keep") {
+  console.log(
+    `\ncertify: ${clientId} pass FAILED — the existing certified-live record is KEPT, not overwritten ` +
+      `(re-run until the pass succeeds to update it)`,
+  );
+} else {
+  results.clients[clientId] = decision.merged;
+  writeFileSync(RESULTS_PATH, `${JSON.stringify(results, null, 2)}\n`, "utf8");
+  console.log(`\ncertify: ${clientId} → ${record.disposition} (recorded in scripts/certification-results.json)`);
+}

@@ -142,6 +142,18 @@ function executeTomlSplice(content: string, edit: TomlNativeEdit): string {
       }
       return lines.join("\n");
     }
+    case "merge-update": {
+      // AC 33.5.2 apply-update surgery: apply the disjoint line spans
+      // BOTTOM-UP so earlier spans' line numbers stay valid. A span with
+      // endLine < startLine is a pure insert at startLine.
+      if (!edit.spans) throw new Error("toml merge-update descriptor is missing its spans");
+      const ordered = [...edit.spans].sort((a, b) => b.startLine - a.startLine);
+      for (const span of ordered) {
+        const count = Math.max(0, span.endLine - span.startLine + 1);
+        lines.splice(span.startLine, count, ...span.lines);
+      }
+      return lines.join("\n");
+    }
   }
 }
 
@@ -154,6 +166,13 @@ function executeYamlOp(content: string, edit: YamlNativeEdit): string {
   }
   if (edit.op === "delete") {
     doc.deleteIn(edit.path);
+  } else if (edit.op === "merge-update") {
+    // Story 33.5 QA: per-key sets — only changed keys are touched, so
+    // comments and formatting on the entry's other lines survive (a
+    // whole-entry set re-rendered the subtree and dropped interior comments).
+    for (const op of edit.ops ?? []) {
+      doc.setIn(op.path, doc.createNode(op.value));
+    }
   } else {
     doc.setIn(edit.path, doc.createNode(edit.value));
   }

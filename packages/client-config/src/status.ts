@@ -126,18 +126,23 @@ function scopeStatus(
   ctx: HostContext,
   fs: StatusFs,
 ): ScopeStatus {
-  const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
+  // Per-probe degradation (the detect.ts pattern, Story 33.5 AC 33.5.5): an
+  // exists probe that THROWS (EACCES on an unreadable parent, an injected
+  // throwing probe) reports not-exists — it must never escape as an
+  // exception and take down the whole status command.
+  const safeExists = (p: string): boolean => {
+    try {
+      return fs.exists(p);
+    } catch {
+      return false;
+    }
+  };
+  const path = resolveScopePath(adapter, scope, ctx, safeExists);
   const empty: Pick<ScopeStatus, "servers" | "foreign"> = { servers: [], foreign: [] };
   if (path === null) {
     return { scope, path: null, file: "unresolved", ...empty };
   }
-  let exists = false;
-  try {
-    exists = fs.exists(path);
-  } catch {
-    exists = false;
-  }
-  if (!exists) {
+  if (!safeExists(path)) {
     return { scope, path, file: "missing", ...empty };
   }
   let content: string;
@@ -165,6 +170,9 @@ function scopeStatus(
       foreign.push(name);
     }
   }
+  // 33-5-12: unsupported-form root-key children (TOML array-of-tables) are
+  // surfaced by NAME among the foreign entries — never invisible.
+  foreign.push(...Object.keys(parsed.unsupported));
   foreign.sort();
   const servers: ServerStatus[] = CANONICAL_SERVERS.map((server) => ({
     server,
