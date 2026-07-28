@@ -47,3 +47,4 @@
 2026-07-28T12:55:00Z	Story 33.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=p1-p2-reproductions-dead model=claude-fable-5
 2026-07-28T12:57:00Z	Story 33.5	committed	sha=a04cbbd submodules=
 2026-07-28T12:58:00Z	Epic 33	epic_status_done	stories=6
+2026-07-28T13:15:00Z	Epic 33	epic_retro_complete	path=_bmad-output/implementation-artifacts/epic-33-retro-2026-07-28.md rules_codified=57,58
