@@ -48,3 +48,4 @@
 2026-07-28T12:57:00Z	Story 33.5	committed	sha=a04cbbd submodules=
 2026-07-28T12:58:00Z	Epic 33	epic_status_done	stories=6
 2026-07-28T13:15:00Z	Epic 33	epic_retro_complete	path=_bmad-output/implementation-artifacts/epic-33-retro-2026-07-28.md rules_codified=57,58
+2026-07-28T13:20:00Z	Epic 33	epic_merged_to_feature	repos=. feature_sha=1cbd367 merge_sha=1cbd367 submodules=
