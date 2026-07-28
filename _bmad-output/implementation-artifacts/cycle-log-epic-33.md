@@ -23,3 +23,10 @@
 2026-07-28T02:10:00Z	Story 33.2	cr_complete	spawn_at=2026-07-28T01:41:00Z model=claude-opus-5 resolved=6 deferred=0 dismissed=3 high=1 med=2 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-3of3
 2026-07-28T03:10:00Z	Story 33.2	smoke_complete	method=cli result=pass iterations=2 defects_caught=1 evidence=compact-foreign-byte-preservation model=claude-fable-5
 2026-07-28T03:12:00Z	Story 33.2	committed	sha=72efac7 submodules=
+2026-07-28T03:20:00Z	Story 33.3	story_created	path=_bmad-output/implementation-artifacts/33-3-clients-ui.md
+2026-07-28T03:35:00Z	Story 33.3	dev_clarification_requested	question=detect-json-dispositions resolution=option1-additive-envelope-key model=claude-fable-5
+2026-07-28T04:30:00Z	Story 33.3	dev_complete	spawn_at=2026-07-28T03:36:00Z model=claude-sonnet-5 files=extensions/iris-mcp-launcher/src loc_added=na clarifications=1 cycle_iteration=2 closing_sections_present=true
+2026-07-28T04:30:00Z	Story 33.3	adr_verifications_complete	result=none_required model=claude-fable-5
+2026-07-28T04:55:00Z	Story 33.3	qa_complete	spawn_at=2026-07-28T04:31:00Z model=claude-sonnet-5 tests=clientsPanelRealCli+clientsActivationFlowWrites tests_added=10 defects_fixed=1 clarifications=0 closing_sections_present=true
+2026-07-28T05:20:00Z	Story 33.3	cr_complete	spawn_at=2026-07-28T04:56:00Z model=claude-opus-5 resolved=3 deferred=0 dismissed=3 high=0 med=0 low=3 clarifications=0 closing_sections_present=true note=review-layers-silent-4of4
+2026-07-28T06:05:00Z	Story 33.3	smoke_complete	method=cli result=pass iterations=3 defects_caught=0 evidence=vsix-packaged-plus-compiled-engine-journey-real-cli model=claude-fable-5

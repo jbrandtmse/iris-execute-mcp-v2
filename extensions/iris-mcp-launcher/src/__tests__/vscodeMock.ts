@@ -23,6 +23,10 @@
  * - `window.showOpenDialog({ canSelectFiles: true })` resolves `Uri[] | undefined`
  *   — an array of `{ fsPath }` Uris when a file is chosen, `undefined` when
  *   dismissed (scripted via `mockState.openDialogResponse`)
+ * - `window.showInputBox(options)` resolves `string | undefined` — the typed
+ *   string, or `undefined` when dismissed (scripted via
+ *   `mockState.inputBoxResponder`; the DEFAULT is the dismissed shape, a real
+ *   outcome of every input box)
  * - `window.createWebviewPanel(viewType, title, column, options)` returns a
  *   panel whose `webview.html` is settable, whose
  *   `webview.onDidReceiveMessage`/`onDidDispose` register listeners, and whose
@@ -133,6 +137,15 @@ export interface MockState {
   webviewPanels: MockWebviewPanel[];
   /** Scripted `showOpenDialog` resolution — an array of `{ fsPath }` Uris, or undefined (dismissed). */
   openDialogResponse: { fsPath: string }[] | undefined;
+  /**
+   * Scripted `showInputBox` responder — resolves the typed string, or
+   * `undefined` when dismissed (the DEFAULT, a shape every real input box can
+   * produce). Receives the options the extension passed so a responder can
+   * branch on `password`/`prompt`.
+   */
+  inputBoxResponder: (options: { prompt?: string; password?: boolean; placeHolder?: string }) => string | undefined;
+  /** Recorded `showInputBox` option tuples (assert the hidden-password gesture). */
+  inputBoxCalls: { prompt?: string; password?: boolean; placeHolder?: string }[];
   /** `workspace.onDidChangeConfiguration` listeners. */
   configChangeListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[];
 }
@@ -154,6 +167,8 @@ export const mockState: MockState = {
   statusBarItems: [],
   webviewPanels: [],
   openDialogResponse: undefined,
+  inputBoxResponder: () => undefined,
+  inputBoxCalls: [],
   configChangeListeners: [],
 };
 
@@ -175,6 +190,8 @@ export function resetMockState(): void {
   mockState.statusBarItems = [];
   mockState.webviewPanels = [];
   mockState.openDialogResponse = undefined;
+  mockState.inputBoxResponder = () => undefined;
+  mockState.inputBoxCalls = [];
   mockState.configChangeListeners = [];
 }
 
@@ -237,6 +254,17 @@ export const window = {
    */
   showOpenDialog: (_options?: unknown): Promise<{ fsPath: string }[] | undefined> =>
     Promise.resolve(mockState.openDialogResponse),
+
+  /**
+   * Mirrors the declared `window.showInputBox`: resolves `string | undefined`
+   * (the typed string, or `undefined` on dismiss — the default responder's
+   * shape). The options tuple is recorded so tests can assert the
+   * hidden-password gesture (`password: true`).
+   */
+  showInputBox: (options: { prompt?: string; password?: boolean; placeHolder?: string }): Promise<string | undefined> => {
+    mockState.inputBoxCalls.push(options);
+    return Promise.resolve(mockState.inputBoxResponder(options));
+  },
 
   /**
    * Mirrors the declared `window.createWebviewPanel` shape as the extension's

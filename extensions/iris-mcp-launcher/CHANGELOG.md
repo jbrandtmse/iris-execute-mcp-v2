@@ -21,6 +21,21 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Added
 
+- **MCP Clients view** (Story 33.3): a new command "IRIS MCP Launcher: Manage MCP Clients…" opens a webview
+  for wiring the iris-mcp servers into any detected MCP client — no more hand-editing client config JSON.
+  Detected clients render with user-selectable checkboxes (the roster persists across sessions in extension
+  state; every detected client is selected by default); undetected v1 clients list collapsed with a
+  "not detected" note; considered-but-excluded clients (Pi — verified not MCP-capable — plus the JetBrains
+  and Kilo Code roadmap rows) show as info rows with their rationale. Per selected client: the iris-mcp
+  server matrix (the five servers + `@iris-mcp/all`) with enable/disable/remove actions, scope and env-mode
+  pickers (modes are offered exactly as the CLI's host probes allow), and third-party entries listed
+  read-only, names only. Every write flows diff preview → explicit confirm → the `iris-mcp-clients` CLI as a
+  subprocess (the same single code path as the terminal CLI — the VSIX stays self-contained with zero runtime
+  dependencies), resolved exactly like server spawning: `developmentRepoPath`'s built CLI first, else
+  `npx -y -p @iris-mcp/client-config iris-mcp-clients`. The CLI subprocess runs with every `IRIS_*` variable
+  scrubbed from its environment (credential containment; the one extension-owned re-add is
+  `IRIS_GOVERNANCE_FILE` from `irisMcpLauncher.governanceFile`), the post-write restart hint is surfaced
+  inline, and backup restore and `doctor` findings are reachable from the same view.
 - **Governance editor** (Story 32.2): a new command "IRIS MCP Launcher: Open Governance Editor" opens a webview
   editor for the shared governance policy file (`IRIS_GOVERNANCE_FILE`). It shows the full governed-key universe
   — derived from the server packages' built dist, never a hand-maintained list — grouped per package with

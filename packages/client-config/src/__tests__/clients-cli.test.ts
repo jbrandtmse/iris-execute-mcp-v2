@@ -22,7 +22,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { runCli, VALUED_OPTIONS, type CliDeps } from "../cli/clients.js";
-import { CLIENT_ADAPTERS } from "../adapters.js";
+import { CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
 import { detectClients } from "../detect.js";
 import { buildStatusMatrix } from "../status.js";
 import { readState, resolveStateDir, stateFilePath } from "../state.js";
@@ -247,6 +247,39 @@ describe("detect", () => {
     expect(payload.command).toBe("detect");
     expect(payload.data.counts.probed).toBe(payload.data.counts.detected + payload.data.counts.notDetected);
     expect(payload.data.counts.dispositioned).toBe(3);
+  });
+
+  // Story 33.3 (sanctioned additive, lead Option-1 decision 2026-07-28): the
+  // --json envelope carries the SAME dispositions the text render prints under
+  // "Other clients:" — the extension UI reads them structured, never a
+  // text-render scrape.
+  it("--json carries the dispositions array, exactly the CLIENT_DISPOSITIONS data (id/displayName/disposition/reason)", async () => {
+    const h = harness();
+    seedFamilies(h.fs);
+    expect(await h.run(["detect", "--json"])).toBe(0);
+    const payload = JSON.parse(h.stdout.text) as {
+      ok: boolean;
+      command: string;
+      data: {
+        dispositions: { id: string; displayName: string; disposition: string; reason: string }[];
+        counts: { dispositioned: number };
+      };
+    };
+    // The count and the array agree (derived from the same source, AC 33.2.4).
+    expect(payload.data.dispositions).toHaveLength(payload.data.counts.dispositioned);
+    // Every row is exactly the four documented fields, in registry order.
+    for (const row of payload.data.dispositions) {
+      expect(Object.keys(row).sort()).toEqual(["displayName", "disposition", "id", "reason"]);
+    }
+    expect(payload.data.dispositions.map((row) => row.id)).toEqual(
+      CLIENT_DISPOSITIONS.map((row) => row.id),
+    );
+    expect(payload.data.dispositions).toEqual([...CLIENT_DISPOSITIONS]);
+    // The Pi row the UI renders as its "not MCP-capable" info row is present
+    // with its rationale.
+    const pi = payload.data.dispositions.find((row) => row.id === "pi");
+    expect(pi?.disposition).toBe("excluded-not-mcp-capable");
+    expect(pi?.reason).toContain("no built-in MCP support");
   });
 });
 
@@ -856,6 +889,85 @@ describe("review: diff --mode explicit works (MEDIUM)", () => {
       ]),
     ).toBe(2);
     expect(h.stderr.text).toContain("--password-stdin");
+  });
+});
+
+describe("qa 33.3: diff --json explicit mode redacts the envelope too (HIGH — the JSON path emitted the raw diffText)", () => {
+  it("a long verbatim secret is masked in data.servers[].text (the redactPlanSecrets gate, not the raw render)", async () => {
+    const secret = "s3cr3t-json-envelope-leak";
+    const h = harness({ stdin: stdinFrom(`${secret}\n`) });
+    seedFamilies(h.fs);
+    // Pre-fix: data.servers[].text carried the literal password (only the
+    // text/stderr renders went through redactPlanSecrets).
+    expect(
+      await h.run([
+        "diff", "--client", "claude-code", "--servers", "iris-admin-mcp",
+        "--mode", "explicit", "--confirm-secret", "iris-admin-mcp",
+        "--password-stdin", "--json",
+      ]),
+    ).toBe(0);
+    const envelope = JSON.parse(h.stdout.text) as {
+      ok: boolean;
+      data: { servers: { server: string; text: string }[] };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.servers).toHaveLength(1);
+    expect(envelope.data.servers[0]?.text).toContain("********");
+    expect(h.stdout.text).not.toContain(secret);
+  });
+
+  it("a below-gate secret withholds the render in the envelope (length gate applies to JSON too)", async () => {
+    const secret = "pw123"; // < SECRET_MIN_REDACTION_LENGTH
+    const h = harness({ stdin: stdinFrom(`${secret}\n`) });
+    seedFamilies(h.fs);
+    expect(
+      await h.run([
+        "diff", "--client", "claude-code", "--servers", "iris-admin-mcp",
+        "--mode", "explicit", "--confirm-secret", "iris-admin-mcp",
+        "--password-stdin", "--json",
+      ]),
+    ).toBe(0);
+    const envelope = JSON.parse(h.stdout.text) as {
+      ok: boolean;
+      data: { servers: { server: string; text: string }[] };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.servers[0]?.text).toContain("(render withheld");
+    expect(h.stdout.text).not.toContain(secret);
+  });
+
+  it("a serializer-escaped secret withholds the render in the envelope (verbatim gate applies to JSON too)", async () => {
+    const secret = `abc"def\\gh123`; // ≥ 8 chars, JSON-escaped in the render
+    const h = harness({ stdin: stdinFrom(`${secret}\n`) });
+    seedFamilies(h.fs);
+    expect(
+      await h.run([
+        "diff", "--client", "claude-code", "--servers", "iris-admin-mcp",
+        "--mode", "explicit", "--confirm-secret", "iris-admin-mcp",
+        "--password-stdin", "--json",
+      ]),
+    ).toBe(0);
+    expect(h.stdout.text).toContain("(render withheld");
+    expect(h.stdout.text).not.toContain(secret);
+    expect(h.stdout.text).not.toContain(`abc\\"def\\\\gh123`); // escaped form neither
+  });
+
+  it("non-explicit modes are byte-identical to the pre-fix envelope (the redaction is a no-op when no secret is present)", async () => {
+    const h = harness();
+    seedFamilies(h.fs);
+    expect(
+      await h.run([
+        "diff", "--client", "claude-code", "--servers", "iris-admin-mcp", "--json",
+      ]),
+    ).toBe(0);
+    const envelope = JSON.parse(h.stdout.text) as {
+      ok: boolean;
+      data: { mode: string; servers: { server: string; text: string }[] };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.mode).toBe("env-reference");
+    expect(envelope.data.servers[0]?.text).toContain("iris-admin-mcp");
+    expect(envelope.data.servers[0]?.text).not.toContain("********");
   });
 });
 

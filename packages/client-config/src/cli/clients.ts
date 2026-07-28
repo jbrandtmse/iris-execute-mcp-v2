@@ -21,7 +21,13 @@
  * **`--json`:** every command accepts `--json` and answers with ONE stable
  * envelope on stdout: `{ok, command, data, error?}`. Usage errors (exit 2)
  * are plain text on stderr — the flags themselves were not understood
- * (governance CLI discipline).
+ * (governance CLI discipline). `detect --json`'s `data` additionally carries
+ * `dispositions` — the considered-but-dispositioned clients (id, displayName,
+ * disposition, reason), the same rows the text render prints under "Other
+ * clients:" (Story 33.3, additive). `diff --json`'s per-server `text` is
+ * redacted through the same `redactPlanSecrets` gate as the text render — an
+ * explicit-mode diff render carries the literal IRIS_PASSWORD and the envelope
+ * must never echo it (Story 33.3 QA hardening).
  *
  * **Write discipline.** `apply` prints the pending diff FIRST and requires
  * confirmation: `--yes` skips it; an interactive TTY prompt otherwise; a
@@ -592,7 +598,11 @@ async function cmdDetect(args: string[], deps: ResolvedDeps): Promise<number> {
   };
 
   if (wantJson) {
-    emitJson(deps, "detect", true, { ...report, counts });
+    // Story 33.3 (sanctioned additive, lead Option-1 decision 2026-07-28):
+    // the envelope carries the dispositions too — the SAME CLIENT_DISPOSITIONS
+    // rows the text render prints under "Other clients:" — so JSON consumers
+    // (the extension's MCP Clients view) never scrape the text render.
+    emitJson(deps, "detect", true, { ...report, dispositions: CLIENT_DISPOSITIONS, counts });
     return 0;
   }
 
@@ -969,7 +979,10 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
       servers: plans.map((plan) => ({
         server: plan.server,
         mechanism: plan.mechanism,
-        text: plan.diffText,
+        // The envelope gets the SAME redaction as the text render — an
+        // explicit-mode diffText carries the literal IRIS_PASSWORD (QA 33.3:
+        // the JSON path previously emitted it raw).
+        text: redactPlanSecrets(plan),
         missingInputIds: plan.missingInputIds,
       })),
     });

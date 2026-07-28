@@ -52,6 +52,11 @@
         "command": "irisMcpLauncher.openGovernanceEditor",
         "title": "Open Governance Editor",
         "category": "IRIS MCP Launcher"
+      },
+      {
+        "command": "irisMcpLauncher.manageClients",
+        "title": "Manage MCP Clients…",
+        "category": "IRIS MCP Launcher"
       }
     ],
     "configuration": {

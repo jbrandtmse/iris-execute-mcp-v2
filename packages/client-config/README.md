@@ -17,7 +17,13 @@ The CLI is a thin consumer of the engine — no configuration format logic of
 its own — and is fully scriptable: exit codes are `0` success / `1`
 operational failure (an engine refusal, a declined confirmation, a doctor
 finding) / `2` usage error, and every command answers `--json` with one
-stable `{ok, command, data, error?}` envelope on stdout.
+stable `{ok, command, data, error?}` envelope on stdout. `detect --json`'s
+`data` additionally carries `dispositions` (id, displayName, disposition,
+reason — the same rows the text render lists under "Other clients:", Story
+33.3 additive). `diff --json`'s per-server `text` is redacted through the
+same gate as the text render — an explicit-mode render carries the literal
+`IRIS_PASSWORD` and no output surface ever echoes it (Story 33.3 QA
+hardening).
 
 ```text
 iris-mcp-clients detect [--json]                     # installed clients + resolved config paths
