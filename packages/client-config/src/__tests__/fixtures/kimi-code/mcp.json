@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}

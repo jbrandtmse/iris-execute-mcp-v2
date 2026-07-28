@@ -1,6 +1,6 @@
 # Project Rules
 
-Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#57**.
+Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#59**.
 
 ## #1 — Meta-rule: codify retrospective lessons
 
@@ -151,6 +151,14 @@ Context: writing or appending source, docs, or ledger entries from an agent. Rul
 ## #56 — Enumeration completeness is a review question, not an implementation detail
 
 Context: any feature that enumerates a candidate set — settings-file paths, client adapters, product variants, OS scopes, governed keys. Rule: the ACs state the enumeration is EXHAUSTIVE-as-of-a-named-date with its source, and review asks "what is MISSING from this list?" as a distinct question from "does the code handle the listed entries correctly?". A list that is wrong by omission passes every test written against it, and `auto`-style modes that do not fail on zero results make the omission silent. Why: Epic 31 shipped Story 31.0 through three adversarial review layers, all of which verified the code did exactly what the ACs said — and none asked whether the AC's own candidate list was complete. The Project Lead subsequently found two omissions by inspection: `.code-workspace` files were never a discovery candidate (a multi-root user imported nothing, silently), and Linux user scope ignored both `XDG_CONFIG_HOME` and Flatpak's `~/.var/app` sandbox.
+
+## #57 — Review layers: bounded-close, frozen diff, delivery receipts
+
+Context: bmad-code-review's three adversarial layers (Blind/Edge/Auditor) failed to return before review close on 3 stories in Epic 32 and all 6 in Epic 33, then delivered post-commit with real findings (~40% stale because they reviewed a mutated tree). Rule: (a) BOUNDED-CLOSE — a review may not close while its layers are outstanding: the lead blocks on layer return or a hard documented timeout, and a timeout close is recorded as degraded, not normal; (b) FROZEN-DIFF — layers review a frozen diff snapshot captured at review start, so a late return can never be stale against a patched tree; (c) DELIVERY RECEIPTS — no findings file = the layer FAILED, never "found nothing"; "found nothing" requires an explicit empty-findings payload. Why: silent-layer reviews shipped 2 confirmed HIGHs + 4 MEDIUMs past close in Epic 33 (caught only by lead triage of the late returns + a gate-created cleanup story); the Epic-32 retro set the recurrence trigger and it fired 6/6.
+
+## #58 — Byte-preservation and behavior guarantees require fixture diversity
+
+Context: any test pinning a byte-preservation, format-preservation, or round-trip guarantee. Rule: the fixture set must include NON-canonical variants — compact single-line formatting, 4-space indentation, CRLF, comment-bearing (incl. comments inside owned spans), BOM — not only canonically-formatted files; a canonical-only fixture set is blind by construction because an implementation that re-serializes through its own formatter passes every canonical fixture. Why: Epic 33's worst defect (jsonc-parser `modify()` reformatting foreign entries on insert, AC-level byte-preservation violation) passed dev + QA + review because all ~40 fixtures were canonically formatted; only the lead smoke's hand-written compact fixture caught it. Same class recurred in 33.5 (interior comments, multiline TOML strings, comment-only documents).
 
 ---
 

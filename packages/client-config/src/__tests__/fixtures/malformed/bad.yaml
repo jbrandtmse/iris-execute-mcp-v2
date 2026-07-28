@@ -1,0 +1,5 @@
+extensions:
+	iris-data-mcp:
+    type: stdio
+    cmd: npx
+  bad-indent: [unclosed

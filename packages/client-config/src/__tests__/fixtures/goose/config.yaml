@@ -1,0 +1,30 @@
+# Goose configuration — YAML with comments.
+GOOSE_PROVIDER: anthropic
+GOOSE_MODEL: claude-sonnet-4-5
+
+extensions:
+  # Built-in Goose extension (foreign, must never be touched).
+  developer:
+    type: builtin
+    name: developer
+    enabled: true
+  # The iris-mcp data server, managed by iris-mcp.
+  iris-data-mcp:
+    type: stdio
+    cmd: npx
+    args:
+      - "-y"
+      - "@iris-mcp/data"
+    envs:
+      IRIS_NAMESPACE: HSCUSTOM
+    enabled: true
+    timeout: 300
+  # Present but disabled via the native flag.
+  iris-ops-mcp:
+    type: stdio
+    cmd: npx
+    args:
+      - "-y"
+      - "@iris-mcp/ops"
+    enabled: false
+    timeout: 300

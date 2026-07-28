@@ -1,0 +1,17 @@
+{
+  "theme": "Default",
+  "selectedAuthType": "oauth-personal",
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+      "env": {
+        "IRIS_HOST": "$IRIS_HOST"
+      }
+    },
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp",
+      "timeout": 30000
+    }
+  }
+}

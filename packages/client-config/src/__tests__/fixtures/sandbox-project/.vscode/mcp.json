@@ -1,0 +1,15 @@
+// VS Code project MCP configuration (shareable, committable)
+{
+  "servers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops"]
+    },
+    // A foreign third-party server
+    "microsoft-learn": {
+      "command": "npx",
+      "args": ["-y", "@microsoft/learn-mcp"]
+    }
+  },
+  "inputs": []
+}

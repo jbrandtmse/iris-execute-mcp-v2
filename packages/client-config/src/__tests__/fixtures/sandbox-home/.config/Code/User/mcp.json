@@ -1,0 +1,8 @@
+{
+  // This VS Code mcp.json is intentionally malformed (unbalanced brace)
+  // to exercise the per-client `unparseable` status in the matrix.
+  "servers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev"],
+}

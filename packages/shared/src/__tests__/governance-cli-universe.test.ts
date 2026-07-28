@@ -115,8 +115,12 @@ async function loadOracleTools(): Promise<{ pkg: string; tools: ToolDefinition[]
 }
 
 // ── Full-universe render against the real built dist ───────────────────
+// These tests spawn the real CLI over five built dists — legitimately ~4–8s,
+// which crosses vitest's 5s default under full-parallel turbo load (observed
+// flake in Story 33.0's review, 3 of 4 uncached full runs). A describe-level
+// timeout keeps the suite honest without masking hangs elsewhere.
 
-describe("universe — full-universe render over the real built dist", () => {
+describe("universe — full-universe render over the real built dist", { timeout: 60_000 }, () => {
   it("renders every key of the REAL universe: baseline ∪ dist-derived ∪ framework, with complete mutates and matching policy/configSource key sets", async () => {
     const { code, json } = await runUniverseJson();
     expect(code).toBe(0);

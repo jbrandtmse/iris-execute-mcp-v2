@@ -1,5 +1,13 @@
 # Claude Desktop Configuration
 
+> **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Desktop is
+> `npx -y @iris-mcp/client-config iris-mcp-clients apply --client claude-desktop --servers iris-dev-mcp`
+> — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
+> verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
+> This page remains as the **manual fallback**. Claude Desktop's adapter is
+> **fixture-only-with-residual-risk** (no local install as of 2026-07-28) — see the
+> [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
+
 Connect the IRIS MCP Server Suite to [Claude Desktop](https://claude.ai/download).
 
 ---

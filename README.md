@@ -201,6 +201,29 @@ Point your MCP client at the built server using `node` and the local `dist/index
 
 > **📖 [MCP client configuration index](docs/client-config/README.md)** — copy-pasteable config for **13 clients** (Claude Code, VS Code/Copilot, Cline, Kimi Code, Kimi CLI, Codex CLI, Cursor, Claude Desktop, Windsurf, Roo Code, Gemini CLI, Zed, Goose), a format/root-key matrix (three formats and four different root keys between them), and the two credential caveats above restated where you need them.
 
+#### The manager: `iris-mcp-clients` (recommended)
+
+The [`@iris-mcp/client-config`](packages/client-config/README.md) package ships the **`iris-mcp-clients`** CLI — one tool that wires any of the 13 supported clients for you instead of hand-editing config files: it detects which clients are installed, previews the exact edit, writes through a backup-on-write engine, toggles entries, rolls back, and diagnoses the result. Not yet published to npm (see [Quick Start](#quick-start)), so invoke the built bin directly with `node`:
+
+```bash
+node packages/client-config/dist/cli/clients-cli.js detect                    # which clients are installed
+node packages/client-config/dist/cli/clients-cli.js diff --client claude-code --servers iris-dev-mcp
+node packages/client-config/dist/cli/clients-cli.js apply --client claude-code --servers iris-dev-mcp
+node packages/client-config/dist/cli/clients-cli.js doctor                    # env refs, parseability, drift, backups, stashes
+```
+
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint.
+
+**The zero-secrets end state** — three composable pieces, each covering a different secret class:
+
+1. **Server Manager + OS keychain** (Epic 31): `--mode server-manager` writes entries carrying `IRIS_SERVER_MANAGER=auto` — connections come from your InterSystems Server Manager profiles, passwords from the OS keychain via `iris-mcp-credentials set <name>`; nothing secret in the config file.
+2. **Governance file** (Epic 32): `--mode governance-file` writes entries carrying `IRIS_GOVERNANCE_FILE=<path>` — one shared policy file governs every server's tool surface; the file holds no credentials.
+3. **VS Code native inputs** (default `env-reference` mode on VS Code): the password is never stored — the manager merges a native `inputs` prompt (`${input:iris-password}`) so VS Code asks once and keeps it out of the file.
+
+Which clients/config surfaces are proven: the [adapter certification table](packages/client-config/README.md#certification-dispositions-generated) (Claude Code, VS Code, Cline and Kimi Code are certified-live as of 2026-07-28; the rest carry explicit fixture-only-with-residual-risk dispositions — re-provable anywhere with `node packages/client-config/scripts/certify.mjs run <client> --real-config`).
+
+The manual per-client snippets below remain as the fallback (and as the reference for what the manager writes).
+
 #### Claude Code (`.mcp.json`)
 
 Create a `.mcp.json` file in your project root:

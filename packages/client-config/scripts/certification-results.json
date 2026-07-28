@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "purpose": "Adapter certification dispositions (Story 33.4, AC 33.4.1/33.4.4, spec section 3.7). certified-live records are written by scripts/certify.mjs from REAL runs (commands + outputs, never edited to match); fixture-only-with-residual-risk records state what the fixtures prove and what stays unproven. The README certification table is GENERATED from this file by scripts/render-certification-table.mjs — never hand-edit the table.",
+  "clients": {
+    "claude-code": {
+      "disposition": "certified-live",
+      "date": "2026-07-28",
+      "host": "win32/x64",
+      "server": "iris-mcp-all",
+      "steps": [
+        "PASS snapshot",
+        "PASS add (engine apply)",
+        "PASS client surfaces the entry",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup"
+      ],
+      "evidence": [
+        "PASS snapshot — config 88585 bytes; state.json present; 2 pre-existing backup(s)",
+        "PASS add (engine apply) — iris-mcp-all written to C:\\Users\\Josh\\.claude.json",
+        "PASS client surfaces the entry — `claude mcp list` listed the manager-written entry \"iris-mcp-all\"",
+        "$ claude mcp list → iris-mcp-all: npx -y @iris-mcp/all - × Failed to connect — -32000: MCP error -32000: Connection closed",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable — state = absent",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
+      ],
+      "residualRisk": "The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28, so the client health check reports 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey show '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg.",
+      "sharing": {
+        "claim": "repo-root .mcp.json is read by Claude Code (AC 33.4.4, Claude half)",
+        "verdict": "verified-live",
+        "date": "2026-07-28",
+        "evidence": "manager wrote iris-mcp-all at project scope into a scratch dir .mcp.json; claude mcp list (2.1.220) in that dir showed: iris-mcp-all: npx -y @iris-mcp/all - Pending approval, with the MCP config diagnostics naming the exact scratch .mcp.json path"
+      }
+    },
+    "claude-desktop": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, per-OS claude_desktop_config.json paths) parses and round-trips add/disable/enable/remove byte-equal in the golden suite, and the entry shape matches the spec capability table. Unproven: the real Claude Desktop config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run claude-desktop --real-config on a machine with Claude Desktop installed."
+    },
+    "cursor": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.cursor/mcp.json + .cursor/mcp.json paths, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Cursor config surface (no local install as of 2026-07-28; installing clients is a Project Lead choice) — certify with: node packages/client-config/scripts/certify.mjs run cursor --real-config."
+    },
+    "vscode": {
+      "disposition": "certified-live",
+      "date": "2026-07-28",
+      "host": "win32/x64",
+      "server": "iris-mcp-all",
+      "steps": [
+        "PASS snapshot",
+        "PASS add (engine apply)",
+        "PASS client surfaces the entry",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup"
+      ],
+      "evidence": [
+        "PASS snapshot — config 0 bytes; state.json present; 2 pre-existing backup(s)",
+        "PASS add (engine apply) — iris-mcp-all written to C:\\Users\\Josh\\AppData\\Roaming\\Code\\User\\mcp.json",
+        "PASS client surfaces the entry — file-level: \"iris-mcp-all\" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)",
+        "$ iris-mcp-clients status --json → vscode iris-mcp-all = present-enabled",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable — state = absent",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
+      ],
+      "residualRisk": "File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish."
+    },
+    "cline": {
+      "disposition": "certified-live",
+      "date": "2026-07-28",
+      "host": "win32/x64",
+      "server": "iris-mcp-all",
+      "steps": [
+        "PASS snapshot",
+        "PASS add (engine apply)",
+        "PASS client surfaces the entry",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup"
+      ],
+      "evidence": [
+        "PASS snapshot — config 2683 bytes; state.json present; 2 pre-existing backup(s)",
+        "PASS add (engine apply) — iris-mcp-all written to C:\\Users\\Josh\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json",
+        "PASS client surfaces the entry — file-level: \"iris-mcp-all\" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)",
+        "$ iris-mcp-clients status --json → cline iris-mcp-all = present-enabled",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable — state = present-disabled",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
+      ],
+      "residualRisk": "File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish."
+    },
+    "roo-code": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, globalStorage mcp_settings.json + .roo/mcp.json paths, native disabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Roo Code config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run roo-code --real-config."
+    },
+    "windsurf": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config."
+    },
+    "codex": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (TOML format, mcp_servers rootKey, ~/.codex/config.toml + .codex/config.toml paths) parses and round-trips add/disable/enable/remove byte-equal in the golden suite; the native `enabled` flag is docs-verified (Story 33.1 probe: learn.chatgpt.com config reference documents mcp_servers.<id>.enabled). Unproven: the real Codex CLI config surface (no local install as of 2026-07-28; installing clients is a Project Lead choice) — certify with: node packages/client-config/scripts/certify.mjs run codex --real-config."
+    },
+    "gemini": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.gemini/settings.json paths, shell $VAR/${VAR} env expansion, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Gemini CLI config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run gemini --real-config."
+    },
+    "zed": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, context_servers rootKey, per-OS settings.json paths, zed command-object entry shape, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Zed config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run zed --real-config."
+    },
+    "goose": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (YAML format, extensions rootKey, per-OS config.yaml paths, goose stdio extension shape, native enabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Goose config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run goose --real-config."
+    },
+    "kimi": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-07-28",
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.kimi/mcp.json path, stash disable, --mcp-config-file per-invocation override documented not modeled) parses and round-trips byte-equal in the golden suite. Unproven: the real Kimi CLI config surface (no local install as of 2026-07-28 — the installed Kimi CODE is a different product with its own adapter) — certify with: node packages/client-config/scripts/certify.mjs run kimi --real-config."
+    },
+    "kimi-code": {
+      "disposition": "certified-live",
+      "date": "2026-07-28",
+      "host": "win32/x64",
+      "server": "iris-mcp-all",
+      "steps": [
+        "PASS snapshot",
+        "PASS add (engine apply)",
+        "PASS client surfaces the entry",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup"
+      ],
+      "evidence": [
+        "PASS snapshot — config 2632 bytes; state.json present; 2 pre-existing backup(s)",
+        "PASS add (engine apply) — iris-mcp-all written to C:\\Users\\Josh\\.kimi-code\\mcp.json",
+        "PASS client surfaces the entry — file-level: \"iris-mcp-all\" present-enabled in ~/.kimi-code/mcp.json (agent surface: {\"role\":\"assistant\",\"content\":\"chrome-devtools, iris-admin-mcp, iris-data-mcp, iris-dev-mcp, iris-interop-mcp, iris-ops-mcp, perplexity\"} {\"role\":\"meta\",\"type\":\"session.resume_hint\",\"session_id\":\"session_07c0aa5c-cced-4880-9e5f-ac7d7b51b9fc\",\"command\":\"kimi -r session_07c0aa5c-cced-4880-9e5f-ac7d7b51b9fc\",\"content\":\"To resume this session: kimi -r session_07c0aa5c-cced-4880-9e5f-ac7d7b51b9fc\"})",
+        "$ iris-mcp-clients status --json → kimi-code iris-mcp-all = present-enabled",
+        "$ kimi -p \"list MCP servers\" → {\"role\":\"assistant\",\"content\":\"chrome-devtools, iris-admin-mcp, iris-data-mcp, iris-dev-mcp, iris-interop-mcp, iris-ops-mcp, perplexity\"} {\"role\":\"meta\",\"type\":\"session.resume_hint\",\"session_id\":\"session_07c0aa5c-cced-4880-9e5f-ac7d7b51b9fc\",\"command\":\"kimi -r session_07c0aa5c-cced-4880-9e5f-ac7d7b5…",
+        "PASS disable (engine)",
+        "PASS entry inactive after disable — state = absent",
+        "PASS remove (engine)",
+        "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
+      ],
+      "residualRisk": "CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is unpublished as of 2026-07-28, so its in-session launch fails — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.",
+      "ac3344": {
+        "cliTuiHalf": {
+          "verdict": "verified-live",
+          "date": "2026-07-28",
+          "evidence": "user-scope pass certified live (see steps/evidence above); the agent surface (kimi -p, 0.29.0) called iris_server_info LIVE through the existing entries of the same ~/.kimi-code/mcp.json the manager writes (returned IRIS for Windows (x86-64) 2026.1 (Build 235U)); kimi -p listing answered exactly the user-scope servers (chrome-devtools, iris-admin-mcp, iris-data-mcp, iris-dev-mcp, iris-interop-mcp, iris-ops-mcp, perplexity)"
+        },
+        "vscodeExtensionHalf": {
+          "verdict": "fixture-only-with-residual-risk",
+          "date": "2026-07-28",
+          "note": "the Kimi Code VS Code extension is NOT installed locally (code --list-extensions shows no kimi/moonshot extension, 2026-07-28) — per the stage brief this half is never claimed; per the extension docs it reads the same ~/.kimi-code/mcp.json, unproven live"
+        },
+        "mcpJsonSharing": {
+          "claim": "repo-root .mcp.json sharing between Claude Code and Kimi Code (binding-spec claim, AC 33.4.4)",
+          "claudeSide": "verified-live (see claude-code record)",
+          "kimiSide": "FALSIFIED for kimi-code 0.29.0 as probed — official docs (moonshotai.github.io/kimi-code MCP customization) document ONLY .kimi-code/mcp.json as the project path (no .mcp.json fallback anywhere); live print-mode probes loaded NO project-scope server: a distinctive WORKING probe server (iris-sharing-probe, node dist entry) placed first in .mcp.json then in .kimi-code/mcp.json answered TOOL-NOT-LOADED to mcp__iris-sharing-probe__iris_server_info, even in a TUI-registered workspace",
+          "consequence": "the adapter data fallback was REMOVED (ADAPTER_DATA_VERSION 2026-07-25.2 → 2026-07-28.1, drift-fix data patch); project-scope loading itself may be TUI-only (print mode loads user scope only) — residual risk recorded",
+          "date": "2026-07-28"
+        }
+      }
+    }
+  }
+}

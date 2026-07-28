@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops"],
+      "disabled": true
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"],
+      "alwaysAllow": ["get_current_time"]
+    }
+  }
+}

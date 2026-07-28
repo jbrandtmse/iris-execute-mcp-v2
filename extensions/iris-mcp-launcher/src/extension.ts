@@ -49,6 +49,27 @@ import { stat } from "node:fs/promises";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
 import {
+  applyJson,
+  availableModes,
+  buildClientsCliEnv,
+  detectClientsJson,
+  diffApplyJson,
+  diffApplyText,
+  doctorJson,
+  resolveClientsCli,
+  restoreJson,
+  runClientsCli,
+  statusMatrixJson,
+  toggleJson,
+  type ClientsCliCommand,
+} from "./clientsEngine.js";
+import {
+  CLIENT_ROSTER_STATE_KEY,
+  createClientsPanelOpener,
+  MANAGE_CLIENTS_COMMAND_ID,
+  type ClientsEngineHost,
+} from "./clientsPanel.js";
+import {
   buildGovernanceCliEnv,
   resolveGovernanceCli,
   runGovernanceCli,
@@ -433,6 +454,108 @@ export function activate(context: vscode.ExtensionContext): void {
     () => void openGovernanceEditor(),
   );
   context.subscriptions.push(openGovernanceEditorCommand);
+
+  // Story 33.3: "MCP Clients" view (AC 33.3.1–33.3.3, Integration AC
+  // 33.3-I1). Thin adapters over clientsPanel.ts's injected-dependency
+  // orchestration — the real WebviewPanel, the globalState roster memento,
+  // the explicit-mode input boxes, and the engine host that composes
+  // clientsEngine.ts's pieces (resolution, IRIS_* env scrub, subprocess).
+  // Every client-config read/write happens inside the iris-mcp-clients CLI
+  // subprocess — the same single code path as the terminal CLI; the ONE
+  // state write this surface adds is the roster (client ids, UI state only).
+  const runClientsCommand = async (command: ClientsCliCommand) => {
+    let settings;
+    try {
+      settings = getSettings();
+    } catch {
+      return {
+        status: null,
+        stdout: "",
+        stderr: "",
+        spawnError: "could not read the irisMcpLauncher settings to run the clients CLI",
+      };
+    }
+    const resolution = await resolveClientsCli(settings);
+    if (!resolution.ok) {
+      return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
+    }
+    const env = buildClientsCliEnv(settings, resolution.target.extraEnv);
+    return runClientsCli(resolution.target, command, env);
+  };
+
+  const clientsEngineHost: ClientsEngineHost = {
+    describe: async () => {
+      try {
+        const resolution = await resolveClientsCli(getSettings());
+        return resolution.ok
+          ? { ok: true, mode: resolution.target.mode }
+          : { ok: false, error: resolution.error };
+      } catch {
+        return {
+          ok: false as const,
+          error: "could not read the irisMcpLauncher settings to resolve the clients CLI",
+        };
+      }
+    },
+    detect: () => detectClientsJson(runClientsCommand),
+    status: () => statusMatrixJson(runClientsCommand),
+    modes: () => availableModes(runClientsCommand),
+    diffApply: (args) => diffApplyJson(runClientsCommand, args),
+    diffApplyText: (args) => diffApplyText(runClientsCommand, args),
+    apply: (args) => applyJson(runClientsCommand, args),
+    toggle: (action, args) => toggleJson(runClientsCommand, action, args),
+    restore: (args) => restoreJson(runClientsCommand, args),
+    doctor: () => doctorJson(runClientsCommand),
+  };
+
+  const manageClients = createClientsPanelOpener({
+    engine: clientsEngineHost,
+    getClientRoster: () => context.globalState.get<unknown>(CLIENT_ROSTER_STATE_KEY),
+    setClientRoster: (ids) => {
+      // Two-statement idiom (mirrors updateServersConfig): keeps the write
+      // legible to containment.test.ts's single-expression-chain grep. The
+      // roster is UI state (client ids) — never config, never a credential.
+      const state = context.globalState;
+      return state.update(CLIENT_ROSTER_STATE_KEY, ids);
+    },
+    askInput: (options) =>
+      vscode.window.showInputBox({
+        prompt: options.prompt,
+        password: options.password === true,
+        placeHolder: options.placeHolder,
+        // The explicit-mode confirmation + password are deliberately typed;
+        // losing the box on focus-out would silently discard them.
+        ignoreFocusOut: true,
+      }),
+    createPanel: () => {
+      const webviewPanel = vscode.window.createWebviewPanel(
+        "irisMcpClients",
+        "MCP Clients",
+        vscode.ViewColumn.One,
+        { enableScripts: true },
+      );
+      return {
+        setHtml: (html) => {
+          webviewPanel.webview.html = html;
+        },
+        onMessage: (listener) => {
+          webviewPanel.webview.onDidReceiveMessage(listener, undefined, context.subscriptions);
+        },
+        onDispose: (listener) => {
+          webviewPanel.onDidDispose(listener, undefined, context.subscriptions);
+        },
+        reveal: () => {
+          webviewPanel.reveal();
+        },
+      };
+    },
+    showWarning,
+  });
+
+  const manageClientsCommand = vscode.commands.registerCommand(MANAGE_CLIENTS_COMMAND_ID, () =>
+    void manageClients(),
+  );
+  context.subscriptions.push(manageClientsCommand);
 
   // Story 31.5: status bar item (AC 31.5.3/31.5.4) — created unconditionally
   // in `activate()`. `package.json`'s `onStartupFinished` activation event

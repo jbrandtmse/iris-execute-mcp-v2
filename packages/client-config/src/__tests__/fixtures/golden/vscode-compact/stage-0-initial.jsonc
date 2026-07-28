@@ -1,0 +1,7 @@
+// VS Code user MCP configuration (JSONC with comments).
+{
+  "servers": {
+    // A foreign third-party server (must never be touched).
+    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" } }
+  }
+}

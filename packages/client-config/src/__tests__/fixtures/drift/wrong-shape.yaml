@@ -1,0 +1,5 @@
+# Goose config — extensions must be a MAPPING of server entries, not a list
+# (a config-drift fixture: parses as YAML, wrong shape at the root key).
+extensions:
+  - stdio
+  - http
