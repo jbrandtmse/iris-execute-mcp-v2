@@ -4510,38 +4510,41 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 **Functional Requirements (new)**: FR142 (classmethod execution fidelity: device-output capture, `{byRef, value?}` marker args with `byRefValues`, 20-arg ceiling — completes FR38's output-parameter clause; FR37-adjacent capture parity).
 
 **Stories**:
-- 34.0 Probe: pin `$ClassMethod` by-ref semantics + capture/namespace-switch interplay
-- 34.1 ObjectScript handler: capture + byref markers + 20-arg ladder + bootstrap bump
-- 34.2 TS tool surfacing + docs + live smokes (bug-report repros are the epic gate)
+- 34.0 Epic 33 deferred cleanup (created by the `/epic-cycle` retro-review gate; 34.0 is deliberately reserved for it — see note below)
+- 34.1 Probe: pin `$ClassMethod` by-ref semantics + capture/namespace-switch interplay
+- 34.2 ObjectScript handler: capture + byref markers + 20-arg ladder + bootstrap bump
+- 34.3 TS tool surfacing + docs + live smokes (bug-report repros are the epic gate)
+
+**Story-numbering note (2026-08-14, stakeholder decision)**: this epic's own work starts at **34.1**, departing from the project's usual X.0-is-the-probe convention (Epics 23–33). `/epic-cycle`'s mandatory retro-review gate auto-creates "Story {N}.0: Epic {N-1} Deferred Cleanup" whenever the prior epic's retro or `deferred-work.md` has unresolved items — Epic 33's retro exists and the ledger carries 15 unresolved LOW items from Story 33.5 — so 34.0 is left free for that story rather than colliding with it. Per Rule #37 those items are on their FIRST deferral, so the gate's triage may legitimately re-defer any of them; a burn-down is only mandatory at 3 consecutive re-deferrals.
 
 **Out of scope**: streaming/chunked output for very large captures; `ByRef` object (OREF) arguments; `iris_execute_command` changes (already has capture).
 
-### Story 34.0: ClassMethod Invocation Probe
+### Story 34.1: ClassMethod Invocation Probe
 
-**As a** dev agent, **I want** the by-ref and capture claims verified live before coding, **so that** 34.1 codes against pinned behavior, not assumptions (Rules #14/#16).
+**As a** dev agent, **I want** the by-ref and capture claims verified live before coding, **so that** 34.2 codes against pinned behavior, not assumptions (Rules #14/#16).
 
 **Acceptance Criteria**:
-- **AC 34.0.1** — Disposable `ExecuteMCPv2.Temp.*` probe proves `$ClassMethod` passes locals by reference (`.tArg`) such that an `Output`/`ByRef` formal's post-call value is readable, including an undefined-in (Output-style) case; exact working call shape recorded.
-- **AC 34.0.2** — Probe proves the null-device redirect pattern (from `Execute()`) captures a target method's `Write` output when invoked via `$ClassMethod`, including a target that switches namespace (`ZN`) mid-execution (bug-report reproduction 3's shape).
-- **AC 34.0.3** — 20-argument `$ClassMethod` call verified (no undocumented platform arg ceiling below 20); probe classes deleted before commit.
+- **AC 34.1.1** — Disposable `ExecuteMCPv2.Temp.*` probe proves `$ClassMethod` passes locals by reference (`.tArg`) such that an `Output`/`ByRef` formal's post-call value is readable, including an undefined-in (Output-style) case; exact working call shape recorded.
+- **AC 34.1.2** — Probe proves the null-device redirect pattern (from `Execute()`) captures a target method's `Write` output when invoked via `$ClassMethod`, including a target that switches namespace (`ZN`) mid-execution (bug-report reproduction 3's shape).
+- **AC 34.1.3** — 20-argument `$ClassMethod` call verified (no undocumented platform arg ceiling below 20); probe classes deleted before commit.
 
-### Story 34.1: Handler — Capture, ByRef Markers, 20-Arg Ladder
+### Story 34.2: Handler — Capture, ByRef Markers, 20-Arg Ladder
 
 **As a** developer, **I want** the `/classmethod` endpoint to capture device output and support marked by-ref args up to 20 positions, **so that** ordinary narrating methods and `Output`-parameter methods work without bespoke wrapper classes.
 
 **Acceptance Criteria**:
-- **AC 34.1.1** — `ClassMethod()` wraps target invocation in the same null-device I/O-capture pattern as `Execute()` (Rule #7 discipline: full restore before render, single `RenderResponseBody` per request); captured text returned as additive `output` field; behavior on target runtime error unchanged (sanitized error, Rule #9).
-- **AC 34.1.2** — Marker objects per epic scope: marked args passed by reference; post-call values returned in additive `byRefValues` (keyed by zero-based index, marked args only); non-marker object args rejected with a clear validation error.
-- **AC 34.1.3** — Argument ladder extended to 20; count-21 rejected with "maximum is 20" error; counts 0/1/10/11/20 covered by `%UnitTest` tests (Rule #35 total check).
-- **AC 34.1.4** — Back-compat proof (Rule #19): plain-scalar-args regression test pins `returnValue`/`argCount` unchanged for an existing-shape call.
-- **AC 34.1.5** — `gen:bootstrap` regenerated, BOOTSTRAP_VERSION from→to recorded (Rule #24); `bootstrap.test.ts` green; frozen governance baseline untouched (#23/#25).
+- **AC 34.2.1** — `ClassMethod()` wraps target invocation in the same null-device I/O-capture pattern as `Execute()` (Rule #7 discipline: full restore before render, single `RenderResponseBody` per request); captured text returned as additive `output` field; behavior on target runtime error unchanged (sanitized error, Rule #9).
+- **AC 34.2.2** — Marker objects per epic scope: marked args passed by reference; post-call values returned in additive `byRefValues` (keyed by zero-based index, marked args only); non-marker object args rejected with a clear validation error.
+- **AC 34.2.3** — Argument ladder extended to 20; count-21 rejected with "maximum is 20" error; counts 0/1/10/11/20 covered by `%UnitTest` tests (Rule #35 total check).
+- **AC 34.2.4** — Back-compat proof (Rule #19): plain-scalar-args regression test pins `returnValue`/`argCount` unchanged for an existing-shape call.
+- **AC 34.2.5** — `gen:bootstrap` regenerated, BOOTSTRAP_VERSION from→to recorded (Rule #24); `bootstrap.test.ts` green; frozen governance baseline untouched (#23/#25).
 
-### Story 34.2: TS Tool Surfacing + Docs + Live Smokes
+### Story 34.3: TS Tool Surfacing + Docs + Live Smokes
 
 **As an** AI-agent user, **I want** the tool schema, docs, and live behavior to reflect capture, by-ref, and the 20-arg ceiling, **so that** callers stop needing per-method wrapper classes.
 
 **Acceptance Criteria**:
-- **AC 34.2.1** — `iris_execute_classmethod` schema/description updated: args entries may be scalars or `{byRef, value?}` markers; "up to 20 arguments"; response surfaces `output` and `byRefValues` in `structuredContent` (object, not array); annotations, governance keys, and tool counts unchanged.
-- **AC 34.2.2** — Vitest: marker pass-through to REST body, additive-response back-compat pin (Rule #19), error surface for rejected object args.
-- **AC 34.2.3** — Docs rollup (Rule #30/#43) across ALL surfaces documenting the tool (audited 2026-08-14; Rule #56 — review re-asks "what surface is missing?"): `packages/iris-dev-mcp/README.md` BOTH spots (tool summary table row ~L213 and the `iris_execute_classmethod` detail block ~L915) — 20-arg ceiling, `{byRef, value?}` markers, `output`/`byRefValues` response fields; `docs/migration-v1-v2.md` mapping row note ("Same functionality" → enhanced: output capture + byref + 20 args); `docs/tool_support.md` and root `README.md` currently do not mention the tool — add rows/notes ONLY if the change warrants, else record checked-no-edit-needed; CHANGELOG entry.
-- **AC 34.2.4** — Live smokes on built dist (Rules #22/#26/#34): (a) all three bug-report reproduction shapes from docs/bugs-2026-08-14.md pass without wrapper classes — this is the epic-done gate (Rule #21); (b) an `Output`-param method returns its post-call value; (c) a 20-arg call; (d) second-namespace run; bug report annotated with disposition.
+- **AC 34.3.1** — `iris_execute_classmethod` schema/description updated: args entries may be scalars or `{byRef, value?}` markers; "up to 20 arguments"; response surfaces `output` and `byRefValues` in `structuredContent` (object, not array); annotations, governance keys, and tool counts unchanged.
+- **AC 34.3.2** — Vitest: marker pass-through to REST body, additive-response back-compat pin (Rule #19), error surface for rejected object args.
+- **AC 34.3.3** — Docs rollup (Rule #30/#43) across ALL surfaces documenting the tool (audited 2026-08-14; Rule #56 — review re-asks "what surface is missing?"): `packages/iris-dev-mcp/README.md` BOTH spots (tool summary table row ~L213 and the `iris_execute_classmethod` detail block ~L915) — 20-arg ceiling, `{byRef, value?}` markers, `output`/`byRefValues` response fields; `docs/migration-v1-v2.md` mapping row note ("Same functionality" → enhanced: output capture + byref + 20 args); `docs/tool_support.md` and root `README.md` currently do not mention the tool — add rows/notes ONLY if the change warrants, else record checked-no-edit-needed; CHANGELOG entry.
+- **AC 34.3.4** — Live smokes on built dist (Rules #22/#26/#34): (a) all three bug-report reproduction shapes from docs/bugs-2026-08-14.md pass without wrapper classes — this is the epic-done gate (Rule #21); (b) an `Output`-param method returns its post-call value; (c) a 20-arg call; (d) second-namespace run; bug report annotated with disposition.

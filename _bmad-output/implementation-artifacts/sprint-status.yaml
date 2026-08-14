@@ -518,12 +518,21 @@ development_status:
   # explicit {byRef:true, value?} marker args w/ additive byRefValues response
   # (new FR142; completes FR38's output-parameter clause), arg ceiling 10->20.
   # Strictly additive; no new tool/governance
-  # key; BOOTSTRAP_VERSION bump in 34.1 (Rule #24). Docs scope in AC 34.2.3 names
+  # key; BOOTSTRAP_VERSION bump in 34.2 (Rule #24). Docs scope in AC 34.3.3 names
   # every surface explicitly (dev README x2 spots, migration-v1-v2.md row, CHANGELOG;
   # tool_support.md + root README audited as no-mention). Epic gate: the three
-  # bug-report reproductions pass live without wrapper classes (34.2, Rule #21).
+  # bug-report reproductions pass live without wrapper classes (34.3, Rule #21).
+  # Story numbering (2026-08-14 stakeholder decision): epic work starts at 34.1.
+  # 34.0 is RESERVED for the /epic-cycle retro-review gate's auto-created
+  # "Epic 33 Deferred Cleanup" story (epic-33 retro exists; deferred-work.md
+  # carries 15 unresolved LOW items from 33.5 — first deferral, so Rule #37
+  # allows re-deferral at triage). Do NOT renumber 34.1-34.3 onto 34.0.
+  # Branch (2026-08-14): cut feature/feature-wave-4-classmethod-fidelity off
+  # main for this epic — wave-3 is already merged. Epic branch: epic34
+  # (ticketless convention, matching epic31/32/33; SC-1 default JIRA pattern
+  # does NOT apply — answer the SC-1 prompt with this convention).
   epic-34: backlog
-  34-0-classmethod-invocation-probe: backlog
-  34-1-handler-capture-byref-20args: backlog
-  34-2-ts-tool-docs-smokes: backlog
+  34-1-classmethod-invocation-probe: backlog
+  34-2-handler-capture-byref-20args: backlog
+  34-3-ts-tool-docs-smokes: backlog
   epic-34-retrospective: backlog
