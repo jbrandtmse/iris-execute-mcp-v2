@@ -511,3 +511,19 @@ development_status:
   33-4-certification-docs: done
   33-5-late-findings-cleanup: done
   epic-33-retrospective: done
+
+  # Epic 34: iris_execute_classmethod fidelity (trigger docs/bugs-2026-08-14.md +
+  # stakeholder request; sprint-change-proposal-2026-08-14.md). Write-capture bug
+  # (ClassMethod() lacks Execute()'s null-device redirect -> non-JSON envelope),
+  # explicit {byRef:true, value?} marker args w/ additive byRefValues response
+  # (new FR142; completes FR38's output-parameter clause), arg ceiling 10->20.
+  # Strictly additive; no new tool/governance
+  # key; BOOTSTRAP_VERSION bump in 34.1 (Rule #24). Docs scope in AC 34.2.3 names
+  # every surface explicitly (dev README x2 spots, migration-v1-v2.md row, CHANGELOG;
+  # tool_support.md + root README audited as no-mention). Epic gate: the three
+  # bug-report reproductions pass live without wrapper classes (34.2, Rule #21).
+  epic-34: backlog
+  34-0-classmethod-invocation-probe: backlog
+  34-1-handler-capture-byref-20args: backlog
+  34-2-ts-tool-docs-smokes: backlog
+  epic-34-retrospective: backlog

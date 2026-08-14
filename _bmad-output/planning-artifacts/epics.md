@@ -4500,3 +4500,48 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 33.4.2** — Config-surface drift guard: `doctor` warns when a client's config file exists but fails adapter expectations (unknown root key/shape), citing the adapter data version; drift fix procedure documented (data patch + fixture update, no engine change).
 - **AC 33.4.3** — Docs rollup (Rule #30): `@iris-mcp/client-config` README (adapter table with per-client paths/formats/disable mechanism/restart hints, certification dispositions); root README section; per-client recipes superseded by `iris-mcp-clients apply` guidance with the old manual snippets retained as fallback; CHANGELOG.
 - **AC 33.4.4** — Kimi Code dual-surface verification: one config written to `~/.kimi-code/mcp.json` is confirmed visible in BOTH the Kimi Code CLI/TUI and its VS Code extension; repo `.mcp.json` sharing between Claude Code and Kimi Code verified and documented (binding-spec claim, proven live per Rule #14/#16). *(Amended 2026-07-28, Story 33.4 dev, Rule #42 — the live verification FALSIFIED the spec's `.mcp.json`-fallback claim: kimi-code 0.29.0 loaded NO project-scope server from `.mcp.json` (or from the docs-documented `.kimi-code/mcp.json`) in print mode — a distinctive working probe server answered TOOL-NOT-LOADED — and the official docs document only `.kimi-code/mcp.json`. The AC is therefore satisfied as: CLI/TUI half verified live (user scope), VS Code extension half fixture-only-with-residual-risk (extension not installed), `.mcp.json` sharing verified for the Claude Code side and recorded as FALSIFIED/residual-risk for the Kimi side, with the adapter-data fallback removed (`ADAPTER_DATA_VERSION` → 2026-07-28.1). Project-scope loading may be TUI-only — recorded residual risk.)*
+
+## Epic 34: `iris_execute_classmethod` Fidelity — Write Capture, ByRef/Output Args, 20-Arg Ceiling (added 2026-08-14)
+
+**Goal**: Make `iris_execute_classmethod` faithfully round-trip everything a classmethod invocation produces. Today a target method that `Write`s to the current device corrupts the JSON envelope ("non-JSON response") because `ClassMethod()` in `ExecuteMCPv2.REST.Command` has no I/O capture — unlike `Execute()` 100 lines up in the same class, which already has the null-device redirect pattern. Additionally there is no way to pass or retrieve `ByRef`/`Output` arguments (an unfulfilled part of **FR38**), and the positional-arg ceiling is 10 (raise to 20). Trigger: [docs/bugs-2026-08-14.md](../../docs/bugs-2026-08-14.md) (three live reproductions) + stakeholder request; see [sprint-change-proposal-2026-08-14.md](./sprint-change-proposal-2026-08-14.md).
+
+**Scope**: ObjectScript `ClassMethod()` handler in `Command.cls` (bootstrapped class — Rule #24 BOOTSTRAP_VERSION bump in the handler story) + TS tool `iris_execute_classmethod` in `@iris-mcp/dev`. NO new tool, NO new governance key/action, NO tool-count change (Rule #31 not triggered; #28/#53 not triggered). **Strictly additive** (Rule #19): existing plain-scalar-args calls return the same `returnValue`/`argCount` plus new additive fields. ByRef design (stakeholder-selected): **explicit marker objects** in `args` — an entry that is a JSON object `{"byRef": true, "value": <optional initial>}` is passed by reference (omitted `value` = undefined, `Output`-style); scalar entries unchanged; any other object entry is rejected with a clear error (today undocumented/unsupported). Response adds `output` (captured device output, same mechanism as `/command`) and `byRefValues` (object keyed by zero-based arg index, post-call values of marked args only).
+
+**Functional Requirements (new)**: FR142 (classmethod execution fidelity: device-output capture, `{byRef, value?}` marker args with `byRefValues`, 20-arg ceiling — completes FR38's output-parameter clause; FR37-adjacent capture parity).
+
+**Stories**:
+- 34.0 Probe: pin `$ClassMethod` by-ref semantics + capture/namespace-switch interplay
+- 34.1 ObjectScript handler: capture + byref markers + 20-arg ladder + bootstrap bump
+- 34.2 TS tool surfacing + docs + live smokes (bug-report repros are the epic gate)
+
+**Out of scope**: streaming/chunked output for very large captures; `ByRef` object (OREF) arguments; `iris_execute_command` changes (already has capture).
+
+### Story 34.0: ClassMethod Invocation Probe
+
+**As a** dev agent, **I want** the by-ref and capture claims verified live before coding, **so that** 34.1 codes against pinned behavior, not assumptions (Rules #14/#16).
+
+**Acceptance Criteria**:
+- **AC 34.0.1** — Disposable `ExecuteMCPv2.Temp.*` probe proves `$ClassMethod` passes locals by reference (`.tArg`) such that an `Output`/`ByRef` formal's post-call value is readable, including an undefined-in (Output-style) case; exact working call shape recorded.
+- **AC 34.0.2** — Probe proves the null-device redirect pattern (from `Execute()`) captures a target method's `Write` output when invoked via `$ClassMethod`, including a target that switches namespace (`ZN`) mid-execution (bug-report reproduction 3's shape).
+- **AC 34.0.3** — 20-argument `$ClassMethod` call verified (no undocumented platform arg ceiling below 20); probe classes deleted before commit.
+
+### Story 34.1: Handler — Capture, ByRef Markers, 20-Arg Ladder
+
+**As a** developer, **I want** the `/classmethod` endpoint to capture device output and support marked by-ref args up to 20 positions, **so that** ordinary narrating methods and `Output`-parameter methods work without bespoke wrapper classes.
+
+**Acceptance Criteria**:
+- **AC 34.1.1** — `ClassMethod()` wraps target invocation in the same null-device I/O-capture pattern as `Execute()` (Rule #7 discipline: full restore before render, single `RenderResponseBody` per request); captured text returned as additive `output` field; behavior on target runtime error unchanged (sanitized error, Rule #9).
+- **AC 34.1.2** — Marker objects per epic scope: marked args passed by reference; post-call values returned in additive `byRefValues` (keyed by zero-based index, marked args only); non-marker object args rejected with a clear validation error.
+- **AC 34.1.3** — Argument ladder extended to 20; count-21 rejected with "maximum is 20" error; counts 0/1/10/11/20 covered by `%UnitTest` tests (Rule #35 total check).
+- **AC 34.1.4** — Back-compat proof (Rule #19): plain-scalar-args regression test pins `returnValue`/`argCount` unchanged for an existing-shape call.
+- **AC 34.1.5** — `gen:bootstrap` regenerated, BOOTSTRAP_VERSION from→to recorded (Rule #24); `bootstrap.test.ts` green; frozen governance baseline untouched (#23/#25).
+
+### Story 34.2: TS Tool Surfacing + Docs + Live Smokes
+
+**As an** AI-agent user, **I want** the tool schema, docs, and live behavior to reflect capture, by-ref, and the 20-arg ceiling, **so that** callers stop needing per-method wrapper classes.
+
+**Acceptance Criteria**:
+- **AC 34.2.1** — `iris_execute_classmethod` schema/description updated: args entries may be scalars or `{byRef, value?}` markers; "up to 20 arguments"; response surfaces `output` and `byRefValues` in `structuredContent` (object, not array); annotations, governance keys, and tool counts unchanged.
+- **AC 34.2.2** — Vitest: marker pass-through to REST body, additive-response back-compat pin (Rule #19), error surface for rejected object args.
+- **AC 34.2.3** — Docs rollup (Rule #30/#43) across ALL surfaces documenting the tool (audited 2026-08-14; Rule #56 — review re-asks "what surface is missing?"): `packages/iris-dev-mcp/README.md` BOTH spots (tool summary table row ~L213 and the `iris_execute_classmethod` detail block ~L915) — 20-arg ceiling, `{byRef, value?}` markers, `output`/`byRefValues` response fields; `docs/migration-v1-v2.md` mapping row note ("Same functionality" → enhanced: output capture + byref + 20 args); `docs/tool_support.md` and root `README.md` currently do not mention the tool — add rows/notes ONLY if the change warrants, else record checked-no-edit-needed; CHANGELOG entry.
+- **AC 34.2.4** — Live smokes on built dist (Rules #22/#26/#34): (a) all three bug-report reproduction shapes from docs/bugs-2026-08-14.md pass without wrapper classes — this is the epic-done gate (Rule #21); (b) an `Output`-param method returns its post-call value; (c) a 20-arg call; (d) second-namespace run; bug report annotated with disposition.
