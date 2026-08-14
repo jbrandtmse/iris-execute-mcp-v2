@@ -18,3 +18,10 @@ Notes for this run:
 2026-08-14T01:15:00Z	Story 34.0	qa_complete	spawn_at=2026-08-14T00:46:00Z model=claude-sonnet-5 tests_added=0 tier=reading_verification first_run_failures=0 clarifications=0 closing_sections_present=true
 2026-08-14T01:40:00Z	Story 34.0	cr_complete	spawn_at=2026-08-14T01:16:00Z model=claude-opus-5 resolved=9 deferred=2 dismissed=0 high=2 med=6 low=3 clarifications=0 close_kind=CLEAN layers_delivered=3 closing_sections_present=true
 2026-08-14T01:50:00Z	Story 34.0	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live_gitignore_check+degraded_gate_path_walk+mechanical_ledger_recount+cr_stage_live_3layer_run model=claude-opus-5
+2026-08-14T01:55:00Z	Story 34.0	committed	sha=5cda456 submodules=
+2026-08-14T02:10:00Z	Story 34.1	story_created	path=_bmad-output/implementation-artifacts/34-1-classmethod-invocation-probe.md integration_ac=not_applicable_probe_only
+2026-08-14T02:55:00Z	Story 34.1	dev_complete	spawn_at=2026-08-14T02:12:00Z model=claude-sonnet-5 files=2 findings=5 probes_deleted=true clarifications=0 nfr_tripwires=0 cycle_iteration=1 closing_sections_present=true
+2026-08-14T02:55:30Z	Story 34.1	adr_verifications_complete	result=none_required model=claude-opus-5
+2026-08-14T03:35:00Z	Story 34.1	qa_complete	spawn_at=2026-08-14T02:57:00Z model=claude-sonnet-5 tests_added=0 tier=independent_live_reverification findings_reverified=5 findings_corrected=1 first_run_failures=0 closing_sections_present=true
+2026-08-14T04:20:00Z	Story 34.1	cr_complete	spawn_at=2026-08-14T03:37:00Z model=claude-opus-5 resolved=24 deferred=16 dismissed=4 high=7 med=9 low=8 clarifications=0 close_kind=CLEAN layers_delivered=3 closing_sections_present=true
+2026-08-14T04:30:00Z	Story 34.1	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live_probe_residue_zero_HSCUSTOM+USER_incl_generated+C2_single_int_verified+epics_amendment_confirmed model=claude-opus-5
