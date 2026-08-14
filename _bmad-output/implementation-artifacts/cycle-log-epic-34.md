@@ -40,3 +40,4 @@ Notes for this run:
 2026-08-14T09:15:00Z	Story 34.3	qa_complete	spawn_at=2026-08-14T08:32:00Z model=claude-sonnet-5 tests_added=1_file_3_gate_tests defects_found=1_HIGH_epic_gate_not_durable defects_fixed=1 mutation_verified=true closing_sections_present=true
 2026-08-14T10:05:00Z	Story 34.3	cr_complete	spawn_at=2026-08-14T09:17:00Z model=claude-opus-5 resolved=9 deferred=9 dismissed=2 high=2 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=b1c1415b4870-to-5ef2df119451 closing_sections_present=true
 2026-08-14T10:15:00Z	Story 34.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=epic_gate_default_suite_3_passed_0_skipped_live_iris+not_matching_integration_exclude_pattern+sprint_status_yaml_validated model=claude-opus-5
+2026-08-14T10:20:00Z	Epic 34	epic_status_done	stories=4
