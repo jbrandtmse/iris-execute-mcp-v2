@@ -210,7 +210,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
-| `iris_execute_classmethod` | Invoke a class method with arguments | `className`, `methodName`, `args?`, `namespace?` | -- |
+| `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
 | `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
 
 ### Code Metrics Tools
@@ -906,15 +906,28 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 **Output:**
 ```json
 {
-  "output": "Hello from IRIS"
+  "output": "Hello from IRIS",
+  "truncated": false
 }
 ```
+
+`truncated` is `true` only in the rare case where the captured output hit the platform's
+long-string ceiling mid-command — the call still succeeds, with whatever was captured up
+to that point, and this is never silent.
 </details>
 
 <details>
 <summary><strong>iris_execute_classmethod</strong> -- Call a class method</summary>
 
-**Input:**
+Each `args` entry is either a plain scalar (by value) or a `{"byRef": true, "value"?: ...}`
+marker for a `ByRef`/`Output` parameter — up to 20 positions total. Any `Write` output the
+target produces is captured (no wrapper class needed for narrating methods, stock runners
+like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
+in `output`; marked positions' post-call values are returned in `byRefValues`, keyed by
+zero-based index. `truncated` is `true` only in the rare case where captured output hit
+the platform's long-string ceiling mid-call.
+
+**Input (plain scalars):**
 ```json
 {
   "className": "MyApp.Utils",
@@ -926,7 +939,31 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 **Output:**
 ```json
 {
-  "returnValue": "7"
+  "returnValue": "7",
+  "argCount": 2,
+  "output": "",
+  "byRefValues": {},
+  "truncated": false
+}
+```
+
+**Input (an `Output` parameter via a `byRef` marker):**
+```json
+{
+  "className": "MyApp.Utils",
+  "methodName": "Summarize",
+  "args": [{ "byRef": true }]
+}
+```
+
+**Output:**
+```json
+{
+  "returnValue": "ok",
+  "argCount": 1,
+  "output": "",
+  "byRefValues": { "0": "summary text" },
+  "truncated": false
 }
 ```
 </details>

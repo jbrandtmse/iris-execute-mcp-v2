@@ -11,6 +11,7 @@ Method OnBeforeOneTest() As %Status
 {
     Kill ^ExecuteMCPv2CmdTest
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 
@@ -19,6 +20,7 @@ Method OnAfterOneTest() As %Status
 {
     Kill ^ExecuteMCPv2CmdTest
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 
@@ -230,6 +232,45 @@ Method TestLargeOutputCaptureOver8KB() As %Status
     Do $$$AssertTrue($Extract(%ExecuteMCPOutput, 1, 5) = "XXXXX", "capture should start with XXXXX")
     Do $$$AssertTrue($Extract(%ExecuteMCPOutput, *-4, *) = "XXXXX", "capture should end with XXXXX")
 
+    Quit $$$OK
+}
+
+/// 34-2-R1 fix (Story 34.3): Redirects()'s label bodies now catch a capture-buffer
+/// <MAXSTRING> internally and record it in the process-private %ExecuteMCPTruncated flag
+/// instead of letting it propagate as an exception. Drives Redirects() directly — the
+/// same call site TestLargeOutputCaptureOver8KB above uses — to prove the label-level fix
+/// in isolation from ExecuteMCPv2.Utils.InvokeWithArgs (whose own OR-in-and-clear logic is
+/// covered separately by ClassMethodArgsTest).
+Method TestRedirectsSetsTruncatedFlagOnCaptureOverflow() As %Status
+{
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Set tChunk = $Translate($Justify("", 5000), " ", "X")
+
+    Set %ExecuteMCPOutput = ""
+    Kill %ExecuteMCPTruncated
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    ; 1000 * 5000 = 5,000,000 chars, comfortably past the ~2-4M <MAXSTRING> ceiling —
+    ; every Write past the ceiling must be caught silently by Redirects(), never thrown.
+    Set tCaught = 0
+    Try {
+        For i=1:1:1000 { Write tChunk }
+    } Catch {
+        Set tCaught = 1
+    }
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Do $$$AssertTrue('tCaught, "the capture overflow must never propagate as an exception to the caller of Write")
+    Do $$$AssertEquals($Get(%ExecuteMCPTruncated, 0), 1, "the capture-buffer overflow must be recorded in %ExecuteMCPTruncated")
+    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > 1000000, "the partial capture up to the ceiling must still be preserved")
+    Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 

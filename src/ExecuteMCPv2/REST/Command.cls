@@ -54,6 +54,7 @@ ClassMethod Execute() As %Status
         ; JSON envelope when it exceeds the buffer boundary. By doing the redirect
         ; on a throw-away null device, the HTTP response stream stays pristine.
         Set %ExecuteMCPOutput = ""
+        Set %ExecuteMCPTruncated = 0
         Set tInitIO = $IO
         Set tNull = ##class(%Library.Device).GetNullDevice()
         Open tNull:::1
@@ -88,11 +89,18 @@ ClassMethod Execute() As %Status
         If tCmdErrored {
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
             Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
         } Else {
             Set tOutput = $Get(%ExecuteMCPOutput, "")
+            Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
             Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
             Set tResult = {}
             Do tResult.%Set("output", tOutput)
+            ; Additive (Rule #19): 34-2-R1 fix — a capture-buffer <MAXSTRING> no longer
+            ; aborts the command with an opaque error; it now completes with whatever was
+            ; captured up to the ceiling, flagged here rather than silently.
+            Do tResult.%Set("truncated", tTruncated, "boolean")
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     } Catch ex {
@@ -106,6 +114,7 @@ ClassMethod Execute() As %Status
                 If $Get(tNull) '= "" { Close tNull }
             }
         } Catch {}
+        Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
@@ -240,14 +249,35 @@ ClassMethod ClassMethod() As %Status
 /// set via <code>Use tInitIO::("^"_$ZNAME)</code> when I/O redirection is active.
 /// All captured output is accumulated in the process-private variable
 /// <code>%ExecuteMCPOutput</code>.</p>
+/// <p><b>34-2-R1 fix (Story 34.3):</b> each label's append is wrapped in its own
+/// <code>Try/Catch</code> <b>discriminated on <code>&lt;MAXSTRING&gt;</code></b> — any other
+/// exception (e.g. <code>&lt;STORE&gt;</code>) is re-thrown unchanged, so a genuine crash is
+/// never mis-reported as a benign truncation and the target's/dispatcher's own error
+/// handling still sees it (the same discrimination the Story 34.2 review required of
+/// <method>ExecuteMCPv2.Utils</method>.<method>InvokeWithArgs</method>, applied here at the
+/// point the exception is now absorbed). A capture-buffer <code>&lt;MAXSTRING&gt;</code> (the
+/// platform's long-string ceiling, reached when <var>%ExecuteMCPOutput</var> itself grows
+/// too large) is absorbed HERE and recorded in the process-private
+/// <var>%ExecuteMCPTruncated</var> flag instead of being thrown to the caller of
+/// <code>Write</code>. Previously that exception propagated out of <code>Write</code>
+/// into whatever code issued it — including a TARGET method's own
+/// <code>Try/Catch</code>, which could swallow it before
+/// <method>ExecuteMCPv2.Utils</method>.<method>InvokeWithArgs</method>'s dispatch
+/// <code>Catch</code> ever saw it, producing a silent partial
+/// (<var>truncated</var> staying <code>false</code> even though output was genuinely cut
+/// off — ledger item <c>34-2-R1</c>). Now the target's <code>Write</code> call simply
+/// returns normally (the target completes instead of aborting) and the flag is the sole,
+/// unconditionally reliable signal — read by <method>InvokeWithArgs</method> for the
+/// <code>/classmethod</code> endpoint and by <method>Execute</method> above for the
+/// <code>/command</code> endpoint's own additive <var>truncated</var> field.</p>
 ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
 {
     Quit
-wstr(s) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s Quit
-wchr(a) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) Quit
-wnl Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) Quit
-wff Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) Quit
-wtab(n) New chars Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars Quit
+wstr(s) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wchr(a) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wnl New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wff New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wtab(n) New chars,mcpex Try { Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
 rstr(len,time) Quit ""
 rchr(time) Quit ""
 }

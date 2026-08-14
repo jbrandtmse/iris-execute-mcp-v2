@@ -33,3 +33,10 @@ Notes for this run:
 2026-08-14T07:10:00Z	Story 34.2	cr_complete	spawn_at=2026-08-14T06:17:00Z model=claude-opus-5 resolved=12 deferred=10 dismissed=5 high=4 med=8 low=0 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=96f36486cc71-to-b514009cf654 tests_total=48 closing_sections_present=true
 2026-08-14T07:10:30Z	Epic 34	log_correction	note=story_34.2_dev_complete_entry_said_files=6_actual_was_8_incl_2_new_test_classes_rule51
 2026-08-14T07:20:00Z	Story 34.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live_iris_execute_classmethod_3_calls_write+metachars_unicode_ctrl+zn_mid_execution_all_clean_json model=claude-opus-5
+2026-08-14T07:22:00Z	Story 34.2	committed	sha=959ca72 submodules=
+2026-08-14T07:35:00Z	Story 34.3	story_created	path=_bmad-output/implementation-artifacts/34-3-ts-tool-docs-smokes.md integration_ac=not_applicable_consumer_of_34.2 carried_items=34-2-R1 epic_gate=AC_34.3.4a
+2026-08-14T08:30:00Z	Story 34.3	dev_complete	spawn_at=2026-08-14T07:37:00Z model=claude-sonnet-5 files=16 tests_added=15 bootstrap_version=b514009cf654-to-b1c1415b4870 epic_gate=passed r1_disposition=resolved clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-08-14T08:30:30Z	Story 34.3	adr_verifications_complete	result=none_required model=claude-opus-5
+2026-08-14T09:15:00Z	Story 34.3	qa_complete	spawn_at=2026-08-14T08:32:00Z model=claude-sonnet-5 tests_added=1_file_3_gate_tests defects_found=1_HIGH_epic_gate_not_durable defects_fixed=1 mutation_verified=true closing_sections_present=true
+2026-08-14T10:05:00Z	Story 34.3	cr_complete	spawn_at=2026-08-14T09:17:00Z model=claude-opus-5 resolved=9 deferred=9 dismissed=2 high=2 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=b1c1415b4870-to-5ef2df119451 closing_sections_present=true
+2026-08-14T10:15:00Z	Story 34.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=epic_gate_default_suite_3_passed_0_skipped_live_iris+not_matching_integration_exclude_pattern+sprint_status_yaml_validated model=claude-opus-5

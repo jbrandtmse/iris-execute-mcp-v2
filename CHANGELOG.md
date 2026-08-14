@@ -2,6 +2,31 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-08-14] — Epic 34: `iris_execute_classmethod` output capture, `ByRef`/`Output` support, 20-arg ceiling
+
+### Fixed — `iris_execute_classmethod` no longer fails on classmethods that `Write` to the current device (`@iris-mcp/dev`)
+
+Calling `iris_execute_classmethod` against a classmethod whose execution path emits output via `Write`/`W` — a narrating
+patch/config runner, InterSystems' own stock `%UnitTest.Manager.RunTest`, or a target that switches namespace (`ZN`)
+mid-execution — previously failed with a non-JSON-response error at the tool's response-parsing layer, requiring a
+bespoke `%SYS.Capture`-wrapper classmethod as a workaround for every affected target. The `/classmethod` endpoint now
+captures device output the same way `iris_execute_command` already does (a throwaway null-device redirect, never bound
+on the HTTP response stream) and returns it in a new additive `output` field — no wrapper class needed.
+
+### Added — `ByRef`/`Output` parameter support and a 20-argument ceiling (`@iris-mcp/dev`)
+
+`args` entries may now be a plain scalar (unchanged, by value) or a `{byRef: true, value?}` marker object for a
+`ByRef`/`Output` parameter; the marked position's post-call value is returned in a new additive `byRefValues` field,
+keyed by zero-based index (a plain scalar out-value is the raw value; an idiomatic subscripted `Output` array is a
+nested `{value?, subscripts?}` object preserving arbitrary subscript depth). The argument ceiling is raised from 10 to
+20. A new additive `truncated` boolean flags the rare case where captured output hit the platform's long-string
+ceiling mid-call — the call still succeeds with a partial capture, and this is never silent, even when the target's
+own code would otherwise swallow the underlying `<MAXSTRING>` condition itself. `iris_execute_command`'s response also
+gained the same additive `truncated` field, for the same reason.
+
+**Back-compat (Rule #19):** `returnValue`/`argCount` are byte-identical for existing plain-scalar calls; no new tool,
+governance key, or action — `iris_execute_classmethod` keeps its existing `write` classification and default state.
+
 ## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
 
 ### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)

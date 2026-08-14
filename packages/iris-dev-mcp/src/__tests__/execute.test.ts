@@ -139,6 +139,40 @@ describe("iris_execute_command", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
+  // Story 34.3 AC 34.3.5 / Rule #19 — the 34-2-R1 fix touched `Redirects()`, which is
+  // SHARED with `/command`, so `Execute()` gained an additive `truncated` field too.
+  // The classmethod side got a back-compat pin; this is the missing command-side one.
+  it("should surface the additive truncated field on a capture overflow (34-2-R1)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ output: "partial output", truncated: true }),
+    );
+
+    const result = await executeCommandTool.handler(
+      { command: "Do ##class(Some.Chatty).Target()" },
+      ctx,
+    );
+
+    // A capture overflow is a partial SUCCESS, never an error envelope, and never silent.
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as {
+      output: string;
+      truncated: boolean;
+    };
+    expect(structured.output).toBe("partial output");
+    expect(structured.truncated).toBe(true);
+  });
+
+  it("should leave a legacy truncated-less command envelope untouched (Rule #19)", async () => {
+    // Pre-34.3 servers do not send `truncated`. The tool must not invent, default, or
+    // reshape the field — today's behavior for today's envelope, byte for byte.
+    mockHttp.post.mockResolvedValue(envelope({ output: "legacy" }));
+
+    const result = await executeCommandTool.handler({ command: "Write 1" }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ output: "legacy" });
+  });
+
   it("should have correct annotations (readOnlyHint: false, destructiveHint: false)", () => {
     expect(executeCommandTool.annotations).toEqual({
       readOnlyHint: false,
@@ -317,6 +351,137 @@ describe("iris_execute_classmethod", () => {
   it("should have correct name and title", () => {
     expect(executeClassMethodTool.name).toBe("iris_execute_classmethod");
     expect(executeClassMethodTool.title).toBe("Execute Class Method");
+  });
+
+  // ── Story 34.3: 20-arg ceiling, {byRef, value?} markers, additive fields ──
+
+  it("schema accepts 20 args and rejects 21 (max ceiling raised from 10 to 20)", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => i);
+    const twentyOne = Array.from({ length: 21 }, (_, i) => i);
+    expect(() =>
+      executeClassMethodTool.inputSchema.parse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: twenty,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      executeClassMethodTool.inputSchema.parse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: twentyOne,
+      }),
+    ).toThrow();
+  });
+
+  it("passes {byRef, value?} marker objects through to the REST body untouched (marker pass-through)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        returnValue: "ok",
+        argCount: 2,
+        output: "",
+        byRefValues: { "0": "start-mutated" },
+        truncated: false,
+      }),
+    );
+
+    const markerArgs = [
+      { byRef: true, value: "start" },
+      { byRef: true },
+    ];
+
+    await executeClassMethodTool.handler(
+      {
+        className: "MyPackage.MyClass",
+        methodName: "DoSomething",
+        args: markerArgs,
+      },
+      ctx,
+    );
+
+    const body = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
+    // Markers must reach the server body EXACTLY as supplied — no client-side
+    // reshaping, since marker-shape validation is the server's job (Utils.ParseArgEntry).
+    expect(body.args).toEqual(markerArgs);
+  });
+
+  it("surfaces additive output/byRefValues/truncated fields in structuredContent as an object", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        returnValue: "ok",
+        argCount: 1,
+        output: "line1\nline2",
+        byRefValues: { "0": { value: "top", subscripts: { k1: "v1" } } },
+        truncated: false,
+      }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      {
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [{ byRef: true }],
+      },
+      ctx,
+    );
+
+    expect(Array.isArray(result.structuredContent)).toBe(false);
+    expect(typeof result.structuredContent).toBe("object");
+    const structured = result.structuredContent as {
+      output: string;
+      byRefValues: Record<string, unknown>;
+      truncated: boolean;
+    };
+    expect(structured.output).toBe("line1\nline2");
+    expect(structured.byRefValues).toEqual({ "0": { value: "top", subscripts: { k1: "v1" } } });
+    expect(structured.truncated).toBe(false);
+  });
+
+  it("back-compat (Rule #19): a legacy envelope with only returnValue/argCount (no output/byRefValues/truncated) still surfaces correctly", async () => {
+    // Pins that older-server or older-fixture responses lacking the additive Story
+    // 34.2/34.3 fields do not break the tool — the fields are additive, never required.
+    mockHttp.post.mockResolvedValue(
+      envelope({ returnValue: "2024.1", argCount: 0 }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "%SYSTEM.Version", methodName: "GetVersion" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as { returnValue: string; argCount: number };
+    expect(structured.returnValue).toBe("2024.1");
+    expect(structured.argCount).toBe(0);
+  });
+
+  it("surfaces a clear isError for a rejected object arg (non-marker shape)", async () => {
+    // Models the server's ParseArgEntry rejection (e.g. an object missing 'byRef').
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [
+          {
+            error:
+              "ERROR #5001: Argument 0 is an object without a 'byRef' key; expected a scalar or a {byRef, value} marker object",
+          },
+        ],
+        "/api/executemcp/v2/classmethod",
+        "Argument 0 is an object without a 'byRef' key; expected a scalar or a {byRef, value} marker object",
+      ),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      {
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [{ notAMarker: true }],
+      },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("without a 'byRef' key");
   });
 });
 

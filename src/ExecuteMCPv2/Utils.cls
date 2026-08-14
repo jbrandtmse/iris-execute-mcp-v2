@@ -314,6 +314,17 @@ ClassMethod BuildByRefNode(ByRef pLocal)
 /// so the response envelope stays intact either way. There is no endpoint-side way to
 /// detect or prevent a target's own I/O redirection, so this is a documented gap, not a
 /// silent corruption.</p>
+/// <p><b>34-2-R1 TERMINAL disposition (Story 34.3):</b> a capture-buffer
+/// <code>&lt;MAXSTRING&gt;</code> is no longer detected by catching an exception here at
+/// all — <class>ExecuteMCPv2.REST.Command</class>'s <method>Redirects</method> labels now
+/// absorb it internally (so a target's OWN <code>Try/Catch</code> around its
+/// <code>Write</code> calls can never swallow it first, closing the exact silent-partial
+/// shape the ledger item reported) and record it in the process-private
+/// <var>%ExecuteMCPTruncated</var> flag. This method reads that flag immediately after
+/// dispatch and ORs it into <var>pTruncated</var>, so a target with no
+/// <code>Try/Catch</code> (still covered by the exTarget discriminator below, kept as
+/// defense-in-depth for any <code>&lt;MAXSTRING&gt;</code> that reaches this level by some
+/// other path) and a target that swallows its own errors report identically.</p>
 ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean) As %Status
 {
     Set tSC = $$$OK
@@ -321,6 +332,7 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
     Set pByRefValues = {}
     Set pArgCount = 0
     Set pTruncated = 0
+    Kill %ExecuteMCPTruncated
     Try {
         ; Validate args shape (AC 34.2.6/R12) — must be a JSON array, or absent/empty.
         If $IsObject(pArgs) {
@@ -442,6 +454,12 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
                 Set tSC = tTargetStatus
             }
         }
+        ; 34-2-R1: fold in the label-level capture-overflow flag (see Command.cls's
+        ; Redirects() and this method's banner) regardless of which path set tSC — a
+        ; target that swallowed a MAXSTRING via its own Try/Catch never throws here at
+        ; all, so this is the only place that observes it for such a target.
+        Set pTruncated = pTruncated || $Get(%ExecuteMCPTruncated, 0)
+        Kill %ExecuteMCPTruncated
         ; A genuine target error skips the read-back below and is returned as-is; only the
         ; capture-truncation path (tSC still OK) reaches byRefValues assembly.
         If $$$ISERR(tSC) Quit

@@ -14,6 +14,7 @@ Parameter FIXTURE = "ExecuteMCPv2.Tests.ClassMethodArgsFixture";
 Method OnBeforeOneTest() As %Status
 {
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 
@@ -26,6 +27,7 @@ Method OnBeforeOneTest() As %Status
 Method OnAfterOneTest() As %Status
 {
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Try {
         Do ##class(%Library.Device).ReDirectIO(0)
     } Catch {}
@@ -483,9 +485,12 @@ Method TestCaptureThroughDispatch() As %Status
 }
 
 /// AC 34.2.6/R2: a target that writes past the platform's long-string ceiling raises
-/// <MAXSTRING> from the capture concatenation itself. InvokeWithArgs must catch it,
-/// set truncated=1, and still return $$$OK (partial success, never a silent partial
-/// and never an opaque generic error).
+/// <MAXSTRING> from the capture concatenation itself. Since the Story 34.3 34-2-R1 fix
+/// that is absorbed at Command.cls's Redirects() labels (which discriminate on
+/// <MAXSTRING> and re-throw anything else) and recorded in %ExecuteMCPTruncated;
+/// InvokeWithArgs ORs that flag into pTruncated. Either way the contract asserted here is
+/// unchanged: truncated=1 and still $$$OK (partial success, never a silent partial and
+/// never an opaque generic error).
 Method TestMaxStringTruncation() As %Status
 {
     Set %ExecuteMCPOutput = ""
@@ -504,6 +509,34 @@ Method TestMaxStringTruncation() As %Status
     Do $$$AssertStatusOK(tSC, "a <MAXSTRING> capture overflow should be a partial success, not an error")
     Do $$$AssertTrue(tTruncated, "truncated flag should be set")
     Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > 1000000, "a large partial capture should still be preserved")
+    Kill %ExecuteMCPOutput
+    Quit $$$OK
+}
+
+/// 34-2-R1 TERMINAL disposition (Story 34.3): a capture <MAXSTRING> that the TARGET's own
+/// Try/Catch would previously have swallowed must still surface as truncated:true — the
+/// exact silent-partial shape the ledger item reported (deferred from the 34.2 review).
+/// Proven by Command.cls's Redirects() labels now absorbing the MAXSTRING internally
+/// (setting %ExecuteMCPTruncated) instead of letting it propagate as an exception at all,
+/// so the target's own Try/Catch never even sees it — the target runs to completion.
+Method TestMaxStringSwallowedByTargetTryCatchStillObservable() As %Status
+{
+    Set %ExecuteMCPOutput = ""
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetWriteHugeSwallowsOwnErrors", "", .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Do $$$AssertStatusOK(tSC, "a target whose own Try/Catch would swallow the capture MAXSTRING must still succeed")
+    Do $$$AssertEquals(tReturn, "wrote-huge-swallowed", "the target must run to completion — it never sees the capture-buffer exception at all")
+    Do $$$AssertTrue(tTruncated, "34-2-R1: truncation must be observable even when the target's own Try/Catch would have swallowed the underlying MAXSTRING")
     Kill %ExecuteMCPOutput
     Quit $$$OK
 }

@@ -173,16 +173,48 @@ ClassMethod TargetWriteTwoLines() As %String
     Quit "wrote"
 }
 
-/// Writes a very large amount of output via successive Write calls, past the
-/// platform's long-string ceiling — for AC 34.2.6/R2's <MAXSTRING> boundary test.
+/// Writes a very large amount of output via repeated FIXED-size Write calls, past the
+/// platform's long-string ceiling — for AC 34.2.6/R2's <MAXSTRING> boundary test. Writes
+/// the SAME fixed-size chunk repeatedly (never doubles a local) so only the capture
+/// buffer (<code>%ExecuteMCPOutput</code>) can overflow. A doubling local, by contrast,
+/// risks tripping its OWN independent <MAXSTRING> around iteration ~21-22 — after the
+/// Story 34.3 <method>ExecuteMCPv2.REST.Command</method>.<method>Redirects</method> fix
+/// (ledger item 34-2-R1), a capture overflow no longer aborts the target at all, so the
+/// old doubling design would instead run to completion and then hit the LOCAL's own
+/// <MAXSTRING> — a genuine target error, not the capture-overflow path this fixture
+/// exists to exercise (Story 34.3 rework).
 ClassMethod TargetWriteHuge() As %String
 {
-    Set tChunk = "X"
-    For i=1:1:30 {
-        Set tChunk = tChunk _ tChunk
+    Set tChunk = $Translate($Justify("", 5000), " ", "X")
+    For i=1:1:1000 {
         Write tChunk
     }
-    Quit "never-reached"
+    Quit "wrote-huge"
+}
+
+/// Same capture-overflow shape as <method>TargetWriteHuge</method>, but wraps each
+/// <code>Write</code> in the TARGET's OWN <code>Try/Catch</code> that swallows any
+/// exception — the exact shape ledger item 34-2-R1 reported: before the Story 34.3
+/// <method>Redirects</method> fix, a capture <MAXSTRING> propagated THROUGH
+/// <code>Write</code> and could be absorbed by a target's own exception handling before
+/// <method>ExecuteMCPv2.Utils</method>.<method>InvokeWithArgs</method>'s dispatch
+/// <code>Catch</code> ever saw it, producing a silent partial (<var>truncated</var>
+/// staying <code>false</code>) even though output was genuinely cut off. After the fix,
+/// the capture buffer's own <MAXSTRING> never reaches <code>Write</code>'s caller at all
+/// (<method>Redirects</method> absorbs it at the label and records
+/// <var>%ExecuteMCPTruncated</var>), so it is unconditionally observable regardless of
+/// what the target does with an exception that never arrives.
+ClassMethod TargetWriteHugeSwallowsOwnErrors() As %String
+{
+    Set tChunk = $Translate($Justify("", 5000), " ", "X")
+    For i=1:1:1000 {
+        Try {
+            Write tChunk
+        } Catch {
+            ; Deliberately swallowed — models the reported shape.
+        }
+    }
+    Quit "wrote-huge-swallowed"
 }
 
 /// Writes before/after a nested <code>%SYS.Capture</code> window — for AC 34.2.6/R3's

@@ -27,7 +27,11 @@ export const executeCommandTool: ToolDefinition = {
   title: "Execute Command",
   description:
     "Execute an ObjectScript command on IRIS with captured I/O output. " +
-    "Write statements and other output are captured and returned in the response.",
+    "Write statements and other output are captured and returned in the response's " +
+    "`output` field. The response also includes `truncated` (boolean — true only in " +
+    "the rare case where captured output hit the platform's long-string ceiling " +
+    "mid-command; the call still succeeds with a partial capture, and this never " +
+    "happens silently).",
   inputSchema: z.object({
     command: z
       .string()
@@ -345,12 +349,50 @@ export const executeTestsTool: ToolDefinition = {
 
 // ── iris_execute_classmethod ────────────────────────────────────
 
+/**
+ * Ensure a value is a record suitable for MCP `structuredContent` (never a
+ * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
+ * there is no shared exported version (each server keeps its own copy per
+ * [[feedback_mcp_structured_content]]). The `/classmethod` endpoint always
+ * returns a JSON object today, but every response on this surface is routed
+ * through the same discipline as a matter of policy, not because a concrete
+ * array-shaped response has been observed.
+ */
+function toStructured(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { items: value, count: value.length };
+  }
+  if (value !== null && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return { value };
+}
+
 export const executeClassMethodTool: ToolDefinition = {
   name: "iris_execute_classmethod",
   title: "Execute Class Method",
   description:
     "Invoke an ObjectScript class method by name with optional positional arguments. " +
-    "Returns the method's return value. Supports up to 10 arguments.",
+    "Supports up to 20 arguments. Each entry in `args` is either a plain scalar " +
+    "(string, number, or boolean), passed by value, or a `{byRef: true, value?}` " +
+    "marker object, passed by reference — use this for `ByRef`/`Output` parameters. " +
+    "Omit `value` entirely for Output-style undefined-in (e.g. `{\"byRef\": true}`); " +
+    "`value` may not be JSON null or a non-scalar. The `byRef` flag controls only " +
+    "whether the position's post-call value is reported back in `byRefValues` — every " +
+    "position is bound by reference to the target regardless of the flag, so " +
+    "`byRef: false` does not protect a plain scalar argument from being mutated by a " +
+    "target that happens to assign it; it only means that mutation is not read back. " +
+    "The response's `returnValue` and `argCount` fields are unchanged from prior " +
+    "versions of this tool. Additively, the response also includes `output` (any text " +
+    "the target wrote to the current device via Write during the call — no wrapper " +
+    "class is needed for methods that narrate, run stock tools like " +
+    "%UnitTest.Manager.RunTest, or switch namespace mid-execution), `byRefValues` (an " +
+    "object keyed by zero-based position index, present only for marked positions whose " +
+    "target-side local ended up defined — a plain scalar out-value is the raw value, " +
+    "and an idiomatic subscripted Output array is a nested {value?, subscripts?} " +
+    "object), and `truncated` (boolean — true only in the rare case where captured " +
+    "output hit the platform's long-string ceiling mid-call; the call still succeeds " +
+    "with a partial capture, and this never happens silently).",
   inputSchema: z.object({
     className: z
       .string()
@@ -360,8 +402,17 @@ export const executeClassMethodTool: ToolDefinition = {
       .describe("Name of the class method to invoke"),
     args: z
       .array(z.any())
+      .max(20)
       .optional()
-      .describe("Positional arguments as a JSON array (max 10). Strings, numbers, and booleans are supported (e.g., [\"hello\", 42, true])."),
+      .describe(
+        "Positional arguments as a JSON array (max 20). Each entry is either a plain " +
+          "scalar — string, number, or boolean, passed by value (e.g. [\"hello\", 42, " +
+          "true]) — or a {byRef: true, value?} marker object for a ByRef/Output " +
+          "parameter, whose post-call value is returned in the response's byRefValues " +
+          "(e.g. [{\"byRef\": true}, {\"byRef\": true, \"value\": \"start\"}]). A " +
+          "marker's value may be omitted (undefined-in, the Output pattern) but not " +
+          "JSON null, and must be a scalar, not an object or array.",
+      ),
     namespace: z
       .string()
       .optional()
@@ -402,7 +453,7 @@ export const executeClassMethodTool: ToolDefinition = {
         content: [
           { type: "text", text: JSON.stringify(result, null, 2) },
         ],
-        structuredContent: result,
+        structuredContent: toStructured(result),
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
