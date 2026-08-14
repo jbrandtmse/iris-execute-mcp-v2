@@ -1876,3 +1876,50 @@ Findings from the Story 33.5 review (executed reviewer-direct; all three spawned
 | 33-5-R1 | TOML merge-update splices LF-only lines into a CRLF file | LOW | `tomlMergeUpdate`'s replacement/insert span lines carry no `\r`, diluting a CRLF `config.toml` to mixed line endings around the touched spans (probe 2026-07-28: `command`/`args`/env-block lines LF, untouched lines CRLF). Same class and root cause as 33-1-R2 (set-flag) but a different op, so 33-1-R2's scope does not cover it. Parseable (TOML tolerates mixed endings; the post-write re-parse safety net passes); cosmetic only, and Codex's own writes are LF, so real exposure is hand-edited CRLF files. | Carry the matched line's terminator through the merge-update spans — fold into the 33-1-R2 fix (one terminator-aware line model for every TOML splice op). |
 | 33-5-R2 | merge-update drops comments on CHANGED managed lines / inside a CHANGED env table | LOW | Post-review-patch, UNCHANGED managed lines and an unchanged env table are byte-exact (spans skipped) — but when a value genuinely changes, the whole line (command/args) or the whole env sub-table is re-rendered, dropping a trailing comment on that line and interior comments inside that table (probe 2026-07-28). The completion note's "comments stay byte-exact" holds only for untouched regions; values stay correct and the file parses. | Re-attach the trailing comment on single-line command/args replacements (a `#`-outside-string scan of the old line); render the env sub-table as per-key spans (the JSONC per-key discipline) instead of a whole-table re-render. |
 
+## Epic 34 retro-review gate (2026-08-14)
+
+The `/epic-cycle 34` kickoff retro-review gate read the Epic 33 retrospective (`epic-33-retro-2026-07-28.md`) and this ledger, via Story 34.0's triage table (`34-0-epic-33-deferred-cleanup.md`). Carried-open items entering the gate: the full Epic-33 ledger, **17 LOW items, all in `@iris-mcp/client-config`** — 33-1-R1..R4 (engine-level, from the 33-1-write-engine review) and 33-5-L1..L11 + 33-5-R1..R2 (from the 33-5 late-findings-cleanup batch). Every one of these 17 is on its **first** deferral entering this gate (per the 2026-07-28 ledger notes above, each carried batch was recorded "re-deferral count 0 (first carry)").
+
+**Decision: all 17 RE-DEFERRED — first re-deferral, Rule #37 count = 1.** Rationale:
+
+- **Epic 34 is disjoint in scope.** Its two stories touch `ExecuteMCPv2.REST.Command` (an ObjectScript REST handler) and the `iris_execute_classmethod` TS tool in `@iris-mcp/dev`, plus Story 34.0's own review-skill/doc changes (`.claude/skills/bmad-code-review/steps/*.md`, this file, `.claude/rules/project-rules.md`). None of these overlaps `packages/client-config/**`, the package every one of the 17 items lives in.
+- Per Rule #37, re-deferral is valid at count 1 (only a 3rd CONSECUTIVE re-deferral mandates a dedicated burn-down story); this is the first re-deferral for all 17, well below that threshold.
+- **No colliding Story X.0** for the 17-item ledger — Story 34.0 is itself a review-skill/doc cleanup story (Rule #57 implementation, retro action item #5), not a `@iris-mcp/client-config` burn-down. The Epic-34 slot for that burn-down, if the count reaches 3, would be seeded at a future gate.
+
+| # | Item | Severity | Disposition |
+|---|------|----------|-------------|
+| 33-1-R1 | Stale stash record survives an already-in-state enable no-op | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope; see rationale above. |
+| 33-1-R2 | CRLF TOML `set-flag` splices LF-only lines | LOW | **RE-DEFERRED** (count 1) — pairs with 33-5-R1 (same root cause); out of Epic 34 scope. |
+| 33-1-R3 | Comments inside a manager-owned JSONC entry not stash-round-tripped | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-1-R4 | Backup names collide within the same millisecond | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L1 | Native-flag strict-equality (`disabled: 1` reads enabled) | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L2 | Tests shipped in dist | LOW | **RE-DEFERRED** (count 1) — suite-wide convention decision, not a per-package fix; out of Epic 34 scope. |
+| 33-5-L3 | Proof-surface gaps: spy coverage, marker sweep | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L4 | Shareable pin forces codex `shareable: true` | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L5 | Duplicate JSON keys: first-vs-last wins | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L6 | Non-object canonical value invisible | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L7 | appDir platform-completeness pin | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L8 | TOML top-not-object branch unreachable | LOW | **RE-DEFERRED** (count 1) — Rule #54-adjacent; decide at the next `readers.ts` touch, which Epic 34 does not make. |
+| 33-5-L9 | certify: rung-2 unexercised; flags Set-as-map; excerpt truncation; `--skip-agent` ignored for claude | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L10 | certify: no mutual exclusion; timedOut unconsumed; dangling symlink | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-L11 | doctor `$$` false positive; walkEntry recursion | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+| 33-5-R1 | TOML merge-update splices LF-only lines into a CRLF file | LOW | **RE-DEFERRED** (count 1) — pairs with 33-1-R2; out of Epic 34 scope. |
+| 33-5-R2 | merge-update drops comments on CHANGED managed lines / env table | LOW | **RE-DEFERRED** (count 1) — out of Epic 34 scope. |
+
+**Disposition tally:** 0 resolved · 0 closed-with-evidence · 0 closed-by-decision · **17 re-deferred**. (17 items total; mechanically recounted from the disposition column at this gate, per Rule #51.)
+
+### Epic 33 retrospective action items — disposition at this gate
+
+Full triage recorded in `34-0-epic-33-deferred-cleanup.md`'s "Retro-Review Triage" table (23 items: 1 include, 21 defer, 1 drop — the 17 ledger rows above plus 6 retro action items). Summary: **#5 (Rule #57 implementation) INCLUDED as Story 34.0** — this story; #2 (AC 33.3.4 GUI smoke) DROPPED as already done; #1, #3, #4, #6 DEFERRED (Project Lead decisions / external dependencies, orthogonal to Epic 34).
+
+**Carried into the next retro-review gate:** all 17 items above, **re-deferral count after Epic 34: 1**. **Rule #37 watch:** a re-defer at the next gate would be the 2nd consecutive for this batch — still below the ≥3-consecutive burn-down threshold.
+
+## Deferred from: code review of 34-0-epic-33-deferred-cleanup (2026-08-14)
+
+Epic-34-own findings from the Story 34.0 review. **All three review layers DELIVERED within the 20-minute hard window** (Blind Hunter, Edge Case Hunter, Acceptance Auditor) — the first non-degraded 3-layer close since Epic 32, and live evidence that this story's own bounded-close gate works. **2 HIGH / 6 MEDIUM / 3 LOW raised · 2 HIGH + 6 MEDIUM + 1 LOW patched in-review · 2 LOW deferred · 0 decision-needed · 0 dismissed.** Re-deferral count 0 (first carry). Both carried items are in the review skill itself (`.claude/skills/bmad-code-review/steps/`), not in `packages/**`.
+
+| # | Finding | Location | Severity | Deferral rationale | Suggested resolution |
+|---|---------|----------|----------|--------------------|----------------------|
+| 34-0-R1 | `{review_degraded}` and `{failed_layers}` have no durable persistence during the wait window | `.claude/skills/bmad-code-review/steps/step-02-review.md` (frontmatter + instruction 3) | LOW | Raised by the Edge Case Hunter. These are in-context pseudo-variables that exist only in the runner's working state between step-02 instruction 2 and step-04's write. If the orchestrating session is interrupted, compacted, or restarted during the (potentially 20-minute) wait, the degraded/failed-layer state is lost with no recovery instruction — the review would silently restart from a clean slate. Deferred because the mitigation is architectural (the whole skill is LLM-executed prompt state with no checkpointing anywhere), the blast radius is a re-run rather than a wrong close, and a partial fix for this one variable would imply a durability guarantee the surrounding design does not provide. | Have step-02 instruction 3 write the accounting to a small sidecar (e.g. `review-state-{key}-{run}.json` beside the diff snapshot, same `.gitignore` pattern) as each layer is classified, and have step-04 read it back rather than relying on carried context. Decide it as one piece with any future checkpointing of the skill's other runtime variables. |
+| 34-0-R2 | `{story_key}` is never discovered on the invocation-text branch of step-01 instruction 1 | `.claude/skills/bmad-code-review/steps/step-01-gather-context.md` instruction 1 | LOW | Raised by the Blind Hunter, confirmed live. When the review mode is matched from the invocation text (the common case), instruction 1 announces the mode and skips ahead to instruction 4 — never running the sprint-status scan that is the only place `{story_key}` is set. Consequence: step-04's sprint-status sync self-skips ("If `{story_key}` is not set, skip this subsection"), so the story's status is updated in the story file but never in `sprint-status.yaml` unless the caller supplies the key explicitly (as this review's caller did). **Pre-existing** — not introduced by Story 34.0; the story only added a second consumer of the variable, and that consumer now has a well-defined `unkeyed` fallback. Deferred as out of this story's scope. | In instruction 1's invocation-text branch, still consult the sprint status file to resolve `{story_key}` before skipping to instruction 4 — match on the detected story or on a single `review`-status story — so sprint sync works on the common path rather than only when a key is passed in by hand. |
+

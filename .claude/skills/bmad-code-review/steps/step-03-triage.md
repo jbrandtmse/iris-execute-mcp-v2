@@ -39,9 +39,11 @@
 
 4. **Drop** all `dismiss` findings. Record the dismiss count for the summary.
 
-5. If `{failed_layers}` is non-empty, report which layers failed before announcing results. If zero findings remain after dropping dismissed AND `{failed_layers}` is non-empty, warn the user that the review may be incomplete rather than announcing a clean review.
+5. If `{failed_layers}` is non-empty, report which layers failed before announcing results. If zero findings remain after dropping dismissed AND `{failed_layers}` is non-empty, warn the user that the review may be incomplete rather than announcing a clean review. This is the review-visible half of the DEGRADED outcome; `{review_degraded}` itself was already set in step-02 instruction 3 and is NOT recomputed here — pass it through unchanged to step-04, which uses it as a hard gate on the `done` status decision (AC 34.0.3/34.0.4). Do not let this step's wording, or a zero-findings result, imply a clean, non-degraded close when `{review_degraded}` = `true`.
 
-6. If zero findings remain after triage (all rejected or none raised): state "✅ Clean review — all layers passed." (Step 3 already warned if any review layers failed via `{failed_layers}`.)
+6. If zero findings remain after triage (all rejected or none raised): state "✅ Clean review — all layers passed." **ONLY if `{review_degraded}` = `false`.** If `{review_degraded}` = `true`, do NOT use this "clean" wording even with zero findings — instead state that the review is DEGRADED (name the failed layers from `{failed_layers}`) and that zero findings reflects only the layers that returned, not a full pass. (Instruction 5 already warned if any review layers failed via `{failed_layers}`; this instruction is what stops that warning from being overridden by a "Clean review" headline.)
+
+**Back-compat (AC 34.0.5):** when `{review_degraded}` = `false` (the ordinary case — every launched layer delivered), instructions 5 and 6 behave exactly as they did before this story's changes.
 
 
 ## NEXT

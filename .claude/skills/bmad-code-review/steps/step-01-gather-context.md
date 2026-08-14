@@ -1,5 +1,6 @@
 ---
 diff_output: '' # set at runtime
+diff_snapshot_path: '' # set at runtime — path to the frozen diff snapshot written at the end of instruction 3 (AC 34.0.2)
 spec_file: '' # set at runtime (path or empty)
 review_mode: '' # set at runtime: "full" or "no-spec"
 story_key: '' # set at runtime when discovered from sprint status
@@ -11,7 +12,7 @@ story_key: '' # set at runtime when discovered from sprint status
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
 - The prompt that triggered this workflow IS the intent — not a hint.
-- Do not modify any files. This step is read-only.
+- This step is read-only with ONE sanctioned exception: instruction 3's final action writes the frozen `{diff_output}` snapshot to `{diff_snapshot_path}`. That write exists solely to freeze the reviewed diff so later layers can never review a stale, since-patched tree (Rule #57 FROZEN-DIFF) — it is not a license to modify, format, or otherwise touch the code under review, which stays strictly read-only.
 
 ## INSTRUCTIONS
 
@@ -41,6 +42,11 @@ story_key: '' # set at runtime when discovered from sprint status
    - For **provided diff**: validate the content is non-empty and parseable as a unified diff. If it is not parseable, HALT and ask the user to provide a valid diff.
    - For **file list**: validate each path exists in the working tree. Construct `{diff_output}` by running `git diff HEAD -- <path1> <path2> ...`. If any paths are untracked (new files not yet staged), use `git diff --no-index /dev/null <path>` to include them. If the diff is empty (files have no uncommitted changes and are not untracked), ask the user whether to review the full file contents or to specify a different baseline.
    - After constructing `{diff_output}`, verify it is non-empty regardless of source type. If empty, HALT and tell the user there is nothing to review.
+   - **Freeze the diff (AC 34.0.2).** Once `{diff_output}` is confirmed non-empty, persist it verbatim to a snapshot file so every review layer in step-02 reads the identical frozen content no matter when it returns. Compute the path as `{implementation_artifacts}/review-diff-snapshot-{key}-{run}.diff`, where `{key}` is `{story_key}` if it is set, otherwise `unkeyed`, and `{run}` is the current UTC timestamp as `YYYYMMDD-HHMMSS`. Write `{diff_output}` to that path exactly as constructed, and set `{diff_snapshot_path}` to the path written. This is the ONE sanctioned file write of this step (see RULES) — its purpose is to freeze the diff under review, never to change it.
+     - **The `{run}` component is required, not decorative.** A DEGRADED close routes the story back to `in-progress`, and step-04 section 7 offers "Re-run code review" — so a second review of the SAME `{story_key}` is an ordinary path. Without the per-run suffix, that second run overwrites the first run's snapshot in place, and any still-outstanding layer from the first run that re-reads `{diff_snapshot_path}` would silently review the NEW diff. That would defeat FROZEN-DIFF in exactly the late-return scenario it exists for. Never reuse or overwrite an existing snapshot path.
+     - **Never assume `{story_key}` is set here.** It is populated only on instruction 1's sprint-status branch; when the review mode was matched from the invocation text, instruction 1 skips ahead and `{story_key}` stays empty. The `unkeyed` fallback keeps the write well-defined either way.
+     - **Retention:** the snapshot is a disposable review artifact, not a deliverable. It is excluded from version control via the `review-diff-snapshot-*.diff` pattern in `.gitignore`, so it must never appear as a file to commit at the lead's commit gate, and must never be picked up as content by a later review's `{diff_output}`. Leave it in place for the duration of the review (a late-returning layer may still be reading it); step-04 handles disposal.
+   - **Back-compat (AC 34.0.5):** this snapshot step is purely additive. It does not change how `{diff_output}` is constructed, validated, or presented — it only adds a second, frozen copy for the layers to consume in step-02.
 
 4. Ask the user: **Is there a spec or story file that provides context for these changes?**
    - If yes: set `{spec_file}` to the path provided, verify the file exists and is readable, then set `{review_mode}` = `"full"`.
