@@ -25,3 +25,11 @@ Notes for this run:
 2026-08-14T03:35:00Z	Story 34.1	qa_complete	spawn_at=2026-08-14T02:57:00Z model=claude-sonnet-5 tests_added=0 tier=independent_live_reverification findings_reverified=5 findings_corrected=1 first_run_failures=0 closing_sections_present=true
 2026-08-14T04:20:00Z	Story 34.1	cr_complete	spawn_at=2026-08-14T03:37:00Z model=claude-opus-5 resolved=24 deferred=16 dismissed=4 high=7 med=9 low=8 clarifications=0 close_kind=CLEAN layers_delivered=3 closing_sections_present=true
 2026-08-14T04:30:00Z	Story 34.1	smoke_complete	method=other result=pass iterations=1 defects_caught=0 evidence=live_probe_residue_zero_HSCUSTOM+USER_incl_generated+C2_single_int_verified+epics_amendment_confirmed model=claude-opus-5
+2026-08-14T04:32:00Z	Story 34.1	committed	sha=fec48a5 submodules=
+2026-08-14T04:45:00Z	Story 34.2	story_created	path=_bmad-output/implementation-artifacts/34-2-handler-capture-byref-20args.md integration_ac=present_no_consumer_escape_clause_first_consumer_34.3 carried_items=R1,R2,R3,R6,R7,R12
+2026-08-14T05:35:00Z	Story 34.2	dev_complete	spawn_at=2026-08-14T04:47:00Z model=claude-sonnet-5 files=6 tests_added=27 bootstrap_version=6422caf6ec31-to-96f36486cc71 clarifications=0 nfr_tripwires=0 cycle_iteration=1 closing_sections_present=true
+2026-08-14T05:35:30Z	Story 34.2	adr_verifications_complete	result=none_required model=claude-opus-5
+2026-08-14T06:15:00Z	Story 34.2	qa_complete	spawn_at=2026-08-14T05:37:00Z model=claude-sonnet-5 tests_added=11 tests_total=38 package_total=311 first_run_failures=0 defects_found=0 closing_sections_present=true
+2026-08-14T07:10:00Z	Story 34.2	cr_complete	spawn_at=2026-08-14T06:17:00Z model=claude-opus-5 resolved=12 deferred=10 dismissed=5 high=4 med=8 low=0 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=96f36486cc71-to-b514009cf654 tests_total=48 closing_sections_present=true
+2026-08-14T07:10:30Z	Epic 34	log_correction	note=story_34.2_dev_complete_entry_said_files=6_actual_was_8_incl_2_new_test_classes_rule51
+2026-08-14T07:20:00Z	Story 34.2	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=live_iris_execute_classmethod_3_calls_write+metachars_unicode_ctrl+zn_mid_execution_all_clean_json model=claude-opus-5

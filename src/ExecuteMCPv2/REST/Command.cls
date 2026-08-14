@@ -113,15 +113,31 @@ ClassMethod Execute() As %Status
     Quit tSC
 }
 
-/// Execute a class method by name with positional arguments.
+/// Invoke a class method by name with positional arguments and captured I/O output.
 /// <p>Reads a JSON body with <code>className</code>, <code>methodName</code>,
-/// optional <code>args</code> (JSON array of positional parameters), and
-/// optional <code>namespace</code>. Uses <code>$ClassMethod()</code> for
-/// dynamic invocation, supporting up to 10 arguments.</p>
+/// optional <code>args</code> (JSON array of up to 20 positional parameters — a plain
+/// scalar is passed by value; a <code>{byRef, value?}</code> marker object is passed
+/// by reference and its post-call value is returned in the additive
+/// <code>byRefValues</code> field, keyed by zero-based index), and optional
+/// <code>namespace</code>. Uses <code>$ClassMethod()</code> for dynamic invocation.
+/// Argument parsing, marker handling, and the 20-argument dispatch ladder live in
+/// <method>InvokeWithArgs</method> on <class>ExecuteMCPv2.Utils</class> — kept out of
+/// this routine so the 21-branch ladder cannot push <method>ClassMethod</method> into a
+/// separately generated <c>.int</c> from <method>Redirects</method> below (Story 34.1
+/// Constraint C-2: <code>$ZNAME</code> binds the currently executing routine, and the
+/// mnemonic entry points must live in that same routine).</p>
+/// <p>Captures <code>Write</code> output from the target via the same null-device
+/// redirect pattern as <method>Execute</method> above (see its comment for why the
+/// redirect must bind on a throw-away null device rather than <code>$IO</code>), and
+/// returns it in the additive <code>output</code> field. An additive
+/// <code>truncated</code> boolean flags the case where the captured output hit the
+/// platform's long-string ceiling mid-target-execution (AC 34.2.6/R2) — the response
+/// still succeeds, with whatever was captured/mutated before the limit.</p>
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
+    Set tRedirected = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -152,43 +168,41 @@ ClassMethod ClassMethod() As %Status
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
-        ; Determine argument count
-        Set tArgCount = 0
-        If $IsObject(tArgs) Set tArgCount = tArgs.%Size()
+        ; Set up I/O redirect to capture Write output via a SEPARATE null device — see
+        ; Execute()'s comment above for why this must never bind on $IO. The mnemonic
+        ; entry points (Redirects(), below) must stay compiled into this SAME routine
+        ; (Story 34.1 Constraint C-2) for "^"_$ZNAME to resolve them; verified after
+        ; every compile in this story via iris_doc_list(generated=true).
+        Set %ExecuteMCPOutput = ""
+        Set tInitIO = $IO
+        Set tNull = ##class(%Library.Device).GetNullDevice()
+        Open tNull:::1
+        Use tNull::("^"_$ZNAME)
+        Set tRedirected = 1
+        Do ##class(%Library.Device).ReDirectIO(1)
 
-        ; Call $ClassMethod with the appropriate number of arguments (up to 10)
-        If tArgCount = 0 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName)
-        } ElseIf tArgCount = 1 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0))
-        } ElseIf tArgCount = 2 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1))
-        } ElseIf tArgCount = 3 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2))
-        } ElseIf tArgCount = 4 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3))
-        } ElseIf tArgCount = 5 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4))
-        } ElseIf tArgCount = 6 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5))
-        } ElseIf tArgCount = 7 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6))
-        } ElseIf tArgCount = 8 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7))
-        } ElseIf tArgCount = 9 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7), tArgs.%Get(8))
-        } ElseIf tArgCount = 10 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7), tArgs.%Get(8), tArgs.%Get(9))
-        } Else {
-            Set $NAMESPACE = tOrigNS
-            Set tSC = $$$ERROR($$$GeneralError, "Too many arguments: maximum is 10, received " _ tArgCount)
+        ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
+        ; ladder all live in Utils (keeps this routine small — see method banner).
+        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+
+        ; Restore the original I/O state — same discipline as Execute() (Rule #7):
+        ; disable redirect, switch back to the untouched initial device, close the
+        ; scratch null device, unconditionally and before rendering.
+        Do ##class(%Library.Device).ReDirectIO(0)
+        Use tInitIO
+        Close tNull
+        Set tRedirected = 0
+        Set tOutput = $Get(%ExecuteMCPOutput, "")
+        Kill %ExecuteMCPOutput
+
+        ; Restore namespace before rendering response
+        Set $NAMESPACE = tOrigNS
+
+        If $$$ISERR(tSC) {
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
             Set tSC = $$$OK
             Quit
         }
-
-        ; Restore namespace before rendering response
-        Set $NAMESPACE = tOrigNS
 
         ; Build result — convert return value to string for JSON transport
         ; Guard against OREF return values that cannot be serialized to JSON
@@ -200,8 +214,20 @@ ClassMethod ClassMethod() As %Status
         Set tResult = {}
         Do tResult.%Set("returnValue", tReturnStr)
         Do tResult.%Set("argCount", tArgCount, "number")
+        Do tResult.%Set("output", tOutput)
+        Do tResult.%Set("byRefValues", tByRefValues)
+        Do tResult.%Set("truncated", tTruncated, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
+        ; Ensure redirection is restored on unexpected error before rendering.
+        Try {
+            If tRedirected {
+                Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
+                If $Get(tNull) '= "" { Close tNull }
+            }
+        } Catch {}
+        Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
