@@ -60,3 +60,5 @@ Notes for this run:
 2026-08-15T02:35:00Z	Story 34.5	qa_complete	spawn_at=2026-08-15T02:00:00Z model=claude-sonnet-5 tests_added=3 tests_total=50 package_dev_tests=632 defects_found=1_root_cause_of_34-4-R10 defects_fixed=1 mutation_verified=true closing_sections_present=true
 2026-08-15T04:00:00Z	Story 34.5	cr_complete	spawn_at=2026-08-15T02:40:00Z model=claude-opus-5 resolved=6 deferred=5 dismissed=8 high=1 clarifications=0 close_kind=CLEAN layers_delivered=3 dev_tests=638 closing_sections_present=true
 2026-08-15T04:15:00Z	Story 34.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=dev_default_suite_638of638_38_files_0_skipped model=claude-opus-5
+2026-08-15T04:20:00Z	Story 34.5	committed	sha=d8a8159 submodules=
+2026-08-15T04:20:30Z	Epic 34	epic_status_done	stories=6
