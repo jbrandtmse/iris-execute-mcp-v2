@@ -51,3 +51,5 @@ Notes for this run:
 2026-08-14T14:45:00Z	Story 34.4	cr_complete	spawn_at=2026-08-14T13:47:00Z model=claude-opus-5 resolved=14 deferred=9 dismissed=5 high=3 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=d7adf516d912-to-34233b5c9f63 closing_sections_present=true
 2026-08-14T14:45:30Z	Epic 34	log_correction	note=call_site_count_745_was_hand_summed_mechanical_count_is_738_rule51
 2026-08-14T15:00:00Z	Story 34.4	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=epic_gate_6of6_0skipped+live_cross_handler_Global_Task_Analytics_Health_Monitor model=claude-opus-5
+2026-08-14T15:05:00Z	Story 34.4	committed	sha=2444ec3 submodules=
+2026-08-14T15:05:30Z	Epic 34	epic_status_done	stories=5
