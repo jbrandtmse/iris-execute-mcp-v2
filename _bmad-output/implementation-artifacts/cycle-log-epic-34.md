@@ -44,3 +44,4 @@ Notes for this run:
 2026-08-14T11:00:00Z	Epic 34	post_reload_smoke	result=pass method=live_mcp_tool checks=8 evidence=output_marker+subscript_encoding+20args+reject_nonmarker+second_ns_USER+metachars_unicode+command_backcompat+21arg_boundary model=claude-opus-5
 2026-08-14T11:30:00Z	Epic 34	epic_branch_reopened	reason=project_lead_escalation_34-2-R3_34-3-R1_34-3-R4 from=existing_unmerged_epic34_no_recreation_needed
 2026-08-14T11:30:30Z	Epic 34	correct_course_complete	proposal=_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-14-story-34-4.md scope=MODERATE approved_by=user
+2026-08-14T11:45:00Z	Story 34.4	story_created	path=_bmad-output/implementation-artifacts/34-4-response-integrity-gate-durability.md integration_ac=not_applicable_hardening design=base_class_reparent_15_handlers_lead_decision

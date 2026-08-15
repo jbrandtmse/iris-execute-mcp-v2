@@ -538,5 +538,5 @@ development_status:
   34-1-classmethod-invocation-probe: done
   34-2-handler-capture-byref-20args: done
   34-3-ts-tool-docs-smokes: done
-  34-4-response-integrity-gate-durability: backlog
+  34-4-response-integrity-gate-durability: ready-for-dev
   epic-34-retrospective: optional
