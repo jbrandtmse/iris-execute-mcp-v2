@@ -8,7 +8,9 @@ const root = resolve(__dirname, '..');
 
 // Classes in compilation order: Utils first (no deps), then Setup (depends on Utils),
 // then the Diagram library (models first; facade referenced by REST/Interop.cls),
-// then handlers (depend on Utils), then Dispatch last (references all handlers in UrlMap)
+// then REST/Base.cls (Story 34.4 — must precede every class extending it), then
+// handlers (depend on Utils, and — since Story 34.4 — on REST/Base.cls),
+// then Dispatch last (references all handlers in UrlMap)
 const classes = [
   { name: 'ExecuteMCPv2.Utils.cls', path: 'src/ExecuteMCPv2/Utils.cls' },
   { name: 'ExecuteMCPv2.Setup.cls', path: 'src/ExecuteMCPv2/Setup.cls' },
@@ -22,6 +24,7 @@ const classes = [
   { name: 'ExecuteMCPv2.Loc.Classifier.cls', path: 'src/ExecuteMCPv2/Loc/Classifier.cls' },
   { name: 'ExecuteMCPv2.Loc.Scanner.cls', path: 'src/ExecuteMCPv2/Loc/Scanner.cls' },
   { name: 'ExecuteMCPv2.Loc.Generate.cls', path: 'src/ExecuteMCPv2/Loc/Generate.cls' },
+  { name: 'ExecuteMCPv2.REST.Base.cls', path: 'src/ExecuteMCPv2/REST/Base.cls' },
   { name: 'ExecuteMCPv2.REST.Global.cls', path: 'src/ExecuteMCPv2/REST/Global.cls' },
   { name: 'ExecuteMCPv2.REST.Command.cls', path: 'src/ExecuteMCPv2/REST/Command.cls' },
   { name: 'ExecuteMCPv2.REST.UnitTest.cls', path: 'src/ExecuteMCPv2/REST/UnitTest.cls' },

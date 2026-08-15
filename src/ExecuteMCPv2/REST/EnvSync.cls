@@ -23,7 +23,7 @@
 /// does NOT work</b> — probed live and confirmed it throws
 /// <code>&lt;ILLEGAL VALUE&gt;</code> (not a valid $ZCONVERT output code on this
 /// instance); do not use it despite it being a plausible-looking alternative.</p>
-Class ExecuteMCPv2.REST.EnvSync Extends %Atelier.REST
+Class ExecuteMCPv2.REST.EnvSync Extends ExecuteMCPv2.REST.Base
 {
 
 /// Document-hash endpoint: SHA-256 content hash + last-modified timestamp per

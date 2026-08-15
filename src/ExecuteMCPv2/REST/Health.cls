@@ -10,7 +10,7 @@
 /// (Story 23.0). This class returns <b>raw per-area values only</b>; ALL threshold/verdict
 /// logic lives in TypeScript (<code>iris_health_check</code>, Story 23.2), per
 /// architecture.md ADR H5 (server-side composition, TS-side interpretation).</p>
-Class ExecuteMCPv2.REST.Health Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Health Extends ExecuteMCPv2.REST.Base
 {
 
 /// Composite health-check endpoint: gathers all requested health areas in

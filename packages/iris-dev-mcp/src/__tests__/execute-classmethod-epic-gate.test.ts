@@ -244,4 +244,94 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
     },
     { timeout: 30000 },
   );
+
+  // ── Story 34.4 (AC 34.4.3 / 34-3-R4): AC 34.3.4 legs (b) Output-param, (c)
+  // 20-arg, and (d) second-namespace joining leg (a) above in this DEFAULT-suite
+  // file. Before this story these three legs lived ONLY in
+  // `custom-rest.integration.test.ts`, which `vitest.config.ts` excludes from the
+  // default `vitest run` (and `turbo.json`'s `test` task never invokes
+  // `test:integration`) — so three-quarters of AC 34.3.4 carried the same
+  // zero-protection property the Story 34.3 review rated HIGH for leg (a) alone.
+  // Assertions ported verbatim from `custom-rest.integration.test.ts` (Rule #36 —
+  // do not re-derive expected values). ─────────────────────────────────────────
+
+  it(
+    "leg (b) — an Output-param method returns its post-call value via byRefValues (AC 34.3.4b)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg b): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const result = await executeClassMethodTool.handler(
+        {
+          className: FIXTURE,
+          methodName: "TargetOutput",
+          args: [{ byRef: true }],
+        },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as {
+        byRefValues: Record<string, unknown>;
+      };
+      // wasUndef=1 confirms the Output parameter arrived genuinely undefined-in.
+      expect(structured.byRefValues["0"]).toBe("output-set-wasUndef1");
+    },
+    { timeout: 30000 },
+  );
+
+  it(
+    "leg (c) — a 20-argument call dispatches and reads back every position (AC 34.3.4c)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg c): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const markers = Array.from({ length: 20 }, (_, i) => ({
+        byRef: true,
+        value: `v${i}`,
+      }));
+      const result = await executeClassMethodTool.handler(
+        { className: FIXTURE, methodName: "Target20", args: markers },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as {
+        returnValue: string;
+        byRefValues: Record<string, unknown>;
+      };
+      expect(structured.returnValue).toBe("20-ok");
+      expect(structured.byRefValues["0"]).toBe("v0-m");
+      expect(structured.byRefValues["19"]).toBe("v19-m");
+    },
+    { timeout: 30000 },
+  );
+
+  it(
+    "leg (d) — iris_execute_classmethod works in a second, genuinely different namespace (Rule #34)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg d): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const result = await executeClassMethodTool.handler(
+        {
+          className: "%SYSTEM.Version",
+          methodName: "GetVersion",
+          namespace: "USER",
+        },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toMatch(/IRIS|20\d{2}\.\d/i);
+    },
+    { timeout: 30000 },
+  );
 });

@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 28 production classes as string literals, keyed by their
+ * Contains all 29 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5ef2df119451";
+export const BOOTSTRAP_VERSION = "34233b5c9f63";
 
 export interface BootstrapClass {
   name: string;
@@ -587,7 +587,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5ef2df119451";
+Parameter BOOTSTRAPVERSION = "34233b5c9f63";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -2935,13 +2935,189 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 }`,
   ],
   [
+    "ExecuteMCPv2.REST.Base.cls",
+    `/// Common base class for <class>ExecuteMCPv2.REST.*</class> handlers.
+/// <p>Every handler in this package previously extended <class>%Atelier.REST</class>
+/// directly and called its inherited <method>RenderResponseBody</method> via the
+/// <code>Do ..RenderResponseBody(...)</code> form, which discards the method's
+/// returned <c>%Status</c> at all 738 call sites across 15 handlers (count derived
+/// mechanically from <code>..RenderResponseBody(</code> occurrences, Rule #51 — the
+/// "745" carried by the story spec was a hand-authored figure). This class
+/// intercepts that single inherited entry point so every one of those call sites is
+/// covered without a single call-site edit (Story 34.4, AC 34.4.1).</p>
+/// <p><b>What the override does.</b> <class>%Atelier.REST</class>'s own
+/// <method>RenderResponseBody</method> interleaves <code>Write</code> calls with
+/// <code>%ToJSON()</code> calls directly against the response device: it writes the
+/// opening brace and the <code>"status"</code> key, then <code>%ToJSON()</code>s the
+/// status part, writes <code>"console"</code>, <code>%ToJSON()</code>s the message
+/// part, writes <code>"result"</code>, <code>%ToJSON()</code>s the result part, then
+/// writes the closing brace. If serialization of the message or result part fails
+/// partway through, everything written so far has already reached the client as an
+/// HTTP 200 with a truncated, invalid JSON body and no error signal — the exact
+/// failure class Epic 34 exists to remove, just triggered from the response-render
+/// path instead of the capture path (deferred-work ledger item <c>34-2-R3</c>).</p>
+/// <p>This override serializes the message and result parts into a throw-away
+/// <class>%Stream.TmpCharacter</class> FIRST, before anything is written to the real
+/// response. If that pre-flight succeeds, nothing has been written yet, so delegating
+/// to <code>##super()</code> reproduces the parent's output byte-for-byte (AC 34.4.4
+/// back-compat). Note the delegation passes the LOCALLY DEFAULTED copies
+/// (<var>tMsgPart</var>/<var>tResPart</var>), never the raw formals — see the
+/// <method>RenderResponseBody</method> comment for why re-referencing an omitted
+/// formal at that call site is a live outage, and why the defaulted copies are
+/// nonetheless byte-equivalent to the parent's own defaulting. If the pre-flight fails,
+/// nothing has been written yet either, so a minimal, guaranteed-serializable error
+/// envelope — built from empty console/result parts and the real pre-flight failure
+/// text (via <method>ExecuteMCPv2.Utils.SanitizeError</method>, Rule #9) — is
+/// substituted instead of a truncated one.</p>
+/// <p><b>Scope limits — what this pre-flight does NOT cover.</b> Stated explicitly so
+/// the guard is not read as broader than it is:</p>
+/// <ul>
+/// <li><b>The status part is not pre-flighted.</b> The parent serializes
+/// <var>pStatus</var> (via <method>StatusToJSON</method>) FIRST, before the console and
+/// result parts. A failure there still yields an empty or <c>{"status":</c>-truncated
+/// body. It is deliberately not guarded: the substitution envelope must itself render a
+/// status through that same path, so pre-flighting it is circular. In practice
+/// <method>StatusToJSON</method> builds a well-formed object from any <c>%Status</c>.</li>
+/// <li><b>Only serializability is proven, not the device write.</b> The pre-flight
+/// serializes into a character stream; the parent writes through the CSP response device
+/// (charset translation, Web-Gateway buffering). A payload that serializes cleanly can
+/// still fail on the device — e.g. a client disconnecting mid-write — and that
+/// <c>%Status</c> is still discarded by the <c>Do</c> call form. This class narrows the
+/// failure class; it does not eliminate it.</li>
+/// </ul>
+/// <p><b>Severity note:</b> <c>34-2-R3</c> has <b>no reachable trigger today</b>. Its
+/// known cause — a value whose JSON serialization outright fails reaching a dynamic
+/// entity — was fixed at the root during the Story 34.2 review. This class is
+/// defense-in-depth: the failure pattern lives in <method>RenderResponseBody</method>
+/// itself, which is shared by every <c>ExecuteMCPv2.REST.*</c> handler, on the payload
+/// surface Epic 34 enlarged the most.</p>
+Class ExecuteMCPv2.REST.Base Extends %Atelier.REST
+{
+
+/// Pre-flight JSON serialization of <var>pMsgPart</var>/<var>pResPart</var> before
+/// delegating to the inherited implementation. See the class banner for the full
+/// rationale.
+/// <p>Signature pinned live from <class>%Atelier.REST</class> (IRIS 2026.1 Build
+/// 235U) via <c>iris_doc_get</c> before writing this override — parameter names,
+/// types, and return type match exactly. Do not change this signature; a mismatch
+/// either fails to compile or silently fails to override the inherited method.</p>
+ClassMethod RenderResponseBody(pStatus As %Status, pMsgPart As %DynamicArray, pResPart As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Mirror %Atelier.REST.RenderResponseBody's own default-application so the
+        ; pre-flight walks exactly what the parent implementation would walk.
+        ; pMsgPart/pResPart are frequently UNDEFINED here — every "Do
+        ; ..RenderResponseBody(status, , result)" call site (the overwhelming
+        ; majority) omits pMsgPart positionally, and error paths often omit both —
+        ; so $Get() (never a bare Set) is required to read them without an
+        ; <UNDEFINED> that this method's own Try/Catch would swallow silently,
+        ; leaving nothing written to the response (Rule #15 exempts this: pMsgPart
+        ; is a local variable/parameter reference, not a method call).
+        Set tMsgPart = $Get(pMsgPart)
+        Set tResPart = $Get(pResPart)
+        If '$IsObject(tMsgPart) Set tMsgPart = []
+        If '$IsObject(tResPart) Set tResPart = {}
+
+        Set tPreflightOK = 1
+        Set tPreflightStatus = $$$OK
+        Try {
+            ; Parity with the parent's own %IsA branch (%Atelier.REST.RenderResponseBody):
+            ; a %Atelier.v1.Utils.DocumentStreamAdapter is NOT a dynamic entity — its
+            ; %ToJSON(pLevel, pFormat) WRITES TO THE CURRENT DEVICE, so handing it the
+            ; scratch stream would bind it to pLevel and emit the document body to the
+            ; real response during "pre-flight", then again from ##super(). No handler in
+            ; this package passes that shape today (nothing calls the inherited
+            ; ServeDoc/ServeXml), so this is parity with the method being overridden
+            ; rather than speculative generality: an override must not silently diverge
+            ; from its parent's contract for a shape the parent explicitly supports.
+            If tResPart.%IsA("%Atelier.v1.Utils.DocumentStreamAdapter") {
+                ; Nothing to pre-flight — defer entirely to the parent's own branch.
+            } Else {
+                Set tScratch = ##class(%Stream.TmpCharacter).%New()
+                Do tMsgPart.%ToJSON(tScratch)
+                Set tScratch = ##class(%Stream.TmpCharacter).%New()
+                Do tResPart.%ToJSON(tScratch)
+            }
+        } Catch exPreflight {
+            ; DISCRIMINATED, in the fail-safe direction (Rule #44; same discipline the
+            ; Story 34.3 review imposed on Redirects()'s undiscriminated Catch, and that
+            ; Utils.InvokeWithArgs applies to <MAXSTRING>). The pre-flight materializes
+            ; the whole payload into IRISTEMP, which the parent's device-targeted
+            ; %ToJSON() never does — so it can fail for reasons that have NOTHING to do
+            ; with serializability (temp-DB pressure on a large but perfectly valid
+            ; response). Substituting an error envelope for those would DESTROY a good
+            ; payload: a brand-new regression on the hot path of all 738 renders.
+            ; Mis-substituting is strictly worse than mis-passing: falling through to
+            ; ##super() is exactly the pre-Story-34.4 behavior, never a new failure.
+            ; So only a genuine serialization failure substitutes; resource/environment
+            ; errors fall through and let the parent render as it always did.
+            If $ListFind($ListBuild("<STORE>", "<FILEFULL>", "<NOTOPEN>", "<DIRECTORY>", "<PROTECT>", "<DISCONNECT>", "<INTERRUPT>"), exPreflight.Name) > 0 {
+                Set tPreflightOK = 1
+            } Else {
+                Set tPreflightOK = 0
+                Set tPreflightStatus = exPreflight.AsStatus()
+            }
+        }
+
+        If tPreflightOK {
+            ; Success path. Pass the already-defaulted tMsgPart/tResPart, NOT the
+            ; raw pMsgPart/pResPart formals: those are frequently undefined (see
+            ; above), and re-referencing an undefined by-value argument AT THIS
+            ; CALL SITE evaluates it immediately and throws <UNDEFINED> before
+            ; control ever reaches ##super() — this was caught live (Story 34.4
+            ; dev) as a real empty-response regression, not a hypothetical one.
+            ; tMsgPart/tResPart are exactly what the parent's own default-
+            ; application would have produced from pMsgPart/pResPart, so this is
+            ; still byte-identical to the inherited implementation (AC 34.4.4).
+            Set tSC = ##super(pStatus, tMsgPart, tResPart)
+        } Else {
+            ; Nothing has reached the client yet, so this is one clean envelope,
+            ; never a truncated one. Empty console/result parts are guaranteed
+            ; serializable; the real failure text is preserved via SanitizeError
+            ; (Rule #9) rather than masked with generic text.
+            ; The CALLER's own pStatus is folded in rather than replaced: the majority
+            ; of substitutable sites are error renders (e.g. Command.cls passes
+            ; SanitizeError(tCmdStatus)), and dropping pStatus would tell the client
+            ; only "%ToJSON failed" while silently discarding the application error
+            ; that caused the response in the first place. $$$ADDSC of an OK pStatus
+            ; yields just the pre-flight status, so the success-render case is
+            ; unchanged.
+            Set tSubStatus = ##class(ExecuteMCPv2.Utils).SanitizeError(tPreflightStatus)
+            If $$$ISERR(pStatus) Set tSubStatus = $$$ADDSC(pStatus, tSubStatus)
+            Set tSC = ##super(tSubStatus, [], {})
+        }
+    } Catch ex {
+        ; REACHABILITY (Rule #54 — this branch is deliberate, not dead code).
+        ; It is NOT reachable via ##super(): %Atelier.REST.RenderResponseBody wraps
+        ; its whole body in its own Try/Catch and always returns a %Status rather
+        ; than throwing. It IS reachable via the two calls in this method that sit
+        ; OUTSIDE the inner pre-flight Try — ##class(ExecuteMCPv2.Utils).SanitizeError()
+        ; (which has no internal error trapping of its own) and exPreflight.AsStatus()
+        ; in the pre-flight Catch. Both are only reached once the pre-flight has
+        ; already failed, so this is a second-order guard.
+        ; CONSEQUENCE, stated plainly: nothing has been written to the device at this
+        ; point, and every one of the 738 call sites uses the "Do" form that discards
+        ; the status returned here — so this path yields an empty HTTP 200. That is
+        ; accepted deliberately rather than papered over with a last-resort render:
+        ; a render here would itself be a doubly-unreachable, untestable branch
+        ; (Rule #54 cuts against adding it). Revisit if the pre-flight ever gains a
+        ; reachable trigger.
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Global.cls",
     `/// REST handler for global operations (get, set, kill, list).
 /// <p>Provides CRUD operations on IRIS globals via the custom REST
 /// endpoint <code>/api/executemcp/v2/global</code>. Each method follows
 /// the namespace switch/restore pattern and uses shared validation
 /// utilities from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Global Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Global Extends ExecuteMCPv2.REST.Base
 {
 
 /// Get the value of a global node.
@@ -3227,7 +3403,16 @@ ClassMethod ValidateGlobalName(pGlobal As %String) As %Status [ Private ]
 /// Both methods follow the namespace switch/restore pattern from
 /// <class>ExecuteMCPv2.REST.Global</class> and use shared utilities
 /// from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Command Extends %Atelier.REST
+/// <p><b>34-3-R1 fix (Story 34.4, AC 34.4.2):</b> <var>truncated</var> is surfaced on
+/// the error envelope of every failure path reached AFTER I/O capture has begun (the
+/// command/target-execution Catch in <method>Execute</method>, and the
+/// <method>ExecuteMCPv2.Utils.InvokeWithArgs</method> error path plus its own Catch in
+/// <method>ClassMethod</method>) — previously computed there and then silently
+/// discarded. The early validation-error one-liners (missing body/command/className/
+/// methodName, bad namespace) render before capture ever starts, so there is no
+/// truncated state to report for them; this is documented here explicitly rather than
+/// left to be inferred, per the point-of-use clause of AC 34.4.2.</p>
+Class ExecuteMCPv2.REST.Command Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an ObjectScript command with captured I/O output.
@@ -3307,7 +3492,13 @@ ClassMethod Execute() As %Status
         Set $NAMESPACE = tOrigNS
 
         If tCmdErrored {
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): truncated was computed but
+            ; discarded on this path — surface it on the error envelope instead of
+            ; silently losing it, the same "computed then discarded" shape 34-2-R3
+            ; named for RenderResponseBody's own %Status.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus), , tErrorResult)
             Kill %ExecuteMCPOutput
             Kill %ExecuteMCPTruncated
         } Else {
@@ -3334,9 +3525,13 @@ ClassMethod Execute() As %Status
                 If $Get(tNull) '= "" { Close tNull }
             }
         } Catch {}
+        ; 34-3-R1 fix: capture whatever truncated state exists before it is
+        ; killed, and surface it on the error envelope (AC 34.4.2).
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
         Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC
@@ -3428,7 +3623,12 @@ ClassMethod ClassMethod() As %Status
         Set $NAMESPACE = tOrigNS
 
         If $$$ISERR(tSC) {
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): tTruncated is always defined by
+            ; InvokeWithArgs (set to 0 at entry) even on its error return — surface
+            ; it here instead of discarding it.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC), , tErrorResult)
             Set tSC = $$$OK
             Quit
         }
@@ -3458,7 +3658,11 @@ ClassMethod ClassMethod() As %Status
         } Catch {}
         Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
+        ; InvokeWithArgs returned), so default it rather than assume it exists.
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC
@@ -3518,7 +3722,7 @@ rchr(time) Quit ""
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
 /// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
 /// its progress output from corrupting the HTTP response body.</p>
-Class ExecuteMCPv2.REST.UnitTest Extends %Atelier.REST
+Class ExecuteMCPv2.REST.UnitTest Extends ExecuteMCPv2.REST.Base
 {
 
 /// Run unit tests for a given target at the specified level.
@@ -3853,7 +4057,7 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
 /// scoped so that error paths can still access <class>ExecuteMCPv2.Utils</class>
 /// (which only exists in HSCUSTOM, not %SYS). The pattern is to save/restore
 /// <code>$NAMESPACE</code> manually in catch blocks.</p>
-Class ExecuteMCPv2.REST.Config Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Config Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all namespaces with their code and data database associations.
@@ -4561,7 +4765,7 @@ ClassMethod MappingManage(pType As %String) As %Status
 /// <class>ExecuteMCPv2.Utils</class> remains visible in catch blocks.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER included in response bodies
 /// or error messages (NFR6).</p>
-Class ExecuteMCPv2.REST.Security Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Security Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all user accounts with their properties (excluding passwords).
@@ -7742,7 +7946,7 @@ ClassMethod SqlPrivilegeList() As %Status
 /// The web application runs in HSCUSTOM, so namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is required for
 /// all Ens.Director and Ens.Config.Production calls.</p>
-Class ExecuteMCPv2.REST.Interop Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Interop Extends ExecuteMCPv2.REST.Base
 {
 
 /// Create or delete an Interoperability production.
@@ -10238,7 +10442,7 @@ ClassMethod DefaultSettingsManage() As %Status
 /// <b>target namespace</b> (not %SYS) — namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is used when a
 /// <code>namespace</code> parameter is supplied.</p>
-Class ExecuteMCPv2.REST.MessageResend Extends %Atelier.REST
+Class ExecuteMCPv2.REST.MessageResend Extends ExecuteMCPv2.REST.Base
 {
 
 /// Map a case-insensitive <code>Ens.DataType.MessageStatus</code> display label
@@ -10850,7 +11054,7 @@ ClassMethod MessageResend() As %Status
 /// <code>New $NAMESPACE</code>; the catch path restores first), exactly one
 /// <method>RenderResponseBody</method> per request path, and
 /// <method>ExecuteMCPv2.Utils:SanitizeError</method> on every error status.</p>
-Class ExecuteMCPv2.REST.Loc Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Loc Extends ExecuteMCPv2.REST.Base
 {
 
 /// Count lines of code for the documents matching a caller-supplied spec.
@@ -10953,7 +11157,7 @@ ClassMethod LocCount() As %Status
 /// <code>SYS.Database</code>, and <code>$SYSTEM.Monitor</code> class methods.
 /// Interoperability metrics require namespace switching to the target namespace
 /// for <code>Ens.*</code> queries.</p>
-Class ExecuteMCPv2.REST.Monitor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Monitor Extends ExecuteMCPv2.REST.Base
 {
 
 /// Return system metrics in JSON format.
@@ -12386,7 +12590,7 @@ ClassMethod BackupManage() As %Status
 /// (Story 23.0). This class returns <b>raw per-area values only</b>; ALL threshold/verdict
 /// logic lives in TypeScript (<code>iris_health_check</code>, Story 23.2), per
 /// architecture.md ADR H5 (server-side composition, TS-side interpretation).</p>
-Class ExecuteMCPv2.REST.Health Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Health Extends ExecuteMCPv2.REST.Base
 {
 
 /// Composite health-check endpoint: gathers all requested health areas in
@@ -12934,7 +13138,7 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
 /// does NOT work</b> — probed live and confirmed it throws
 /// <code>&lt;ILLEGAL VALUE&gt;</code> (not a valid $ZCONVERT output code on this
 /// instance); do not use it despite it being a plausible-looking alternative.</p>
-Class ExecuteMCPv2.REST.EnvSync Extends %Atelier.REST
+Class ExecuteMCPv2.REST.EnvSync Extends ExecuteMCPv2.REST.Base
 {
 
 /// Document-hash endpoint: SHA-256 content hash + last-modified timestamp per
@@ -13179,7 +13383,7 @@ ClassMethod HashDoc(pDocName As %String, Output pHashHex As %String) As %Status
 /// <code>/api/executemcp/v2/task</code>.</p>
 /// <p>All operations execute in <b>%SYS</b> namespace using the
 /// <code>%SYS.Task</code> and <code>%SYS.Task.History</code> classes.</p>
-Class ExecuteMCPv2.REST.Task Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Task Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all scheduled tasks with details.
@@ -13521,7 +13725,7 @@ ClassMethod TaskHistory() As %Status
 /// </ul>
 /// <p>All operations requiring system classes execute in <b>%SYS</b> namespace
 /// using the safe save/restore pattern for namespace switching.</p>
-Class ExecuteMCPv2.REST.SystemConfig Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SystemConfig Extends ExecuteMCPv2.REST.Base
 {
 
 /// Handle system configuration get/set/export operations.
@@ -13817,7 +14021,7 @@ ClassMethod ExportConfig(Output pSC As %Status) As %DynamicObject [ Private ]
 /// </ul>
 /// <p>All operations execute in the <b>target namespace</b> (not %SYS)
 /// because DeepSee classes live in application namespaces.</p>
-Class ExecuteMCPv2.REST.Analytics Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Analytics Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an MDX query and return structured pivot-table results.
@@ -14088,7 +14292,7 @@ ClassMethod CubeAction() As %Status
 /// no governance key, and no consumer ships in this story — Story 28.3's <code>advise</code>
 /// action is the first live caller; Story 28.2 captures reference fixtures from this
 /// endpoint's live output.</p>
-Class ExecuteMCPv2.REST.SqlAdvisor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SqlAdvisor Extends ExecuteMCPv2.REST.Base
 {
 
 /// SQL advisor data endpoint: EXPLAIN plan text + index/class dictionary rows for the

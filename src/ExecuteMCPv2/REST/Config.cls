@@ -9,7 +9,7 @@
 /// scoped so that error paths can still access <class>ExecuteMCPv2.Utils</class>
 /// (which only exists in HSCUSTOM, not %SYS). The pattern is to save/restore
 /// <code>$NAMESPACE</code> manually in catch blocks.</p>
-Class ExecuteMCPv2.REST.Config Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Config Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all namespaces with their code and data database associations.

@@ -15,7 +15,7 @@
 /// <b>target namespace</b> (not %SYS) — namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is used when a
 /// <code>namespace</code> parameter is supplied.</p>
-Class ExecuteMCPv2.REST.MessageResend Extends %Atelier.REST
+Class ExecuteMCPv2.REST.MessageResend Extends ExecuteMCPv2.REST.Base
 {
 
 /// Map a case-insensitive <code>Ens.DataType.MessageStatus</code> display label

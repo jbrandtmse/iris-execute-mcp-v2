@@ -7,7 +7,16 @@
 /// Both methods follow the namespace switch/restore pattern from
 /// <class>ExecuteMCPv2.REST.Global</class> and use shared utilities
 /// from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Command Extends %Atelier.REST
+/// <p><b>34-3-R1 fix (Story 34.4, AC 34.4.2):</b> <var>truncated</var> is surfaced on
+/// the error envelope of every failure path reached AFTER I/O capture has begun (the
+/// command/target-execution Catch in <method>Execute</method>, and the
+/// <method>ExecuteMCPv2.Utils.InvokeWithArgs</method> error path plus its own Catch in
+/// <method>ClassMethod</method>) — previously computed there and then silently
+/// discarded. The early validation-error one-liners (missing body/command/className/
+/// methodName, bad namespace) render before capture ever starts, so there is no
+/// truncated state to report for them; this is documented here explicitly rather than
+/// left to be inferred, per the point-of-use clause of AC 34.4.2.</p>
+Class ExecuteMCPv2.REST.Command Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an ObjectScript command with captured I/O output.
@@ -87,7 +96,13 @@ ClassMethod Execute() As %Status
         Set $NAMESPACE = tOrigNS
 
         If tCmdErrored {
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): truncated was computed but
+            ; discarded on this path — surface it on the error envelope instead of
+            ; silently losing it, the same "computed then discarded" shape 34-2-R3
+            ; named for RenderResponseBody's own %Status.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus), , tErrorResult)
             Kill %ExecuteMCPOutput
             Kill %ExecuteMCPTruncated
         } Else {
@@ -114,9 +129,13 @@ ClassMethod Execute() As %Status
                 If $Get(tNull) '= "" { Close tNull }
             }
         } Catch {}
+        ; 34-3-R1 fix: capture whatever truncated state exists before it is
+        ; killed, and surface it on the error envelope (AC 34.4.2).
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
         Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC
@@ -208,7 +227,12 @@ ClassMethod ClassMethod() As %Status
         Set $NAMESPACE = tOrigNS
 
         If $$$ISERR(tSC) {
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): tTruncated is always defined by
+            ; InvokeWithArgs (set to 0 at entry) even on its error return — surface
+            ; it here instead of discarding it.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC), , tErrorResult)
             Set tSC = $$$OK
             Quit
         }
@@ -238,7 +262,11 @@ ClassMethod ClassMethod() As %Status
         } Catch {}
         Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
+        ; InvokeWithArgs returned), so default it rather than assume it exists.
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC

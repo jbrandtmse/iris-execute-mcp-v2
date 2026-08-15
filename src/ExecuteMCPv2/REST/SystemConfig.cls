@@ -11,7 +11,7 @@
 /// </ul>
 /// <p>All operations requiring system classes execute in <b>%SYS</b> namespace
 /// using the safe save/restore pattern for namespace switching.</p>
-Class ExecuteMCPv2.REST.SystemConfig Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SystemConfig Extends ExecuteMCPv2.REST.Base
 {
 
 /// Handle system configuration get/set/export operations.

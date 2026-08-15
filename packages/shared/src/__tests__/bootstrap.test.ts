@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 28 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(28);
+    it("should contain exactly 29 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(29);
     });
 
     it("should contain all required class names", () => {
@@ -1041,6 +1041,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.Loc.Classifier.cls",
         "ExecuteMCPv2.Loc.Scanner.cls",
         "ExecuteMCPv2.Loc.Generate.cls",
+        "ExecuteMCPv2.REST.Base.cls",
         "ExecuteMCPv2.REST.Global.cls",
         "ExecuteMCPv2.REST.Command.cls",
         "ExecuteMCPv2.REST.UnitTest.cls",
@@ -1085,7 +1086,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(28);
+      expect(classes.length).toBe(29);
     });
 
     it("should return classes in compilation order", () => {
@@ -1102,6 +1103,49 @@ describe("bootstrap", () => {
         expect(cls.content).toBeDefined();
         expect(cls.content.length).toBeGreaterThan(0);
         expect(cls.content).toContain("Class ");
+      }
+    });
+
+    it("should include Base.cls (Story 34.4)", () => {
+      const classes = getBootstrapClasses();
+      const base = classes.find(c => c.name === "ExecuteMCPv2.REST.Base.cls");
+      expect(base).toBeDefined();
+      expect(base!.content).toContain("Class ExecuteMCPv2.REST.Base Extends");
+    });
+
+    // Rule #39: `classes[]` is ORDERED and the ordering is load-bearing — on a fresh
+    // instance the bootstrap compiles in this sequence, so a superclass listed after
+    // its subclasses compiles them against a class that does not exist yet. Story 34.4
+    // introduced the first such dependency in the manifest (Base ← 15 handlers) and
+    // it was previously protected only by a comment in `gen-bootstrap.mjs`: the
+    // existing order test pins classes[0], classes[1] and last-is-Dispatch only, none
+    // of which move if Base drifts below its extenders.
+    it("should order Base.cls before every class that extends it (Story 34.4, Rule #39)", () => {
+      const names = getBootstrapClasses().map(c => c.name);
+      const baseIdx = names.indexOf("ExecuteMCPv2.REST.Base.cls");
+      expect(baseIdx).toBeGreaterThanOrEqual(0);
+
+      const extenders = [
+        "ExecuteMCPv2.REST.Analytics.cls",
+        "ExecuteMCPv2.REST.Command.cls",
+        "ExecuteMCPv2.REST.Config.cls",
+        "ExecuteMCPv2.REST.EnvSync.cls",
+        "ExecuteMCPv2.REST.Global.cls",
+        "ExecuteMCPv2.REST.Health.cls",
+        "ExecuteMCPv2.REST.Interop.cls",
+        "ExecuteMCPv2.REST.Loc.cls",
+        "ExecuteMCPv2.REST.MessageResend.cls",
+        "ExecuteMCPv2.REST.Monitor.cls",
+        "ExecuteMCPv2.REST.Security.cls",
+        "ExecuteMCPv2.REST.SqlAdvisor.cls",
+        "ExecuteMCPv2.REST.SystemConfig.cls",
+        "ExecuteMCPv2.REST.Task.cls",
+        "ExecuteMCPv2.REST.UnitTest.cls",
+      ];
+      for (const name of extenders) {
+        const idx = names.indexOf(name);
+        expect(idx).toBeGreaterThanOrEqual(0);
+        expect(baseIdx).toBeLessThan(idx);
       }
     });
 
@@ -1217,6 +1261,7 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.Loc.Classifier.cls", "src/ExecuteMCPv2/Loc/Classifier.cls"],
       ["ExecuteMCPv2.Loc.Scanner.cls", "src/ExecuteMCPv2/Loc/Scanner.cls"],
       ["ExecuteMCPv2.Loc.Generate.cls", "src/ExecuteMCPv2/Loc/Generate.cls"],
+      ["ExecuteMCPv2.REST.Base.cls", "src/ExecuteMCPv2/REST/Base.cls"],
       ["ExecuteMCPv2.REST.Global.cls", "src/ExecuteMCPv2/REST/Global.cls"],
       ["ExecuteMCPv2.REST.Command.cls", "src/ExecuteMCPv2/REST/Command.cls"],
       ["ExecuteMCPv2.REST.UnitTest.cls", "src/ExecuteMCPv2/REST/UnitTest.cls"],

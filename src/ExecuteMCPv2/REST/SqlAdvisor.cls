@@ -28,7 +28,7 @@
 /// no governance key, and no consumer ships in this story — Story 28.3's <code>advise</code>
 /// action is the first live caller; Story 28.2 captures reference fixtures from this
 /// endpoint's live output.</p>
-Class ExecuteMCPv2.REST.SqlAdvisor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SqlAdvisor Extends ExecuteMCPv2.REST.Base
 {
 
 /// SQL advisor data endpoint: EXPLAIN plan text + index/class dictionary rows for the

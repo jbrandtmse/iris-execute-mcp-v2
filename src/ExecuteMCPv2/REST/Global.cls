@@ -3,7 +3,7 @@
 /// endpoint <code>/api/executemcp/v2/global</code>. Each method follows
 /// the namespace switch/restore pattern and uses shared validation
 /// utilities from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Global Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Global Extends ExecuteMCPv2.REST.Base
 {
 
 /// Get the value of a global node.

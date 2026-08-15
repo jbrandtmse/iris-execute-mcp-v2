@@ -913,7 +913,9 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 `truncated` is `true` only in the rare case where the captured output hit the platform's
 long-string ceiling mid-command — the call still succeeds, with whatever was captured up
-to that point, and this is never silent.
+to that point, and this is never silent. (On a FAILED call the tool reports the error
+itself; `truncated` is carried on the underlying REST error envelope but is not currently
+surfaced through the tool's error response.)
 </details>
 
 <details>
@@ -925,7 +927,9 @@ target produces is captured (no wrapper class needed for narrating methods, stoc
 like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
 in `output`; marked positions' post-call values are returned in `byRefValues`, keyed by
 zero-based index. `truncated` is `true` only in the rare case where captured output hit
-the platform's long-string ceiling mid-call.
+the platform's long-string ceiling mid-call. (On a FAILED call the tool reports the error
+itself; `truncated` is carried on the underlying REST error envelope but is not currently
+surfaced through the tool's error response.)
 
 **Input (plain scalars):**
 ```json
