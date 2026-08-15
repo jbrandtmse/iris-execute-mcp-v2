@@ -41,3 +41,6 @@ Notes for this run:
 2026-08-14T10:05:00Z	Story 34.3	cr_complete	spawn_at=2026-08-14T09:17:00Z model=claude-opus-5 resolved=9 deferred=9 dismissed=2 high=2 clarifications=0 close_kind=CLEAN layers_delivered=3 bootstrap_version=b1c1415b4870-to-5ef2df119451 closing_sections_present=true
 2026-08-14T10:15:00Z	Story 34.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=epic_gate_default_suite_3_passed_0_skipped_live_iris+not_matching_integration_exclude_pattern+sprint_status_yaml_validated model=claude-opus-5
 2026-08-14T10:20:00Z	Epic 34	epic_status_done	stories=4
+2026-08-14T11:00:00Z	Epic 34	post_reload_smoke	result=pass method=live_mcp_tool checks=8 evidence=output_marker+subscript_encoding+20args+reject_nonmarker+second_ns_USER+metachars_unicode+command_backcompat+21arg_boundary model=claude-opus-5
+2026-08-14T11:30:00Z	Epic 34	epic_branch_reopened	reason=project_lead_escalation_34-2-R3_34-3-R1_34-3-R4 from=existing_unmerged_epic34_no_recreation_needed
+2026-08-14T11:30:30Z	Epic 34	correct_course_complete	proposal=_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-14-story-34-4.md scope=MODERATE approved_by=user
