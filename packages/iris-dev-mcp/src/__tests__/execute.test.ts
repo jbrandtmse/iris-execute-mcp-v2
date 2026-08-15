@@ -131,6 +131,47 @@ describe("iris_execute_command", () => {
     expect(result.content[0]?.text).toContain("<DIVIDE>");
   });
 
+  // AC 34.5.1 (34-4-R4): `truncated` was on the REST error envelope's
+  // `result` since Story 34.4 but was invisible to the tool caller because
+  // `IrisApiError` discarded `result` at the http-client throw site. The
+  // fix threads `result` through to the 5th constructor argument.
+  it("surfaces `truncated` in structuredContent on the error path when the envelope carried it (34-4-R4)", async () => {
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [{ error: "ERROR #5001: ObjectScript error: <MAXSTRING>" }],
+        "/api/executemcp/v2/command",
+        "ObjectScript error: <MAXSTRING>",
+        { truncated: true },
+      ),
+    );
+
+    const result = await executeCommandTool.handler(
+      { command: "Do ##class(Some.Chatty).Target()" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Error executing command");
+    expect(result.structuredContent).toEqual({ truncated: true });
+  });
+
+  it("back-compat (Rule #19): an error whose envelope never carried `truncated` gets no structuredContent at all — not `{truncated: undefined}` or `{truncated: false}`", async () => {
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        400,
+        [{ error: "Required parameter 'command' is missing" }],
+        "/api/executemcp/v2/command",
+        "Required parameter 'command' is missing",
+      ),
+    );
+
+    const result = await executeCommandTool.handler({ command: "" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+  });
+
   it("should propagate non-IrisApiError exceptions", async () => {
     mockHttp.post.mockRejectedValue(new Error("ECONNREFUSED"));
 
@@ -322,6 +363,46 @@ describe("iris_execute_classmethod", () => {
     expect(result.content[0]?.text).toContain(
       "Error executing class method 'NonExistent.DoSomething'",
     );
+  });
+
+  // AC 34.5.1 (34-4-R4): same additive surfacing as `iris_execute_command`.
+  it("surfaces `truncated` in structuredContent on the error path when the envelope carried it (34-4-R4)", async () => {
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [{ error: "ERROR #5001: ObjectScript error: <MAXSTRING>" }],
+        "/api/executemcp/v2/classmethod",
+        "ObjectScript error: <MAXSTRING>",
+        { truncated: true },
+      ),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "Some.Chatty", methodName: "Target" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ truncated: true });
+  });
+
+  it("back-compat (Rule #19): an error whose envelope never carried `truncated` gets no structuredContent at all", async () => {
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        500,
+        [{ error: "Class not found" }],
+        "/api/executemcp/v2/classmethod",
+        "Class not found",
+      ),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "NonExistent", methodName: "DoSomething" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
   });
 
   it("should propagate non-IrisApiError exceptions", async () => {
@@ -530,9 +611,12 @@ describe("iris_execute_tests", () => {
   }
 
   it("should queue async unittest and return structured results for class level", async () => {
+    // Raw Atelier result rows carry method names with the "Test" prefix
+    // STRIPPED (verified live, Story 34.5 QA — see toAtelierMethodFilter's
+    // doc comment in execute.ts) — the tool restores it for its own output.
     const atelierResults = [
-      { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: 1, duration: 10, failures: [] },
-      { class: "MyApp.Tests.UtilsTest", method: "TestFormat", status: 1, duration: 15, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 10, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", method: "Format", status: 1, duration: 15, failures: [] },
       { class: "MyApp.Tests.UtilsTest", status: 1, duration: 25, failures: [] },
     ];
     mockQueueAndPoll(atelierResults);
@@ -551,19 +635,28 @@ describe("iris_execute_tests", () => {
       }),
     );
 
-    const structured = result.structuredContent as { total: number; passed: number; failed: number };
+    const structured = result.structuredContent as {
+      total: number;
+      passed: number;
+      failed: number;
+      details: { method: string }[];
+    };
     expect(structured.total).toBe(2); // Only method-level results counted
     expect(structured.passed).toBe(2);
     expect(structured.failed).toBe(0);
+    // The tool's OWN output restores the "Test" prefix its schema/README
+    // document, even though the raw endpoint row never carried it.
+    expect(structured.details.map((d) => d.method).sort()).toEqual(["TestFormat", "TestValidate"]);
     expect(result.isError).toBeUndefined();
   });
 
   it("should handle mixed results (some pass, some fail)", async () => {
+    // Raw rows stripped, as the real endpoint returns them.
     const atelierResults = [
-      { class: "MyApp.Tests.UtilsTest", method: "TestGood", status: 1, duration: 10, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", method: "Good", status: 1, duration: 10, failures: [] },
       {
         class: "MyApp.Tests.UtilsTest",
-        method: "TestBad",
+        method: "Bad",
         status: 0,
         duration: 20,
         failures: [{ message: "AssertEquals: Expected 'foo' but got 'bar'" }],
@@ -577,17 +670,32 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
-    const structured = result.structuredContent as { total: number; passed: number; failed: number; details: { message: string }[] };
+    const structured = result.structuredContent as { total: number; passed: number; failed: number; details: { method: string; message: string }[] };
     expect(structured.total).toBe(2);
     expect(structured.passed).toBe(1);
     expect(structured.failed).toBe(1);
     expect(structured.details[1]?.message).toContain("AssertEquals");
+    expect(structured.details[1]?.method).toBe("TestBad");
     expect(result.isError).toBeUndefined();
   });
 
-  it("should send method-level with class and methods array", async () => {
+  // ── Atelier "Test"-prefix normalization (Story 34.5 QA follow-up) ──
+  //
+  // Live probe against HSCUSTOM (2026.1 Build 235U) confirmed the Atelier
+  // `/work` unittest endpoint's `methods` request filter matches ONLY the
+  // unprefixed form of a test method name, and every result row (at every
+  // level, not just filtered method-level runs) carries the unprefixed
+  // form too — even though the real OS method, the tool's schema, and the
+  // README all use the prefixed form (`%UnitTest.TestCase` requires every
+  // test method's real name to start with `Test`). Left unhandled, the
+  // documented `ClassName:TestMethodName` call shape drains zero rows and
+  // (after AC 34.5.3's guard) reports a misleading "No tests found" for a
+  // target that genuinely exists and passes. These tests pin the fix:
+  // strip on the way out, restore on the way back.
+
+  it("strips the 'Test' prefix from the outgoing methods filter (documented input form)", async () => {
     mockQueueAndPoll([
-      { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: 1, duration: 5, failures: [] },
+      { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
     ]);
 
     await executeTestsTool.handler(
@@ -599,17 +707,66 @@ describe("iris_execute_tests", () => {
       expect.stringContaining("/work"),
       expect.objectContaining({
         request: "unittest",
-        tests: [{ class: "MyApp.Tests.UtilsTest", methods: ["TestValidate"] }],
+        // The endpoint's filter must be sent WITHOUT the prefix, even
+        // though the caller supplied the documented, prefixed form.
+        tests: [{ class: "MyApp.Tests.UtilsTest", methods: ["Validate"] }],
       }),
     );
+  });
+
+  it("does not strip a methods filter that was never prefixed (defensive — real test methods always start with 'Test')", async () => {
+    mockQueueAndPoll([
+      { class: "MyApp.Tests.UtilsTest", method: "Weird", status: 1, duration: 5, failures: [] },
+    ]);
+
+    await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest:Weird", level: "method" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/work"),
+      expect.objectContaining({
+        tests: [{ class: "MyApp.Tests.UtilsTest", methods: ["Weird"] }],
+      }),
+    );
+  });
+
+  it("restores the 'Test' prefix on result rows (documented output form) end-to-end for a prefixed target", async () => {
+    // The documented, correctly-typed call — target uses the "Test"
+    // prefix that matches the tool's own schema and README. Before this
+    // normalization, this exact shape drained zero rows against the real
+    // endpoint (the root cause behind the AC 34.5.3 zero-result guard's
+    // false positive on a genuinely correct, documented call).
+    mockQueueAndPoll([
+      { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+    ]);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest:TestValidate", level: "method" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as {
+      total: number;
+      passed: number;
+      error?: string;
+      details: { method: string }[];
+    };
+    // Real counts, not the zero-result guard.
+    expect(structured.total).toBe(1);
+    expect(structured.passed).toBe(1);
+    expect(structured.error).toBeUndefined();
+    expect(structured.details[0]?.method).toBe("TestValidate");
   });
 
   it("should discover package test classes via SQL then queue", async () => {
     mockPackageDiscoverAndRun(
       ["MyApp.Tests.UtilsTest", "MyApp.Tests.OtherTest"],
       [
-        { class: "MyApp.Tests.UtilsTest", method: "Test1", status: 1, duration: 5, failures: [] },
-        { class: "MyApp.Tests.OtherTest", method: "Test2", status: 1, duration: 3, failures: [] },
+        { class: "MyApp.Tests.UtilsTest", method: "One", status: 1, duration: 5, failures: [] },
+        { class: "MyApp.Tests.OtherTest", method: "Two", status: 1, duration: 3, failures: [] },
       ],
     );
 
@@ -666,12 +823,15 @@ describe("iris_execute_tests", () => {
     // Poll 2: terminal drain — carries ONLY the remaining two methods
     //   (delta semantics, as observed live). A last-drain-only loop
     //   returns total=2 and silently drops TestA (bug shape b).
+    // Raw rows are stripped, as the real endpoint returns them; the tool
+    // restores the "Test" prefix (Story 34.5 QA normalization) — see the
+    // `.details.map(...)` assertion below, which pins the RESTORED form.
     mockHttp.get
       .mockResolvedValueOnce({
         status: { errors: [] },
         console: [],
         result: [
-          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 4000, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 4000, failures: [] },
         ],
         retryafter: "1",
       })
@@ -679,8 +839,8 @@ describe("iris_execute_tests", () => {
         status: { errors: [] },
         console: [],
         result: [
-          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 0, duration: 4100, failures: [{ message: "AssertTrue failed" }] },
-          { class: "MyApp.Tests.SlowTest", method: "TestC", status: 1, duration: 3900, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "B", status: 0, duration: 4100, failures: [{ message: "AssertTrue failed" }] },
+          { class: "MyApp.Tests.SlowTest", method: "C", status: 1, duration: 3900, failures: [] },
         ],
       });
 
@@ -709,7 +869,7 @@ describe("iris_execute_tests", () => {
         status: { errors: [] },
         console: [],
         result: [
-          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 1000, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 1000, failures: [] },
         ],
         retryafter: "1",
       })
@@ -717,9 +877,9 @@ describe("iris_execute_tests", () => {
         status: { errors: [] },
         console: [],
         result: [
-          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 1000, failures: [] },
-          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 1, duration: 1100, failures: [] },
-          { class: "MyApp.Tests.SlowTest", method: "TestC", status: 1, duration: 900, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 1000, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "B", status: 1, duration: 1100, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "C", status: 1, duration: 900, failures: [] },
         ],
       });
 
@@ -747,8 +907,8 @@ describe("iris_execute_tests", () => {
         status: { errors: [] },
         console: [],
         result: [
-          { class: "MyApp.Tests.SlowTest", method: "TestA", status: 1, duration: 900, failures: [] },
-          { class: "MyApp.Tests.SlowTest", method: "TestB", status: 1, duration: 950, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 900, failures: [] },
+          { class: "MyApp.Tests.SlowTest", method: "B", status: 1, duration: 950, failures: [] },
         ],
       });
 
@@ -764,7 +924,25 @@ describe("iris_execute_tests", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it("accepts an EMPTY terminal result (no retryafter) as a completed run with no tests", async () => {
+  // ── Zero-result guard for class/method levels (AC 34.5.3, 34-4-R10) ──
+  //
+  // `package` already guards a zero-match run at discovery time (the
+  // "should return empty results when no test classes found for package"
+  // test above). `class` and `method` have no discovery step, so a run
+  // that drains zero method-level rows previously reported total:0,
+  // passed:0, failed:0 with NO error field — indistinguishable from a
+  // genuinely empty test class. This is the exact defect the 34.4 reviewer
+  // hit live at `level: "method"` and only caught via Rule #35's
+  // total-vs-expected check. These tests pin the fix across the fixture
+  // diversity Rule #58 calls for: a class that exists with zero matching
+  // rows (this test — stands in for both "class exists, method doesn't"
+  // and "class doesn't exist", since the Atelier endpoint returns the same
+  // empty-array shape for both and the tool cannot distinguish them from
+  // the response alone), the `method`-level case observed live, and the
+  // `ClassName:MethodName` parse edges (missing colon, empty method part)
+  // below.
+
+  it("guards a class-level run with zero method rows via an explicit error instead of a silent total:0 (34-4-R10)", async () => {
     mockHttp.post.mockResolvedValue(envelope({ location: "job-empty" }));
     mockHttp.get.mockResolvedValueOnce({
       status: { errors: [] },
@@ -778,9 +956,267 @@ describe("iris_execute_tests", () => {
     );
 
     expect(mockHttp.get).toHaveBeenCalledTimes(1);
-    const structured = result.structuredContent as { total: number };
-    expect(structured.total).toBe(0);
+    // No isError/structuredContent — mirrors the pre-existing package-level
+    // guard's shape exactly (content-only JSON carrying an `error` field).
     expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toBeUndefined();
+    const text = result.content[0]?.text ?? "";
+    const parsed = JSON.parse(text) as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("MyApp.Tests.EmptyTest");
+    expect(parsed.error).toContain("class");
+  });
+
+  it("guards a method-level run with zero method rows via an explicit error (observed live during the 34.4 review)", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-empty-method" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest:NoSuchMethod", level: "method" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0]?.text ?? "";
+    const parsed = JSON.parse(text) as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("MyApp.Tests.UtilsTest:NoSuchMethod");
+    expect(parsed.error).toContain("method");
+  });
+
+  // ── The guard must not blame the target for a run-level FAILURE ──
+  //
+  // Review finding (Story 34.5, lead layer — confirmed live on HSCUSTOM
+  // 2026.1 Build 235U). The runner reports a failure that stopped any method
+  // from running via a CLASS-LEVEL row: no `method` key, `status: 0`, and a
+  // populated `error` string. The result loop drops every row without a
+  // `method`, so `total` is 0 and the guard fired with "No tests found" —
+  // telling the caller their class name was wrong when the class was found,
+  // ran, and failed in setup, and when the runner had handed us the exact
+  // reason. The fixture below is a VERBATIM live capture:
+  //
+  //   POST /api/atelier/v8/HSCUSTOM/work
+  //     {"request":"unittest","tests":[{"class":"ExecuteMCPv2.Temp.SetupFailProbe345"}],"console":false}
+  //   GET  /api/atelier/v8/HSCUSTOM/work/{id}  ->
+  //     {"status":{"errors":[],"summary":""},"console":[],"result":[
+  //       {"class":"ExecuteMCPv2.Temp.SetupFailProbe345","status":0,
+  //        "duration":0.833,"failures":[],
+  //        "error":"OnBeforeAllTests: ERROR #5001: deliberate setup failure probe345"}]}
+  //
+  // (probe class created, captured, and deleted during the review).
+  it("surfaces a class-level failure diagnostic instead of blaming the target name (live-captured setup failure)", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-setup-fail" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [
+        {
+          class: "ExecuteMCPv2.Temp.SetupFailProbe345",
+          status: 0,
+          duration: 0.833,
+          failures: [],
+          error: "OnBeforeAllTests: ERROR #5001: deliberate setup failure probe345",
+        },
+      ],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "ExecuteMCPv2.Temp.SetupFailProbe345", level: "class" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    // The runner's own reason must reach the caller verbatim...
+    expect(parsed.error).toContain("OnBeforeAllTests: ERROR #5001: deliberate setup failure probe345");
+    expect(parsed.error).toContain("ExecuteMCPv2.Temp.SetupFailProbe345");
+    // ...and the misleading not-found wording must NOT be used for a class
+    // that was found and failed.
+    expect(parsed.error).not.toContain("No tests found");
+  });
+
+  it("a class-level row with status 0 but no error text still avoids the misleading not-found wording", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-classfail-noerr" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [{ class: "MyApp.Tests.BrokenTest", status: 0, duration: 1, failures: [] }],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.BrokenTest", level: "class" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("class-level failure");
+    expect(parsed.error).not.toContain("No tests found");
+  });
+
+  // A PASSING class-level summary row (status 1, no error) is the ordinary
+  // roll-up the endpoint sends alongside every run — live-verified on an
+  // empty `%UnitTest.TestCase` subclass, which drains exactly
+  // `{class, status: 1, duration: 0.086, failures: []}` and nothing else.
+  // That must still read as "no tests found", not as a failure.
+  it("a passing class-level summary row with zero methods still reports the plain not-found guard", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-empty-class-summary" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [{ class: "ExecuteMCPv2.Temp.EmptyProbe345", status: 1, duration: 0.086, failures: [] }],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "ExecuteMCPv2.Temp.EmptyProbe345", level: "class" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("No tests found for 'ExecuteMCPv2.Temp.EmptyProbe345'");
+  });
+
+  // ── AC 34.5.4: the third level ──
+  //
+  // The package guard fired only at DISCOVERY time (zero classes matched the
+  // SQL). A package whose classes ARE discovered but whose run drains zero
+  // method rows kept the original silent `total: 0` — the exact 34-4-R10
+  // shape, surviving at the one level the story claims to pin. Confirmed
+  // live: `level: "package"` over a package of two real
+  // `%UnitTest.TestCase` subclasses (one empty, one setup-failing) returned
+  // `{"total":0,"passed":0,"failed":0,"skipped":0,"details":[]}` with no
+  // error field at all.
+  it("guards a package-level run whose classes were discovered but drained zero method rows (AC 34.5.4)", async () => {
+    mockPackageDiscoverAndRun(["MyApp.Tests.AlphaTest", "MyApp.Tests.BetaTest"], []);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests", level: "package" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("MyApp.Tests");
+    expect(parsed.error).toContain("package");
+  });
+
+  it("a package-level run that drained zero rows surfaces a class-level setup failure too", async () => {
+    mockPackageDiscoverAndRun(
+      ["ExecuteMCPv2.Temp.SetupFailProbe345"],
+      [
+        {
+          class: "ExecuteMCPv2.Temp.SetupFailProbe345",
+          status: 0,
+          duration: 0.833,
+          failures: [],
+          error: "OnBeforeAllTests: ERROR #5001: deliberate setup failure probe345",
+        },
+      ],
+    );
+
+    const result = await executeTestsTool.handler(
+      { target: "ExecuteMCPv2.Temp", level: "package" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.error).toContain("OnBeforeAllTests: ERROR #5001");
+    expect(parsed.error).not.toContain("No tests found");
+  });
+
+  it("back-compat: a package with zero DISCOVERED classes keeps its original discovery-time message", async () => {
+    mockPackageDiscoverAndRun([], []);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Nothing", level: "package" },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
+    expect(parsed.error).toBe("No test classes found in package 'MyApp.Nothing'");
+  });
+
+  it("a matching method-level run reports real counts (not the zero-result guard)", async () => {
+    // Raw row stripped, as the real endpoint returns it.
+    mockQueueAndPoll([
+      { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+    ]);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest:TestValidate", level: "method" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as { total: number; passed: number; failed: number; error?: string };
+    expect(structured.total).toBe(1);
+    expect(structured.passed).toBe(1);
+    expect(structured.failed).toBe(0);
+    expect(structured.error).toBeUndefined();
+  });
+
+  it("method-level target missing the ':' separator runs the whole class unfiltered, and a real match is unaffected by the guard", async () => {
+    // target.split(":") on a colon-less string yields [target, undefined] —
+    // methodName is undefined, so no `methods` filter is sent; the whole
+    // class runs. This pins that parse edge's existing behavior (Rule #58)
+    // rather than changing it — the zero-result guard still applies
+    // generically on top, keyed off the actual row count, not the parse.
+    mockQueueAndPoll([
+      { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+    ]);
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.UtilsTest", level: "method" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/work"),
+      expect.objectContaining({
+        request: "unittest",
+        tests: [{ class: "MyApp.Tests.UtilsTest" }],
+      }),
+    );
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as { total: number };
+    expect(structured.total).toBe(1);
+  });
+
+  it("method-level target with an empty method part (trailing ':') runs the whole class unfiltered, and the guard fires on a genuine zero-match", async () => {
+    // "Class:" splits to ["Class", ""] — methodName is "" (falsy), so the
+    // `if (methodName)` check omits the `methods` filter, same as the
+    // missing-colon case above. This test pins that parse edge AND proves
+    // the zero-result guard still fires when the drained set is genuinely
+    // empty for this shape (Rule #58's second named parse edge).
+    mockHttp.post.mockResolvedValue(envelope({ location: "job-empty-trailing-colon" }));
+    mockHttp.get.mockResolvedValueOnce({
+      status: { errors: [] },
+      console: [],
+      result: [],
+    });
+
+    const result = await executeTestsTool.handler(
+      { target: "MyApp.Tests.EmptyTest:", level: "method" },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/work"),
+      expect.objectContaining({
+        request: "unittest",
+        tests: [{ class: "MyApp.Tests.EmptyTest" }],
+      }),
+    );
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0]?.text ?? "";
+    const parsed = JSON.parse(text) as { total: number; error?: string };
+    expect(parsed.total).toBe(0);
+    expect(parsed.error).toContain("MyApp.Tests.EmptyTest:");
   });
 
   it("should return isError on IrisApiError", async () => {

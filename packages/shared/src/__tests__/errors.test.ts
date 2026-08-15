@@ -58,6 +58,37 @@ describe("IrisApiError", () => {
     const err = new IrisApiError(500, [], "/");
     expect(err).toBeInstanceOf(Error);
   });
+
+  // Story 34.5 AC 34.5.1/34.5.5 (34-4-R4): `result` is a 5th, optional,
+  // additive constructor parameter. Every existing 3- and 4-argument call
+  // site (the four tests above, and every other constructor call in the
+  // codebase) is untouched — this only pins the NEW 5th-argument behavior.
+  describe("result (Story 34.5 — additive envelope passthrough)", () => {
+    it("should default `result` to undefined when the 5th argument is omitted (Rule #19 back-compat)", () => {
+      const err = new IrisApiError(404, [], "/test", "Not found");
+      expect(err.result).toBeUndefined();
+    });
+
+    it("should store `result` when the 5th argument is provided", () => {
+      const err = new IrisApiError(
+        500,
+        [{ error: "boom" }],
+        "/test",
+        "boom",
+        { truncated: true },
+      );
+      expect(err.result).toEqual({ truncated: true });
+    });
+
+    it("should leave message/statusCode/errors/originalUrl unaffected by the new parameter", () => {
+      const errors = [{ error: "boom" }];
+      const err = new IrisApiError(500, errors, "/test", "boom", { truncated: true });
+      expect(err.statusCode).toBe(500);
+      expect(err.errors).toEqual(errors);
+      expect(err.originalUrl).toBe("/test");
+      expect(err.message).toContain("boom");
+    });
+  });
 });
 
 describe("McpProtocolError", () => {

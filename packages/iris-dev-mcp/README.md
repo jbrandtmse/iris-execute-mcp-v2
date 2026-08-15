@@ -913,9 +913,15 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 
 `truncated` is `true` only in the rare case where the captured output hit the platform's
 long-string ceiling mid-command — the call still succeeds, with whatever was captured up
-to that point, and this is never silent. (On a FAILED call the tool reports the error
-itself; `truncated` is carried on the underlying REST error envelope but is not currently
-surfaced through the tool's error response.)
+to that point, and this is never silent. On a FAILED call the tool reports the error text
+as usual, and additionally surfaces `truncated` in the response's `structuredContent`
+(e.g. `{"truncated": false}` alongside `"isError": true`) whenever the underlying REST
+error envelope carried the flag — verified live against the real `/command` endpoint
+(Story 34.5). `structuredContent` is omitted entirely, not set to `false`, on any IRIS
+error whose response envelope never carried the flag — a request rejected before the
+server's capture logic began, or a server predating Story 34.4. (A transport-level
+failure such as a refused connection is a different case again: it raises a connection
+error rather than producing a tool error response at all.)
 </details>
 
 <details>
@@ -927,9 +933,10 @@ target produces is captured (no wrapper class needed for narrating methods, stoc
 like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
 in `output`; marked positions' post-call values are returned in `byRefValues`, keyed by
 zero-based index. `truncated` is `true` only in the rare case where captured output hit
-the platform's long-string ceiling mid-call. (On a FAILED call the tool reports the error
-itself; `truncated` is carried on the underlying REST error envelope but is not currently
-surfaced through the tool's error response.)
+the platform's long-string ceiling mid-call. On a FAILED call the tool reports the error
+text as usual, and additionally surfaces `truncated` in the response's `structuredContent`
+whenever the underlying REST error envelope carried the flag — same mechanism as
+`iris_execute_command` above (Story 34.5).
 
 **Input (plain scalars):**
 ```json
@@ -996,6 +1003,43 @@ surfaced through the tool's error response.)
   ]
 }
 ```
+
+A run that matches zero test methods at any level — a typo'd class or method name, or a
+`class:method` spec the runner doesn't match — returns an explicit `error` field naming
+the target and level instead of a silent `total: 0, passed: 0, failed: 0`
+(Story 34.5):
+```json
+{
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "details": [],
+  "error": "No tests found for 'MyApp.Tests.UtilsTest:TestTypo' at level 'method'"
+}
+```
+
+If the runner instead reports that the target was found but the run failed before any
+test method could execute — a setup failure such as an `OnBeforeAllTests` error — the
+`error` field carries that reason rather than the generic "not found" wording, so a
+broken fixture is never misreported as a misspelled target:
+```json
+{
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "details": [],
+  "error": "Test run for 'MyApp.Tests.UtilsTest' at level 'class' produced no method-level results — MyApp.Tests.UtilsTest: OnBeforeAllTests: ERROR #5001: ..."
+}
+```
+
+At `level: "method"`, use the method's real, `Test`-prefixed name (e.g.
+`MyApp.Tests.UtilsTest:TestAdd`) — the same form shown in `details[].method`
+above. Internally the tool strips that prefix before querying IRIS's Atelier
+test-runner endpoint (which matches on the unprefixed form) and restores it on
+every result row, so the documented prefixed form is what you should always
+pass and always see back; you do not need to do this stripping yourself.
 </details>
 
 ---

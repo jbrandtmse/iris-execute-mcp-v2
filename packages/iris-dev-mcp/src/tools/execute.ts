@@ -20,6 +20,27 @@ import { z } from "zod";
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
+/**
+ * Extract a boolean `truncated` flag from an `IrisApiError`'s preserved
+ * envelope `result`, when present (Story 34.5 AC 34.5.1 / `34-4-R4`).
+ *
+ * The `/command` and `/classmethod` REST endpoints place `truncated` on
+ * the error envelope's `result` for failures reached after capture began
+ * (Story 34.4); `IrisApiError.result` now carries that envelope through to
+ * the tool layer (`http-client.ts`, Story 34.5). Returns `undefined` — not
+ * `false` — for any error whose `result` never carried the flag (a
+ * connection failure, a pre-capture validation error, or a pre-34.5
+ * server), so callers can distinguish "never reported" from "reported
+ * false" and the tool never invents a value the server didn't send.
+ */
+function extractTruncated(result: unknown): boolean | undefined {
+  if (result && typeof result === "object" && "truncated" in result) {
+    const value = (result as Record<string, unknown>).truncated;
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
 // ── iris_execute_command ────────────────────────────────────────
 
 export const executeCommandTool: ToolDefinition = {
@@ -74,6 +95,12 @@ export const executeCommandTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // AC 34.5.1 (34-4-R4): surface `truncated` on the error path too,
+        // when the server's error envelope carried it. Additive —
+        // `structuredContent` is omitted entirely (not set to `undefined`)
+        // when the envelope never reported the flag, so a plain error
+        // response is byte-identical to today's shape (Rule #19).
+        const truncated = extractTruncated(error.result);
         return {
           content: [
             {
@@ -81,6 +108,7 @@ export const executeCommandTool: ToolDefinition = {
               text: `Error executing command: ${error.message}`,
             },
           ],
+          ...(truncated !== undefined ? { structuredContent: { truncated } } : {}),
           isError: true,
         };
       }
@@ -95,6 +123,44 @@ export const executeCommandTool: ToolDefinition = {
 const TEST_POLL_TIMEOUT = 120_000;
 /** Delay between poll requests (ms). */
 const TEST_POLL_INTERVAL = 200;
+
+/**
+ * The Atelier `/work` unittest endpoint's `methods` request filter and its
+ * result rows both use test method names with the leading `Test` prefix
+ * STRIPPED (e.g. `ExtractTablesSingleTable`, not
+ * `TestExtractTablesSingleTable`) — even though the underlying ObjectScript
+ * method, `%Dictionary.MethodDefinition`, this tool's own input schema, and
+ * every documented example all use the prefixed form (the method's REAL
+ * name; `%UnitTest.TestCase` requires every test method to start with
+ * `Test`, so the prefix is always present on the real side).
+ *
+ * Verified live against HSCUSTOM (2026.1 Build 235U), Story 34.5 QA:
+ * `ExecuteMCPv2.Tests.AdvisorDataTest:TestExtractTablesSingleTable` (the
+ * prefixed, documented form) drained 0 rows; the identical target with the
+ * prefix stripped drained 1 passing row. Reproduced across 4 distinct
+ * methods on the same class, and the class-level run's own result rows
+ * (13/13) carried stripped names too — the stripping is a property of the
+ * endpoint's wire format at BOTH the request filter and every result row,
+ * not something specific to the `methods` filter alone.
+ *
+ * Without this normalization, a caller using the tool's own documented
+ * method-name form at `level: "method"` would drain zero rows and now hit
+ * the AC 34.5.3 zero-result guard on a target that genuinely exists and
+ * passes — turning a silent false-negative into a misleading "not found"
+ * for a correct, documented call. {@link toAtelierMethodFilter} strips the
+ * prefix before sending the filter so the documented form actually works;
+ * {@link fromAtelierMethodName} restores it on every result row so the
+ * tool's own output stays true to its documented shape (e.g. `"TestAdd"`,
+ * not `"Add"`) at all three levels.
+ */
+function toAtelierMethodFilter(methodName: string): string {
+  return methodName.startsWith("Test") ? methodName.slice(4) : methodName;
+}
+
+/** Reverse of {@link toAtelierMethodFilter} — see that function's doc. */
+function fromAtelierMethodName(method: string): string {
+  return `Test${method}`;
+}
 
 /** Result structure from the Atelier async unittest endpoint. */
 interface AtelierTestResult {
@@ -190,7 +256,7 @@ export const executeTestsTool: ToolDefinition = {
         // method level: "ClassName:MethodName"
         const [className, methodName] = target.split(":");
         const testEntry: { class: string; methods?: string[] } = { class: className! };
-        if (methodName) testEntry.methods = [methodName];
+        if (methodName) testEntry.methods = [toAtelierMethodFilter(methodName)];
         tests = [testEntry];
       }
 
@@ -296,6 +362,17 @@ export const executeTestsTool: ToolDefinition = {
       const statusMap: Record<number, string> = { 0: "failed", 1: "passed", 2: "skipped" };
       let total = 0, passed = 0, failed = 0, skipped = 0;
       const details: { class: string; method: string; status: string; duration: number; message: string }[] = [];
+      // Diagnostics carried by class-level (summary) rows — rows with no
+      // `method`. Normally these are a harmless per-class roll-up and are
+      // dropped, but the runner ALSO uses them to report a failure that
+      // prevented any method from running at all (verified live on HSCUSTOM
+      // 2026.1 Build 235U: a `%UnitTest.TestCase` subclass whose
+      // `OnBeforeAllTests` returns an error drains exactly one row —
+      // `{class, status: 0, failures: [], error: "OnBeforeAllTests: ERROR
+      // #5001: ..."}` — and no method rows at all). Capturing them here lets
+      // the zero-result guard below report WHY nothing ran instead of
+      // blaming the caller's target name for a run that failed in setup.
+      const classLevelErrors: string[] = [];
 
       for (const r of testResults) {
         if (r.method) {
@@ -314,13 +391,70 @@ export const executeTestsTool: ToolDefinition = {
 
           details.push({
             class: r.class,
-            method: r.method,
+            method: fromAtelierMethodName(r.method),
             status,
             duration: r.duration,
             message: messages.join("; "),
           });
+        } else if (r.error || r.status === 0) {
+          // Class-level row reporting a run-level failure (see
+          // `classLevelErrors` above). Kept out of the counts — it is not a
+          // test method — but retained so the guard can surface it.
+          classLevelErrors.push(
+            r.error ? `${r.class}: ${r.error}` : `${r.class}: the test runner reported a class-level failure`,
+          );
         }
-        // Class-level results are summary — we only report method-level details
+        // Other class-level results are summary — we only report method-level details
+      }
+
+      // AC 34.5.3 (34-4-R10): `package` partially guards a zero-match run via
+      // the discovery-time check above (empty `tests` array). `class` and
+      // `method` have no discovery step at all — the target is trusted and
+      // handed straight to the /work queue — so a typo'd class or method name, or
+      // a `ClassName:MethodName` spec the endpoint doesn't match, drains
+      // zero method-level rows and would otherwise report `total: 0,
+      // passed: 0, failed: 0` with no error field, indistinguishable from a
+      // genuine clean run on an intentionally-empty test class. Mirror the
+      // package-level guard's shape exactly (content-only JSON with an
+      // `error` field naming what ran; no `isError`/`structuredContent`) so
+      // a typo is never mistaken for success.
+      //
+      // The guard applies at ALL THREE levels (AC 34.5.4). `package`'s
+      // pre-existing discovery-time check only covers "the package contains
+      // no test classes"; a package whose classes ARE discovered but whose
+      // run drains zero method rows fell through to the same silent
+      // `total: 0` (confirmed live against a package of two real
+      // `%UnitTest.TestCase` subclasses that produce no method rows).
+      //
+      // When the runner told us WHY nothing ran (a class-level failure row —
+      // a setup/`OnBeforeAllTests` error), report that reason instead of
+      // "No tests found": the tests were found, the run failed. Blaming the
+      // target name for a setup failure is the same lying-verification-
+      // surface defect this story exists to close.
+      if (total === 0) {
+        const reason =
+          classLevelErrors.length > 0
+            ? `Test run for '${target}' at level '${level}' produced no method-level results — ${classLevelErrors.join("; ")}`
+            : `No tests found for '${target}' at level '${level}'`;
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  total: 0,
+                  passed: 0,
+                  failed: 0,
+                  skipped: 0,
+                  details: [],
+                  error: reason,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
       }
 
       const result = { total, passed, failed, skipped, details };
@@ -457,6 +591,8 @@ export const executeClassMethodTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // AC 34.5.1 (34-4-R4): same additive surfacing as `iris_execute_command`.
+        const truncated = extractTruncated(error.result);
         return {
           content: [
             {
@@ -464,6 +600,7 @@ export const executeClassMethodTool: ToolDefinition = {
               text: `Error executing class method '${className}.${methodName}': ${error.message}`,
             },
           ],
+          ...(truncated !== undefined ? { structuredContent: { truncated } } : {}),
           isError: true,
         };
       }

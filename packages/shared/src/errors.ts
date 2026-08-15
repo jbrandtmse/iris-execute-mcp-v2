@@ -37,12 +37,33 @@ export class IrisApiError extends Error {
   readonly errors: unknown[];
   /** Request URL that triggered the error (path only, no credentials). */
   readonly originalUrl: string;
+  /**
+   * The Atelier envelope's `result` payload, when one was available at
+   * throw time (Story 34.5 / `34-4-R4`).
+   *
+   * Additive (Rule #19): a 5th, optional constructor parameter appended
+   * after `message` — every pre-existing 3- and 4-argument call site is
+   * unaffected, and `result` is simply `undefined` for them. Only
+   * `http-client.ts`'s two envelope-bearing throw sites (an HTTP error
+   * status and an Atelier-level `status.errors[]` failure) pass it; the
+   * non-JSON-response and HEAD-request throw sites have no envelope to
+   * pass and leave it `undefined`, same as any caller on a pre-34.5
+   * version of this class.
+   *
+   * Lets a caller recover fields the server placed on the error envelope's
+   * `result` that would otherwise be discarded when the request fails —
+   * e.g. `truncated` on the `/command` and `/classmethod` custom REST
+   * endpoints (Story 34.4), which is on the envelope but was previously
+   * unreachable from any tool's error path.
+   */
+  readonly result: unknown;
 
   constructor(
     statusCode: number,
     errors: unknown[],
     originalUrl: string,
     message?: string,
+    result?: unknown,
   ) {
     const summary =
       message ??
@@ -53,6 +74,7 @@ export class IrisApiError extends Error {
     this.statusCode = statusCode;
     this.errors = errors;
     this.originalUrl = originalUrl;
+    this.result = result;
   }
 }
 
