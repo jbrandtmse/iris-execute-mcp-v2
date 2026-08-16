@@ -4517,6 +4517,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 34.4 Response-path integrity + epic-gate durability (Epic 34 re-opened 2026-08-14 per Rule SC-5; Project Lead escalation of ledger items 34-2-R3, 34-3-R1, 34-3-R4 — see [sprint-change-proposal-2026-08-14-story-34-4.md](./sprint-change-proposal-2026-08-14-story-34-4.md))
 - 34.5 TS-layer `truncated` reachability + test-runner zero-result guard (Epic 34 re-opened 2026-08-15, Rule SC-5)
 - 34.6 Pre-publish release hardening: output ceiling, armed epic gate, machine-detectable guard (Epic 34 re-opened 2026-08-15, Rule SC-5; Project Lead escalation of 34-2-R2/34-3-R2, 34-4-R1, 34-4-R3, 34-5-R1 ahead of the first npm publish)
+- 34.7 Publish blockers: surrogate-safe truncation, shared response budget, build-freshness gate (Epic 34 re-opened 2026-08-16, Rule SC-5; Project Lead escalation of 34-6-CR-10, 34-6-CR2-6, 34-6-CR-11)
 
 **Story-numbering note (2026-08-14, stakeholder decision)**: this epic's own work starts at **34.1**, departing from the project's usual X.0-is-the-probe convention (Epics 23–33). `/epic-cycle`'s mandatory retro-review gate auto-creates "Story {N}.0: Epic {N-1} Deferred Cleanup" whenever the prior epic's retro or `deferred-work.md` has unresolved items — Epic 33's retro exists and the ledger carries 15 unresolved LOW items from Story 33.5 — so 34.0 is left free for that story rather than colliding with it. Per Rule #37 those items are on their FIRST deferral, so the gate's triage may legitimately re-defer any of them; a burn-down is only mandatory at 3 consecutive re-deferrals.
 
@@ -4569,6 +4570,24 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 34.4.6** — If `Command.cls`/`Utils.cls` change: BOOTSTRAP_VERSION from→to recorded (Rule #24; current `5ef2df119451`), Constraint C-2 re-verified (single generated `.int`, pinned by `TestCommandCompilesToSingleGeneratedRoutine`), frozen governance baseline unchanged (#23/#25), tool counts unmoved (#31).
 
 **Out of scope**: the remaining open MEDIUMs (`34-1-R5`, `34-1-R8`, `34-2-R2`, `34-2-R4`, `34-2-R5`, `34-3-R2`, `34-3-R3`) and all LOW items stay in the ledger at Rule #37 count 1. The size-cap items (`34-2-R2`/`34-3-R2`) were considered and declined by the Project Lead as roughly doubling the story.
+
+### Story 34.7: Publish Blockers - Surrogate-Safe Truncation, Shared Response Budget, Build-Freshness Gate
+
+**Added 2026-08-16 (Epic 34 re-opened, Rule SC-5).** Project Lead escalation of the three items the Story 34.6 review flagged as decisions that are only free BEFORE the first npm publish. Stories 34.0-34.6 stay `done` and are NOT re-touched (Rule #52).
+
+**As a** maintainer publishing this suite for the first time, **I want** truncation to never emit invalid UTF-8, the response as a whole to be bounded by the ceiling it advertises, and packaging to refuse a stale build, **so that** the first immutable public release is correct on the wire, honest in its documented limits, and cannot ship an empty tarball.
+
+**Acceptance Criteria**:
+- **AC 34.7.1** (`34-6-CR-10`) - truncation is surrogate-boundary aware: a cut MUST NOT leave a lone surrogate. **Story 34.6 introduced this defect** - `$Extract` cuts at a UTF-16 code-unit index with no guard, and live verification showed the raw HTTP body is not valid UTF-8 (IRIS emits a lone `D83D` as WTF-8 `ED A0 BD`), which Node's lenient decoder turns into 3 x U+FFFD - making the client-visible string 32,770 characters and breaking the "capped at 32768" claim outright. A strict decoder errors. Back the cut off to the preceding character boundary.
+- **AC 34.7.2** (`34-7`, verification shape for AC 34.7.1) - the pin MUST validate **on the wire with a strict decoder** (`TextDecoder` with `fatal: true`, or equivalent), NOT by round-tripping inside IRIS. The existing test was structurally blind precisely because it round-tripped internally (Rules #36/#54).
+- **AC 34.7.3** (`34-6-CR2-6`) - ONE shared response budget replaces the three independent per-field ceilings. **Lead decision, recorded so it is not re-litigated:** spend the budget in field order **`returnValue` -> `byRefValues` -> `output`** - the small, high-value fields are never starved, and narration (usually the large field) absorbs the truncation. The three flags (`truncated` / `returnValueTruncated` / `byRefTruncated`) are RETAINED per the Story 34.6 review's verdict; only the budget arithmetic changes.
+- **AC 34.7.4** (`34-6-CR2-6`) - the documented claim must be **accurate and testable**: state plainly what the ceiling bounds (raw characters) and what JSON escaping can do to the serialized body, and pin it with an **escape-heavy fixture** (quotes, backslashes, tabs, control chars). Live measurement showed two 32768-character escape-heavy fields serializing to 131,102 characters, so every escaping-neutral fixture in Story 34.6 was blind to this.
+- **AC 34.7.5** (`34-6-CR-11`) - packaging refuses a stale or missing build. Note the ordering trap: `prepublishOnly` runs BEFORE `prepack`; `verify-iris-reachable.mjs` imports only `@iris-mcp/shared`'s dist (never the caller's own) and `prepublish-gate.mjs` runs vitest over TypeScript SOURCE - so today a stale/missing `dist` leaves both gates green while npm packs the tarball. Every publishable package declares `files: ["dist"]` and none declares `prepare`/`prepack`. Fix so each publishable package verifies its OWN `dist` is present and newer than its `src`, or builds it as part of packing. Must fail CLOSED.
+- **AC 34.7.6** - Rule #19: under-budget responses stay byte-identical to Story 34.6's behavior wherever the shared budget does not bind. Proven mechanically.
+- **AC 34.7.7** - Rule #48 mutation evidence per fix, including: the surrogate guard removed -> the strict-decoder pin RED; the shared budget reverted to per-field -> the worst-case pin RED; a package's `dist` deleted/staled -> packaging RED with zero tarball.
+- **AC 34.7.8** - Gates: `pnpm turbo run build test lint type-check` green; `gen:governance-baseline:check` (`:check` ONLY) exit 0 at frozen `1e62c5ad5bf7`/141/201/60; tool counts unmoved (#31); BOOTSTRAP_VERSION from->to recorded and Constraint C-2 re-verified if a bootstrapped class changes (#24; current `ae812159d829`); changeset updated.
+
+**Out of scope**: the remaining open MEDIUM/LOW ledger items. The npm publish itself remains a separate Project Lead action.
 
 ### Story 34.6: Pre-Publish Release Hardening
 

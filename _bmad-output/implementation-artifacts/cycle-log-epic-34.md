@@ -74,3 +74,5 @@ Notes for this run:
 2026-08-16T02:00:00Z	Story 34.6	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=epic_gate_13of13_0skipped+live_ceiling_marker_and_3_flags_on_wire model=claude-opus-5
 2026-08-16T02:05:00Z	Story 34.6	committed	sha=04a566c submodules=
 2026-08-16T02:05:30Z	Epic 34	epic_status_done	stories=7
+2026-08-16T09:00:00Z	Epic 34	epic_branch_reopened	reason=project_lead_publish_blockers_34-6-CR-10_34-6-CR2-6_34-6-CR-11 from=existing_unmerged_epic34
+2026-08-16T09:00:30Z	Story 34.7	story_created	path=_bmad-output/implementation-artifacts/34-7-publish-blockers-utf8-budget-build-gate.md integration_ac=not_applicable_hardening lead_decisions=1_shared_budget_field_order

@@ -2244,3 +2244,15 @@ Prior-fix non-regression re-verified: gate 13/13 green under BOTH the default na
 **Disposition tally (Rule #51 — mechanically counted from the Disposition/Severity columns above):** 15 new items — **5 RESOLVED** in review (`34-6-CR2-1` … `-5`) · **10 deferred open** (0 HIGH; 2 MEDIUM: `-6`, `-7`; 8 LOW: `-8` … `-15`). All 10 deferred items enter at Rule #37 re-deferral count **0**.
 
 **Ledger state after this pass:** **0 HIGH / 12 MEDIUM / 58 LOW = 70 open** across **132 distinct items** (62 terminal). Derived mechanically per Rule #51 from the prior recount (61 open / 117 distinct / 56 terminal): `34-6-CR-8` moves open to terminal (−1 MEDIUM), and these 15 new items add 5 terminal + 10 open (+2 MEDIUM, +8 LOW). So MEDIUM 11 − 1 + 2 = 12; LOW 50 + 8 = 58; open 61 − 1 + 10 = 70; distinct 117 + 15 = 132; terminal 56 + 1 + 5 = 62.
+
+## Escalated to Story 34.7 (2026-08-16, Project Lead) — publish blockers
+
+Epic 34 re-opened a fourth time (Rule SC-5). These three are the Story 34.6 review's own "only free before the first publish" items. All three are **in-flight**, not deferred; they reach TERMINAL disposition when Story 34.7 closes.
+
+| Item | Severity | Escalation rationale | Story 34.7 AC |
+|---|---|---|---|
+| 34-6-CR-10 | MEDIUM (Blind Hunter rated HIGH) | A truncation cut through a surrogate pair emits **invalid UTF-8 on the wire** (lone `D83D` as WTF-8 `ED A0 BD`), inflating the client-visible string to 32,770 chars and breaking the "capped at 32768" claim; strict decoders error. **Story 34.6 introduced this** — before the ceiling, `output` passed through verbatim. Its pinning test round-tripped INSIDE IRIS and was structurally blind (Rules #36/#54). | AC 34.7.1 + 34.7.2 |
+| 34-6-CR2-6 | MEDIUM | Three independent 32768 budgets do not bound the response: worst case ~98 KB raw, and escape-heavy content measured at 131,102 serialized chars — ~2.6x past the 50,031 client threshold that was the entire documented rationale for the number. Changing it after publish is a breaking contract change. Lead decision: ONE shared budget spent `returnValue` -> `byRefValues` -> `output`; the three flags are retained. | AC 34.7.3 + 34.7.4 |
+| 34-6-CR-11 | MEDIUM | No gate verifies the package being published was actually BUILT. `prepublishOnly` runs before `prepack`; the reachability gate imports only shared's dist, never the caller's own; the dev gate runs vitest over TS source; no package declares `prepare`/`prepack` while all declare `files:["dist"]`. A stale/missing dist leaves both gates green and npm packs anyway. npm versions are immutable, so an empty first-publish tarball is unrecoverable. | AC 34.7.5 |
+
+Every other open ledger item is judged shippable-and-patchable and stays deferred at its current Rule #37 count.
