@@ -81,3 +81,5 @@ Notes for this run:
 2026-08-16T15:00:00Z	Story 34.7	qa_complete	spawn_at=2026-08-16T13:05:00Z model=claude-sonnet-5 tests_added=0 defects_found=1_doc_accuracy_gap defects_fixed=1 new_ledger=34-7-QA-1 bootstrap_version=c8cf90200b39-to-a5db4ddbdbed os_tests=353 dev_tests=653 closing_sections_present=true
 2026-08-16T18:00:00Z	Story 34.7	cr_complete	spawn_at=2026-08-16T15:05:00Z model=claude-opus-5 resolved=4 deferred=9 dismissed=1 high=1 close_kind=CLEAN layers_delivered=3 bootstrap_version=a5db4ddbdbed-to-06b326631504 verdict=SHIP os_tests=353 dev_tests=653 closing_sections_present=true
 2026-08-16T19:00:00Z	Story 34.7	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=epic_gate_16of16_0skipped+live_ceiling_marker_truncated_flag+incidentally_demonstrated_34-6-CR-7_request_body_mojibake model=claude-opus-5
+2026-08-16T19:10:00Z	Story 34.7	committed	sha=16ae1b5 submodules=
+2026-08-16T19:10:30Z	Epic 34	epic_status_done	stories=8
