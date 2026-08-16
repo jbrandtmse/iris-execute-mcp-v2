@@ -64,3 +64,11 @@ Notes for this run:
 2026-08-15T04:20:30Z	Epic 34	epic_status_done	stories=6
 2026-08-15T14:00:00Z	Epic 34	epic_branch_reopened	reason=project_lead_prepublish_hardening_34-2-R2_34-3-R2_34-4-R1_34-4-R3_34-5-R1 from=existing_unmerged_epic34
 2026-08-15T14:00:30Z	Story 34.6	story_created	path=_bmad-output/implementation-artifacts/34-6-pre-publish-release-hardening.md integration_ac=not_applicable_hardening lead_decisions=2
+2026-08-15T16:30:00Z	Story 34.6	dev_complete	spawn_at=2026-08-15T14:05:00Z model=claude-sonnet-5 files=19 tests_added=17 ceiling=32768chars bootstrap_version=34233b5c9f63-to-ff5029239b07 clarifications=0 cycle_iteration=1 closing_sections_present=true
+2026-08-15T16:30:30Z	Story 34.6	adr_verifications_complete	result=none_required model=claude-opus-5
+2026-08-15T18:00:00Z	Story 34.6	qa_complete	spawn_at=2026-08-15T16:35:00Z model=claude-sonnet-5 tests_added=1 defects_found=2 defects_fixed=2 high=1_prepublish_gate_bypassed_by_recursive_publish os_tests=343 dev_tests=643 closing_sections_present=true
+2026-08-15T20:00:00Z	Story 34.6	cr_complete	spawn_at=2026-08-15T18:05:00Z model=claude-opus-5 resolved=4 deferred=16 dismissed=0 high=5 med=7 low=8 close_kind=NORMAL layers_delivered=3 status=in-progress open_high=34-6-CR-5,34-6-CR-6,34-6-CR-7 cycle_iteration=1 closing_sections_present=true
+2026-08-15T22:30:00Z	Story 34.6	dev_complete	spawn_at=2026-08-15T20:05:00Z model=claude-sonnet-5 cycle_iteration=2 mode=review_continuation high_closed=34-6-CR-5,34-6-CR-6,34-6-CR-7 tests_added=8 bootstrap_version=ff5029239b07-to-e95957368a12 os_tests=346 dev_tests=649 closing_sections_present=true
+2026-08-15T22:30:30Z	Story 34.6	adr_verifications_complete	result=none_required cycle_iteration=2 model=claude-opus-5
+2026-08-16T01:00:00Z	Story 34.6	cr_complete	spawn_at=2026-08-15T22:35:00Z model=claude-opus-5 cycle_iteration=2 resolved=5 deferred=10 dismissed=0 high=1_new_found_and_fixed close_kind=NORMAL layers_delivered=3 status=done bootstrap_version=e95957368a12-to-ae812159d829 os_tests=348 dev_tests=649 closing_sections_present=true
+2026-08-16T02:00:00Z	Story 34.6	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=epic_gate_13of13_0skipped+live_ceiling_marker_and_3_flags_on_wire model=claude-opus-5

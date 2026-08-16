@@ -749,6 +749,201 @@ Method TestCommandCompilesToSingleGeneratedRoutine() As %Status
     Quit $$$OK
 }
 
+/// Story 34.6 AC 34.6.1: mirrors Command.cls's OWN capture + ApplyOutputCeiling
+/// sequence exactly (open null device, redirect, dispatch, restore, THEN bound the
+/// captured output) — the REST handlers themselves are not directly %UnitTest-callable,
+/// so this pins the full pipeline they run without requiring live HTTP. Proves the raw
+/// capture is untouched (truncation is NOT InvokeWithArgs' concern) and that applying
+/// the ceiling afterward, exactly as Command.cls does, produces a bounded, marked result.
+Method TestOutputCeilingAppliedAfterCaptureMirrorsCommandCls() As %Status
+{
+    Set %ExecuteMCPOutput = ""
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetWriteOverCeiling", "", .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Do $$$AssertStatusOK(tSC, "a 50000-char narrating target should succeed")
+    Do $$$AssertEquals(tTruncated, 0, "InvokeWithArgs itself must not flag truncation — 50000 chars is far below <MAXSTRING>")
+    Set tOutput = $Get(%ExecuteMCPOutput, "")
+    Do $$$AssertEquals($Length(tOutput), 50000, "the raw capture must hold all 50000 chars — the ceiling is applied AFTER capture, in Command.cls, not during it")
+    Kill %ExecuteMCPOutput
+
+    ; Mirror Command.cls's post-capture ceiling application exactly (Rule #19: same
+    ; helper, same OR-in semantics).
+    Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+    Do $$$AssertTrue($Length(tOutput) <= 32768, "ceiling-applied output must not exceed the documented ceiling")
+    Do $$$AssertTrue(tOutput [ "[IRIS-MCP-TRUNCATED", "ceiling-applied output must carry the machine-detectable marker")
+    Do $$$AssertEquals(tTruncated, 1, "truncated must now be set — the OR-in behavior Command.cls relies on")
+    Quit $$$OK
+}
+
+/// Story 34.6 AC 34.6.1: a single byRef value far exceeding the documented byte budget
+/// (OUTPUTCEILING, 32768 chars) is truncated in place with the SAME marker
+/// ApplyOutputCeiling uses for the output field, and byRefTruncated is set — separately
+/// from truncated, which stays 0 (no capture-overflow occurred; this is a structural
+/// byRefValues concern, not an output-capture one).
+Method TestByRefValueByteBudgetTruncatesHugeLeaf() As %Status
+{
+    Set tArgs = [{"byRef":true,"value":"start"}]
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetByRefHugeValue", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+    Do $$$AssertStatusOK(tSC, "huge byRef-value call should succeed")
+    Set tVal = tByRefValues.%Get("0")
+    Do $$$AssertTrue($Length(tVal) <= 32768, "byRefValues.0 must not exceed the documented byte budget")
+    Do $$$AssertTrue(tVal [ "[IRIS-MCP-TRUNCATED", "truncated byRefValues.0 must carry the machine-detectable marker")
+    Do $$$AssertEquals(tByRefTruncated, 1, "byRefTruncated must be set when the byte budget is exhausted")
+    Do $$$AssertEquals(tTruncated, 0, "the unrelated output-capture truncated flag must stay 0")
+    Quit $$$OK
+}
+
+/// Story 34.6 AC 34.6.1: 1500 subscript entries (each a trivially small value) exceed
+/// the documented STRUCTURAL node budget (BYREFNODECEILING, 1000) — the tree is cut
+/// short rather than growing unbounded, and both byRefTruncated AND the cut node's own
+/// subscriptsTruncated marker are set, isolating the node budget from the byte budget
+/// (every individual value here is one character — the byte budget is nowhere close to
+/// exhausted).
+Method TestByRefValueNodeBudgetTruncatesManySubscripts() As %Status
+{
+    Set tArgs = [{"byRef":true}]
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetByRefManySubscripts", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+    Do $$$AssertStatusOK(tSC, "many-subscripts call should succeed")
+    Set tNode = tByRefValues.%Get("0")
+    Do $$$AssertTrue(tNode.%Get("subscriptsTruncated"), "the cut-off node must be marked subscriptsTruncated")
+    Set tSubs = tNode.%Get("subscripts")
+    Set tIter = tSubs.%GetIterator()
+    Set tCount = 0
+    While tIter.%GetNext(.tKey, .tVal) {
+        Set tCount = tCount + 1
+    }
+    Do $$$AssertTrue(tCount <= 1000, "subscript count ("_tCount_") must not exceed the documented node budget of 1000, out of 1500 written")
+    Do $$$AssertTrue(tCount > 0, "some subscripts should still have been captured before the budget ran out")
+    Do $$$AssertEquals(tByRefTruncated, 1, "byRefTruncated must be set when the node budget is exhausted")
+    Quit $$$OK
+}
+
+/// Story 34.6 code-review finding CR-6 (a defect this story introduced, not
+/// pre-existing): once the shared byRefValues byte budget is fully exhausted by an
+/// earlier position, later positions must be OMITTED from byRefValues entirely —
+/// never replaced by a marker LARGER than the small value it would have destroyed,
+/// and never pushing the total content past the documented budget. Mirrors the live
+/// reproduction from code review exactly: one huge Output value (which alone consumes
+/// the entire 32768-char budget) followed by several small ones — "42", "hello", "x" —
+/// the exact values code review found destroyed and replaced with ~37-char markers.
+Method TestByRefValueBudgetExhaustionOmitsRatherThanDestroys() As %Status
+{
+    Set tHuge = $TR($J("", 40000), " ", "H")
+    Set tArgs = []
+    Do tArgs.%Push({"byRef":true,"value":(tHuge)})
+    Do tArgs.%Push({"byRef":true,"value":"42"})
+    Do tArgs.%Push({"byRef":true,"value":"hello"})
+    Do tArgs.%Push({"byRef":true,"value":"x"})
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "Target20", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+    Do $$$AssertStatusOK(tSC, "budget-exhaustion call should still succeed")
+    Do $$$AssertEquals(tByRefTruncated, 1, "byRefTruncated must be set once the shared budget is exhausted")
+
+    Set tVal0 = tByRefValues.%Get("0")
+    Do $$$AssertEquals($Length(tVal0), 32768, "the huge first position must be truncated to exactly the documented ceiling")
+
+    ; Positions 1-3 must be OMITTED entirely — never replaced by an oversized marker,
+    ; and never shown as a misleading empty string that could be confused with a
+    ; genuine target-assigned empty value.
+    Do $$$AssertTrue('tByRefValues.%IsDefined("1"), "position 1 (would-be '42-m') must be omitted once the budget is exhausted, not replaced by a marker")
+    Do $$$AssertTrue('tByRefValues.%IsDefined("2"), "position 2 (would-be 'hello-m') must be omitted once the budget is exhausted, not replaced by a marker")
+    Do $$$AssertTrue('tByRefValues.%IsDefined("3"), "position 3 (would-be 'x-m') must be omitted once the budget is exhausted, not replaced by a marker")
+
+    ; The combined content across ALL surviving positions must never exceed the
+    ; documented budget — the CR-6 "response grew while losing data" defect.
+    ; Story 34.6 code review (cycle 2): this previously asserted only
+    ; $Length(tVal0) <= 32768, a strictly weaker duplicate of the AssertEquals two lines
+    ; above that could not fail and did not measure the property its message claimed —
+    ; a surviving position 1 carrying 5KB would have kept it green. Sum the WHOLE
+    ; serialized structure instead, so the assertion actually observes the total.
+    Do $$$AssertTrue($Length(tByRefValues.%ToJSON()) <= (32768 + 4096), "total serialized byRefValues ("_$Length(tByRefValues.%ToJSON())_") must stay within the documented budget plus scaffolding allowance")
+    Quit $$$OK
+}
+
+/// Story 34.6 code review (cycle 2) — the byRefValues byte budget must charge subscript
+/// KEYS, not only leaf values. Before this fix the budget was decremented solely by leaf
+/// value length, so a long-keyed Output array (file paths, URLs, composite keys — an
+/// entirely idiomatic ObjectScript Output shape) emitted a byRefValues payload
+/// arbitrarily larger than the documented 32768-character budget while
+/// <var>byRefTruncated</var> still reported false. Measured live against the deployed
+/// pre-fix code: 400 positions keyed by 900-character subscripts emitted 363,908
+/// characters with 32,368 of the budget still reported unspent.
+/// <p>Uses <method>ExecuteMCPv2.Utils.BuildByRefNode</method> directly (the same shape
+/// the sibling budget tests use) so the property is pinned at the unit that owns it, and
+/// deliberately keeps every VALUE tiny so only the key charging can bound the result —
+/// a regression that stops charging keys makes this go RED, not merely slower.</p>
+Method TestByRefKeysAreChargedAgainstTheByteBudget() As %Status
+{
+    Kill tLocal
+    Set tKeyBase = $TR($J("", 900), " ", "K")
+    For i = 1:1:400 { Set tLocal(tKeyBase_i) = "v" }
+    Set tNodeBudget = 1000
+    Set tByteBudget = 32768
+    Set tByRefTruncated = 0
+    Set tNode = ##class(ExecuteMCPv2.Utils).BuildByRefNode(.tLocal, .tNodeBudget, .tByteBudget, .tByRefTruncated)
+    Set tSerialized = tNode.%ToJSON()
+    ; Every value is 1 character, so the node budget (1000) cannot bind here: 400
+    ; subscripts is well under it. Only key charging can stop this.
+    Do $$$AssertTrue(tNodeBudget > 0, "the node budget must NOT be what bounds this case — otherwise the test would not exercise key charging")
+    Do $$$AssertEquals(tByRefTruncated, 1, "exhausting the shared byte budget on subscript keys must set byRefTruncated")
+    Do $$$AssertTrue($Length(tSerialized) <= (32768 + 4096), "serialized byRefValues node ("_$Length(tSerialized)_") must stay within the documented budget plus scaffolding allowance")
+    Quit $$$OK
+}
+
+/// Story 34.6 code review (cycle 2) — companion to
+/// <method>TestByRefKeysAreChargedAgainstTheByteBudget</method> for the OTHER previously
+/// free emission: the <code>&lt;Object:...&gt;</code> placeholder written for an OREF
+/// out-value. Before this fix that arm never decremented the byte budget at all, so the
+/// budget provided literally zero protection on the OREF path.
+Method TestOrefPlaceholdersAreChargedAgainstTheByteBudget() As %Status
+{
+    Kill tLocal
+    Set tLocal = "root"
+    For i = 1:1:400 { Set tLocal(i) = ##class(%DynamicObject).%New() }
+    Set tNodeBudget = 1000
+    Set tByteBudget = 32768
+    Set tByRefTruncated = 0
+    Set tNode = ##class(ExecuteMCPv2.Utils).BuildByRefNode(.tLocal, .tNodeBudget, .tByteBudget, .tByRefTruncated)
+    Do $$$AssertTrue(tByteBudget < 32768, "OREF placeholders must be charged against the shared byte budget, not emitted free")
+    Do $$$AssertTrue($Length(tNode.%ToJSON()) <= (32768 + 4096), "serialized byRefValues node must stay within the documented budget plus scaffolding allowance")
+    Quit $$$OK
+}
+
+/// Story 34.6 AC 34.6.5 (Rule #19): an ordinary, small byRefValues call stays
+/// byte-identical to pre-34.6 behavior — byRefTruncated is additively false, never
+/// invented as true when nothing was truncated.
+Method TestByRefValueUnderBudgetByRefTruncatedFalse() As %Status
+{
+    Set tArgs = [{"byRef":true,"value":"before"}]
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetByRef", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+    Do $$$AssertStatusOK(tSC, "ordinary defined-in ByRef call should succeed")
+    Do $$$AssertEquals(tByRefValues.%Get("0"), "before-mutated", "value unaffected by the new budget machinery")
+    Do $$$AssertEquals(tByRefTruncated, 0, "byRefTruncated must be false when nothing was truncated")
+    Quit $$$OK
+}
+
+/// Story 34.6 AC 34.6.2 fixture sanity: TargetReturnNamespace reflects the CURRENT
+/// namespace, proving it is genuinely namespace-sensitive — used by the epic gate's leg
+/// (d) and its custom-rest.integration.test.ts original to replace the
+/// namespace-invariant %SYSTEM.Version.GetVersion() oracle (ledger 34-4-R1).
+Method TestTargetReturnNamespaceReflectsCurrentNamespace() As %Status
+{
+    Set tBefore = $NAMESPACE
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "TargetReturnNamespace", "", .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+    Do $$$AssertStatusOK(tSC, "TargetReturnNamespace call should succeed")
+    Do $$$AssertEquals(tReturn, tBefore, "should return the namespace the call executed in")
+    Quit $$$OK
+}
+
 /// AC 34.2.6/R3 (documented limitation): a target that turns the redirect off/on
 /// itself does not corrupt the envelope — its "during-off" write is silently lost
 /// (discarded to the null device), but before/after writes are captured and the

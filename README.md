@@ -751,6 +751,14 @@ On the next server start, the bootstrap recognizes this `unconfigured` state and
 
 If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap reports `configured: false` with manual instructions, and a later launch by a privileged user self-heals automatically.
 
+### Non-ASCII Request-Body Content Is Mis-Decoded
+
+Every custom `ExecuteMCPv2.REST.*` handler reads its JSON request body through the shared `ExecuteMCPv2.Utils.ReadRequestBody` helper (14 handler classes, 46 call sites, spanning all five servers). That helper currently reads the body as if it were Latin-1, so **non-ASCII characters submitted in a JSON request body are silently corrupted on the way in** — verified live: `é` (U+00E9) arrives as two garbled characters matching its raw UTF-8 bytes, `世界` as six, an emoji as four. There is no error and no truncation flag; the call returns `HTTP 200` with the corrupted value already accepted.
+
+This affects any tool whose input is written back to IRIS or otherwise round-tripped — most directly `@iris-mcp/dev`'s `iris_global_set` (`value`), whose corrupted text is written to the target global, a genuine **data corruption at rest**, plus `iris_execute_command` (`command`) and `iris_execute_classmethod` (`args`). Content that *originates* on the server (e.g. a compiled class's literal source) round-trips out correctly — the defect is strictly on the inbound request-body path.
+
+**Workaround:** avoid submitting non-ASCII characters through these request bodies until this is fixed. Tracked as ledger item `34-6-CR-7` in this repository's deferred-work ledger (`_bmad-output/implementation-artifacts/deferred-work.md`); a proper fix requires investigating IRIS's CSP request-body character-set negotiation and is out of scope for the story that discovered it.
+
 ---
 
 ## License

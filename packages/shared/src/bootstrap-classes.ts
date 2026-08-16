@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "34233b5c9f63";
+export const BOOTSTRAP_VERSION = "ae812159d829";
 
 export interface BootstrapClass {
   name: string;
@@ -37,6 +37,23 @@ export const BOOTSTRAP_CLASSES: Map<string, string> = new Map([
 /// and request body parsing helpers used by all REST handler classes.</p>
 Class ExecuteMCPv2.Utils Extends %RegisteredObject
 {
+
+/// Story 34.6 AC 34.6.1 — the ONE documented response-payload ceiling, measured in
+/// CHARACTERS via <code>$Length</code> (not raw UTF-8 bytes — stated explicitly to avoid
+/// overclaiming byte-precision on a Unicode-enabled instance). Applied to the
+/// <code>output</code> field on both <code>/command</code> and <code>/classmethod</code>
+/// via <method>ApplyOutputCeiling</method>, and reused as the byRefValues shared byte
+/// budget in <method>BuildByRefNode</method>. Chosen from LIVE 2026-08-15 measurement
+/// (Rule #36), not by feel — see <method>ApplyOutputCeiling</method>'s banner for the
+/// measurement evidence and Rule #38 discipline.
+Parameter OUTPUTCEILING As %Integer = 32768;
+
+/// Story 34.6 AC 34.6.1 — the byRefValues STRUCTURAL ceiling: the maximum number of tree
+/// nodes (subscript entries) <method>BuildByRefNode</method> will materialize across the
+/// WHOLE byRefValues structure (every by-ref-marked position combined), independent of
+/// the byte budget in <parameter>OUTPUTCEILING</parameter> — bounds a pathologically
+/// wide/deep Output array even where every individual value is tiny.
+Parameter BYREFNODECEILING As %Integer = 1000;
 
 /// Save the current namespace and switch to <var>pNamespace</var>.
 /// <p>The original namespace is returned via the <var>pOriginal</var> output parameter
@@ -188,6 +205,80 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
     Quit $$$ERROR($$$GeneralError, tSafe)
 }
 
+/// Story 34.6 AC 34.6.1 — truncate <var>pOutput</var> to the documented
+/// <parameter>OUTPUTCEILING</parameter>-character ceiling, appending a structured,
+/// machine-detectable elision marker (never a bare "...") in place of the elided tail.
+/// Only ever SETS <var>pTruncated</var> to true when truncation happens HERE — an
+/// already-true value from an earlier, unrelated truncation cause (e.g. a capture-buffer
+/// &lt;MAXSTRING&gt;, Story 34.3) is left untouched, so a caller ORs this in for free
+/// simply by passing its existing flag ByRef. The returned string's length never exceeds
+/// <parameter>OUTPUTCEILING</parameter> (content is trimmed to make room for the marker
+/// itself, not appended on top of a full-length excerpt).
+/// <p><b>Rule #38 — what this ceiling is NOT.</b> Live measurement on 2026-08-15 (Story
+/// 34.6) found the CSP Gateway/HTTP transport tolerates multi-megabyte
+/// <code>/command</code> responses cleanly — no corruption, no timeout, no error — up to
+/// 3,000,000 characters (the largest size tested; the underlying platform long-string
+/// ceiling sits somewhere past that). So this ceiling is NOT protection against a Web
+/// Gateway timeout or against the target's own execution cost: the target has already
+/// fully run, and the captured output has already been fully produced, by the time this
+/// method trims it. It exists purely to keep the RESPONSE PAYLOAD a bounded, genuinely
+/// consumable size for the MCP clients — typically AI agents with a finite context
+/// budget — that read tool results. A real, live MCP client (Claude Code CLI, this
+/// repository's own dev environment) was observed diverting a rendered tool result away
+/// from inline consumption once it reached 50,031 characters; 32768 (see
+/// <parameter>OUTPUTCEILING</parameter>) was chosen to stay safely under that measured
+/// boundary.</p>
+/// <p><b>Story 34.6 code review (cycle 2) — the ceiling is PER FIELD, not per response.</b>
+/// <code>output</code>, <code>returnValue</code> and the <code>byRefValues</code> budget
+/// each get their own <parameter>OUTPUTCEILING</parameter>, so a single fully-compliant,
+/// fully-flagged <code>/classmethod</code> response can carry roughly three times this
+/// figure before JSON escaping, and more after it. The 50,031-character client
+/// observation above therefore bounds any ONE field comfortably, but is NOT a guarantee
+/// about the whole envelope — an earlier version of this banner claimed "headroom for the
+/// rest of the JSON envelope", which overstated it. A target that narrates AND returns a
+/// large value AND has large Output parameters is the worst case; whether to replace the
+/// three per-field budgets with one shared response budget spent in field order is an
+/// open design question recorded as ledger item <code>34-6-CR2-6</code>.</p>
+/// <p><var>pCeiling</var> defaults to <parameter>OUTPUTCEILING</parameter> when omitted
+/// (sentinel <code>-1</code> — distinct from an explicit <code>0</code>, which
+/// <method>BuildByRefNode</method> legitimately passes once its shared byte budget is
+/// fully exhausted).</p>
+/// <p><b>Story 34.6 code-review findings CR-6/CR-8/CR-9 fix.</b> The elision marker
+/// itself is <code>36 + digits(pCeiling)</code> characters (never smaller than ~37).
+/// When <var>pCeiling</var> is smaller than the marker's own length, appending the
+/// marker anyway would make the result BOTH longer than the ceiling it is supposed to
+/// respect AND longer than the (small) original value it replaces — exactly the defect
+/// <method>BuildByRefNode</method>'s shared byte budget hit once nearly exhausted
+/// (a 4-character value destroyed and replaced by a ~37-character marker, and the
+/// response growing past its own documented budget). In that band this method falls
+/// back to a plain hard cut of the first <var>pCeiling</var> characters, with NO marker
+/// at all — the marker is only ever emitted whole, exactly matching the documented
+/// format, never as a truncated/malformed fragment. Two invariants hold for EVERY
+/// <var>pCeiling</var>, including this band: the result never exceeds
+/// <var>pCeiling</var> characters, and the result is never LONGER than
+/// <var>pOutput</var> itself — a value is never elided into something bigger than it
+/// started.</p>
+ClassMethod ApplyOutputCeiling(pOutput As %String, ByRef pTruncated As %Boolean, pCeiling As %Integer = -1) As %String
+{
+    Set tCeiling = pCeiling
+    If tCeiling < 0 { Set tCeiling = ..#OUTPUTCEILING }
+    Set tLen = $Length(pOutput)
+    If tLen <= tCeiling {
+        Quit pOutput
+    }
+    Set pTruncated = 1
+    Set tMarker = $Char(10)_"[IRIS-MCP-TRUNCATED ceiling="_tCeiling_"chars]"_$Char(10)
+    ; Story 34.6 CR-6/CR-8/CR-9: the marker does not fit within a small remaining
+    ; ceiling — appending it anyway would both exceed the ceiling AND replace a SMALLER
+    ; original value with something LARGER. Fall back to a marker-less hard cut so the
+    ; result is always bounded by tCeiling and never bigger than pOutput itself.
+    If $Length(tMarker) > tCeiling {
+        Quit $Extract(pOutput, 1, tCeiling)
+    }
+    Set tKeep = tCeiling - $Length(tMarker)
+    Quit $Extract(pOutput, 1, tKeep) _ tMarker
+}
+
 /// Parse one positional argument entry for the <code>/classmethod</code> endpoint's
 /// argument ladder (Story 34.2). Takes the whole <var>pArgs</var> array plus the
 /// <var>pPosition</var> index rather than a pre-extracted element, because
@@ -275,8 +366,50 @@ ClassMethod ParseArgEntry(pArgs As %DynamicArray, Output pValue, Output pIsByRef
 /// subscripted node by reference (not valid ObjectScript call-argument syntax — verified
 /// live during this story) and without name indirection (which cannot see
 /// procedure-block-private locals — Story 34.1 Finding 5).</p>
-ClassMethod BuildByRefNode(ByRef pLocal)
+/// <p><b>Story 34.6 AC 34.6.1 — node/byte budget.</b> <var>pNodeBudget</var> and
+/// <var>pByteBudget</var> are shared counters THREADED across every recursive call AND
+/// across every one of the (up to 20) top-level positions <method>InvokeWithArgs</method>
+/// calls this method for — the budgets bound the WHOLE <var>byRefValues</var> structure,
+/// not any one position. <var>pNodeBudget</var> (initial value
+/// <parameter>BYREFNODECEILING</parameter>) is decremented once per call — once it is
+/// exhausted, further subscript descent stops (the node already built is kept, marked
+/// <code>subscriptsTruncated: true</code>) — bounding a pathologically wide/deep tree even
+/// when every value is tiny. <var>pByteBudget</var> (initial value
+/// <parameter>OUTPUTCEILING</parameter>, the SAME ceiling <method>ApplyOutputCeiling</method>
+/// applies to <var>output</var>) is decremented by every piece of CONTENT this method
+/// emits: each leaf value's own length (via <method>ApplyOutputCeiling</method>), each
+/// <code>&lt;Object:...&gt;</code> OREF placeholder, and each subscript KEY. So one huge
+/// value, many medium values, or many long subscript keys are all bounded to the same
+/// total. It does NOT charge the per-node JSON scaffolding itself (the
+/// <code>{"value":...,"subscripts":{}}</code> wrapper, roughly 25-30 characters per
+/// container node); that residue is bounded instead by
+/// <parameter>BYREFNODECEILING</parameter>, giving a hard worst case of about
+/// <parameter>OUTPUTCEILING</parameter> + (<parameter>BYREFNODECEILING</parameter> x 30)
+/// characters for the whole structure. Either budget's exhaustion sets
+/// <var>pByRefTruncated</var> — reported separately from the <var>output</var> field's own
+/// <var>truncated</var> flag, since they describe different parts of the response.</p>
+/// <p><b>Story 34.6 code-review finding CR-6.</b> This method's own child-subscript
+/// loop below already refuses to recurse once either budget is exhausted. The 20
+/// top-level calls <method>InvokeWithArgs</method> makes had no equivalent guard — see
+/// <method>AddByRefPosition</method>, which now wraps every one of those calls with the
+/// SAME pre-check, OMITTING a position from <var>pByRefValues</var> entirely once the
+/// budget is already gone, rather than materializing it here and relying on
+/// <method>ApplyOutputCeiling</method> alone to keep the damage bounded.</p>
+/// <p><b>Story 34.6 code review (cycle 2) — the byte budget now charges KEYS and OREF
+/// placeholders, not only leaf values.</b> Before this, both were emitted free, so the
+/// advertised 32768-character <var>byRefValues</var> budget did not bound
+/// <var>byRefValues</var> at all: measured live, 400 positions keyed by 900-character
+/// subscripts emitted 363,908 characters with 32,368 of the budget still reported
+/// unspent and <var>pByRefTruncated</var> still false, and 1500 OREF leaves emitted
+/// ~49,000 characters without touching the budget at all. A long-keyed
+/// <code>Output</code> array (file paths, URLs, composite keys) is an entirely idiomatic
+/// ObjectScript shape, so this was reachable by ordinary callers, and it was the same
+/// unbounded-payload class as code-review finding CR-5 one field over.</p>
+ClassMethod BuildByRefNode(ByRef pLocal, ByRef pNodeBudget As %Integer, ByRef pByteBudget As %Integer, ByRef pByRefTruncated As %Boolean)
 {
+    ; Every call materializes exactly one tree node — charge it against the shared
+    ; structural budget regardless of whether it turns out to be a leaf or a container.
+    Set pNodeBudget = pNodeBudget - 1
     Set tData = $Data(pLocal)
     ; Guard against an OREF out-value (a target that mutates a by-ref local to hold an
     ; object reference) — mirrors the returnValue $IsObject guard in ClassMethod(), so a
@@ -291,8 +424,24 @@ ClassMethod BuildByRefNode(ByRef pLocal)
     If tHasValue {
         If $IsObject(pLocal) {
             Set tValue = "<Object:"_$ClassName(pLocal)_">"
+            ; Story 34.6 code review (cycle 2): the OREF placeholder is EMITTED CONTENT
+            ; and must be charged like any other leaf value. Before this it was the one
+            ; value shape that consumed payload without ever decrementing the budget, so
+            ; a target returning many OREF out-values shipped tens of KB with the byte
+            ; budget still reading its full 32768 and byRefTruncated still false.
+            Set pByteBudget = pByteBudget - $Length(tValue)
+            If pByteBudget < 0 { Set pByteBudget = 0 }
         } Else {
-            Set tValue = pLocal
+            ; Charge this leaf's value against the shared byte budget (AC 34.6.1) by
+            ; truncating it to WHATEVER REMAINS of that budget right now — reuses
+            ; ApplyOutputCeiling (same marker format as the output field) with an
+            ; EXPLICIT ceiling instead of the default, so a value that is itself under
+            ; OUTPUTCEILING but arrives after other leaves have already spent most of
+            ; the shared budget is truncated to the remainder in ONE pass (never
+            ; double-truncated: OUTPUTCEILING first, then the remaining budget again).
+            Set tValue = ..ApplyOutputCeiling(pLocal, .pByRefTruncated, pByteBudget)
+            Set pByteBudget = pByteBudget - $Length(tValue)
+            If pByteBudget < 0 { Set pByteBudget = 0 }
         }
     }
     If tData = 1 {
@@ -304,15 +453,69 @@ ClassMethod BuildByRefNode(ByRef pLocal)
     }
     Set tSubs = {}
     Set tKey = ""
+    Set tCut = 0
     For {
         Set tKey = $Order(pLocal(tKey))
         Quit:tKey=""
+        If (pNodeBudget <= 0) || (pByteBudget <= 0) {
+            Set tCut = 1
+            Quit
+        }
+        ; Story 34.6 code review (cycle 2): a subscript KEY is emitted content too, and
+        ; was previously never charged — so a long-keyed Output array (file paths, URLs,
+        ; composite keys: an entirely idiomatic ObjectScript Output shape) shipped a
+        ; byRefValues payload arbitrarily larger than the documented budget while
+        ; byRefTruncated still read false. Measured live before this fix: 400 positions
+        ; keyed by 900-character strings emitted 363,908 characters against a
+        ; 32768-character budget, with 32,368 of that budget still reported unspent.
+        ; Charge the key BEFORE descending; if the key alone would consume the rest of
+        ; the budget, stop here instead of descending with a zero budget (which would
+        ; force the child's value to the ambiguous empty string AddByRefPosition's
+        ; banner deliberately avoids). This keeps pByteBudget >= 1 at every recursive
+        ; entry, so ApplyOutputCeiling is never called with a zero ceiling.
+        If $Length(tKey) >= pByteBudget {
+            Set pByteBudget = 0
+            Set tCut = 1
+            Quit
+        }
+        Set pByteBudget = pByteBudget - $Length(tKey)
         Kill tChild
         Merge tChild = pLocal(tKey)
-        Do tSubs.%Set(tKey, ..BuildByRefNode(.tChild))
+        Do tSubs.%Set(tKey, ..BuildByRefNode(.tChild, .pNodeBudget, .pByteBudget, .pByRefTruncated))
+    }
+    If tCut {
+        Set pByRefTruncated = 1
+        Do tResult.%Set("subscriptsTruncated", 1, "boolean")
     }
     Do tResult.%Set("subscripts", tSubs)
     Quit tResult
+}
+
+/// Story 34.6 code-review finding CR-6 — add ONE top-level by-ref position's node to
+/// <var>pByRefValues</var> at key <var>pKey</var>, honoring the shared node/byte
+/// budgets the SAME way <method>BuildByRefNode</method>'s own child-subscript loop
+/// already does. <method>InvokeWithArgs</method>' 20 top-level calls were the one place
+/// nothing checked the budget BEFORE materializing a node: once one large value
+/// exhausted the shared byte budget, every later position was still handed to
+/// <method>BuildByRefNode</method>, which (before the accompanying
+/// <method>ApplyOutputCeiling</method> fix) truncated a small real value down to an
+/// elision marker LARGER than the value itself.
+/// <p>When either budget is already exhausted BEFORE this position is visited, it is
+/// OMITTED from <var>pByRefValues</var> entirely — the key never appears — rather than
+/// materialized as a misleading placeholder. This mirrors the convention this class
+/// already uses for a genuinely-undefined post-call local (see
+/// <method>BuildByRefNode</method>'s banner: "a fully undefined local is represented by
+/// omitting its key ... entirely") instead of inventing a new, ambiguous empty-string
+/// shape that could be confused with a target that genuinely set the value to "".
+/// <var>pByRefTruncated</var> is set either way so the caller knows something was cut.</p>
+ClassMethod AddByRefPosition(pByRefValues As %DynamicObject, pKey As %Integer, ByRef pLocal, ByRef pNodeBudget As %Integer, ByRef pByteBudget As %Integer, ByRef pByRefTruncated As %Boolean)
+{
+    If (pNodeBudget <= 0) || (pByteBudget <= 0) {
+        Set pByRefTruncated = 1
+        Quit
+    }
+    Do pByRefValues.%Set(pKey, ..BuildByRefNode(.pLocal, .pNodeBudget, .pByteBudget, .pByRefTruncated))
+    Quit
 }
 
 /// Invoke a class method dynamically with up to 20 positional arguments, each either a
@@ -359,13 +562,28 @@ ClassMethod BuildByRefNode(ByRef pLocal)
 /// <code>Try/Catch</code> (still covered by the exTarget discriminator below, kept as
 /// defense-in-depth for any <code>&lt;MAXSTRING&gt;</code> that reaches this level by some
 /// other path) and a target that swallows its own errors report identically.</p>
-ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean) As %Status
+/// <p><b>Story 34.6 AC 34.6.1:</b> <var>pByRefTruncated</var> is a new, additive,
+/// OPTIONAL trailing output parameter (verified live that omitting a trailing
+/// <c>Output</c> argument at a call site is safe ObjectScript — the pre-existing 30+
+/// call sites in <class>ExecuteMCPv2.Tests.ClassMethodArgsTest</class> do not pass it and
+/// need no change). It reports whether <var>pByRefValues</var>' node/byte budget (see
+/// <method>BuildByRefNode</method>) was exhausted — separate from <var>pTruncated</var>,
+/// which describes only the <var>output</var> field.</p>
+/// <p><b>Story 34.6 code-review finding CR-6:</b> the 20 top-level
+/// <method>BuildByRefNode</method> dispatches below are each wrapped by
+/// <method>AddByRefPosition</method>, which shares ONE pair of budget counters across
+/// every position (not a fresh budget per position) and OMITS a position from
+/// <var>pByRefValues</var> once either budget is already exhausted, instead of handing
+/// it to <method>BuildByRefNode</method> and risking a small real value being replaced
+/// by a larger elision marker.</p>
+ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean, Output pByRefTruncated As %Boolean) As %Status
 {
     Set tSC = $$$OK
     Set pReturn = ""
     Set pByRefValues = {}
     Set pArgCount = 0
     Set pTruncated = 0
+    Set pByRefTruncated = 0
     Kill %ExecuteMCPTruncated
     Try {
         ; Validate args shape (AC 34.2.6/R12) — must be a JSON array, or absent/empty.
@@ -501,26 +719,35 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
         ; Assemble byRefValues for marked positions only (AC 34.2.2, 34.2.6/R1, R6) —
         ; direct-by-name access; omit the key when the local is still genuinely
         ; undefined after the call (Residual Risk: "undefined out-value").
-        If tByRef0, $Data(tA0)   Do pByRefValues.%Set(0, ..BuildByRefNode(.tA0))
-        If tByRef1, $Data(tA1)   Do pByRefValues.%Set(1, ..BuildByRefNode(.tA1))
-        If tByRef2, $Data(tA2)   Do pByRefValues.%Set(2, ..BuildByRefNode(.tA2))
-        If tByRef3, $Data(tA3)   Do pByRefValues.%Set(3, ..BuildByRefNode(.tA3))
-        If tByRef4, $Data(tA4)   Do pByRefValues.%Set(4, ..BuildByRefNode(.tA4))
-        If tByRef5, $Data(tA5)   Do pByRefValues.%Set(5, ..BuildByRefNode(.tA5))
-        If tByRef6, $Data(tA6)   Do pByRefValues.%Set(6, ..BuildByRefNode(.tA6))
-        If tByRef7, $Data(tA7)   Do pByRefValues.%Set(7, ..BuildByRefNode(.tA7))
-        If tByRef8, $Data(tA8)   Do pByRefValues.%Set(8, ..BuildByRefNode(.tA8))
-        If tByRef9, $Data(tA9)   Do pByRefValues.%Set(9, ..BuildByRefNode(.tA9))
-        If tByRef10, $Data(tA10) Do pByRefValues.%Set(10, ..BuildByRefNode(.tA10))
-        If tByRef11, $Data(tA11) Do pByRefValues.%Set(11, ..BuildByRefNode(.tA11))
-        If tByRef12, $Data(tA12) Do pByRefValues.%Set(12, ..BuildByRefNode(.tA12))
-        If tByRef13, $Data(tA13) Do pByRefValues.%Set(13, ..BuildByRefNode(.tA13))
-        If tByRef14, $Data(tA14) Do pByRefValues.%Set(14, ..BuildByRefNode(.tA14))
-        If tByRef15, $Data(tA15) Do pByRefValues.%Set(15, ..BuildByRefNode(.tA15))
-        If tByRef16, $Data(tA16) Do pByRefValues.%Set(16, ..BuildByRefNode(.tA16))
-        If tByRef17, $Data(tA17) Do pByRefValues.%Set(17, ..BuildByRefNode(.tA17))
-        If tByRef18, $Data(tA18) Do pByRefValues.%Set(18, ..BuildByRefNode(.tA18))
-        If tByRef19, $Data(tA19) Do pByRefValues.%Set(19, ..BuildByRefNode(.tA19))
+        ; Story 34.6 AC 34.6.1: tByRefNodeBudget/tByRefByteBudget are initialized ONCE
+        ; and threaded (ByRef) through every position below, so the budget spans the
+        ; WHOLE byRefValues structure rather than resetting per position.
+        ; Story 34.6 code-review finding CR-6: each position is routed through
+        ; AddByRefPosition (not BuildByRefNode directly), which OMITS the position once
+        ; either budget is already exhausted instead of risking a small value being
+        ; replaced by a larger elision marker — see AddByRefPosition's banner.
+        Set tByRefNodeBudget = ..#BYREFNODECEILING
+        Set tByRefByteBudget = ..#OUTPUTCEILING
+        If tByRef0, $Data(tA0)   Do ..AddByRefPosition(pByRefValues, 0, .tA0, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef1, $Data(tA1)   Do ..AddByRefPosition(pByRefValues, 1, .tA1, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef2, $Data(tA2)   Do ..AddByRefPosition(pByRefValues, 2, .tA2, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef3, $Data(tA3)   Do ..AddByRefPosition(pByRefValues, 3, .tA3, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef4, $Data(tA4)   Do ..AddByRefPosition(pByRefValues, 4, .tA4, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef5, $Data(tA5)   Do ..AddByRefPosition(pByRefValues, 5, .tA5, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef6, $Data(tA6)   Do ..AddByRefPosition(pByRefValues, 6, .tA6, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef7, $Data(tA7)   Do ..AddByRefPosition(pByRefValues, 7, .tA7, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef8, $Data(tA8)   Do ..AddByRefPosition(pByRefValues, 8, .tA8, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef9, $Data(tA9)   Do ..AddByRefPosition(pByRefValues, 9, .tA9, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef10, $Data(tA10) Do ..AddByRefPosition(pByRefValues, 10, .tA10, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef11, $Data(tA11) Do ..AddByRefPosition(pByRefValues, 11, .tA11, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef12, $Data(tA12) Do ..AddByRefPosition(pByRefValues, 12, .tA12, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef13, $Data(tA13) Do ..AddByRefPosition(pByRefValues, 13, .tA13, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef14, $Data(tA14) Do ..AddByRefPosition(pByRefValues, 14, .tA14, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef15, $Data(tA15) Do ..AddByRefPosition(pByRefValues, 15, .tA15, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef16, $Data(tA16) Do ..AddByRefPosition(pByRefValues, 16, .tA16, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef17, $Data(tA17) Do ..AddByRefPosition(pByRefValues, 17, .tA17, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef18, $Data(tA18) Do ..AddByRefPosition(pByRefValues, 18, .tA18, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef19, $Data(tA19) Do ..AddByRefPosition(pByRefValues, 19, .tA19, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
     } Catch ex {
         Set tSC = ex.AsStatus()
     }
@@ -587,7 +814,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "34233b5c9f63";
+Parameter BOOTSTRAPVERSION = "ae812159d829";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3506,6 +3733,13 @@ ClassMethod Execute() As %Status
             Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
             Kill %ExecuteMCPOutput
             Kill %ExecuteMCPTruncated
+            ; Story 34.6 AC 34.6.1: bound the response PAYLOAD to the documented ceiling —
+            ; independent of (and applied AFTER) the capture-buffer <MAXSTRING> truncation
+            ; above. ApplyOutputCeiling only ever SETS tTruncated (never clears an
+            ; already-true value), so this correctly ORs the two truncation causes into
+            ; one flag. See ApplyOutputCeiling's banner for the Rule #38 discipline and
+            ; the Rule #36 measurement behind the ceiling value.
+            Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
             Set tResult = {}
             Do tResult.%Set("output", tOutput)
             ; Additive (Rule #19): 34-2-R1 fix — a capture-buffer <MAXSTRING> no longer
@@ -3557,6 +3791,20 @@ ClassMethod Execute() As %Status
 /// <code>truncated</code> boolean flags the case where the captured output hit the
 /// platform's long-string ceiling mid-target-execution (AC 34.2.6/R2) — the response
 /// still succeeds, with whatever was captured/mutated before the limit.</p>
+/// <p><b>Story 34.6 AC 34.6.1:</b> <code>output</code> is additionally bounded by
+/// <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>'s documented ceiling (folding
+/// further into <code>truncated</code>), and <code>byRefValues</code> gains its own
+/// node/byte budget in <method>ExecuteMCPv2.Utils.BuildByRefNode</method>, surfaced here
+/// as the additive <code>byRefTruncated</code> boolean — reported separately from
+/// <code>truncated</code> since the two describe different response fields.</p>
+/// <p><b>Story 34.6 code-review finding CR-5:</b> <code>returnValue</code> — the
+/// PRIMARY payload field, and the one AC 34.6.1's ceiling did not originally cover — is
+/// now ALSO bounded by the same <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>
+/// ceiling and marker, surfaced as its own additive <code>returnValueTruncated</code>
+/// boolean. Reported separately from <code>truncated</code>/<code>byRefTruncated</code>
+/// (each describes a different response field) but present, defaulted false, on both
+/// error envelopes too, for the same shape symmetry <code>byRefTruncated</code>
+/// already established.</p>
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
@@ -3607,7 +3855,7 @@ ClassMethod ClassMethod() As %Status
 
         ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
         ; ladder all live in Utils (keeps this routine small — see method banner).
-        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
 
         ; Restore the original I/O state — same discipline as Execute() (Rule #7):
         ; disable redirect, switch back to the untouched initial device, close the
@@ -3619,15 +3867,26 @@ ClassMethod ClassMethod() As %Status
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput
 
+        ; Story 34.6 AC 34.6.1: bound the output field to the documented ceiling — same
+        ; discipline as Execute() above. ApplyOutputCeiling only ever SETS tTruncated
+        ; (never clears an already-true value), so this ORs in with InvokeWithArgs' own
+        ; capture-overflow signal.
+        Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS
 
         If $$$ISERR(tSC) {
             ; 34-3-R1 fix (Story 34.4, AC 34.4.2): tTruncated is always defined by
             ; InvokeWithArgs (set to 0 at entry) even on its error return — surface
-            ; it here instead of discarding it.
+            ; it here instead of discarding it. tByRefTruncated is likewise always
+            ; defined (Story 34.6) — a genuine target error skips byRefValues assembly
+            ; entirely, so it stays 0, but the field is still rendered for shape
+            ; consistency with the success envelope.
             Set tErrorResult = {}
             Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+            Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+            Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC), , tErrorResult)
             Set tSC = $$$OK
             Quit
@@ -3640,12 +3899,23 @@ ClassMethod ClassMethod() As %Status
         } Else {
             Set tReturnStr = tReturn
         }
+        ; Story 34.6 code-review finding CR-5: returnValue is the PRIMARY payload field,
+        ; and was the one field AC 34.6.1's ceiling did not cover — a target returning a
+        ; large string (a file read, a serialized report, ...) shipped fully unbounded.
+        ; Apply the SAME documented ceiling and marker, with its own additive
+        ; returnValueTruncated flag (symmetric with truncated/byRefTruncated — the
+        ; story's own established one-flag-per-response-field pattern) rather than
+        ; folding it into the unrelated truncated flag, which describes only output.
+        Set tReturnValueTruncated = 0
+        Set tReturnStr = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tReturnStr, .tReturnValueTruncated)
         Set tResult = {}
         Do tResult.%Set("returnValue", tReturnStr)
         Do tResult.%Set("argCount", tArgCount, "number")
         Do tResult.%Set("output", tOutput)
         Do tResult.%Set("byRefValues", tByRefValues)
         Do tResult.%Set("truncated", tTruncated, "boolean")
+        Do tResult.%Set("byRefTruncated", tByRefTruncated, "boolean")
+        Do tResult.%Set("returnValueTruncated", tReturnValueTruncated, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
         ; Ensure redirection is restored on unexpected error before rendering.
@@ -3659,9 +3929,13 @@ ClassMethod ClassMethod() As %Status
         Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
         ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
-        ; InvokeWithArgs returned), so default it rather than assume it exists.
+        ; InvokeWithArgs returned), so default it rather than assume it exists. Same for
+        ; tByRefTruncated (Story 34.6) and tReturnValueTruncated (code review CR-5) —
+        ; an exception this early means returnValue was never computed either.
         Set tErrorResult = {}
         Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+        Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+        Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }

@@ -14,6 +14,7 @@ import {
   atelierPath,
   ensureUnitTestRoot,
   type ToolDefinition,
+  type ToolResult,
 } from "@iris-mcp/shared";
 import { z } from "zod";
 
@@ -49,10 +50,16 @@ export const executeCommandTool: ToolDefinition = {
   description:
     "Execute an ObjectScript command on IRIS with captured I/O output. " +
     "Write statements and other output are captured and returned in the response's " +
-    "`output` field. The response also includes `truncated` (boolean — true only in " +
-    "the rare case where captured output hit the platform's long-string ceiling " +
-    "mid-command; the call still succeeds with a partial capture, and this never " +
-    "happens silently).",
+    "`output` field, capped at 32768 characters — output beyond the ceiling is cut off " +
+    "and replaced with a structured, machine-detectable marker " +
+    "(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare '...'. This ceiling bounds " +
+    "the RESPONSE PAYLOAD only: the command has already fully executed by the time it is " +
+    "applied, so it is not protection against the command's own execution time or " +
+    "resource usage, and it is not a Web Gateway timeout safeguard. The response also " +
+    "includes `truncated` (boolean — true whenever `output` does not contain everything " +
+    "the command wrote, whether because it hit this ceiling or because it hit the " +
+    "platform's long-string ceiling mid-command; the call still succeeds with a partial " +
+    "capture, and this never happens silently).",
   inputSchema: z.object({
     command: z
       .string()
@@ -198,6 +205,35 @@ async function discoverPackageTests(
   return tests;
 }
 
+/**
+ * Build the zero-result guard's response envelope (AC 34.5.3/34.5.4, and its AC 34.6.4
+ * machine-detectability fix, ledger item `34-5-R1`).
+ *
+ * BOTH guard sites below — the package discovery-time check and the shared post-run
+ * check covering all three levels — call this SAME helper so their shapes can never
+ * diverge again (the AC's own explicit requirement). Carries BOTH `structuredContent`
+ * (so a structured consumer reading `structuredContent.total` sees `0` with a populated
+ * `error`, never `undefined`) AND `isError: true` (the guard fires only when the
+ * caller's target produced nothing — a failed request, not a clean run — so `isError`
+ * is truthful). This is a recorded Project Lead decision (Story 34.6 AC 34.6.4): both
+ * halves are required, not an either/or — see the story's Dev Notes for the rationale.
+ */
+function zeroResultGuardResponse(error: string): ToolResult {
+  const structured = {
+    total: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    details: [] as { class: string; method: string; status: string; duration: number; message: string }[],
+    error,
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(structured, null, 2) }],
+    structuredContent: structured,
+    isError: true,
+  };
+}
+
 export const executeTestsTool: ToolDefinition = {
   name: "iris_execute_tests",
   title: "Execute Tests",
@@ -244,11 +280,7 @@ export const executeTestsTool: ToolDefinition = {
         // Discover all %UnitTest.TestCase subclasses in the package
         tests = await discoverPackageTests(ctx, ns, target);
         if (tests.length === 0) {
-          return {
-            content: [
-              { type: "text", text: JSON.stringify({ total: 0, passed: 0, failed: 0, skipped: 0, details: [], error: `No test classes found in package '${target}'` }, null, 2) },
-            ],
-          };
+          return zeroResultGuardResponse(`No test classes found in package '${target}'`);
         }
       } else if (level === "class") {
         tests = [{ class: target }];
@@ -415,9 +447,11 @@ export const executeTestsTool: ToolDefinition = {
       // zero method-level rows and would otherwise report `total: 0,
       // passed: 0, failed: 0` with no error field, indistinguishable from a
       // genuine clean run on an intentionally-empty test class. Mirror the
-      // package-level guard's shape exactly (content-only JSON with an
-      // `error` field naming what ran; no `isError`/`structuredContent`) so
-      // a typo is never mistaken for success.
+      // package-level guard's shape exactly — both call zeroResultGuardResponse,
+      // which since AC 34.6.4 also carries `isError: true` and `structuredContent`
+      // (see that helper's banner) — so a typo is never mistaken for success and
+      // is machine-detectable by both `isError`- and `structuredContent`-reading
+      // consumers.
       //
       // The guard applies at ALL THREE levels (AC 34.5.4). `package`'s
       // pre-existing discovery-time check only covers "the package contains
@@ -436,25 +470,7 @@ export const executeTestsTool: ToolDefinition = {
           classLevelErrors.length > 0
             ? `Test run for '${target}' at level '${level}' produced no method-level results — ${classLevelErrors.join("; ")}`
             : `No tests found for '${target}' at level '${level}'`;
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  total: 0,
-                  passed: 0,
-                  failed: 0,
-                  skipped: 0,
-                  details: [],
-                  error: reason,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+        return zeroResultGuardResponse(reason);
       }
 
       const result = { total, passed, failed, skipped, details };
@@ -516,17 +532,46 @@ export const executeClassMethodTool: ToolDefinition = {
     "position is bound by reference to the target regardless of the flag, so " +
     "`byRef: false` does not protect a plain scalar argument from being mutated by a " +
     "target that happens to assign it; it only means that mutation is not read back. " +
-    "The response's `returnValue` and `argCount` fields are unchanged from prior " +
-    "versions of this tool. Additively, the response also includes `output` (any text " +
+    "The response's `argCount` field is unchanged from prior versions of this tool. " +
+    "`returnValue` is now ALSO capped at 32768 characters with the same structured, " +
+    "machine-detectable elision marker described below (previously unbounded — flagged " +
+    "via the additive `returnValueTruncated` boolean when it applies). Additively, the " +
+    "response also includes `output` (any text " +
     "the target wrote to the current device via Write during the call — no wrapper " +
     "class is needed for methods that narrate, run stock tools like " +
-    "%UnitTest.Manager.RunTest, or switch namespace mid-execution), `byRefValues` (an " +
-    "object keyed by zero-based position index, present only for marked positions whose " +
-    "target-side local ended up defined — a plain scalar out-value is the raw value, " +
-    "and an idiomatic subscripted Output array is a nested {value?, subscripts?} " +
-    "object), and `truncated` (boolean — true only in the rare case where captured " +
-    "output hit the platform's long-string ceiling mid-call; the call still succeeds " +
-    "with a partial capture, and this never happens silently).",
+    "%UnitTest.Manager.RunTest, or switch namespace mid-execution), capped at the same " +
+    "32768 characters with a structured, machine-detectable elision marker " +
+    "(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`, never a bare '...') in place of anything " +
+    "beyond it; `byRefValues` (an object keyed by zero-based position index, present " +
+    "only for marked positions whose target-side local ended up defined — a plain " +
+    "scalar out-value is the raw value, and an idiomatic subscripted Output array is a " +
+    "nested {value?, subscripts?} object), itself bounded by a combined 1000-node / " +
+    "32768-character budget SHARED ACROSS EVERY MARKED POSITION (not a fresh budget per " +
+    "position). The character budget is charged for every piece of content emitted — " +
+    "leaf values, `<Object:...>` placeholders, and subscript keys — but not for the " +
+    "per-node JSON scaffolding, which the 1000-node ceiling bounds instead. Once either " +
+    "budget is exhausted, further subscript entries are omitted from the affected node " +
+    "(marked `subscriptsTruncated: true`), and a marked position reached after the " +
+    "budget is already gone is OMITTED from `byRefValues` entirely. A position reached " +
+    "with budget still remaining, but whose value does not fit in what remains, is cut " +
+    "short in one of two ways: with an elision marker (`ceiling=<N>chars`, where `<N>` " +
+    "is however much of the shared budget remained at that point, not always 32768) when " +
+    "there is room for the marker itself, or — when the remaining budget is smaller than " +
+    "the marker (under ~40 characters) — as a plain unmarked prefix of the real value, " +
+    "since emitting the marker there would replace a value with something larger than " +
+    "itself. In that last case `byRefTruncated` is the ONLY signal: the value carries no " +
+    "marker of its own, so do not treat the absence of a marker as proof a byRef value " +
+    "is complete. `truncated` (boolean — true whenever `output` does not contain " +
+    "everything the target wrote, whether because it hit the 32768-character ceiling or " +
+    "the platform's long-string ceiling mid-call; the call still succeeds with a partial " +
+    "capture, and this never happens silently); `returnValueTruncated` (boolean — true " +
+    "whenever `returnValue` was cut short by its ceiling, reported separately since it " +
+    "describes a different response field); and `byRefTruncated` (boolean — true " +
+    "whenever `byRefValues`' node or byte budget was exhausted, reported separately from " +
+    "`truncated` since they describe different response fields). None of these ceilings " +
+    "are protection against the target's own execution time, resource usage, or a Web " +
+    "Gateway timeout — the target has already fully run by the time these caps are " +
+    "applied to the response payload.",
   inputSchema: z.object({
     className: z
       .string()

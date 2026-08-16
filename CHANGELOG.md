@@ -27,6 +27,87 @@ gained the same additive `truncated` field, for the same reason.
 **Back-compat (Rule #19):** `returnValue`/`argCount` are byte-identical for existing plain-scalar calls; no new tool,
 governance key, or action — `iris_execute_classmethod` keeps its existing `write` classification and default state.
 
+### Added — Response payload ceiling on `iris_execute_command`/`iris_execute_classmethod` (`@iris-mcp/dev`, Story 34.6)
+
+`output` is now capped at 32768 characters on both tools — content beyond the ceiling is cut off and replaced with a
+structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`; `truncated`
+folds this in alongside the pre-existing capture-overflow signal. `iris_execute_classmethod`'s `byRefValues` gains its
+own combined 1000-node / 32768-character budget shared across every marked position, surfaced via a new additive
+`byRefTruncated` boolean (separate from `truncated`, which describes only `output`). The ceiling was picked from live
+measurement, not by feel: the CSP Gateway/HTTP transport tolerates multi-megabyte responses cleanly (tested clean to
+3,000,000 characters), so this is **not** protection against a Web Gateway timeout or the target's own execution
+cost — it exists to keep the response payload a bounded, genuinely consumable size for MCP clients, informed by a
+real client (Claude Code CLI) observed diverting inline tool results to a file once they exceeded roughly 50,000
+characters. **Back-compat (Rule #19):** under-ceiling responses are byte-identical to today's shape; `byRefTruncated`
+is additive and absent (not `false`) from any pre-34.6 envelope shape.
+
+### Fixed — `returnValue` on `iris_execute_classmethod` was completely unbounded (`@iris-mcp/dev`, Story 34.6 code-review finding CR-5)
+
+The ceiling above covered `output` and `byRefValues` but not `returnValue` — the PRIMARY payload field — so a target
+returning a large string (a file read, a serialized report, ...) shipped fully unbounded, defeating the ceiling's own
+stated purpose. `returnValue` is now capped at the same 32768 characters with the same elision marker, flagged via a
+new additive `returnValueTruncated` boolean (symmetric with `truncated`/`byRefTruncated`, present — defaulted false —
+on error envelopes too, for the same shape consistency). **Back-compat (Rule #19):** under-ceiling `returnValue` is
+byte-identical to today's shape; `returnValueTruncated` is additive and absent (not `false`) from any pre-fix
+envelope shape.
+
+### Fixed — the `byRefValues` byte budget could destroy small values with oversized elision markers (`@iris-mcp/dev` + ObjectScript, Story 34.6 code-review finding CR-6)
+
+A defect introduced by the response-payload ceiling above, not pre-existing: once one large `Output` value exhausted
+the shared `byRefValues` byte budget, every later marked position was still handed to the truncation logic, which
+(when the remaining budget was smaller than the ~37-character elision marker itself) replaced a small real value with
+a marker LARGER than the value it destroyed — the response grew while losing data, and the total could exceed the
+documented 32768-character budget. Fixed in two places: the elision-marker logic now falls back to a plain,
+marker-less hard cut whenever the marker itself would not fit in the remaining budget (never emitting something
+bigger than the ceiling or the original value), and the 20 top-level `byRefValues` positions now share the same
+budget pre-check the recursive subscript walk already had — a position is OMITTED from `byRefValues` entirely once
+the shared budget is already exhausted, rather than materialized as a misleading placeholder.
+
+### Fixed — the `byRefValues` character budget did not bound `byRefValues` (`@iris-mcp/dev` + ObjectScript, Story 34.6 code review cycle 2)
+
+A second defect introduced by the response-payload ceiling: the shared byte budget was decremented only by each
+leaf VALUE's length, so subscript KEYS and `<Object:...>` OREF placeholders were emitted free. Measured live, an
+`Output` array of 400 positions keyed by 900-character subscripts emitted **363,908 characters** against a
+32768-character budget, with 32,368 of that budget still reported unspent and `byRefTruncated` still `false`; 400
+OREF out-values emitted ~16,000 characters without touching the budget at all. A long-keyed `Output` array (file
+paths, URLs, composite keys) is an entirely idiomatic ObjectScript shape, so ordinary callers could reach it — the
+same unbounded-payload class as the `returnValue` defect above, one field over. Every emitted piece of content is
+now charged; the same case emits 32,797 characters with `byRefTruncated: true`. The per-node JSON scaffolding
+(~25-30 characters per container node) remains uncharged and is bounded by the 1000-node ceiling instead, now
+stated explicitly at every doc site. The tool description and README also gained the previously-undocumented third
+elision outcome: at a remaining budget smaller than the ~40-character marker, a value is cut to a plain **unmarked**
+prefix, and `byRefTruncated` is then the only signal — the absence of a marker does not prove a byRef value is
+complete.
+
+### Documented (not fixed) — non-ASCII JSON request-body content is silently mis-decoded (all servers, Story 34.6 code-review finding CR-7)
+
+Every custom `ExecuteMCPv2.REST.*` handler's shared request-body parser reads non-ASCII JSON content as if it were
+Latin-1, silently corrupting it on the way in (`HTTP 200`, no error, no flag) — most directly affecting
+`iris_global_set`'s `value` (data corruption **at rest**), `iris_execute_command`'s `command`, and
+`iris_execute_classmethod`'s `args`. This is pre-existing across every epic and untouched by this story's own
+changes; a proper fix requires investigating IRIS's CSP request-body character-set negotiation. Documented
+prominently (not silently) in both the suite README and `@iris-mcp/dev`'s own README's new Known Limitations
+sections, tracked as ledger item `34-6-CR-7`.
+
+### Fixed — `iris_execute_tests`' zero-result guard is now machine-detectable (`@iris-mcp/dev`, Story 34.6)
+
+The guard introduced in Epic 34 for a run matching zero test methods (see the 2026-08-14 entry above) previously
+returned content-only JSON with no `isError`/`structuredContent`, so a structured consumer reading
+`structuredContent.total` saw it regress from `0` to `undefined`, and an agent branching on `isError` recorded the
+call as a success. It now carries **both** `isError: true` **and** `structuredContent` set to the same
+`{total, passed, failed, skipped, details, error}` object shown in the text content, applied identically to every
+guard path (package/class/method levels and the package discovery-time check) so no two paths can diverge again.
+
+### Fixed — the epic-done gate can no longer silently skip on a packaging release (internal, Story 34.6)
+
+Not user-facing, but material to this being the suite's first publish: the `iris_execute_classmethod` epic-done gate's
+fixture-availability probe previously collapsed any failure — a credential fault, a network error, a licence issue —
+into the same "fixtures not deployed" verdict as a genuinely missing fixture, and `IRIS_REQUIRE_LIVE` (the switch that
+turns a skip into a hard failure) was armed nowhere in the repository. The probe now re-throws anything that is not a
+genuine "document not found" response, and `IRIS_REQUIRE_LIVE=1` is armed on `@iris-mcp/dev`'s own `prepublishOnly`
+lifecycle hook — mechanically confirmed (`pnpm publish --dry-run`) to abort packaging before producing a tarball when
+IRIS is unreachable.
+
 ## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
 
 ### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)

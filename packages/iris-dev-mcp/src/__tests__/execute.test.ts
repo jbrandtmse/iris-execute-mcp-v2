@@ -518,6 +518,125 @@ describe("iris_execute_classmethod", () => {
     expect(structured.truncated).toBe(false);
   });
 
+  // Story 34.6 AC 34.6.1: `byRefTruncated` is computed server-side (ObjectScript
+  // `ExecuteMCPv2.Utils.BuildByRefNode`'s node/byte budget) — this pins that the TS
+  // tool layer passes it through structuredContent unchanged (never dropped/renamed),
+  // and separately from `truncated`, which describes the `output` field. Also serves as
+  // the Rule #19 ceiling proof at the tool layer: an over-ceiling `output`/`byRefValues`
+  // shape (as the real server would send once truncated) reaches the caller exactly as
+  // the server sent it — the tool performs no additional truncation of its own.
+  it("passes returnValueTruncated, byRefTruncated, and an over-ceiling output/returnValue/marker shape through unchanged (server-computed, tool is a pure pass-through)", async () => {
+    // Rule #54 — these fixtures must be shapes the REAL server can actually emit.
+    // All were corrected/added in code review / the 34-6-CR-5/CR-6 review-continuation
+    // pass after being pinned against live IRIS:
+    //   * The marker is `\n[IRIS-MCP-TRUNCATED ceiling=<N>chars]\n` = 36 + digits(N)
+    //     characters, so at the default ceiling it is 41 chars and the server keeps
+    //     32768 - 41 = 32727 content characters, for a total of EXACTLY 32768. `output`
+    //     AND (as of the CR-5 fix) `returnValue` share this exact shape.
+    //   * A byRef leaf truncated at a REMAINING budget of 20 gets NO marker at all (the
+    //     34-6-CR-6/CR-8/CR-9 fix): the marker itself is 38 characters at that ceiling,
+    //     which is bigger than the 20-char budget, so appending it would replace a
+    //     smaller value with something LARGER — the server now falls back to a plain
+    //     20-character hard cut of the original content, no marker fragment. A prior
+    //     fixture here encoded the marker-alone shape the server produced BEFORE that
+    //     fix — an envelope the server can no longer produce.
+    const CEILING = 32768;
+    const outputMarker = "\n[IRIS-MCP-TRUNCATED ceiling=32768chars]\n";
+    const overCeilingOutput = "A".repeat(CEILING - outputMarker.length) + outputMarker;
+    expect(overCeilingOutput.length).toBe(CEILING);
+    const overCeilingReturnValue = "B".repeat(CEILING - outputMarker.length) + outputMarker;
+    expect(overCeilingReturnValue.length).toBe(CEILING);
+    const byRefHardCutNoMarker = "C".repeat(20);
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        returnValue: overCeilingReturnValue,
+        argCount: 1,
+        output: overCeilingOutput,
+        byRefValues: { "0": byRefHardCutNoMarker },
+        truncated: true,
+        byRefTruncated: true,
+        returnValueTruncated: true,
+      }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething", args: [{ byRef: true }] },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      returnValue: string;
+      output: string;
+      byRefValues: Record<string, unknown>;
+      truncated: boolean;
+      byRefTruncated: boolean;
+      returnValueTruncated: boolean;
+    };
+    expect(structured.output).toBe(overCeilingOutput);
+    expect(structured.output).toContain("[IRIS-MCP-TRUNCATED");
+    expect(structured.returnValue).toBe(overCeilingReturnValue);
+    expect(structured.returnValue).toContain("[IRIS-MCP-TRUNCATED");
+    expect(structured.byRefValues).toEqual({ "0": byRefHardCutNoMarker });
+    expect(structured.truncated).toBe(true);
+    expect(structured.byRefTruncated).toBe(true);
+    expect(structured.returnValueTruncated).toBe(true);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("back-compat (Rule #19): a legacy envelope with no byRefTruncated field surfaces with the key simply absent, not invented as false", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ returnValue: "ok", argCount: 0, output: "", byRefValues: {}, truncated: false }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect("byRefTruncated" in structured).toBe(false);
+  });
+
+  // Story 34.6 code-review finding CR-5 (review-continuation pass): returnValue is
+  // now additionally capped, with its own returnValueTruncated flag — same additive/
+  // pure-pass-through discipline as byRefTruncated above.
+  it("passes returnValueTruncated through structuredContent unchanged when the server sends it", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        returnValue: "short",
+        argCount: 0,
+        output: "",
+        byRefValues: {},
+        truncated: false,
+        byRefTruncated: false,
+        returnValueTruncated: false,
+      }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as { returnValueTruncated: boolean };
+    expect(structured.returnValueTruncated).toBe(false);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("back-compat (Rule #19): a legacy envelope with no returnValueTruncated field surfaces with the key simply absent, not invented as false", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ returnValue: "ok", argCount: 0, output: "", byRefValues: {}, truncated: false }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething" },
+      ctx,
+    );
+
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect("returnValueTruncated" in structured).toBe(false);
+  });
+
   it("back-compat (Rule #19): a legacy envelope with only returnValue/argCount (no output/byRefValues/truncated) still surfaces correctly", async () => {
     // Pins that older-server or older-fixture responses lacking the additive Story
     // 34.2/34.3 fields do not break the tool — the fields are additive, never required.
@@ -798,6 +917,10 @@ describe("iris_execute_tests", () => {
 
     const text = result.content[0]?.text ?? "";
     expect(text).toContain("No test classes found");
+    // AC 34.6.4: the zero-result guard is machine-detectable on every path,
+    // including this discovery-time one.
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { total: number }).total).toBe(0);
   });
 
   // ── Regression: poll-loop truncation (bug 2026-07-09) ──────────
@@ -956,15 +1079,17 @@ describe("iris_execute_tests", () => {
     );
 
     expect(mockHttp.get).toHaveBeenCalledTimes(1);
-    // No isError/structuredContent — mirrors the pre-existing package-level
-    // guard's shape exactly (content-only JSON carrying an `error` field).
-    expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toBeUndefined();
+    // AC 34.6.4 (34-5-R1, recorded Lead decision — both halves, not either/or):
+    // the guard carries isError:true AND structuredContent with the SAME
+    // {total,passed,failed,skipped,details,error} object as the text content,
+    // so both isError- and structuredContent-reading consumers see it.
+    expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? "";
     const parsed = JSON.parse(text) as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("MyApp.Tests.EmptyTest");
     expect(parsed.error).toContain("class");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("guards a method-level run with zero method rows via an explicit error (observed live during the 34.4 review)", async () => {
@@ -980,12 +1105,13 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
-    expect(result.isError).toBeUndefined();
+    expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? "";
     const parsed = JSON.parse(text) as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("MyApp.Tests.UtilsTest:NoSuchMethod");
     expect(parsed.error).toContain("method");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   // ── The guard must not blame the target for a run-level FAILURE ──
@@ -1029,6 +1155,7 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
+    expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     // The runner's own reason must reach the caller verbatim...
@@ -1037,6 +1164,7 @@ describe("iris_execute_tests", () => {
     // ...and the misleading not-found wording must NOT be used for a class
     // that was found and failed.
     expect(parsed.error).not.toContain("No tests found");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("a class-level row with status 0 but no error text still avoids the misleading not-found wording", async () => {
@@ -1052,10 +1180,12 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
+    expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("class-level failure");
     expect(parsed.error).not.toContain("No tests found");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   // A PASSING class-level summary row (status 1, no error) is the ordinary
@@ -1076,9 +1206,11 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
+    expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("No tests found for 'ExecuteMCPv2.Temp.EmptyProbe345'");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   // ── AC 34.5.4: the third level ──
@@ -1099,10 +1231,12 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
+    expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("MyApp.Tests");
     expect(parsed.error).toContain("package");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("a package-level run that drained zero rows surfaces a class-level setup failure too", async () => {
@@ -1124,12 +1258,17 @@ describe("iris_execute_tests", () => {
       ctx,
     );
 
+    expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.error).toContain("OnBeforeAllTests: ERROR #5001");
     expect(parsed.error).not.toContain("No tests found");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("back-compat: a package with zero DISCOVERED classes keeps its original discovery-time message", async () => {
+    // "Back-compat" here means the MESSAGE TEXT this guard has always produced
+    // is unchanged (Rule #19) — the envelope shape gained isError/structuredContent
+    // additively under AC 34.6.4, which the next two assertions cover.
     mockPackageDiscoverAndRun([], []);
 
     const result = await executeTestsTool.handler(
@@ -1139,6 +1278,8 @@ describe("iris_execute_tests", () => {
 
     const parsed = JSON.parse(result.content[0]?.text ?? "") as { total: number; error?: string };
     expect(parsed.error).toBe("No test classes found in package 'MyApp.Nothing'");
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("a matching method-level run reports real counts (not the zero-result guard)", async () => {
@@ -1212,11 +1353,12 @@ describe("iris_execute_tests", () => {
         tests: [{ class: "MyApp.Tests.EmptyTest" }],
       }),
     );
-    expect(result.isError).toBeUndefined();
+    expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? "";
     const parsed = JSON.parse(text) as { total: number; error?: string };
     expect(parsed.total).toBe(0);
     expect(parsed.error).toContain("MyApp.Tests.EmptyTest:");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("should return isError on IrisApiError", async () => {

@@ -21,7 +21,8 @@
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src/",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "node ../../scripts/verify-iris-reachable.mjs"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1",

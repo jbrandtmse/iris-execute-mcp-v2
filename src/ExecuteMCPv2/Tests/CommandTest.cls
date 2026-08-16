@@ -274,4 +274,44 @@ Method TestRedirectsSetsTruncatedFlagOnCaptureOverflow() As %Status
     Quit $$$OK
 }
 
+/// Story 34.6 AC 34.6.1: mirrors Execute()'s OWN capture + ApplyOutputCeiling sequence
+/// exactly — XECUTE a command that writes past the documented 32768-char ceiling but far
+/// below <MAXSTRING>, then bound the captured output exactly as Execute() does before
+/// rendering. Execute() itself is a REST handler and not directly %UnitTest-callable, so
+/// this pins the full /command pipeline without requiring live HTTP.
+Method TestCommandOutputCeilingAppliedAfterCapture() As %Status
+{
+    Set %ExecuteMCPOutput = ""
+    Set %ExecuteMCPTruncated = 0
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    ; Reproduce Execute()'s own XECUTE dispatch. The command string is built via
+    ; $Char(34) rather than inline doubled-quote escaping — clearer and less
+    ; error-prone than nesting several quoted string literals inside an XECUTE literal.
+    Set tCmd = "Write $Justify(" _ $Char(34) _ $Char(34) _ ",50000)"
+    XECUTE tCmd
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Set tOutput = $Get(%ExecuteMCPOutput, "")
+    Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
+    Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
+    Do $$$AssertEquals($Length(tOutput), 50000, "the raw XECUTE capture must hold all 50000 chars before the ceiling is applied")
+    Do $$$AssertEquals(tTruncated, 0, "the capture-buffer flag must not be set — 50000 chars is far below <MAXSTRING>")
+
+    ; Mirror Execute()'s post-capture ceiling application exactly.
+    Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+    Do $$$AssertTrue($Length(tOutput) <= 32768, "ceiling-applied /command output must not exceed the documented ceiling")
+    Do $$$AssertTrue(tOutput [ "[IRIS-MCP-TRUNCATED", "ceiling-applied /command output must carry the machine-detectable marker")
+    Do $$$AssertEquals(tTruncated, 1, "truncated must now be set — the OR-in behavior Execute() relies on")
+    Quit $$$OK
+}
+
 }

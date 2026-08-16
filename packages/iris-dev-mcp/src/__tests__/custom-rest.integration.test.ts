@@ -277,17 +277,34 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
       });
 
       it("iris_execute_classmethod works in a second, genuinely different namespace (Rule #34)", async () => {
+        // Story 34.6 AC 34.6.2 (ledger 34-4-R1): %SYSTEM.Version.GetVersion() returns
+        // the SAME string in every namespace, so this could not fail for the property
+        // it claims — a regression dropping `namespace` entirely would still pass.
+        // The oracle below echoes $NAMESPACE, so the assertion genuinely requires
+        // the namespace parameter to have reached the server AND been applied (Rules
+        // #34/#40) — mutation-verified RED when namespace is omitted (see the
+        // execute-classmethod-epic-gate.test.ts leg (d) sibling of this test).
+        // Code review (Story 34.6): the second namespace is DERIVED rather than
+        // hard-coded to "USER" (this package's README documents IRIS_NAMESPACE=USER as
+        // the default, which made the two assertions mutually unsatisfiable), and the
+        // target is the always-present `%SYSTEM.SYS` system class rather than the
+        // fixture, which is not guaranteed to resolve outside the configured namespace.
+        // See leg (d)'s banner for the full rationale.
+        const configuredNamespace = ctx.resolveNamespace();
+        const secondNamespace =
+          configuredNamespace.toUpperCase() === "USER" ? "%SYS" : "USER";
         const result = await executeClassMethodTool.handler(
           {
-            className: "%SYSTEM.Version",
-            methodName: "GetVersion",
-            namespace: "USER",
+            className: "%SYSTEM.SYS",
+            methodName: "NameSpace",
+            namespace: secondNamespace,
           },
           ctx,
         );
         expect(result.isError).toBeUndefined();
-        const text = result.content[0]?.text ?? "";
-        expect(text).toMatch(/IRIS|20\d{2}\.\d/i);
+        const structured = result.structuredContent as { returnValue: string };
+        expect(structured.returnValue).toBe(secondNamespace);
+        expect(structured.returnValue).not.toBe(configuredNamespace);
       });
     });
 

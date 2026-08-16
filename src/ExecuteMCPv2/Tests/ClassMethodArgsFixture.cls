@@ -294,4 +294,58 @@ ClassMethod TargetWriteModerate() As %String
     Quit "wrote-moderate"
 }
 
+/// Writes 50,000 characters — comfortably past the Story 34.6 AC 34.6.1
+/// <parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter> (32768 chars) but nowhere near
+/// the &lt;MAXSTRING&gt; ceiling (~2-4M chars) — isolates the NEW response-payload
+/// ceiling from the pre-existing capture-buffer-overflow truncation path.
+ClassMethod TargetWriteOverCeiling() As %String
+{
+    Write $TR($J("", 50000), " ", "Y")
+    Quit "wrote-over-ceiling"
+}
+
+/// ByRef formal mutated to a single value LONGER than the AC 34.6.1 byte budget
+/// (40000 chars, vs. the 32768-char ceiling) — exercises
+/// <method>ExecuteMCPv2.Utils.BuildByRefNode</method>'s per-leaf byte-budget truncation
+/// in isolation from the structural node budget.
+ClassMethod TargetByRefHugeValue(ByRef pVal) As %String
+{
+    Set pVal = $TR($J("", 40000), " ", "Z")
+    Quit "ok"
+}
+
+/// Output formal receiving 1500 subscript entries (each a tiny value) — exceeds the
+/// AC 34.6.1 <parameter>ExecuteMCPv2.Utils.BYREFNODECEILING</parameter> (1000 nodes) while
+/// every individual value stays trivially small, isolating the STRUCTURAL node budget
+/// from the byte budget.
+ClassMethod TargetByRefManySubscripts(Output pOut) As %String
+{
+    For i=1:1:1500 { Set pOut(i) = "v" }
+    Quit "ok"
+}
+
+/// Returns 50,000 characters directly as the RETURN value (not via Write) —
+/// comfortably past the Story 34.6 <parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter>
+/// (32768 chars). Code-review finding CR-5: <code>returnValue</code>, the PRIMARY
+/// payload field, is now ALSO bounded by the same ceiling <code>output</code>/
+/// <code>byRefValues</code> already use — this isolates that new ceiling from the
+/// pre-existing output-capture one <method>TargetWriteOverCeiling</method> exercises.
+ClassMethod TargetReturnOverCeiling() As %String
+{
+    Quit $TR($J("", 50000), " ", "R")
+}
+
+/// Returns the CURRENT namespace — Story 34.6 AC 34.6.2 (ledger `34-4-R1`): the epic
+/// gate's leg (d) and its <c>custom-rest.integration.test.ts</c> original previously
+/// asserted only that <code>%SYSTEM.Version.GetVersion()</code> returned SOME
+/// version-looking string, which is IDENTICAL in every namespace — a regression that
+/// dropped the <code>namespace</code> parameter entirely would still pass. This target
+/// makes the namespace-sensitive area genuinely differ (Rules #34/#40): a caller passing
+/// <code>namespace: "USER"</code> must see <code>"USER"</code> back, not the configured
+/// default namespace.
+ClassMethod TargetReturnNamespace() As %String
+{
+    Quit $NAMESPACE
+}
+
 }

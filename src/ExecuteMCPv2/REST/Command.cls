@@ -110,6 +110,13 @@ ClassMethod Execute() As %Status
             Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
             Kill %ExecuteMCPOutput
             Kill %ExecuteMCPTruncated
+            ; Story 34.6 AC 34.6.1: bound the response PAYLOAD to the documented ceiling —
+            ; independent of (and applied AFTER) the capture-buffer <MAXSTRING> truncation
+            ; above. ApplyOutputCeiling only ever SETS tTruncated (never clears an
+            ; already-true value), so this correctly ORs the two truncation causes into
+            ; one flag. See ApplyOutputCeiling's banner for the Rule #38 discipline and
+            ; the Rule #36 measurement behind the ceiling value.
+            Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
             Set tResult = {}
             Do tResult.%Set("output", tOutput)
             ; Additive (Rule #19): 34-2-R1 fix — a capture-buffer <MAXSTRING> no longer
@@ -161,6 +168,20 @@ ClassMethod Execute() As %Status
 /// <code>truncated</code> boolean flags the case where the captured output hit the
 /// platform's long-string ceiling mid-target-execution (AC 34.2.6/R2) — the response
 /// still succeeds, with whatever was captured/mutated before the limit.</p>
+/// <p><b>Story 34.6 AC 34.6.1:</b> <code>output</code> is additionally bounded by
+/// <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>'s documented ceiling (folding
+/// further into <code>truncated</code>), and <code>byRefValues</code> gains its own
+/// node/byte budget in <method>ExecuteMCPv2.Utils.BuildByRefNode</method>, surfaced here
+/// as the additive <code>byRefTruncated</code> boolean — reported separately from
+/// <code>truncated</code> since the two describe different response fields.</p>
+/// <p><b>Story 34.6 code-review finding CR-5:</b> <code>returnValue</code> — the
+/// PRIMARY payload field, and the one AC 34.6.1's ceiling did not originally cover — is
+/// now ALSO bounded by the same <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>
+/// ceiling and marker, surfaced as its own additive <code>returnValueTruncated</code>
+/// boolean. Reported separately from <code>truncated</code>/<code>byRefTruncated</code>
+/// (each describes a different response field) but present, defaulted false, on both
+/// error envelopes too, for the same shape symmetry <code>byRefTruncated</code>
+/// already established.</p>
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
@@ -211,7 +232,7 @@ ClassMethod ClassMethod() As %Status
 
         ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
         ; ladder all live in Utils (keeps this routine small — see method banner).
-        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated)
+        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
 
         ; Restore the original I/O state — same discipline as Execute() (Rule #7):
         ; disable redirect, switch back to the untouched initial device, close the
@@ -223,15 +244,26 @@ ClassMethod ClassMethod() As %Status
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput
 
+        ; Story 34.6 AC 34.6.1: bound the output field to the documented ceiling — same
+        ; discipline as Execute() above. ApplyOutputCeiling only ever SETS tTruncated
+        ; (never clears an already-true value), so this ORs in with InvokeWithArgs' own
+        ; capture-overflow signal.
+        Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS
 
         If $$$ISERR(tSC) {
             ; 34-3-R1 fix (Story 34.4, AC 34.4.2): tTruncated is always defined by
             ; InvokeWithArgs (set to 0 at entry) even on its error return — surface
-            ; it here instead of discarding it.
+            ; it here instead of discarding it. tByRefTruncated is likewise always
+            ; defined (Story 34.6) — a genuine target error skips byRefValues assembly
+            ; entirely, so it stays 0, but the field is still rendered for shape
+            ; consistency with the success envelope.
             Set tErrorResult = {}
             Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+            Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+            Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
             Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC), , tErrorResult)
             Set tSC = $$$OK
             Quit
@@ -244,12 +276,23 @@ ClassMethod ClassMethod() As %Status
         } Else {
             Set tReturnStr = tReturn
         }
+        ; Story 34.6 code-review finding CR-5: returnValue is the PRIMARY payload field,
+        ; and was the one field AC 34.6.1's ceiling did not cover — a target returning a
+        ; large string (a file read, a serialized report, ...) shipped fully unbounded.
+        ; Apply the SAME documented ceiling and marker, with its own additive
+        ; returnValueTruncated flag (symmetric with truncated/byRefTruncated — the
+        ; story's own established one-flag-per-response-field pattern) rather than
+        ; folding it into the unrelated truncated flag, which describes only output.
+        Set tReturnValueTruncated = 0
+        Set tReturnStr = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tReturnStr, .tReturnValueTruncated)
         Set tResult = {}
         Do tResult.%Set("returnValue", tReturnStr)
         Do tResult.%Set("argCount", tArgCount, "number")
         Do tResult.%Set("output", tOutput)
         Do tResult.%Set("byRefValues", tByRefValues)
         Do tResult.%Set("truncated", tTruncated, "boolean")
+        Do tResult.%Set("byRefTruncated", tByRefTruncated, "boolean")
+        Do tResult.%Set("returnValueTruncated", tReturnValueTruncated, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
         ; Ensure redirection is restored on unexpected error before rendering.
@@ -263,9 +306,13 @@ ClassMethod ClassMethod() As %Status
         Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
         ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
-        ; InvokeWithArgs returned), so default it rather than assume it exists.
+        ; InvokeWithArgs returned), so default it rather than assume it exists. Same for
+        ; tByRefTruncated (Story 34.6) and tReturnValueTruncated (code review CR-5) —
+        ; an exception this early means returnValue was never computed either.
         Set tErrorResult = {}
         Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+        Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+        Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
