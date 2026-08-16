@@ -62,3 +62,5 @@ Notes for this run:
 2026-08-15T04:15:00Z	Story 34.5	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 evidence=dev_default_suite_638of638_38_files_0_skipped model=claude-opus-5
 2026-08-15T04:20:00Z	Story 34.5	committed	sha=d8a8159 submodules=
 2026-08-15T04:20:30Z	Epic 34	epic_status_done	stories=6
+2026-08-15T14:00:00Z	Epic 34	epic_branch_reopened	reason=project_lead_prepublish_hardening_34-2-R2_34-3-R2_34-4-R1_34-4-R3_34-5-R1 from=existing_unmerged_epic34
+2026-08-15T14:00:30Z	Story 34.6	story_created	path=_bmad-output/implementation-artifacts/34-6-pre-publish-release-hardening.md integration_ac=not_applicable_hardening lead_decisions=2
