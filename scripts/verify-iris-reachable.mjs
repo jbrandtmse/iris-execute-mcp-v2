@@ -54,9 +54,18 @@
  * directory), so it resolves `@iris-mcp/shared`'s dist by a path relative to
  * ITS OWN file location (repo-root `scripts/`), not by package resolution
  * from the caller's cwd.
+ *
+ * Story 34.7 AC 34.7.5 (ledger `34-6-CR-11`) ALSO runs `scripts/lib/dist-freshness.mjs`
+ * here, FIRST, before the IRIS-reachability check below: neither this script nor
+ * `packages/iris-dev-mcp/scripts/prepublish-gate.mjs` ever verified the package about
+ * to be packaged had actually been built. `checkDistFresh` is per-package and
+ * self-referential — it inspects `process.cwd()` (the CALLING package's own directory,
+ * which npm/pnpm set when running that package's own `prepublishOnly` hook), never a
+ * sibling's `dist/` (see that module's own banner for the full rationale).
  */
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { checkDistFresh } from "./lib/dist-freshness.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -64,6 +73,17 @@ const sharedDistEntry = resolve(repoRoot, "packages/shared/dist/index.js");
 
 const pkgName = process.env.npm_package_name ?? "(unknown package)";
 const timeoutMs = 10000;
+
+const distCheck = checkDistFresh(process.cwd(), pkgName);
+if (!distCheck.ok) {
+  console.error(`[verify-iris-reachable] FAILED CLOSED: ${distCheck.reason}`);
+  process.exit(1);
+}
+console.log(
+  distCheck.skipped
+    ? `[verify-iris-reachable] ${pkgName} declares no dist/ build output of its own — build-freshness check skipped.`
+    : `[verify-iris-reachable] ${pkgName}'s dist/ is present and fresh.`,
+);
 
 console.log(
   `[verify-iris-reachable] Checking IRIS reachability before packaging ${pkgName} — ` +

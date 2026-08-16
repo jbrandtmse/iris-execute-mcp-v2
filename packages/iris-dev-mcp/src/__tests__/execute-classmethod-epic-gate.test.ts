@@ -51,6 +51,14 @@ const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
 const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
 const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
 
+/**
+ * Mirrors `execute.ts`'s own module-private `BASE_URL` (not exported — that file has
+ * no reason to export it, since every other caller goes through `ctx.http`). Story
+ * 34.7 leg (e-5) is the one place in this file that deliberately bypasses `ctx.http`
+ * (see that leg's own comment for why), so it needs the literal path itself.
+ */
+const BASE_URL = "/api/executemcp/v2";
+
 function getConfig() {
   return loadConfig({
     IRIS_HOST,
@@ -440,7 +448,14 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
       expect(underCommandOut.truncated).toBe(false);
 
       // (3) /classmethod OVER the ceiling — proves ClassMethod()'s wiring is
-      //     present. TargetWriteOverCeiling writes 50,000 characters.
+      //     present. TargetWriteOverCeiling writes 50,000 characters and returns
+      //     "wrote-over-ceiling" (18 chars). Story 34.7 AC 34.7.3: returnValue,
+      //     byRefValues, and output now share ONE 32768-character budget, spent in
+      //     that field order — returnValue is first, so it consumes 19 of the
+      //     budget (untouched, well under 32768), leaving CEILING - 19 for output
+      //     (there is no byRefValues competitor here — no byRef args). Derived from
+      //     the fixture's own known-fixed return string, never hard-coded, so this
+      //     stays correct if the ceiling itself is ever tuned.
       const overClassMethod = await executeClassMethodTool.handler(
         { className: FIXTURE, methodName: "TargetWriteOverCeiling" },
         ctx,
@@ -450,10 +465,11 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
         truncated: boolean;
         returnValue: string;
       };
-      expect(overCm.output.length).toBe(CEILING);
+      expect(overCm.returnValue).toBe("wrote-over-ceiling");
+      const expectedOutputBudget = CEILING - overCm.returnValue.length;
+      expect(overCm.output.length).toBe(expectedOutputBudget);
       expect(overCm.output).toContain("[IRIS-MCP-TRUNCATED");
       expect(overCm.truncated).toBe(true);
-      expect(overCm.returnValue).toBe("wrote-over-ceiling");
 
       // (4) /classmethod UNDER the ceiling — Rule #19 byte-identity, and the
       //     additive byRefTruncated field present and false.
@@ -562,11 +578,18 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
       );
       expect(result.isError).toBeUndefined();
       const structured = result.structuredContent as {
+        returnValue: string;
         byRefValues: Record<string, unknown>;
         byRefTruncated: boolean;
       };
       expect(structured.byRefTruncated).toBe(true);
-      expect((structured.byRefValues["0"] as string).length).toBe(CEILING);
+      // Story 34.7 AC 34.7.3: returnValue ("20-ok") is first in the shared-budget
+      // priority order and is well under budget, so it is untouched — but it still
+      // consumes its own length from the ONE shared 32768-character pool, leaving
+      // byRefValues (second in priority) with CEILING minus that, not the full
+      // CEILING. Derived from the actual observed returnValue, never hard-coded.
+      const byRefSharedBudget = CEILING - structured.returnValue.length;
+      expect((structured.byRefValues["0"] as string).length).toBe(byRefSharedBudget);
 
       // The exact code-review repro: positions 1-3's small values ("42-m", "hello-m",
       // "x-m") must be OMITTED once the shared budget is exhausted — never replaced by
@@ -575,12 +598,13 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
       expect("2" in structured.byRefValues).toBe(false);
       expect("3" in structured.byRefValues).toBe(false);
 
-      // The combined content across every surviving position must never exceed the
-      // documented budget — the "response grew while losing data" defect.
+      // The combined content across every surviving position must never exceed
+      // byRefValues' own share of the documented budget — the "response grew while
+      // losing data" defect.
       const totalLen = Object.values(structured.byRefValues)
         .filter((v): v is string => typeof v === "string")
         .reduce((sum, v) => sum + v.length, 0);
-      expect(totalLen).toBeLessThanOrEqual(CEILING);
+      expect(totalLen).toBeLessThanOrEqual(byRefSharedBudget);
     },
     { timeout: 30000 },
   );
@@ -600,6 +624,12 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
   // that gap: position 0 leaves a small POSITIVE remainder (20 chars, smaller than the
   // ~38-character marker at that ceiling) rather than exactly zero, so position 1 is
   // truncated THROUGH ApplyOutputCeiling itself.
+  //
+  // Story 34.7 AC 34.7.3: returnValue, byRefValues, and output now share ONE 32768-char
+  // budget (spent returnValue -> byRefValues -> output), so byRefValues' OWN starting
+  // budget is CEILING minus Target20's known "20-ok" return value (5 chars), not the
+  // full CEILING. raw0's length is derived from that — never hard-coded — so this leg
+  // does not go stale if the ceiling or the fixture's return string ever change.
   it(
     "leg (e-4) — a small POSITIVE remaining byRef budget (smaller than the marker) hard-cuts with no marker, never exceeding the ceiling or the original value (34-6-CR-6)",
     async (testCtx) => {
@@ -610,12 +640,18 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
         return;
       }
       const CEILING = 32768;
-      // Position 0: mutated length (raw + "-m" suffix) is 32748 — under the ceiling, so
-      // NO truncation occurs, leaving a remaining shared budget of exactly 20 characters
-      // (32768 - 32748) for the next position. 20 is smaller than the ~38-character
-      // elision marker at that ceiling, so position 1 below cannot be truncated via the
-      // marker path without exceeding its own remaining budget.
-      const raw0 = "P".repeat(32746);
+      const RETURN_VALUE = "20-ok"; // Target20's own known, fixed return value
+      const MUTATE_SUFFIX = "-m"; // Target20 appends this to every byRef value
+      const REMAINING_BUDGET_TARGET = 20; // smaller than the ~38-char marker, deliberately positive
+      const byRefSharedBudget = CEILING - RETURN_VALUE.length;
+
+      // Position 0: mutated length (raw + "-m" suffix) is chosen so it stays UNDER
+      // byRefSharedBudget (no truncation), leaving exactly REMAINING_BUDGET_TARGET
+      // characters for the next position — smaller than the ~38-character elision
+      // marker, so position 1 below cannot be truncated via the marker path without
+      // exceeding its own remaining budget.
+      const position0MutatedLen = byRefSharedBudget - REMAINING_BUDGET_TARGET;
+      const raw0 = "P".repeat(position0MutatedLen - MUTATE_SUFFIX.length);
       // Position 1: mutated length (30 + 2 = 32) exceeds the 20-char remaining budget,
       // forcing truncation. All 30 raw characters are "Q", so the first 20 characters of
       // the mutated value are unambiguous regardless of exactly where the cut lands.
@@ -633,23 +669,201 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
       );
       expect(result.isError).toBeUndefined();
       const structured = result.structuredContent as {
+        returnValue: string;
         byRefValues: Record<string, unknown>;
         byRefTruncated: boolean;
       };
+      // Sanity check on the setup — if Target20's return value ever changes, this leg's
+      // arithmetic above (derived from RETURN_VALUE) would silently stop matching reality.
+      expect(structured.returnValue).toBe(RETURN_VALUE);
       // Position 0 was never truncated at all (sanity check on the setup).
-      expect(structured.byRefValues["0"]).toBe(raw0 + "-m");
+      expect(structured.byRefValues["0"]).toBe(raw0 + MUTATE_SUFFIX);
       // Position 1 must be a plain 20-character hard cut — a genuine PREFIX of its own
       // mutated value, never the marker (which would be 38 characters, bigger than both
       // the 20-char budget AND, being a fabricated string, not a real prefix at all).
       const pos1 = structured.byRefValues["1"] as string;
-      expect(pos1.length).toBe(20);
-      expect(pos1).toBe("Q".repeat(20));
+      expect(pos1.length).toBe(REMAINING_BUDGET_TARGET);
+      expect(pos1).toBe("Q".repeat(REMAINING_BUDGET_TARGET));
       expect(pos1).not.toContain("[IRIS-MCP-TRUNCATED");
       expect(structured.byRefTruncated).toBe(true);
-      // The total across both positions lands exactly on the documented budget —
-      // nothing was wasted, and nothing exceeded it.
+      // The total across both positions lands exactly on byRefValues' own share of the
+      // shared budget — nothing was wasted, and nothing exceeded it.
       const totalLen = (structured.byRefValues["0"] as string).length + pos1.length;
-      expect(totalLen).toBe(CEILING);
+      expect(totalLen).toBe(byRefSharedBudget);
+    },
+    { timeout: 30000 },
+  );
+
+  // ── Story 34.7 AC 34.7.1 + 34.7.2 (ledger 34-6-CR-10) — surrogate-safe truncation,
+  //    pinned on the ACTUAL WIRE BYTES with a strict decoder ─────────────────────
+  //
+  // WHY THIS EXISTS. The Story 34.6 pin for this exact defect
+  // (`UtilsTest.TestApplyOutputCeilingMidSurrogatePairStaysValidJSON`) round-tripped
+  // through %ToJSON/%FromJSON INSIDE IRIS — a closed loop that tolerates IRIS's own
+  // WTF-8 encoding of an unpaired surrogate and is structurally blind to what actually
+  // reaches an HTTP client (Rules #36/#54). Live-verified during this story: with the
+  // cut landing on a high surrogate, the raw response body is invalid UTF-8 (IRIS emits
+  // the lone D83D high surrogate as WTF-8 ED A0 BD); Node's own lenient `response.text()`
+  // (used by `ctx.http` / `IrisHttpClient`) silently substitutes 3 x U+FFFD, inflating
+  // the client-visible length from 32768 to 32,770 — breaking the "capped at 32768"
+  // claim outright. AC 34.7.2 requires decoding the ACTUAL bytes that left the server
+  // with a STRICT decoder, so this leg deliberately bypasses `ctx.http`/`IrisHttpClient`
+  // entirely (which would hide the defect exactly like the Story 34.6 pin did) and
+  // issues its own raw `fetch`, reading `response.arrayBuffer()` rather than
+  // `response.text()`.
+  //
+  // The command builds a long, solid run of surrogate pairs starting at position 1
+  // (high, low, high, low, ...) via `Write` — deterministic content, not a fixture
+  // method, so no server redeploy is required to exercise this. `/command` (not
+  // `/classmethod`) is used deliberately: it has no returnValue/byRefValues to share
+  // the response budget with, so `output`'s ceiling is always the full, predictable
+  // 32768 characters, keeping this leg's oracle independent of the AC 34.7.3 shared
+  // budget this same story also introduces.
+  it(
+    "leg (e-5) — a truncation cut through a surrogate pair emits valid UTF-8 on the wire, decoded with a strict decoder (AC 34.7.1 + AC 34.7.2, ledger 34-6-CR-10)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg e-5): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const config = getConfig();
+      const auth = Buffer.from(`${config.username}:${config.password}`).toString("base64");
+      // 20000 repeated (high, low) surrogate pairs = 40000 characters, comfortably past
+      // the 32768-char ceiling, with EVERY odd position a high surrogate and EVERY even
+      // position a low surrogate — deterministically exercising the exact defect
+      // trigger regardless of the ceiling/marker's own exact digit-length arithmetic.
+      const command =
+        'Set s="" For i=1:1:20000 { Set s=s_$Char(55357)_$Char(56832) } Write s';
+      const response = await fetch(`${config.baseUrl}${BASE_URL}/command`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ command, namespace: ctx.resolveNamespace() }),
+      });
+      expect(response.status).toBe(200);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+
+      // The AC 34.7.2 property itself: the ACTUAL bytes that left the server must be
+      // valid UTF-8 under a STRICT (fatal) decoder — not Node's lenient default, which
+      // is exactly what let the Story 34.6 pin miss this defect at the tool layer.
+      const strictDecoder = new TextDecoder("utf-8", { fatal: true });
+      let text = "";
+      expect(() => {
+        text = strictDecoder.decode(bytes);
+      }).not.toThrow();
+
+      const envelope = JSON.parse(text) as {
+        result: { output: string; truncated: boolean };
+      };
+      expect(envelope.result.truncated).toBe(true);
+      // The AC 34.7.1 property: the client-visible length is genuinely <= the
+      // advertised ceiling — the pre-fix defect inflated a clean 32768-character cut to
+      // 32,770 once Node's lenient decoder substituted the orphaned surrogate.
+      expect(envelope.result.output.length).toBeLessThanOrEqual(32768);
+      expect(envelope.result.output).toContain("[IRIS-MCP-TRUNCATED");
+    },
+    { timeout: 30000 },
+  );
+
+  // ── Story 34.7 AC 34.7.3 (ledger 34-6-CR2-6) — shared-budget PRIORITY ORDER,
+  //    proven end-to-end at the real endpoint with ALL THREE fields competing ──────
+  //
+  // WHY THIS EXISTS. legs (e)/(e-3)/(e-4) above each exercise ONE pairwise interaction
+  // (returnValue-vs-output, returnValue-vs-byRefValues). This leg drives the full
+  // three-way contract in a single call: TargetReturnHugeWriteAndByRef both writes
+  // narration AND mutates a ByRef argument AND returns a value alone longer than the
+  // WHOLE shared budget — proving returnValue (first in priority) consumes the entire
+  // budget by itself, so byRefValues (second) and output (third) are BOTH observably
+  // starved, never silently unaffected.
+  it(
+    "leg (e-6) — returnValue alone exceeding the shared budget consumes it entirely, starving BOTH byRefValues and output (AC 34.7.3)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg e-6): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const CEILING = 32768;
+      const result = await executeClassMethodTool.handler(
+        {
+          className: FIXTURE,
+          methodName: "TargetReturnHugeWriteAndByRef",
+          args: [{ byRef: true, value: "start" }],
+        },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as {
+        returnValue: string;
+        output: string;
+        byRefValues: Record<string, unknown>;
+        truncated: boolean;
+        byRefTruncated: boolean;
+        returnValueTruncated: boolean;
+      };
+      // returnValue (first in priority) is truncated to exactly the whole shared budget.
+      expect(structured.returnValue.length).toBe(CEILING);
+      expect(structured.returnValue).toContain("[IRIS-MCP-TRUNCATED");
+      expect(structured.returnValueTruncated).toBe(true);
+      // byRefValues (second in priority) gets NOTHING — the marked position is omitted
+      // entirely, never a misleading empty-string placeholder.
+      expect(structured.byRefValues).toEqual({});
+      expect(structured.byRefTruncated).toBe(true);
+      // output (third/last in priority) gets NOTHING either — the target's own
+      // "some-narration" Write is fully elided, not merely shortened.
+      expect(structured.output).toBe("");
+      expect(structured.truncated).toBe(true);
+    },
+    { timeout: 30000 },
+  );
+
+  // ── Story 34.7 AC 34.7.4 — raw characters vs. serialized JSON size, pinned with an
+  //    escape-heavy fixture (Rule #58) ──────────────────────────────────────────────
+  //
+  // WHY THIS EXISTS. Every prior over-ceiling fixture in this file/repo used
+  // escaping-NEUTRAL content (a single repeated plain letter), which is structurally
+  // blind to how far JSON string escaping can inflate the SERIALIZED response body
+  // past the documented RAW-character ceiling. TargetReturnEscapeHeavyOverCeiling
+  // returns 40,000 characters built entirely from a quote, a backslash, a tab, and a
+  // control character with no short JSON escape — repeated — so the truncated
+  // 32768-raw-character result is maximally adversarial to serialize.
+  it(
+    "leg (e-7) — an escape-heavy over-budget field stays bounded at 32768 RAW characters even though its SERIALIZED size is far larger (AC 34.7.4, Rule #58)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (leg e-7): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      const CEILING = 32768;
+      const result = await executeClassMethodTool.handler(
+        { className: FIXTURE, methodName: "TargetReturnEscapeHeavyOverCeiling" },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as {
+        returnValue: string;
+        returnValueTruncated: boolean;
+      };
+      // The RAW-character invariant holds regardless of content: exactly the ceiling,
+      // never more, even though every character here is JSON-escape-heavy.
+      expect(structured.returnValue.length).toBe(CEILING);
+      expect(structured.returnValueTruncated).toBe(true);
+      // The SERIALIZED size is the whole point of this leg: it must be substantially
+      // larger than the raw-character ceiling, proving the documentation's raw-vs-wire
+      // distinction is real and testable, not just asserted in prose. Live-measured at
+      // 98,410 characters for the whole HTTP response body (Dev Notes); asserting a
+      // generous lower bound here (not the exact figure) keeps this resilient to minor
+      // envelope-shape changes while still proving the inflation is real and large.
+      const serializedSize = JSON.stringify(structured).length;
+      expect(serializedSize).toBeGreaterThan(CEILING * 2);
     },
     { timeout: 30000 },
   );

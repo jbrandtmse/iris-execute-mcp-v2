@@ -4,14 +4,26 @@
 Class ExecuteMCPv2.Utils Extends %RegisteredObject
 {
 
-/// Story 34.6 AC 34.6.1 — the ONE documented response-payload ceiling, measured in
-/// CHARACTERS via <code>$Length</code> (not raw UTF-8 bytes — stated explicitly to avoid
-/// overclaiming byte-precision on a Unicode-enabled instance). Applied to the
-/// <code>output</code> field on both <code>/command</code> and <code>/classmethod</code>
-/// via <method>ApplyOutputCeiling</method>, and reused as the byRefValues shared byte
-/// budget in <method>BuildByRefNode</method>. Chosen from LIVE 2026-08-15 measurement
-/// (Rule #36), not by feel — see <method>ApplyOutputCeiling</method>'s banner for the
-/// measurement evidence and Rule #38 discipline.
+/// Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>) — the
+/// ONE documented response-payload ceiling, measured in RAW CHARACTERS via
+/// <code>$Length</code> BEFORE JSON escaping — not raw UTF-8 bytes (stated explicitly to
+/// avoid overclaiming byte-precision on a Unicode-enabled instance) and not the SERIALIZED
+/// size of the JSON response body, which JSON escaping can inflate well past this figure
+/// for content heavy in quotes, backslashes, tabs, or control characters (see
+/// <method>ApplyOutputCeiling</method>'s banner for a live-measured worst case).
+/// <p><b>Story 34.7 — ONE SHARED budget, not three independent ones.</b> On
+/// <code>/classmethod</code>, <parameter>OUTPUTCEILING</parameter> characters are shared
+/// across <code>returnValue</code>, <code>byRefValues</code>, and <code>output</code>
+/// TOGETHER, spent in that field order (a Project Lead decision, not re-litigable — see
+/// <method>InvokeWithArgs</method>'s banner) — NOT applied independently to each field
+/// (the pre-34.7 shape, which let a fully-flagged response carry roughly three times this
+/// figure raw, before escaping). On <code>/command</code>, which has only
+/// <code>output</code>, this ceiling is the field's own full budget, unchanged.</p>
+/// <p>Also reused as the byRefValues STRUCTURAL byte budget's own starting point inside
+/// <method>BuildByRefNode</method> (reduced by whatever <code>returnValue</code> already
+/// consumed of the shared pool — see <method>InvokeWithArgs</method>). Chosen from LIVE
+/// 2026-08-15 measurement (Rule #36), not by feel — see <method>ApplyOutputCeiling</method>'s
+/// banner for the measurement evidence and Rule #38 discipline.</p>
 Parameter OUTPUTCEILING As %Integer = 32768;
 
 /// Story 34.6 AC 34.6.1 — the byRefValues STRUCTURAL ceiling: the maximum number of tree
@@ -194,17 +206,48 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
 /// from inline consumption once it reached 50,031 characters; 32768 (see
 /// <parameter>OUTPUTCEILING</parameter>) was chosen to stay safely under that measured
 /// boundary.</p>
-/// <p><b>Story 34.6 code review (cycle 2) — the ceiling is PER FIELD, not per response.</b>
+/// <p><b>Story 34.6 code review (cycle 2) / Story 34.7 AC 34.7.3 — the ceiling is ONE
+/// SHARED budget across a <code>/classmethod</code> response, not per field.</b>
 /// <code>output</code>, <code>returnValue</code> and the <code>byRefValues</code> budget
-/// each get their own <parameter>OUTPUTCEILING</parameter>, so a single fully-compliant,
-/// fully-flagged <code>/classmethod</code> response can carry roughly three times this
-/// figure before JSON escaping, and more after it. The 50,031-character client
-/// observation above therefore bounds any ONE field comfortably, but is NOT a guarantee
-/// about the whole envelope — an earlier version of this banner claimed "headroom for the
-/// rest of the JSON envelope", which overstated it. A target that narrates AND returns a
-/// large value AND has large Output parameters is the worst case; whether to replace the
-/// three per-field budgets with one shared response budget spent in field order is an
-/// open design question recorded as ledger item <code>34-6-CR2-6</code>.</p>
+/// used to each get their own independent <parameter>OUTPUTCEILING</parameter>, so a
+/// single fully-compliant, fully-flagged response could carry roughly three times this
+/// figure raw before JSON escaping (and more after it) — this is now fixed: see
+/// <method>InvokeWithArgs</method>'s banner for the shared-budget/field-order design.
+/// This method itself is unchanged by that fix — it still truncates ONE string to
+/// WHATEVER <var>pCeiling</var> it is given; the caller now simply passes a smaller,
+/// already-reduced <var>pCeiling</var> once an earlier field has spent part of the shared
+/// pool.</p>
+/// <p><b>Rule #38 / AC 34.7.4 — raw characters, not serialized JSON size.</b>
+/// <var>pCeiling</var> bounds <var>pOutput</var>'s own RAW character count, measured
+/// BEFORE this value is embedded in a JSON response body. JSON string escaping can
+/// inflate the SERIALIZED size well past the ceiling: a quote or backslash becomes a
+/// 2-character escape, and a tab/newline/other control character becomes a 2- or
+/// 6-character escape. The earlier, now-inapplicable pre-34.7 independent-budget
+/// measurement — two 32768-character raw fields built entirely from JSON metacharacters
+/// serialized to 131,102 characters combined — described the per-field shape this story
+/// replaced (see this parameter's own Story 34.7 banner above).
+/// <p><b>Live-measured inflation UNDER THIS STORY'S shared budget</b> (Story 34.7 code
+/// review, raw <code>fetch</code> against the deployed <code>/command</code> endpoint;
+/// every row is a single field holding exactly 32768 RAW characters, so the RAW ceiling
+/// itself is honored identically in all three):
+/// <ul>
+/// <li>escaping-neutral plain letters &#8594; 32,860-character HTTP body (1.0x)</li>
+/// <li>mixed metacharacters (the <c>TargetReturnEscapeHeavyOverCeiling</c> fixture's own
+/// profile: quote, backslash, tab, one control character) &#8594; 98,311 (3.0x)</li>
+/// <li><b>WORST CASE — all C0 control characters</b> (each costing a 6-character
+/// <code>\uXXXX</code> escape) &#8594; <b>196,495</b> (6.0x)</li>
+/// </ul>
+/// <b>Honest residual-risk statement:</b> the worst case is therefore about <b>6x</b> the
+/// raw ceiling — roughly <b>3.9x past</b> the 50,031-character client-divert threshold
+/// documented above that was the entire rationale for
+/// <parameter>OUTPUTCEILING</parameter>'s value. The shared budget substantially reduces
+/// the pre-34.7 worst case (which was this figure again per independent field) but does
+/// NOT restore that safety margin for metacharacter-heavy content. The ceiling was never
+/// a promise about the HTTP response body's own byte size, only about how much of any one
+/// RAW field's content survives; fully bounding the SERIALIZED size would require
+/// measuring and truncating against it directly rather than against raw characters, which
+/// is a larger design change tracked in <c>deferred-work.md</c> (<c>34-7-QA-1</c>) rather
+/// than attempted here.</p>
 /// <p><var>pCeiling</var> defaults to <parameter>OUTPUTCEILING</parameter> when omitted
 /// (sentinel <code>-1</code> — distinct from an explicit <code>0</code>, which
 /// <method>BuildByRefNode</method> legitimately passes once its shared byte budget is
@@ -224,6 +267,22 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
 /// <var>pCeiling</var> characters, and the result is never LONGER than
 /// <var>pOutput</var> itself — a value is never elided into something bigger than it
 /// started.</p>
+/// <p><b>Story 34.7 AC 34.7.1 fix (ledger <c>34-6-CR-10</c>) — the cut never lands
+/// between a high and low surrogate.</b> IRIS represents an astral character (outside
+/// the Basic Multilingual Plane, e.g. an emoji) internally as a UTF-16 SURROGATE PAIR —
+/// two consecutive code units — and <code>$Extract</code> counts each half as one
+/// character. Cutting immediately after the high half (leaving its low-half partner on
+/// the elided side) previously emitted that lone high surrogate on the wire as WTF-8
+/// (invalid UTF-8): Node's lenient decoder silently substituted it with U+FFFD,
+/// inflating the client-visible length PAST the advertised ceiling (32768 became
+/// 32770, live-verified), and a strict decoder (<code>TextDecoder({fatal:true})</code>)
+/// threw outright. Every retained-length computation below is now passed through
+/// <method>SurrogateSafeCutLength</method>, which backs the cut off by one code unit
+/// whenever it would otherwise end on an unpaired high surrogate — see that method's
+/// own banner for why this can never itself land on ANOTHER split pair. The wire-level
+/// proof (decoding the ACTUAL HTTP response bytes with a strict decoder, per AC 34.7.2)
+/// lives in the TS default suite, not here — see
+/// <c>execute-classmethod-epic-gate.test.ts</c>.</p>
 ClassMethod ApplyOutputCeiling(pOutput As %String, ByRef pTruncated As %Boolean, pCeiling As %Integer = -1) As %String
 {
     Set tCeiling = pCeiling
@@ -239,10 +298,41 @@ ClassMethod ApplyOutputCeiling(pOutput As %String, ByRef pTruncated As %Boolean,
     ; original value with something LARGER. Fall back to a marker-less hard cut so the
     ; result is always bounded by tCeiling and never bigger than pOutput itself.
     If $Length(tMarker) > tCeiling {
-        Quit $Extract(pOutput, 1, tCeiling)
+        Set tKeep = ..SurrogateSafeCutLength(pOutput, tCeiling)
+        Quit $Extract(pOutput, 1, tKeep)
     }
     Set tKeep = tCeiling - $Length(tMarker)
+    Set tKeep = ..SurrogateSafeCutLength(pOutput, tKeep)
     Quit $Extract(pOutput, 1, tKeep) _ tMarker
+}
+
+/// Story 34.7 AC 34.7.1 (ledger <c>34-6-CR-10</c>) — back a truncation cut length off by
+/// one UTF-16 code unit when the code unit AT <var>pLen</var> is a high surrogate half
+/// (<code>$Ascii</code> range 55296-56319, hex D800-DBFF). See
+/// <method>ApplyOutputCeiling</method>'s banner for why cutting immediately after a high
+/// surrogate is unsafe: it strands the surrogate's low-half partner on the elided side,
+/// which IRIS emits on the wire as invalid UTF-8 (WTF-8) rather than the intended 4-byte
+/// astral-character encoding.
+/// <p>Backing off by one never lands on ANOTHER split pair: if the PRECEDING code unit
+/// (at <var>pLen</var>-1) is itself a low surrogate, positions <var>pLen</var>-2 and
+/// <var>pLen</var>-1 already form a COMPLETE pair — in well-formed UTF-16 a low
+/// surrogate only ever immediately follows its own matching high surrogate — so the
+/// shorter cut is always clean. Never backs off below 0. A no-op (returns
+/// <var>pLen</var> unchanged) whenever the code unit at <var>pLen</var> is anything
+/// other than a high surrogate, including when <var>pLen</var> is 0. Uses the SAME
+/// <code>$Ascii(string, position)</code> two-argument form already proven live by
+/// <c>UtilsTest.TestApplyOutputCeilingMidSurrogatePairStaysValidJSON</c> (Story 34.6 QA)
+/// to read a UTF-16 code unit's raw numeric value at an arbitrary position.</p>
+ClassMethod SurrogateSafeCutLength(pStr As %String, pLen As %Integer) As %Integer
+{
+    Set tLen = pLen
+    If tLen > 0 {
+        Set tLastCode = $Ascii(pStr, tLen)
+        If (tLastCode >= 55296) && (tLastCode <= 56319) {
+            Set tLen = tLen - 1
+        }
+    }
+    Quit tLen
 }
 
 /// Parse one positional argument entry for the <code>/classmethod</code> endpoint's
@@ -340,9 +430,11 @@ ClassMethod ParseArgEntry(pArgs As %DynamicArray, Output pValue, Output pIsByRef
 /// <parameter>BYREFNODECEILING</parameter>) is decremented once per call — once it is
 /// exhausted, further subscript descent stops (the node already built is kept, marked
 /// <code>subscriptsTruncated: true</code>) — bounding a pathologically wide/deep tree even
-/// when every value is tiny. <var>pByteBudget</var> (initial value
-/// <parameter>OUTPUTCEILING</parameter>, the SAME ceiling <method>ApplyOutputCeiling</method>
-/// applies to <var>output</var>) is decremented by every piece of CONTENT this method
+/// when every value is tiny. <var>pByteBudget</var> — STARTING value
+/// <parameter>OUTPUTCEILING</parameter> MINUS whatever <var>returnValue</var> already
+/// consumed of the ONE shared response budget (Story 34.7 AC 34.7.3; see
+/// <method>InvokeWithArgs</method>'s banner for the field-order design) — is decremented
+/// by every piece of CONTENT this method
 /// emits: each leaf value's own length (via <method>ApplyOutputCeiling</method>), each
 /// <code>&lt;Object:...&gt;</code> OREF placeholder, and each subscript KEY. So one huge
 /// value, many medium values, or many long subscript keys are all bounded to the same
@@ -542,7 +634,32 @@ ClassMethod AddByRefPosition(pByRefValues As %DynamicObject, pKey As %Integer, B
 /// <var>pByRefValues</var> once either budget is already exhausted, instead of handing
 /// it to <method>BuildByRefNode</method> and risking a small real value being replaced
 /// by a larger elision marker.</p>
-ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean, Output pByRefTruncated As %Boolean) As %Status
+/// <p><b>Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>) — ONE shared response budget,
+/// spent <c>returnValue</c> &#8594; <c>byRefValues</c> &#8594; <c>output</c>.</b> This is a
+/// recorded Project Lead decision, not re-litigated here: the small, high-value fields
+/// are never starved, and narration — usually the field that actually blows the budget —
+/// absorbs the truncation. Before this, <c>output</c>, <c>returnValue</c> and
+/// <c>byRefValues</c> each got their OWN independent <parameter>OUTPUTCEILING</parameter>,
+/// so a fully-flagged response could carry roughly three times the documented figure raw.
+/// <var>pOutputBudget</var> is a new, additive, OPTIONAL trailing output parameter
+/// (omittable exactly like <var>pByRefTruncated</var> above — every pre-34.7 call site is
+/// unaffected) reporting how much of the shared <parameter>OUTPUTCEILING</parameter> pool
+/// remains AFTER this call accounted for both <var>returnValue</var> and
+/// <var>byRefValues</var>; <class>ExecuteMCPv2.REST.Command</class> passes it as the
+/// explicit ceiling for <var>output</var>'s own <method>ApplyOutputCeiling</method> call,
+/// so <var>output</var> — last in priority — gets exactly whatever is left.
+/// <var>pReturn</var> itself is UNCHANGED by this — still the target's raw, untouched
+/// return value (never pre-truncated here); this method only computes, INTERNALLY, how
+/// much of the shared budget a STRINGIFIED-and-ceiling-applied copy of it WOULD consume
+/// (mirroring <class>ExecuteMCPv2.REST.Command</class>'s own <c>$IsObject</c> OREF-guard +
+/// <method>ApplyOutputCeiling</method> sequence on the SAME <var>pReturn</var> value, so
+/// the two computations can never diverge), purely to seed <var>tByRefByteBudget</var>'s
+/// STARTING point below at whatever remains once <var>returnValue</var>'s share is
+/// deducted — <var>returnValue</var>'s OWN truncation, computed independently in
+/// <class>ExecuteMCPv2.REST.Command</class>, is therefore unaffected: it is always first
+/// in priority, so it always sees the FULL <parameter>OUTPUTCEILING</parameter> as its own
+/// ceiling, exactly as before this story.</p>
+ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean, Output pByRefTruncated As %Boolean, Output pOutputBudget As %Integer) As %Status
 {
     Set tSC = $$$OK
     Set pReturn = ""
@@ -550,6 +667,12 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
     Set pArgCount = 0
     Set pTruncated = 0
     Set pByRefTruncated = 0
+    ; Story 34.7 AC 34.7.3: default to the FULL shared budget so a caller that never
+    ; reaches the shared-budget computation below (an early validation error, or a
+    ; genuine target throw — see the $$$ISERR(tSC) Quit right before that computation)
+    ; still gets a well-defined value, matching this method's pre-34.7 behavior exactly
+    ; (Command.cls's own output ceiling was always the full OUTPUTCEILING on those paths).
+    Set pOutputBudget = ..#OUTPUTCEILING
     Kill %ExecuteMCPTruncated
     Try {
         ; Validate args shape (AC 34.2.6/R12) — must be a JSON array, or absent/empty.
@@ -682,6 +805,17 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
         ; capture-truncation path (tSC still OK) reaches byRefValues assembly.
         If $$$ISERR(tSC) Quit
 
+        ; Story 34.7 AC 34.7.3: determine how much of the ONE shared response budget
+        ; returnValue's own (independently, identically computed) truncation in
+        ; Command.cls WILL consume, so byRefValues — second in priority — starts with
+        ; whatever is left rather than always resetting to the full ceiling. See this
+        ; method's banner for why pReturn itself is left untouched here.
+        Set tRVForBudget = $Select($IsObject(pReturn): "<Object:"_$ClassName(pReturn)_">", 1: pReturn)
+        Set tRVTruncatedForBudget = 0
+        Set tRVForBudget = ..ApplyOutputCeiling(tRVForBudget, .tRVTruncatedForBudget, ..#OUTPUTCEILING)
+        Set pOutputBudget = ..#OUTPUTCEILING - $Length(tRVForBudget)
+        If pOutputBudget < 0 { Set pOutputBudget = 0 }
+
         ; Assemble byRefValues for marked positions only (AC 34.2.2, 34.2.6/R1, R6) —
         ; direct-by-name access; omit the key when the local is still genuinely
         ; undefined after the call (Residual Risk: "undefined out-value").
@@ -692,8 +826,12 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
         ; AddByRefPosition (not BuildByRefNode directly), which OMITS the position once
         ; either budget is already exhausted instead of risking a small value being
         ; replaced by a larger elision marker — see AddByRefPosition's banner.
+        ; Story 34.7 AC 34.7.3: the byte budget now STARTS at pOutputBudget (whatever the
+        ; shared response budget has left after returnValue's share, computed above)
+        ; rather than always resetting to the full ceiling — byRefValues is second in the
+        ; shared-budget priority order.
         Set tByRefNodeBudget = ..#BYREFNODECEILING
-        Set tByRefByteBudget = ..#OUTPUTCEILING
+        Set tByRefByteBudget = pOutputBudget
         If tByRef0, $Data(tA0)   Do ..AddByRefPosition(pByRefValues, 0, .tA0, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
         If tByRef1, $Data(tA1)   Do ..AddByRefPosition(pByRefValues, 1, .tA1, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
         If tByRef2, $Data(tA2)   Do ..AddByRefPosition(pByRefValues, 2, .tA2, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
@@ -714,6 +852,11 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
         If tByRef17, $Data(tA17) Do ..AddByRefPosition(pByRefValues, 17, .tA17, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
         If tByRef18, $Data(tA18) Do ..AddByRefPosition(pByRefValues, 18, .tA18, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
         If tByRef19, $Data(tA19) Do ..AddByRefPosition(pByRefValues, 19, .tA19, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+
+        ; Story 34.7 AC 34.7.3: whatever remains of the shared budget after both
+        ; returnValue and byRefValues have taken their share is what Command.cls may
+        ; spend on `output` — third and last in the shared-budget priority order.
+        Set pOutputBudget = tByRefByteBudget
     } Catch ex {
         Set tSC = ex.AsStatus()
     }

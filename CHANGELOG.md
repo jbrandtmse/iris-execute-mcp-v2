@@ -108,6 +108,64 @@ genuine "document not found" response, and `IRIS_REQUIRE_LIVE=1` is armed on `@i
 lifecycle hook — mechanically confirmed (`pnpm publish --dry-run`) to abort packaging before producing a tarball when
 IRIS is unreachable.
 
+### Fixed — a truncation cut through a surrogate pair could emit invalid UTF-8 on the wire (`@iris-mcp/dev` + ObjectScript, Story 34.7 pre-publish blocker, ledger `34-6-CR-10`)
+
+A regression introduced by the response-payload ceiling above, not pre-existing: before the ceiling, `output` passed
+through verbatim and was always valid UTF-8. IRIS represents an astral character (outside the Basic Multilingual
+Plane, e.g. an emoji) internally as a UTF-16 surrogate pair, and the ceiling's `$Extract` cut counted each half as
+one character with no boundary guard. A cut landing immediately after the high half emitted that lone surrogate on
+the wire as WTF-8 (invalid UTF-8) — live-verified: Node's lenient decoder silently substituted it with U+FFFD,
+inflating the client-visible length from the advertised 32768 to **32,770 characters** (breaking the documented cap
+outright), and a strict decoder (`TextDecoder({fatal:true})`, or any non-lenient JSON consumer) threw outright. The
+truncation logic now backs a cut off by one code unit whenever it would otherwise end on an unpaired high surrogate.
+**Verified on the actual HTTP response bytes with a strict decoder** (not by round-tripping inside IRIS, which
+tolerates its own WTF-8 and was structurally blind to this defect — the prior Story 34.6 pin used exactly that blind
+oracle). Mutation-verified: reverting the guard reproduces the exact 32,770-character / strict-decode-failure defect
+live; restored, the same request decodes cleanly at 32767 characters.
+
+### Changed — the response payload budget is now ONE shared pool across `returnValue`/`byRefValues`/`output`, not three independent ceilings (`@iris-mcp/dev` + ObjectScript, Story 34.7 pre-publish blocker, ledger `34-6-CR2-6`)
+
+Story 34.6 gave `output`, `returnValue`, and `byRefValues` each their own independent 32768-character ceiling, so a
+single fully-compliant, fully-flagged `/classmethod` response could carry roughly three times the documented figure
+raw before JSON escaping — and escaping could inflate it further still (live-measured: two 32768-character
+escape-heavy fields serialized to 131,102 characters, ~2.6x past the 50,031-character client threshold that was the
+entire documented rationale for the 32768 figure). The three fields now share **one** 32768-character budget, spent
+in field order **`returnValue` → `byRefValues` → `output`** (a Project Lead decision): the small, high-value
+`returnValue` field is never starved by narration, and `output` — usually the field that actually exceeds the
+budget — absorbs the truncation last. All three flags (`truncated`, `returnValueTruncated`, `byRefTruncated`) are
+**retained unchanged**; only the budget arithmetic changes. Live-measured worst case under the new shared budget: a
+single 32768-character field of C0 control characters (consuming the whole budget by itself) serializes to
+**196,495** characters — 6.0x the raw ceiling, and roughly 3.9x past the 50,031-character client-divert threshold.
+The pre-34.7 shape reached that same inflation again per independent field, so the shared budget substantially
+reduces but does not eliminate the risk (tracked as `34-7-QA-1`). **Back-compat (Rule #19):**
+proven mechanically — responses that stay under the shared budget (the common case: `returnValue` is small, so
+`byRefValues`/`output` see nearly the full 32768 either way) are byte-identical to the pre-34.7 shape.
+
+### Documented — the response-payload ceiling bounds raw characters, not the serialized JSON size (`@iris-mcp/dev`, Story 34.7 AC 34.7.4)
+
+The 32768 figure was always measured via `$Length` on raw content before JSON escaping, but this was not stated
+plainly enough at every doc site, and no fixture had ever exercised escape-heavy content — every prior over-ceiling
+test fixture used escaping-neutral content (a single repeated plain letter), which cannot reveal how far JSON
+escaping inflates the wire size. Both `execute.ts` tool descriptions and `packages/iris-dev-mcp/README.md` now state
+explicitly that the ceiling bounds RAW characters (measured before escaping), not the serialized response body size,
+and cite the live-measured range above — 32,860 (escaping-neutral) / 98,311 (mixed metacharacters) / **196,495**
+(worst case, all C0 control characters) for the same 32768 raw characters — pinned by a new escape-heavy fixture (a
+quote, backslash, tab, and a control character with no short JSON escape, repeated).
+
+### Fixed — packaging no longer proceeds with a stale or missing build (internal tooling, Story 34.7 pre-publish blocker, ledger `34-6-CR-11`)
+
+Neither existing prepublish gate verified that the package about to be packaged had actually been built:
+`prepublishOnly` runs BEFORE `prepack`; `scripts/verify-iris-reachable.mjs` imports only `@iris-mcp/shared`'s dist,
+never the calling package's own; and `@iris-mcp/dev`'s deeper `prepublish-gate.mjs` runs vitest over TypeScript
+SOURCE. With a stale or missing `dist/`, both gates passed green and `npm`/`pnpm` packed the tarball anyway — for a
+first public release, an empty or stale tarball on the registry is unrecoverable (npm versions are immutable). Every
+publishable package's own prepublish gate now ALSO verifies, per-package and self-referentially (never checking a
+sibling's `dist/`), that its own `dist/` exists, is non-empty, and is at least as new as its own `src/` — failing
+closed (non-zero exit, zero tarball produced) otherwise. Packages with no build step of their own (the `@iris-mcp/all`
+meta-package) are unaffected — the check is derived from each package's own `package.json` (`files: ["dist"]`), never
+a hand-maintained package list. Mutation-verified: a deliberately staled/deleted `dist/` fails the gate closed with
+zero tarball produced; restoring the build (`pnpm turbo run build`) passes again.
+
 ## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
 
 ### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)

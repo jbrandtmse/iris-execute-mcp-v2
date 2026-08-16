@@ -50,9 +50,16 @@ export const executeCommandTool: ToolDefinition = {
   description:
     "Execute an ObjectScript command on IRIS with captured I/O output. " +
     "Write statements and other output are captured and returned in the response's " +
-    "`output` field, capped at 32768 characters — output beyond the ceiling is cut off " +
-    "and replaced with a structured, machine-detectable marker " +
-    "(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare '...'. This ceiling bounds " +
+    "`output` field, capped at 32768 RAW characters — measured BEFORE JSON escaping, " +
+    "not the serialized wire size — output beyond the ceiling is cut off and replaced " +
+    "with a structured, machine-detectable marker " +
+    "(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare '...'. JSON string " +
+    "escaping (quotes, backslashes, tabs, control characters) can inflate the " +
+    "SERIALIZED response body well past this raw-character figure for " +
+    "metacharacter-heavy output — a 32768-character output of C0 control characters " +
+    "(each costing a 6-character \\uXXXX escape) measured 196,495 serialized " +
+    "characters, roughly 6x the raw ceiling and about 3.9x past the ~50,000-character " +
+    "point at which some MCP clients divert inline results to a file. This ceiling bounds " +
     "the RESPONSE PAYLOAD only: the command has already fully executed by the time it is " +
     "applied, so it is not protection against the command's own execution time or " +
     "resource usage, and it is not a Web Gateway timeout safeguard. The response also " +
@@ -533,41 +540,58 @@ export const executeClassMethodTool: ToolDefinition = {
     "`byRef: false` does not protect a plain scalar argument from being mutated by a " +
     "target that happens to assign it; it only means that mutation is not read back. " +
     "The response's `argCount` field is unchanged from prior versions of this tool. " +
-    "`returnValue` is now ALSO capped at 32768 characters with the same structured, " +
-    "machine-detectable elision marker described below (previously unbounded — flagged " +
-    "via the additive `returnValueTruncated` boolean when it applies). Additively, the " +
-    "response also includes `output` (any text " +
-    "the target wrote to the current device via Write during the call — no wrapper " +
-    "class is needed for methods that narrate, run stock tools like " +
-    "%UnitTest.Manager.RunTest, or switch namespace mid-execution), capped at the same " +
-    "32768 characters with a structured, machine-detectable elision marker " +
-    "(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`, never a bare '...') in place of anything " +
-    "beyond it; `byRefValues` (an object keyed by zero-based position index, present " +
+    "`returnValue`, `byRefValues`, and `output` (any text the target wrote to the " +
+    "current device via Write during the call — no wrapper class is needed for methods " +
+    "that narrate, run stock tools like %UnitTest.Manager.RunTest, or switch namespace " +
+    "mid-execution) TOGETHER share ONE 32768-RAW-CHARACTER response budget — measured " +
+    "BEFORE JSON escaping, not the serialized wire size; metacharacter-heavy content " +
+    "(quotes, backslashes, tabs, control characters) can serialize to a much larger " +
+    "wire size for the same raw-character count — a single 32768-character field of C0 " +
+    "control characters (each costing a 6-character \\uXXXX escape) measured 196,495 " +
+    "serialized characters, roughly 6x the raw ceiling and about 3.9x past the " +
+    "~50,000-character point at which some MCP clients divert inline results to a file. " +
+    "The budget is spent in this field " +
+    "order: `returnValue` first (so the method's actual result is never starved by " +
+    "narration), then `byRefValues`, then `output` last (narration is usually the " +
+    "field that actually exceeds the budget, so it usually absorbs the truncation). " +
+    "Whatever a field does not use is available to the next field in that order — a " +
+    "small `returnValue` leaves nearly the whole 32768 for `byRefValues`/`output`, " +
+    "while a `returnValue` alone longer than 32768 characters consumes the ENTIRE " +
+    "budget, leaving nothing for the other two. Truncated content is cut off and " +
+    "replaced with a structured, machine-detectable elision marker " +
+    "(`[IRIS-MCP-TRUNCATED ceiling=<N>chars]`, where `<N>` is however much of the " +
+    "shared budget remained for that field at that point — not always 32768 — never a " +
+    "bare '...'), EXCEPT when the remaining budget is smaller than the marker itself " +
+    "(~37-41 characters), in which case the field is a plain hard-cut prefix with NO " +
+    "marker and the `truncated`/`byRefTruncated` flag is the only signal — so the " +
+    "absence of a marker is not proof a field is complete. `byRefValues` (an object " +
+    "keyed by zero-based position index, present " +
     "only for marked positions whose target-side local ended up defined — a plain " +
     "scalar out-value is the raw value, and an idiomatic subscripted Output array is a " +
-    "nested {value?, subscripts?} object), itself bounded by a combined 1000-node / " +
-    "32768-character budget SHARED ACROSS EVERY MARKED POSITION (not a fresh budget per " +
-    "position). The character budget is charged for every piece of content emitted — " +
-    "leaf values, `<Object:...>` placeholders, and subscript keys — but not for the " +
-    "per-node JSON scaffolding, which the 1000-node ceiling bounds instead. Once either " +
-    "budget is exhausted, further subscript entries are omitted from the affected node " +
-    "(marked `subscriptsTruncated: true`), and a marked position reached after the " +
-    "budget is already gone is OMITTED from `byRefValues` entirely. A position reached " +
-    "with budget still remaining, but whose value does not fit in what remains, is cut " +
-    "short in one of two ways: with an elision marker (`ceiling=<N>chars`, where `<N>` " +
-    "is however much of the shared budget remained at that point, not always 32768) when " +
-    "there is room for the marker itself, or — when the remaining budget is smaller than " +
+    "nested {value?, subscripts?} object) is ADDITIONALLY bounded by its own 1000-node " +
+    "structural ceiling, independent of (and on top of) the shared character budget " +
+    "above. The shared character budget is charged for every piece of `byRefValues` " +
+    "content emitted — leaf values, `<Object:...>` placeholders, and subscript keys — " +
+    "but not for the per-node JSON scaffolding, which the 1000-node ceiling bounds " +
+    "instead. Once either budget is exhausted, further subscript entries are omitted " +
+    "from the affected node (marked `subscriptsTruncated: true`), and a marked " +
+    "position reached after the shared budget is already gone is OMITTED from " +
+    "`byRefValues` entirely. A position reached with budget still remaining, but whose " +
+    "value does not fit in what remains, is cut " +
+    "short in one of two ways: with the elision marker described above when there is " +
+    "room for the marker itself, or — when the remaining budget is smaller than " +
     "the marker (under ~40 characters) — as a plain unmarked prefix of the real value, " +
     "since emitting the marker there would replace a value with something larger than " +
     "itself. In that last case `byRefTruncated` is the ONLY signal: the value carries no " +
     "marker of its own, so do not treat the absence of a marker as proof a byRef value " +
     "is complete. `truncated` (boolean — true whenever `output` does not contain " +
-    "everything the target wrote, whether because it hit the 32768-character ceiling or " +
+    "everything the target wrote, whether because it hit the shared budget or " +
     "the platform's long-string ceiling mid-call; the call still succeeds with a partial " +
     "capture, and this never happens silently); `returnValueTruncated` (boolean — true " +
-    "whenever `returnValue` was cut short by its ceiling, reported separately since it " +
+    "whenever `returnValue` was cut short by the shared budget, reported separately since it " +
     "describes a different response field); and `byRefTruncated` (boolean — true " +
-    "whenever `byRefValues`' node or byte budget was exhausted, reported separately from " +
+    "whenever `byRefValues`' node budget or its share of the shared character budget was " +
+    "exhausted, reported separately from " +
     "`truncated` since they describe different response fields). None of these ceilings " +
     "are protection against the target's own execution time, resource usage, or a Web " +
     "Gateway timeout — the target has already fully run by the time these caps are " +

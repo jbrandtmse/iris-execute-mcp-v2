@@ -911,8 +911,9 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 }
 ```
 
-`output` is capped at **32768 characters** (Story 34.6, AC 34.6.1) — content beyond the
-ceiling is cut off and replaced with a structured, machine-detectable marker
+`output` is capped at **32768 RAW characters** (Story 34.6 AC 34.6.1; the ceiling bounds
+raw content, not the serialized wire size — see below) — content beyond the ceiling is cut
+off and replaced with a structured, machine-detectable marker
 (`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`. **This ceiling bounds the
 response payload only**: the command has already fully executed by the time it is applied,
 so it is not protection against the command's own execution time or resource usage, and it
@@ -921,6 +922,28 @@ Gateway/HTTP transport tolerates multi-megabyte responses cleanly (tested clean 
 3,000,000 characters). The 32768 value was chosen because a real MCP client (Claude Code
 CLI) was observed diverting a rendered tool result away from inline consumption once it
 reached 50,031 characters — 32768 stays safely under that measured boundary.
+
+**Raw characters vs. serialized JSON size (Story 34.7, AC 34.7.4).** The 32768 figure is
+measured via `$Length` on the raw content **before** JSON string escaping — it is not a
+promise about the HTTP response body's own byte size. Quotes, backslashes, and control
+characters each expand under JSON escaping (a quote or backslash becomes a 2-character
+escape; a control character with no short escape becomes a 6-character `\uXXXX` escape),
+so metacharacter-heavy output can serialize to several times the raw-character ceiling.
+Live-measured inflation, each row a single field holding exactly 32768 **raw** characters
+(so the raw ceiling is honored identically in all three):
+
+| content | serialized HTTP body | inflation |
+|---|---|---|
+| escaping-neutral plain letters | 32,860 | 1.0x |
+| mixed metacharacters (quote, backslash, tab, one control char) | 98,311 | 3.0x |
+| **worst case — all C0 control characters** (`\uXXXX`, 6 chars each) | **196,495** | **6.0x** |
+
+**Honest residual risk:** the worst case is about **6x** the raw ceiling — roughly **3.9x
+past** the 50,031-character client-divert threshold cited above, which was the entire
+rationale for the 32768 figure. The shared budget substantially reduces the pre-34.7 worst
+case (which was this same inflation again per independent field) but does **not** restore
+that safety margin for metacharacter-heavy content. Tracked as `34-7-QA-1` in
+`deferred-work.md`.
 
 `truncated` is `true` whenever `output` does not contain everything the command wrote,
 whether because it hit the 32768-character ceiling above or the platform's long-string
@@ -943,35 +966,68 @@ Each `args` entry is either a plain scalar (by value) or a `{"byRef": true, "val
 marker for a `ByRef`/`Output` parameter — up to 20 positions total. Any `Write` output the
 target produces is captured (no wrapper class needed for narrating methods, stock runners
 like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
-in `output`, capped at the same 32768-character ceiling as `iris_execute_command` above
-(Story 34.6, AC 34.6.1 — see that entry for the Rule #38/#36 discipline and the elision
-marker format). **`returnValue` is capped at the same 32768-character ceiling** (Story 34.6
-code-review finding CR-5 — previously unbounded), flagged via the additive
-`returnValueTruncated` boolean; `argCount` is unchanged from prior versions of this tool.
-Marked positions' post-call values are returned in `byRefValues`, keyed by
-zero-based index, itself bounded by a **combined 1000-node / 32768-character budget**
-shared across every marked position (not a fresh budget per position). The character budget
-is charged for every piece of content emitted — leaf values, `<Object:...>` placeholders,
-and subscript keys — but not for the per-node JSON scaffolding, which the 1000-node ceiling
-bounds instead. Once either budget is exhausted, further subscript entries are omitted from
-the affected node (marked `subscriptsTruncated: true`), and a marked position reached after
-the budget is already gone is **omitted from `byRefValues` entirely**. A position reached
-with budget still remaining, but whose value does not fit in what remains, is cut short in
-one of two ways: with an elision marker (`ceiling=<N>chars`, where `<N>` is however much of
-the shared budget remained at that point — not always 32768) when there is room for the
-marker itself, or — when the remaining budget is smaller than the marker (under ~40
-characters) — as a **plain unmarked prefix** of the real value, since emitting the marker
-there would replace a value with something larger than itself (Story 34.6 code-review
-finding CR-6). In that last case `byRefTruncated` is the **only** signal — the value carries
-no marker of its own, so the absence of a marker is not proof that a byRef value is
-complete. `truncated`
-is `true` whenever `output` does
-not contain everything the target wrote, whether because it hit the 32768-character
-ceiling or the platform's long-string ceiling mid-call; `byRefTruncated` is `true` whenever
-`byRefValues`' node or byte budget was exhausted — reported separately from `truncated`
-since they describe different response fields. None of these ceilings are protection against the
-target's own execution time, resource usage, or a Web Gateway timeout. On a FAILED call the
-tool reports the error text as usual, and additionally surfaces `truncated` in the
+in `output`; `argCount` is unchanged from prior versions of this tool.
+
+**Response payload budget (Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 — ledger
+`34-6-CR2-6`).** `returnValue`, `byRefValues`, and `output` **share ONE 32768-RAW-character
+response budget** — not three independent 32768 budgets — spent in this field order:
+`returnValue` first (the method's actual result, usually small, so it is never starved by
+narration), then `byRefValues`, then `output` last (narration is usually the field that
+actually exceeds the budget, so it usually absorbs the truncation). Whatever a field does
+not use is available to the next one: a small `returnValue` leaves nearly the whole 32768
+for `byRefValues`/`output`, while a `returnValue` alone longer than 32768 characters
+consumes the **entire** budget, leaving nothing for the other two. Truncated content is cut
+off and replaced with a structured, machine-detectable elision marker
+(`[IRIS-MCP-TRUNCATED ceiling=<N>chars]`, where `<N>` is however much of the shared budget
+remained for that field at that point — not always 32768), never a bare `...`. Flagged via
+`returnValueTruncated` (for `returnValue`), `truncated` (for `output`), and `byRefTruncated`
+(for `byRefValues`) — three separate booleans, retained from the pre-34.7 shape, since each
+describes a different response field.
+
+`byRefValues` (marked positions' post-call values, keyed by zero-based index) is
+**additionally** bounded by its own **1000-node structural ceiling**, independent of (and on
+top of) the shared character budget above. The shared budget is charged for every piece of
+`byRefValues` content emitted — leaf values, `<Object:...>` placeholders, and subscript keys
+— but not for the per-node JSON scaffolding, which the 1000-node ceiling bounds instead.
+Once either budget is exhausted, further subscript entries are omitted from the affected
+node (marked `subscriptsTruncated: true`), and a marked position reached after the shared
+budget is already gone is **omitted from `byRefValues` entirely**. A position reached with
+budget still remaining, but whose value does not fit in what remains, is cut short in one of
+two ways: with the elision marker described above when there is room for the marker itself,
+or — when the remaining budget is smaller than the marker (under ~40 characters) — as a
+**plain unmarked prefix** of the real value, since emitting the marker there would replace a
+value with something larger than itself (Story 34.6 code-review finding CR-6). In that last
+case `byRefTruncated` is the **only** signal — the value carries no marker of its own, so
+the absence of a marker is not proof that a byRef value is complete.
+
+**Raw characters vs. serialized JSON size (Story 34.7, AC 34.7.4).** The 32768 figure is
+measured via `$Length` on each field's raw content **before** JSON string escaping — it is
+not a promise about the HTTP response body's own byte size. Quotes, backslashes, and
+control characters each expand under JSON escaping (a quote or backslash becomes a
+2-character escape; a control character with no short escape becomes a 6-character `\uXXXX`
+escape), so metacharacter-heavy content can serialize to several times the raw-character
+budget. Live-measured worst case: a single 32768-raw-character field of C0 control
+characters (consuming the ENTIRE shared budget by itself) serialized to a
+**196,495-character** HTTP response body — 6.0x the raw ceiling. See the measurement table
+under `iris_execute_command` above for the full escaping-neutral / mixed / worst-case
+range. This supersedes the earlier, now-inapplicable per-field measurement ("two
+32768-character fields serializing to 131,102 characters"), which described the pre-34.7
+independent-budget shape. **Honest residual risk:** 196,495 is roughly **3.9x past** the
+50,031-character client-divert threshold documented under `iris_execute_command` above,
+which was the entire rationale for the 32768 figure — the shared budget reduces but does
+not eliminate the risk that a metacharacter-heavy response gets diverted away from inline
+consumption by an MCP client. Tracked as `34-7-QA-1` in `deferred-work.md`.
+
+**Truncated `output` is not always marked.** Because `output` is spent **last**, it can be
+left a remainder smaller than the elision marker itself (~37-41 characters). In that band
+`output` is a plain hard-cut prefix with **no** `[IRIS-MCP-TRUNCATED …]` marker at all —
+exactly the fallback described for `byRefValues` below. As there, `truncated: true` is then
+the **only** signal, so the absence of a marker is not proof that `output` is complete.
+
+None of these ceilings are protection against the
+target's own execution time, resource usage, or a Web Gateway timeout — the target has
+already fully run by the time these caps are applied to the response payload. On a FAILED
+call the tool reports the error text as usual, and additionally surfaces `truncated` in the
 response's `structuredContent` whenever the underlying REST error envelope carried the
 flag — same mechanism as `iris_execute_command` above (Story 34.5).
 

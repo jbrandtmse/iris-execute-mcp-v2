@@ -324,20 +324,32 @@ Method TestApplyOutputCeilingCustomSmallerCeiling() As %Status
 }
 
 /// Story 34.6 QA (Priority 1 — UTF-8/surrogate-pair truncation-boundary safety, "the
-/// epic's original bug class": a corrupt/unparseable envelope). Live-verified during QA
-/// via a disposable probe (deleted) that a cut landing exactly between the high and low
-/// half of a GENUINE UTF-16 surrogate pair (IRIS's native encoding of an astral character
-/// like U+1F600 — constructed here as $Char(55357)_$Char(56832), never producible via
-/// $Char() as one call: $Char(128512) is out of range on this instance, confirming
-/// surrogate-pair, not code-point, internal semantics) does NOT corrupt the response:
-/// %ToJSON does not throw, and %FromJSON re-parses the result cleanly. This pins that
-/// property permanently.
+/// epic's original bug class": a corrupt/unparseable envelope), SUPERSEDED by Story 34.7
+/// AC 34.7.1 (ledger <c>34-6-CR-10</c>). The original version of this test only proved
+/// the response stayed valid INSIDE IRIS's own %ToJSON/%FromJSON round-trip — a closed
+/// loop that tolerates IRIS's own WTF-8 encoding of an unpaired surrogate and is
+/// structurally blind to what actually reaches the wire (Rules #36/#54). It is genuinely
+/// impossible to pin the REAL defect (invalid UTF-8 bytes on an HTTP response) from
+/// inside IRIS at all — that pin lives in the TS default suite,
+/// <c>execute-classmethod-epic-gate.test.ts</c>, which decodes the ACTUAL response bytes
+/// with a strict, fatal <c>TextDecoder</c> (AC 34.7.2).
+/// <p>What THIS test pins instead, at the ObjectScript level, is the new PRODUCT
+/// guarantee directly: for every ceiling in a sweep engineered to include at least one
+/// case that WOULD have cut mid-pair under the pre-34.7 formula, the retained CONTENT
+/// portion of the result — everything before any elision marker — never ends on a lone
+/// high surrogate. Live-verified during this story: before the
+/// <method>SurrogateSafeCutLength</method> fix, this exact assertion failed at ceiling
+/// 101 with a content-portion length of 60 ending in ascii 55357 (a lone high
+/// surrogate); after the fix, ceiling 101's content portion is 59 characters, ending in
+/// ascii 56832 (the LOW half of the PRECEDING complete pair) — the guard backs off by
+/// exactly one code unit, never more.</p>
 /// <p>Sweeps 4 consecutive ceilings against a long repeated-pair run rather than one
 /// hand-picked value — tKeep = ceiling - markerLen, so consecutive ceilings alternate
-/// parity, GUARANTEEING at least one lands on a clean pair boundary and at least one
-/// lands mid-pair, without depending on hand-derived marker-length arithmetic (a mistake
-/// made and caught during this same QA pass). tKeep is computed with ApplyOutputCeiling's
-/// own formula, copied verbatim, rather than reverse-derived from the result string.</p>
+/// parity, GUARANTEEING at least one would have landed mid-pair under the UNGUARDED
+/// formula, without depending on hand-derived marker-length arithmetic (a mistake made
+/// and caught during the original Story 34.6 QA pass). The unguarded tKeep is computed
+/// with ApplyOutputCeiling's OWN pre-guard formula, copied verbatim, ONLY to confirm the
+/// sweep reaches the dangerous case — never to predict the actual (guarded) result.</p>
 /// <p>Rule #58 fixture diversity: the pre-existing TestCaptureMetacharsAndUnicode
 /// coverage (ClassMethodArgsTest) embeds "héllo-世界-😀" but well BELOW any ceiling, so
 /// it is never actually cut — it cannot catch a truncation-boundary defect. This test
@@ -352,26 +364,38 @@ Method TestApplyOutputCeilingMidSurrogatePairStaysValidJSON() As %Status
         Set tRun = tRun _ tPair
     }
     Set tFull = tRun _ "TAILAFTERCUT"
-    Set tSawMidPairCut = 0
-    Set tSawCleanBoundaryCut = 0
+    Set tSawWouldHaveCutMidPairUnguarded = 0
     For tCeiling=100:1:103 {
         Set tTruncated = 0
         Set tResult = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tFull, .tTruncated, tCeiling)
         Do $$$AssertEquals(tTruncated, 1, "content longer than ceiling "_tCeiling_" must be truncated")
 
-        ; Mirror ApplyOutputCeiling's own tKeep formula exactly (verbatim), rather than
-        ; reverse-deriving it from the result string.
+        ; The marker text is deterministic from tCeiling alone — used to locate the
+        ; boundary between the retained CONTENT portion and any trailing marker, and
+        ; (via the UNGUARDED formula it embeds) to confirm this sweep genuinely reaches
+        ; a would-be mid-pair cut. Never used to predict tResult's actual content.
         Set tMarker = $Char(10)_"[IRIS-MCP-TRUNCATED ceiling="_tCeiling_"chars]"_$Char(10)
-        Set tKeep = tCeiling - $Length(tMarker)
-        If tKeep < 0 { Set tKeep = 0 }
-        Set tLastKeptAscii = $Select(tKeep>0: $Ascii(tResult, tKeep), 1: -1)
-        If tLastKeptAscii = 55357 {
-            Set tSawMidPairCut = 1
-        } ElseIf tLastKeptAscii = 56832 {
-            Set tSawCleanBoundaryCut = 1
+        Set tUnguardedKeep = tCeiling - $Length(tMarker)
+        If tUnguardedKeep < 0 { Set tUnguardedKeep = 0 }
+        Set tUnguardedLastAscii = $Select(tUnguardedKeep>0: $Ascii(tFull, tUnguardedKeep), 1: -1)
+        If tUnguardedLastAscii = 55357 {
+            Set tSawWouldHaveCutMidPairUnguarded = 1
         }
 
-        ; The core safety property, at THIS cut point: %ToJSON must not throw.
+        ; The ACTUAL, guarded content portion: tResult with any trailing marker
+        ; stripped. A marker, when present, is always emitted WHOLE (Story 34.6
+        ; CR-6/CR-8/CR-9) at the very end of tResult, so a literal suffix match locates
+        ; it unambiguously; when the marker does not fit within tCeiling at all,
+        ; tResult IS the content portion (the marker-less hard-cut band).
+        Set tContentLen = $Length(tResult)
+        If ($Length(tResult) >= $Length(tMarker)) && ($Extract(tResult, $Length(tResult)-$Length(tMarker)+1, *) = tMarker) {
+            Set tContentLen = $Length(tResult) - $Length(tMarker)
+        }
+        Set tContentLastAscii = $Select(tContentLen>0: $Ascii(tResult, tContentLen), 1: -1)
+        Do $$$AssertTrue((tContentLastAscii < 55296) || (tContentLastAscii > 56319), "ceiling "_tCeiling_": the retained content must never end on a lone high surrogate (got ascii "_tContentLastAscii_")")
+
+        ; The pre-existing safety net, still true and still worth pinning: whatever the
+        ; guard produces must stay valid inside IRIS's own JSON round-trip too.
         Set tObj = {}
         Do tObj.%Set("output", tResult)
         Set tJsonOK = 1
@@ -384,7 +408,7 @@ Method TestApplyOutputCeilingMidSurrogatePairStaysValidJSON() As %Status
         } Catch {
             Set tJsonOK = 0
         }
-        Do $$$AssertEquals(tJsonOK, 1, "%ToJSON must not throw at ceiling "_tCeiling_" (lastKeptAscii="_tLastKeptAscii_")")
+        Do $$$AssertEquals(tJsonOK, 1, "%ToJSON must not throw at ceiling "_tCeiling_" (contentLastAscii="_tContentLastAscii_")")
 
         ; And the result must be genuinely re-parseable — a corrupt envelope is corrupt
         ; precisely because a real client's JSON.parse (mirrored here by %FromJSON) fails.
@@ -396,11 +420,62 @@ Method TestApplyOutputCeilingMidSurrogatePairStaysValidJSON() As %Status
         }
         Do $$$AssertEquals(tRoundTripOK, 1, "the envelope at ceiling "_tCeiling_" must round-trip through %FromJSON without error")
     }
-    ; Confirm the sweep genuinely covered BOTH cases — if this ever fails, the test's own
-    ; setup needs revisiting (e.g. IRIS's internal surrogate representation changed), not
-    ; the product code the loop above already exercised.
-    Do $$$AssertEquals(tSawMidPairCut, 1, "the ceiling sweep must include at least one cut landing mid-surrogate-pair")
-    Do $$$AssertEquals(tSawCleanBoundaryCut, 1, "the ceiling sweep must include at least one cut landing on a clean pair boundary")
+    ; Confirm the sweep genuinely reached the dangerous case — if this ever fails, the
+    ; test's own setup needs revisiting (e.g. IRIS's internal surrogate representation
+    ; changed), not the product code the loop above already exercised.
+    Do $$$AssertEquals(tSawWouldHaveCutMidPairUnguarded, 1, "the ceiling sweep must include at least one ceiling that would have cut mid-pair under the pre-34.7 unguarded formula, or this test proves nothing about the guard")
+    Quit $$$OK
+}
+
+/// Story 34.7 AC 34.7.1 (ledger 34-6-CR-10) — direct, deterministic pin of
+/// SurrogateSafeCutLength's four cases, independent of ApplyOutputCeiling's own marker
+/// arithmetic. pStr is a complete surrogate pair (high then low) followed by plain
+/// ASCII tail characters, so every position's classification is known by construction.
+Method TestSurrogateSafeCutLengthCases() As %Status
+{
+    Set tHigh = $Char(55357)
+    Set tLow = $Char(56832)
+    Set tStr = tHigh _ tLow _ "TAIL"
+
+    ; Position 1 lands exactly ON the high surrogate — must back off to 0.
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(tStr, 1), 0, "a cut landing on the high half of a pair must back off to the preceding boundary (0, not 1)")
+
+    ; Position 2 lands exactly on the low surrogate — the pair is COMPLETE at this
+    ; length, so the guard must be a no-op (never backs off a clean boundary).
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(tStr, 2), 2, "a cut landing on the low half (pair already complete) must not be adjusted")
+
+    ; Position 3 lands on a plain ASCII character ('T') — no surrogate involved at all.
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(tStr, 3), 3, "a cut landing on an ordinary ASCII character must not be adjusted")
+
+    ; pLen=0 is the explicit boundary case the method's own banner calls out — must
+    ; return 0 unchanged (nothing to inspect, never negative).
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(tStr, 0), 0, "pLen=0 must return 0 unchanged")
+    Quit $$$OK
+}
+
+/// Story 34.7 AC 34.7.1 (ledger 34-6-CR-10) — the guard also protects the MARKER-LESS
+/// hard-cut band (a ceiling below the ~37-41 character elision marker's own length),
+/// not just the marker-carrying band the sweep above exercises. pOutput is a complete
+/// surrogate pair followed by plain ASCII, so ceiling=1 deterministically lands ON the
+/// high surrogate (backs off to an empty result) and ceiling=2 deterministically lands
+/// on the completed pair's low half (an already-clean cut, unaffected by the guard) —
+/// both well below any marker, isolating SurrogateSafeCutLength's effect inside
+/// ApplyOutputCeiling's own marker-less fallback branch specifically.
+Method TestApplyOutputCeilingMarkerlessBandNeverEndsOnHighSurrogate() As %Status
+{
+    Set tHigh = $Char(55357)
+    Set tLow = $Char(56832)
+    Set tOutput = tHigh _ tLow _ "TAIL"
+
+    Set tTruncated1 = 0
+    Set tResult1 = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated1, 1)
+    Do $$$AssertEquals(tTruncated1, 1, "content longer than ceiling 1 must be truncated")
+    Do $$$AssertEquals(tResult1, "", "ceiling 1 lands on the high surrogate alone — must back off to an empty result, never a lone high surrogate")
+
+    Set tTruncated2 = 0
+    Set tResult2 = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated2, 2)
+    Do $$$AssertEquals(tTruncated2, 1, "content longer than ceiling 2 must be truncated")
+    Do $$$AssertEquals(tResult2, tHigh_tLow, "ceiling 2 lands exactly on the completed pair — must be returned intact, unaffected by the guard")
     Quit $$$OK
 }
 

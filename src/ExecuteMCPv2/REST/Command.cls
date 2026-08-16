@@ -182,6 +182,15 @@ ClassMethod Execute() As %Status
 /// (each describes a different response field) but present, defaulted false, on both
 /// error envelopes too, for the same shape symmetry <code>byRefTruncated</code>
 /// already established.</p>
+/// <p><b>Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>):</b> <code>returnValue</code>,
+/// <code>byRefValues</code> and <code>output</code> no longer each get their own
+/// independent <parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter> — they now share
+/// ONE pool of that size, spent in that field order (a Project Lead decision; see
+/// <method>ExecuteMCPv2.Utils.InvokeWithArgs</method>'s banner). All three flags are
+/// RETAINED unchanged; only the budget arithmetic changes. <code>returnValue</code> is
+/// unaffected in practice (always first, so it always sees the full ceiling); a large
+/// <code>output</code> capture now absorbs whatever <code>returnValue</code> and
+/// <code>byRefValues</code> did not spend, rather than getting its own separate 32768.</p>
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
@@ -232,7 +241,11 @@ ClassMethod ClassMethod() As %Status
 
         ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
         ; ladder all live in Utils (keeps this routine small — see method banner).
-        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+        ; Story 34.7 AC 34.7.3: tOutputBudget is the new additive trailing output —
+        ; whatever remains of the ONE shared response budget after InvokeWithArgs
+        ; accounted for both returnValue and byRefValues (see its banner) — passed below
+        ; as the explicit ceiling for `output`, last in the shared-budget priority order.
+        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated, .tOutputBudget)
 
         ; Restore the original I/O state — same discipline as Execute() (Rule #7):
         ; disable redirect, switch back to the untouched initial device, close the
@@ -244,11 +257,14 @@ ClassMethod ClassMethod() As %Status
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput
 
-        ; Story 34.6 AC 34.6.1: bound the output field to the documented ceiling — same
-        ; discipline as Execute() above. ApplyOutputCeiling only ever SETS tTruncated
-        ; (never clears an already-true value), so this ORs in with InvokeWithArgs' own
-        ; capture-overflow signal.
-        Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+        ; Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3: bound the output field
+        ; to whatever the shared response budget has left (tOutputBudget — the full
+        ; OUTPUTCEILING on any early-exit path where InvokeWithArgs never reached its own
+        ; shared-budget computation, exactly matching pre-34.7 behavior there). Same
+        ; discipline as Execute() above otherwise: ApplyOutputCeiling only ever SETS
+        ; tTruncated (never clears an already-true value), so this ORs in with
+        ; InvokeWithArgs' own capture-overflow signal.
+        Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated, tOutputBudget)
 
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS

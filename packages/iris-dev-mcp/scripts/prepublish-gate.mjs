@@ -26,12 +26,32 @@
  * `spawn("npx")`-cannot-execute-`.cmd`-shim class of failure (Story 32.2, CVE-2024-27980
  * hardening): `spawn("pnpm", [...])` without a shell cannot execute the `pnpm.cmd` shim
  * on Windows either.
+ *
+ * Story 34.7 AC 34.7.5 (ledger `34-6-CR-11`): this gate runs vitest over TypeScript
+ * SOURCE, not the built `dist/` — so, like `scripts/verify-iris-reachable.mjs`, it
+ * never verified `@iris-mcp/dev`'s own package actually got BUILT before packaging.
+ * Runs `scripts/lib/dist-freshness.mjs`'s `checkDistFresh` FIRST, against this
+ * package's own `packageDir` (computed below from this script's own location, which —
+ * unlike the shared repo-root script — genuinely IS this package, so self-referential
+ * by construction here too).
  */
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { checkDistFresh } from "../../../scripts/lib/dist-freshness.mjs";
 
 const packageDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+const distCheck = checkDistFresh(packageDir, "@iris-mcp/dev");
+if (!distCheck.ok) {
+  console.error(`[prepublish-gate] FAILED CLOSED: ${distCheck.reason}`);
+  process.exit(1);
+}
+console.log(
+  distCheck.skipped
+    ? "[prepublish-gate] @iris-mcp/dev declares no dist/ build output of its own — build-freshness check skipped."
+    : "[prepublish-gate] @iris-mcp/dev's dist/ is present and fresh.",
+);
 
 const vitestArgs = [
   "exec",

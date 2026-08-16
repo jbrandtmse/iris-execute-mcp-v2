@@ -525,34 +525,31 @@ describe("iris_execute_classmethod", () => {
   // the Rule #19 ceiling proof at the tool layer: an over-ceiling `output`/`byRefValues`
   // shape (as the real server would send once truncated) reaches the caller exactly as
   // the server sent it — the tool performs no additional truncation of its own.
-  it("passes returnValueTruncated, byRefTruncated, and an over-ceiling output/returnValue/marker shape through unchanged (server-computed, tool is a pure pass-through)", async () => {
-    // Rule #54 — these fixtures must be shapes the REAL server can actually emit.
-    // All were corrected/added in code review / the 34-6-CR-5/CR-6 review-continuation
-    // pass after being pinned against live IRIS:
-    //   * The marker is `\n[IRIS-MCP-TRUNCATED ceiling=<N>chars]\n` = 36 + digits(N)
-    //     characters, so at the default ceiling it is 41 chars and the server keeps
-    //     32768 - 41 = 32727 content characters, for a total of EXACTLY 32768. `output`
-    //     AND (as of the CR-5 fix) `returnValue` share this exact shape.
-    //   * A byRef leaf truncated at a REMAINING budget of 20 gets NO marker at all (the
-    //     34-6-CR-6/CR-8/CR-9 fix): the marker itself is 38 characters at that ceiling,
-    //     which is bigger than the 20-char budget, so appending it would replace a
-    //     smaller value with something LARGER — the server now falls back to a plain
-    //     20-character hard cut of the original content, no marker fragment. A prior
-    //     fixture here encoded the marker-alone shape the server produced BEFORE that
-    //     fix — an envelope the server can no longer produce.
+  //
+  // Story 34.7 AC 34.7.3 split this ONE test into TWO (Rule #54): `returnValue`,
+  // `byRefValues`, and `output` now share a SINGLE 32768-character response budget
+  // (spent in that field order) instead of three independent 32768 budgets, so a
+  // single envelope can no longer show `returnValue` AND `output` BOTH at the full
+  // 32768 characters simultaneously — that shape can never leave the real server. Each
+  // scenario below is independently realistic under the shared-budget model.
+  it("passes an over-budget returnValue (consuming the ENTIRE shared budget) through unchanged, leaving output empty and byRefValues omitted (server-computed, tool is a pure pass-through)", async () => {
+    // Rule #54 — these fixtures must be shapes the REAL server can actually emit, and
+    // Rule #36 — pinned from the live measurement in this story's Dev Notes: the marker
+    // is `\n[IRIS-MCP-TRUNCATED ceiling=<N>chars]\n` = 36 + digits(N) characters (41 at
+    // the default 32768 ceiling), so a returnValue alone exceeding the WHOLE shared
+    // budget is truncated to exactly 32768 characters total — consuming it entirely,
+    // which is why output is empty (0 remaining) and the byRef position is omitted
+    // rather than shown as a hard-cut value.
     const CEILING = 32768;
     const outputMarker = "\n[IRIS-MCP-TRUNCATED ceiling=32768chars]\n";
-    const overCeilingOutput = "A".repeat(CEILING - outputMarker.length) + outputMarker;
-    expect(overCeilingOutput.length).toBe(CEILING);
-    const overCeilingReturnValue = "B".repeat(CEILING - outputMarker.length) + outputMarker;
-    expect(overCeilingReturnValue.length).toBe(CEILING);
-    const byRefHardCutNoMarker = "C".repeat(20);
+    const overBudgetReturnValue = "B".repeat(CEILING - outputMarker.length) + outputMarker;
+    expect(overBudgetReturnValue.length).toBe(CEILING);
     mockHttp.post.mockResolvedValue(
       envelope({
-        returnValue: overCeilingReturnValue,
+        returnValue: overBudgetReturnValue,
         argCount: 1,
-        output: overCeilingOutput,
-        byRefValues: { "0": byRefHardCutNoMarker },
+        output: "",
+        byRefValues: {},
         truncated: true,
         byRefTruncated: true,
         returnValueTruncated: true,
@@ -572,14 +569,75 @@ describe("iris_execute_classmethod", () => {
       byRefTruncated: boolean;
       returnValueTruncated: boolean;
     };
-    expect(structured.output).toBe(overCeilingOutput);
-    expect(structured.output).toContain("[IRIS-MCP-TRUNCATED");
-    expect(structured.returnValue).toBe(overCeilingReturnValue);
+    expect(structured.returnValue).toBe(overBudgetReturnValue);
     expect(structured.returnValue).toContain("[IRIS-MCP-TRUNCATED");
-    expect(structured.byRefValues).toEqual({ "0": byRefHardCutNoMarker });
+    expect(structured.output).toBe("");
+    expect(structured.byRefValues).toEqual({});
     expect(structured.truncated).toBe(true);
     expect(structured.byRefTruncated).toBe(true);
     expect(structured.returnValueTruncated).toBe(true);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("passes a small (untruncated) returnValue and byRefValues alongside an over-budget output through unchanged (server-computed, tool is a pure pass-through)", async () => {
+    // Rule #54 — this envelope must be a shape the REAL server can emit, and Rule #36 —
+    // every figure below is DERIVED from the server's own documented arithmetic, never
+    // hard-coded, so the fixture cannot drift into an impossible shape.
+    //
+    // The canonical shared-budget case: `returnValue` is small so it is never touched
+    // (returnValueTruncated: false), `byRefValues` is small so it is not truncated
+    // either (byRefTruncated: false), and `output` — LAST in the shared-budget priority
+    // order — absorbs the truncation, exactly as the tool description says narration
+    // usually does. The budget `output` therefore sees is
+    // 32768 - len(returnValue) - len(byRef value), and the marker the server stamps
+    // reports THAT number, not 32768. The server's own invariant (ApplyOutputCeiling)
+    // is that the result never exceeds the ceiling it stamps, so the total is asserted.
+    //
+    // NOTE: a marker-less byRef hard-cut CANNOT coexist with a small untruncated
+    // returnValue — a byRef leaf only loses its marker once the remaining budget is
+    // below the marker's own ~37-41 characters, which requires returnValue to have
+    // consumed nearly the whole budget. That combination is covered by the
+    // over-budget-returnValue scenario above instead.
+    const CEILING = 32768;
+    const smallReturnValue = "short";
+    const smallByRefValue = "C".repeat(20);
+    const outputBudget = CEILING - smallReturnValue.length - smallByRefValue.length;
+    const outputMarker = `\n[IRIS-MCP-TRUNCATED ceiling=${outputBudget}chars]\n`;
+    const overBudgetOutput =
+      "A".repeat(outputBudget - outputMarker.length) + outputMarker;
+    expect(overBudgetOutput.length).toBe(outputBudget);
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        returnValue: smallReturnValue,
+        argCount: 1,
+        output: overBudgetOutput,
+        byRefValues: { "0": smallByRefValue },
+        truncated: true,
+        byRefTruncated: false,
+        returnValueTruncated: false,
+      }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething", args: [{ byRef: true }] },
+      ctx,
+    );
+
+    const structured = result.structuredContent as {
+      returnValue: string;
+      output: string;
+      byRefValues: Record<string, unknown>;
+      truncated: boolean;
+      byRefTruncated: boolean;
+      returnValueTruncated: boolean;
+    };
+    expect(structured.returnValue).toBe(smallReturnValue);
+    expect(structured.returnValueTruncated).toBe(false);
+    expect(structured.output).toBe(overBudgetOutput);
+    expect(structured.output).toContain(`[IRIS-MCP-TRUNCATED ceiling=${outputBudget}chars]`);
+    expect(structured.byRefValues).toEqual({ "0": smallByRefValue });
+    expect(structured.truncated).toBe(true);
+    expect(structured.byRefTruncated).toBe(false);
     expect(result.isError).toBeUndefined();
   });
 

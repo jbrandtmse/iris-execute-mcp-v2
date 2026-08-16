@@ -834,8 +834,15 @@ Method TestByRefValueNodeBudgetTruncatesManySubscripts() As %Status
 /// never replaced by a marker LARGER than the small value it would have destroyed,
 /// and never pushing the total content past the documented budget. Mirrors the live
 /// reproduction from code review exactly: one huge Output value (which alone consumes
-/// the entire 32768-char budget) followed by several small ones — "42", "hello", "x" —
+/// the entire remaining budget) followed by several small ones — "42", "hello", "x" —
 /// the exact values code review found destroyed and replaced with ~37-char markers.
+/// <p><b>Story 34.7 AC 34.7.3:</b> <method>InvokeWithArgs</method>' byRefValues byte
+/// budget now STARTS at <parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter> MINUS
+/// whatever <c>Target20</c>'s own <c>"20-ok"</c> return value would consume of the ONE
+/// shared response budget (5 characters — returnValue is first in the shared-budget
+/// priority order), not the full ceiling. <var>tSharedBudget</var> below derives that
+/// starting point explicitly rather than hard-coding 32763, so this test does not go
+/// stale if the fixture's return string or the ceiling ever change.</p>
 Method TestByRefValueBudgetExhaustionOmitsRatherThanDestroys() As %Status
 {
     Set tHuge = $TR($J("", 40000), " ", "H")
@@ -844,12 +851,16 @@ Method TestByRefValueBudgetExhaustionOmitsRatherThanDestroys() As %Status
     Do tArgs.%Push({"byRef":true,"value":"42"})
     Do tArgs.%Push({"byRef":true,"value":"hello"})
     Do tArgs.%Push({"byRef":true,"value":"x"})
-    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "Target20", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated)
+    Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "Target20", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated, .tOutputBudget)
     Do $$$AssertStatusOK(tSC, "budget-exhaustion call should still succeed")
     Do $$$AssertEquals(tByRefTruncated, 1, "byRefTruncated must be set once the shared budget is exhausted")
+    Do $$$AssertEquals(tReturn, "20-ok", "Target20's own return value must survive untouched — sanity check on the shared-budget arithmetic below")
 
+    ; Story 34.7 AC 34.7.3: byRefValues starts with whatever the shared response budget
+    ; has left after returnValue's own share ("20-ok", 5 chars) — not the full ceiling.
+    Set tSharedBudget = ##class(ExecuteMCPv2.Utils).#OUTPUTCEILING - $Length(tReturn)
     Set tVal0 = tByRefValues.%Get("0")
-    Do $$$AssertEquals($Length(tVal0), 32768, "the huge first position must be truncated to exactly the documented ceiling")
+    Do $$$AssertEquals($Length(tVal0), tSharedBudget, "the huge first position must be truncated to exactly the shared budget remaining after returnValue")
 
     ; Positions 1-3 must be OMITTED entirely — never replaced by an oversized marker,
     ; and never shown as a misleading empty string that could be confused with a
@@ -865,7 +876,11 @@ Method TestByRefValueBudgetExhaustionOmitsRatherThanDestroys() As %Status
     ; above that could not fail and did not measure the property its message claimed —
     ; a surviving position 1 carrying 5KB would have kept it green. Sum the WHOLE
     ; serialized structure instead, so the assertion actually observes the total.
-    Do $$$AssertTrue($Length(tByRefValues.%ToJSON()) <= (32768 + 4096), "total serialized byRefValues ("_$Length(tByRefValues.%ToJSON())_") must stay within the documented budget plus scaffolding allowance")
+    Do $$$AssertTrue($Length(tByRefValues.%ToJSON()) <= (tSharedBudget + 4096), "total serialized byRefValues ("_$Length(tByRefValues.%ToJSON())_") must stay within the shared budget remaining after returnValue, plus scaffolding allowance")
+
+    ; Story 34.7 AC 34.7.3: nothing is left over for `output` once byRefValues has
+    ; consumed the entire shared budget on position 0 alone.
+    Do $$$AssertEquals(tOutputBudget, 0, "the shared response budget must be fully exhausted (0 remaining for output) once byRefValues consumed all of it")
     Quit $$$OK
 }
 

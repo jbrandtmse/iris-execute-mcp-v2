@@ -348,4 +348,40 @@ ClassMethod TargetReturnNamespace() As %String
     Quit $NAMESPACE
 }
 
+/// Story 34.7 AC 34.7.3 (ledger `34-6-CR2-6`) — writes narration, mutates a ByRef
+/// argument, AND returns a value LARGER than the whole shared response budget
+/// (<parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter>) all in the same call —
+/// proves the lead-decided field-order priority (`returnValue` &#8594; `byRefValues`
+/// &#8594; `output`) end-to-end at the REAL deployed endpoint: `returnValue` alone
+/// consumes the ENTIRE shared budget, so `byRefValues` and `output` must both be
+/// observably starved (the position omitted, `output` empty), never silently
+/// unaffected.
+ClassMethod TargetReturnHugeWriteAndByRef(ByRef pVal) As %String
+{
+    Write "some-narration"
+    Set pVal = "byref-value"
+    Quit $TR($J("", 50000), " ", "R")
+}
+
+/// Returns a 40,000-character string built entirely from JSON-metacharacter-heavy
+/// content (a quote, a backslash, a tab, and a control character with no short JSON
+/// escape, repeated) — comfortably past the Story 34.7 shared response budget
+/// (32768 characters) — for Rule #58 escape-heavy fixture diversity (AC 34.7.4). Every
+/// prior over-budget fixture in this class (<method>TargetWriteOverCeiling</method>,
+/// <method>TargetReturnOverCeiling</method>, <method>TargetByRefHugeValue</method>) used
+/// escaping-NEUTRAL content (a single repeated plain letter), which is structurally
+/// blind to how far JSON string escaping can inflate the SERIALIZED response body past
+/// the RAW character ceiling the documentation states — live-measured on the pre-34.7
+/// per-field-ceiling shape: two 32768-character escape-heavy fields serialized to
+/// 131,102 characters combined.
+ClassMethod TargetReturnEscapeHeavyOverCeiling() As %String
+{
+    Set tUnit = $Char(34, 92, 9, 1)
+    Set tResult = ""
+    For i=1:1:10000 {
+        Set tResult = tResult _ tUnit
+    }
+    Quit tResult
+}
+
 }
