@@ -33,6 +33,17 @@ Parameter OUTPUTCEILING As %Integer = 32768;
 /// wide/deep Output array even where every individual value is tiny.
 Parameter BYREFNODECEILING As %Integer = 1000;
 
+/// Story 34.8 AC 34.8.3/34.8.4 — the size (in RAW BYTES) of each chunk
+/// <method>DecodeUtf8Stream</method> reads from a request-body stream before decoding it.
+/// Chosen well under the platform's practical string ceiling while staying large enough
+/// that an ordinary request body decodes in a single chunk. Live-measured during this
+/// story (2026-08-16, disposable <c>ExecuteMCPv2.Temp.Utf8Probe</c>): a SINGLE
+/// <code>.Read()</code> call requesting a stream's full ~49,000,000-byte
+/// <property>Size</property> in one shot silently returned only ~3.6 million characters —
+/// with NO exception of any kind — which is exactly the failure this chunk size and the
+/// accompanying read-loop in <method>DecodeUtf8Stream</method> exist to avoid.
+Parameter UTF8CHUNKSIZE As %Integer = 1000000;
+
 /// Save the current namespace and switch to <var>pNamespace</var>.
 /// <p>The original namespace is returned via the <var>pOriginal</var> output parameter
 /// so callers can restore it later with <method>RestoreNamespace</method>.</p>
@@ -863,12 +874,262 @@ ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs,
     Quit tSC
 }
 
+/// Story 34.8 — decode a raw (untranslated) request-body stream as UTF-8, returning a NEW
+/// character stream ready for <method>%DynamicObject</method>.<method>%FromJSON</method>.
+/// <p><b>Why this exists (ledger <c>34-6-CR-7</c>).</b> Live-probed 2026-08-16 (disposable
+/// <c>ExecuteMCPv2.Temp.Utf8Probe</c>, deleted before commit — see the story's Probe
+/// Findings section for the full transcript): <property>%request.Content</property> is a
+/// <class>%CSP.BinaryStream</class> holding the RAW, untranslated request bytes (confirmed
+/// byte-for-byte against a known UTF-8 encoding — e.g. <code>é</code> arrived as the two
+/// raw bytes 195,169, its exact UTF-8 encoding read as if each byte were its own Latin-1
+/// code point), and <property>%request.CharSet</property> is empty because the TS client's
+/// <code>Content-Type: application/json</code> header carries no charset parameter, so no
+/// CSP-level charset negotiation ever applies. Handing this raw-byte stream straight to
+/// <method>%FromJSON</method> (the pre-fix behavior) reproduced the defect exactly: per
+/// that method's OWN documented note (<c>%Library.DynamicAbstractObject.cls</c>: "for
+/// streams not containing 16-bit Unicode it may be necessary to explicitly convert...via
+/// $ZCONVERT...or entire streams by setting the TranslateTable attribute"), it does NOT
+/// itself assume UTF-8 for an untranslated stream.</p>
+/// <p><b>Chunk-boundary safety (AC 34.8.3).</b> Reads <parameter>UTF8CHUNKSIZE</parameter>
+/// raw bytes at a time. A naive per-chunk <code>$ZCONVERT(chunk,"I","UTF8")</code> would
+/// corrupt any multi-byte UTF-8 sequence straddling a chunk boundary — decoding each
+/// fragment independently mangles it. This method instead detects, via
+/// <method>IncompleteUtf8TailLength</method>, whether the last 0-3 bytes of a chunk are the
+/// unfinished start of a multi-byte sequence, holds those bytes back, and prepends them to
+/// the FRONT of the next chunk before decoding — so a sequence is never split across the
+/// boundary. Live-verified against a deliberately tiny 16-byte chunk size on a body
+/// containing 2-, 3-, and 4-byte UTF-8 characters back to back (several chunk boundaries
+/// land mid-sequence by construction): output was byte-for-byte identical to a single-shot
+/// whole-body decode.</p>
+/// <p><b>Large-body safety (AC 34.8.4) — two traps found live, not by reasoning.</b>
+/// (1) <code>$ZCONVERT</code> given a <class>%Stream.Object</class> OREF directly (instead
+/// of a <class>%String</class>) does not throw and does not decode anything — it silently
+/// STRINGIFIES THE OREF ITSELF (observed: <code>"25209@%CSP.BinaryStream"</code>), so every
+/// chunk MUST be materialized as a <class>%String</class> via <code>.Read()</code> before
+/// conversion — never pass a stream to <code>$ZCONVERT</code> directly. (2) A SINGLE
+/// <code>.Read(stream.Size)</code> call requesting an entire large stream's content in one
+/// shot does not reliably return all of it: live-measured on a 49,000,000-byte stream, one
+/// such call silently returned only ~3,589,128 characters — NO exception of any kind, never
+/// &lt;MAXSTRING&gt;, just quietly less data than asked for. Reading in a
+/// <code>While 'stream.AtEnd</code> loop, chunk by chunk, is the shape verified to retrieve
+/// the full content — accumulating the DECODED text into a
+/// <class>%Stream.TmpCharacter</class> (never into one growing <class>%String</class>) so
+/// the decoded output is not bounded by the <class>%String</class> long-string ceiling
+/// either. Live-verified end-to-end at 49,000,000 raw bytes / 48,300,000 decoded characters
+/// with zero exceptions and a correct content spot-check.</p>
+/// <p>Neither <class>%Stream.TmpCharacter</class> nor <class>%Stream.GlobalCharacter</class>
+/// exposes a settable <property>TranslateTable</property> property (mechanically confirmed
+/// live via <class>%Dictionary.PropertyDefinition</class>: only
+/// <class>%Stream.FileCharacter</class> among <code>%Stream.*</code> classes has one) — the
+/// "set TranslateTable on the stream" alternative <method>%FromJSON</method>'s own
+/// documentation names is therefore not available for the in-memory stream classes used
+/// here without introducing a temp file; the explicit chunked <code>$ZCONVERT</code>
+/// approach below is used instead.</p>
+/// <p><b>ASCII is unaffected (AC 34.8.5).</b> Every ASCII byte (0-127) is already valid
+/// single-byte UTF-8, so <code>$ZCONVERT(asciiChunk,"I","UTF8")</code> is a no-op on
+/// ASCII-only content — live-verified byte-for-byte identical through this exact method
+/// with a deliberately tiny 7-byte chunk size.</p>
+/// <p><var>pChunkSize</var> defaults to <parameter>UTF8CHUNKSIZE</parameter> when omitted
+/// (sentinel <code>-1</code>, matching <method>ApplyOutputCeiling</method>'s established
+/// convention in this class) — production code always omits it; tests pass a small value
+/// to force multiple chunks (and therefore boundary crossings) without needing a
+/// multi-megabyte fixture. <b>Story 34.8 code review:</b> the guard accepts any NON-POSITIVE
+/// value, not just <code>-1</code>. A literal <code>0</code> would otherwise be used as a
+/// real chunk size, and <code>.Read(0)</code> was live-verified during this review to return
+/// the empty string WITHOUT advancing the stream or setting <property>AtEnd</property> — so
+/// the read loop below would never terminate, hanging the job and its Web Gateway
+/// connection. Clamping at <code>&lt;= 0</code> makes that unreachable by construction.</p>
+/// <p><b>Malformed input safety (Story 34.8 QA).</b> Each decoded chunk is passed through
+/// <method>SanitizeUnpairedSurrogates</method> before being written to <var>tOut</var> —
+/// see that method's own banner for why a malformed (never a valid-UTF-8-encoded) input
+/// byte sequence can otherwise make this method emit a raw, unpaired UTF-16 surrogate that
+/// later re-emerges as genuinely invalid UTF-8 on a response.</p>
+ClassMethod DecodeUtf8Stream(pRawStream As %Stream.Object, pChunkSize As %Integer = -1) As %Stream.Object
+{
+    Set tChunkSize = pChunkSize
+    If tChunkSize <= 0 { Set tChunkSize = ..#UTF8CHUNKSIZE }
+    Set tOut = ##class(%Stream.TmpCharacter).%New()
+    Set tCarry = ""
+    Do pRawStream.Rewind()
+    While 'pRawStream.AtEnd {
+        Set tRawChunk = tCarry _ pRawStream.Read(tChunkSize)
+        Set tTail = ..IncompleteUtf8TailLength(tRawChunk)
+        If tTail > 0 {
+            Set tCarry = $Extract(tRawChunk, *-tTail+1, *)
+            Set tDecodeNow = $Extract(tRawChunk, 1, *-tTail)
+        } Else {
+            Set tCarry = ""
+            Set tDecodeNow = tRawChunk
+        }
+        If tDecodeNow '= "" {
+            Do ..WriteDecoded(tOut, tDecodeNow)
+        }
+    }
+    ; Final flush: whatever remains in tCarry at end-of-stream is a genuinely truncated or
+    ; malformed trailing sequence AT THIS POINT (not a chunk-boundary artifact — every
+    ; boundary up to here was proven complete) — decode it as-is rather than silently
+    ; dropping it.
+    If tCarry '= "" {
+        Do ..WriteDecoded(tOut, tCarry)
+    }
+    Do tOut.Rewind()
+    Quit tOut
+}
+
+/// Story 34.8 code review — decode ONE raw-byte chunk and append it to <var>pOut</var>,
+/// THROWING if the stream write fails.
+/// <p>Both <method>DecodeUtf8Stream</method> call sites previously used a bare
+/// <code>Do tOut.Write(...)</code>, discarding the <class>%Status</class> that
+/// <method>%Stream.Object.Write</method> returns. A failing write (IRISTEMP full or over
+/// quota on a large body, a <code>&lt;STORE&gt;</code>) would then be silently ignored: the
+/// read loop would continue and <method>%FromJSON</method> would receive a SILENTLY
+/// TRUNCATED document — precisely the "do not trade a silent corruption for a silent
+/// failure" failure class AC 34.8.4 exists to prevent, reintroduced one layer down. Raising
+/// the real status instead surfaces it through <method>ReadRequestBody</method>'s catch as
+/// an explicit server-side read/decode error.</p>
+ClassMethod WriteDecoded(pOut As %Stream.Object, pRawChunk As %String) As %Status
+{
+    Set tSC = pOut.Write(..SanitizeUnpairedSurrogates($ZConvert(pRawChunk, "I", "UTF8")))
+    If $$$ISERR(tSC) {
+        Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+    }
+    Quit tSC
+}
+
+/// Story 34.8 QA (adversarial pass) — <method>DecodeUtf8Stream</method>'s
+/// <code>$ZConvert(...,"I","UTF8")</code> call is lenient enough to decode a malformed
+/// 3-byte WTF-8/CESU-8 byte sequence (<code>0xED [0xA0-0xBF] [0x80-0xBF]</code> — never
+/// valid in conformant UTF-8: RFC 3629 section 3 excludes the entire surrogate block
+/// D800-DFFF from UTF-8) into a raw, UNPAIRED UTF-16 surrogate code unit rather than
+/// rejecting it — live-verified: <code>$Char(237,160,128)</code> decodes to code point
+/// 55296, the literal high-surrogate value, and <code>$Char(237,176,128)</code> to 56320,
+/// the literal low-surrogate value. The pre-Story-34.8 Latin-1 decode this replaced could
+/// NEVER produce a surrogate code unit from ANY input (Latin-1's range is 0-255, entirely
+/// below the surrogate block), so an unpaired surrogate reaching a response is a NEW
+/// failure mode this story's UTF-8-aware decode introduces, not a pre-existing one.
+/// <p>An unpaired surrogate that reaches a JSON response is re-emitted by IRIS as genuinely
+/// invalid UTF-8 on the wire — confirmed live with a hand-crafted raw HTTP body (bypassing
+/// any client-side JSON.stringify/UTF-8 auto-sanitization, which always substitutes
+/// U+FFFD for an unpaired surrogate before it reaches the wire — no standard JSON+UTF-8
+/// client, including this suite's own <c>IrisHttpClient</c>, can produce this byte pattern):
+/// a strict <code>TextDecoder({fatal:true})</code> against the actual response bytes
+/// THREW, confirming HTTP 200 with genuinely corrupt bytes and no error or truncation
+/// signal — the same underlying platform behavior <method>SurrogateSafeCutLength</method>
+/// already guards against on the truncation/output side (see its own banner), mirrored
+/// here on the decode/input side rather than left as a new, undocumented gap.</p>
+/// <p>Replaces each unpaired surrogate half with <code>?</code> — matching
+/// <code>$ZConvert</code>'s OWN observed substitution for other invalid byte sequences
+/// (e.g. an orphan continuation byte, live-verified to decode to <code>?</code> as well),
+/// for consistency rather than inventing a new convention. A genuine, correctly-paired
+/// surrogate pair (any valid astral character, e.g. an emoji from a real 4-byte UTF-8
+/// sequence) is left completely untouched — chunk-boundary safety guarantees a valid
+/// pair's 4 raw bytes are always decoded together in the SAME <code>$ZConvert</code> call
+/// (see <method>IncompleteUtf8TailLength</method>'s banner), so this method never needs to
+/// look across two separate calls to recognize one.</p>
+/// <p>Single forward pass, O(n) in <var>pStr</var>'s length — builds the result from
+/// unchanged "clean" runs plus substituted characters rather than repeatedly re-slicing a
+/// growing string, so a pathological input consisting of many consecutive unpaired
+/// surrogates cannot degrade to quadratic behavior.</p>
+ClassMethod SanitizeUnpairedSurrogates(pStr As %String) As %String
+{
+    Set tLen = $Length(pStr)
+    Set tOut = ""
+    Set tRunStart = 1
+    Set i = 1
+    While i <= tLen {
+        Set tCode = $Ascii(pStr, i)
+        Set tUnpaired = 0
+        If (tCode >= 55296) && (tCode <= 56319) {
+            ; High surrogate half — valid only when immediately followed by a low surrogate.
+            Set tNext = $Select(i < tLen: $Ascii(pStr, i + 1), 1: 0)
+            If (tNext >= 56320) && (tNext <= 57343) {
+                Set i = i + 2 ; a genuine pair — both code units stay in the pending clean run
+            } Else {
+                Set tUnpaired = 1
+            }
+        } ElseIf (tCode >= 56320) && (tCode <= 57343) {
+            ; A low surrogate is only ever reached here when it was NOT already consumed as
+            ; the second half of a pair above (that branch jumps i past it) — so it is
+            ; always unpaired by the time control reaches this branch.
+            Set tUnpaired = 1
+        } Else {
+            Set i = i + 1
+        }
+        If tUnpaired {
+            If i > tRunStart {
+                Set tOut = tOut _ $Extract(pStr, tRunStart, i - 1)
+            }
+            Set tOut = tOut _ "?"
+            Set i = i + 1
+            Set tRunStart = i
+        }
+    }
+    If tRunStart <= tLen {
+        Set tOut = tOut _ $Extract(pStr, tRunStart, tLen)
+    }
+    Quit tOut
+}
+
+/// Story 34.8 AC 34.8.3 — how many TRAILING bytes of <var>pChunk</var> are the unfinished
+/// start of a multi-byte UTF-8 sequence (0-3). Lead-byte ranges AS CLASSIFIED HERE: 0xC0-0xDF
+/// starts a 2-byte sequence, 0xE0-0xEF a 3-byte sequence, 0xF0-0xFF a 4-byte sequence;
+/// 0x80-0xBF is a continuation byte.
+/// <p><b>Story 34.8 code review — this classification is deliberately WIDER than conformant
+/// UTF-8.</b> Per RFC 3629 a valid 4-byte lead is only 0xF0-0xF4, and 0xF5-0xFF never appear
+/// in well-formed UTF-8 at all; 0xC0-0xC1 are likewise always invalid (overlong). Those bytes
+/// are still treated as leads above so that a malformed trailing byte is HELD BACK and
+/// flushed intact rather than split across two <code>$ZConvert</code> calls. The consequence
+/// is bounded and lossless: the carry is at most 3 bytes and is always decoded exactly once
+/// by the final flush. Live-verified during code review that every such sequence
+/// (0xF5-lead, an 0xF8 5-byte-style lead, a bare 0xFF, and an above-U+10FFFF 0xF4 0x90 0x80
+/// 0x80) decodes to a literal <code>?</code> and leaks NO surrogate or other code unit that
+/// would re-emerge as invalid UTF-8 on the wire.</p>
+/// <p>Checking only the last up to 3 bytes is sufficient — no UTF-8
+/// sequence is longer than 4 bytes, so if the last 3 bytes are ALL continuation bytes, the
+/// only well-formed reading is a COMPLETE 4-byte sequence whose lead byte is one position
+/// further back — already inside the caller's "decode now" portion (that lead byte and all
+/// 3 of its continuation bytes are entirely within the current chunk), never split at all.
+ClassMethod IncompleteUtf8TailLength(pChunk As %String) As %Integer
+{
+    Set tLen = $Length(pChunk)
+    If tLen = 0 Quit 0
+    Set tB1 = $Ascii(pChunk, tLen)
+    If tB1 >= 192 Quit 1
+    If tB1 < 128 Quit 0
+    ; tB1 is a continuation byte (128-191) — look one byte further back.
+    If tLen < 2 Quit 0
+    Set tB2 = $Ascii(pChunk, tLen - 1)
+    If tB2 >= 224 Quit 2
+    If tB2 < 128 Quit 0
+    If tB2 >= 192 Quit 0
+    ; tB2 is ALSO a continuation byte — look one more byte further back.
+    If tLen < 3 Quit 0
+    Set tB3 = $Ascii(pChunk, tLen - 2)
+    If tB3 >= 240 Quit 3
+    Quit 0
+}
+
 /// Read the HTTP request body and parse it as JSON.
 /// <p>Returns a <class>%DynamicObject</class> via the <var>pBody</var> output parameter.</p>
+/// <p><b>Story 34.8 (ledger <c>34-6-CR-7</c>).</b> The stream resolved below — whichever of
+/// the two branches supplies it — is now decoded as UTF-8 via <method>DecodeUtf8Stream</method>
+/// before being handed to <method>%FromJSON</method>, fixing the request-body UTF-8
+/// mis-decode defect. See <method>DecodeUtf8Stream</method>'s own banner for the full
+/// live-probe evidence. Applied uniformly to both the <code>GetMimeData("BODY")</code>
+/// branch and the <property>%request.Content</property> fallback: only the fallback is
+/// empirically reachable today (probed 2026-08-16 — <code>GetMimeData("BODY")</code> is
+/// never populated for this project's plain <code>application/json</code> POSTs, multipart
+/// only), but both are documented CSP conventions for "the raw request body" and neither
+/// applies charset translation of its own, so the same fix is correct for either.</p>
 ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
     Set pBody = ""
+    ; Story 34.8 code review: the decode stage now runs inside this same Try, so the catch
+    ; can no longer assume every failure means malformed client JSON. tStage discriminates
+    ; a server-side read/decode fault (stream read, $ZConvert, temp-stream write) from a
+    ; genuine JSON parse error, so an operator is not sent to debug a payload that was fine.
+    Set tStage = "decode"
     Try {
         ; In %CSP.REST context, the POST body is available via %request.Content
         ; which is a MultiDimensional property in %CSP.Request.
@@ -886,9 +1147,15 @@ ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
         If '$IsObject($Get(tStream)) Quit
         Do tStream.Rewind()
         If 'tStream.Size Quit
-        Set pBody = ##class(%DynamicObject).%FromJSON(tStream)
+        Set tUtf8Stream = ..DecodeUtf8Stream(tStream)
+        Set tStage = "parse"
+        Set pBody = ##class(%DynamicObject).%FromJSON(tUtf8Stream)
     } Catch ex {
-        Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body: "_ex.DisplayString())
+        If tStage = "parse" {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body: "_ex.DisplayString())
+        } Else {
+            Set tSC = $$$ERROR($$$GeneralError, "Failed to read and UTF-8-decode the request body before parsing it; this is a server-side read/decode fault, not malformed JSON from the client: "_ex.DisplayString())
+        }
     }
     Quit tSC
 }

@@ -53,19 +53,27 @@ console.log(
     : "[prepublish-gate] @iris-mcp/dev's dist/ is present and fresh.",
 );
 
-const vitestArgs = [
-  "exec",
-  "vitest",
-  "run",
+// Story 34.8 code review: every live-IRIS gate file must be listed here, NOT just the
+// epic gate. Each of these uses the same `beforeAll` probe + `ctx.skip()` shape, which
+// silently SKIPS when IRIS is unreachable or the fixtures are not deployed — green, with
+// nothing actually verified. `IRIS_REQUIRE_LIVE=1` (below) is what converts that skip into
+// a hard failure, and it only applies to the files named here. `request-body-utf8-decode`
+// is the ONLY end-to-end proof that non-ASCII request bodies decode correctly; omitting it
+// meant a publish could ship that fix entirely unexecuted — the same defect class already
+// recorded as ledger `34-4-R3` / AC 34.6.3 and fixed for the epic gate.
+const gateTestFiles = [
   "src/__tests__/execute-classmethod-epic-gate.test.ts",
+  "src/__tests__/request-body-utf8-decode.test.ts",
 ];
+
+const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 
 console.log(
-  "[prepublish-gate] Running the iris_execute_classmethod epic-done gate with " +
+  `[prepublish-gate] Running ${gateTestFiles.length} live-IRIS gate file(s) with ` +
     "IRIS_REQUIRE_LIVE=1 — this MUST fail closed (non-zero exit) if IRIS is " +
-    "unreachable or the reproduction fixtures are not deployed.",
+    `unreachable or the reproduction fixtures are not deployed:\n  - ${gateTestFiles.join("\n  - ")}`,
 );
 
 const result =
@@ -88,7 +96,7 @@ if (result.error) {
 
 if (result.status !== 0) {
   console.error(
-    "[prepublish-gate] FAILED CLOSED: the epic-done gate did not pass with IRIS_REQUIRE_LIVE=1. " +
+    "[prepublish-gate] FAILED CLOSED: a live-IRIS gate did not pass with IRIS_REQUIRE_LIVE=1. " +
       "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD at a " +
       "reachable IRIS instance with src/ExecuteMCPv2/Tests/ loaded, then retry.",
   );

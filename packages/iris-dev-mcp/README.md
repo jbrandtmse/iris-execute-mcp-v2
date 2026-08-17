@@ -1190,9 +1190,13 @@ Compilation errors are returned as successful tool results (not `isError: true`)
 
 ## Known Limitations
 
-### Non-ASCII request-body content is mis-decoded
+### Non-ASCII request-body content was mis-decoded (fixed in Story 34.8)
 
-`iris_execute_command`'s `command`, `iris_execute_classmethod`'s `args`, and `iris_global_set`'s `value` are all read through a shared request-body parser that currently mis-decodes non-ASCII JSON content (UTF-8 read as Latin-1) — e.g. an emoji arrives corrupted as several garbled characters matching its raw UTF-8 byte values, with **no error and no truncation flag** (`HTTP 200`, silently wrong). For `iris_global_set` this corrupts data **at rest** in the target global. Content that already lives server-side (e.g. compiled class source) is unaffected — only the inbound request-body path. Avoid non-ASCII characters in these fields until this is fixed. Full detail and the tracked fix: see the [suite README's Known Limitations](../../README.md#known-limitations) and ledger item `34-6-CR-7`.
+`iris_execute_command`'s `command`, `iris_execute_classmethod`'s `args`, and `iris_global_set`'s `value` are all read through a shared request-body parser. Before Story 34.8 it mis-decoded non-ASCII JSON content (UTF-8 read as Latin-1) — e.g. an emoji arrived corrupted as several garbled characters matching its raw UTF-8 byte values, with **no error and no truncation flag** (`HTTP 200`, silently wrong). For `iris_global_set` this corrupted data **at rest** in the target global.
+
+**This is now fixed** — accented characters, CJK, and emoji all round-trip correctly, and plain ASCII is unaffected. **The fix is forward-only**: data already written corrupted (e.g. via `iris_global_set` before upgrading) is **not** automatically repaired — there is no repair tool for previously-corrupted data.
+
+The decoder is **lenient rather than validating**: invalid byte sequences (orphan continuation bytes, truncated sequences, unpaired surrogates) are replaced with a literal `?` under `HTTP 200` rather than rejected, and non-canonical "overlong" encodings are decoded rather than refused — which has a filter-bypass implication if you byte-inspect these request bodies upstream. Full detail on both, plus the security note: see the [suite README's Known Limitations](../../README.md#known-limitations) and ledger item `34-6-CR-7`.
 
 ---
 

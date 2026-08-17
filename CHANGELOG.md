@@ -79,15 +79,22 @@ elision outcome: at a remaining budget smaller than the ~40-character marker, a 
 prefix, and `byRefTruncated` is then the only signal — the absence of a marker does not prove a byRef value is
 complete.
 
-### Documented (not fixed) — non-ASCII JSON request-body content is silently mis-decoded (all servers, Story 34.6 code-review finding CR-7)
+### Fixed — non-ASCII JSON request-body content is decoded correctly (all servers, Story 34.6 finding CR-7, fixed in Story 34.8)
 
-Every custom `ExecuteMCPv2.REST.*` handler's shared request-body parser reads non-ASCII JSON content as if it were
-Latin-1, silently corrupting it on the way in (`HTTP 200`, no error, no flag) — most directly affecting
-`iris_global_set`'s `value` (data corruption **at rest**), `iris_execute_command`'s `command`, and
-`iris_execute_classmethod`'s `args`. This is pre-existing across every epic and untouched by this story's own
-changes; a proper fix requires investigating IRIS's CSP request-body character-set negotiation. Documented
-prominently (not silently) in both the suite README and `@iris-mcp/dev`'s own README's new Known Limitations
-sections, tracked as ledger item `34-6-CR-7`.
+Every custom `ExecuteMCPv2.REST.*` handler's shared request-body parser (`ExecuteMCPv2.Utils.ReadRequestBody`, 14
+handler classes / 46 call sites) read non-ASCII JSON content as if it were Latin-1, silently corrupting it on the way
+in (`HTTP 200`, no error, no flag) — most directly affecting `iris_global_set`'s `value` (data corruption **at
+rest**), `iris_execute_command`'s `command`, and `iris_execute_classmethod`'s `args`. It was first found and
+documented (not fixed) during Story 34.6 and tracked as ledger item `34-6-CR-7`.
+
+**Story 34.8 fixes it centrally**: the body's raw bytes are now explicitly UTF-8-decoded before JSON parsing, in a
+chunked read that is safe across chunk boundaries (a multi-byte character split by a boundary is never corrupted) and
+carries no practical body-size ceiling. Accented, CJK, and astral-plane/emoji content now round-trips correctly, and
+the plain-ASCII path is byte-identical to before. **The fix is forward-only** — data already written corrupted is not
+repaired automatically. The decoder is deliberately lenient rather than validating: invalid byte sequences (including
+unpaired surrogates) become a literal `?` rather than an error, and non-canonical "overlong" encodings are decoded
+rather than rejected — see both READMEs' Known Limitations for the details and the accompanying filter-bypass
+security note for anyone byte-inspecting these request bodies upstream.
 
 ### Fixed — `iris_execute_tests`' zero-result guard is now machine-detectable (`@iris-mcp/dev`, Story 34.6)
 
