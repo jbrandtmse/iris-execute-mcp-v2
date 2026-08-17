@@ -550,7 +550,7 @@ development_status:
   34-8-request-body-utf8-decoding: done
   epic-34-retrospective: done
   epic-35: backlog
-  35-0-epic-34-retro-gate-deferred-triage: backlog
+  35-0-epic-34-deferred-cleanup: backlog
   35-1-production-item-set-composite-key: backlog
   35-2-analytics-cubes-build-device-output: backlog
   35-3-pin-request-locale-error-text: backlog
