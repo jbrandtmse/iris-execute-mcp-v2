@@ -2302,3 +2302,11 @@ Three adversarial layers plus the reviewer's own live mutation/measurement pass.
 **Disposition tally (Rule #51 — mechanically counted from the Severity column above):** 9 new items — 0 resolved, 9 deferred open (0 HIGH / 0 MEDIUM / 9 LOW). All enter at Rule #37 re-deferral count 0. Four further defects were fixed in-pass and are deliberately NOT ledgered (see the paragraph above).
 
 **Ledger state after this pass:** **0 HIGH / 10 MEDIUM / 67 LOW = 77 open** across **142 distinct items** (65 terminal), derived mechanically per Rule #51 from the prior recount (68 open / 133 distinct / 65 terminal): +9 new LOW items, all open (not terminal). So LOW 58 + 9 = 67; open 68 + 9 = 77; distinct 133 + 9 = 142; terminal unchanged at 65. Check: 0 + 10 + 67 = 77.
+
+## Escalated to Story 34.8 (2026-08-16, Project Lead) — request-body UTF-8
+
+Epic 34 re-opened a fifth time (Rule SC-5). `34-6-CR-7` is **in-flight**, not deferred; it reaches TERMINAL disposition when Story 34.8 closes.
+
+| Item | Severity | Escalation rationale | Story 34.8 AC |
+|---|---|---|---|
+| 34-6-CR-7 | HIGH | UTF-8 request bodies are read as Latin-1 across all 14 REST handler classes (46 call sites) sharing `ReadRequestBody`. `e-acute` arrives as 2 chars `[195,169]` — the raw UTF-8 bytes — CJK as 6, emoji as 4. Silent: HTTP 200, no error. It corrupts non-ASCII data AT REST via `iris_global_set`, and the Project Lead reproduced it end-to-end through the MCP tool on 2026-08-16 (`hello-world-emoji` returned mojibake). Story 34.7 documented it as a Known Limitation; the Lead elected to fix it before the first publish rather than ship documented data corruption. | AC 34.8.1-34.8.8 |

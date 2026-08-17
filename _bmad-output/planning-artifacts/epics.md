@@ -4518,6 +4518,7 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 34.5 TS-layer `truncated` reachability + test-runner zero-result guard (Epic 34 re-opened 2026-08-15, Rule SC-5)
 - 34.6 Pre-publish release hardening: output ceiling, armed epic gate, machine-detectable guard (Epic 34 re-opened 2026-08-15, Rule SC-5; Project Lead escalation of 34-2-R2/34-3-R2, 34-4-R1, 34-4-R3, 34-5-R1 ahead of the first npm publish)
 - 34.7 Publish blockers: surrogate-safe truncation, shared response budget, build-freshness gate (Epic 34 re-opened 2026-08-16, Rule SC-5; Project Lead escalation of 34-6-CR-10, 34-6-CR2-6, 34-6-CR-11)
+- 34.8 Request-body UTF-8 decoding across all REST handlers (Epic 34 re-opened 2026-08-16, Rule SC-5; Project Lead escalation of 34-6-CR-7 before the first publish)
 
 **Story-numbering note (2026-08-14, stakeholder decision)**: this epic's own work starts at **34.1**, departing from the project's usual X.0-is-the-probe convention (Epics 23–33). `/epic-cycle`'s mandatory retro-review gate auto-creates "Story {N}.0: Epic {N-1} Deferred Cleanup" whenever the prior epic's retro or `deferred-work.md` has unresolved items — Epic 33's retro exists and the ledger carries 15 unresolved LOW items from Story 33.5 — so 34.0 is left free for that story rather than colliding with it. Per Rule #37 those items are on their FIRST deferral, so the gate's triage may legitimately re-defer any of them; a burn-down is only mandatory at 3 consecutive re-deferrals.
 
@@ -4570,6 +4571,26 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 34.4.6** — If `Command.cls`/`Utils.cls` change: BOOTSTRAP_VERSION from→to recorded (Rule #24; current `5ef2df119451`), Constraint C-2 re-verified (single generated `.int`, pinned by `TestCommandCompilesToSingleGeneratedRoutine`), frozen governance baseline unchanged (#23/#25), tool counts unmoved (#31).
 
 **Out of scope**: the remaining open MEDIUMs (`34-1-R5`, `34-1-R8`, `34-2-R2`, `34-2-R4`, `34-2-R5`, `34-3-R2`, `34-3-R3`) and all LOW items stay in the ledger at Rule #37 count 1. The size-cap items (`34-2-R2`/`34-3-R2`) were considered and declined by the Project Lead as roughly doubling the story.
+
+### Story 34.8: Request-Body UTF-8 Decoding
+
+**Added 2026-08-16 (Epic 34 re-opened, Rule SC-5).** Project Lead escalation of `34-6-CR-7` ahead of the first npm publish. Stories 34.0-34.7 stay `done` and are NOT re-touched (Rule #52).
+
+**As a** caller sending non-ASCII data through any IRIS MCP tool, **I want** my request body decoded correctly, **so that** accented, CJK and emoji content is not silently corrupted at rest with an HTTP 200 and no error.
+
+**The defect (live-verified, pre-existing across every epic):** `ExecuteMCPv2.Utils.ReadRequestBody` reads the POST body via `%request.GetMimeData("BODY")` and hands it to `%DynamicObject.%FromJSON()`, where UTF-8 is interpreted as Latin-1. `e-acute` (U+00E9) arrives as 2 characters `[195,169]`; CJK as 6 code points; an emoji as 4 - in every case the raw UTF-8 bytes. Server-ORIGINATED Unicode round-trips OUT correctly, so the defect is strictly on the input path. It affects `iris_execute_command`'s `command`, `iris_execute_classmethod`'s `args`, and `iris_global_set`'s `value`, so non-ASCII data is written to globals corrupted. One central fix covers all 14 handler classes / 46 call sites.
+
+**Acceptance Criteria**:
+- **AC 34.8.1** - PROBE FIRST (Rules #14/#16). Before changing anything, pin LIVE the correct decode mechanism for this `%CSP.REST` context: what `%request.GetMimeData("BODY")` actually returns, whether `%request.CharSet` / Content-Type charset is honoured, and which of `$ZCONVERT(...,"I","UTF8")`, a stream TranslateTable, or a character-stream copy is correct here. Record the exact working shape. Probe classes deleted before commit.
+- **AC 34.8.2** - the fix is central in `ReadRequestBody` (one change, all 14 handlers). Non-ASCII request-body content round-trips correctly: BMP accented, CJK, and astral/surrogate-pair.
+- **AC 34.8.3** - **chunk-boundary safety**: if the implementation reads the stream in pieces, a multi-byte UTF-8 sequence straddling a chunk boundary MUST NOT corrupt. Prove it with a fixture that deliberately places a multi-byte character across the boundary. A naive per-chunk `$ZCONVERT` is the obvious wrong answer.
+- **AC 34.8.4** - **large-body safety**: a body large enough to exceed the long-string ceiling must not `<MAXSTRING>`. Determine and pin the behaviour; do not trade a silent corruption for a silent failure.
+- **AC 34.8.5** - Rule #19: the currently-working ASCII path is byte-identical. Proven mechanically, not by inspection - this is the risk the ledger explicitly flags.
+- **AC 34.8.6** - Rule #58 fixture diversity, submitted THROUGH the request body (not server-originated literals): accented BMP, CJK, astral/emoji, mixed ASCII+non-ASCII, non-ASCII in a JSON *key* as well as a value, and non-ASCII inside a `{byRef, value}` marker. Round-trip verified end-to-end through the deployed route.
+- **AC 34.8.7** - the "Known Limitations" sections added in Story 34.7 for this defect are UPDATED (root `README.md` and `packages/iris-dev-mcp/README.md`). State explicitly that the fix is **forward-only**: data already written corrupted is NOT repaired.
+- **AC 34.8.8** - Rule #48 mutation evidence (revert -> red -> restore byte-identically); Gates: `pnpm turbo run build test lint type-check` green; `gen:governance-baseline:check` (`:check` ONLY) exit 0 at frozen `1e62c5ad5bf7`/141/201/60; tool counts unmoved (#31); BOOTSTRAP_VERSION from->to recorded (#24; current `06b326631504`) and Constraint C-2 re-verified.
+
+**Out of scope**: repairing already-corrupted data at rest; the response path (Story 34.7); all other open ledger items.
 
 ### Story 34.7: Publish Blockers - Surrogate-Safe Truncation, Shared Response Budget, Build-Freshness Gate
 

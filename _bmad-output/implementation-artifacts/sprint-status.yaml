@@ -537,7 +537,7 @@ development_status:
   # main for this epic — wave-3 is already merged. Epic branch: epic34
   # (ticketless convention, matching epic31/32/33; SC-1 default JIRA pattern
   # does NOT apply — answer the SC-1 prompt with this convention).
-  epic-34: done
+  epic-34: in-progress
   34-0-epic-33-deferred-cleanup: done
   34-1-classmethod-invocation-probe: done
   34-2-handler-capture-byref-20args: done
@@ -546,4 +546,5 @@ development_status:
   34-5-tool-layer-truncated-and-test-runner-guard: done
   34-6-pre-publish-release-hardening: done
   34-7-publish-blockers-utf8-budget-build-gate: done
+  34-8-request-body-utf8-decoding: ready-for-dev
   epic-34-retrospective: optional

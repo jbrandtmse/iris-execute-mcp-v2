@@ -83,3 +83,5 @@ Notes for this run:
 2026-08-16T19:00:00Z	Story 34.7	smoke_complete	method=api result=pass iterations=1 defects_caught=0 evidence=epic_gate_16of16_0skipped+live_ceiling_marker_truncated_flag+incidentally_demonstrated_34-6-CR-7_request_body_mojibake model=claude-opus-5
 2026-08-16T19:10:00Z	Story 34.7	committed	sha=16ae1b5 submodules=
 2026-08-16T19:10:30Z	Epic 34	epic_status_done	stories=8
+2026-08-16T20:00:00Z	Epic 34	epic_branch_reopened	reason=project_lead_fix_34-6-CR-7_request_body_utf8 from=existing_unmerged_epic34
+2026-08-16T20:00:30Z	Story 34.8	story_created	path=_bmad-output/implementation-artifacts/34-8-request-body-utf8-decoding.md integration_ac=not_applicable_central_fix probe_first=true
