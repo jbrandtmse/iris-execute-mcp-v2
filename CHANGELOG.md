@@ -173,6 +173,117 @@ meta-package) are unaffected — the check is derived from each package's own `p
 a hand-maintained package list. Mutation-verified: a deliberately staled/deleted `dist/` fails the gate closed with
 zero tarball produced; restoring the build (`pnpm turbo run build`) passes again.
 
+## [Pre-release — 2026-07-28] — Epic 33: Multi-Client MCP Configuration Manager (`@iris-mcp/client-config`)
+
+### Added — `@iris-mcp/client-config`: an adapter registry + engine for 13 MCP clients (new package)
+
+A new package — **not** a dependency of any server runtime, and adding **no MCP tool, governance key, or server-runtime
+change** — that knows how each supported MCP client stores its server entries: a declarative `ClientAdapter` registry
+covering the 13 v1 clients (Claude Code, Claude Desktop, Cursor, VS Code/Copilot, Cline, Roo Code, Windsurf, OpenAI
+Codex CLI, Gemini CLI, Zed, Goose, Kimi CLI, Kimi Code) with per-OS config paths, format (JSON/JSONC/TOML/YAML), root
+key (`mcpServers`/`servers`/`mcp_servers`/`context_servers`/`extensions`), scopes, env-expansion capability, native
+disable mechanism, and restart hint; a read engine (`detect`/`status`/`diff`) that parses each detected config in its
+native format; and a **format-preserving write engine** — `jsonc-parser` edits, TOML splices limited to the suite's own
+`[mcp_servers.<name>]` tables, comment-preserving `yaml` CST edits — under a universal safety protocol (validate →
+timestamped backup → edit → re-parse → auto-restore on failure). The manager modifies **only entries it owns**;
+third-party servers in the same file are surfaced read-only, never rewritten, and byte-preserved.
+
+Per-client × per-server enable/disable uses each client's native flag where one exists (Cline/Roo `disabled`, Goose
+`enabled`) and otherwise a byte-preserving stash-and-remove recorded in `~/.iris-mcp/client-manager/state.json`. Entry
+synthesis has four env modes: `server-manager` (Epic 31 connections + OS keychain), `governance-file` (Epic 32 policy
+file), `env-reference` (client-syntax-aware, and on VS Code merges a native `inputs` prompt so the password is never
+written to the file), and `explicit` (a literal `IRIS_PASSWORD`, behind a typed confirmation gate; never from argv).
+
+### Added — the `iris-mcp-clients` CLI (`@iris-mcp/client-config`)
+
+`detect` · `status` · `diff` · `apply` · `enable` · `disable` · `remove` · `restore` · `doctor`. `apply` prints the
+pending diff and requires confirmation (`--yes` to skip; a non-TTY invocation without `--yes` refuses), takes a
+timestamped backup before every write, and prints the client's restart hint after it. `doctor` checks env-reference
+resolvability, file parseability, a `config-drift` shape check, stale backups and orphaned stashes. Exit codes mirror
+the governance CLI contract (`0` success / `1` operational failure / `2` usage error) and every command answers
+`--json` with one stable `{ok, command, data, error?}` envelope, so the whole surface is scriptable. Until the packages
+are published, run the built bin directly: `node packages/client-config/dist/cli/clients-cli.js <command>`.
+
+### Added — VS Code extension "MCP Clients" view (`iris-mcp-launcher`)
+
+The same engine behind a GUI: client roster, per-server toggle matrix, diff preview, backup restore, and doctor —
+driven through the identical CLI code path. Unlike the extension's server-launcher half (Copilot-family only), this
+view helps **every** client: use it from VS Code to wire up Claude Code, Cursor, Cline, and the rest.
+
+### Added — adapter certification record + doctor config-drift guard
+
+`scripts/certify.mjs` runs a scripted certification pass per locally installed client against its **real** config —
+apply → the client surfaces the entry → disable → absent → remove → byte-exact verified restore, with cleanup of
+manager state and pass-created backups. Claude Code, VS Code, Cline and Kimi Code are **certified-live** (2026-07-28);
+the other nine adapters carry explicit fixture-only-with-residual-risk dispositions stating what the fixtures prove and
+what stays unproven. The README's adapter table and dispositions are **generated** from `CLIENT_ADAPTERS` ⨝
+`scripts/certification-results.json` (a suite test keeps them in sync — never hand-edited). `doctor` gained a
+`config-drift` finding for a config that parses but no longer matches the adapter's root-key shape expectation,
+reporting the `ADAPTER_DATA_VERSION` the expectation came from; the fix is always a data patch, never an engine change.
+
+### Changed — certification-driven adapter corrections
+
+The repo-root `.mcp.json` fallback for `kimi-code` was **falsified** by the live probe (kimi-code 0.29.0 loaded no
+project-scope server from it) and removed (`ADAPTER_DATA_VERSION` 2026-07-25.2 → 2026-07-28.1): writing a config the
+client may never read is worse than no fallback. Repo `.mcp.json` sharing is verified for Claude Code only.
+`iris-mcp-all` was also removed from the managed server set — as a peer row it invited registering all five servers
+*and* the aggregate, double-registering every tool; `CANONICAL_SERVERS` is now the five leaf servers and any
+`iris-mcp-all` entry is treated as foreign (read-only, never modified).
+
+**Docs:** [`packages/client-config/README.md`](packages/client-config/README.md) (adapter table + certification
+dispositions, both generated), the root README's *The manager: `iris-mcp-clients`* section, and
+[`docs/client-config/`](docs/client-config/) — whose per-client snippets are now the documented manual **fallback**
+behind the manager.
+
+## [Pre-release — 2026-07-27] — Epic 32: Governance File & Editors (`IRIS_GOVERNANCE_FILE`)
+
+### Added — `IRIS_GOVERNANCE_FILE`: a portable governance policy file (`@iris-mcp/shared`, all five servers)
+
+Governance policy gains a **file substrate** so one policy is portable across every MCP client instead of being
+re-escaped into each client's `env` block: `IRIS_GOVERNANCE_FILE` points at a JSON file of exactly the same shape as
+`IRIS_GOVERNANCE` (`{"global": {...}, "profiles": {...}}`, booleans only), parsed by the **same** `parseGovernanceConfig`
+validation (reserved-key rejection included). Enforcement never moves — the servers keep sole authority at the existing
+`dispatchToolCall` gate; the file is a config source, and the editors below are management surfaces.
+
+- **Unset ⇒ inert.** With the variable unset no file is ever read (zero filesystem access) and behavior is byte-for-byte
+  a pre-feature install (Rule #19, proven mechanically over resolved policy).
+- **All env layers sit above all file layers** — the cascade is
+  `env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`, so a governance file
+  introduced later can never silently override an `IRIS_GOVERNANCE` setting you already had.
+- **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file aborts startup
+  naming the variable, the path, and the parse error.
+- **Explicit path only** — never discovered or searched for; a relative path resolves against the server process's CWD
+  (which the MCP *client* chooses), so prefer an absolute path. Read once at startup; no hot-reload in v1.
+- **Attribution.** `iris_server_profiles` and the `iris-governance://{profile}` resource now report a per-key
+  `configSource` (`env` | `file` | `preset` | `default`) — an additive report field, emitted unconditionally.
+
+**No new MCP tool, no new governance key, no tool-count change, and the frozen Epic-14 baseline (`1e62c5ad5bf7`, 141
+keys) is untouched.**
+
+### Added — the `iris-mcp-governance` CLI (a second `bin` in `@iris-mcp/shared`)
+
+`validate` · `get` · `set` · `unset` · `preset` · `effective` · `diff` · `universe`, single-sourced with the shared
+engine: every parse goes through the server's own loader (so `validate` prints the exact text a server would fail
+startup with) and `effective`/`diff` compose the same cascade functions the servers enforce with, never a
+reimplementation. `set`/`unset` write the file atomically (temp + rename, existing key order preserved) and
+re-validate with rollback on failure. `preset` prints env-level wiring and **writes nothing** — the safety preset is
+sourced from the process environment only, never from a file. `universe` renders the **full** governed-key universe
+(frozen baseline ∪ the five servers' registered tool keys, derived from their built dist ∪ the framework
+`iris_server_profiles` tool) with the real `mutates`/default-enabled classifications, closing the gap where
+`effective`/`diff` cannot enumerate keys they would have to import a server package to see. Exit codes `0`/`1`/`2` and
+a one-object `--json` envelope on every operational outcome, matching the `iris-mcp-credentials` contract. Until
+publish: `node packages/shared/dist/cli/governance-cli.js <command>`.
+
+### Added — VS Code extension governance editor (`iris-mcp-launcher`)
+
+An "Open Governance Editor" command that edits the shared governance file visually — the same engine, the same file
+every client's servers read. Reload semantics are stated at every surface: the view reflects file state at open/refresh,
+and a server must be restarted to apply an edit.
+
+**Docs:** the root README's [Governance file](README.md#governance-file-iris_governance_file) and
+[`iris-mcp-governance` CLI](README.md#iris-mcp-governance-cli) sections, `packages/shared/README.md`, and the
+extension README's *Governance editor* section.
+
 ## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
 
 ### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)

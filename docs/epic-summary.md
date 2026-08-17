@@ -1,6 +1,6 @@
-# IRIS MCP Server Suite — Epic History (Epics 1–30)
+# IRIS MCP Server Suite — Epic History (Epics 1–34)
 
-What each of the 30 development epics built, grouped into the three phases the project moved through. The suite today is **104 tools across 5 servers** (109 advertised with the framework `iris_server_profiles` tool), all merged to `main`.
+What each of the 34 development epics built, grouped into the four phases the project moved through. The suite today is **104 tools across 5 servers** (109 advertised with the framework `iris_server_profiles` tool) — Epics 31–34 added no tools, so that count has not moved since Epic 30.
 
 Authoritative per-epic detail lives in [`_bmad-output/planning-artifacts/epics.md`](../_bmad-output/planning-artifacts/epics.md); release notes are in [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -45,6 +45,15 @@ Authoritative per-epic detail lives in [`_bmad-output/planning-artifacts/epics.m
 29. **Tool-Call Observability & Session Audit Log** — `IRIS_AUDIT_LOG`: opt-in, secrets-free JSONL trail of every tool call across all 5 servers (governance denials become auditable events); server-side config an AI client can't switch off.
 30. **Tool Visibility Presets & Per-Tool Enable/Disable** — `IRIS_TOOLS_PRESET` (`full`/`core`/`developer`) + `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE`: an advertise-time layer that trims each server back inside the 5–15-tool window for small models (dev `core` = ~67% fewer `tools/list` tokens), while default `full` stays byte-for-byte unchanged.
 
+## Phase 4 — Adoption, configuration & fidelity (Epics 31–34)
+
+No new tools in this phase — it is about getting the suite *configured*, *governed* and *correct on the wire* wherever it runs.
+
+31. **Server Manager Connection Integration** — `IRIS_SERVER_MANAGER`: source IRIS connections from the InterSystems Server Manager VS Code extension instead of retyping host/credentials into every client, with a credential chain (OS keychain via the new `iris-mcp-credentials` CLI, then `IRIS_CREDENTIAL_HELPER`) and the optional `iris-mcp-launcher` VS Code extension for in-VS-Code launches.
+32. **Governance File & Editors** — `IRIS_GOVERNANCE_FILE`: one policy file, portable across every MCP client, sitting strictly *below* the `IRIS_GOVERNANCE` env layers; plus the `iris-mcp-governance` CLI (`validate`/`get`/`set`/`unset`/`effective`/`diff`/`universe`, single-sourced with the servers' own engine) and an extension governance editor. Enforcement never moves — the file is a config source, the editors are management surfaces.
+33. **Multi-Client MCP Configuration Manager** — the new `@iris-mcp/client-config` package: an adapter registry for 13 MCP clients, a format-preserving write engine (backup → edit → re-parse → auto-restore), the `iris-mcp-clients` CLI and an extension "MCP Clients" view. Kills the per-client copy-paste-JSON ritual and composes with 31/32 into the zero-secrets end state.
+34. **`iris_execute_classmethod` Fidelity** — device-output capture (no more `%SYS.Capture` wrapper classes), `{byRef, value?}` marker args with `byRefValues`, a 20-argument ceiling, one shared 32768-raw-character response budget with machine-detectable elision markers, and — found during pre-publish hardening — correct UTF-8 decoding of request bodies across all 14 REST handlers.
+
 ---
 
-**The arc:** Epics 1–9 built the five-server foundation; 10–18 stabilized it and added the multi-profile + governance platform; 19–30 layered on the differentiating capabilities (discovery, recovery, diagrams, health, read-only mode, prompts, resend, env promotion, SQL advice, audit, visibility).
+**The arc:** Epics 1–9 built the five-server foundation; 10–18 stabilized it and added the multi-profile + governance platform; 19–30 layered on the differentiating capabilities (discovery, recovery, diagrams, health, read-only mode, prompts, resend, env promotion, SQL advice, audit, visibility); 31–34 made it easy to connect, govern and configure anywhere — and made execution faithful on the wire before the first publish.
