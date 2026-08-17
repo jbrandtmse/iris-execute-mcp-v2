@@ -213,11 +213,33 @@ describe("iris_production_item", () => {
   });
 
   // ── Story 18.0 (CR 17.2-4 doc-only): extent/XData add-then-get visibility note ──
-
+  // Story 35.1 code review (CR 35.1-13): 'set' now performs its OWN LoadFromClass and
+  // SaveToClass, so the original wording ("NOT visible to an immediate 'get'/'set'") became
+  // false for 'set' while this assertion kept it pinned as if it were still true — the test
+  // was pinning the STRING, not the behaviour. Re-pinned against the corrected contract:
+  // the visibility caveat now applies to 'get' alone, and 'set' is documented as persisting
+  // durably to the class XData.
   it("description documents the add-then-get extent/XData visibility split (Rule #27)", () => {
     const desc = productionItemTool.description ?? "";
-    expect(desc).toContain("NOT visible to an immediate 'get'/'set'");
+    expect(desc).toContain("not visible to an immediate 'get'");
     expect(desc).toContain("LoadFromClass");
+    // 'set' must NOT be named as a victim of the stale-extent caveat any more...
+    expect(desc).not.toContain("NOT visible to an immediate 'get'/'set'");
+    // ...and the durable-XData half of its contract must be stated.
+    expect(desc).toContain("'add'/'remove'/'set' all persist to the production class");
+  });
+
+  // ── Story 35.1 code review: 'set'-specific safety behaviours must be documented ──
+
+  it("description documents 'set' rejecting an invalid settings.className (CR 35.1-1)", () => {
+    const desc = productionItemTool.description ?? "";
+    expect(desc).toContain("settings.className");
+    expect(desc).toContain("Ens.Host");
+  });
+
+  it("description documents that 'set' only refreshes the RUNNING production (CR 35.1-6)", () => {
+    const desc = productionItemTool.description ?? "";
+    expect(desc).toContain("only when the production it wrote");
   });
 
   // ════════════════════════════════════════════════════════════════

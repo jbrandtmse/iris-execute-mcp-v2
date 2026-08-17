@@ -146,7 +146,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
 | `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
 
-> **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. **Exception — `iris_production_control:clean`** is a new `write` that is nonetheless **enabled by default** (via the `defaultEnabled` marker, Epic 20 decision F2) because it is a recovery operation an operator expects available; it can still be disabled with an explicit `IRIS_GOVERNANCE` override. (A just-`add`-ed config item is not visible to an immediate `get`/`set` until the next add/remove syncs the config extent from the production class — see the `iris_production_item` examples below.)
+> **Governance defaults:** the **new write** actions are classified `write` and **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_production_item:add`/`:remove` and `iris_default_settings_manage:set`/`:delete`. The **pre-existing / read** actions are **enabled by default** — `iris_production_item:enable`/`:disable`/`:get`/`:set` (shipped before governance) and `iris_default_settings_manage:list`/`:get`. **Exception — `iris_production_control:clean`** is a new `write` that is nonetheless **enabled by default** (via the `defaultEnabled` marker, Epic 20 decision F2) because it is a recovery operation an operator expects available; it can still be disabled with an explicit `IRIS_GOVERNANCE` override. (A just-`add`-ed config item is not visible to an immediate `get` until the next add/remove/set syncs the config extent from the production class — `set` performs its own sync, so it does see it. See the `iris_production_item` examples below.)
 
 ### Production Monitoring Tools
 
@@ -429,6 +429,15 @@ Six actions (`start`, `stop`, `restart`, `update`, `recover`, `clean`) are verif
   }
 }
 ```
+
+`Ens.Config.Item` is keyed by the composite pair `(production, name)`, not `name` alone. `get` and `set` both accept an optional `production` to resolve the item unambiguously when the same `itemName` exists in more than one production; when omitted, `get` resolves the first matching row (unchanged legacy behavior) and `set` defaults to the namespace's active production (same default `add`/`remove` already use — required when no production is active).
+
+**`set` persistence and side effects.** `set` writes both the `Ens.Config.Item` SQL extent (so an immediate `get` sees the change) and the production **class** XData via `SaveToClass` (so the change survives the next `add`/`remove`/`set` resync or a class recompile). Consequences worth knowing:
+
+- A `set` that changes nothing (`settings: {}`) performs no write at all and does not touch the running production.
+- `set` rejects a `settings.className` that is not a compiled, non-abstract `Ens.Host` subclass. Persisting an invalid host class would be swallowed silently by `SaveToClass`'s `OnConfigChange` handling and leave a broken item, so this is a rejection rather than a warning. The same guard applies to `add`'s `className` argument **and** to an `add` `settings.className` override.
+- `set` refreshes the running production (`Ens.Director.UpdateProduction`) only when the production it wrote is the one currently running — editing a stopped production never disturbs a different, running one.
+- `set` rewrites the production class definition on the server. If your production classes are source-controlled, expect drift against the checked-in `.cls` after a `set`.
 </details>
 
 <details>

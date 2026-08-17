@@ -29,18 +29,27 @@ export const productionItemTool: ToolDefinition = {
     "an Ens.Config.Setting on the item (Target Adapter by default; pass " +
     "'<Name>@Host' / '<Name>@Adapter' to force the target). 'enable'/'disable' toggles " +
     "the item in the running production. 'add' creates a new item (requires 'className'; " +
-    "Required Name+ClassName); 'remove' deletes it. For 'add'/'remove' the target " +
+    "Required Name+ClassName); 'remove' deletes it. For 'add'/'remove'/'set' the target " +
     "production defaults to the namespace's active production; pass 'production' " +
-    "explicitly when there is no active production.\n\n" +
+    "explicitly when there is no active production, or to disambiguate an item name " +
+    "that exists in more than one production (Ens.Config.Item is keyed by the composite " +
+    "(production, name) pair, not name alone). 'get' also accepts an optional " +
+    "'production' to disambiguate; when omitted, 'get' resolves the first matching row " +
+    "(unchanged legacy behavior).\n\n" +
     "The mutating actions add/remove are opt-in under tool governance and are DISABLED " +
     "by default until enabled via IRIS_GOVERNANCE; enable/disable/get/set are " +
     "grandfathered (always available).\n\n" +
-    "NOTE (visibility of a just-added item): 'add'/'remove' persist to the production " +
-    "class definition (XData), while 'get'/'set' read the Ens.Config.Item SQL extent. " +
-    "The extent is re-synced from the class only on the next add/remove (LoadFromClass). " +
-    "So an item created by 'add' is NOT visible to an immediate 'get'/'set' until the " +
-    "next add/remove (or a recompile) syncs the extent — this is an accepted IRIS " +
-    "persistence-model split, not an error.",
+    "NOTE (persistence model): 'add'/'remove'/'set' all persist to the production class " +
+    "definition (XData, the source of truth) and each re-syncs the Ens.Config.Item SQL " +
+    "extent from that class first (LoadFromClass), so a 'set' both sees a just-added item " +
+    "and survives a later add/remove/set or a class recompile. 'get' reads the SQL extent " +
+    "directly and does NOT re-sync, so an item created by 'add' is not visible to an " +
+    "immediate 'get' until the next add/remove/set (or a recompile) syncs the extent — an " +
+    "accepted IRIS persistence-model split, not an error. Because 'set' rewrites the " +
+    "production class XData, it also rejects a settings.className that is not a compiled, " +
+    "non-abstract Ens.Host subclass (an invalid host class would otherwise be persisted " +
+    "silently), and it refreshes the running production only when the production it wrote " +
+    "is the one currently running.",
   inputSchema: z.object({
     action: z
       .enum(["add", "remove", "enable", "disable", "get", "set"])
@@ -58,7 +67,7 @@ export const productionItemTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Target production name for 'add'/'remove'. Defaults to the namespace's active production; required when no production is active. Ignored by enable/disable/get/set (those operate by itemName).",
+        "Target production name for 'add'/'remove'/'set' (defaults to the namespace's active production; required for those actions when no production is active) and optionally for 'get' (to disambiguate an item name that exists in more than one production; when omitted, 'get' resolves the first matching row — unchanged legacy behavior). Ignored by enable/disable (those operate by itemName only against the running production).",
       ),
     settings: z
       .record(z.string(), z.unknown())
