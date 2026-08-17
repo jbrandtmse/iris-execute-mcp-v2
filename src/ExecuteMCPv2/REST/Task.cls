@@ -4,7 +4,7 @@
 /// <code>/api/executemcp/v2/task</code>.</p>
 /// <p>All operations execute in <b>%SYS</b> namespace using the
 /// <code>%SYS.Task</code> and <code>%SYS.Task.History</code> classes.</p>
-Class ExecuteMCPv2.REST.Task Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Task Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all scheduled tasks with details.

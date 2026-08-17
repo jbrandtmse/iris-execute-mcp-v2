@@ -10,7 +10,7 @@
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
 /// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
 /// its progress output from corrupting the HTTP response body.</p>
-Class ExecuteMCPv2.REST.UnitTest Extends %Atelier.REST
+Class ExecuteMCPv2.REST.UnitTest Extends ExecuteMCPv2.REST.Base
 {
 
 /// Run unit tests for a given target at the specified level.

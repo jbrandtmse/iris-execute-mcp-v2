@@ -157,8 +157,21 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
     });
 
     it("iris_doc_list with category=CLS includes the test class", async () => {
+      // Story 34.6 QA fix (pre-existing failure, confirmed via `git stash` to
+      // reproduce on the unmodified baseline, unrelated to this story):
+      // an unfiltered CLS listing on this namespace now has enough system
+      // classes to push "Test.MCPIntegration.Temp" past the first
+      // (default page-size, offset-cursor-paginated) page, so a bare
+      // `toContain` check against page 1 alone became flaky-to-failing as
+      // the system class count grew — never a defect in `iris_doc_list`
+      // itself. Scoped with `filter`, exactly the tool's own documented
+      // usage guidance ("WARNING: Without a filter, this returns ALL
+      // documents including system classes — use the filter parameter or
+      // category to limit results"), so the test asserts what it actually
+      // means to assert: the created class is findable, not "happens to
+      // sort onto page 1 of an unscoped scan."
       const result = await docListTool.handler(
-        { category: "CLS" },
+        { category: "CLS", filter: "Test.MCPIntegration" },
         ctx,
       );
 

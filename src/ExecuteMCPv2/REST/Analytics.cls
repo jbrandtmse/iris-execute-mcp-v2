@@ -13,7 +13,7 @@
 /// </ul>
 /// <p>All operations execute in the <b>target namespace</b> (not %SYS)
 /// because DeepSee classes live in application namespaces.</p>
-Class ExecuteMCPv2.REST.Analytics Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Analytics Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an MDX query and return structured pivot-table results.

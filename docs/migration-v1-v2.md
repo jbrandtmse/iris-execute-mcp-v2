@@ -61,7 +61,7 @@ Every v1 tool has a direct equivalent in the `@iris-mcp/dev` package:
 | v1 Tool | v2 Tool | v2 Package | Notes |
 |---------|---------|------------|-------|
 | `execute_command` | `iris_execute_command` | `@iris-mcp/dev` | Same functionality |
-| `execute_classmethod` | `iris_execute_classmethod` | `@iris-mcp/dev` | Same functionality |
+| `execute_classmethod` | `iris_execute_classmethod` | `@iris-mcp/dev` | Enhanced (Epic 34, 2026-08-14): captures `Write` output from the target (`output` field, no wrapper class needed), supports `{byRef, value?}` markers for `ByRef`/`Output` parameters (`byRefValues` field), and raises the argument ceiling from 10 to 20 — additive only, existing plain-scalar calls are unaffected |
 | `get_global` | `iris_global_get` | `@iris-mcp/dev` | Same functionality |
 | `set_global` | `iris_global_set` | `@iris-mcp/dev` | Same functionality |
 | `get_system_info` | `iris_server_info` | `@iris-mcp/dev` | Renamed |

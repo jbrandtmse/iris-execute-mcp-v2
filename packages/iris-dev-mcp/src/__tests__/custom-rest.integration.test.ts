@@ -162,6 +162,150 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
         // IRIS version string contains "IRIS" or a version number pattern
         expect(text).toMatch(/IRIS|20\d{2}\.\d/i);
       });
+
+      // ── Story 34.3: endpoint-level regression for ClassMethod()'s own response
+      // shape (closes ledger item 34-2-R9 — the prior 48+ %UnitTest methods all
+      // drove Utils.InvokeWithArgs directly, never the real REST handler's own
+      // redirect setup/teardown and envelope assembly over real HTTP). ─────────
+
+      const FIXTURE = "ExecuteMCPv2.Tests.ClassMethodArgsFixture";
+
+      it("Rule #19 back-compat pin: a plain-scalar call's returnValue/argCount over real HTTP are unchanged by the additive fields", async () => {
+        const result = await executeClassMethodTool.handler(
+          {
+            className: "%SYSTEM.Encryption",
+            methodName: "Base64Encode",
+            args: ["hello"],
+          },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as {
+          returnValue: string;
+          argCount: number;
+          output: string;
+          byRefValues: Record<string, unknown>;
+          truncated: boolean;
+        };
+        // Pre-Story-34.2 shape, byte-identical semantics.
+        expect(structured.returnValue).toBe(Buffer.from("hello").toString("base64"));
+        expect(structured.argCount).toBe(1);
+        // Additive-only: present, but empty/false for a plain-scalar call.
+        expect(structured.output).toBe("");
+        expect(structured.byRefValues).toEqual({});
+        expect(structured.truncated).toBe(false);
+      });
+
+      it("a Write-per-item narrating target returns captured output with no wrapper class (bug repro 1 shape)", async () => {
+        const result = await executeClassMethodTool.handler(
+          { className: FIXTURE, methodName: "TargetWriteTwoLines" },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as { returnValue: string; output: string };
+        expect(structured.returnValue).toBe("wrote");
+        expect(structured.output).toBe("line1\nline2");
+      });
+
+      it("an Output-param method returns its post-call value via byRefValues (AC 34.3.4b)", async () => {
+        const result = await executeClassMethodTool.handler(
+          {
+            className: FIXTURE,
+            methodName: "TargetOutput",
+            args: [{ byRef: true }],
+          },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as {
+          byRefValues: Record<string, unknown>;
+        };
+        // wasUndef=1 confirms the Output parameter arrived genuinely undefined-in.
+        expect(structured.byRefValues["0"]).toBe("output-set-wasUndef1");
+      });
+
+      it("a 20-argument call dispatches and reads back every position (AC 34.3.4c)", async () => {
+        const markers = Array.from({ length: 20 }, (_, i) => ({
+          byRef: true,
+          value: `v${i}`,
+        }));
+        const result = await executeClassMethodTool.handler(
+          { className: FIXTURE, methodName: "Target20", args: markers },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as {
+          returnValue: string;
+          byRefValues: Record<string, unknown>;
+        };
+        expect(structured.returnValue).toBe("20-ok");
+        expect(structured.byRefValues["0"]).toBe("v0-m");
+        expect(structured.byRefValues["19"]).toBe("v19-m");
+      });
+
+      it("a Write-narrating target that ZNs mid-execution captures output across the namespace switch with no wrapper class (bug repro 3 shape)", async () => {
+        const result = await executeClassMethodTool.handler(
+          {
+            className: FIXTURE,
+            methodName: "TargetZNWriteByRef",
+            args: [{ byRef: true, value: "start" }],
+          },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as {
+          returnValue: string;
+          output: string;
+          byRefValues: Record<string, unknown>;
+        };
+        expect(structured.returnValue).toBe("zn-ok");
+        expect(structured.output).toBe(`before-zn:${ctx.resolveNamespace()}\nafter-zn:USER`);
+        expect(structured.byRefValues["0"]).toBe("start-zn-mutated");
+      });
+
+      it("surfaces a clear isError for a rejected non-marker object arg over real HTTP (AC 34.3.2)", async () => {
+        const result = await executeClassMethodTool.handler(
+          {
+            className: FIXTURE,
+            methodName: "TargetPlainReadOnly",
+            args: [{ notAMarker: true }],
+          },
+          ctx,
+        );
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("without a 'byRef' key");
+      });
+
+      it("iris_execute_classmethod works in a second, genuinely different namespace (Rule #34)", async () => {
+        // Story 34.6 AC 34.6.2 (ledger 34-4-R1): %SYSTEM.Version.GetVersion() returns
+        // the SAME string in every namespace, so this could not fail for the property
+        // it claims — a regression dropping `namespace` entirely would still pass.
+        // The oracle below echoes $NAMESPACE, so the assertion genuinely requires
+        // the namespace parameter to have reached the server AND been applied (Rules
+        // #34/#40) — mutation-verified RED when namespace is omitted (see the
+        // execute-classmethod-epic-gate.test.ts leg (d) sibling of this test).
+        // Code review (Story 34.6): the second namespace is DERIVED rather than
+        // hard-coded to "USER" (this package's README documents IRIS_NAMESPACE=USER as
+        // the default, which made the two assertions mutually unsatisfiable), and the
+        // target is the always-present `%SYSTEM.SYS` system class rather than the
+        // fixture, which is not guaranteed to resolve outside the configured namespace.
+        // See leg (d)'s banner for the full rationale.
+        const configuredNamespace = ctx.resolveNamespace();
+        const secondNamespace =
+          configuredNamespace.toUpperCase() === "USER" ? "%SYS" : "USER";
+        const result = await executeClassMethodTool.handler(
+          {
+            className: "%SYSTEM.SYS",
+            methodName: "NameSpace",
+            namespace: secondNamespace,
+          },
+          ctx,
+        );
+        expect(result.isError).toBeUndefined();
+        const structured = result.structuredContent as { returnValue: string };
+        expect(structured.returnValue).toBe(secondNamespace);
+        expect(structured.returnValue).not.toBe(configuredNamespace);
+      });
     });
 
     // ── Test execution tool ───────────────────────────────────────

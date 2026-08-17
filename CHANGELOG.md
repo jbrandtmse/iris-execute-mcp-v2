@@ -2,6 +2,288 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-08-14] — Epic 34: `iris_execute_classmethod` output capture, `ByRef`/`Output` support, 20-arg ceiling
+
+### Fixed — `iris_execute_classmethod` no longer fails on classmethods that `Write` to the current device (`@iris-mcp/dev`)
+
+Calling `iris_execute_classmethod` against a classmethod whose execution path emits output via `Write`/`W` — a narrating
+patch/config runner, InterSystems' own stock `%UnitTest.Manager.RunTest`, or a target that switches namespace (`ZN`)
+mid-execution — previously failed with a non-JSON-response error at the tool's response-parsing layer, requiring a
+bespoke `%SYS.Capture`-wrapper classmethod as a workaround for every affected target. The `/classmethod` endpoint now
+captures device output the same way `iris_execute_command` already does (a throwaway null-device redirect, never bound
+on the HTTP response stream) and returns it in a new additive `output` field — no wrapper class needed.
+
+### Added — `ByRef`/`Output` parameter support and a 20-argument ceiling (`@iris-mcp/dev`)
+
+`args` entries may now be a plain scalar (unchanged, by value) or a `{byRef: true, value?}` marker object for a
+`ByRef`/`Output` parameter; the marked position's post-call value is returned in a new additive `byRefValues` field,
+keyed by zero-based index (a plain scalar out-value is the raw value; an idiomatic subscripted `Output` array is a
+nested `{value?, subscripts?}` object preserving arbitrary subscript depth). The argument ceiling is raised from 10 to
+20. A new additive `truncated` boolean flags the rare case where captured output hit the platform's long-string
+ceiling mid-call — the call still succeeds with a partial capture, and this is never silent, even when the target's
+own code would otherwise swallow the underlying `<MAXSTRING>` condition itself. `iris_execute_command`'s response also
+gained the same additive `truncated` field, for the same reason.
+
+**Back-compat (Rule #19):** `returnValue`/`argCount` are byte-identical for existing plain-scalar calls; no new tool,
+governance key, or action — `iris_execute_classmethod` keeps its existing `write` classification and default state.
+
+### Added — Response payload ceiling on `iris_execute_command`/`iris_execute_classmethod` (`@iris-mcp/dev`, Story 34.6)
+
+`output` is now capped at 32768 characters on both tools — content beyond the ceiling is cut off and replaced with a
+structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`; `truncated`
+folds this in alongside the pre-existing capture-overflow signal. `iris_execute_classmethod`'s `byRefValues` gains its
+own combined 1000-node / 32768-character budget shared across every marked position, surfaced via a new additive
+`byRefTruncated` boolean (separate from `truncated`, which describes only `output`). The ceiling was picked from live
+measurement, not by feel: the CSP Gateway/HTTP transport tolerates multi-megabyte responses cleanly (tested clean to
+3,000,000 characters), so this is **not** protection against a Web Gateway timeout or the target's own execution
+cost — it exists to keep the response payload a bounded, genuinely consumable size for MCP clients, informed by a
+real client (Claude Code CLI) observed diverting inline tool results to a file once they exceeded roughly 50,000
+characters. **Back-compat (Rule #19):** under-ceiling responses are byte-identical to today's shape; `byRefTruncated`
+is additive and absent (not `false`) from any pre-34.6 envelope shape.
+
+### Fixed — `returnValue` on `iris_execute_classmethod` was completely unbounded (`@iris-mcp/dev`, Story 34.6 code-review finding CR-5)
+
+The ceiling above covered `output` and `byRefValues` but not `returnValue` — the PRIMARY payload field — so a target
+returning a large string (a file read, a serialized report, ...) shipped fully unbounded, defeating the ceiling's own
+stated purpose. `returnValue` is now capped at the same 32768 characters with the same elision marker, flagged via a
+new additive `returnValueTruncated` boolean (symmetric with `truncated`/`byRefTruncated`, present — defaulted false —
+on error envelopes too, for the same shape consistency). **Back-compat (Rule #19):** under-ceiling `returnValue` is
+byte-identical to today's shape; `returnValueTruncated` is additive and absent (not `false`) from any pre-fix
+envelope shape.
+
+### Fixed — the `byRefValues` byte budget could destroy small values with oversized elision markers (`@iris-mcp/dev` + ObjectScript, Story 34.6 code-review finding CR-6)
+
+A defect introduced by the response-payload ceiling above, not pre-existing: once one large `Output` value exhausted
+the shared `byRefValues` byte budget, every later marked position was still handed to the truncation logic, which
+(when the remaining budget was smaller than the ~37-character elision marker itself) replaced a small real value with
+a marker LARGER than the value it destroyed — the response grew while losing data, and the total could exceed the
+documented 32768-character budget. Fixed in two places: the elision-marker logic now falls back to a plain,
+marker-less hard cut whenever the marker itself would not fit in the remaining budget (never emitting something
+bigger than the ceiling or the original value), and the 20 top-level `byRefValues` positions now share the same
+budget pre-check the recursive subscript walk already had — a position is OMITTED from `byRefValues` entirely once
+the shared budget is already exhausted, rather than materialized as a misleading placeholder.
+
+### Fixed — the `byRefValues` character budget did not bound `byRefValues` (`@iris-mcp/dev` + ObjectScript, Story 34.6 code review cycle 2)
+
+A second defect introduced by the response-payload ceiling: the shared byte budget was decremented only by each
+leaf VALUE's length, so subscript KEYS and `<Object:...>` OREF placeholders were emitted free. Measured live, an
+`Output` array of 400 positions keyed by 900-character subscripts emitted **363,908 characters** against a
+32768-character budget, with 32,368 of that budget still reported unspent and `byRefTruncated` still `false`; 400
+OREF out-values emitted ~16,000 characters without touching the budget at all. A long-keyed `Output` array (file
+paths, URLs, composite keys) is an entirely idiomatic ObjectScript shape, so ordinary callers could reach it — the
+same unbounded-payload class as the `returnValue` defect above, one field over. Every emitted piece of content is
+now charged; the same case emits 32,797 characters with `byRefTruncated: true`. The per-node JSON scaffolding
+(~25-30 characters per container node) remains uncharged and is bounded by the 1000-node ceiling instead, now
+stated explicitly at every doc site. The tool description and README also gained the previously-undocumented third
+elision outcome: at a remaining budget smaller than the ~40-character marker, a value is cut to a plain **unmarked**
+prefix, and `byRefTruncated` is then the only signal — the absence of a marker does not prove a byRef value is
+complete.
+
+### Fixed — non-ASCII JSON request-body content is decoded correctly (all servers, Story 34.6 finding CR-7, fixed in Story 34.8)
+
+Every custom `ExecuteMCPv2.REST.*` handler's shared request-body parser (`ExecuteMCPv2.Utils.ReadRequestBody`, 14
+handler classes / 46 call sites) read non-ASCII JSON content as if it were Latin-1, silently corrupting it on the way
+in (`HTTP 200`, no error, no flag) — most directly affecting `iris_global_set`'s `value` (data corruption **at
+rest**), `iris_execute_command`'s `command`, and `iris_execute_classmethod`'s `args`. It was first found and
+documented (not fixed) during Story 34.6 and tracked as ledger item `34-6-CR-7`.
+
+**Story 34.8 fixes it centrally**: the body's raw bytes are now explicitly UTF-8-decoded before JSON parsing, in a
+chunked read that is safe across chunk boundaries (a multi-byte character split by a boundary is never corrupted) and
+carries no practical body-size ceiling. Accented, CJK, and astral-plane/emoji content now round-trips correctly, and
+the plain-ASCII path is byte-identical to before. **The fix is forward-only** — data already written corrupted is not
+repaired automatically. The decoder is deliberately lenient rather than validating: invalid byte sequences (including
+unpaired surrogates) become a literal `?` rather than an error, and non-canonical "overlong" encodings are decoded
+rather than rejected — see both READMEs' Known Limitations for the details and the accompanying filter-bypass
+security note for anyone byte-inspecting these request bodies upstream.
+
+### Fixed — `iris_execute_tests`' zero-result guard is now machine-detectable (`@iris-mcp/dev`, Story 34.6)
+
+The guard introduced in Epic 34 for a run matching zero test methods (see the 2026-08-14 entry above) previously
+returned content-only JSON with no `isError`/`structuredContent`, so a structured consumer reading
+`structuredContent.total` saw it regress from `0` to `undefined`, and an agent branching on `isError` recorded the
+call as a success. It now carries **both** `isError: true` **and** `structuredContent` set to the same
+`{total, passed, failed, skipped, details, error}` object shown in the text content, applied identically to every
+guard path (package/class/method levels and the package discovery-time check) so no two paths can diverge again.
+
+### Fixed — the epic-done gate can no longer silently skip on a packaging release (internal, Story 34.6)
+
+Not user-facing, but material to this being the suite's first publish: the `iris_execute_classmethod` epic-done gate's
+fixture-availability probe previously collapsed any failure — a credential fault, a network error, a licence issue —
+into the same "fixtures not deployed" verdict as a genuinely missing fixture, and `IRIS_REQUIRE_LIVE` (the switch that
+turns a skip into a hard failure) was armed nowhere in the repository. The probe now re-throws anything that is not a
+genuine "document not found" response, and `IRIS_REQUIRE_LIVE=1` is armed on `@iris-mcp/dev`'s own `prepublishOnly`
+lifecycle hook — mechanically confirmed (`pnpm publish --dry-run`) to abort packaging before producing a tarball when
+IRIS is unreachable.
+
+### Fixed — a truncation cut through a surrogate pair could emit invalid UTF-8 on the wire (`@iris-mcp/dev` + ObjectScript, Story 34.7 pre-publish blocker, ledger `34-6-CR-10`)
+
+A regression introduced by the response-payload ceiling above, not pre-existing: before the ceiling, `output` passed
+through verbatim and was always valid UTF-8. IRIS represents an astral character (outside the Basic Multilingual
+Plane, e.g. an emoji) internally as a UTF-16 surrogate pair, and the ceiling's `$Extract` cut counted each half as
+one character with no boundary guard. A cut landing immediately after the high half emitted that lone surrogate on
+the wire as WTF-8 (invalid UTF-8) — live-verified: Node's lenient decoder silently substituted it with U+FFFD,
+inflating the client-visible length from the advertised 32768 to **32,770 characters** (breaking the documented cap
+outright), and a strict decoder (`TextDecoder({fatal:true})`, or any non-lenient JSON consumer) threw outright. The
+truncation logic now backs a cut off by one code unit whenever it would otherwise end on an unpaired high surrogate.
+**Verified on the actual HTTP response bytes with a strict decoder** (not by round-tripping inside IRIS, which
+tolerates its own WTF-8 and was structurally blind to this defect — the prior Story 34.6 pin used exactly that blind
+oracle). Mutation-verified: reverting the guard reproduces the exact 32,770-character / strict-decode-failure defect
+live; restored, the same request decodes cleanly at 32767 characters.
+
+### Changed — the response payload budget is now ONE shared pool across `returnValue`/`byRefValues`/`output`, not three independent ceilings (`@iris-mcp/dev` + ObjectScript, Story 34.7 pre-publish blocker, ledger `34-6-CR2-6`)
+
+Story 34.6 gave `output`, `returnValue`, and `byRefValues` each their own independent 32768-character ceiling, so a
+single fully-compliant, fully-flagged `/classmethod` response could carry roughly three times the documented figure
+raw before JSON escaping — and escaping could inflate it further still (live-measured: two 32768-character
+escape-heavy fields serialized to 131,102 characters, ~2.6x past the 50,031-character client threshold that was the
+entire documented rationale for the 32768 figure). The three fields now share **one** 32768-character budget, spent
+in field order **`returnValue` → `byRefValues` → `output`** (a Project Lead decision): the small, high-value
+`returnValue` field is never starved by narration, and `output` — usually the field that actually exceeds the
+budget — absorbs the truncation last. All three flags (`truncated`, `returnValueTruncated`, `byRefTruncated`) are
+**retained unchanged**; only the budget arithmetic changes. Live-measured worst case under the new shared budget: a
+single 32768-character field of C0 control characters (consuming the whole budget by itself) serializes to
+**196,495** characters — 6.0x the raw ceiling, and roughly 3.9x past the 50,031-character client-divert threshold.
+The pre-34.7 shape reached that same inflation again per independent field, so the shared budget substantially
+reduces but does not eliminate the risk (tracked as `34-7-QA-1`). **Back-compat (Rule #19):**
+proven mechanically — responses that stay under the shared budget (the common case: `returnValue` is small, so
+`byRefValues`/`output` see nearly the full 32768 either way) are byte-identical to the pre-34.7 shape.
+
+### Documented — the response-payload ceiling bounds raw characters, not the serialized JSON size (`@iris-mcp/dev`, Story 34.7 AC 34.7.4)
+
+The 32768 figure was always measured via `$Length` on raw content before JSON escaping, but this was not stated
+plainly enough at every doc site, and no fixture had ever exercised escape-heavy content — every prior over-ceiling
+test fixture used escaping-neutral content (a single repeated plain letter), which cannot reveal how far JSON
+escaping inflates the wire size. Both `execute.ts` tool descriptions and `packages/iris-dev-mcp/README.md` now state
+explicitly that the ceiling bounds RAW characters (measured before escaping), not the serialized response body size,
+and cite the live-measured range above — 32,860 (escaping-neutral) / 98,311 (mixed metacharacters) / **196,495**
+(worst case, all C0 control characters) for the same 32768 raw characters — pinned by a new escape-heavy fixture (a
+quote, backslash, tab, and a control character with no short JSON escape, repeated).
+
+### Fixed — packaging no longer proceeds with a stale or missing build (internal tooling, Story 34.7 pre-publish blocker, ledger `34-6-CR-11`)
+
+Neither existing prepublish gate verified that the package about to be packaged had actually been built:
+`prepublishOnly` runs BEFORE `prepack`; `scripts/verify-iris-reachable.mjs` imports only `@iris-mcp/shared`'s dist,
+never the calling package's own; and `@iris-mcp/dev`'s deeper `prepublish-gate.mjs` runs vitest over TypeScript
+SOURCE. With a stale or missing `dist/`, both gates passed green and `npm`/`pnpm` packed the tarball anyway — for a
+first public release, an empty or stale tarball on the registry is unrecoverable (npm versions are immutable). Every
+publishable package's own prepublish gate now ALSO verifies, per-package and self-referentially (never checking a
+sibling's `dist/`), that its own `dist/` exists, is non-empty, and is at least as new as its own `src/` — failing
+closed (non-zero exit, zero tarball produced) otherwise. Packages with no build step of their own (the `@iris-mcp/all`
+meta-package) are unaffected — the check is derived from each package's own `package.json` (`files: ["dist"]`), never
+a hand-maintained package list. Mutation-verified: a deliberately staled/deleted `dist/` fails the gate closed with
+zero tarball produced; restoring the build (`pnpm turbo run build`) passes again.
+
+## [Pre-release — 2026-07-28] — Epic 33: Multi-Client MCP Configuration Manager (`@iris-mcp/client-config`)
+
+### Added — `@iris-mcp/client-config`: an adapter registry + engine for 13 MCP clients (new package)
+
+A new package — **not** a dependency of any server runtime, and adding **no MCP tool, governance key, or server-runtime
+change** — that knows how each supported MCP client stores its server entries: a declarative `ClientAdapter` registry
+covering the 13 v1 clients (Claude Code, Claude Desktop, Cursor, VS Code/Copilot, Cline, Roo Code, Windsurf, OpenAI
+Codex CLI, Gemini CLI, Zed, Goose, Kimi CLI, Kimi Code) with per-OS config paths, format (JSON/JSONC/TOML/YAML), root
+key (`mcpServers`/`servers`/`mcp_servers`/`context_servers`/`extensions`), scopes, env-expansion capability, native
+disable mechanism, and restart hint; a read engine (`detect`/`status`/`diff`) that parses each detected config in its
+native format; and a **format-preserving write engine** — `jsonc-parser` edits, TOML splices limited to the suite's own
+`[mcp_servers.<name>]` tables, comment-preserving `yaml` CST edits — under a universal safety protocol (validate →
+timestamped backup → edit → re-parse → auto-restore on failure). The manager modifies **only entries it owns**;
+third-party servers in the same file are surfaced read-only, never rewritten, and byte-preserved.
+
+Per-client × per-server enable/disable uses each client's native flag where one exists (Cline/Roo `disabled`, Goose
+`enabled`) and otherwise a byte-preserving stash-and-remove recorded in `~/.iris-mcp/client-manager/state.json`. Entry
+synthesis has four env modes: `server-manager` (Epic 31 connections + OS keychain), `governance-file` (Epic 32 policy
+file), `env-reference` (client-syntax-aware, and on VS Code merges a native `inputs` prompt so the password is never
+written to the file), and `explicit` (a literal `IRIS_PASSWORD`, behind a typed confirmation gate; never from argv).
+
+### Added — the `iris-mcp-clients` CLI (`@iris-mcp/client-config`)
+
+`detect` · `status` · `diff` · `apply` · `enable` · `disable` · `remove` · `restore` · `doctor`. `apply` prints the
+pending diff and requires confirmation (`--yes` to skip; a non-TTY invocation without `--yes` refuses), takes a
+timestamped backup before every write, and prints the client's restart hint after it. `doctor` checks env-reference
+resolvability, file parseability, a `config-drift` shape check, stale backups and orphaned stashes. Exit codes mirror
+the governance CLI contract (`0` success / `1` operational failure / `2` usage error) and every command answers
+`--json` with one stable `{ok, command, data, error?}` envelope, so the whole surface is scriptable. Until the packages
+are published, run the built bin directly: `node packages/client-config/dist/cli/clients-cli.js <command>`.
+
+### Added — VS Code extension "MCP Clients" view (`iris-mcp-launcher`)
+
+The same engine behind a GUI: client roster, per-server toggle matrix, diff preview, backup restore, and doctor —
+driven through the identical CLI code path. Unlike the extension's server-launcher half (Copilot-family only), this
+view helps **every** client: use it from VS Code to wire up Claude Code, Cursor, Cline, and the rest.
+
+### Added — adapter certification record + doctor config-drift guard
+
+`scripts/certify.mjs` runs a scripted certification pass per locally installed client against its **real** config —
+apply → the client surfaces the entry → disable → absent → remove → byte-exact verified restore, with cleanup of
+manager state and pass-created backups. Claude Code, VS Code, Cline and Kimi Code are **certified-live** (2026-07-28);
+the other nine adapters carry explicit fixture-only-with-residual-risk dispositions stating what the fixtures prove and
+what stays unproven. The README's adapter table and dispositions are **generated** from `CLIENT_ADAPTERS` ⨝
+`scripts/certification-results.json` (a suite test keeps them in sync — never hand-edited). `doctor` gained a
+`config-drift` finding for a config that parses but no longer matches the adapter's root-key shape expectation,
+reporting the `ADAPTER_DATA_VERSION` the expectation came from; the fix is always a data patch, never an engine change.
+
+### Changed — certification-driven adapter corrections
+
+The repo-root `.mcp.json` fallback for `kimi-code` was **falsified** by the live probe (kimi-code 0.29.0 loaded no
+project-scope server from it) and removed (`ADAPTER_DATA_VERSION` 2026-07-25.2 → 2026-07-28.1): writing a config the
+client may never read is worse than no fallback. Repo `.mcp.json` sharing is verified for Claude Code only.
+`iris-mcp-all` was also removed from the managed server set — as a peer row it invited registering all five servers
+*and* the aggregate, double-registering every tool; `CANONICAL_SERVERS` is now the five leaf servers and any
+`iris-mcp-all` entry is treated as foreign (read-only, never modified).
+
+**Docs:** [`packages/client-config/README.md`](packages/client-config/README.md) (adapter table + certification
+dispositions, both generated), the root README's *The manager: `iris-mcp-clients`* section, and
+[`docs/client-config/`](docs/client-config/) — whose per-client snippets are now the documented manual **fallback**
+behind the manager.
+
+## [Pre-release — 2026-07-27] — Epic 32: Governance File & Editors (`IRIS_GOVERNANCE_FILE`)
+
+### Added — `IRIS_GOVERNANCE_FILE`: a portable governance policy file (`@iris-mcp/shared`, all five servers)
+
+Governance policy gains a **file substrate** so one policy is portable across every MCP client instead of being
+re-escaped into each client's `env` block: `IRIS_GOVERNANCE_FILE` points at a JSON file of exactly the same shape as
+`IRIS_GOVERNANCE` (`{"global": {...}, "profiles": {...}}`, booleans only), parsed by the **same** `parseGovernanceConfig`
+validation (reserved-key rejection included). Enforcement never moves — the servers keep sole authority at the existing
+`dispatchToolCall` gate; the file is a config source, and the editors below are management surfaces.
+
+- **Unset ⇒ inert.** With the variable unset no file is ever read (zero filesystem access) and behavior is byte-for-byte
+  a pre-feature install (Rule #19, proven mechanically over resolved policy).
+- **All env layers sit above all file layers** — the cascade is
+  `env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`, so a governance file
+  introduced later can never silently override an `IRIS_GOVERNANCE` setting you already had.
+- **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file aborts startup
+  naming the variable, the path, and the parse error.
+- **Explicit path only** — never discovered or searched for; a relative path resolves against the server process's CWD
+  (which the MCP *client* chooses), so prefer an absolute path. Read once at startup; no hot-reload in v1.
+- **Attribution.** `iris_server_profiles` and the `iris-governance://{profile}` resource now report a per-key
+  `configSource` (`env` | `file` | `preset` | `default`) — an additive report field, emitted unconditionally.
+
+**No new MCP tool, no new governance key, no tool-count change, and the frozen Epic-14 baseline (`1e62c5ad5bf7`, 141
+keys) is untouched.**
+
+### Added — the `iris-mcp-governance` CLI (a second `bin` in `@iris-mcp/shared`)
+
+`validate` · `get` · `set` · `unset` · `preset` · `effective` · `diff` · `universe`, single-sourced with the shared
+engine: every parse goes through the server's own loader (so `validate` prints the exact text a server would fail
+startup with) and `effective`/`diff` compose the same cascade functions the servers enforce with, never a
+reimplementation. `set`/`unset` write the file atomically (temp + rename, existing key order preserved) and
+re-validate with rollback on failure. `preset` prints env-level wiring and **writes nothing** — the safety preset is
+sourced from the process environment only, never from a file. `universe` renders the **full** governed-key universe
+(frozen baseline ∪ the five servers' registered tool keys, derived from their built dist ∪ the framework
+`iris_server_profiles` tool) with the real `mutates`/default-enabled classifications, closing the gap where
+`effective`/`diff` cannot enumerate keys they would have to import a server package to see. Exit codes `0`/`1`/`2` and
+a one-object `--json` envelope on every operational outcome, matching the `iris-mcp-credentials` contract. Until
+publish: `node packages/shared/dist/cli/governance-cli.js <command>`.
+
+### Added — VS Code extension governance editor (`iris-mcp-launcher`)
+
+An "Open Governance Editor" command that edits the shared governance file visually — the same engine, the same file
+every client's servers read. Reload semantics are stated at every surface: the view reflects file state at open/refresh,
+and a server must be restarted to apply an edit.
+
+**Docs:** the root README's [Governance file](README.md#governance-file-iris_governance_file) and
+[`iris-mcp-governance` CLI](README.md#iris-mcp-governance-cli) sections, `packages/shared/README.md`, and the
+extension README's *Governance editor* section.
+
 ## [Pre-release — 2026-07-25] — Epic 31: Server Manager Connection Integration (`IRIS_SERVER_MANAGER`)
 
 ### Added — Import connections from the InterSystems Server Manager VS Code extension (`@iris-mcp/shared`, all five servers)

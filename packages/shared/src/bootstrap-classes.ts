@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 28 production classes as string literals, keyed by their
+ * Contains all 29 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "6422caf6ec31";
+export const BOOTSTRAP_VERSION = "01dc15bb27df";
 
 export interface BootstrapClass {
   name: string;
@@ -37,6 +37,46 @@ export const BOOTSTRAP_CLASSES: Map<string, string> = new Map([
 /// and request body parsing helpers used by all REST handler classes.</p>
 Class ExecuteMCPv2.Utils Extends %RegisteredObject
 {
+
+/// Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>) — the
+/// ONE documented response-payload ceiling, measured in RAW CHARACTERS via
+/// <code>$Length</code> BEFORE JSON escaping — not raw UTF-8 bytes (stated explicitly to
+/// avoid overclaiming byte-precision on a Unicode-enabled instance) and not the SERIALIZED
+/// size of the JSON response body, which JSON escaping can inflate well past this figure
+/// for content heavy in quotes, backslashes, tabs, or control characters (see
+/// <method>ApplyOutputCeiling</method>'s banner for a live-measured worst case).
+/// <p><b>Story 34.7 — ONE SHARED budget, not three independent ones.</b> On
+/// <code>/classmethod</code>, <parameter>OUTPUTCEILING</parameter> characters are shared
+/// across <code>returnValue</code>, <code>byRefValues</code>, and <code>output</code>
+/// TOGETHER, spent in that field order (a Project Lead decision, not re-litigable — see
+/// <method>InvokeWithArgs</method>'s banner) — NOT applied independently to each field
+/// (the pre-34.7 shape, which let a fully-flagged response carry roughly three times this
+/// figure raw, before escaping). On <code>/command</code>, which has only
+/// <code>output</code>, this ceiling is the field's own full budget, unchanged.</p>
+/// <p>Also reused as the byRefValues STRUCTURAL byte budget's own starting point inside
+/// <method>BuildByRefNode</method> (reduced by whatever <code>returnValue</code> already
+/// consumed of the shared pool — see <method>InvokeWithArgs</method>). Chosen from LIVE
+/// 2026-08-15 measurement (Rule #36), not by feel — see <method>ApplyOutputCeiling</method>'s
+/// banner for the measurement evidence and Rule #38 discipline.</p>
+Parameter OUTPUTCEILING As %Integer = 32768;
+
+/// Story 34.6 AC 34.6.1 — the byRefValues STRUCTURAL ceiling: the maximum number of tree
+/// nodes (subscript entries) <method>BuildByRefNode</method> will materialize across the
+/// WHOLE byRefValues structure (every by-ref-marked position combined), independent of
+/// the byte budget in <parameter>OUTPUTCEILING</parameter> — bounds a pathologically
+/// wide/deep Output array even where every individual value is tiny.
+Parameter BYREFNODECEILING As %Integer = 1000;
+
+/// Story 34.8 AC 34.8.3/34.8.4 — the size (in RAW BYTES) of each chunk
+/// <method>DecodeUtf8Stream</method> reads from a request-body stream before decoding it.
+/// Chosen well under the platform's practical string ceiling while staying large enough
+/// that an ordinary request body decodes in a single chunk. Live-measured during this
+/// story (2026-08-16, disposable <c>ExecuteMCPv2.Temp.Utf8Probe</c>): a SINGLE
+/// <code>.Read()</code> call requesting a stream's full ~49,000,000-byte
+/// <property>Size</property> in one shot silently returned only ~3.6 million characters —
+/// with NO exception of any kind — which is exactly the failure this chunk size and the
+/// accompanying read-loop in <method>DecodeUtf8Stream</method> exist to avoid.
+Parameter UTF8CHUNKSIZE As %Integer = 1000000;
 
 /// Save the current namespace and switch to <var>pNamespace</var>.
 /// <p>The original namespace is returned via the <var>pOriginal</var> output parameter
@@ -188,12 +228,942 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
     Quit $$$ERROR($$$GeneralError, tSafe)
 }
 
+/// Story 34.6 AC 34.6.1 — truncate <var>pOutput</var> to the documented
+/// <parameter>OUTPUTCEILING</parameter>-character ceiling, appending a structured,
+/// machine-detectable elision marker (never a bare "...") in place of the elided tail.
+/// Only ever SETS <var>pTruncated</var> to true when truncation happens HERE — an
+/// already-true value from an earlier, unrelated truncation cause (e.g. a capture-buffer
+/// &lt;MAXSTRING&gt;, Story 34.3) is left untouched, so a caller ORs this in for free
+/// simply by passing its existing flag ByRef. The returned string's length never exceeds
+/// <parameter>OUTPUTCEILING</parameter> (content is trimmed to make room for the marker
+/// itself, not appended on top of a full-length excerpt).
+/// <p><b>Rule #38 — what this ceiling is NOT.</b> Live measurement on 2026-08-15 (Story
+/// 34.6) found the CSP Gateway/HTTP transport tolerates multi-megabyte
+/// <code>/command</code> responses cleanly — no corruption, no timeout, no error — up to
+/// 3,000,000 characters (the largest size tested; the underlying platform long-string
+/// ceiling sits somewhere past that). So this ceiling is NOT protection against a Web
+/// Gateway timeout or against the target's own execution cost: the target has already
+/// fully run, and the captured output has already been fully produced, by the time this
+/// method trims it. It exists purely to keep the RESPONSE PAYLOAD a bounded, genuinely
+/// consumable size for the MCP clients — typically AI agents with a finite context
+/// budget — that read tool results. A real, live MCP client (Claude Code CLI, this
+/// repository's own dev environment) was observed diverting a rendered tool result away
+/// from inline consumption once it reached 50,031 characters; 32768 (see
+/// <parameter>OUTPUTCEILING</parameter>) was chosen to stay safely under that measured
+/// boundary.</p>
+/// <p><b>Story 34.6 code review (cycle 2) / Story 34.7 AC 34.7.3 — the ceiling is ONE
+/// SHARED budget across a <code>/classmethod</code> response, not per field.</b>
+/// <code>output</code>, <code>returnValue</code> and the <code>byRefValues</code> budget
+/// used to each get their own independent <parameter>OUTPUTCEILING</parameter>, so a
+/// single fully-compliant, fully-flagged response could carry roughly three times this
+/// figure raw before JSON escaping (and more after it) — this is now fixed: see
+/// <method>InvokeWithArgs</method>'s banner for the shared-budget/field-order design.
+/// This method itself is unchanged by that fix — it still truncates ONE string to
+/// WHATEVER <var>pCeiling</var> it is given; the caller now simply passes a smaller,
+/// already-reduced <var>pCeiling</var> once an earlier field has spent part of the shared
+/// pool.</p>
+/// <p><b>Rule #38 / AC 34.7.4 — raw characters, not serialized JSON size.</b>
+/// <var>pCeiling</var> bounds <var>pOutput</var>'s own RAW character count, measured
+/// BEFORE this value is embedded in a JSON response body. JSON string escaping can
+/// inflate the SERIALIZED size well past the ceiling: a quote or backslash becomes a
+/// 2-character escape, and a tab/newline/other control character becomes a 2- or
+/// 6-character escape. The earlier, now-inapplicable pre-34.7 independent-budget
+/// measurement — two 32768-character raw fields built entirely from JSON metacharacters
+/// serialized to 131,102 characters combined — described the per-field shape this story
+/// replaced (see this parameter's own Story 34.7 banner above).
+/// <p><b>Live-measured inflation UNDER THIS STORY'S shared budget</b> (Story 34.7 code
+/// review, raw <code>fetch</code> against the deployed <code>/command</code> endpoint;
+/// every row is a single field holding exactly 32768 RAW characters, so the RAW ceiling
+/// itself is honored identically in all three):
+/// <ul>
+/// <li>escaping-neutral plain letters &#8594; 32,860-character HTTP body (1.0x)</li>
+/// <li>mixed metacharacters (the <c>TargetReturnEscapeHeavyOverCeiling</c> fixture's own
+/// profile: quote, backslash, tab, one control character) &#8594; 98,311 (3.0x)</li>
+/// <li><b>WORST CASE — all C0 control characters</b> (each costing a 6-character
+/// <code>\\uXXXX</code> escape) &#8594; <b>196,495</b> (6.0x)</li>
+/// </ul>
+/// <b>Honest residual-risk statement:</b> the worst case is therefore about <b>6x</b> the
+/// raw ceiling — roughly <b>3.9x past</b> the 50,031-character client-divert threshold
+/// documented above that was the entire rationale for
+/// <parameter>OUTPUTCEILING</parameter>'s value. The shared budget substantially reduces
+/// the pre-34.7 worst case (which was this figure again per independent field) but does
+/// NOT restore that safety margin for metacharacter-heavy content. The ceiling was never
+/// a promise about the HTTP response body's own byte size, only about how much of any one
+/// RAW field's content survives; fully bounding the SERIALIZED size would require
+/// measuring and truncating against it directly rather than against raw characters, which
+/// is a larger design change tracked in <c>deferred-work.md</c> (<c>34-7-QA-1</c>) rather
+/// than attempted here.</p>
+/// <p><var>pCeiling</var> defaults to <parameter>OUTPUTCEILING</parameter> when omitted
+/// (sentinel <code>-1</code> — distinct from an explicit <code>0</code>, which
+/// <method>BuildByRefNode</method> legitimately passes once its shared byte budget is
+/// fully exhausted).</p>
+/// <p><b>Story 34.6 code-review findings CR-6/CR-8/CR-9 fix.</b> The elision marker
+/// itself is <code>36 + digits(pCeiling)</code> characters (never smaller than ~37).
+/// When <var>pCeiling</var> is smaller than the marker's own length, appending the
+/// marker anyway would make the result BOTH longer than the ceiling it is supposed to
+/// respect AND longer than the (small) original value it replaces — exactly the defect
+/// <method>BuildByRefNode</method>'s shared byte budget hit once nearly exhausted
+/// (a 4-character value destroyed and replaced by a ~37-character marker, and the
+/// response growing past its own documented budget). In that band this method falls
+/// back to a plain hard cut of the first <var>pCeiling</var> characters, with NO marker
+/// at all — the marker is only ever emitted whole, exactly matching the documented
+/// format, never as a truncated/malformed fragment. Two invariants hold for EVERY
+/// <var>pCeiling</var>, including this band: the result never exceeds
+/// <var>pCeiling</var> characters, and the result is never LONGER than
+/// <var>pOutput</var> itself — a value is never elided into something bigger than it
+/// started.</p>
+/// <p><b>Story 34.7 AC 34.7.1 fix (ledger <c>34-6-CR-10</c>) — the cut never lands
+/// between a high and low surrogate.</b> IRIS represents an astral character (outside
+/// the Basic Multilingual Plane, e.g. an emoji) internally as a UTF-16 SURROGATE PAIR —
+/// two consecutive code units — and <code>$Extract</code> counts each half as one
+/// character. Cutting immediately after the high half (leaving its low-half partner on
+/// the elided side) previously emitted that lone high surrogate on the wire as WTF-8
+/// (invalid UTF-8): Node's lenient decoder silently substituted it with U+FFFD,
+/// inflating the client-visible length PAST the advertised ceiling (32768 became
+/// 32770, live-verified), and a strict decoder (<code>TextDecoder({fatal:true})</code>)
+/// threw outright. Every retained-length computation below is now passed through
+/// <method>SurrogateSafeCutLength</method>, which backs the cut off by one code unit
+/// whenever it would otherwise end on an unpaired high surrogate — see that method's
+/// own banner for why this can never itself land on ANOTHER split pair. The wire-level
+/// proof (decoding the ACTUAL HTTP response bytes with a strict decoder, per AC 34.7.2)
+/// lives in the TS default suite, not here — see
+/// <c>execute-classmethod-epic-gate.test.ts</c>.</p>
+ClassMethod ApplyOutputCeiling(pOutput As %String, ByRef pTruncated As %Boolean, pCeiling As %Integer = -1) As %String
+{
+    Set tCeiling = pCeiling
+    If tCeiling < 0 { Set tCeiling = ..#OUTPUTCEILING }
+    Set tLen = $Length(pOutput)
+    If tLen <= tCeiling {
+        Quit pOutput
+    }
+    Set pTruncated = 1
+    Set tMarker = $Char(10)_"[IRIS-MCP-TRUNCATED ceiling="_tCeiling_"chars]"_$Char(10)
+    ; Story 34.6 CR-6/CR-8/CR-9: the marker does not fit within a small remaining
+    ; ceiling — appending it anyway would both exceed the ceiling AND replace a SMALLER
+    ; original value with something LARGER. Fall back to a marker-less hard cut so the
+    ; result is always bounded by tCeiling and never bigger than pOutput itself.
+    If $Length(tMarker) > tCeiling {
+        Set tKeep = ..SurrogateSafeCutLength(pOutput, tCeiling)
+        Quit $Extract(pOutput, 1, tKeep)
+    }
+    Set tKeep = tCeiling - $Length(tMarker)
+    Set tKeep = ..SurrogateSafeCutLength(pOutput, tKeep)
+    Quit $Extract(pOutput, 1, tKeep) _ tMarker
+}
+
+/// Story 34.7 AC 34.7.1 (ledger <c>34-6-CR-10</c>) — back a truncation cut length off by
+/// one UTF-16 code unit when the code unit AT <var>pLen</var> is a high surrogate half
+/// (<code>$Ascii</code> range 55296-56319, hex D800-DBFF). See
+/// <method>ApplyOutputCeiling</method>'s banner for why cutting immediately after a high
+/// surrogate is unsafe: it strands the surrogate's low-half partner on the elided side,
+/// which IRIS emits on the wire as invalid UTF-8 (WTF-8) rather than the intended 4-byte
+/// astral-character encoding.
+/// <p>Backing off by one never lands on ANOTHER split pair: if the PRECEDING code unit
+/// (at <var>pLen</var>-1) is itself a low surrogate, positions <var>pLen</var>-2 and
+/// <var>pLen</var>-1 already form a COMPLETE pair — in well-formed UTF-16 a low
+/// surrogate only ever immediately follows its own matching high surrogate — so the
+/// shorter cut is always clean. Never backs off below 0. A no-op (returns
+/// <var>pLen</var> unchanged) whenever the code unit at <var>pLen</var> is anything
+/// other than a high surrogate, including when <var>pLen</var> is 0. Uses the SAME
+/// <code>$Ascii(string, position)</code> two-argument form already proven live by
+/// <c>UtilsTest.TestApplyOutputCeilingMidSurrogatePairStaysValidJSON</c> (Story 34.6 QA)
+/// to read a UTF-16 code unit's raw numeric value at an arbitrary position.</p>
+ClassMethod SurrogateSafeCutLength(pStr As %String, pLen As %Integer) As %Integer
+{
+    Set tLen = pLen
+    If tLen > 0 {
+        Set tLastCode = $Ascii(pStr, tLen)
+        If (tLastCode >= 55296) && (tLastCode <= 56319) {
+            Set tLen = tLen - 1
+        }
+    }
+    Quit tLen
+}
+
+/// Parse one positional argument entry for the <code>/classmethod</code> endpoint's
+/// argument ladder (Story 34.2). Takes the whole <var>pArgs</var> array plus the
+/// <var>pPosition</var> index rather than a pre-extracted element, because
+/// <method>%Get</method> collapses JSON <code>null</code> and <code>""</code> to the same
+/// value — only <method>%GetTypeOf</method> on the array can tell them apart, and
+/// AC 34.2.6/R6 requires that distinction (code review 2026-08-14).
+/// <p>A plain JSON scalar (string/number/boolean) is a by-value argument:
+/// <var>pValue</var> is set to it directly and <var>pIsByRef</var> is 0. A JSON object
+/// of shape <code>{byRef, value?}</code> is a by-reference marker: <var>pIsByRef</var>
+/// reflects the marker's <code>byRef</code> flag, and <var>pValue</var> is set to the
+/// marker's <code>value</code> — or left genuinely UNDEFINED (<code>Kill pValue</code>)
+/// when <code>value</code> is omitted, which is the Output-style undefined-in case
+/// (AC 34.2.6/R6). A bare JSON <code>null</code> element, a JSON array, an object missing
+/// or mistyping <code>byRef</code>, a <code>byRef:false</code> marker with no
+/// <code>value</code>, a JSON <code>null</code> <code>value</code>, or a non-scalar
+/// <code>value</code> are all rejected with a clear validation error (AC 34.2.6/R7 — the
+/// enumeration of recognized/rejected shapes is exhaustive as of 2026-08-15, when code
+/// review added the bare-<code>null</code> element that the original list omitted).</p>
+ClassMethod ParseArgEntry(pArgs As %DynamicArray, Output pValue, Output pIsByRef As %Boolean, pPosition As %Integer) As %Status
+{
+    Set tSC = $$$OK
+    Set pIsByRef = 0
+    Try {
+        ; A bare JSON null element is rejected rather than silently aliased to "" —
+        ; the same rule the marker path applies to \`value: null\` (AC 34.2.6/R6). Without
+        ; this, \`args:[null]\` and \`args:[""]\` were indistinguishable to the target while
+        ; \`{"byRef":true,"value":null}\` was loudly rejected — an inconsistency found at
+        ; code review (Rule #56: the shape was missing from the R7 enumeration).
+        If pArgs.%GetTypeOf(pPosition) = "null" {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_" cannot be JSON null; use {""byRef"":true} for an undefined argument, or """" for an empty string")
+            Quit
+        }
+        Set pEntry = pArgs.%Get(pPosition)
+        If '$IsObject(pEntry) {
+            Set pValue = pEntry
+            Quit
+        }
+        If $ClassName(pEntry) = "%Library.DynamicArray" {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_" is a JSON array; expected a scalar or a {byRef, value} marker object")
+            Quit
+        }
+        Set tByRefType = pEntry.%GetTypeOf("byRef")
+        If tByRefType = "unassigned" {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_" is an object without a 'byRef' key; expected a scalar or a {byRef, value} marker object")
+            Quit
+        }
+        If tByRefType '= "boolean" {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_": 'byRef' must be a JSON boolean")
+            Quit
+        }
+        Set pIsByRef = pEntry.%Get("byRef")
+        Set tValueType = pEntry.%GetTypeOf("value")
+        If tValueType = "unassigned" {
+            If 'pIsByRef {
+                Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_": marker with byRef:false must include a 'value'")
+            } Else {
+                ; Output-style undefined-in: leave pValue genuinely undefined.
+                Kill pValue
+            }
+            Quit
+        }
+        If tValueType = "null" {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_": marker 'value' cannot be JSON null; omit 'value' entirely for an undefined argument")
+            Quit
+        }
+        If (tValueType = "object") || (tValueType = "array") {
+            Set tSC = $$$ERROR($$$GeneralError, "Argument "_pPosition_": marker 'value' must be a scalar (string, number, or boolean)")
+            Quit
+        }
+        Set pValue = pEntry.%Get("value")
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Recursively serialize a by-ref-bound local's post-call value into the AC 34.2.6/R1
+/// encoding used by <var>byRefValues</var>: a leaf with no subscripts returns its raw
+/// scalar value; a node with descendants (and optionally its own top-level value)
+/// returns a <class>%DynamicObject</class> of shape <code>{value?, subscripts?}</code>,
+/// with each subscript key mapped recursively via the same rule. Only call this when
+/// <code>$Data(pLocal)</code> is nonzero — a fully undefined local is represented by
+/// omitting its key from <var>byRefValues</var> entirely, not by calling this method.
+/// <p>Descends via <code>Merge</code> into a fresh local rather than passing a
+/// subscripted node by reference (not valid ObjectScript call-argument syntax — verified
+/// live during this story) and without name indirection (which cannot see
+/// procedure-block-private locals — Story 34.1 Finding 5).</p>
+/// <p><b>Story 34.6 AC 34.6.1 — node/byte budget.</b> <var>pNodeBudget</var> and
+/// <var>pByteBudget</var> are shared counters THREADED across every recursive call AND
+/// across every one of the (up to 20) top-level positions <method>InvokeWithArgs</method>
+/// calls this method for — the budgets bound the WHOLE <var>byRefValues</var> structure,
+/// not any one position. <var>pNodeBudget</var> (initial value
+/// <parameter>BYREFNODECEILING</parameter>) is decremented once per call — once it is
+/// exhausted, further subscript descent stops (the node already built is kept, marked
+/// <code>subscriptsTruncated: true</code>) — bounding a pathologically wide/deep tree even
+/// when every value is tiny. <var>pByteBudget</var> — STARTING value
+/// <parameter>OUTPUTCEILING</parameter> MINUS whatever <var>returnValue</var> already
+/// consumed of the ONE shared response budget (Story 34.7 AC 34.7.3; see
+/// <method>InvokeWithArgs</method>'s banner for the field-order design) — is decremented
+/// by every piece of CONTENT this method
+/// emits: each leaf value's own length (via <method>ApplyOutputCeiling</method>), each
+/// <code>&lt;Object:...&gt;</code> OREF placeholder, and each subscript KEY. So one huge
+/// value, many medium values, or many long subscript keys are all bounded to the same
+/// total. It does NOT charge the per-node JSON scaffolding itself (the
+/// <code>{"value":...,"subscripts":{}}</code> wrapper, roughly 25-30 characters per
+/// container node); that residue is bounded instead by
+/// <parameter>BYREFNODECEILING</parameter>, giving a hard worst case of about
+/// <parameter>OUTPUTCEILING</parameter> + (<parameter>BYREFNODECEILING</parameter> x 30)
+/// characters for the whole structure. Either budget's exhaustion sets
+/// <var>pByRefTruncated</var> — reported separately from the <var>output</var> field's own
+/// <var>truncated</var> flag, since they describe different parts of the response.</p>
+/// <p><b>Story 34.6 code-review finding CR-6.</b> This method's own child-subscript
+/// loop below already refuses to recurse once either budget is exhausted. The 20
+/// top-level calls <method>InvokeWithArgs</method> makes had no equivalent guard — see
+/// <method>AddByRefPosition</method>, which now wraps every one of those calls with the
+/// SAME pre-check, OMITTING a position from <var>pByRefValues</var> entirely once the
+/// budget is already gone, rather than materializing it here and relying on
+/// <method>ApplyOutputCeiling</method> alone to keep the damage bounded.</p>
+/// <p><b>Story 34.6 code review (cycle 2) — the byte budget now charges KEYS and OREF
+/// placeholders, not only leaf values.</b> Before this, both were emitted free, so the
+/// advertised 32768-character <var>byRefValues</var> budget did not bound
+/// <var>byRefValues</var> at all: measured live, 400 positions keyed by 900-character
+/// subscripts emitted 363,908 characters with 32,368 of the budget still reported
+/// unspent and <var>pByRefTruncated</var> still false, and 1500 OREF leaves emitted
+/// ~49,000 characters without touching the budget at all. A long-keyed
+/// <code>Output</code> array (file paths, URLs, composite keys) is an entirely idiomatic
+/// ObjectScript shape, so this was reachable by ordinary callers, and it was the same
+/// unbounded-payload class as code-review finding CR-5 one field over.</p>
+ClassMethod BuildByRefNode(ByRef pLocal, ByRef pNodeBudget As %Integer, ByRef pByteBudget As %Integer, ByRef pByRefTruncated As %Boolean)
+{
+    ; Every call materializes exactly one tree node — charge it against the shared
+    ; structural budget regardless of whether it turns out to be a leaf or a container.
+    Set pNodeBudget = pNodeBudget - 1
+    Set tData = $Data(pLocal)
+    ; Guard against an OREF out-value (a target that mutates a by-ref local to hold an
+    ; object reference) — mirrors the returnValue $IsObject guard in ClassMethod(), so a
+    ; non-JSON-serializable OREF can never reach RenderResponseBody.
+    ; The guard is applied to the node's own VALUE at EVERY $Data shape, not just the
+    ; leaf case: \`Set pOut = obj  Set pOut("k") = 1\` is legal ObjectScript ($Data=11), and
+    ; code review reproduced live (2026-08-14) that an unguarded OREF there reaches
+    ; %ToJSON INSIDE RenderResponseBody — after the response has begun — truncating the
+    ; body into an unparseable envelope with HTTP 200. That is the very failure class this
+    ; epic exists to fix, so the check must not sit inside the tData=1 arm.
+    Set tHasValue = (tData # 10)
+    If tHasValue {
+        If $IsObject(pLocal) {
+            Set tValue = "<Object:"_$ClassName(pLocal)_">"
+            ; Story 34.6 code review (cycle 2): the OREF placeholder is EMITTED CONTENT
+            ; and must be charged like any other leaf value. Before this it was the one
+            ; value shape that consumed payload without ever decrementing the budget, so
+            ; a target returning many OREF out-values shipped tens of KB with the byte
+            ; budget still reading its full 32768 and byRefTruncated still false.
+            Set pByteBudget = pByteBudget - $Length(tValue)
+            If pByteBudget < 0 { Set pByteBudget = 0 }
+        } Else {
+            ; Charge this leaf's value against the shared byte budget (AC 34.6.1) by
+            ; truncating it to WHATEVER REMAINS of that budget right now — reuses
+            ; ApplyOutputCeiling (same marker format as the output field) with an
+            ; EXPLICIT ceiling instead of the default, so a value that is itself under
+            ; OUTPUTCEILING but arrives after other leaves have already spent most of
+            ; the shared budget is truncated to the remainder in ONE pass (never
+            ; double-truncated: OUTPUTCEILING first, then the remaining budget again).
+            Set tValue = ..ApplyOutputCeiling(pLocal, .pByRefTruncated, pByteBudget)
+            Set pByteBudget = pByteBudget - $Length(tValue)
+            If pByteBudget < 0 { Set pByteBudget = 0 }
+        }
+    }
+    If tData = 1 {
+        Quit tValue
+    }
+    Set tResult = {}
+    If tHasValue {
+        Do tResult.%Set("value", tValue)
+    }
+    Set tSubs = {}
+    Set tKey = ""
+    Set tCut = 0
+    For {
+        Set tKey = $Order(pLocal(tKey))
+        Quit:tKey=""
+        If (pNodeBudget <= 0) || (pByteBudget <= 0) {
+            Set tCut = 1
+            Quit
+        }
+        ; Story 34.6 code review (cycle 2): a subscript KEY is emitted content too, and
+        ; was previously never charged — so a long-keyed Output array (file paths, URLs,
+        ; composite keys: an entirely idiomatic ObjectScript Output shape) shipped a
+        ; byRefValues payload arbitrarily larger than the documented budget while
+        ; byRefTruncated still read false. Measured live before this fix: 400 positions
+        ; keyed by 900-character strings emitted 363,908 characters against a
+        ; 32768-character budget, with 32,368 of that budget still reported unspent.
+        ; Charge the key BEFORE descending; if the key alone would consume the rest of
+        ; the budget, stop here instead of descending with a zero budget (which would
+        ; force the child's value to the ambiguous empty string AddByRefPosition's
+        ; banner deliberately avoids). This keeps pByteBudget >= 1 at every recursive
+        ; entry, so ApplyOutputCeiling is never called with a zero ceiling.
+        If $Length(tKey) >= pByteBudget {
+            Set pByteBudget = 0
+            Set tCut = 1
+            Quit
+        }
+        Set pByteBudget = pByteBudget - $Length(tKey)
+        Kill tChild
+        Merge tChild = pLocal(tKey)
+        Do tSubs.%Set(tKey, ..BuildByRefNode(.tChild, .pNodeBudget, .pByteBudget, .pByRefTruncated))
+    }
+    If tCut {
+        Set pByRefTruncated = 1
+        Do tResult.%Set("subscriptsTruncated", 1, "boolean")
+    }
+    Do tResult.%Set("subscripts", tSubs)
+    Quit tResult
+}
+
+/// Story 34.6 code-review finding CR-6 — add ONE top-level by-ref position's node to
+/// <var>pByRefValues</var> at key <var>pKey</var>, honoring the shared node/byte
+/// budgets the SAME way <method>BuildByRefNode</method>'s own child-subscript loop
+/// already does. <method>InvokeWithArgs</method>' 20 top-level calls were the one place
+/// nothing checked the budget BEFORE materializing a node: once one large value
+/// exhausted the shared byte budget, every later position was still handed to
+/// <method>BuildByRefNode</method>, which (before the accompanying
+/// <method>ApplyOutputCeiling</method> fix) truncated a small real value down to an
+/// elision marker LARGER than the value itself.
+/// <p>When either budget is already exhausted BEFORE this position is visited, it is
+/// OMITTED from <var>pByRefValues</var> entirely — the key never appears — rather than
+/// materialized as a misleading placeholder. This mirrors the convention this class
+/// already uses for a genuinely-undefined post-call local (see
+/// <method>BuildByRefNode</method>'s banner: "a fully undefined local is represented by
+/// omitting its key ... entirely") instead of inventing a new, ambiguous empty-string
+/// shape that could be confused with a target that genuinely set the value to "".
+/// <var>pByRefTruncated</var> is set either way so the caller knows something was cut.</p>
+ClassMethod AddByRefPosition(pByRefValues As %DynamicObject, pKey As %Integer, ByRef pLocal, ByRef pNodeBudget As %Integer, ByRef pByteBudget As %Integer, ByRef pByRefTruncated As %Boolean)
+{
+    If (pNodeBudget <= 0) || (pByteBudget <= 0) {
+        Set pByRefTruncated = 1
+        Quit
+    }
+    Do pByRefValues.%Set(pKey, ..BuildByRefNode(.pLocal, .pNodeBudget, .pByteBudget, .pByRefTruncated))
+    Quit
+}
+
+/// Invoke a class method dynamically with up to 20 positional arguments, each either a
+/// plain JSON scalar (by-value) or a <code>{byRef, value?}</code> marker object
+/// (by-reference — the caller reads post-call mutations back via <var>pByRefValues</var>,
+/// AC 34.2.2). Rejects a non-array <var>pArgs</var> (AC 34.2.6/R12) and an argument
+/// count above 20 (AC 34.2.3).
+/// <p>Every argument position is materialized into its own named local (<var>tA0</var>
+/// … <var>tA19</var>) and dot-passed to <code>$ClassMethod</code> UNCONDITIONALLY
+/// (Story 34.1 Finding 1 / Finding E) — the caller's marker decides only what is READ
+/// BACK, never what is bound. Both materialization and the post-call read-back use
+/// direct-by-name access (an explicit ladder per position): string-built indirection
+/// cannot see these procedure-block-private locals (Story 34.1 Finding 5) and a generic
+/// loop over indirected names would silently return an empty <var>pByRefValues</var>,
+/// and a subscripted array node cannot be dot-passed as a call argument at all (verified
+/// live during this story) — both are why this method cannot be written as a loop.</p>
+/// <p>If the target throws mid-execution — including a &lt;MAXSTRING&gt; raised by the
+/// caller's own output-capture concatenation once captured text exceeds the platform's
+/// long-string ceiling (verified live at roughly 2–4 million characters during this
+/// story) — the throw is caught here. A &lt;MAXSTRING&gt; sets <var>pTruncated</var> and
+/// is treated as a partial success (whatever the target wrote up to that point stays in
+/// the caller's capture buffer, and whatever by-ref mutations already landed are still
+/// read back); any other target throw is returned as a real, sanitizable error
+/// (AC 34.2.6/R2 — never a silent partial).</p>
+/// <p><b>Known limitation (AC 34.2.6/R3, documented rather than implemented):</b> a
+/// target that itself redirects I/O mid-execution — e.g. <code>%SYS.Capture</code> (the
+/// bug report's own published workaround) or its own <code>ReDirectIO(0)</code> — steals
+/// whatever it writes during that window into its own buffer or the null device. That
+/// content is silently absent from <var>pReturn</var>'s caller's captured <c>output</c>,
+/// but verified live: the caller's own capture/redirect state is NOT corrupted by this —
+/// <code>%SYS.Capture</code> restores the prior mnemonic via its own cookie, and a
+/// target's own <code>ReDirectIO(0)</code> just discards writes into the null device —
+/// so the response envelope stays intact either way. There is no endpoint-side way to
+/// detect or prevent a target's own I/O redirection, so this is a documented gap, not a
+/// silent corruption.</p>
+/// <p><b>34-2-R1 TERMINAL disposition (Story 34.3):</b> a capture-buffer
+/// <code>&lt;MAXSTRING&gt;</code> is no longer detected by catching an exception here at
+/// all — <class>ExecuteMCPv2.REST.Command</class>'s <method>Redirects</method> labels now
+/// absorb it internally (so a target's OWN <code>Try/Catch</code> around its
+/// <code>Write</code> calls can never swallow it first, closing the exact silent-partial
+/// shape the ledger item reported) and record it in the process-private
+/// <var>%ExecuteMCPTruncated</var> flag. This method reads that flag immediately after
+/// dispatch and ORs it into <var>pTruncated</var>, so a target with no
+/// <code>Try/Catch</code> (still covered by the exTarget discriminator below, kept as
+/// defense-in-depth for any <code>&lt;MAXSTRING&gt;</code> that reaches this level by some
+/// other path) and a target that swallows its own errors report identically.</p>
+/// <p><b>Story 34.6 AC 34.6.1:</b> <var>pByRefTruncated</var> is a new, additive,
+/// OPTIONAL trailing output parameter (verified live that omitting a trailing
+/// <c>Output</c> argument at a call site is safe ObjectScript — the pre-existing 30+
+/// call sites in <class>ExecuteMCPv2.Tests.ClassMethodArgsTest</class> do not pass it and
+/// need no change). It reports whether <var>pByRefValues</var>' node/byte budget (see
+/// <method>BuildByRefNode</method>) was exhausted — separate from <var>pTruncated</var>,
+/// which describes only the <var>output</var> field.</p>
+/// <p><b>Story 34.6 code-review finding CR-6:</b> the 20 top-level
+/// <method>BuildByRefNode</method> dispatches below are each wrapped by
+/// <method>AddByRefPosition</method>, which shares ONE pair of budget counters across
+/// every position (not a fresh budget per position) and OMITS a position from
+/// <var>pByRefValues</var> once either budget is already exhausted, instead of handing
+/// it to <method>BuildByRefNode</method> and risking a small real value being replaced
+/// by a larger elision marker.</p>
+/// <p><b>Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>) — ONE shared response budget,
+/// spent <c>returnValue</c> &#8594; <c>byRefValues</c> &#8594; <c>output</c>.</b> This is a
+/// recorded Project Lead decision, not re-litigated here: the small, high-value fields
+/// are never starved, and narration — usually the field that actually blows the budget —
+/// absorbs the truncation. Before this, <c>output</c>, <c>returnValue</c> and
+/// <c>byRefValues</c> each got their OWN independent <parameter>OUTPUTCEILING</parameter>,
+/// so a fully-flagged response could carry roughly three times the documented figure raw.
+/// <var>pOutputBudget</var> is a new, additive, OPTIONAL trailing output parameter
+/// (omittable exactly like <var>pByRefTruncated</var> above — every pre-34.7 call site is
+/// unaffected) reporting how much of the shared <parameter>OUTPUTCEILING</parameter> pool
+/// remains AFTER this call accounted for both <var>returnValue</var> and
+/// <var>byRefValues</var>; <class>ExecuteMCPv2.REST.Command</class> passes it as the
+/// explicit ceiling for <var>output</var>'s own <method>ApplyOutputCeiling</method> call,
+/// so <var>output</var> — last in priority — gets exactly whatever is left.
+/// <var>pReturn</var> itself is UNCHANGED by this — still the target's raw, untouched
+/// return value (never pre-truncated here); this method only computes, INTERNALLY, how
+/// much of the shared budget a STRINGIFIED-and-ceiling-applied copy of it WOULD consume
+/// (mirroring <class>ExecuteMCPv2.REST.Command</class>'s own <c>$IsObject</c> OREF-guard +
+/// <method>ApplyOutputCeiling</method> sequence on the SAME <var>pReturn</var> value, so
+/// the two computations can never diverge), purely to seed <var>tByRefByteBudget</var>'s
+/// STARTING point below at whatever remains once <var>returnValue</var>'s share is
+/// deducted — <var>returnValue</var>'s OWN truncation, computed independently in
+/// <class>ExecuteMCPv2.REST.Command</class>, is therefore unaffected: it is always first
+/// in priority, so it always sees the FULL <parameter>OUTPUTCEILING</parameter> as its own
+/// ceiling, exactly as before this story.</p>
+ClassMethod InvokeWithArgs(pClassName As %String, pMethodName As %String, pArgs, Output pReturn, Output pByRefValues As %DynamicObject, Output pArgCount As %Integer, Output pTruncated As %Boolean, Output pByRefTruncated As %Boolean, Output pOutputBudget As %Integer) As %Status
+{
+    Set tSC = $$$OK
+    Set pReturn = ""
+    Set pByRefValues = {}
+    Set pArgCount = 0
+    Set pTruncated = 0
+    Set pByRefTruncated = 0
+    ; Story 34.7 AC 34.7.3: default to the FULL shared budget so a caller that never
+    ; reaches the shared-budget computation below (an early validation error, or a
+    ; genuine target throw — see the $$$ISERR(tSC) Quit right before that computation)
+    ; still gets a well-defined value, matching this method's pre-34.7 behavior exactly
+    ; (Command.cls's own output ceiling was always the full OUTPUTCEILING on those paths).
+    Set pOutputBudget = ..#OUTPUTCEILING
+    Kill %ExecuteMCPTruncated
+    Try {
+        ; Validate args shape (AC 34.2.6/R12) — must be a JSON array, or absent/empty.
+        If $IsObject(pArgs) {
+            If $ClassName(pArgs) '= "%Library.DynamicArray" {
+                Set tSC = $$$ERROR($$$GeneralError, "'args' must be a JSON array")
+                Quit
+            }
+            Set pArgCount = pArgs.%Size()
+        } ElseIf (pArgs '= "") {
+            Set tSC = $$$ERROR($$$GeneralError, "'args' must be a JSON array")
+            Quit
+        }
+
+        If pArgCount > 20 {
+            Set tSC = $$$ERROR($$$GeneralError, "Too many arguments: maximum is 20, received "_pArgCount)
+            Quit
+        }
+
+        ; Materialize each supplied position into its own named local (AC 34.2.2,
+        ; 34.2.6/R6, 34.2.6/R7) — explicit per-position ladder, see method banner.
+        Set tByRef0=0, tByRef1=0, tByRef2=0, tByRef3=0, tByRef4=0
+        Set tByRef5=0, tByRef6=0, tByRef7=0, tByRef8=0, tByRef9=0
+        Set tByRef10=0, tByRef11=0, tByRef12=0, tByRef13=0, tByRef14=0
+        Set tByRef15=0, tByRef16=0, tByRef17=0, tByRef18=0, tByRef19=0
+        If pArgCount > 0  { Set tSC = ..ParseArgEntry(pArgs, .tA0, .tByRef0, 0)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 1  { Set tSC = ..ParseArgEntry(pArgs, .tA1, .tByRef1, 1)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 2  { Set tSC = ..ParseArgEntry(pArgs, .tA2, .tByRef2, 2)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 3  { Set tSC = ..ParseArgEntry(pArgs, .tA3, .tByRef3, 3)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 4  { Set tSC = ..ParseArgEntry(pArgs, .tA4, .tByRef4, 4)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 5  { Set tSC = ..ParseArgEntry(pArgs, .tA5, .tByRef5, 5)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 6  { Set tSC = ..ParseArgEntry(pArgs, .tA6, .tByRef6, 6)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 7  { Set tSC = ..ParseArgEntry(pArgs, .tA7, .tByRef7, 7)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 8  { Set tSC = ..ParseArgEntry(pArgs, .tA8, .tByRef8, 8)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 9  { Set tSC = ..ParseArgEntry(pArgs, .tA9, .tByRef9, 9)     If $$$ISERR(tSC) Quit }
+        If pArgCount > 10 { Set tSC = ..ParseArgEntry(pArgs, .tA10, .tByRef10, 10) If $$$ISERR(tSC) Quit }
+        If pArgCount > 11 { Set tSC = ..ParseArgEntry(pArgs, .tA11, .tByRef11, 11) If $$$ISERR(tSC) Quit }
+        If pArgCount > 12 { Set tSC = ..ParseArgEntry(pArgs, .tA12, .tByRef12, 12) If $$$ISERR(tSC) Quit }
+        If pArgCount > 13 { Set tSC = ..ParseArgEntry(pArgs, .tA13, .tByRef13, 13) If $$$ISERR(tSC) Quit }
+        If pArgCount > 14 { Set tSC = ..ParseArgEntry(pArgs, .tA14, .tByRef14, 14) If $$$ISERR(tSC) Quit }
+        If pArgCount > 15 { Set tSC = ..ParseArgEntry(pArgs, .tA15, .tByRef15, 15) If $$$ISERR(tSC) Quit }
+        If pArgCount > 16 { Set tSC = ..ParseArgEntry(pArgs, .tA16, .tByRef16, 16) If $$$ISERR(tSC) Quit }
+        If pArgCount > 17 { Set tSC = ..ParseArgEntry(pArgs, .tA17, .tByRef17, 17) If $$$ISERR(tSC) Quit }
+        If pArgCount > 18 { Set tSC = ..ParseArgEntry(pArgs, .tA18, .tByRef18, 18) If $$$ISERR(tSC) Quit }
+        If pArgCount > 19 { Set tSC = ..ParseArgEntry(pArgs, .tA19, .tByRef19, 19) If $$$ISERR(tSC) Quit }
+        If $$$ISERR(tSC) Quit
+
+        ; Dispatch — literal arity-specific ladder (0..20); every position dot-passed
+        ; so by-ref binding works regardless of the target's own declared signature
+        ; (Story 34.1 Finding 1 / Finding E). Wrapped separately so a capture <MAXSTRING>
+        ; — a partial success, not a failure — doesn't skip the by-ref read-back below;
+        ; any GENUINE target throw still short-circuits it and returns as a real error.
+        Try {
+            If pArgCount = 0 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName)
+            } ElseIf pArgCount = 1 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0)
+            } ElseIf pArgCount = 2 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1)
+            } ElseIf pArgCount = 3 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2)
+            } ElseIf pArgCount = 4 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3)
+            } ElseIf pArgCount = 5 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4)
+            } ElseIf pArgCount = 6 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5)
+            } ElseIf pArgCount = 7 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6)
+            } ElseIf pArgCount = 8 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7)
+            } ElseIf pArgCount = 9 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8)
+            } ElseIf pArgCount = 10 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9)
+            } ElseIf pArgCount = 11 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10)
+            } ElseIf pArgCount = 12 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11)
+            } ElseIf pArgCount = 13 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12)
+            } ElseIf pArgCount = 14 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13)
+            } ElseIf pArgCount = 15 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14)
+            } ElseIf pArgCount = 16 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14, .tA15)
+            } ElseIf pArgCount = 17 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14, .tA15, .tA16)
+            } ElseIf pArgCount = 18 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14, .tA15, .tA16, .tA17)
+            } ElseIf pArgCount = 19 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14, .tA15, .tA16, .tA17, .tA18)
+            } ElseIf pArgCount = 20 {
+                Set pReturn = $ClassMethod(pClassName, pMethodName, .tA0, .tA1, .tA2, .tA3, .tA4, .tA5, .tA6, .tA7, .tA8, .tA9, .tA10, .tA11, .tA12, .tA13, .tA14, .tA15, .tA16, .tA17, .tA18, .tA19)
+            } Else {
+                ; Unreachable today (pArgCount comes from %Size() and >20 is rejected
+                ; above), but the pre-Story-34.2 ladder carried this defence and losing it
+                ; would let a future refactor fall through all 21 branches, never call the
+                ; target, and still report success with an empty returnValue.
+                Set tSC = $$$ERROR($$$GeneralError, "Internal error: unsupported argument count "_pArgCount)
+            }
+        } Catch exTarget {
+            ; Only a <MAXSTRING> raised INSIDE this request's own capture labels means the
+            ; capture buffer overflowed — that is the AC 34.2.6/R2 partial-success case.
+            ; A <MAXSTRING> the TARGET itself raised (its own concatenation overflowing),
+            ; or any error whose text merely MENTIONS the token, is a genuine failure and
+            ; must surface as a real, sanitizable error — never as a success envelope with
+            ; truncated:true, which would report a crash as a truncation and mask the real
+            ; %Status (Rule #9). Code review reproduced both false positives live.
+            ; Discriminator grounded in live-probed reality (2026-08-14, Rule #36): a
+            ; capture overflow reports Name="<MAXSTRING>" and Location="wstr^<mnemonic
+            ; routine>" — a Redirects() entry point in Command.cls; a target's own
+            ; overflow reports its own label (e.g. "ThrowOwnMaxString+3^SomeRoutine").
+            Set tTargetStatus = exTarget.AsStatus()
+            Set tThrowLabel = $Piece($Piece(exTarget.Location, "^", 1), "+", 1)
+            If (exTarget.Name = "<MAXSTRING>") && ($ListFind($ListBuild("wstr", "wchr", "wnl", "wff", "wtab"), tThrowLabel) > 0) {
+                Set pTruncated = 1
+            } Else {
+                Set tSC = tTargetStatus
+            }
+        }
+        ; 34-2-R1: fold in the label-level capture-overflow flag (see Command.cls's
+        ; Redirects() and this method's banner) regardless of which path set tSC — a
+        ; target that swallowed a MAXSTRING via its own Try/Catch never throws here at
+        ; all, so this is the only place that observes it for such a target.
+        Set pTruncated = pTruncated || $Get(%ExecuteMCPTruncated, 0)
+        Kill %ExecuteMCPTruncated
+        ; A genuine target error skips the read-back below and is returned as-is; only the
+        ; capture-truncation path (tSC still OK) reaches byRefValues assembly.
+        If $$$ISERR(tSC) Quit
+
+        ; Story 34.7 AC 34.7.3: determine how much of the ONE shared response budget
+        ; returnValue's own (independently, identically computed) truncation in
+        ; Command.cls WILL consume, so byRefValues — second in priority — starts with
+        ; whatever is left rather than always resetting to the full ceiling. See this
+        ; method's banner for why pReturn itself is left untouched here.
+        Set tRVForBudget = $Select($IsObject(pReturn): "<Object:"_$ClassName(pReturn)_">", 1: pReturn)
+        Set tRVTruncatedForBudget = 0
+        Set tRVForBudget = ..ApplyOutputCeiling(tRVForBudget, .tRVTruncatedForBudget, ..#OUTPUTCEILING)
+        Set pOutputBudget = ..#OUTPUTCEILING - $Length(tRVForBudget)
+        If pOutputBudget < 0 { Set pOutputBudget = 0 }
+
+        ; Assemble byRefValues for marked positions only (AC 34.2.2, 34.2.6/R1, R6) —
+        ; direct-by-name access; omit the key when the local is still genuinely
+        ; undefined after the call (Residual Risk: "undefined out-value").
+        ; Story 34.6 AC 34.6.1: tByRefNodeBudget/tByRefByteBudget are initialized ONCE
+        ; and threaded (ByRef) through every position below, so the budget spans the
+        ; WHOLE byRefValues structure rather than resetting per position.
+        ; Story 34.6 code-review finding CR-6: each position is routed through
+        ; AddByRefPosition (not BuildByRefNode directly), which OMITS the position once
+        ; either budget is already exhausted instead of risking a small value being
+        ; replaced by a larger elision marker — see AddByRefPosition's banner.
+        ; Story 34.7 AC 34.7.3: the byte budget now STARTS at pOutputBudget (whatever the
+        ; shared response budget has left after returnValue's share, computed above)
+        ; rather than always resetting to the full ceiling — byRefValues is second in the
+        ; shared-budget priority order.
+        Set tByRefNodeBudget = ..#BYREFNODECEILING
+        Set tByRefByteBudget = pOutputBudget
+        If tByRef0, $Data(tA0)   Do ..AddByRefPosition(pByRefValues, 0, .tA0, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef1, $Data(tA1)   Do ..AddByRefPosition(pByRefValues, 1, .tA1, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef2, $Data(tA2)   Do ..AddByRefPosition(pByRefValues, 2, .tA2, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef3, $Data(tA3)   Do ..AddByRefPosition(pByRefValues, 3, .tA3, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef4, $Data(tA4)   Do ..AddByRefPosition(pByRefValues, 4, .tA4, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef5, $Data(tA5)   Do ..AddByRefPosition(pByRefValues, 5, .tA5, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef6, $Data(tA6)   Do ..AddByRefPosition(pByRefValues, 6, .tA6, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef7, $Data(tA7)   Do ..AddByRefPosition(pByRefValues, 7, .tA7, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef8, $Data(tA8)   Do ..AddByRefPosition(pByRefValues, 8, .tA8, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef9, $Data(tA9)   Do ..AddByRefPosition(pByRefValues, 9, .tA9, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef10, $Data(tA10) Do ..AddByRefPosition(pByRefValues, 10, .tA10, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef11, $Data(tA11) Do ..AddByRefPosition(pByRefValues, 11, .tA11, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef12, $Data(tA12) Do ..AddByRefPosition(pByRefValues, 12, .tA12, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef13, $Data(tA13) Do ..AddByRefPosition(pByRefValues, 13, .tA13, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef14, $Data(tA14) Do ..AddByRefPosition(pByRefValues, 14, .tA14, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef15, $Data(tA15) Do ..AddByRefPosition(pByRefValues, 15, .tA15, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef16, $Data(tA16) Do ..AddByRefPosition(pByRefValues, 16, .tA16, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef17, $Data(tA17) Do ..AddByRefPosition(pByRefValues, 17, .tA17, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef18, $Data(tA18) Do ..AddByRefPosition(pByRefValues, 18, .tA18, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+        If tByRef19, $Data(tA19) Do ..AddByRefPosition(pByRefValues, 19, .tA19, .tByRefNodeBudget, .tByRefByteBudget, .pByRefTruncated)
+
+        ; Story 34.7 AC 34.7.3: whatever remains of the shared budget after both
+        ; returnValue and byRefValues have taken their share is what Command.cls may
+        ; spend on \`output\` — third and last in the shared-budget priority order.
+        Set pOutputBudget = tByRefByteBudget
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Story 34.8 — decode a raw (untranslated) request-body stream as UTF-8, returning a NEW
+/// character stream ready for <method>%DynamicObject</method>.<method>%FromJSON</method>.
+/// <p><b>Why this exists (ledger <c>34-6-CR-7</c>).</b> Live-probed 2026-08-16 (disposable
+/// <c>ExecuteMCPv2.Temp.Utf8Probe</c>, deleted before commit — see the story's Probe
+/// Findings section for the full transcript): <property>%request.Content</property> is a
+/// <class>%CSP.BinaryStream</class> holding the RAW, untranslated request bytes (confirmed
+/// byte-for-byte against a known UTF-8 encoding — e.g. <code>é</code> arrived as the two
+/// raw bytes 195,169, its exact UTF-8 encoding read as if each byte were its own Latin-1
+/// code point), and <property>%request.CharSet</property> is empty because the TS client's
+/// <code>Content-Type: application/json</code> header carries no charset parameter, so no
+/// CSP-level charset negotiation ever applies. Handing this raw-byte stream straight to
+/// <method>%FromJSON</method> (the pre-fix behavior) reproduced the defect exactly: per
+/// that method's OWN documented note (<c>%Library.DynamicAbstractObject.cls</c>: "for
+/// streams not containing 16-bit Unicode it may be necessary to explicitly convert...via
+/// $ZCONVERT...or entire streams by setting the TranslateTable attribute"), it does NOT
+/// itself assume UTF-8 for an untranslated stream.</p>
+/// <p><b>Chunk-boundary safety (AC 34.8.3).</b> Reads <parameter>UTF8CHUNKSIZE</parameter>
+/// raw bytes at a time. A naive per-chunk <code>$ZCONVERT(chunk,"I","UTF8")</code> would
+/// corrupt any multi-byte UTF-8 sequence straddling a chunk boundary — decoding each
+/// fragment independently mangles it. This method instead detects, via
+/// <method>IncompleteUtf8TailLength</method>, whether the last 0-3 bytes of a chunk are the
+/// unfinished start of a multi-byte sequence, holds those bytes back, and prepends them to
+/// the FRONT of the next chunk before decoding — so a sequence is never split across the
+/// boundary. Live-verified against a deliberately tiny 16-byte chunk size on a body
+/// containing 2-, 3-, and 4-byte UTF-8 characters back to back (several chunk boundaries
+/// land mid-sequence by construction): output was byte-for-byte identical to a single-shot
+/// whole-body decode.</p>
+/// <p><b>Large-body safety (AC 34.8.4) — two traps found live, not by reasoning.</b>
+/// (1) <code>$ZCONVERT</code> given a <class>%Stream.Object</class> OREF directly (instead
+/// of a <class>%String</class>) does not throw and does not decode anything — it silently
+/// STRINGIFIES THE OREF ITSELF (observed: <code>"25209@%CSP.BinaryStream"</code>), so every
+/// chunk MUST be materialized as a <class>%String</class> via <code>.Read()</code> before
+/// conversion — never pass a stream to <code>$ZCONVERT</code> directly. (2) A SINGLE
+/// <code>.Read(stream.Size)</code> call requesting an entire large stream's content in one
+/// shot does not reliably return all of it: live-measured on a 49,000,000-byte stream, one
+/// such call silently returned only ~3,589,128 characters — NO exception of any kind, never
+/// &lt;MAXSTRING&gt;, just quietly less data than asked for. Reading in a
+/// <code>While 'stream.AtEnd</code> loop, chunk by chunk, is the shape verified to retrieve
+/// the full content — accumulating the DECODED text into a
+/// <class>%Stream.TmpCharacter</class> (never into one growing <class>%String</class>) so
+/// the decoded output is not bounded by the <class>%String</class> long-string ceiling
+/// either. Live-verified end-to-end at 49,000,000 raw bytes / 48,300,000 decoded characters
+/// with zero exceptions and a correct content spot-check.</p>
+/// <p>Neither <class>%Stream.TmpCharacter</class> nor <class>%Stream.GlobalCharacter</class>
+/// exposes a settable <property>TranslateTable</property> property (mechanically confirmed
+/// live via <class>%Dictionary.PropertyDefinition</class>: only
+/// <class>%Stream.FileCharacter</class> among <code>%Stream.*</code> classes has one) — the
+/// "set TranslateTable on the stream" alternative <method>%FromJSON</method>'s own
+/// documentation names is therefore not available for the in-memory stream classes used
+/// here without introducing a temp file; the explicit chunked <code>$ZCONVERT</code>
+/// approach below is used instead.</p>
+/// <p><b>ASCII is unaffected (AC 34.8.5).</b> Every ASCII byte (0-127) is already valid
+/// single-byte UTF-8, so <code>$ZCONVERT(asciiChunk,"I","UTF8")</code> is a no-op on
+/// ASCII-only content — live-verified byte-for-byte identical through this exact method
+/// with a deliberately tiny 7-byte chunk size.</p>
+/// <p><var>pChunkSize</var> defaults to <parameter>UTF8CHUNKSIZE</parameter> when omitted
+/// (sentinel <code>-1</code>, matching <method>ApplyOutputCeiling</method>'s established
+/// convention in this class) — production code always omits it; tests pass a small value
+/// to force multiple chunks (and therefore boundary crossings) without needing a
+/// multi-megabyte fixture. <b>Story 34.8 code review:</b> the guard accepts any NON-POSITIVE
+/// value, not just <code>-1</code>. A literal <code>0</code> would otherwise be used as a
+/// real chunk size, and <code>.Read(0)</code> was live-verified during this review to return
+/// the empty string WITHOUT advancing the stream or setting <property>AtEnd</property> — so
+/// the read loop below would never terminate, hanging the job and its Web Gateway
+/// connection. Clamping at <code>&lt;= 0</code> makes that unreachable by construction.</p>
+/// <p><b>Malformed input safety (Story 34.8 QA).</b> Each decoded chunk is passed through
+/// <method>SanitizeUnpairedSurrogates</method> before being written to <var>tOut</var> —
+/// see that method's own banner for why a malformed (never a valid-UTF-8-encoded) input
+/// byte sequence can otherwise make this method emit a raw, unpaired UTF-16 surrogate that
+/// later re-emerges as genuinely invalid UTF-8 on a response.</p>
+ClassMethod DecodeUtf8Stream(pRawStream As %Stream.Object, pChunkSize As %Integer = -1) As %Stream.Object
+{
+    Set tChunkSize = pChunkSize
+    If tChunkSize <= 0 { Set tChunkSize = ..#UTF8CHUNKSIZE }
+    Set tOut = ##class(%Stream.TmpCharacter).%New()
+    Set tCarry = ""
+    Do pRawStream.Rewind()
+    While 'pRawStream.AtEnd {
+        Set tRawChunk = tCarry _ pRawStream.Read(tChunkSize)
+        Set tTail = ..IncompleteUtf8TailLength(tRawChunk)
+        If tTail > 0 {
+            Set tCarry = $Extract(tRawChunk, *-tTail+1, *)
+            Set tDecodeNow = $Extract(tRawChunk, 1, *-tTail)
+        } Else {
+            Set tCarry = ""
+            Set tDecodeNow = tRawChunk
+        }
+        If tDecodeNow '= "" {
+            Do ..WriteDecoded(tOut, tDecodeNow)
+        }
+    }
+    ; Final flush: whatever remains in tCarry at end-of-stream is a genuinely truncated or
+    ; malformed trailing sequence AT THIS POINT (not a chunk-boundary artifact — every
+    ; boundary up to here was proven complete) — decode it as-is rather than silently
+    ; dropping it.
+    If tCarry '= "" {
+        Do ..WriteDecoded(tOut, tCarry)
+    }
+    Do tOut.Rewind()
+    Quit tOut
+}
+
+/// Story 34.8 code review — decode ONE raw-byte chunk and append it to <var>pOut</var>,
+/// THROWING if the stream write fails.
+/// <p>Both <method>DecodeUtf8Stream</method> call sites previously used a bare
+/// <code>Do tOut.Write(...)</code>, discarding the <class>%Status</class> that
+/// <method>%Stream.Object.Write</method> returns. A failing write (IRISTEMP full or over
+/// quota on a large body, a <code>&lt;STORE&gt;</code>) would then be silently ignored: the
+/// read loop would continue and <method>%FromJSON</method> would receive a SILENTLY
+/// TRUNCATED document — precisely the "do not trade a silent corruption for a silent
+/// failure" failure class AC 34.8.4 exists to prevent, reintroduced one layer down. Raising
+/// the real status instead surfaces it through <method>ReadRequestBody</method>'s catch as
+/// an explicit server-side read/decode error.</p>
+ClassMethod WriteDecoded(pOut As %Stream.Object, pRawChunk As %String) As %Status
+{
+    Set tSC = pOut.Write(..SanitizeUnpairedSurrogates($ZConvert(pRawChunk, "I", "UTF8")))
+    If $$$ISERR(tSC) {
+        Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+    }
+    Quit tSC
+}
+
+/// Story 34.8 QA (adversarial pass) — <method>DecodeUtf8Stream</method>'s
+/// <code>$ZConvert(...,"I","UTF8")</code> call is lenient enough to decode a malformed
+/// 3-byte WTF-8/CESU-8 byte sequence (<code>0xED [0xA0-0xBF] [0x80-0xBF]</code> — never
+/// valid in conformant UTF-8: RFC 3629 section 3 excludes the entire surrogate block
+/// D800-DFFF from UTF-8) into a raw, UNPAIRED UTF-16 surrogate code unit rather than
+/// rejecting it — live-verified: <code>$Char(237,160,128)</code> decodes to code point
+/// 55296, the literal high-surrogate value, and <code>$Char(237,176,128)</code> to 56320,
+/// the literal low-surrogate value. The pre-Story-34.8 Latin-1 decode this replaced could
+/// NEVER produce a surrogate code unit from ANY input (Latin-1's range is 0-255, entirely
+/// below the surrogate block), so an unpaired surrogate reaching a response is a NEW
+/// failure mode this story's UTF-8-aware decode introduces, not a pre-existing one.
+/// <p>An unpaired surrogate that reaches a JSON response is re-emitted by IRIS as genuinely
+/// invalid UTF-8 on the wire — confirmed live with a hand-crafted raw HTTP body (bypassing
+/// any client-side JSON.stringify/UTF-8 auto-sanitization, which always substitutes
+/// U+FFFD for an unpaired surrogate before it reaches the wire — no standard JSON+UTF-8
+/// client, including this suite's own <c>IrisHttpClient</c>, can produce this byte pattern):
+/// a strict <code>TextDecoder({fatal:true})</code> against the actual response bytes
+/// THREW, confirming HTTP 200 with genuinely corrupt bytes and no error or truncation
+/// signal — the same underlying platform behavior <method>SurrogateSafeCutLength</method>
+/// already guards against on the truncation/output side (see its own banner), mirrored
+/// here on the decode/input side rather than left as a new, undocumented gap.</p>
+/// <p>Replaces each unpaired surrogate half with <code>?</code> — matching
+/// <code>$ZConvert</code>'s OWN observed substitution for other invalid byte sequences
+/// (e.g. an orphan continuation byte, live-verified to decode to <code>?</code> as well),
+/// for consistency rather than inventing a new convention. A genuine, correctly-paired
+/// surrogate pair (any valid astral character, e.g. an emoji from a real 4-byte UTF-8
+/// sequence) is left completely untouched — chunk-boundary safety guarantees a valid
+/// pair's 4 raw bytes are always decoded together in the SAME <code>$ZConvert</code> call
+/// (see <method>IncompleteUtf8TailLength</method>'s banner), so this method never needs to
+/// look across two separate calls to recognize one.</p>
+/// <p>Single forward pass, O(n) in <var>pStr</var>'s length — builds the result from
+/// unchanged "clean" runs plus substituted characters rather than repeatedly re-slicing a
+/// growing string, so a pathological input consisting of many consecutive unpaired
+/// surrogates cannot degrade to quadratic behavior.</p>
+ClassMethod SanitizeUnpairedSurrogates(pStr As %String) As %String
+{
+    Set tLen = $Length(pStr)
+    Set tOut = ""
+    Set tRunStart = 1
+    Set i = 1
+    While i <= tLen {
+        Set tCode = $Ascii(pStr, i)
+        Set tUnpaired = 0
+        If (tCode >= 55296) && (tCode <= 56319) {
+            ; High surrogate half — valid only when immediately followed by a low surrogate.
+            Set tNext = $Select(i < tLen: $Ascii(pStr, i + 1), 1: 0)
+            If (tNext >= 56320) && (tNext <= 57343) {
+                Set i = i + 2 ; a genuine pair — both code units stay in the pending clean run
+            } Else {
+                Set tUnpaired = 1
+            }
+        } ElseIf (tCode >= 56320) && (tCode <= 57343) {
+            ; A low surrogate is only ever reached here when it was NOT already consumed as
+            ; the second half of a pair above (that branch jumps i past it) — so it is
+            ; always unpaired by the time control reaches this branch.
+            Set tUnpaired = 1
+        } Else {
+            Set i = i + 1
+        }
+        If tUnpaired {
+            If i > tRunStart {
+                Set tOut = tOut _ $Extract(pStr, tRunStart, i - 1)
+            }
+            Set tOut = tOut _ "?"
+            Set i = i + 1
+            Set tRunStart = i
+        }
+    }
+    If tRunStart <= tLen {
+        Set tOut = tOut _ $Extract(pStr, tRunStart, tLen)
+    }
+    Quit tOut
+}
+
+/// Story 34.8 AC 34.8.3 — how many TRAILING bytes of <var>pChunk</var> are the unfinished
+/// start of a multi-byte UTF-8 sequence (0-3). Lead-byte ranges AS CLASSIFIED HERE: 0xC0-0xDF
+/// starts a 2-byte sequence, 0xE0-0xEF a 3-byte sequence, 0xF0-0xFF a 4-byte sequence;
+/// 0x80-0xBF is a continuation byte.
+/// <p><b>Story 34.8 code review — this classification is deliberately WIDER than conformant
+/// UTF-8.</b> Per RFC 3629 a valid 4-byte lead is only 0xF0-0xF4, and 0xF5-0xFF never appear
+/// in well-formed UTF-8 at all; 0xC0-0xC1 are likewise always invalid (overlong). Those bytes
+/// are still treated as leads above so that a malformed trailing byte is HELD BACK and
+/// flushed intact rather than split across two <code>$ZConvert</code> calls. The consequence
+/// is bounded and lossless: the carry is at most 3 bytes and is always decoded exactly once
+/// by the final flush. Live-verified during code review that every such sequence
+/// (0xF5-lead, an 0xF8 5-byte-style lead, a bare 0xFF, and an above-U+10FFFF 0xF4 0x90 0x80
+/// 0x80) decodes to a literal <code>?</code> and leaks NO surrogate or other code unit that
+/// would re-emerge as invalid UTF-8 on the wire.</p>
+/// <p>Checking only the last up to 3 bytes is sufficient — no UTF-8
+/// sequence is longer than 4 bytes, so if the last 3 bytes are ALL continuation bytes, the
+/// only well-formed reading is a COMPLETE 4-byte sequence whose lead byte is one position
+/// further back — already inside the caller's "decode now" portion (that lead byte and all
+/// 3 of its continuation bytes are entirely within the current chunk), never split at all.
+ClassMethod IncompleteUtf8TailLength(pChunk As %String) As %Integer
+{
+    Set tLen = $Length(pChunk)
+    If tLen = 0 Quit 0
+    Set tB1 = $Ascii(pChunk, tLen)
+    If tB1 >= 192 Quit 1
+    If tB1 < 128 Quit 0
+    ; tB1 is a continuation byte (128-191) — look one byte further back.
+    If tLen < 2 Quit 0
+    Set tB2 = $Ascii(pChunk, tLen - 1)
+    If tB2 >= 224 Quit 2
+    If tB2 < 128 Quit 0
+    If tB2 >= 192 Quit 0
+    ; tB2 is ALSO a continuation byte — look one more byte further back.
+    If tLen < 3 Quit 0
+    Set tB3 = $Ascii(pChunk, tLen - 2)
+    If tB3 >= 240 Quit 3
+    Quit 0
+}
+
 /// Read the HTTP request body and parse it as JSON.
 /// <p>Returns a <class>%DynamicObject</class> via the <var>pBody</var> output parameter.</p>
+/// <p><b>Story 34.8 (ledger <c>34-6-CR-7</c>).</b> The stream resolved below — whichever of
+/// the two branches supplies it — is now decoded as UTF-8 via <method>DecodeUtf8Stream</method>
+/// before being handed to <method>%FromJSON</method>, fixing the request-body UTF-8
+/// mis-decode defect. See <method>DecodeUtf8Stream</method>'s own banner for the full
+/// live-probe evidence. Applied uniformly to both the <code>GetMimeData("BODY")</code>
+/// branch and the <property>%request.Content</property> fallback: only the fallback is
+/// empirically reachable today (probed 2026-08-16 — <code>GetMimeData("BODY")</code> is
+/// never populated for this project's plain <code>application/json</code> POSTs, multipart
+/// only), but both are documented CSP conventions for "the raw request body" and neither
+/// applies charset translation of its own, so the same fix is correct for either.</p>
 ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
     Set pBody = ""
+    ; Story 34.8 code review: the decode stage now runs inside this same Try, so the catch
+    ; can no longer assume every failure means malformed client JSON. tStage discriminates
+    ; a server-side read/decode fault (stream read, $ZConvert, temp-stream write) from a
+    ; genuine JSON parse error, so an operator is not sent to debug a payload that was fine.
+    Set tStage = "decode"
     Try {
         ; In %CSP.REST context, the POST body is available via %request.Content
         ; which is a MultiDimensional property in %CSP.Request.
@@ -211,9 +1181,15 @@ ClassMethod ReadRequestBody(Output pBody As %DynamicObject) As %Status
         If '$IsObject($Get(tStream)) Quit
         Do tStream.Rewind()
         If 'tStream.Size Quit
-        Set pBody = ##class(%DynamicObject).%FromJSON(tStream)
+        Set tUtf8Stream = ..DecodeUtf8Stream(tStream)
+        Set tStage = "parse"
+        Set pBody = ##class(%DynamicObject).%FromJSON(tUtf8Stream)
     } Catch ex {
-        Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body: "_ex.DisplayString())
+        If tStage = "parse" {
+            Set tSC = $$$ERROR($$$GeneralError, "Invalid JSON in request body: "_ex.DisplayString())
+        } Else {
+            Set tSC = $$$ERROR($$$GeneralError, "Failed to read and UTF-8-decode the request body before parsing it; this is a server-side read/decode fault, not malformed JSON from the client: "_ex.DisplayString())
+        }
     }
     Quit tSC
 }
@@ -248,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "6422caf6ec31";
+Parameter BOOTSTRAPVERSION = "01dc15bb27df";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -2596,13 +3572,189 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 }`,
   ],
   [
+    "ExecuteMCPv2.REST.Base.cls",
+    `/// Common base class for <class>ExecuteMCPv2.REST.*</class> handlers.
+/// <p>Every handler in this package previously extended <class>%Atelier.REST</class>
+/// directly and called its inherited <method>RenderResponseBody</method> via the
+/// <code>Do ..RenderResponseBody(...)</code> form, which discards the method's
+/// returned <c>%Status</c> at all 738 call sites across 15 handlers (count derived
+/// mechanically from <code>..RenderResponseBody(</code> occurrences, Rule #51 — the
+/// "745" carried by the story spec was a hand-authored figure). This class
+/// intercepts that single inherited entry point so every one of those call sites is
+/// covered without a single call-site edit (Story 34.4, AC 34.4.1).</p>
+/// <p><b>What the override does.</b> <class>%Atelier.REST</class>'s own
+/// <method>RenderResponseBody</method> interleaves <code>Write</code> calls with
+/// <code>%ToJSON()</code> calls directly against the response device: it writes the
+/// opening brace and the <code>"status"</code> key, then <code>%ToJSON()</code>s the
+/// status part, writes <code>"console"</code>, <code>%ToJSON()</code>s the message
+/// part, writes <code>"result"</code>, <code>%ToJSON()</code>s the result part, then
+/// writes the closing brace. If serialization of the message or result part fails
+/// partway through, everything written so far has already reached the client as an
+/// HTTP 200 with a truncated, invalid JSON body and no error signal — the exact
+/// failure class Epic 34 exists to remove, just triggered from the response-render
+/// path instead of the capture path (deferred-work ledger item <c>34-2-R3</c>).</p>
+/// <p>This override serializes the message and result parts into a throw-away
+/// <class>%Stream.TmpCharacter</class> FIRST, before anything is written to the real
+/// response. If that pre-flight succeeds, nothing has been written yet, so delegating
+/// to <code>##super()</code> reproduces the parent's output byte-for-byte (AC 34.4.4
+/// back-compat). Note the delegation passes the LOCALLY DEFAULTED copies
+/// (<var>tMsgPart</var>/<var>tResPart</var>), never the raw formals — see the
+/// <method>RenderResponseBody</method> comment for why re-referencing an omitted
+/// formal at that call site is a live outage, and why the defaulted copies are
+/// nonetheless byte-equivalent to the parent's own defaulting. If the pre-flight fails,
+/// nothing has been written yet either, so a minimal, guaranteed-serializable error
+/// envelope — built from empty console/result parts and the real pre-flight failure
+/// text (via <method>ExecuteMCPv2.Utils.SanitizeError</method>, Rule #9) — is
+/// substituted instead of a truncated one.</p>
+/// <p><b>Scope limits — what this pre-flight does NOT cover.</b> Stated explicitly so
+/// the guard is not read as broader than it is:</p>
+/// <ul>
+/// <li><b>The status part is not pre-flighted.</b> The parent serializes
+/// <var>pStatus</var> (via <method>StatusToJSON</method>) FIRST, before the console and
+/// result parts. A failure there still yields an empty or <c>{"status":</c>-truncated
+/// body. It is deliberately not guarded: the substitution envelope must itself render a
+/// status through that same path, so pre-flighting it is circular. In practice
+/// <method>StatusToJSON</method> builds a well-formed object from any <c>%Status</c>.</li>
+/// <li><b>Only serializability is proven, not the device write.</b> The pre-flight
+/// serializes into a character stream; the parent writes through the CSP response device
+/// (charset translation, Web-Gateway buffering). A payload that serializes cleanly can
+/// still fail on the device — e.g. a client disconnecting mid-write — and that
+/// <c>%Status</c> is still discarded by the <c>Do</c> call form. This class narrows the
+/// failure class; it does not eliminate it.</li>
+/// </ul>
+/// <p><b>Severity note:</b> <c>34-2-R3</c> has <b>no reachable trigger today</b>. Its
+/// known cause — a value whose JSON serialization outright fails reaching a dynamic
+/// entity — was fixed at the root during the Story 34.2 review. This class is
+/// defense-in-depth: the failure pattern lives in <method>RenderResponseBody</method>
+/// itself, which is shared by every <c>ExecuteMCPv2.REST.*</c> handler, on the payload
+/// surface Epic 34 enlarged the most.</p>
+Class ExecuteMCPv2.REST.Base Extends %Atelier.REST
+{
+
+/// Pre-flight JSON serialization of <var>pMsgPart</var>/<var>pResPart</var> before
+/// delegating to the inherited implementation. See the class banner for the full
+/// rationale.
+/// <p>Signature pinned live from <class>%Atelier.REST</class> (IRIS 2026.1 Build
+/// 235U) via <c>iris_doc_get</c> before writing this override — parameter names,
+/// types, and return type match exactly. Do not change this signature; a mismatch
+/// either fails to compile or silently fails to override the inherited method.</p>
+ClassMethod RenderResponseBody(pStatus As %Status, pMsgPart As %DynamicArray, pResPart As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; Mirror %Atelier.REST.RenderResponseBody's own default-application so the
+        ; pre-flight walks exactly what the parent implementation would walk.
+        ; pMsgPart/pResPart are frequently UNDEFINED here — every "Do
+        ; ..RenderResponseBody(status, , result)" call site (the overwhelming
+        ; majority) omits pMsgPart positionally, and error paths often omit both —
+        ; so $Get() (never a bare Set) is required to read them without an
+        ; <UNDEFINED> that this method's own Try/Catch would swallow silently,
+        ; leaving nothing written to the response (Rule #15 exempts this: pMsgPart
+        ; is a local variable/parameter reference, not a method call).
+        Set tMsgPart = $Get(pMsgPart)
+        Set tResPart = $Get(pResPart)
+        If '$IsObject(tMsgPart) Set tMsgPart = []
+        If '$IsObject(tResPart) Set tResPart = {}
+
+        Set tPreflightOK = 1
+        Set tPreflightStatus = $$$OK
+        Try {
+            ; Parity with the parent's own %IsA branch (%Atelier.REST.RenderResponseBody):
+            ; a %Atelier.v1.Utils.DocumentStreamAdapter is NOT a dynamic entity — its
+            ; %ToJSON(pLevel, pFormat) WRITES TO THE CURRENT DEVICE, so handing it the
+            ; scratch stream would bind it to pLevel and emit the document body to the
+            ; real response during "pre-flight", then again from ##super(). No handler in
+            ; this package passes that shape today (nothing calls the inherited
+            ; ServeDoc/ServeXml), so this is parity with the method being overridden
+            ; rather than speculative generality: an override must not silently diverge
+            ; from its parent's contract for a shape the parent explicitly supports.
+            If tResPart.%IsA("%Atelier.v1.Utils.DocumentStreamAdapter") {
+                ; Nothing to pre-flight — defer entirely to the parent's own branch.
+            } Else {
+                Set tScratch = ##class(%Stream.TmpCharacter).%New()
+                Do tMsgPart.%ToJSON(tScratch)
+                Set tScratch = ##class(%Stream.TmpCharacter).%New()
+                Do tResPart.%ToJSON(tScratch)
+            }
+        } Catch exPreflight {
+            ; DISCRIMINATED, in the fail-safe direction (Rule #44; same discipline the
+            ; Story 34.3 review imposed on Redirects()'s undiscriminated Catch, and that
+            ; Utils.InvokeWithArgs applies to <MAXSTRING>). The pre-flight materializes
+            ; the whole payload into IRISTEMP, which the parent's device-targeted
+            ; %ToJSON() never does — so it can fail for reasons that have NOTHING to do
+            ; with serializability (temp-DB pressure on a large but perfectly valid
+            ; response). Substituting an error envelope for those would DESTROY a good
+            ; payload: a brand-new regression on the hot path of all 738 renders.
+            ; Mis-substituting is strictly worse than mis-passing: falling through to
+            ; ##super() is exactly the pre-Story-34.4 behavior, never a new failure.
+            ; So only a genuine serialization failure substitutes; resource/environment
+            ; errors fall through and let the parent render as it always did.
+            If $ListFind($ListBuild("<STORE>", "<FILEFULL>", "<NOTOPEN>", "<DIRECTORY>", "<PROTECT>", "<DISCONNECT>", "<INTERRUPT>"), exPreflight.Name) > 0 {
+                Set tPreflightOK = 1
+            } Else {
+                Set tPreflightOK = 0
+                Set tPreflightStatus = exPreflight.AsStatus()
+            }
+        }
+
+        If tPreflightOK {
+            ; Success path. Pass the already-defaulted tMsgPart/tResPart, NOT the
+            ; raw pMsgPart/pResPart formals: those are frequently undefined (see
+            ; above), and re-referencing an undefined by-value argument AT THIS
+            ; CALL SITE evaluates it immediately and throws <UNDEFINED> before
+            ; control ever reaches ##super() — this was caught live (Story 34.4
+            ; dev) as a real empty-response regression, not a hypothetical one.
+            ; tMsgPart/tResPart are exactly what the parent's own default-
+            ; application would have produced from pMsgPart/pResPart, so this is
+            ; still byte-identical to the inherited implementation (AC 34.4.4).
+            Set tSC = ##super(pStatus, tMsgPart, tResPart)
+        } Else {
+            ; Nothing has reached the client yet, so this is one clean envelope,
+            ; never a truncated one. Empty console/result parts are guaranteed
+            ; serializable; the real failure text is preserved via SanitizeError
+            ; (Rule #9) rather than masked with generic text.
+            ; The CALLER's own pStatus is folded in rather than replaced: the majority
+            ; of substitutable sites are error renders (e.g. Command.cls passes
+            ; SanitizeError(tCmdStatus)), and dropping pStatus would tell the client
+            ; only "%ToJSON failed" while silently discarding the application error
+            ; that caused the response in the first place. $$$ADDSC of an OK pStatus
+            ; yields just the pre-flight status, so the success-render case is
+            ; unchanged.
+            Set tSubStatus = ##class(ExecuteMCPv2.Utils).SanitizeError(tPreflightStatus)
+            If $$$ISERR(pStatus) Set tSubStatus = $$$ADDSC(pStatus, tSubStatus)
+            Set tSC = ##super(tSubStatus, [], {})
+        }
+    } Catch ex {
+        ; REACHABILITY (Rule #54 — this branch is deliberate, not dead code).
+        ; It is NOT reachable via ##super(): %Atelier.REST.RenderResponseBody wraps
+        ; its whole body in its own Try/Catch and always returns a %Status rather
+        ; than throwing. It IS reachable via the two calls in this method that sit
+        ; OUTSIDE the inner pre-flight Try — ##class(ExecuteMCPv2.Utils).SanitizeError()
+        ; (which has no internal error trapping of its own) and exPreflight.AsStatus()
+        ; in the pre-flight Catch. Both are only reached once the pre-flight has
+        ; already failed, so this is a second-order guard.
+        ; CONSEQUENCE, stated plainly: nothing has been written to the device at this
+        ; point, and every one of the 738 call sites uses the "Do" form that discards
+        ; the status returned here — so this path yields an empty HTTP 200. That is
+        ; accepted deliberately rather than papered over with a last-resort render:
+        ; a render here would itself be a doubly-unreachable, untestable branch
+        ; (Rule #54 cuts against adding it). Revisit if the pre-flight ever gains a
+        ; reachable trigger.
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Global.cls",
     `/// REST handler for global operations (get, set, kill, list).
 /// <p>Provides CRUD operations on IRIS globals via the custom REST
 /// endpoint <code>/api/executemcp/v2/global</code>. Each method follows
 /// the namespace switch/restore pattern and uses shared validation
 /// utilities from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Global Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Global Extends ExecuteMCPv2.REST.Base
 {
 
 /// Get the value of a global node.
@@ -2888,7 +4040,16 @@ ClassMethod ValidateGlobalName(pGlobal As %String) As %Status [ Private ]
 /// Both methods follow the namespace switch/restore pattern from
 /// <class>ExecuteMCPv2.REST.Global</class> and use shared utilities
 /// from <class>ExecuteMCPv2.Utils</class>.</p>
-Class ExecuteMCPv2.REST.Command Extends %Atelier.REST
+/// <p><b>34-3-R1 fix (Story 34.4, AC 34.4.2):</b> <var>truncated</var> is surfaced on
+/// the error envelope of every failure path reached AFTER I/O capture has begun (the
+/// command/target-execution Catch in <method>Execute</method>, and the
+/// <method>ExecuteMCPv2.Utils.InvokeWithArgs</method> error path plus its own Catch in
+/// <method>ClassMethod</method>) — previously computed there and then silently
+/// discarded. The early validation-error one-liners (missing body/command/className/
+/// methodName, bad namespace) render before capture ever starts, so there is no
+/// truncated state to report for them; this is documented here explicitly rather than
+/// left to be inferred, per the point-of-use clause of AC 34.4.2.</p>
+Class ExecuteMCPv2.REST.Command Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an ObjectScript command with captured I/O output.
@@ -2935,6 +4096,7 @@ ClassMethod Execute() As %Status
         ; JSON envelope when it exceeds the buffer boundary. By doing the redirect
         ; on a throw-away null device, the HTTP response stream stays pristine.
         Set %ExecuteMCPOutput = ""
+        Set %ExecuteMCPTruncated = 0
         Set tInitIO = $IO
         Set tNull = ##class(%Library.Device).GetNullDevice()
         Open tNull:::1
@@ -2967,13 +4129,33 @@ ClassMethod Execute() As %Status
         Set $NAMESPACE = tOrigNS
 
         If tCmdErrored {
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): truncated was computed but
+            ; discarded on this path — surface it on the error envelope instead of
+            ; silently losing it, the same "computed then discarded" shape 34-2-R3
+            ; named for RenderResponseBody's own %Status.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus), , tErrorResult)
             Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
         } Else {
             Set tOutput = $Get(%ExecuteMCPOutput, "")
+            Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
             Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
+            ; Story 34.6 AC 34.6.1: bound the response PAYLOAD to the documented ceiling —
+            ; independent of (and applied AFTER) the capture-buffer <MAXSTRING> truncation
+            ; above. ApplyOutputCeiling only ever SETS tTruncated (never clears an
+            ; already-true value), so this correctly ORs the two truncation causes into
+            ; one flag. See ApplyOutputCeiling's banner for the Rule #38 discipline and
+            ; the Rule #36 measurement behind the ceiling value.
+            Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
             Set tResult = {}
             Do tResult.%Set("output", tOutput)
+            ; Additive (Rule #19): 34-2-R1 fix — a capture-buffer <MAXSTRING> no longer
+            ; aborts the command with an opaque error; it now completes with whatever was
+            ; captured up to the ceiling, flagged here rather than silently.
+            Do tResult.%Set("truncated", tTruncated, "boolean")
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     } Catch ex {
@@ -2987,22 +4169,66 @@ ClassMethod Execute() As %Status
                 If $Get(tNull) '= "" { Close tNull }
             }
         } Catch {}
+        ; 34-3-R1 fix: capture whatever truncated state exists before it is
+        ; killed, and surface it on the error envelope (AC 34.4.2).
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
+        Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC
 }
 
-/// Execute a class method by name with positional arguments.
+/// Invoke a class method by name with positional arguments and captured I/O output.
 /// <p>Reads a JSON body with <code>className</code>, <code>methodName</code>,
-/// optional <code>args</code> (JSON array of positional parameters), and
-/// optional <code>namespace</code>. Uses <code>$ClassMethod()</code> for
-/// dynamic invocation, supporting up to 10 arguments.</p>
+/// optional <code>args</code> (JSON array of up to 20 positional parameters — a plain
+/// scalar is passed by value; a <code>{byRef, value?}</code> marker object is passed
+/// by reference and its post-call value is returned in the additive
+/// <code>byRefValues</code> field, keyed by zero-based index), and optional
+/// <code>namespace</code>. Uses <code>$ClassMethod()</code> for dynamic invocation.
+/// Argument parsing, marker handling, and the 20-argument dispatch ladder live in
+/// <method>InvokeWithArgs</method> on <class>ExecuteMCPv2.Utils</class> — kept out of
+/// this routine so the 21-branch ladder cannot push <method>ClassMethod</method> into a
+/// separately generated <c>.int</c> from <method>Redirects</method> below (Story 34.1
+/// Constraint C-2: <code>$ZNAME</code> binds the currently executing routine, and the
+/// mnemonic entry points must live in that same routine).</p>
+/// <p>Captures <code>Write</code> output from the target via the same null-device
+/// redirect pattern as <method>Execute</method> above (see its comment for why the
+/// redirect must bind on a throw-away null device rather than <code>$IO</code>), and
+/// returns it in the additive <code>output</code> field. An additive
+/// <code>truncated</code> boolean flags the case where the captured output hit the
+/// platform's long-string ceiling mid-target-execution (AC 34.2.6/R2) — the response
+/// still succeeds, with whatever was captured/mutated before the limit.</p>
+/// <p><b>Story 34.6 AC 34.6.1:</b> <code>output</code> is additionally bounded by
+/// <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>'s documented ceiling (folding
+/// further into <code>truncated</code>), and <code>byRefValues</code> gains its own
+/// node/byte budget in <method>ExecuteMCPv2.Utils.BuildByRefNode</method>, surfaced here
+/// as the additive <code>byRefTruncated</code> boolean — reported separately from
+/// <code>truncated</code> since the two describe different response fields.</p>
+/// <p><b>Story 34.6 code-review finding CR-5:</b> <code>returnValue</code> — the
+/// PRIMARY payload field, and the one AC 34.6.1's ceiling did not originally cover — is
+/// now ALSO bounded by the same <method>ExecuteMCPv2.Utils.ApplyOutputCeiling</method>
+/// ceiling and marker, surfaced as its own additive <code>returnValueTruncated</code>
+/// boolean. Reported separately from <code>truncated</code>/<code>byRefTruncated</code>
+/// (each describes a different response field) but present, defaulted false, on both
+/// error envelopes too, for the same shape symmetry <code>byRefTruncated</code>
+/// already established.</p>
+/// <p><b>Story 34.7 AC 34.7.3 (ledger <c>34-6-CR2-6</c>):</b> <code>returnValue</code>,
+/// <code>byRefValues</code> and <code>output</code> no longer each get their own
+/// independent <parameter>ExecuteMCPv2.Utils.OUTPUTCEILING</parameter> — they now share
+/// ONE pool of that size, spent in that field order (a Project Lead decision; see
+/// <method>ExecuteMCPv2.Utils.InvokeWithArgs</method>'s banner). All three flags are
+/// RETAINED unchanged; only the budget arithmetic changes. <code>returnValue</code> is
+/// unaffected in practice (always first, so it always sees the full ceiling); a large
+/// <code>output</code> capture now absorbs whatever <code>returnValue</code> and
+/// <code>byRefValues</code> did not spend, rather than getting its own separate 32768.</p>
 ClassMethod ClassMethod() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
+    Set tRedirected = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -3033,43 +4259,64 @@ ClassMethod ClassMethod() As %Status
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
         }
 
-        ; Determine argument count
-        Set tArgCount = 0
-        If $IsObject(tArgs) Set tArgCount = tArgs.%Size()
+        ; Set up I/O redirect to capture Write output via a SEPARATE null device — see
+        ; Execute()'s comment above for why this must never bind on $IO. The mnemonic
+        ; entry points (Redirects(), below) must stay compiled into this SAME routine
+        ; (Story 34.1 Constraint C-2) for "^"_$ZNAME to resolve them; verified after
+        ; every compile in this story via iris_doc_list(generated=true).
+        Set %ExecuteMCPOutput = ""
+        Set tInitIO = $IO
+        Set tNull = ##class(%Library.Device).GetNullDevice()
+        Open tNull:::1
+        Use tNull::("^"_$ZNAME)
+        Set tRedirected = 1
+        Do ##class(%Library.Device).ReDirectIO(1)
 
-        ; Call $ClassMethod with the appropriate number of arguments (up to 10)
-        If tArgCount = 0 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName)
-        } ElseIf tArgCount = 1 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0))
-        } ElseIf tArgCount = 2 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1))
-        } ElseIf tArgCount = 3 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2))
-        } ElseIf tArgCount = 4 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3))
-        } ElseIf tArgCount = 5 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4))
-        } ElseIf tArgCount = 6 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5))
-        } ElseIf tArgCount = 7 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6))
-        } ElseIf tArgCount = 8 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7))
-        } ElseIf tArgCount = 9 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7), tArgs.%Get(8))
-        } ElseIf tArgCount = 10 {
-            Set tReturn = $ClassMethod(tClassName, tMethodName, tArgs.%Get(0), tArgs.%Get(1), tArgs.%Get(2), tArgs.%Get(3), tArgs.%Get(4), tArgs.%Get(5), tArgs.%Get(6), tArgs.%Get(7), tArgs.%Get(8), tArgs.%Get(9))
-        } Else {
-            Set $NAMESPACE = tOrigNS
-            Set tSC = $$$ERROR($$$GeneralError, "Too many arguments: maximum is 10, received " _ tArgCount)
-            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-            Set tSC = $$$OK
-            Quit
-        }
+        ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
+        ; ladder all live in Utils (keeps this routine small — see method banner).
+        ; Story 34.7 AC 34.7.3: tOutputBudget is the new additive trailing output —
+        ; whatever remains of the ONE shared response budget after InvokeWithArgs
+        ; accounted for both returnValue and byRefValues (see its banner) — passed below
+        ; as the explicit ceiling for \`output\`, last in the shared-budget priority order.
+        Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated, .tOutputBudget)
+
+        ; Restore the original I/O state — same discipline as Execute() (Rule #7):
+        ; disable redirect, switch back to the untouched initial device, close the
+        ; scratch null device, unconditionally and before rendering.
+        Do ##class(%Library.Device).ReDirectIO(0)
+        Use tInitIO
+        Close tNull
+        Set tRedirected = 0
+        Set tOutput = $Get(%ExecuteMCPOutput, "")
+        Kill %ExecuteMCPOutput
+
+        ; Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3: bound the output field
+        ; to whatever the shared response budget has left (tOutputBudget — the full
+        ; OUTPUTCEILING on any early-exit path where InvokeWithArgs never reached its own
+        ; shared-budget computation, exactly matching pre-34.7 behavior there). Same
+        ; discipline as Execute() above otherwise: ApplyOutputCeiling only ever SETS
+        ; tTruncated (never clears an already-true value), so this ORs in with
+        ; InvokeWithArgs' own capture-overflow signal.
+        Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated, tOutputBudget)
 
         ; Restore namespace before rendering response
         Set $NAMESPACE = tOrigNS
+
+        If $$$ISERR(tSC) {
+            ; 34-3-R1 fix (Story 34.4, AC 34.4.2): tTruncated is always defined by
+            ; InvokeWithArgs (set to 0 at entry) even on its error return — surface
+            ; it here instead of discarding it. tByRefTruncated is likewise always
+            ; defined (Story 34.6) — a genuine target error skips byRefValues assembly
+            ; entirely, so it stays 0, but the field is still rendered for shape
+            ; consistency with the success envelope.
+            Set tErrorResult = {}
+            Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+            Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+            Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC), , tErrorResult)
+            Set tSC = $$$OK
+            Quit
+        }
 
         ; Build result — convert return value to string for JSON transport
         ; Guard against OREF return values that cannot be serialized to JSON
@@ -3078,13 +4325,44 @@ ClassMethod ClassMethod() As %Status
         } Else {
             Set tReturnStr = tReturn
         }
+        ; Story 34.6 code-review finding CR-5: returnValue is the PRIMARY payload field,
+        ; and was the one field AC 34.6.1's ceiling did not cover — a target returning a
+        ; large string (a file read, a serialized report, ...) shipped fully unbounded.
+        ; Apply the SAME documented ceiling and marker, with its own additive
+        ; returnValueTruncated flag (symmetric with truncated/byRefTruncated — the
+        ; story's own established one-flag-per-response-field pattern) rather than
+        ; folding it into the unrelated truncated flag, which describes only output.
+        Set tReturnValueTruncated = 0
+        Set tReturnStr = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tReturnStr, .tReturnValueTruncated)
         Set tResult = {}
         Do tResult.%Set("returnValue", tReturnStr)
         Do tResult.%Set("argCount", tArgCount, "number")
+        Do tResult.%Set("output", tOutput)
+        Do tResult.%Set("byRefValues", tByRefValues)
+        Do tResult.%Set("truncated", tTruncated, "boolean")
+        Do tResult.%Set("byRefTruncated", tByRefTruncated, "boolean")
+        Do tResult.%Set("returnValueTruncated", tReturnValueTruncated, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
+        ; Ensure redirection is restored on unexpected error before rendering.
+        Try {
+            If tRedirected {
+                Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
+                If $Get(tNull) '= "" { Close tNull }
+            }
+        } Catch {}
+        Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
-        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
+        ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
+        ; InvokeWithArgs returned), so default it rather than assume it exists. Same for
+        ; tByRefTruncated (Story 34.6) and tReturnValueTruncated (code review CR-5) —
+        ; an exception this early means returnValue was never computed either.
+        Set tErrorResult = {}
+        Do tErrorResult.%Set("truncated", $Get(tTruncated, 0), "boolean")
+        Do tErrorResult.%Set("byRefTruncated", $Get(tByRefTruncated, 0), "boolean")
+        Do tErrorResult.%Set("returnValueTruncated", $Get(tReturnValueTruncated, 0), "boolean")
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
     }
     Quit tSC
@@ -3095,14 +4373,35 @@ ClassMethod ClassMethod() As %Status
 /// set via <code>Use tInitIO::("^"_$ZNAME)</code> when I/O redirection is active.
 /// All captured output is accumulated in the process-private variable
 /// <code>%ExecuteMCPOutput</code>.</p>
+/// <p><b>34-2-R1 fix (Story 34.3):</b> each label's append is wrapped in its own
+/// <code>Try/Catch</code> <b>discriminated on <code>&lt;MAXSTRING&gt;</code></b> — any other
+/// exception (e.g. <code>&lt;STORE&gt;</code>) is re-thrown unchanged, so a genuine crash is
+/// never mis-reported as a benign truncation and the target's/dispatcher's own error
+/// handling still sees it (the same discrimination the Story 34.2 review required of
+/// <method>ExecuteMCPv2.Utils</method>.<method>InvokeWithArgs</method>, applied here at the
+/// point the exception is now absorbed). A capture-buffer <code>&lt;MAXSTRING&gt;</code> (the
+/// platform's long-string ceiling, reached when <var>%ExecuteMCPOutput</var> itself grows
+/// too large) is absorbed HERE and recorded in the process-private
+/// <var>%ExecuteMCPTruncated</var> flag instead of being thrown to the caller of
+/// <code>Write</code>. Previously that exception propagated out of <code>Write</code>
+/// into whatever code issued it — including a TARGET method's own
+/// <code>Try/Catch</code>, which could swallow it before
+/// <method>ExecuteMCPv2.Utils</method>.<method>InvokeWithArgs</method>'s dispatch
+/// <code>Catch</code> ever saw it, producing a silent partial
+/// (<var>truncated</var> staying <code>false</code> even though output was genuinely cut
+/// off — ledger item <c>34-2-R1</c>). Now the target's <code>Write</code> call simply
+/// returns normally (the target completes instead of aborting) and the flag is the sole,
+/// unconditionally reliable signal — read by <method>InvokeWithArgs</method> for the
+/// <code>/classmethod</code> endpoint and by <method>Execute</method> above for the
+/// <code>/command</code> endpoint's own additive <var>truncated</var> field.</p>
 ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
 {
     Quit
-wstr(s) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s Quit
-wchr(a) Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) Quit
-wnl Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) Quit
-wff Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) Quit
-wtab(n) New chars Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars Quit
+wstr(s) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wchr(a) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wnl New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wff New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wtab(n) New chars,mcpex Try { Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
 rstr(len,time) Quit ""
 rchr(time) Quit ""
 }
@@ -3123,7 +4422,7 @@ rchr(time) Quit ""
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
 /// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
 /// its progress output from corrupting the HTTP response body.</p>
-Class ExecuteMCPv2.REST.UnitTest Extends %Atelier.REST
+Class ExecuteMCPv2.REST.UnitTest Extends ExecuteMCPv2.REST.Base
 {
 
 /// Run unit tests for a given target at the specified level.
@@ -3458,7 +4757,7 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
 /// scoped so that error paths can still access <class>ExecuteMCPv2.Utils</class>
 /// (which only exists in HSCUSTOM, not %SYS). The pattern is to save/restore
 /// <code>$NAMESPACE</code> manually in catch blocks.</p>
-Class ExecuteMCPv2.REST.Config Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Config Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all namespaces with their code and data database associations.
@@ -4166,7 +5465,7 @@ ClassMethod MappingManage(pType As %String) As %Status
 /// <class>ExecuteMCPv2.Utils</class> remains visible in catch blocks.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER included in response bodies
 /// or error messages (NFR6).</p>
-Class ExecuteMCPv2.REST.Security Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Security Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all user accounts with their properties (excluding passwords).
@@ -7347,7 +8646,7 @@ ClassMethod SqlPrivilegeList() As %Status
 /// The web application runs in HSCUSTOM, so namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is required for
 /// all Ens.Director and Ens.Config.Production calls.</p>
-Class ExecuteMCPv2.REST.Interop Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Interop Extends ExecuteMCPv2.REST.Base
 {
 
 /// Create or delete an Interoperability production.
@@ -9843,7 +11142,7 @@ ClassMethod DefaultSettingsManage() As %Status
 /// <b>target namespace</b> (not %SYS) — namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is used when a
 /// <code>namespace</code> parameter is supplied.</p>
-Class ExecuteMCPv2.REST.MessageResend Extends %Atelier.REST
+Class ExecuteMCPv2.REST.MessageResend Extends ExecuteMCPv2.REST.Base
 {
 
 /// Map a case-insensitive <code>Ens.DataType.MessageStatus</code> display label
@@ -10455,7 +11754,7 @@ ClassMethod MessageResend() As %Status
 /// <code>New $NAMESPACE</code>; the catch path restores first), exactly one
 /// <method>RenderResponseBody</method> per request path, and
 /// <method>ExecuteMCPv2.Utils:SanitizeError</method> on every error status.</p>
-Class ExecuteMCPv2.REST.Loc Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Loc Extends ExecuteMCPv2.REST.Base
 {
 
 /// Count lines of code for the documents matching a caller-supplied spec.
@@ -10558,7 +11857,7 @@ ClassMethod LocCount() As %Status
 /// <code>SYS.Database</code>, and <code>$SYSTEM.Monitor</code> class methods.
 /// Interoperability metrics require namespace switching to the target namespace
 /// for <code>Ens.*</code> queries.</p>
-Class ExecuteMCPv2.REST.Monitor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Monitor Extends ExecuteMCPv2.REST.Base
 {
 
 /// Return system metrics in JSON format.
@@ -11991,7 +13290,7 @@ ClassMethod BackupManage() As %Status
 /// (Story 23.0). This class returns <b>raw per-area values only</b>; ALL threshold/verdict
 /// logic lives in TypeScript (<code>iris_health_check</code>, Story 23.2), per
 /// architecture.md ADR H5 (server-side composition, TS-side interpretation).</p>
-Class ExecuteMCPv2.REST.Health Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Health Extends ExecuteMCPv2.REST.Base
 {
 
 /// Composite health-check endpoint: gathers all requested health areas in
@@ -12539,7 +13838,7 @@ ClassMethod HealthCheckInterop(pAreas As %DynamicObject, pErrors As %DynamicObje
 /// does NOT work</b> — probed live and confirmed it throws
 /// <code>&lt;ILLEGAL VALUE&gt;</code> (not a valid $ZCONVERT output code on this
 /// instance); do not use it despite it being a plausible-looking alternative.</p>
-Class ExecuteMCPv2.REST.EnvSync Extends %Atelier.REST
+Class ExecuteMCPv2.REST.EnvSync Extends ExecuteMCPv2.REST.Base
 {
 
 /// Document-hash endpoint: SHA-256 content hash + last-modified timestamp per
@@ -12784,7 +14083,7 @@ ClassMethod HashDoc(pDocName As %String, Output pHashHex As %String) As %Status
 /// <code>/api/executemcp/v2/task</code>.</p>
 /// <p>All operations execute in <b>%SYS</b> namespace using the
 /// <code>%SYS.Task</code> and <code>%SYS.Task.History</code> classes.</p>
-Class ExecuteMCPv2.REST.Task Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Task Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all scheduled tasks with details.
@@ -13126,7 +14425,7 @@ ClassMethod TaskHistory() As %Status
 /// </ul>
 /// <p>All operations requiring system classes execute in <b>%SYS</b> namespace
 /// using the safe save/restore pattern for namespace switching.</p>
-Class ExecuteMCPv2.REST.SystemConfig Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SystemConfig Extends ExecuteMCPv2.REST.Base
 {
 
 /// Handle system configuration get/set/export operations.
@@ -13422,7 +14721,7 @@ ClassMethod ExportConfig(Output pSC As %Status) As %DynamicObject [ Private ]
 /// </ul>
 /// <p>All operations execute in the <b>target namespace</b> (not %SYS)
 /// because DeepSee classes live in application namespaces.</p>
-Class ExecuteMCPv2.REST.Analytics Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Analytics Extends ExecuteMCPv2.REST.Base
 {
 
 /// Execute an MDX query and return structured pivot-table results.
@@ -13693,7 +14992,7 @@ ClassMethod CubeAction() As %Status
 /// no governance key, and no consumer ships in this story — Story 28.3's <code>advise</code>
 /// action is the first live caller; Story 28.2 captures reference fixtures from this
 /// endpoint's live output.</p>
-Class ExecuteMCPv2.REST.SqlAdvisor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.SqlAdvisor Extends ExecuteMCPv2.REST.Base
 {
 
 /// SQL advisor data endpoint: EXPLAIN plan text + index/class dictionary rows for the

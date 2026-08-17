@@ -1,6 +1,6 @@
 # IRIS MCP Server Suite
 
-> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release. See [CHANGELOG.md](CHANGELOG.md) for the 2026-04-19 bug-fix pass (six defects found during a manual MCP suite retest) and the 2026-04-09 pre-release breaking change to tool names.
+> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release. See [CHANGELOG.md](CHANGELOG.md) for the full pre-release history — most recently the governance policy file (`IRIS_GOVERNANCE_FILE`), the multi-client configuration manager (`iris-mcp-clients`), and the `iris_execute_classmethod` fidelity work (output capture, `ByRef`/`Output` args, response-payload budget, request-body UTF-8 decoding) — and [`docs/epic-summary.md`](docs/epic-summary.md) for what each epic built.
 
 **Give AI assistants structured, safe access to InterSystems IRIS.**
 
@@ -729,9 +729,29 @@ Each server has its own README with a complete tool reference:
 - [`@iris-mcp/ops` — Operations & Monitoring Tools](packages/iris-ops-mcp/README.md)
 - [`@iris-mcp/data` — Data & Analytics Tools](packages/iris-data-mcp/README.md)
 
+Two supporting packages ship no MCP tools of their own but carry user-facing surfaces:
+
+- [`@iris-mcp/shared`](packages/shared/README.md) — the connection/governance/audit engine every server sits on, plus the `iris-mcp-credentials` and `iris-mcp-governance` CLIs.
+- [`@iris-mcp/client-config`](packages/client-config/README.md) — the 13-client adapter registry, the `iris-mcp-clients` manager CLI, and the per-adapter certification dispositions.
+
+And two documentation sets sit alongside them:
+
+- [`tool_support.md`](tool_support.md) — the authoritative per-tool catalog mapping every tool to the IRIS API it calls.
+- [`docs/epic-summary.md`](docs/epic-summary.md) — what each of the 34 development epics built.
+
 ---
 
 ## Known Limitations
+
+### Execution Response Payload Ceiling (`iris_execute_command` / `iris_execute_classmethod`)
+
+The two execution tools cap what they return. On `iris_execute_command` the captured `output` is capped at **32768 raw characters**; on `iris_execute_classmethod` the same 32768-character budget is **shared** across `returnValue`, `byRefValues`, and `output`, spent in that order — so a small `returnValue` leaves nearly the whole budget for narration, while a `returnValue` longer than the budget consumes all of it and the other two fields get nothing. `byRefValues` is additionally bounded by a **1000-node** structural ceiling, independent of the character budget. There is **no environment variable and no per-call parameter to raise any of these** — they are fixed handler-side constants.
+
+- **The cap bounds the RESPONSE, not the work.** The target has already fully executed by the time truncation is applied. This is not protection against the command's own runtime, its resource usage, or a Web Gateway timeout — live measurement found the CSP Gateway/HTTP transport carries multi-megabyte responses cleanly (tested clean to 3,000,000 characters). The ceiling exists to keep results a bounded, genuinely consumable size for MCP clients, calibrated from a real client (Claude Code CLI) observed diverting a tool result away from inline consumption once it reached 50,031 characters.
+- **Truncation is flagged, and usually — but not always — marked.** Cut content is normally replaced with a machine-detectable `[IRIS-MCP-TRUNCATED ceiling=<N>chars]` marker, never a bare `...`. When the remaining budget is smaller than the marker itself (~40 characters), the field is emitted as a plain unmarked prefix instead, because a marker there would be larger than the value it replaced. **Absence of a marker is therefore not proof a field is complete** — trust the booleans: `truncated` (for `output`), `returnValueTruncated`, and `byRefTruncated`. A cut-short `byRefValues` container is marked `subscriptsTruncated: true`.
+- **32768 bounds RAW characters, measured before JSON escaping.** Quotes, backslashes, and control characters expand on the wire (a control character with no short escape becomes a 6-character `\uXXXX`), so the serialized HTTP body can be several times larger. Live-measured, for a single field holding exactly 32768 raw characters: **32,860** characters serialized (plain letters, 1.0x), **98,311** (mixed metacharacters, 3.0x), **196,495** (all C0 control characters, 6.0x). **Residual risk:** that worst case is ~3.9x past the 50,031-character threshold the ceiling was calibrated against, so a metacharacter-heavy response can still be diverted by a client despite honoring the raw ceiling. Tracked as `34-7-QA-1` in `_bmad-output/implementation-artifacts/deferred-work.md`.
+
+If you need output that exceeds the ceiling, have the target write it somewhere durable (a global, a file, a table) and retrieve it in pages rather than through a single execution response. Full per-tool detail, including the response shapes and the escaping-inflation table: [`@iris-mcp/dev`'s README](packages/iris-dev-mcp/README.md).
 
 ### Web Application Gateway Registration
 
@@ -750,6 +770,21 @@ The auto-bootstrap detects deployment state by checking **both** the deployed cl
 On the next server start, the bootstrap recognizes this `unconfigured` state and **self-heals**: it re-registers the web application (and package mapping), then **recompiles** the classes. The recompile is deliberate — a class-version hash matching the build proves the *source* is current, but it does **not** prove the *compiled objects* are valid. A code database migrated across IRIS versions keeps the source while carrying stale or version-incompatible compiled objects, which otherwise dispatch as `<NULL VALUE>` HTTP 500 errors until recompiled. No manual steps are required, provided the connecting user has `%Admin_Manage`.
 
 If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap reports `configured: false` with manual instructions, and a later launch by a privileged user self-heals automatically.
+
+### Non-ASCII Request-Body Content Was Mis-Decoded (Fixed in Story 34.8)
+
+Every custom `ExecuteMCPv2.REST.*` handler reads its JSON request body through the shared `ExecuteMCPv2.Utils.ReadRequestBody` helper (14 handler classes, 46 call sites, spanning all five servers). Before Story 34.8, that helper read the body as if it were Latin-1, so **non-ASCII characters submitted in a JSON request body were silently corrupted on the way in** — verified live: `é` (U+00E9) arrived as two garbled characters matching its raw UTF-8 bytes, `世界` as six, an emoji as four. There was no error and no truncation flag; the call returned `HTTP 200` with the corrupted value already accepted.
+
+This affected any tool whose input is written back to IRIS or otherwise round-tripped — most directly `@iris-mcp/dev`'s `iris_global_set` (`value`), whose corrupted text was written to the target global, a genuine **data corruption at rest**, plus `iris_execute_command` (`command`) and `iris_execute_classmethod` (`args`). Content that *originates* on the server (e.g. a compiled class's literal source) always round-tripped out correctly — the defect was strictly on the inbound request-body path.
+
+**Fixed:** `ReadRequestBody` now decodes the request body's raw UTF-8 bytes explicitly (`ExecuteMCPv2.Utils.DecodeUtf8Stream`), chunk-boundary-safe and streamed in chunks so the decode itself imposes no practical body-size ceiling (measured to tens of megabytes; any remaining limit comes from the JSON parse and transport, not the decode). Accented characters, CJK, and astral-plane emoji submitted through `iris_execute_command`, `iris_execute_classmethod`, and `iris_global_set` now round-trip correctly, and plain-ASCII content is unaffected (byte-identical before and after).
+
+**How malformed input is handled.** The decoder is deliberately **lenient**, not validating — it repairs or substitutes rather than rejecting the request:
+
+- **Invalid byte sequences are replaced with `?`**, not rejected. This covers an orphan continuation byte, an out-of-range lead byte, a truncated sequence at end of body, and a lone (unpaired) UTF-16 surrogate encoded as WTF-8/CESU-8. The substitute is indistinguishable from a `?` the caller genuinely sent, and the response is still `HTTP 200` with no error flag. Well-formed input is never affected — a genuine emoji (a correctly paired surrogate) is always preserved intact.
+- **Non-canonical ("overlong") encodings are decoded, not rejected.** For example the two bytes `C0 AF` decode to `/` even though conformant UTF-8 (RFC 3629) forbids that encoding. **Security note:** overlong forms are a classic filter-bypass technique. If you place a proxy, WAF, or gateway rule in front of these endpoints that inspects **raw bytes** for characters such as `/`, `.`, or a quote, be aware that an overlong encoding will pass that byte-level inspection and still decode to the canonical character inside IRIS. Any such rule must therefore normalize/validate UTF-8 itself rather than rely on byte matching — this matters because these endpoints execute arbitrary ObjectScript (`iris_execute_command`) and write globals (`iris_global_set`).
+
+**The fix is forward-only.** It corrects decoding for requests received after the fix is deployed; it does **not** repair data that was already written corrupted while the defect was live. If a global (or any other target) was populated with mojibake via `iris_global_set` (or an equivalent non-ASCII write) before upgrading, that stored value remains corrupted until it is explicitly rewritten — there is no automated repair tool for previously-corrupted data. Tracked as ledger item `34-6-CR-7` in this repository's deferred-work ledger (`_bmad-output/implementation-artifacts/deferred-work.md`), resolved by Story 34.8.
 
 ---
 

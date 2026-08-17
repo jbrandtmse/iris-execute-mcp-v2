@@ -694,6 +694,81 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
 
+    // Story 34.5 AC 34.5.1 (34-4-R4): the Atelier envelope's `result` must
+    // survive the `IrisApiError` throw so a field the server placed there
+    // (e.g. `truncated`) reaches the tool layer instead of being discarded.
+    it("should preserve the envelope `result` on the thrown IrisApiError for an HTTP-error-status response", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      const body = {
+        status: { errors: [{ code: 5001, msg: "ObjectScript error" }], summary: "error" },
+        console: [],
+        result: { truncated: true },
+      };
+      fetchMock.mockResolvedValueOnce(mockResponse(body, { status: 500 }));
+
+      try {
+        await client.get("/api/executemcp/v2/command");
+        expect.unreachable("expected IrisApiError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(IrisApiError);
+        expect((err as IrisApiError).result).toEqual({ truncated: true });
+      }
+
+      client.destroy();
+    });
+
+    it("should preserve the envelope `result` on the thrown IrisApiError for an Atelier-level error on HTTP 200", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(
+          {
+            status: { errors: [{ code: 1, msg: "Compilation error" }], summary: "" },
+            console: [],
+            result: { truncated: false },
+          },
+          {
+            status: 200,
+            setCookie: ["CSPSESSIONID=s1; path=/"],
+          },
+        ),
+      );
+
+      try {
+        await client.get("/api/compile");
+        expect.unreachable("expected IrisApiError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(IrisApiError);
+        expect((err as IrisApiError).result).toEqual({ truncated: false });
+      }
+
+      client.destroy();
+    });
+
+    it("back-compat (Rule #19): `result` is undefined when the error has no envelope (non-JSON response)", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      const htmlResponse = new Response("<html><body>Error</body></html>", {
+        status: 500,
+        headers: { "Content-Type": "text/html" },
+      });
+      fetchMock.mockResolvedValueOnce(htmlResponse);
+
+      try {
+        await client.get("/api/test");
+        expect.unreachable("expected IrisApiError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(IrisApiError);
+        expect((err as IrisApiError).result).toBeUndefined();
+      }
+
+      client.destroy();
+    });
+
     it("should throw IrisConnectionError on network failures", async () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);

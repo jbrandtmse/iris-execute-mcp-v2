@@ -361,11 +361,15 @@ export class IrisHttpClient {
       const isEmptyResult400 =
         response.status === 400 && errors.length === 0;
       if (!isEmptyResult400) {
+        // Story 34.5 (34-4-R4): pass the envelope's `result` through so
+        // fields the server placed there (e.g. `truncated`) survive the
+        // throw instead of being silently dropped.
         throw new IrisApiError(
           response.status,
           errors,
           path,
           `IRIS returned HTTP ${response.status} for ${method} ${path}. Check the request parameters and try again.`,
+          envelope?.result,
         );
       }
     }
@@ -380,6 +384,7 @@ export class IrisHttpClient {
         envelope.status.errors,
         path,
         `IRIS reported errors for ${method} ${path}. Review the error details and correct the request.`,
+        envelope.result,
       );
     }
 

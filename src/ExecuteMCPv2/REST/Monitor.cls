@@ -7,7 +7,7 @@
 /// <code>SYS.Database</code>, and <code>$SYSTEM.Monitor</code> class methods.
 /// Interoperability metrics require namespace switching to the target namespace
 /// for <code>Ens.*</code> queries.</p>
-Class ExecuteMCPv2.REST.Monitor Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Monitor Extends ExecuteMCPv2.REST.Base
 {
 
 /// Return system metrics in JSON format.

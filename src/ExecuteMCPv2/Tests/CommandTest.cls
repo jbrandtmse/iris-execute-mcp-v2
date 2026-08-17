@@ -11,6 +11,7 @@ Method OnBeforeOneTest() As %Status
 {
     Kill ^ExecuteMCPv2CmdTest
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 
@@ -19,6 +20,7 @@ Method OnAfterOneTest() As %Status
 {
     Kill ^ExecuteMCPv2CmdTest
     Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
     Quit $$$OK
 }
 
@@ -230,6 +232,85 @@ Method TestLargeOutputCaptureOver8KB() As %Status
     Do $$$AssertTrue($Extract(%ExecuteMCPOutput, 1, 5) = "XXXXX", "capture should start with XXXXX")
     Do $$$AssertTrue($Extract(%ExecuteMCPOutput, *-4, *) = "XXXXX", "capture should end with XXXXX")
 
+    Quit $$$OK
+}
+
+/// 34-2-R1 fix (Story 34.3): Redirects()'s label bodies now catch a capture-buffer
+/// <MAXSTRING> internally and record it in the process-private %ExecuteMCPTruncated flag
+/// instead of letting it propagate as an exception. Drives Redirects() directly — the
+/// same call site TestLargeOutputCaptureOver8KB above uses — to prove the label-level fix
+/// in isolation from ExecuteMCPv2.Utils.InvokeWithArgs (whose own OR-in-and-clear logic is
+/// covered separately by ClassMethodArgsTest).
+Method TestRedirectsSetsTruncatedFlagOnCaptureOverflow() As %Status
+{
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Set tChunk = $Translate($Justify("", 5000), " ", "X")
+
+    Set %ExecuteMCPOutput = ""
+    Kill %ExecuteMCPTruncated
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    ; 1000 * 5000 = 5,000,000 chars, comfortably past the ~2-4M <MAXSTRING> ceiling —
+    ; every Write past the ceiling must be caught silently by Redirects(), never thrown.
+    Set tCaught = 0
+    Try {
+        For i=1:1:1000 { Write tChunk }
+    } Catch {
+        Set tCaught = 1
+    }
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Do $$$AssertTrue('tCaught, "the capture overflow must never propagate as an exception to the caller of Write")
+    Do $$$AssertEquals($Get(%ExecuteMCPTruncated, 0), 1, "the capture-buffer overflow must be recorded in %ExecuteMCPTruncated")
+    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > 1000000, "the partial capture up to the ceiling must still be preserved")
+    Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
+    Quit $$$OK
+}
+
+/// Story 34.6 AC 34.6.1: mirrors Execute()'s OWN capture + ApplyOutputCeiling sequence
+/// exactly — XECUTE a command that writes past the documented 32768-char ceiling but far
+/// below <MAXSTRING>, then bound the captured output exactly as Execute() does before
+/// rendering. Execute() itself is a REST handler and not directly %UnitTest-callable, so
+/// this pins the full /command pipeline without requiring live HTTP.
+Method TestCommandOutputCeilingAppliedAfterCapture() As %Status
+{
+    Set %ExecuteMCPOutput = ""
+    Set %ExecuteMCPTruncated = 0
+    Set tInitIO = $IO
+    Set tNull = ##class(%Library.Device).GetNullDevice()
+    Open tNull:::1
+    Use tNull::("^ExecuteMCPv2.REST.Command.1")
+    Do ##class(%Library.Device).ReDirectIO(1)
+
+    ; Reproduce Execute()'s own XECUTE dispatch. The command string is built via
+    ; $Char(34) rather than inline doubled-quote escaping — clearer and less
+    ; error-prone than nesting several quoted string literals inside an XECUTE literal.
+    Set tCmd = "Write $Justify(" _ $Char(34) _ $Char(34) _ ",50000)"
+    XECUTE tCmd
+
+    Do ##class(%Library.Device).ReDirectIO(0)
+    Use tInitIO
+    Close tNull
+
+    Set tOutput = $Get(%ExecuteMCPOutput, "")
+    Set tTruncated = $Get(%ExecuteMCPTruncated, 0)
+    Kill %ExecuteMCPOutput
+    Kill %ExecuteMCPTruncated
+    Do $$$AssertEquals($Length(tOutput), 50000, "the raw XECUTE capture must hold all 50000 chars before the ceiling is applied")
+    Do $$$AssertEquals(tTruncated, 0, "the capture-buffer flag must not be set — 50000 chars is far below <MAXSTRING>")
+
+    ; Mirror Execute()'s post-capture ceiling application exactly.
+    Set tOutput = ##class(ExecuteMCPv2.Utils).ApplyOutputCeiling(tOutput, .tTruncated)
+    Do $$$AssertTrue($Length(tOutput) <= 32768, "ceiling-applied /command output must not exceed the documented ceiling")
+    Do $$$AssertTrue(tOutput [ "[IRIS-MCP-TRUNCATED", "ceiling-applied /command output must carry the machine-detectable marker")
+    Do $$$AssertEquals(tTruncated, 1, "truncated must now be set — the OR-in behavior Execute() relies on")
     Quit $$$OK
 }
 

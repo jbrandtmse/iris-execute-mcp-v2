@@ -7,7 +7,7 @@
 /// The web application runs in HSCUSTOM, so namespace switching via
 /// <method>ExecuteMCPv2.Utils:SwitchNamespace</method> is required for
 /// all Ens.Director and Ens.Config.Production calls.</p>
-Class ExecuteMCPv2.REST.Interop Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Interop Extends ExecuteMCPv2.REST.Base
 {
 
 /// Create or delete an Interoperability production.

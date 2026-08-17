@@ -210,7 +210,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
-| `iris_execute_classmethod` | Invoke a class method with arguments | `className`, `methodName`, `args?`, `namespace?` | -- |
+| `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
 | `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
 
 ### Code Metrics Tools
@@ -906,15 +906,132 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 **Output:**
 ```json
 {
-  "output": "Hello from IRIS"
+  "output": "Hello from IRIS",
+  "truncated": false
 }
 ```
+
+`output` is capped at **32768 RAW characters** (Story 34.6 AC 34.6.1; the ceiling bounds
+raw content, not the serialized wire size — see below) — content beyond the ceiling is cut
+off and replaced with a structured, machine-detectable marker
+(`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`. **This ceiling bounds the
+response payload only**: the command has already fully executed by the time it is applied,
+so it is not protection against the command's own execution time or resource usage, and it
+is not a Web Gateway timeout safeguard (Rule #38) — live measurement found the CSP
+Gateway/HTTP transport tolerates multi-megabyte responses cleanly (tested clean to
+3,000,000 characters). The 32768 value was chosen because a real MCP client (Claude Code
+CLI) was observed diverting a rendered tool result away from inline consumption once it
+reached 50,031 characters — 32768 stays safely under that measured boundary.
+
+**Raw characters vs. serialized JSON size (Story 34.7, AC 34.7.4).** The 32768 figure is
+measured via `$Length` on the raw content **before** JSON string escaping — it is not a
+promise about the HTTP response body's own byte size. Quotes, backslashes, and control
+characters each expand under JSON escaping (a quote or backslash becomes a 2-character
+escape; a control character with no short escape becomes a 6-character `\uXXXX` escape),
+so metacharacter-heavy output can serialize to several times the raw-character ceiling.
+Live-measured inflation, each row a single field holding exactly 32768 **raw** characters
+(so the raw ceiling is honored identically in all three):
+
+| content | serialized HTTP body | inflation |
+|---|---|---|
+| escaping-neutral plain letters | 32,860 | 1.0x |
+| mixed metacharacters (quote, backslash, tab, one control char) | 98,311 | 3.0x |
+| **worst case — all C0 control characters** (`\uXXXX`, 6 chars each) | **196,495** | **6.0x** |
+
+**Honest residual risk:** the worst case is about **6x** the raw ceiling — roughly **3.9x
+past** the 50,031-character client-divert threshold cited above, which was the entire
+rationale for the 32768 figure. The shared budget substantially reduces the pre-34.7 worst
+case (which was this same inflation again per independent field) but does **not** restore
+that safety margin for metacharacter-heavy content. Tracked as `34-7-QA-1` in
+`deferred-work.md`.
+
+`truncated` is `true` whenever `output` does not contain everything the command wrote,
+whether because it hit the 32768-character ceiling above or the platform's long-string
+ceiling mid-command — the call still succeeds, with whatever was captured up to that
+point, and this is never silent. On a FAILED call the tool reports the error text
+as usual, and additionally surfaces `truncated` in the response's `structuredContent`
+(e.g. `{"truncated": false}` alongside `"isError": true`) whenever the underlying REST
+error envelope carried the flag — verified live against the real `/command` endpoint
+(Story 34.5). `structuredContent` is omitted entirely, not set to `false`, on any IRIS
+error whose response envelope never carried the flag — a request rejected before the
+server's capture logic began, or a server predating Story 34.4. (A transport-level
+failure such as a refused connection is a different case again: it raises a connection
+error rather than producing a tool error response at all.)
 </details>
 
 <details>
 <summary><strong>iris_execute_classmethod</strong> -- Call a class method</summary>
 
-**Input:**
+Each `args` entry is either a plain scalar (by value) or a `{"byRef": true, "value"?: ...}`
+marker for a `ByRef`/`Output` parameter — up to 20 positions total. Any `Write` output the
+target produces is captured (no wrapper class needed for narrating methods, stock runners
+like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
+in `output`; `argCount` is unchanged from prior versions of this tool.
+
+**Response payload budget (Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 — ledger
+`34-6-CR2-6`).** `returnValue`, `byRefValues`, and `output` **share ONE 32768-RAW-character
+response budget** — not three independent 32768 budgets — spent in this field order:
+`returnValue` first (the method's actual result, usually small, so it is never starved by
+narration), then `byRefValues`, then `output` last (narration is usually the field that
+actually exceeds the budget, so it usually absorbs the truncation). Whatever a field does
+not use is available to the next one: a small `returnValue` leaves nearly the whole 32768
+for `byRefValues`/`output`, while a `returnValue` alone longer than 32768 characters
+consumes the **entire** budget, leaving nothing for the other two. Truncated content is cut
+off and replaced with a structured, machine-detectable elision marker
+(`[IRIS-MCP-TRUNCATED ceiling=<N>chars]`, where `<N>` is however much of the shared budget
+remained for that field at that point — not always 32768), never a bare `...`. Flagged via
+`returnValueTruncated` (for `returnValue`), `truncated` (for `output`), and `byRefTruncated`
+(for `byRefValues`) — three separate booleans, retained from the pre-34.7 shape, since each
+describes a different response field.
+
+`byRefValues` (marked positions' post-call values, keyed by zero-based index) is
+**additionally** bounded by its own **1000-node structural ceiling**, independent of (and on
+top of) the shared character budget above. The shared budget is charged for every piece of
+`byRefValues` content emitted — leaf values, `<Object:...>` placeholders, and subscript keys
+— but not for the per-node JSON scaffolding, which the 1000-node ceiling bounds instead.
+Once either budget is exhausted, further subscript entries are omitted from the affected
+node (marked `subscriptsTruncated: true`), and a marked position reached after the shared
+budget is already gone is **omitted from `byRefValues` entirely**. A position reached with
+budget still remaining, but whose value does not fit in what remains, is cut short in one of
+two ways: with the elision marker described above when there is room for the marker itself,
+or — when the remaining budget is smaller than the marker (under ~40 characters) — as a
+**plain unmarked prefix** of the real value, since emitting the marker there would replace a
+value with something larger than itself (Story 34.6 code-review finding CR-6). In that last
+case `byRefTruncated` is the **only** signal — the value carries no marker of its own, so
+the absence of a marker is not proof that a byRef value is complete.
+
+**Raw characters vs. serialized JSON size (Story 34.7, AC 34.7.4).** The 32768 figure is
+measured via `$Length` on each field's raw content **before** JSON string escaping — it is
+not a promise about the HTTP response body's own byte size. Quotes, backslashes, and
+control characters each expand under JSON escaping (a quote or backslash becomes a
+2-character escape; a control character with no short escape becomes a 6-character `\uXXXX`
+escape), so metacharacter-heavy content can serialize to several times the raw-character
+budget. Live-measured worst case: a single 32768-raw-character field of C0 control
+characters (consuming the ENTIRE shared budget by itself) serialized to a
+**196,495-character** HTTP response body — 6.0x the raw ceiling. See the measurement table
+under `iris_execute_command` above for the full escaping-neutral / mixed / worst-case
+range. This supersedes the earlier, now-inapplicable per-field measurement ("two
+32768-character fields serializing to 131,102 characters"), which described the pre-34.7
+independent-budget shape. **Honest residual risk:** 196,495 is roughly **3.9x past** the
+50,031-character client-divert threshold documented under `iris_execute_command` above,
+which was the entire rationale for the 32768 figure — the shared budget reduces but does
+not eliminate the risk that a metacharacter-heavy response gets diverted away from inline
+consumption by an MCP client. Tracked as `34-7-QA-1` in `deferred-work.md`.
+
+**Truncated `output` is not always marked.** Because `output` is spent **last**, it can be
+left a remainder smaller than the elision marker itself (~37-41 characters). In that band
+`output` is a plain hard-cut prefix with **no** `[IRIS-MCP-TRUNCATED …]` marker at all —
+exactly the fallback described for `byRefValues` below. As there, `truncated: true` is then
+the **only** signal, so the absence of a marker is not proof that `output` is complete.
+
+None of these ceilings are protection against the
+target's own execution time, resource usage, or a Web Gateway timeout — the target has
+already fully run by the time these caps are applied to the response payload. On a FAILED
+call the tool reports the error text as usual, and additionally surfaces `truncated` in the
+response's `structuredContent` whenever the underlying REST error envelope carried the
+flag — same mechanism as `iris_execute_command` above (Story 34.5).
+
+**Input (plain scalars):**
 ```json
 {
   "className": "MyApp.Utils",
@@ -926,7 +1043,35 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
 **Output:**
 ```json
 {
-  "returnValue": "7"
+  "returnValue": "7",
+  "argCount": 2,
+  "output": "",
+  "byRefValues": {},
+  "truncated": false,
+  "byRefTruncated": false,
+  "returnValueTruncated": false
+}
+```
+
+**Input (an `Output` parameter via a `byRef` marker):**
+```json
+{
+  "className": "MyApp.Utils",
+  "methodName": "Summarize",
+  "args": [{ "byRef": true }]
+}
+```
+
+**Output:**
+```json
+{
+  "returnValue": "ok",
+  "argCount": 1,
+  "output": "",
+  "byRefValues": { "0": "summary text" },
+  "truncated": false,
+  "byRefTruncated": false,
+  "returnValueTruncated": false
 }
 ```
 </details>
@@ -955,6 +1100,50 @@ Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) b
   ]
 }
 ```
+
+A run that matches zero test methods at any level — a typo'd class or method name, or a
+`class:method` spec the runner doesn't match — returns an explicit `error` field naming
+the target and level instead of a silent `total: 0, passed: 0, failed: 0`
+(Story 34.5). This response carries **both** `isError: true` **and** `structuredContent`
+set to the same object shown in the text content (Story 34.6, AC 34.6.4 — a recorded
+Project Lead decision: the guard fires only when the target produced nothing, a failed
+request rather than a clean run, so `isError` is truthful; carrying `structuredContent`
+keeps `structuredContent.total` reading `0` with a populated `error` rather than
+regressing to `undefined` for structured consumers). Applied identically to every guard
+path — package/class/method levels and the package discovery-time check:
+```json
+{
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "details": [],
+  "error": "No tests found for 'MyApp.Tests.UtilsTest:TestTypo' at level 'method'"
+}
+```
+
+If the runner instead reports that the target was found but the run failed before any
+test method could execute — a setup failure such as an `OnBeforeAllTests` error — the
+`error` field carries that reason rather than the generic "not found" wording, so a
+broken fixture is never misreported as a misspelled target (same `isError`/
+`structuredContent` shape as above):
+```json
+{
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "details": [],
+  "error": "Test run for 'MyApp.Tests.UtilsTest' at level 'class' produced no method-level results — MyApp.Tests.UtilsTest: OnBeforeAllTests: ERROR #5001: ..."
+}
+```
+
+At `level: "method"`, use the method's real, `Test`-prefixed name (e.g.
+`MyApp.Tests.UtilsTest:TestAdd`) — the same form shown in `details[].method`
+above. Internally the tool strips that prefix before querying IRIS's Atelier
+test-runner endpoint (which matches on the unprefixed form) and restores it on
+every result row, so the documented prefixed form is what you should always
+pass and always see back; you do not need to do this stripping yourself.
 </details>
 
 ---
@@ -996,6 +1185,18 @@ All tool errors return a standard MCP error response:
 ```
 
 Compilation errors are returned as successful tool results (not `isError: true`) with structured error details including line and character positions.
+
+---
+
+## Known Limitations
+
+### Non-ASCII request-body content was mis-decoded (fixed in Story 34.8)
+
+`iris_execute_command`'s `command`, `iris_execute_classmethod`'s `args`, and `iris_global_set`'s `value` are all read through a shared request-body parser. Before Story 34.8 it mis-decoded non-ASCII JSON content (UTF-8 read as Latin-1) — e.g. an emoji arrived corrupted as several garbled characters matching its raw UTF-8 byte values, with **no error and no truncation flag** (`HTTP 200`, silently wrong). For `iris_global_set` this corrupted data **at rest** in the target global.
+
+**This is now fixed** — accented characters, CJK, and emoji all round-trip correctly, and plain ASCII is unaffected. **The fix is forward-only**: data already written corrupted (e.g. via `iris_global_set` before upgrading) is **not** automatically repaired — there is no repair tool for previously-corrupted data.
+
+The decoder is **lenient rather than validating**: invalid byte sequences (orphan continuation bytes, truncated sequences, unpaired surrogates) are replaced with a literal `?` under `HTTP 200` rather than rejected, and non-canonical "overlong" encodings are decoded rather than refused — which has a filter-bypass implication if you byte-inspect these request bodies upstream. Full detail on both, plus the security note: see the [suite README's Known Limitations](../../README.md#known-limitations) and ledger item `34-6-CR-7`.
 
 ---
 

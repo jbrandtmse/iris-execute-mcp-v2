@@ -14,7 +14,7 @@
 /// <class>ExecuteMCPv2.Utils</class> remains visible in catch blocks.</p>
 /// <p><b>CRITICAL</b>: Password values are NEVER included in response bodies
 /// or error messages (NFR6).</p>
-Class ExecuteMCPv2.REST.Security Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Security Extends ExecuteMCPv2.REST.Base
 {
 
 /// List all user accounts with their properties (excluding passwords).

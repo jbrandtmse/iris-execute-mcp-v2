@@ -5,7 +5,7 @@
 /// <code>New $NAMESPACE</code>; the catch path restores first), exactly one
 /// <method>RenderResponseBody</method> per request path, and
 /// <method>ExecuteMCPv2.Utils:SanitizeError</method> on every error status.</p>
-Class ExecuteMCPv2.REST.Loc Extends %Atelier.REST
+Class ExecuteMCPv2.REST.Loc Extends ExecuteMCPv2.REST.Base
 {
 
 /// Count lines of code for the documents matching a caller-supplied spec.
