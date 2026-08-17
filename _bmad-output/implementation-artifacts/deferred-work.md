@@ -2366,3 +2366,97 @@ Three adversarial layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) al
 **Ledger state after this pass:** **2 HIGH / 19 MEDIUM / 72 LOW = 93 open** across **158 distinct items** (65 terminal), derived mechanically per Rule #51 from the prior state (84 open / 149 distinct / 65 terminal): +2 HIGH, +7 MEDIUM, +0 LOW, all open. So HIGH 0 + 2 = 2; MEDIUM 12 + 7 = 19; LOW 72 + 0 = 72; open 84 + 9 = 93; distinct 149 + 9 = 158. Terminal unchanged at 65 — nothing was dispositioned in this pass, only added. Check: 2 + 19 + 72 = 93.
 
 **This is the first time the ledger has carried an open HIGH since Epic 34 closed at 0 HIGH.** Both HIGHs are assigned to Epic 35 stories that must close before the beta hand-off, per the approved sequencing.
+
+## Epic 35 retro-review gate (2026-08-17)
+
+The `/epic-cycle 35` kickoff retro-review gate (Story 35.0, `35-0-epic-34-deferred-cleanup.md`) read the Epic 34 retrospective (`epic-34-retro-2026-08-17.md`) and this ledger at **93 open items** entering the gate — **2 HIGH / 19 MEDIUM / 72 LOW across 158 distinct items (65 terminal)**, the figure recorded immediately above at the close of the post-Epic-34 full-surface sweep. AC 35.0.2's merge precondition was re-verified live: `git merge-base --is-ancestor 6fe1763 origin/feature/feature-wave-4-classmethod-fidelity` exits **0** — Epic 34's commits are reachable from the wave-4 feature branch; the retro §6 branch-reachability risk is closed. Rule #57 machinery (bounded-close, frozen-diff snapshot, delivery receipts) was confirmed still present and unmodified in `.claude/skills/bmad-code-review/steps/` (installed by Story 34.0) — AC 35.0.4 satisfied by verification, not re-implementation.
+
+**Reconciliation note (both figures correct at their own moment):** Story 35.0 AC 35.0.3's own text cites "0 HIGH / 12 MEDIUM / 72 LOW" — that is this ledger's recorded state at Epic 34's *retrospective close* (line ~2338 above, "Ledger state after this pass" following the `34-8-CR` batch). The 93-open figure used as this gate's entry point additionally carries the post-Epic-34 full-surface sweep's 9 findings (+2 HIGH, +7 MEDIUM, +0 LOW), appended immediately above (line ~2366) after the retrospective closed and before this gate ran. Neither figure is amended; they describe two different, correctly-dated moments.
+
+### Retrospective action items (9) — disposition at this gate
+
+> **Corrected at code review (2026-08-17).** The first version of this section listed 6 rows and mis-sourced two of them: "Kimi Code VS Code extension half" and "Post-publish re-certification" were cited as retro **§7** #3/#4 but are rows #3/#4 of retro **§4** (the *Epic 33* follow-through table). The real §7 #3 (**beta distribution**) and §7 #4 (**npm publish**, carrying a `prepublishOnly`-only gate caveat) had therefore received **no disposition at all**, so "none left unaccounted" was false as written. Both are restored below, the §4 carry-forwards are re-sourced (and §4 #6 added), and §7 #4's engineering caveat is ledgered as `35-0-CR-1`. The recount command was also non-reproducing — see the note under the table.
+
+Full rationale for each item is recorded in Story 35.0's "Retro-Review Triage" section.
+
+**Retro §7 — Epic 34's own action items (6):**
+
+| Item | Source | Disposition |
+|---|---|---|
+| #1 SC-4 merge `epic34` → feature branch — prerequisite for beta | retro §7 | **DROP (closed — completed)**. Merge landed 2026-08-17 as `6fe1763`; this IS AC 35.0.2, re-verified above. No carry. |
+| #2 Decide the beta-visible branch (testers track feature branch, or must Epic 34 reach `main`?) | retro §7 | **DEFER — carried, owner Project Lead**. Open product decision; must resolve before the beta hand-off, i.e. after Story 35.8. |
+| #3 **Beta distribution to the test group** (git clone + build); plain hand-off per Lead decision, beta feedback drives priorities | retro §7 | **DEFER — carried, owner Project Lead (milestone)**. Gated on Epic 35 completing — Stories 35.1–35.8 are what make the hand-off safe — so it is not actionable inside this gate. Sequenced immediately after Story 35.8, jointly blocked with #2. |
+| #4 **npm publish after beta feedback.** Retro caveat: all eight packages wire their gates to `prepublishOnly` only — nothing on `prepack`/`prepare`; inert for a `git clone` hand-off (correct), but must be confirmed before any **tarball-based** distribution | retro §7 | **DEFER — carried, owner Project Lead (decision)**, blocked on #3's feedback by design. The *engineering* half is not deferred silently: ledgered as **`35-0-CR-1`** (MEDIUM) below, so it carries a severity, an owner and a Rule #37 count instead of living only in retro prose. |
+| #5 Re-evaluate `34-8-CR-1` (`%request.CharSet`) + the per-field response ceiling **against beta feedback** | retro §7 | **DEFER — carried with a NAMED TRIGGER (beta feedback)**. Both were deferred on the reasoning that every client is ours, which beta invalidates — but the invalidating evidence does not exist until beta runs. Ledger rows `34-8-CR-1`/`34-8-CR-2` stay open (see the DEFER table below) and are re-flagged at the Epic 36 gate. |
+| #6 Epic 35 is undefined (`epics.md` topped out at 34) | retro §7 | **DROP (closed — completed)**. Epic 35 defined in `epics.md` 2026-08-17 with 9 stories, Constraints E-1/E-2 and the branching decision; sprint planning reconciled all 10 keys. |
+
+**Retro §4 — Epic 33 follow-through still carried (3):**
+
+| Item | Source | Disposition |
+|---|---|---|
+| §4 #3 Kimi Code VS Code extension half | retro §4 (#3) | **DEFER — carried, owner Project Lead**. External blocker (requires the extension installed); unchanged since the Epic 33 retro. |
+| §4 #4 Post-publish re-certification | retro §4 (#4) | **DEFER — carried, blocked by design** on the Epic 33 publish decision (§4 #1), deliberately re-sequenced behind beta. |
+| §4 #6 Find a Copilot user | retro §4 (#6) | **DEFER — carried, owner Project Lead**. External dependency (needs a consenting Copilot user); same class of blocker as §4 #3. Recorded so the §4 table is fully enumerated (Rule #56). |
+
+Dispositions mechanically confirmed with a **row-anchored** command (the previously recorded unscoped form, `grep -oE '\*\*(DROP|DEFER)' 35-0-epic-34-deferred-cleanup.md` → "2 DROP, 4 DEFER", does **not** reproduce — it yields 15 `**DEFER` / 3 `**DROP` over the whole file; QA had corrected the story's copy of that transcript but not this durable one):
+
+```
+$ grep -E '^\| (#[1-6]|§4 #[0-9]) ' 35-0-epic-34-deferred-cleanup.md | grep -oE '\*\*(DROP|DEFER)' | sort | uniq -c
+      7 **DEFER
+      2 **DROP
+$ grep -cE '^\| (#[1-6]|§4 #[0-9]) ' 35-0-epic-34-deferred-cleanup.md
+9
+```
+
+**AC 35.0.1 satisfied:** all **9** action-item rows (6 × §7 + 3 × §4 carry-forwards) are accounted for as done / carried-with-owner / explicitly closed; none left unaccounted. (§4 #2 and #5 are recorded ✅ Done in the retro itself; §4 #1 is the re-sequenced publish decision that §7 #4 now owns.)
+
+### Deferred-work ledger — 93 open items triaged (AC 35.0.3)
+
+**INCLUDE (9):** `35-SWEEP-1..9`, recorded above under "Post-Epic-34 full-surface verification sweep (2026-08-17)" — already assigned to named Epic 35 stories (35.1×1, 35.2×1, 35.3×1, 35.4×1, 35.5×2, 35.6×2, 35.7×1) at Rule #37 re-deferral count 0. No further disposition needed here; this gate does not re-triage them.
+
+**DEFER (84) — re-deferred by batch, Rule #37 counts advanced at this gate:**
+
+Open-count-per-batch mechanically summed from Story 35.0's own triage table via `awk` over the "Open" column: **17 + 5 + 6 + 4 + 19 + 10 + 7 + 16 = 84**, matching the ledger's 84 carried-open items (93 total open − 9 INCLUDE = 84). The **Severity-mix column is summed separately and must reconcile too** — see the reconciliation line below the table.
+
+| Batch | Open | Severity mix | Rule #37 count before → after | Disposition |
+|---|---|---|---|---|
+| `@iris-mcp/client-config` batch — `33-1-R1..R4`, `33-5-L1..L11`, `33-5-R1..R2` | 17 | 17 LOW | **1 → 2** | **RE-DEFERRED**. Epic 35's file scope (`Interop.cls`, `Security.cls`, `Analytics.cls`, `format.ts`, `rest.ts`, `http-client.ts`) is disjoint from `packages/client-config/**`. ⚠️ At count 2 after this gate — a re-defer at the Epic 36 gate is the 3rd consecutive and **mandates** a dedicated burn-down story with terminal disposition for all 17. |
+| Epic 34 carried MEDIUM — `34-1-R5`, `34-1-R8`, `34-2-R4`, `34-2-R5`, `34-3-R3` | 5 | 5 MEDIUM | **1 → 2** | **RE-DEFERRED**. Classmethod-fidelity residuals; Epic 35's 9 stories fix unrelated handlers. Count-1 entry explicit at L1975/L2013/L2116. ⚠️ Also reaches count 2 — same Epic 36 burn-down obligation as the row above. |
+| Story 34.4 review | 6 | 6 LOW | **1 → 2** | **RE-DEFERRED**. Response-integrity/gate-durability residuals; judged shippable-and-patchable by both reviewers at Epic 34 close. Count-1 entry per L2116. ⚠️ Reaches count 2. |
+| Story 34.5 review | 4 | 4 LOW | **1 → 2** | **RE-DEFERRED**. Tool-layer/test-runner residuals. Count-1 entry per L2116. ⚠️ Reaches count 2. |
+| Story 34.6 review (incl. `34-6-CR-9/12/13`, `34-6-CR2-7`) | 19 | 4 MEDIUM · 15 LOW | **0 → 1** | **RE-DEFERRED**. Largest single batch; all defensive-hardening or doc-accuracy, none reachable in a shipped path. Post-dates L2116, so genuinely a first deferral. |
+| Story 34.7 review + QA (`34-7-QA-1`) | 10 | 1 MEDIUM · 9 LOW | **0 → 1** | **RE-DEFERRED**. Residual-risk items on the shared response budget. |
+| Story 34.8 review (`34-8-CR-1`, `34-8-CR-2`) | 7 | 2 MEDIUM · 5 LOW | **0 → 1** | **RE-DEFERRED — but see retro §7 action #5 above**: these two are the named beta-feedback re-evaluation targets, deferred *with* a trigger, not silently. |
+| Epic-34 Stories 34.0–34.3 review residuals — `34-0-R1/R2`, `34-1-R10/R11/R13/R14/R15/R16`, `34-2-R6/R7/R10`, `34-3-R5..R9` | 16 | 16 LOW | **1 → 2** | **RE-DEFERRED**. Out of Epic 35's file scope. Count-1 entry explicit at L1975, L2013 and L2116. ⚠️ Reaches count 2. |
+
+**Severity reconciliation (Rule #51):** DEFER rows sum to **12 MEDIUM + 72 LOW = 84**; plus the 9 INCLUDE rows (2 HIGH · 7 MEDIUM) → **2 HIGH / 19 MEDIUM / 72 LOW = 93**, matching this ledger's authoritative recount above exactly.
+
+> **Corrected at code review (2026-08-17) — two off-by-ones that cancelled in the total.** As first written this table summed to 84 on the Open column but to **13 MEDIUM / 71 LOW** on the Severity-mix column, contradicting the ledger's own 12/72 for the same 84 items; because the only mechanical check ran over the Open column, it was structurally blind to the error. Root causes: (a) the Story 34.6 batch named `34-6-CR-8` as an open MEDIUM, but it reached TERMINAL during Epic 34 — L2224 "**`34-6-CR-8` — now RESOLVED**, not open … Removed from the open MEDIUM count" and L2246 "`34-6-CR-8` moves open to terminal (−1 MEDIUM)"; note `34-6-CR2-4` *was* the finding "Ledger row `34-6-CR-8` was STALE-OPEN", so this triage reintroduced a defect a prior review had already closed. Corrected to 19 = 4 MEDIUM · 15 LOW. (b) The last batch was labelled "Story 32.4 / 33.x stragglers" and counted 15; **no Story-32.4 item is open at all** (`32-4-R1` CLOSED-WITH-EVIDENCE L1829, `32-0-1` RESOLVED in prose L1723) and the true residual is **16** items, every one an Epic-34 Stories 34.0–34.3 review residual, now enumerated by ID. One over-count plus one under-count is why the 84 and 93 totals were right the whole time.
+
+**Disposition tally:** 0 resolved · 0 closed-with-evidence · 0 closed-by-decision · **84 re-deferred** across 8 batches. (84 items total; mechanically recounted from the "Open" column above, per Rule #51 — this story ships no product code, so no ledger item moves to a terminal disposition at this gate.)
+
+**Rule #37 determination:** the **≥3-consecutive burn-down trigger does NOT fire at this gate.** The maximum count after this gate is **2**, below the threshold. The only batch that previously reached 2 (`30-0-1`/`30-0-3`/`30-0-4`/`30-2-1`) was terminally dispositioned in the Epic 32 burn-down and remains closed.
+
+> ⚠️ **Forward obligation for the Epic 36 gate:** **48 items across five batches** now stand at Rule #37 count 2 — client-config 17 + Epic-34 carried MEDIUM 5 + Story 34.4 6 + Story 34.5 4 + Stories 34.0–34.3 residuals 16 (`17+5+6+4+16 = 48`). The remaining **36** (Stories 34.6 19 + 34.7 10 + 34.8 7) sit at count 1; `48 + 36 = 84` ✓. A third consecutive re-deferral of any count-2 batch at the Epic 36 gate trips the trigger and **mandates** a dedicated burn-down story in the Epic 36 plan with a TERMINAL disposition — resolved / closed-with-evidence / closed-by-decision — for every one of those 48 items; re-deferral will not be an allowed outcome there. Probe-first (#16) any item whose suggested fix embeds an unverified claim.
+>
+> **Corrected at code review (2026-08-17):** this obligation was first stated as **22 items** across two batches. This ledger explicitly records the then-43 open LOW items *plus* the 5 carried MEDIUM at Rule #37 count 1 as of 2026-08-15 — L1975 (`34-1-R5, R8, R10, R11, R13, R14, R15, R16` **RE-DEFERRED (count 1)**), L2013 (`34-2-R2, R3, R4, R5, R6, R7, R10` **RE-DEFERRED (count 1)**) and L2116's blanket "remain deferred at Rule #37 count 1 … and all 43 LOW items" — so Story 34.4, Story 34.5 and the 34.0–34.3 residuals also advance to 2. The error direction was **unsafe**: it under-stated carried debt and would have let the burn-down trigger fire later than Rule #37 requires. The ≥3 determination itself is unchanged — max is still 2.
+
+**Ledger state after this gate: unchanged at 2 HIGH / 19 MEDIUM / 72 LOW = 93 open across 158 distinct items (65 terminal).** This story ships no product code (Constraints E-1/E-2), so no item reaches a terminal disposition here — every one of the 93 open items (9 INCLUDE + 84 DEFER) simply carries forward, the 9 INCLUDE items into their assigned Epic 35 stories and the 84 DEFER items into the ledger at their updated Rule #37 counts.
+
+**Carried into the next retro-review gate:** all 84 re-deferred ledger items above, plus the 9 INCLUDE items (which terminate individually as their owning Epic 35 stories close, not at a future gate). **Rule #37 watch:** five batches (**48 items** — `@iris-mcp/client-config` 17, Epic 34 carried MEDIUM 5, Story 34.4 6, Story 34.5 4, Stories 34.0–34.3 residuals 16) are now at count 2; a re-defer of **any** of them at the Epic 36 gate is the 3rd consecutive and mandates the burn-down story described above. The remaining 36 ledger items (84 − 48 — Stories 34.6/34.7/34.8) sit at count 1, one re-deferral below that threshold.
+
+---
+
+## Deferred from: code review of 35-0-epic-34-deferred-cleanup (2026-08-17)
+
+All three adversarial layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) DELIVERED explicit findings payloads inside the 20-minute bounded-close window measured from a real armed clock (Rule #57) — `failed_layers` empty, review **NOT degraded**, close kind NORMAL. This is the arming confirmation AC 35.0.4 required, demonstrated on the story that arms it.
+
+**Tally (Rule #51 — mechanically counted from the Disposition column below):** 6 findings dispositioned — **3 HIGH + 1 MEDIUM + 2 LOW patched in-review** (recorded in the story's "Review Findings" section; all three HIGHs were defects in this gate's own triage record and are corrected in place above), **1 newly deferred** (the row below), **0 re-deferred**, **0 decision-needed**. Four further layer items were dismissed with evidence — see the story's "Dismissed" table; two of them concern `cycle-log-epic-35.md`, which is lead-owned and out of review scope, and are reported to the Project Lead rather than ledgered.
+
+| # | Finding | Severity | Origin story | Deferral rationale | Suggested resolution |
+|---|---|---|---|---|---|
+| `35-0-CR-1` | **Publish-time gates are wired to `prepublishOnly` only — nothing on `prepack`/`prepare` — across all eight packages.** Correctly inert for the planned `git clone` + build beta hand-off, but a **tarball-based** distribution (`npm pack`, a CI artifact, a vendored tgz) would bypass every gate silently, including the dist-freshness gate `34-6-CR-11` added precisely to stop shipping an unbuilt package. | MEDIUM | 35.0 (from Epic 34 retro §7 action item #4) | This is the engineering half of retro §7 #4, which the Epic 35 gate originally lost by mis-sourcing that action item; ledgering it here gives it a severity, an owner and a Rule #37 count instead of leaving it in retro prose. Not includable in Epic 35: Constraint E-1 scopes this epic to the nine sweep defects, and the item is only reachable on a distribution mode the Lead has not chosen — the decision (#7 §4/§7 #4) precedes the fix. Rule #59-shaped: a gate that does not run on the path in use. | Before any tarball-based distribution, add the gates to `prepack` (or `prepare`) as well as `prepublishOnly`, then **prove the gate RED on the tarball path specifically** — break the guarded property, run `npm pack`, confirm it fails — per Rule #59's path requirement. Re-flag at the Epic 36 gate if the beta hand-off stays git-clone-only. Rule #37 re-deferral count **0** (first carry). |
+
+**Ledger state after this pass:** **2 HIGH / 20 MEDIUM / 72 LOW = 94 open** across **159 distinct items** (65 terminal), derived mechanically per Rule #51 from the state recorded at this gate (93 open / 158 distinct / 65 terminal): +1 MEDIUM, open (not terminal), from the Story 35.0 code review. So HIGH 2 + 0 = 2; MEDIUM 19 + 1 = 20; LOW 72 + 0 = 72; open 93 + 1 = 94; distinct 158 + 1 = 159. Terminal unchanged at 65 — the review's other five findings were patched in-review inside this story's own documents rather than ledgered, so they create no ledger rows. Check: 2 + 20 + 72 = 94.
+
+**Note on the gate section above:** the three HIGH findings were defects *in the gate record itself* (a mis-sourced retro table that left two §7 action items untriaged, a DEFER decomposition whose severity column contradicted the ledger, and an understated Rule #37 count-2 population). They were corrected in place in the section above rather than deferred, because a knowingly-wrong ledger section is not a deferrable residual — it is the ledger. Each correction carries an inline "Corrected at code review (2026-08-17)" note preserving what was wrong and why, so the record stays auditable.
