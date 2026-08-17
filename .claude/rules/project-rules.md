@@ -1,6 +1,6 @@
 # Project Rules
 
-Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#59**.
+Durable rules for AI dev + code-review agents on this project, accumulated from epic retrospectives. Consolidated 2026-07-11 (post-Epic-28) from 50 individually-numbered rules into thematic sections; **original rule numbers are preserved in headings and bullets** so references in stories/retros/deferred-work.md still resolve. Next new rule: **#60**.
 
 ## #1 — Meta-rule: codify retrospective lessons
 
@@ -159,6 +159,10 @@ Context: bmad-code-review's three adversarial layers (Blind/Edge/Auditor) failed
 ## #58 — Byte-preservation and behavior guarantees require fixture diversity
 
 Context: any test pinning a byte-preservation, format-preservation, or round-trip guarantee. Rule: the fixture set must include NON-canonical variants — compact single-line formatting, 4-space indentation, CRLF, comment-bearing (incl. comments inside owned spans), BOM — not only canonically-formatted files; a canonical-only fixture set is blind by construction because an implementation that re-serializes through its own formatter passes every canonical fixture. Why: Epic 33's worst defect (jsonc-parser `modify()` reformatting foreign entries on insert, AC-level byte-preservation violation) passed dev + QA + review because all ~40 fixtures were canonically formatted; only the lead smoke's hand-written compact fixture caught it. Same class recurred in 33.5 (interior comments, multiline TOML strings, comment-only documents).
+
+## #59 — A gate must be proven to fail on the path it actually guards
+
+Context: any gate, guard, or capstone whose job is to stop a regression — epic-done gates, packaging/prepublish gates, zero-result guards, coverage pins. Rule: prove the gate RED by breaking the thing it protects, exercised **on the path the gate actually guards**, and state which path that was. Specifically disqualifying: a test excluded from the suite that actually runs; an oracle that cannot vary with the property it claims (a namespace-invariant value "proving" namespace sensitivity); an internal round-trip standing in for the wire; an arming env var nothing sets; a lifecycle hook that does not fire on the distribution path in use. "It passes" and "it would fail if broken" are different claims — only the second is evidence, and only on the right path. Why: six distinct instances in Epic 34, every one a green badge over a dead check (incident list in the epic-34 retro); the worst left the default suite 643/643 green while the live endpoint returned 50,000 untruncated characters. Extends #48 (mutation evidence) with the path dimension, and #21/#54 with the "can this even fail?" question.
 
 ---
 

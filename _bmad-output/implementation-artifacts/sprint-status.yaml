@@ -548,4 +548,4 @@ development_status:
   34-6-pre-publish-release-hardening: done
   34-7-publish-blockers-utf8-budget-build-gate: done
   34-8-request-body-utf8-decoding: done
-  epic-34-retrospective: optional
+  epic-34-retrospective: done
