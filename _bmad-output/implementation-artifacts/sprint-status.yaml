@@ -549,3 +549,13 @@ development_status:
   34-7-publish-blockers-utf8-budget-build-gate: done
   34-8-request-body-utf8-decoding: done
   epic-34-retrospective: done
+  epic-35: backlog
+  35-0-epic-34-retro-gate-deferred-triage: backlog
+  35-1-production-item-set-composite-key: backlog
+  35-2-analytics-cubes-build-device-output: backlog
+  35-3-pin-request-locale-error-text: backlog
+  35-4-bound-list-privileges: backlog
+  35-5-validate-before-delegating-oauth-restname: backlog
+  35-6-xml-import-compile-and-legacy-rest-get: backlog
+  35-7-docdb-prerequisite-error-and-docs: backlog
+  35-8-docs-artifact-rollup-epic-gate: backlog
