@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "0a012dfaee5d";
+export const BOOTSTRAP_VERSION = "a73647f42c11";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "0a012dfaee5d";
+Parameter BOOTSTRAPVERSION = "a73647f42c11";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -15055,6 +15055,7 @@ ClassMethod CubeAction() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
+    Set tRedirected = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -15093,9 +15094,78 @@ ClassMethod CubeAction() As %Status
         Do tResult.%Set("cube", tCube)
 
         If tAction = "build" {
-            ; Synchronous build (pAsync=0)
-            Set tSC2 = ##class(%DeepSee.Utils).%BuildCube(tCube, 0)
+            ; Story 35.2 (AC 35.2.1/35.2.2, ledger 35-SWEEP-2): %DeepSee.Utils:
+            ; %BuildCube writes progress/diagnostic text directly to the CURRENT
+            ; DEVICE (the HTTP response stream), so it lands ahead of the JSON
+            ; envelope and makes the wire body unparseable (observed live:
+            ; "\\nERROR #20013: Cube 'NOSUCHCUBE' does not exist{"status":...}").
+            ; Its pVerbose parameter — 3rd positional; live signature is
+            ; pCubeList,pAsync=1,pVerbose=1,... — defaults to 1 and is NOT
+            ; overridden below, unlike %SynchronizeCube's explicit pVerbose=0 in
+            ; the "sync" branch, which is exactly why "sync" parsed cleanly and
+            ; "build" did not. Isolate it with the SAME null-device redirect
+            ; discipline already proven in Command.cls (Rule #7): bind the
+            ; mnemonic on a throw-away null device — never $IO, see Redirects()'s
+            ; banner below for why — restore FULLY before rendering, and render
+            ; exactly once via the single If/Else dispatch already in this method.
+            ;
+            ; DO NOT "optimize" this by silencing the source with pVerbose=0
+            ; (i.e. %BuildCube(tCube, 0, 0)). Story 35.2's code review probed
+            ; this live and BOTH the progress narration AND the error text are
+            ; gated by pVerbose: %BuildCube("NOSUCH",0,1) writes
+            ; "\\nERROR #20013: Cube ... does not exist" to the device, while
+            ; %BuildCube("NOSUCH",0,0) writes NOTHING. (An earlier revision of
+            ; this comment asserted the error path wrote unconditionally
+            ; regardless of pVerbose — that claim was FALSE and is corrected
+            ; here.) Silencing the source would leave the redirect below with
+            ; nothing to isolate, and the permanent regression gate at
+            ; packages/iris-data-mcp/src/__tests__/analytics-cubes-wire-gate.test.ts
+            ; would become structurally INCAPABLE of failing: deleting this
+            ; entire redirect block would still yield a clean wire body and a
+            ; green gate. That is precisely Rule #59's "an oracle that cannot
+            ; vary with the property it claims". The redirect is the mechanism;
+            ; pVerbose's default is what keeps the regression detectable.
+            Set %ExecuteMCPOutput = ""
+            Set %ExecuteMCPTruncated = 0
+            Set tInitIO = $IO
+            Set tNull = ##class(%Library.Device).GetNullDevice()
+            Open tNull:::1
+            Use tNull::("^"_$ZNAME)
+            Set tRedirected = 1
+            Do ##class(%Library.Device).ReDirectIO(1)
+
+            Try {
+                Set tSC2 = ##class(%DeepSee.Utils).%BuildCube(tCube, 0)
+            } Catch exBuild {
+                ; Flag ONLY — do NOT render here. An argumentless Quit inside
+                ; Catch exits only the catch body and falls through, so a
+                ; render here would be clobbered by the success render below
+                ; (Rule #7).
+                Set tSC2 = exBuild.AsStatus()
+            }
+
+            ; Restore I/O unconditionally, before any render. Bare \`Use
+            ; tInitIO\` (never \`Use tInitIO::("")\`, a NO-OP) is required to
+            ; actually clear the mnemonic bound above.
+            Do ##class(%Library.Device).ReDirectIO(0)
+            Use tInitIO
+            Close tNull
+            Set tRedirected = 0
             Set $NAMESPACE = tOrigNS
+
+            ; AC 35.2.3 disposition: the captured text is DISCARDED, not
+            ; surfaced. %BuildCube's progress narration is diagnostic noise
+            ; from a stock DeepSee API that no caller of this tool has ever
+            ; asked for — the same judgment ExecuteMCPv2.REST.UnitTest already
+            ; makes for %UnitTest.Manager.RunTest's own narration. Surfacing it
+            ; would need its own ApplyOutputCeiling budget and wire-level
+            ; truncation coverage for a field with no established consumer; if
+            ; a future story needs build diagnostics, add an additive \`output\`
+            ; field here bounded by ExecuteMCPv2.Utils.ApplyOutputCeiling
+            ; exactly as Command.cls does for its own captured output.
+            Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
+
             If $$$ISERR(tSC2) {
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC2))
                 Set tSC = $$$OK
@@ -15105,7 +15175,8 @@ ClassMethod CubeAction() As %Status
             Do tResult.%Set("status", "completed")
         }
         ElseIf tAction = "sync" {
-            ; Incremental synchronization (pVerbose=0)
+            ; Incremental synchronization (pVerbose=0) — verified clean of
+            ; device output (Story 35.2 AC 35.2.4 audit); no redirect needed.
             Set tSC2 = ##class(%DeepSee.Utils).%SynchronizeCube(tCube, 0, .tFactsUpdated)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC2) {
@@ -15121,11 +15192,51 @@ ClassMethod CubeAction() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        ; Ensure redirection is restored on unexpected error before rendering
+        ; (Story 35.2, mirrors Command.cls's own outer-catch belt-and-braces
+        ; restore at Command.cls:132-138). Any errors during cleanup are
+        ; swallowed so the real exception is still what gets rendered below.
+        Try {
+            If tRedirected {
+                Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
+                If $Get(tNull) '= "" { Close tNull }
+            }
+        } Catch {}
+        Kill %ExecuteMCPOutput
+        Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// I/O redirect entry points for suppressing <code>%BuildCube</code>'s device
+/// output (Story 35.2, AC 35.2.1/35.2.2).
+/// <p>These label-based methods are referenced by the mnemonic routine set via
+/// <code>Use tNull::("^"_$ZNAME)</code> in <method>CubeAction</method> when I/O
+/// redirection is active. Captured output accumulates in the process-private
+/// <code>%ExecuteMCPOutput</code> — the SAME global <class>ExecuteMCPv2.REST.
+/// Command</class> uses — for consistency, even though this method's caller
+/// currently kills it unread (AC 35.2.3: the captured text is discarded, not
+/// surfaced). A separate copy of this tag routine is required in THIS class
+/// (rather than reusing Command.cls's) because <code>$ZNAME</code> binds the
+/// CURRENTLY EXECUTING routine, and the mnemonic entry points must live in
+/// that same compiled routine (Story 34.1 Constraint C-2) — copied verbatim
+/// from <class>ExecuteMCPv2.REST.Command</class>'s own <method>Redirects</method>
+/// (34-2-R1 fix: each label discriminates on <code>&lt;MAXSTRING&gt;</code> so a
+/// genuine crash is never mis-reported as a benign truncation).</p>
+ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
+{
+    Quit
+wstr(s) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wchr(a) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wnl New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wff New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wtab(n) New chars,mcpex Try { Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+rstr(len,time) Quit ""
+rchr(time) Quit ""
 }
 
 }`,
