@@ -4639,6 +4639,8 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 
 **Constraint E-2 (frozen baseline untouched)**: `GOVERNANCE_BASELINE` stays frozen at `1e62c5ad5bf7`/141/201/60. Verify with `gen:governance-baseline:check` ONLY; never run the bare generator (#23/#25).
 
+**Branching (Rules SC-1 / SC-2)**: Epic 35 targets the **`feature/feature-wave-4-classmethod-fidelity`** feature branch (Project Lead decision 2026-08-17) — Epic 35 exists solely to make wave-4's content beta-ready, and wave-4 is the single branch intended to land on `main` afterward. Branch **`epic35`** off it. Two branches match `feature_pattern`, so this line resolves what would otherwise be an SC-7 ambiguity stop; naming is configured in `_bmad/custom/branch-naming.yaml` (`epic_pattern: epic{N}`, `ticket_required: false`).
+
 ### Story 35.0: Epic 34 Retro-Review Gate + Deferred-Work Triage
 
 > **Note for the epic-cycle lead:** this is the conventional retro-review gate story, keyed `35-0-epic-34-deferred-cleanup` to match the `{N}-0-epic-{N-1}-deferred-cleanup` pattern used by all 14 prior gate stories. It is already present in `sprint-status.yaml` as `backlog`; **adopt that key rather than creating a second 35.0 entry.** Epic 35 is the first epic to pre-declare its X.0 section in `epics.md` (prior gate stories were created at runtime and never pre-planned — see AC 35.8.2) because AC 35.0.2's merge precondition had to be stated at planning time. That precondition is now **SATISFIED**: the SC-4 merge completed 2026-08-17 as `6fe1763`.

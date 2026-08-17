@@ -1,0 +1,49 @@
+# Branch naming configuration for /epic-cycle (Rules SC-1 / SC-2)
+#
+# Created 2026-08-17 to encode the convention this project has actually used
+# since Epic 1. Without this file /epic-cycle falls back to its JIRA-style
+# defaults, which do not describe this repo and halt twice at epic start:
+#
+#   default feature_pattern  feature/{TICKET}_{Description}, TICKET ~ ^[A-Z]+-\d+$
+#   default epic_pattern     {TICKET}-epic{N}
+#
+# With no tracker ID the default epic_pattern resolves to "-epic{N}" — a
+# leading-hyphen name that git rejects. The command's own SC-2 section states
+# that projects in this mode MUST override epic_pattern; that is the primary
+# purpose of this file.
+
+# Feature branches are wave-scoped and carry no tracker ID, so {Description}
+# absorbs the whole wave name (e.g. Description = "wave-4-classmethod-fidelity"
+# renders feature/feature-wave-4-classmethod-fidelity).
+feature_pattern: "feature/feature-{Description}"
+
+# Epic branches are bare "epic{N}" — no ticket prefix. This repo hosts a single
+# project, so the shared-namespace collision SC-2 guards against cannot occur.
+epic_pattern: "epic{N}"
+
+# This project has never used JIRA / Linear / Azure ticket IDs.
+ticket_required: false
+
+description_format: "^[a-z][a-z0-9-]{2,60}$"
+separator: "-"
+
+# ── Observed history (verified against git 2026-08-17) ───────────────────────
+#
+#   feature/feature-wave-3-connection-config      Epics 31-33  (merge 1cbd367)
+#   feature/feature-wave-4-classmethod-fidelity   Epic  34     (merge 6fe1763)
+#   epic branches: epic31 … epic34 — all merged and deleted per Rule SC-4
+#
+# ── ACTIVE feature branch ────────────────────────────────────────────────────
+#
+# feature/feature-wave-4-classmethod-fidelity
+#
+# Two feature branches match feature_pattern, which would otherwise be an SC-7
+# "multiple feature branches with similar names" stop. Epic 35 targets WAVE-4
+# (Project Lead decision 2026-08-17): Epic 35 exists solely to make wave-4's
+# content beta-ready, and wave-4 is the single branch intended to land on main
+# afterward. wave-3 is closed. Branch epic35 off wave-4.
+#
+# NOTE: neither this comment nor the ACTIVE marker is a field /epic-cycle reads
+# — the command has no active-branch key in its schema. It is here for the lead,
+# and is restated in the Epic 35 preamble in epics.md, which sprint planning
+# reads.
