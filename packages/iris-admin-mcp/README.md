@@ -164,7 +164,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_role_manage` | Create, modify, or delete a security role | `action`, `name`, `description?`, `resources?`, `grantedRoles?` | destructive |
 | `iris_role_list` | List all security roles | `cursor?` | readOnly, idempotent |
-| `iris_resource_manage` | Create/modify/delete a security resource, **or grant/revoke/list SQL object privileges** | `action` (`create`, `modify`, `delete`, `grant`, `revoke`, `listPrivileges`), `name?`, `description?`, `publicPermission?`, `target?`, `privilege?`, `grantee?`, `namespace?` | destructive |
+| `iris_resource_manage` | Create/modify/delete a security resource, **or grant/revoke/list SQL object privileges** | `action` (`create`, `modify`, `delete`, `grant`, `revoke`, `listPrivileges`), `name?`, `description?`, `publicPermission?`, `target?`, `privilege?`, `grantee?`, `namespace?`, `maxRows?`, `cursor?` (both `listPrivileges`-only) | destructive |
 | `iris_resource_list` | List all security resources | `cursor?` | readOnly, idempotent |
 
 ### Web Application Tools
@@ -203,9 +203,13 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |--------|-------------|----------------|---------|
 | `grant` | Grant one or more SQL privileges on a schema/table/column to a user or role | `target` (schema, `schema.table`, or `schema.table(col1,col2)`), `privilege` (e.g. `SELECT`, `INSERT,UPDATE`, `%ALTER`), `grantee`, `namespace?` | write (default-disabled under governance) |
 | `revoke` | Revoke SQL privileges from a user or role | `target`, `privilege`, `grantee`, `namespace?` | write (default-disabled under governance) |
-| `listPrivileges` | List the current SQL grants held by a user or role | `grantee`, `target?` (omit for object-level listing; pass `schema.table` for a column-level listing), `namespace?` | read (enabled by default) |
+| `listPrivileges` | List the current SQL grants held by a user or role | `grantee`, `target?` (omit for object-level listing; pass `schema.table` for a column-level listing), `namespace?`, `maxRows?` (default 100, max 1000), `cursor?` | read (enabled by default) |
 
 > **Governance:** `grant` and `revoke` are classified `write` (denied by default under an `IRIS_GOVERNANCE` policy until explicitly allowed); `listPrivileges` is a `read` (enabled by default). SQL privileges are namespace-scoped.
+
+> **`listPrivileges` bounding (Story 35.4):** a grantee holding `%All` (e.g. `_SYSTEM`) is granted every SQL privilege on every object via a derived `SuperUser` cross-product — live-measured at 15,341 rows / 2,900,478 characters for `_SYSTEM`, which overruns the client transport limit. `listPrivileges` now omits those derived (`GRANTED_VIA=SuperUser`) rows automatically, adding a `reason` string and a `superUserPrivilegesOmitted` count to the response; any REAL non-derived grant is still listed, and the omitted count stays exact even when `maxRows` truncates the real rows. The omission is decided per **row**, from the `GRANTED_VIA` value the query itself reports — the handler never resolves the grantee's roles — so it holds however the grantee acquired `%All`, including through a deeply nested role chain. (An instance-wide sweep of all 46 users and roles found `SuperUser` rows emitted if and only if the principal effectively holds `%All`; powerful non-`%All` accounts such as `Admin` return 0 derived rows and are therefore untouched.)
+>
+> `maxRows` bounds the response further (default 100; values above 1000 are clamped) — it is an OUTPUT-only bound on the server's fetch loop, not a bound on the underlying privilege scan, and therefore **not** timeout protection; a capped response carries `rowsCapped: true`. **Pagination is opt-in:** pass `maxRows` or `cursor` and the response is paged **50 rows at a time** (the suite-wide default page size) within the `maxRows` ceiling; pass neither and every row the server returned comes back unpaged, exactly as before Story 35.4. Resend the same `maxRows` alongside each `cursor` — every page re-runs the server query and the cursor offset is positional. The cursor never crosses the `maxRows` ceiling and `maxRows` is itself capped at 1000, so a grantee with more than 1000 *real* grants cannot be fully enumerated through this action. All three new fields (`rowsCapped`, `reason`, `superUserPrivilegesOmitted`) are present ONLY when actually triggered, so a caller who passes no new parameters, fits under the cap, and does not hold `%All` sees the exact pre-35.4 response shape.
 
 ### Service Tools
 

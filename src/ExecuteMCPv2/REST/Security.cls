@@ -3084,13 +3084,93 @@ ClassMethod SqlPrivilegeManage() As %Status
 /// query parameters: <code>grantee</code> (required — the user or role),
 /// optional <code>target</code> (a <code>schema.table</code> to scope a
 /// COLUMN-level listing), <code>system</code> (1 to include system objects),
-/// and <code>namespace</code> (defaults to the request namespace).</p>
+/// <code>namespace</code> (defaults to the request namespace), and
+/// <code>maxRows</code> (default 100, max 1000 — see Story 35.4).</p>
 /// <p>Without <code>target</code>: returns object-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserPrivs</query> (TYPE, NAME, PRIVILEGE,
 /// GRANTED_BY, GRANT_OPTION, GRANTED_VIA, HAS_COLUMN_PRIV). With a
 /// <code>schema.table</code> target: returns column-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserColumnPrivs</query> (COLUMN_NAME,
 /// PRIVILEGE, GRANTED_BY, GRANT_OPTION, GRANTED_VIA).</p>
+/// <p><b>Story 35.4 — bounding.</b> A grantee holding <code>%All</code>
+/// (e.g. <code>_SYSTEM</code>) is granted every SQL privilege on every object
+/// via the <code>SuperUser</code> super-role short-circuit, which the
+/// underlying query enumerates as one derived row per object x privilege
+/// (15,341 rows / 2,900,478 characters for <code>_SYSTEM</code>, measured
+/// live 2026-08-17/18 — exceeds the client transport limit and diverts the
+/// response to a file). Per the project's <code>%All</code> discipline (Rule
+/// #6): rows whose <code>GRANTED_VIA</code> is <code>SuperUser</code> are
+/// OMITTED from <code>privileges</code>, and a <code>reason</code> field plus
+/// a <code>superUserPrivilegesOmitted</code> count are added whenever at
+/// least one row was actually omitted.</p>
+/// <p><b>The omission is driven off the ROW, not off the grantee.</b> This
+/// handler deliberately does NOT resolve the grantee's roles to decide
+/// whether it holds <code>%All</code>: the query already computed that and
+/// stamped the answer on every row it returns. Establishing that was
+/// empirical, not assumed — an instance-wide sweep on 2026-08-18 walked all
+/// <b>46</b> users and roles on this instance, comparing "does
+/// <code>UserPrivs</code> emit any <code>SuperUser</code> row?" against
+/// "does this principal effectively hold <code>%All</code>?" (transitive
+/// role closure). Exactly four principals emitted <code>SuperUser</code>
+/// rows — <code>_SYSTEM</code>, <code>SuperUser</code>, <code>_Ensemble</code>
+/// and one interactive <code>%All</code> holder — and all four hold
+/// <code>%All</code>. There was NO principal emitting <code>SuperUser</code>
+/// rows without it, including deliberately powerful non-<code>%All</code>
+/// controls (<code>Admin</code>, holding <code>%Manager</code> +
+/// <code>%EnsRole_Administrator</code> + <code>%EnsRole_Developer</code>:
+/// 11 rows, 0 derived). The column-level query behaves the same way
+/// (<code>_SYSTEM</code> against <code>%Dictionary.ClassDefinition</code>:
+/// 224 rows, all <code>SuperUser</code>; <code>Admin</code>: 0), so the
+/// filter on that loop is doing real work, not sitting inert.</p>
+/// <p>Reading the row rather than the role graph is what lets this handler
+/// stay entirely inside the query namespace. An earlier revision resolved
+/// <code>%All</code> by switching to <code>%SYS</code> and walking
+/// <class>Security.Users</class>/<class>Security.Roles</class>; that added a
+/// privilege requirement this read never had, could silently disable itself
+/// if the lookup failed, and was only ever correct to a bounded role-chain
+/// depth. The row signal has none of those failure modes and no name
+/// matching at all, so the <code>%AllCustom</code> substring hazard and the
+/// question of <code>%All</code> name case-sensitivity simply do not arise.
+/// Note the one asymmetry, which is harmless: the literal role
+/// <code>%All</code> AS a grantee, and a role holding <code>%All</code> via
+/// <code>GrantedRoles</code>, both emit ZERO <code>SuperUser</code> rows, so
+/// nothing is omitted and — because the response fields are gated on a
+/// non-zero omitted count — no <code>reason</code> is emitted either.</p>
+/// <p>This is information-preserving, not a bare verdict short-circuit: any
+/// REAL non-derived grants (e.g. <code>Owner Privilege</code> — 8 of the
+/// 15,341 rows for <code>_SYSTEM</code>) are still enumerated. Derived rows
+/// never consume the <code>maxRows</code> budget, and once any derived row
+/// has been omitted the fetch loop keeps scanning to the end of the result
+/// set even after the cap engages (live-probed at ~97ms for 15,341 rows on
+/// 2026-08-18 — cheap relative to the ~180ms the query already spends in
+/// <code>Execute()</code> before the first row is even fetched) so that
+/// <code>superUserPrivilegesOmitted</code> is the EXACT total rather than
+/// however many happened to be seen before the cap. A grantee with no
+/// derived rows keeps the cap's original early exit and pays nothing for
+/// that guarantee. Note the honest limits: non-derived rows beyond
+/// <code>maxRows</code> ARE dropped, here as on any other path —
+/// <code>rowsCapped: true</code> is the signal, and a caller who needs every
+/// real grant must raise <code>maxRows</code>.</p>
+/// <p><b>Story 35.4 — <code>maxRows</code> is an OUTPUT bound, not a scan
+/// bound.</b> Mirrors the <method>AuditStatus</method> idiom in this same
+/// class (~line 2577): the fetch loop stops pumping the cursor once
+/// <code>maxRows</code> non-omitted rows have been materialized, so rows
+/// beyond the cap are never JSON-serialized. It does NOT reduce the
+/// underlying privilege computation: live timing (2026-08-18, grantee
+/// <code>_SYSTEM</code>) showed <code>Execute()</code> alone costs
+/// ~180-220ms regardless of how many rows are ultimately fetched — a SQL
+/// <code>TOP</code> rewrite via <code>%SQL.Statement</code> against the same
+/// <code>%SQL_Manager.UserPrivs</code> stored procedure was probed and showed
+/// the same flat ~220-260ms floor for TOP 10 through TOP 5000 (only the fully
+/// uncapped 15,341-row fetch reached ~480ms), so switching to dynamic SQL
+/// would add <code>%Prepare</code> overhead without genuinely bounding the
+/// scan any better than the existing <code>%ResultSet</code> class-query
+/// idiom already in this file. <code>maxRows</code> is therefore implemented
+/// as a Fetch-side cap (like <method>AuditStatus</method>), not a SQL
+/// <code>TOP</code>, and a capped response carries <code>rowsCapped: true</code>
+/// so a caller can tell rows were dropped — present ONLY when the cap
+/// actually engaged, so an under-cap caller's response shape is byte-identical
+/// to the pre-Story-35.4 shape (AC 35.4.5).</p>
 ClassMethod SqlPrivilegeList() As %Status
 {
     Set tSC = $$$OK
@@ -3100,6 +3180,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tTarget = $Get(%request.Data("target", 1))
         Set tSystem = +$Get(%request.Data("system", 1))
         Set tReqNS = $Get(%request.Data("namespace", 1))
+        Set tMaxRows = +$Get(%request.Data("maxRows", 1), 100)
+        If tMaxRows < 1 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
 
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -3117,6 +3200,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tResult = {}
         Do tResult.%Set("grantee", tGrantee)
         Set tPrivs = []
+        Set tRowCount = 0
+        Set tCapped = 0
+        Set tSuperUserOmitted = 0
 
         If tTarget '= "" {
             ; Column-level listing for a specific schema.table
@@ -3133,6 +3219,25 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; Once ANY derived row has been omitted, the omitted-count
+                    ; must stay EXACT: derived rows never consume the cap
+                    ; (they Continue above), so quitting here would freeze
+                    ; tSuperUserOmitted mid-scan and report a partial count as
+                    ; though it were the total. Keep scanning to finish
+                    ; counting; only non-derived rows past the cap are
+                    ; dropped, and rowsCapped:true says so.
+                    ; When nothing derived has been seen, the cap keeps its
+                    ; original early-exit and stops pumping the cursor, so an
+                    ; ordinary grantee pays nothing for this guarantee.
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("column", tRS.Get("COLUMN_NAME"))
                 Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
@@ -3140,6 +3245,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -3155,6 +3261,20 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; See the column-level loop above: once derived rows are
+                    ; in play the omitted-count must keep accumulating past
+                    ; the cap, or superUserPrivilegesOmitted reports a partial
+                    ; figure (live-observed 10,961 instead of 15,333 at
+                    ; maxRows=7).
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("type", tRS.Get("TYPE"))
                 Do tRow.%Set("name", tRS.Get("NAME"))
@@ -3164,6 +3284,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tRow.%Set("hasColumnPriv", +tRS.Get("HAS_COLUMN_PRIV"), "boolean")
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -3171,6 +3292,19 @@ ClassMethod SqlPrivilegeList() As %Status
         Set $NAMESPACE = tOrigNS
         Do tResult.%Set("privileges", tPrivs)
         Do tResult.%Set("count", tPrivs.%Size())
+        If tCapped {
+            Do tResult.%Set("rowsCapped", 1, "boolean")
+        }
+        ; Gate on rows ACTUALLY omitted, not merely on the grantee holding
+        ; %All: a %All holder whose listing happens to contain no derived
+        ; rows (e.g. a column-level target with only explicit grants) would
+        ; otherwise get superUserPrivilegesOmitted:0 next to prose asserting
+        ; that privileges were omitted -- a self-contradicting response, and
+        ; a shape change with nothing to justify it (AC 35.4.5).
+        If tSuperUserOmitted > 0 {
+            Do tResult.%Set("superUserPrivilegesOmitted", tSuperUserOmitted, "number")
+            Do tResult.%Set("reason", "grantee holds %All super-role; privileges derived purely from %All (GRANTED_VIA=SuperUser) are omitted from enumeration - only directly-granted (non-derived) privileges are listed")
+        }
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
