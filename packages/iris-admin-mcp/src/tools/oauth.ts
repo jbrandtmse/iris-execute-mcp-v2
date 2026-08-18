@@ -27,7 +27,14 @@ export const oauthManageTool: ToolDefinition = {
     "Create or delete OAuth2 server definitions and client registrations, " +
     "or perform OpenID Connect discovery from an issuer URL. " +
     "For 'create' and 'delete', entity ('server' or 'client') is required. " +
-    "For 'discover', only issuerURL is needed. " +
+    "For 'discover', issuerURL is required and 'sslConfiguration' (the name of an " +
+    "IRIS SSL/TLS client configuration — inspect with iris_ssl_list, create with " +
+    "iris_ssl_manage) is REQUIRED for https issuers; discover SAVES a server " +
+    "definition keyed by the exact issuer URL. " +
+    "Client registration (create + entity 'client') requires a PRIOR successful " +
+    "discover for the issuer: serverName is the exact issuer URL of that discovered " +
+    "server definition. A failed remote registration (e.g. the issuer publishes no " +
+    "dynamic registration endpoint) leaves the local client record saved. " +
     "Client secrets are never returned in responses.",
   inputSchema: z.object({
     action: z
@@ -55,7 +62,17 @@ export const oauthManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Name of the OAuth2 server definition to register the client against (required for client create)",
+        "Issuer URL of an existing, previously discovered OAuth2 server definition " +
+          "(required for client create) — the exact issuer URL string passed to a prior " +
+          "successful 'discover' (the match is exact; there is no user-chosen server name)",
+      ),
+    sslConfiguration: z
+      .string()
+      .optional()
+      .describe(
+        "Name of an IRIS SSL/TLS client configuration for discovery (e.g. " +
+          "'ISC.FeatureTracker.SSL.Config'; inspect with iris_ssl_list, create with " +
+          "iris_ssl_manage). REQUIRED by IRIS when the issuer URL is https.",
       ),
     clientName: z
       .string()
@@ -129,6 +146,7 @@ export const oauthManageTool: ToolDefinition = {
       issuerURL,
       name,
       serverName,
+      sslConfiguration,
       clientName,
       redirectURIs,
       grantTypes,
@@ -147,6 +165,7 @@ export const oauthManageTool: ToolDefinition = {
       issuerURL?: string;
       name?: string;
       serverName?: string;
+      sslConfiguration?: string;
       clientName?: string;
       redirectURIs?: string;
       grantTypes?: string;
@@ -166,6 +185,7 @@ export const oauthManageTool: ToolDefinition = {
     if (issuerURL !== undefined) body.issuerURL = issuerURL;
     if (name !== undefined) body.name = name;
     if (serverName !== undefined) body.serverName = serverName;
+    if (sslConfiguration !== undefined) body.sslConfiguration = sslConfiguration;
     if (clientName !== undefined) body.clientName = clientName;
     if (redirectURIs !== undefined) body.redirectURIs = redirectURIs;
     if (grantTypes !== undefined) body.grantTypes = grantTypes;

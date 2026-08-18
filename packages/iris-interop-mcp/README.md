@@ -285,7 +285,7 @@ Executing requires the same call again with `dryRun: false, confirm: true` (or `
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_interop_rest` | Create, delete, or get a REST application | `action`, `name`, `spec?`, `namespace?` | destructive |
+| `iris_interop_rest` | Create, delete, or get a REST application (`name` is a package name, e.g. `MyApi`) | `action`, `name`, `spec?`, `namespace?` | destructive |
 
 ---
 
@@ -825,17 +825,18 @@ The response falls back to a best-effort reflection over the target's public non
 ```json
 {
   "action": "create",
-  "name": "/myapi",
-  "spec": { "openapi": "3.0.0", "info": { "title": "My API", "version": "1.0" }, "paths": {} }
+  "name": "MyApi",
+  "spec": { "swagger": "2.0", "info": { "title": "My API", "version": "1.0" }, "paths": {} }
 }
 ```
+
+> `name` is an ObjectScript **package name** (e.g., `MyApi` or `MyCompany.MyApi`) — it becomes the package of the generated classes. URL-path values like `/myapi` are rejected by IRIS ("Application name is not a valid package name").
 
 **Output:**
 ```json
 {
-  "action": "create",
-  "name": "/myapi",
-  "status": "created"
+  "action": "created",
+  "name": "MyApi"
 }
 ```
 </details>

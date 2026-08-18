@@ -1609,6 +1609,18 @@ ClassMethod OAuthList() As %Status
 /// <p>Reads a JSON body with <code>action</code> (create|delete|discover),
 /// <code>entity</code> (server|client for create/delete), and action-specific
 /// parameters. Dispatches to the appropriate OAuth2 classes in <code>%SYS</code>.</p>
+/// <p>Discovery (action=discover) takes <code>issuerURL</code> plus an optional
+/// <code>sslConfiguration</code> naming an IRIS SSL/TLS client configuration — REQUIRED
+/// for https issuers (inspect existing configurations with iris_ssl_list, create one with
+/// iris_ssl_manage). Discovery SAVES an OAuth2.ServerDefinition keyed by the exact issuer
+/// URL.</p>
+/// <p>Client registration (create + entity=client) resolves <code>serverName</code> as the
+/// issuer URL of an EXISTING OAuth2.ServerDefinition — the exact issuer URL string passed
+/// to a prior successful discover (the match is exact; OpenID provider metadata gives no
+/// user-chosen server name). It then creates the OAuth2.Client record and calls the 1-arg
+/// %SYS.OAuth2.Registration.RegisterClient(applicationName). A failed remote registration
+/// (e.g. the issuer publishes no registration endpoint) leaves the local record saved —
+/// the Management Portal's configure-then-register semantics.</p>
 /// <p><b>CRITICAL</b>: Client secrets are NEVER included in response bodies
 /// or error messages (NFR6).</p>
 ClassMethod OAuthManage() As %Status
@@ -1653,28 +1665,49 @@ ClassMethod OAuthManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, .tConfig)
+            ; %SYS.OAuth2.Registration.Discover is 3-arg on this instance:
+            ; Discover(issuerEndpoint, sslConfiguration, Output server) — it SAVES an
+            ; OAuth2.ServerDefinition on success. sslConfiguration names an IRIS SSL/TLS
+            ; client configuration and is REQUIRED for https issuers (native ERROR #6159
+            ; otherwise). Validate before delegating so the caller gets actionable guidance.
+            ; Both inputs are whitespace-stripped so a padded/whitespace-only value cannot
+            ; slip past the friendly validation into the bare native error.
+            Set tSSLConfig = $ZStrip(tBody.%Get("sslConfiguration"), "<>W")
+            Set tIssuerURL = $ZStrip(tIssuerURL, "<>W")
+            If (tSSLConfig = "") && ($ZConvert($Extract(tIssuerURL, 1, 8), "L") = "https://") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Discovering an https issuer requires an IRIS SSL/TLS client configuration: pass 'sslConfiguration' naming one (inspect existing configurations with iris_ssl_list; create one with iris_ssl_manage action='create')")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, tSSLConfig, .tServerDef)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
             Do tResult.%Set("action", "discovered")
             Do tResult.%Set("issuerURL", tIssuerURL)
-            ; Return discovered configuration as a nested object
+            ; Return discovered configuration as a nested object. tServerDef is the saved
+            ; OAuth2.ServerDefinition; its endpoint properties are Metadata-backed getters.
             Set tDiscovered = {}
-            If $IsObject(tConfig) {
-                If tConfig.%IsA("%DynamicObject") {
-                    Set tDiscovered = tConfig
+            If $IsObject($Get(tServerDef)) {
+                If tServerDef.%IsA("%DynamicObject") {
+                    Set tDiscovered = tServerDef
                 }
                 Else {
                     ; Convert discovered config properties to JSON
-                    If $Property(tConfig, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tConfig, "IssuerEndpoint"))
-                    If $Property(tConfig, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tConfig, "AuthorizationEndpoint"))
-                    If $Property(tConfig, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tConfig, "TokenEndpoint"))
-                    If $Property(tConfig, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tConfig, "UserinfoEndpoint"))
-                    If $Property(tConfig, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tConfig, "RevocationEndpoint"))
-                    If $Property(tConfig, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tConfig, "IntrospectionEndpoint"))
-                    If $Property(tConfig, "JWKSEndpoint") '= "" Do tDiscovered.%Set("jwksEndpoint", $Property(tConfig, "JWKSEndpoint"))
+                    If $Property(tServerDef, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tServerDef, "IssuerEndpoint"))
+                    If $Property(tServerDef, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tServerDef, "AuthorizationEndpoint"))
+                    If $Property(tServerDef, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tServerDef, "TokenEndpoint"))
+                    If $Property(tServerDef, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tServerDef, "UserinfoEndpoint"))
+                    If $Property(tServerDef, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tServerDef, "RevocationEndpoint"))
+                    If $Property(tServerDef, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tServerDef, "IntrospectionEndpoint"))
+                    ; OAuth2.ServerDefinition has no JWKSEndpoint property — the JWKS URI
+                    ; lives in the server Metadata as "jwks_uri".
+                    Set tJwksUri = tServerDef.Metadata."jwks_uri"
+                    If tJwksUri '= "" Do tDiscovered.%Set("jwksEndpoint", tJwksUri)
                 }
             }
             Do tResult.%Set("configuration", tDiscovered)
@@ -1782,24 +1815,154 @@ ClassMethod OAuthManage() As %Status
                         Quit
                     }
 
-                    Set tProps("ApplicationName") = tClientName
-                    Set tProps("ServerDefinition") = tServerName
-                    If tBody.%IsDefined("redirectURIs") Set tProps("RedirectURL") = tBody.%Get("redirectURIs")
-                    If tBody.%IsDefined("grantTypes") Set tProps("GrantTypes") = tBody.%Get("grantTypes")
-                    If tBody.%IsDefined("clientType") Set tProps("ClientType") = tBody.%Get("clientType")
-                    If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+                    ; %SYS.OAuth2.Registration.RegisterClient is 1-arg on this instance —
+                    ; RegisterClient(applicationName) opens an EXISTING OAuth2.Client record
+                    ; and POSTs its metadata to the issuer's registration endpoint. The real
+                    ; flow is therefore: resolve the server definition, create and save the
+                    ; client record, then register it.
 
-                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tServerName, .tProps)
+                    ; Pre-validate: serverName is the ISSUER URL of an existing
+                    ; OAuth2.ServerDefinition (created by a prior successful discover).
+                    ; OpenByIssuer is exact-match (SHA512 hash index over the EXACT-collated
+                    ; IssuerEndpoint) and returns "" with $$$OK when not found.
+                    Set tSC = $$$OK
+                    Set tServerDef = ##class(OAuth2.ServerDefinition).OpenByIssuer(tServerName, .tSC)
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    If '$IsObject(tServerDef) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 server definition exists for issuer '" _ tServerName _ "' (issuer match is exact — use the same issuer URL string passed to discover). Client registration requires a prior successful discover for that issuer (action='discover' with issuerURL); discover of an https issuer itself requires an IRIS SSL/TLS client configuration (inspect with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; ClientType is Required with no InitialExpression; the Management
+                    ; Portal's default (and IRIS convention) is 'confidential'.
+                    Set tClientType = tBody.%Get("clientType")
+                    If tClientType = "" Set tClientType = "confidential"
+
+                    ; OAuth2.Client.SSLConfiguration is Required (MINLEN=1); inherit the one
+                    ; discovery used for this issuer.
+                    If tServerDef.SSLConfiguration = "" {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "The server definition for issuer '" _ tServerName _ "' has no SSL/TLS configuration, but an OAuth2 client record requires one: re-run discover for that issuer passing 'sslConfiguration' (inspect configurations with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    Set tClient = ##class(OAuth2.Client).%New()
+                    Set tClient.ApplicationName = tClientName
+                    Set tClient.ClientType = tClientType
+                    Set tClient.SSLConfiguration = tServerDef.SSLConfiguration
+                    Set tClient.ServerDefinition = tServerDef
+                    If tBody.%IsDefined("description") Set tClient.Description = tBody.%Get("description")
+
+                    ; RedirectionEndpoint is an OAuth2.Endpoint serial; sub-property
+                    ; assignment auto-instantiates it (the Management Portal idiom).
+                    ; Required for public/confidential clients. A client record holds ONE
+                    ; redirection endpoint — when a JSON array is supplied, take the first.
+                    Set tRedirectURI = ""
+                    If tBody.%IsDefined("redirectURIs") {
+                        Set tRedirectURIs = tBody.%Get("redirectURIs")
+                        If $IsObject(tRedirectURIs) {
+                            Set tRedirectURI = tRedirectURIs.%Get(0)
+                        } Else {
+                            Set tRedirectURI = tRedirectURIs
+                        }
+                    }
+                    If tRedirectURI '= "" {
+                        ; Same %Net.URLParser idiom as the server-create branch above.
+                        ; Decompose never errors on garbage — it yields an empty host —
+                        ; so validate the parse before building the endpoint serial;
+                        ; otherwise the caller who DID supply a URI gets a misleading
+                        ; "RedirectionEndpoint required" from the %Save validation.
+                        Do ##class(%Net.URLParser).Decompose(tRedirectURI, .tUrlParts)
+                        If $Get(tUrlParts("host")) = "" {
+                            Set $NAMESPACE = tOrigNS
+                            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'redirectURIs' value '" _ tRedirectURI _ "' is not a parseable absolute URL (no host found). Supply a full URL with a scheme and host, e.g. 'http://localhost:52773/csp/sys/oauth2/OAuth2.Response.cls'")
+                            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                            Set tSC = $$$OK
+                            Quit
+                        }
+                        Set tClient.RedirectionEndpoint.Host = $Get(tUrlParts("host"))
+                        Set tClient.RedirectionEndpoint.Port = $Get(tUrlParts("port"))
+                        Set tPrefix = $Get(tUrlParts("path"))
+                        If $Extract(tPrefix, 1) = "/" Set tPrefix = $Extract(tPrefix, 2, *)
+                        Set tClient.RedirectionEndpoint.Prefix = tPrefix
+                        Set tClient.RedirectionEndpoint.UseSSL = ($ZConvert($Get(tUrlParts("scheme")), "L") '= "http")
+                    }
+
+                    ; Grant types live on the client Metadata as a $list (portal idiom).
+                    ; Accept a JSON array or a comma/space-separated string.
+                    Set tGrantTypes = tBody.%Get("grantTypes")
+                    If tGrantTypes '= "" {
+                        Set tGTList = ""
+                        If $IsObject(tGrantTypes) {
+                            Set tGTIter = tGrantTypes.%GetIterator()
+                            While tGTIter.%GetNext(.tGTKey, .tGTVal) {
+                                Set tGTVal = $ZStrip(tGTVal, "<>W")
+                                If tGTVal '= "" Set tGTList = tGTList _ $ListBuild(tGTVal)
+                            }
+                        } Else {
+                            Set tGTNorm = $Translate(tGrantTypes, ",", " ")
+                            For tGTIdx = 1:1:$Length(tGTNorm, " ") {
+                                Set tGT = $ZStrip($Piece(tGTNorm, " ", tGTIdx), "<>W")
+                                If tGT '= "" Set tGTList = tGTList _ $ListBuild(tGT)
+                            }
+                        }
+                        If tGTList '= "" Set tClient.Metadata."grant_types" = tGTList
+                    }
+
+                    Set tSC = tClient.%Save()
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; Register with the issuer (1-arg signature). A failed remote
+                    ; registration leaves the local client record saved for ANY failure
+                    ; class — matching the Management Portal's configure-then-register
+                    ; semantics — so disclose that (and the retry path) on every failure.
+                    ; The no-endpoint class is matched on its error CODE (#8881 survives
+                    ; message localization where an English substring would not).
+                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tClientName)
+                    If $$$ISERR(tSC) {
+                        Set tRegErrText = $System.Status.GetErrorText(tSC)
+                        If tRegErrText [ "#8881" {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration did not run: the issuer publishes no dynamic registration endpoint. Register the client manually on the authorization server and store the returned client id on the record. Native error: " _ tRegErrText)
+                        } Else {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration failed. Fix the cause and retry; to re-run create with the same clientName, delete the saved record first (action='delete', entity='client'). Native error: " _ tRegErrText)
+                        }
+                    }
                     Set $NAMESPACE = tOrigNS
                     If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-                    ; Return client ID but NEVER the client secret (NFR6)
+                    ; Return client ID but NEVER the client secret (NFR6). The reopen must
+                    ; happen in %SYS — OAuth2.Client is not visible in the caller's
+                    ; namespace — so switch back briefly.
+                    Set $NAMESPACE = "%SYS"
+                    Set tRegClientId = ""
+                    Set tOpenSC = $$$OK
+                    Set tSavedClient = ##class(OAuth2.Client).Open(tClientName, .tOpenSC)
+                    If $$$ISOK(tOpenSC) && $IsObject(tSavedClient) && (tSavedClient.ClientId '= "") {
+                        Set tRegClientId = tSavedClient.ClientId
+                    }
+                    Set $NAMESPACE = tOrigNS
+
                     Set tResult = {}
                     Do tResult.%Set("action", "created")
                     Do tResult.%Set("entity", "client")
                     Do tResult.%Set("clientName", tClientName)
                     Do tResult.%Set("serverName", tServerName)
-                    If $Data(tProps("ClientId")) Do tResult.%Set("clientId", tProps("ClientId"))
+                    If tRegClientId '= "" Do tResult.%Set("clientId", tRegClientId)
                     ; CRITICAL: Never include clientSecret in response
                     Do ..RenderResponseBody($$$OK, , tResult)
                 }
@@ -1821,7 +1984,19 @@ ClassMethod OAuthManage() As %Status
                     Set tSC = ##class(OAuth2.Server.Configuration).Delete()
                 }
                 ElseIf tEntity = "client" {
-                    Set tSC = ##class(OAuth2.Client).Delete(tName)
+                    ; OAuth2.Client has NO Delete classmethod on this instance — only
+                    ; DeleteId (verified live: the old call threw <METHOD DOES NOT EXIST>).
+                    ; ApplicationName is the IdKey, so DeleteId(name) is the correct call.
+                    ; Pre-check existence: DeleteId on a missing name fails internally on
+                    ; the open (%LoadData), so surface a clean not-found instead.
+                    If '##class(OAuth2.Client).%ExistsId(tName) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 client named '" _ tName _ "' exists")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    Set tSC = ##class(OAuth2.Client).DeleteId(tName)
                 }
                 Set $NAMESPACE = tOrigNS
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }

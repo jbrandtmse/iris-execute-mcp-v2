@@ -186,7 +186,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_oauth_manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `name?`, `serverName?`, `clientName?`, `supportedScopes?`, `customizationNamespace?`, `customizationRoles?` | destructive |
+| `iris_oauth_manage` | Create/delete OAuth2 servers/clients, OIDC discovery | `action`, `entity?`, `issuerURL?`, `sslConfiguration?`, `name?`, `serverName?`, `clientName?`, `supportedScopes?`, `customizationNamespace?`, `customizationRoles?` | destructive |
 | `iris_oauth_list` | List all OAuth2 server definitions and clients | `cursor?` | readOnly, idempotent |
 
 **OAuth2 server creation notes:**
@@ -194,6 +194,12 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 - `supportedScopes` — accepts a space- or comma-separated string (e.g., `"openid profile email"` or `"openid,profile,email"`). The tool splits the string into an array before sending to IRIS.
 - `customizationNamespace` — IRIS namespace containing OAuth2 customization classes (required by IRIS; defaults to `""` when omitted).
 - `customizationRoles` — roles granted to the customization code (required by IRIS; defaults to `""` when omitted).
+
+**OAuth2 discovery and client registration notes:**
+
+- `sslConfiguration` — name of an IRIS SSL/TLS client configuration used for the discovery connection. **Required for `https` issuer URLs** (IRIS rejects the connection with ERROR #6159 otherwise). Inspect existing configurations with `iris_ssl_list`; create one with `iris_ssl_manage` (`action: "create"`).
+- `discover` **saves** an `OAuth2.ServerDefinition` keyed by the exact issuer URL — it is a write, not a read.
+- Client registration (`create` + `entity: "client"`) requires a **prior successful discover** for the issuer: `serverName` is the exact issuer URL string that was discovered (the match is exact; there is no user-chosen server name). The client record inherits the server definition's SSL configuration. If the issuer publishes no dynamic registration endpoint (Google, for example), the local client record is still created and saved, and the response carries the clean "no registration endpoint" error — matching the Management Portal's configure-then-register semantics.
 
 ### SQL Privilege Tools
 
@@ -922,11 +928,12 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
 ```json
 {
   "action": "discover",
-  "issuerURL": "https://accounts.google.com"
+  "issuerURL": "https://accounts.google.com",
+  "sslConfiguration": "ISC.FeatureTracker.SSL.Config"
 }
 ```
 
-**Output:**
+**Output** (captured live against IRIS 2026.1):
 ```json
 {
   "action": "discovered",
@@ -934,12 +941,15 @@ The `policy` block reflects the active IRIS system password policy (`Security.Sy
   "configuration": {
     "issuerEndpoint": "https://accounts.google.com",
     "authorizationEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-    "tokenEndpoint": "https://oauth2.googleapis.com/token"
+    "tokenEndpoint": "https://oauth2.googleapis.com/token",
+    "userinfoEndpoint": "https://openidconnect.googleapis.com/v1/userinfo",
+    "revocationEndpoint": "https://oauth2.googleapis.com/revoke",
+    "jwksEndpoint": "https://www.googleapis.com/oauth2/v3/certs"
   }
 }
 ```
 
-> Discovery requires an outbound TLS connection to the issuer, which needs a configured SSL/TLS client configuration on the IRIS instance.
+> Discovery requires an outbound TLS connection to the issuer, which needs a configured SSL/TLS client configuration on the IRIS instance — pass its name as `sslConfiguration` for `https` issuers (inspect with `iris_ssl_list`, create with `iris_ssl_manage`). Omitting it on an `https` issuer returns a validation error naming this prerequisite. A successful discover **saves** a server definition keyed by the exact issuer URL; that URL is the `serverName` a later client registration references.
 </details>
 
 <details>

@@ -2215,7 +2215,10 @@ ClassMethod TransformTest() As %Status
 
 /// Create, delete, or get a REST application.
 /// <p>Accepts a JSON body with <code>action</code> ("create", "delete", or "get"),
-/// <code>name</code> (REST application name),
+/// <code>name</code> (REST application name — an ObjectScript PACKAGE name such as
+/// <code>MyApi</code> or <code>MyCompany.MyApi</code>; it becomes the package of the
+/// generated classes and %REST.API validates it with $ZNAME, so URL-path values like
+/// "/myapi" are rejected),
 /// optional <code>spec</code> (OpenAPI JSON for create),
 /// and optional <code>namespace</code>.</p>
 ClassMethod RestManage() As %Status
