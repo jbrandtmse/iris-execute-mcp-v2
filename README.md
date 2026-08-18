@@ -74,6 +74,7 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header value sent on every HTTP request, pinning IRIS's request-locale negotiation so `%Status` error text renders in a predictable language instead of whatever locale an unspecified header resolves to. This addresses ONE of two independent localization mechanisms — IRIS also selects a message table per worker process (unaffected by this header), so both English (`ERROR #`) and localized (e.g. `خطأ #`) prefixes can still appear; existing prefix-stripping is unaffected. |
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |

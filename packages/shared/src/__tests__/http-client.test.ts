@@ -126,6 +126,144 @@ describe("IrisHttpClient", () => {
     });
   });
 
+  // ── Accept-Language header (Story 35.3) ──────────────────────────
+  //
+  // Pins the request locale explicitly so `%Status` error text renders
+  // predictably instead of whatever locale an unspecified `Accept-Language`
+  // resolves to. This is ONE of TWO independent mechanisms — the other
+  // (per-worker-process message-table selection, Rule #13) is untouched and
+  // still handled by the existing ERROR#/خطأ# strippers. Rule #59: prove the
+  // knob is not inert — an explicit override must be observably different
+  // from the default.
+
+  describe("Accept-Language header (Story 35.3)", () => {
+    it("sends the configured Accept-Language header on every request by default", async () => {
+      const config = makeConfig();
+      const client = new IrisHttpClient(config);
+
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({ ok: true })));
+
+      await client.get("/api/test");
+
+      const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = options.headers as Record<string, string>;
+      // makeConfig() does not set acceptLanguage — proves the client falls
+      // back to the documented default (DEFAULT_ACCEPT_LANGUAGE) rather than
+      // sending no header at all.
+      expect(headers["Accept-Language"]).toBe("en-US,en;q=0.9");
+
+      client.destroy();
+    });
+
+    it("honors an operator-supplied acceptLanguage override — the header value genuinely changes", async () => {
+      const config = makeConfig({ acceptLanguage: "ar;q=0.9" });
+      const client = new IrisHttpClient(config);
+
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({ ok: true })));
+
+      await client.get("/api/test");
+
+      const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = options.headers as Record<string, string>;
+      expect(headers["Accept-Language"]).toBe("ar;q=0.9");
+      expect(headers["Accept-Language"]).not.toBe("en-US,en;q=0.9");
+
+      client.destroy();
+    });
+
+    it("lets a per-call header override the configured Accept-Language", async () => {
+      const config = makeConfig({ acceptLanguage: "en-US,en;q=0.9" });
+      const client = new IrisHttpClient(config);
+
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({ ok: true })));
+
+      await client.get("/api/test", { headers: { "Accept-Language": "fr-FR" } });
+
+      const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = options.headers as Record<string, string>;
+      expect(headers["Accept-Language"]).toBe("fr-FR");
+
+      client.destroy();
+    });
+
+    it("sends Accept-Language on POST/PUT/DELETE/HEAD requests too, not only GET", async () => {
+      const config = makeConfig({ acceptLanguage: "en-US,en;q=0.9" });
+      const client = new IrisHttpClient(config);
+
+      // Story 35.3 code review: the original version of this test drove only
+      // `post()` while its name promised four verbs, and asserted inside a
+      // bare `for` over `mock.calls` — which passes VACUOUSLY if zero calls
+      // were recorded. Every verb is now genuinely driven, and the call count
+      // is pinned so the loop cannot silently inspect nothing.
+      //
+      // Each mutating verb is preceded by ensureCsrfToken()'s HEAD preflight
+      // to /api/atelier/; the mocked responses carry no X-CSRF-Token, so the
+      // preflight is not cached and repeats. Those preflights are themselves
+      // requests to IRIS and must carry the header too, which is exactly why
+      // every recorded call is asserted rather than only the last one.
+      // A fresh Response per call — a `Response` body can only be consumed
+      // once, so a single shared instance would fail on the second read.
+      fetchMock.mockImplementation(async () =>
+        mockResponse(atelierResponse({ ok: true })),
+      );
+
+      await client.post("/api/test", { foo: "bar" });
+      await client.put("/api/test", { foo: "bar" });
+      await client.delete("/api/test");
+      await client.head("/api/test");
+
+      const methodsSeen = fetchMock.mock.calls.map(
+        (call) => (call[1] as RequestInit).method,
+      );
+      // Non-vacuity guard: without this, the assertion loop below passes
+      // trivially if zero calls were ever recorded.
+      expect(methodsSeen.length).toBeGreaterThanOrEqual(4);
+      expect(methodsSeen).toEqual(
+        expect.arrayContaining(["POST", "PUT", "DELETE", "HEAD"]),
+      );
+
+      for (const call of fetchMock.mock.calls) {
+        const [, options] = call as [string, RequestInit];
+        const headers = options.headers as Record<string, string>;
+        expect(headers["Accept-Language"]).toBe("en-US,en;q=0.9");
+        // Wire-boundary check (Story 35.3 code review): these tests stub
+        // `fetch`, so real `Headers` construction — the thing that actually
+        // validates a header value at request time — never runs. Asserting it
+        // here keeps a wire-invalid value from staying green in this suite.
+        expect(() => new Headers(headers)).not.toThrow();
+      }
+
+      client.destroy();
+    });
+
+    // Story 35.3 code review: `??` would forward an empty-string
+    // `acceptLanguage` from a hand-built config straight onto the wire as an
+    // EMPTY `Accept-Language:` header (verified live against a local
+    // listener), pinning nothing. `loadConfig` normalizes the env-var side;
+    // this pins the same guarantee for configs constructed in code.
+    it.each([
+      ["an empty string", ""],
+      ["whitespace only", "   "],
+    ])(
+      "falls back to the documented default when a hand-built config sets acceptLanguage to %s",
+      async (_label, value) => {
+        const config = makeConfig({ acceptLanguage: value });
+        const client = new IrisHttpClient(config);
+
+        fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({ ok: true })));
+
+        await client.get("/api/test");
+
+        const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+        const headers = options.headers as Record<string, string>;
+        expect(headers["Accept-Language"]).toBe("en-US,en;q=0.9");
+        expect(headers["Accept-Language"]).not.toBe("");
+
+        client.destroy();
+      },
+    );
+  });
+
   // ── Cookie reuse ────────────────────────────────────────────────
 
   describe("cookie reuse", () => {

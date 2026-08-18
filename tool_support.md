@@ -18,6 +18,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 > **Epic 33 — `@iris-mcp/client-config` is a configuration manager, not a sixth server.** The package (and its `iris-mcp-clients` CLI + the extension's "MCP Clients" view) wires the five servers below into any of 13 MCP clients by editing those clients' own config files. It registers **no MCP tool**, is not a dependency of any server runtime, and calls no IRIS API — nothing in this catalog changes. See [`packages/client-config/README.md`](packages/client-config/README.md).
 
+> **Story 35.3 — `IRIS_ACCEPT_LANGUAGE` is server CONFIG, not a tool.** Every HTTP request every tool below makes now carries an explicit `Accept-Language` header (default `en-US,en;q=0.9`, operator-overridable), set once in `@iris-mcp/shared`'s `IrisHttpClient` — no tool row, no governance key, **no tool count moves**. It pins ONE of TWO independent IRIS localization mechanisms: request-locale negotiation. The other — IRIS selecting a `%Status` message table per WORKER PROCESS, independent of any header — is untouched, so both English (`ERROR #`) and localized (e.g. `خطأ #`) prefixes can still appear across calls; the existing `ExecuteMCPv2.Utils`/`ExecuteMCPv2.Diagram.Loader` prefix-stripping remains required and unmodified. Details: [suite README](README.md#2-set-environment-variables).
+
 ---
 
 ## `@iris-mcp/dev` — Development Tools (28)

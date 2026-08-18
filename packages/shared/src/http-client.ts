@@ -5,7 +5,7 @@
  * management, CSRF token handling, and structured error mapping.
  */
 
-import { IrisConnectionConfig } from "./config.js";
+import { DEFAULT_ACCEPT_LANGUAGE, IrisConnectionConfig } from "./config.js";
 import { IrisApiError, IrisConnectionError } from "./errors.js";
 import { logger } from "./logger.js";
 
@@ -180,7 +180,40 @@ export class IrisHttpClient {
     this.activeControllers.add(controller);
     const timer = setTimeout(() => controller.abort(), timeout);
 
+    // Story 35.3: pin the request locale explicitly (`IRIS_ACCEPT_LANGUAGE`,
+    // default English) so `%Status` error text renders predictably. Setting
+    // NO header is not a neutral act here: Node's `fetch`/undici injects
+    // `Accept-Language: *` on the caller's behalf, and IRIS resolves `*` to
+    // the alphabetically-first locale — which is how this client came to
+    // render Arabic `%Status` prefixes on an `enuw` instance (probe in the
+    // Story 35.3 record; `curl`, which genuinely omits the header, renders
+    // English, which is why the two disagreed). This addresses ONE of TWO
+    // independent mechanisms — the per-worker-process message-table selection
+    // (Rule #13) is untouched and still requires the existing ERROR#/خطأ#
+    // strippers (Utils.cls, Diagram/Loader.cls).
+    //
+    // Override precedence: `init.extraHeaders` then a per-call
+    // `options.headers` are spread after, so either wins — but ONLY under the
+    // exact key `"Accept-Language"`. This is a plain object, not a `Headers`,
+    // so a differently-cased key (`"accept-language"`) does not replace this
+    // entry; undici would MERGE the two into one comma-joined value. No call
+    // site passes an accept-language header today (verified at the Story 35.3
+    // review); if one is ever added it must use this exact casing.
+    //
+    // Blank-safe (not merely nullish-safe): an empty or whitespace-only
+    // `acceptLanguage` on a hand-built config would otherwise be forwarded as
+    // an EMPTY `Accept-Language:` header (undici trims whitespace-only values
+    // to ""), which pins nothing. `loadConfig` already normalizes the env-var
+    // side; this is the same guarantee for configs constructed in code. The
+    // ORIGINAL value is sent when it is non-blank — never a trimmed rewrite.
+    const configuredAcceptLanguage = this.config.acceptLanguage;
+    const acceptLanguage =
+      configuredAcceptLanguage !== undefined && configuredAcceptLanguage.trim() !== ""
+        ? configuredAcceptLanguage
+        : DEFAULT_ACCEPT_LANGUAGE;
+
     const headers: Record<string, string> = {
+      "Accept-Language": acceptLanguage,
       ...init.extraHeaders,
       ...options?.headers,
     };

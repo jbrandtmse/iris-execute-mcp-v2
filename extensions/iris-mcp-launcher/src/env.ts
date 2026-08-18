@@ -115,7 +115,7 @@ export function buildGovernanceEnv(settings: LauncherSettings): Record<string, s
  * the extension's own settings say is unset, or a Server-Manager import path
  * that competes with the profiles this launcher just synthesized.
  *
- * `IRIS_TIMEOUT` / `IRIS_SQL_*` are deliberately NOT in this set: the
+ * `IRIS_TIMEOUT` / `IRIS_SQL_*` / `IRIS_ACCEPT_LANGUAGE` are deliberately NOT in this set: the
  * extension exposes no setting for them, so an ambient value contradicts
  * nothing the user configured here and stays an intentional escape hatch.
  */
