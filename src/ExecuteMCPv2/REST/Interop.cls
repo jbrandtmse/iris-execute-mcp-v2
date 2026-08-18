@@ -545,6 +545,32 @@ ClassMethod ItemManage() As %Status
             ; the item; one-arg NameExists always returns 0).
             Set tFindStatus = $$$OK
             Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): FindItemByConfigName walks
+            ; Ens.Config.Production:findItemIdByName, which SKIPS any item whose ClassName no
+            ; longer resolves to a business type (irislib/Ens/Config/Production.cls:739 —
+            ; Continue:$$$eHostTypeUnknown=##class(Ens.Config.Item).GetBusinessType(...)) — a
+            ; deleted/renamed/uncompiled host class, or an item created before this story's
+            ; ValidateHostClassName guard existed. Such an item is reported "not found" here
+            ; while 'get' (raw SQL, line ~438) still returns it — the SAME get/set
+            ; contradiction AC 35.1.1 exists to kill, by a second route, and the item is
+            ; otherwise unrepairable through this tool (can't 'set' a valid className to fix
+            ; it, can't 'remove' it either). Fallback: resolve via the composite-key index
+            ; directly (two-arg NameExists — live-probed to resolve the item, Dev Notes), then
+            ; take the item from tProd.Items (NOT a standalone %OpenId(tID)) — the object
+            ; SaveToClass serializes, mirroring the library's own idiom at
+            ; irislib/Ens/Config/Production.cls:725-727. (The live swizzle probe, Dev Notes,
+            ; showed %OpenId(tID) returns the SAME already-swizzled OREF as tProd.Items in this
+            ; process and would also work — the tProd.Items idiom is kept for library
+            ; consistency, not because %OpenId was shown to be unsafe here.)
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
                 ; NOTE (code review 35.1): FindItemByConfigName's Output %Status is deliberately
@@ -604,7 +630,26 @@ ClassMethod ItemManage() As %Status
                 Set tSC = tItem.%Save()
                 If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-                Set tSC = tProd.SaveToClass(tItem)
+                ; CR 35.1-15 (Task 7 code review): SaveToClass(pItem) commits the class XData
+                ; FIRST (Production.cls:146) and only THEN dispatches
+                ; $classmethod(pItem.ClassName,"OnConfigChange",...). Its Catch swallows ONLY
+                ; <METHOD DOES NOT EXIST> — a className naming a class that is not on this system
+                ; raises <CLASS DOES NOT EXIST> and falls through to $$$EnsSystemError
+                ; (Production.cls:148-157). The write has ALREADY landed at that point, so the
+                ; caller was told "failed" for a change 'get' then reports as applied — the exact
+                ; get/set contradiction this story exists to kill, inverted. Newly reachable: the
+                ; AC 35.1.7 fallback above is what first lets such an item get this far, and the
+                ; case is real precisely because the fallback's whole purpose is items whose host
+                ; class was DELETED or renamed (live-reproduced over real HTTP). The no-pItem
+                ; overload — exactly what 'remove' already calls — persists the identical XData
+                ; (pItem is used ONLY for that notification) while skipping a dispatch that is
+                ; meaningless for a class that does not exist. Existing valid-class behavior is
+                ; byte-for-byte unchanged.
+                If ##class(%Dictionary.CompiledClass).%ExistsId(tItem.ClassName) {
+                    Set tSC = tProd.SaveToClass(tItem)
+                } Else {
+                    Set tSC = tProd.SaveToClass()
+                }
                 If $$$ISERR(tSC) {
                     ; CR 35.1-3 (code review): the %Save() above already COMMITTED this change to
                     ; the SQL extent that 'get' reads directly. Leaving it there while the class
@@ -719,8 +764,19 @@ ClassMethod ItemManage() As %Status
 
             ; CR 17.2-3: reject a duplicate item Name in the production — the
             ; (Production,Name) index is not unique, so add is otherwise non-idempotent.
+            ; CR 35.1-14 (Task 7 code review, Rule #56 enumeration): this guard resolves through
+            ; FindItemByConfigName, which SKIPS any item whose ClassName no longer resolves to a
+            ; business type (Production.cls:739) — the exact class of item AC 35.1.7 exists to
+            ; keep reachable. Without the same composite-key fallback 'set'/'remove' now carry,
+            ; 'add' believed the name was FREE and inserted a SECOND item with the same Name into
+            ; the production (live-reproduced over real HTTP: the class XData ended up with two
+            ; <Item Name="DupTargetOp"> entries, HTTP 200 "added"), durably corrupting the
+            ; production the guard's own comment above exists to protect. Only presence matters
+            ; here, so the id from the two-arg NameExists is enough — no Items lookup needed.
             Set tDup = tProd.FindItemByConfigName(tItemName)
-            If $IsObject(tDup) {
+            Set tDupID = ""
+            If '$IsObject(tDup) { Do ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tDupID) }
+            If $IsObject(tDup) || (tDupID '= "") {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' already exists in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -813,6 +869,20 @@ ClassMethod ItemManage() As %Status
             }
 
             Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): same fallback as 'set' above —
+            ; an item whose ClassName no longer resolves to a business type is skipped by
+            ; findItemIdByName and must stay reachable through 'remove' too, or it can never
+            ; be cleaned up through this tool. See the 'set' branch (~line 548) for the full
+            ; rationale and the live swizzle-probe evidence (Dev Notes).
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
