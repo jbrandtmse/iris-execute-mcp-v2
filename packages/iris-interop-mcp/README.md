@@ -831,6 +831,8 @@ The response falls back to a best-effort reflection over the target's public non
 ```
 
 > `name` is an ObjectScript **package name** (e.g., `MyApi` or `MyCompany.MyApi`) — it becomes the package of the generated classes. URL-path values like `/myapi` are rejected by IRIS ("Application name is not a valid package name").
+>
+> `action: "delete"` removes the application registration (spec + dispatch); the generated `.impl` implementation class is **preserved by design** (IRIS `%REST.API.DeleteApplication` — the impl class carries user-written endpoint code). Delete it separately (e.g. `iris_doc_delete`) if unwanted.
 
 **Output:**
 ```json

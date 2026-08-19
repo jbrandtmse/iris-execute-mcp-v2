@@ -2795,3 +2795,14 @@ The lead smoke proved `35-9-DEV-1` is a live SILENT-DROP class, not just a misma
 **Disposition tally (Rule #51):** 1 item — **0 HIGH · 0 MEDIUM · 1 LOW**, open.
 
 **Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 99 LOW = 124 open** across **202 distinct items** (77 terminal). Check: 0 + 25 + 99 = 124.
+
+## Terminal disposition — Story 35.8 closes `35-5-SMOKE-1` and `35-9-DEV-2` (2026-08-19, dev pass, both per their ledgered "Story 35.8 docs rollup" suggested resolution)
+
+| Item | Severity | Disposition |
+|---|------|-------------|
+| `35-5-SMOKE-1` | LOW | **RESOLVED** — `iris_interop_rest`'s tool description now states the `.impl` contract (`packages/iris-interop-mcp/src/tools/rest.ts`: "'delete' removes the application registration (spec + dispatch); the generated '.impl' implementation class is preserved by design (IRIS %REST.API) — delete it separately if unwanted"), and the interop README's `iris_interop_rest` example block carries the same note with the `iris_doc_delete` remedy pointer. Both assertions are live-TRUE on this instance (the reviewer's and lead smoke's `.impl` remnants were the observation; `%REST/API.cls`'s own doc banner is the authority). |
+| `35-9-DEV-2` | LOW | **RESOLVED** — the "mis-maps the class name" wording is replaced with the post-35.9 REFUSAL contract on all four prompt surfaces: `packages/iris-dev-mcp/src/prompts/deployAndTestClass.ts` and `objectscriptReview.ts` (sources of truth) plus the two generated skills (`skills/deploy-and-test-class/SKILL.md`, `skills/objectscript-review/SKILL.md`, regenerated via `pnpm gen:skills` from the rebuilt dist per Rule #18 — never hand-edited). The doc-rot guard `prompt-safety-invariants.test.ts` now pins the refusal wording positively ("refused" present, "mis-maps the class name" absent). |
+
+**Disposition tally (Rule #51 — mechanically counted from the Disposition column above):** 2 items — **2 RESOLVED** · 0 closed-with-evidence · 0 closed-by-decision · 0 re-deferred.
+
+**Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 97 LOW = 122 open** across **202 distinct items** (79 terminal), derived mechanically per Rule #51 from the prior state (0 HIGH / 25 MEDIUM / 99 LOW = 124 open / 202 distinct / 77 terminal): `35-5-SMOKE-1` and `35-9-DEV-2` move open → terminal (−2 LOW, +2 terminal); no new items. So HIGH unchanged at 0; MEDIUM unchanged at 25; LOW 99 − 2 = 97; open 124 − 2 = 122; distinct unchanged at 202; terminal 77 + 2 = 79. Check: 0 + 25 + 97 = 122.

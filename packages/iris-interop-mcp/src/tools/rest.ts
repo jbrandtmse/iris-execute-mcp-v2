@@ -21,7 +21,9 @@ export const interopRestTool: ToolDefinition = {
   description:
     "Create, delete, or get a REST application. " +
     "'create' generates a REST application from an OpenAPI specification. " +
-    "'delete' removes a REST application. " +
+    "'delete' removes the application registration (spec + dispatch); the generated " +
+    "'.impl' implementation class is preserved by design (IRIS %REST.API) — delete it " +
+    "separately if unwanted. " +
     "'get' returns the OpenAPI spec for an existing REST application.",
   inputSchema: z.object({
     action: z

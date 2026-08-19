@@ -10,7 +10,7 @@ description: "Deploy an ObjectScript class or package to IRIS (iris_doc_load, gl
 
 Target: `<classOrPackage>`
 
-1. Deploy: call `iris_doc_load` with a **glob-prefixed path** rooted at the local source directory this class/package lives under, e.g. `c:/path/to/src/**/<classOrPackage>*.cls` — a bare (non-glob) file path mis-maps the class name (Rule #17), so ALWAYS include a directory prefix ending in `**/*.cls` or `**/<ClassName>.cls`. Pass `compile: true`.
+1. Deploy: call `iris_doc_load` with a **glob-prefixed path** rooted at the local source directory this class/package lives under, e.g. `c:/path/to/src/**/<classOrPackage>*.cls` — a bare (non-glob) file path derives an unqualified class name and the upload is REFUSED when it disagrees with the file's own Class declaration (Rule #17), so ALWAYS include a directory prefix ending in `**/*.cls` or `**/<ClassName>.cls`. Pass `compile: true`.
 2. If the response reports compile errors, read each error's document/line/message, fix the SOURCE `.cls` file on disk (never edit generated/compiled output), and re-run step 1. Repeat until `iris_doc_load` reports zero compile errors.
 3. Determine the test level: if `<classOrPackage>` names a single class ending in a recognizable test-class pattern (or the user says "just this class"), use `level: "class"`; if it names a package, use `level: "package"`; if the user names one specific test method, use `level: "method"` with `target: "ClassName:MethodName"`.
 4. Call `iris_execute_tests` with `target: "<classOrPackage>"` and the chosen `level`.
