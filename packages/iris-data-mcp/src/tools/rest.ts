@@ -60,6 +60,74 @@ async function fetchLegacyApps(
     }));
 }
 
+/**
+ * Story 35.6 (AC 35.6.4): look up an application name in the legacy
+ * (hand-written %CSP.REST) webapp list.
+ *
+ * Matching is EXACT and case-sensitive: webapp names are case-sensitive IRIS
+ * configuration names, and `list` returns the exact registered name, so a
+ * name the tool itself surfaced always matches byte-for-byte. Normalizing
+ * case would risk resolving to a DIFFERENT registered webapp.
+ *
+ * The result distinguishes ABSENCE from LOOKUP FAILURE (code review, Story
+ * 35.6): a failing fallback must never mask the accurate not-found message,
+ * but a swallowed lookup failure must not be REPORTED as proven absence
+ * either — that would be the same misdirection class this story removes.
+ */
+type LegacyLookup =
+  | { ok: true; match: { name: unknown; dispatchClass: unknown; namespace: unknown; swaggerSpec: null } | null }
+  | { ok: false; reason: string };
+
+async function findLegacyApp(
+  ctx: ToolContext,
+  ns: string,
+  application: string,
+): Promise<LegacyLookup> {
+  try {
+    const legacyApps = await fetchLegacyApps(ctx, ns);
+    return { ok: true, match: legacyApps.find((a) => a.name === application) ?? null };
+  } catch (lookupError: unknown) {
+    // Status-driven reason, never the embedded message text (Rule #8/#13): a
+    // failing endpoint's prose can itself carry the misleading gateway 404
+    // wording this story exists to remove.
+    const reason =
+      lookupError instanceof IrisApiError
+        ? `HTTP ${lookupError.statusCode}`
+        : lookupError instanceof Error
+          ? lookupError.message
+          : String(lookupError);
+    return { ok: false, reason };
+  }
+}
+
+/**
+ * Story 35.6: accurate not-found text naming BOTH scopes checked — replaces
+ * the Mgmnt API's misleading "Check the IRIS web server configuration" text
+ * (an HTTP-status-driven branch, never message-text matching: Rule #8/#13).
+ */
+function notFoundBothScopes(application: string, ns: string): string {
+  return (
+    `Error managing REST application: '${application}' was not found in namespace '${ns}' ` +
+    `as a spec-first REST application (IRIS Mgmnt API, /api/mgmnt/v2) or as a legacy ` +
+    `%CSP.REST application (ExecuteMCPv2 webapp list — the names 'list' with scope ` +
+    `'legacy' or 'all' returns).`
+  );
+}
+
+/**
+ * Story 35.6 (code review): the Mgmnt 404 fired but the legacy lookup itself
+ * FAILED — the legacy scope was never actually consulted, so say that instead
+ * of asserting absence in it.
+ */
+function notFoundLegacyUnchecked(application: string, ns: string, reason: string): string {
+  return (
+    `Error managing REST application: '${application}' was not found in namespace '${ns}' ` +
+    `as a spec-first REST application (IRIS Mgmnt API, /api/mgmnt/v2), and the legacy ` +
+    `%CSP.REST scope could not be checked — the ExecuteMCPv2 webapp list query failed ` +
+    `(${reason}).`
+  );
+}
+
 // ── iris_rest_manage ──────────────────────────────────────────
 
 export const restManageTool: ToolDefinition = {
@@ -76,8 +144,15 @@ export const restManageTool: ToolDefinition = {
     "  - 'all': union of both — spec-first + legacy combined into one response.\n\n" +
     "BREAKING (pre-release): old scope:'all' behavior is now scope:'legacy'.\n\n" +
     "'get' returns REST application details (dispatch class, URL map, swagger spec) for a named application. " +
-    "Use fullSpec:false (default) for a compact summary; fullSpec:true for the full 50KB+ swagger blob.\n\n" +
-    "'delete' removes a REST application.",
+    "Use fullSpec:false (default) for a compact summary; fullSpec:true for the full 50KB+ swagger blob. " +
+    "'get' resolves EVERY name 'list' returns: for a legacy %CSP.REST name (a Mgmnt API 404) it falls back " +
+    "to the legacy webapp list and returns {name, dispatchClass, namespace, swaggerSpec: null} plus an " +
+    "'explanation' field — legacy apps have no OpenAPI spec by design, so swaggerSpec stays null and " +
+    "fullSpec has no effect. A name in neither scope fails with an accurate not-found naming BOTH scopes " +
+    "checked (never a 'web server configuration' misdirection).\n\n" +
+    "'delete' removes a SPEC-FIRST REST application only (Mgmnt API scope). A legacy %CSP.REST name " +
+    "fails with an explanation pointing at iris_webapp_manage:delete, which is the correct tool for " +
+    "removing a legacy web application.",
   inputSchema: z.object({
     action: z
       .enum(["list", "get", "delete"])
@@ -110,7 +185,8 @@ export const restManageTool: ToolDefinition = {
       .describe(
         "For 'get' action only. When false (default) returns a compact summary " +
           "{name, dispatchClass, namespace, swaggerSpec:{basePath,pathCount,definitionCount,description,title,version}} " +
-          "to avoid 50KB+ responses. When true, returns the full swagger spec blob.",
+          "to avoid 50KB+ responses. When true, returns the full swagger spec blob. " +
+          "Has no effect for legacy %CSP.REST apps — no spec exists, swaggerSpec stays null.",
       ),
   }),
   annotations: {
@@ -210,9 +286,53 @@ export const restManageTool: ToolDefinition = {
             isError: true,
           };
         }
-        response = await ctx.http.get(
-          `${BASE_MGMNT_URL}/${encodeURIComponent(ns)}/${encodeURIComponent(application)}`,
-        );
+        try {
+          response = await ctx.http.get(
+            `${BASE_MGMNT_URL}/${encodeURIComponent(ns)}/${encodeURIComponent(application)}`,
+          );
+        } catch (error: unknown) {
+          // Story 35.6 (AC 35.6.4): the Mgmnt API covers SPEC-FIRST apps only
+          // (Rule #12), so a 404 here may simply be a legacy hand-written
+          // %CSP.REST app that 'list' scope 'legacy'/'all' returns. Resolve it
+          // via the legacy webapp list instead of surfacing the CSP gateway's
+          // misleading "Check the IRIS web server configuration" 404 text.
+          // Branch on the HTTP STATUS, never the message text (Rule #8/#13).
+          if (error instanceof IrisApiError && error.statusCode === 404) {
+            const legacyLookup = await findLegacyApp(ctx, ns, application);
+            if (legacyLookup.ok && legacyLookup.match) {
+              const legacyMatch = legacyLookup.match;
+              const detail = {
+                name: legacyMatch.name,
+                dispatchClass: legacyMatch.dispatchClass,
+                namespace: legacyMatch.namespace ?? ns,
+                swaggerSpec: null,
+                explanation:
+                  "Legacy hand-written %CSP.REST application — resolved via the ExecuteMCPv2 " +
+                  "webapp list because the IRIS Mgmnt API (/api/mgmnt/v2) covers spec-first " +
+                  "apps only. No OpenAPI spec exists for a legacy app by design, so " +
+                  "swaggerSpec is null and fullSpec has no effect.",
+              };
+              return {
+                content: [
+                  { type: "text" as const, text: JSON.stringify(detail, null, 2) },
+                ],
+                structuredContent: detail,
+              };
+            }
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: legacyLookup.ok
+                    ? notFoundBothScopes(application, ns)
+                    : notFoundLegacyUnchecked(application, ns, legacyLookup.reason),
+                },
+              ],
+              isError: true,
+            };
+          }
+          throw error;
+        }
       } else {
         // delete
         if (!application) {
@@ -226,9 +346,50 @@ export const restManageTool: ToolDefinition = {
             isError: true,
           };
         }
-        response = await ctx.http.delete(
-          `${BASE_MGMNT_URL}/${encodeURIComponent(ns)}/${encodeURIComponent(application)}`,
-        );
+        try {
+          response = await ctx.http.delete(
+            `${BASE_MGMNT_URL}/${encodeURIComponent(ns)}/${encodeURIComponent(application)}`,
+          );
+        } catch (error: unknown) {
+          // Story 35.6: same by-design scope boundary as 'get'. Deleting a
+          // legacy app is deliberately NOT routed anywhere here — that is
+          // iris_webapp_manage:delete's job (it deletes the web application;
+          // there are no spec classes to remove).
+          if (error instanceof IrisApiError && error.statusCode === 404) {
+            const legacyLookup = await findLegacyApp(ctx, ns, application);
+            if (legacyLookup.ok && legacyLookup.match) {
+              const legacyMatch = legacyLookup.match;
+              // fetchLegacyApps filters to non-empty dispatchClass, so a match
+              // always carries a real class name — no empty-parenthetical guard.
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text:
+                      `Error managing REST application: '${application}' is a legacy ` +
+                      `hand-written %CSP.REST application (dispatch class ${String(legacyMatch.dispatchClass)}). ` +
+                      `iris_rest_manage:delete removes spec-first REST applications only ` +
+                      `(IRIS Mgmnt API scope). To remove a legacy web application, use ` +
+                      `iris_webapp_manage:delete.`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: legacyLookup.ok
+                    ? notFoundBothScopes(application, ns)
+                    : notFoundLegacyUnchecked(application, ns, legacyLookup.reason),
+                },
+              ],
+              isError: true,
+            };
+          }
+          throw error;
+        }
       }
 
       const result = extractResult(response);

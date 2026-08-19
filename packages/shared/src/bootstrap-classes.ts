@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "01dc15bb27df";
+export const BOOTSTRAP_VERSION = "e1168c1ebe56";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "01dc15bb27df";
+Parameter BOOTSTRAPVERSION = "e1168c1ebe56";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -7060,6 +7060,18 @@ ClassMethod OAuthList() As %Status
 /// <p>Reads a JSON body with <code>action</code> (create|delete|discover),
 /// <code>entity</code> (server|client for create/delete), and action-specific
 /// parameters. Dispatches to the appropriate OAuth2 classes in <code>%SYS</code>.</p>
+/// <p>Discovery (action=discover) takes <code>issuerURL</code> plus an optional
+/// <code>sslConfiguration</code> naming an IRIS SSL/TLS client configuration — REQUIRED
+/// for https issuers (inspect existing configurations with iris_ssl_list, create one with
+/// iris_ssl_manage). Discovery SAVES an OAuth2.ServerDefinition keyed by the exact issuer
+/// URL.</p>
+/// <p>Client registration (create + entity=client) resolves <code>serverName</code> as the
+/// issuer URL of an EXISTING OAuth2.ServerDefinition — the exact issuer URL string passed
+/// to a prior successful discover (the match is exact; OpenID provider metadata gives no
+/// user-chosen server name). It then creates the OAuth2.Client record and calls the 1-arg
+/// %SYS.OAuth2.Registration.RegisterClient(applicationName). A failed remote registration
+/// (e.g. the issuer publishes no registration endpoint) leaves the local record saved —
+/// the Management Portal's configure-then-register semantics.</p>
 /// <p><b>CRITICAL</b>: Client secrets are NEVER included in response bodies
 /// or error messages (NFR6).</p>
 ClassMethod OAuthManage() As %Status
@@ -7104,28 +7116,49 @@ ClassMethod OAuthManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, .tConfig)
+            ; %SYS.OAuth2.Registration.Discover is 3-arg on this instance:
+            ; Discover(issuerEndpoint, sslConfiguration, Output server) — it SAVES an
+            ; OAuth2.ServerDefinition on success. sslConfiguration names an IRIS SSL/TLS
+            ; client configuration and is REQUIRED for https issuers (native ERROR #6159
+            ; otherwise). Validate before delegating so the caller gets actionable guidance.
+            ; Both inputs are whitespace-stripped so a padded/whitespace-only value cannot
+            ; slip past the friendly validation into the bare native error.
+            Set tSSLConfig = $ZStrip(tBody.%Get("sslConfiguration"), "<>W")
+            Set tIssuerURL = $ZStrip(tIssuerURL, "<>W")
+            If (tSSLConfig = "") && ($ZConvert($Extract(tIssuerURL, 1, 8), "L") = "https://") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Discovering an https issuer requires an IRIS SSL/TLS client configuration: pass 'sslConfiguration' naming one (inspect existing configurations with iris_ssl_list; create one with iris_ssl_manage action='create')")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, tSSLConfig, .tServerDef)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
             Do tResult.%Set("action", "discovered")
             Do tResult.%Set("issuerURL", tIssuerURL)
-            ; Return discovered configuration as a nested object
+            ; Return discovered configuration as a nested object. tServerDef is the saved
+            ; OAuth2.ServerDefinition; its endpoint properties are Metadata-backed getters.
             Set tDiscovered = {}
-            If $IsObject(tConfig) {
-                If tConfig.%IsA("%DynamicObject") {
-                    Set tDiscovered = tConfig
+            If $IsObject($Get(tServerDef)) {
+                If tServerDef.%IsA("%DynamicObject") {
+                    Set tDiscovered = tServerDef
                 }
                 Else {
                     ; Convert discovered config properties to JSON
-                    If $Property(tConfig, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tConfig, "IssuerEndpoint"))
-                    If $Property(tConfig, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tConfig, "AuthorizationEndpoint"))
-                    If $Property(tConfig, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tConfig, "TokenEndpoint"))
-                    If $Property(tConfig, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tConfig, "UserinfoEndpoint"))
-                    If $Property(tConfig, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tConfig, "RevocationEndpoint"))
-                    If $Property(tConfig, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tConfig, "IntrospectionEndpoint"))
-                    If $Property(tConfig, "JWKSEndpoint") '= "" Do tDiscovered.%Set("jwksEndpoint", $Property(tConfig, "JWKSEndpoint"))
+                    If $Property(tServerDef, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tServerDef, "IssuerEndpoint"))
+                    If $Property(tServerDef, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tServerDef, "AuthorizationEndpoint"))
+                    If $Property(tServerDef, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tServerDef, "TokenEndpoint"))
+                    If $Property(tServerDef, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tServerDef, "UserinfoEndpoint"))
+                    If $Property(tServerDef, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tServerDef, "RevocationEndpoint"))
+                    If $Property(tServerDef, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tServerDef, "IntrospectionEndpoint"))
+                    ; OAuth2.ServerDefinition has no JWKSEndpoint property — the JWKS URI
+                    ; lives in the server Metadata as "jwks_uri".
+                    Set tJwksUri = tServerDef.Metadata."jwks_uri"
+                    If tJwksUri '= "" Do tDiscovered.%Set("jwksEndpoint", tJwksUri)
                 }
             }
             Do tResult.%Set("configuration", tDiscovered)
@@ -7233,24 +7266,154 @@ ClassMethod OAuthManage() As %Status
                         Quit
                     }
 
-                    Set tProps("ApplicationName") = tClientName
-                    Set tProps("ServerDefinition") = tServerName
-                    If tBody.%IsDefined("redirectURIs") Set tProps("RedirectURL") = tBody.%Get("redirectURIs")
-                    If tBody.%IsDefined("grantTypes") Set tProps("GrantTypes") = tBody.%Get("grantTypes")
-                    If tBody.%IsDefined("clientType") Set tProps("ClientType") = tBody.%Get("clientType")
-                    If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+                    ; %SYS.OAuth2.Registration.RegisterClient is 1-arg on this instance —
+                    ; RegisterClient(applicationName) opens an EXISTING OAuth2.Client record
+                    ; and POSTs its metadata to the issuer's registration endpoint. The real
+                    ; flow is therefore: resolve the server definition, create and save the
+                    ; client record, then register it.
 
-                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tServerName, .tProps)
+                    ; Pre-validate: serverName is the ISSUER URL of an existing
+                    ; OAuth2.ServerDefinition (created by a prior successful discover).
+                    ; OpenByIssuer is exact-match (SHA512 hash index over the EXACT-collated
+                    ; IssuerEndpoint) and returns "" with $$$OK when not found.
+                    Set tSC = $$$OK
+                    Set tServerDef = ##class(OAuth2.ServerDefinition).OpenByIssuer(tServerName, .tSC)
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    If '$IsObject(tServerDef) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 server definition exists for issuer '" _ tServerName _ "' (issuer match is exact — use the same issuer URL string passed to discover). Client registration requires a prior successful discover for that issuer (action='discover' with issuerURL); discover of an https issuer itself requires an IRIS SSL/TLS client configuration (inspect with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; ClientType is Required with no InitialExpression; the Management
+                    ; Portal's default (and IRIS convention) is 'confidential'.
+                    Set tClientType = tBody.%Get("clientType")
+                    If tClientType = "" Set tClientType = "confidential"
+
+                    ; OAuth2.Client.SSLConfiguration is Required (MINLEN=1); inherit the one
+                    ; discovery used for this issuer.
+                    If tServerDef.SSLConfiguration = "" {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "The server definition for issuer '" _ tServerName _ "' has no SSL/TLS configuration, but an OAuth2 client record requires one: re-run discover for that issuer passing 'sslConfiguration' (inspect configurations with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    Set tClient = ##class(OAuth2.Client).%New()
+                    Set tClient.ApplicationName = tClientName
+                    Set tClient.ClientType = tClientType
+                    Set tClient.SSLConfiguration = tServerDef.SSLConfiguration
+                    Set tClient.ServerDefinition = tServerDef
+                    If tBody.%IsDefined("description") Set tClient.Description = tBody.%Get("description")
+
+                    ; RedirectionEndpoint is an OAuth2.Endpoint serial; sub-property
+                    ; assignment auto-instantiates it (the Management Portal idiom).
+                    ; Required for public/confidential clients. A client record holds ONE
+                    ; redirection endpoint — when a JSON array is supplied, take the first.
+                    Set tRedirectURI = ""
+                    If tBody.%IsDefined("redirectURIs") {
+                        Set tRedirectURIs = tBody.%Get("redirectURIs")
+                        If $IsObject(tRedirectURIs) {
+                            Set tRedirectURI = tRedirectURIs.%Get(0)
+                        } Else {
+                            Set tRedirectURI = tRedirectURIs
+                        }
+                    }
+                    If tRedirectURI '= "" {
+                        ; Same %Net.URLParser idiom as the server-create branch above.
+                        ; Decompose never errors on garbage — it yields an empty host —
+                        ; so validate the parse before building the endpoint serial;
+                        ; otherwise the caller who DID supply a URI gets a misleading
+                        ; "RedirectionEndpoint required" from the %Save validation.
+                        Do ##class(%Net.URLParser).Decompose(tRedirectURI, .tUrlParts)
+                        If $Get(tUrlParts("host")) = "" {
+                            Set $NAMESPACE = tOrigNS
+                            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'redirectURIs' value '" _ tRedirectURI _ "' is not a parseable absolute URL (no host found). Supply a full URL with a scheme and host, e.g. 'http://localhost:52773/csp/sys/oauth2/OAuth2.Response.cls'")
+                            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                            Set tSC = $$$OK
+                            Quit
+                        }
+                        Set tClient.RedirectionEndpoint.Host = $Get(tUrlParts("host"))
+                        Set tClient.RedirectionEndpoint.Port = $Get(tUrlParts("port"))
+                        Set tPrefix = $Get(tUrlParts("path"))
+                        If $Extract(tPrefix, 1) = "/" Set tPrefix = $Extract(tPrefix, 2, *)
+                        Set tClient.RedirectionEndpoint.Prefix = tPrefix
+                        Set tClient.RedirectionEndpoint.UseSSL = ($ZConvert($Get(tUrlParts("scheme")), "L") '= "http")
+                    }
+
+                    ; Grant types live on the client Metadata as a $list (portal idiom).
+                    ; Accept a JSON array or a comma/space-separated string.
+                    Set tGrantTypes = tBody.%Get("grantTypes")
+                    If tGrantTypes '= "" {
+                        Set tGTList = ""
+                        If $IsObject(tGrantTypes) {
+                            Set tGTIter = tGrantTypes.%GetIterator()
+                            While tGTIter.%GetNext(.tGTKey, .tGTVal) {
+                                Set tGTVal = $ZStrip(tGTVal, "<>W")
+                                If tGTVal '= "" Set tGTList = tGTList _ $ListBuild(tGTVal)
+                            }
+                        } Else {
+                            Set tGTNorm = $Translate(tGrantTypes, ",", " ")
+                            For tGTIdx = 1:1:$Length(tGTNorm, " ") {
+                                Set tGT = $ZStrip($Piece(tGTNorm, " ", tGTIdx), "<>W")
+                                If tGT '= "" Set tGTList = tGTList _ $ListBuild(tGT)
+                            }
+                        }
+                        If tGTList '= "" Set tClient.Metadata."grant_types" = tGTList
+                    }
+
+                    Set tSC = tClient.%Save()
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; Register with the issuer (1-arg signature). A failed remote
+                    ; registration leaves the local client record saved for ANY failure
+                    ; class — matching the Management Portal's configure-then-register
+                    ; semantics — so disclose that (and the retry path) on every failure.
+                    ; The no-endpoint class is matched on its error CODE (#8881 survives
+                    ; message localization where an English substring would not).
+                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tClientName)
+                    If $$$ISERR(tSC) {
+                        Set tRegErrText = $System.Status.GetErrorText(tSC)
+                        If tRegErrText [ "#8881" {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration did not run: the issuer publishes no dynamic registration endpoint. Register the client manually on the authorization server and store the returned client id on the record. Native error: " _ tRegErrText)
+                        } Else {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration failed. Fix the cause and retry; to re-run create with the same clientName, delete the saved record first (action='delete', entity='client'). Native error: " _ tRegErrText)
+                        }
+                    }
                     Set $NAMESPACE = tOrigNS
                     If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-                    ; Return client ID but NEVER the client secret (NFR6)
+                    ; Return client ID but NEVER the client secret (NFR6). The reopen must
+                    ; happen in %SYS — OAuth2.Client is not visible in the caller's
+                    ; namespace — so switch back briefly.
+                    Set $NAMESPACE = "%SYS"
+                    Set tRegClientId = ""
+                    Set tOpenSC = $$$OK
+                    Set tSavedClient = ##class(OAuth2.Client).Open(tClientName, .tOpenSC)
+                    If $$$ISOK(tOpenSC) && $IsObject(tSavedClient) && (tSavedClient.ClientId '= "") {
+                        Set tRegClientId = tSavedClient.ClientId
+                    }
+                    Set $NAMESPACE = tOrigNS
+
                     Set tResult = {}
                     Do tResult.%Set("action", "created")
                     Do tResult.%Set("entity", "client")
                     Do tResult.%Set("clientName", tClientName)
                     Do tResult.%Set("serverName", tServerName)
-                    If $Data(tProps("ClientId")) Do tResult.%Set("clientId", tProps("ClientId"))
+                    If tRegClientId '= "" Do tResult.%Set("clientId", tRegClientId)
                     ; CRITICAL: Never include clientSecret in response
                     Do ..RenderResponseBody($$$OK, , tResult)
                 }
@@ -7272,7 +7435,19 @@ ClassMethod OAuthManage() As %Status
                     Set tSC = ##class(OAuth2.Server.Configuration).Delete()
                 }
                 ElseIf tEntity = "client" {
-                    Set tSC = ##class(OAuth2.Client).Delete(tName)
+                    ; OAuth2.Client has NO Delete classmethod on this instance — only
+                    ; DeleteId (verified live: the old call threw <METHOD DOES NOT EXIST>).
+                    ; ApplicationName is the IdKey, so DeleteId(name) is the correct call.
+                    ; Pre-check existence: DeleteId on a missing name fails internally on
+                    ; the open (%LoadData), so surface a clean not-found instead.
+                    If '##class(OAuth2.Client).%ExistsId(tName) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 client named '" _ tName _ "' exists")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    Set tSC = ##class(OAuth2.Client).DeleteId(tName)
                 }
                 Set $NAMESPACE = tOrigNS
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -8535,13 +8710,93 @@ ClassMethod SqlPrivilegeManage() As %Status
 /// query parameters: <code>grantee</code> (required — the user or role),
 /// optional <code>target</code> (a <code>schema.table</code> to scope a
 /// COLUMN-level listing), <code>system</code> (1 to include system objects),
-/// and <code>namespace</code> (defaults to the request namespace).</p>
+/// <code>namespace</code> (defaults to the request namespace), and
+/// <code>maxRows</code> (default 100, max 1000 — see Story 35.4).</p>
 /// <p>Without <code>target</code>: returns object-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserPrivs</query> (TYPE, NAME, PRIVILEGE,
 /// GRANTED_BY, GRANT_OPTION, GRANTED_VIA, HAS_COLUMN_PRIV). With a
 /// <code>schema.table</code> target: returns column-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserColumnPrivs</query> (COLUMN_NAME,
 /// PRIVILEGE, GRANTED_BY, GRANT_OPTION, GRANTED_VIA).</p>
+/// <p><b>Story 35.4 — bounding.</b> A grantee holding <code>%All</code>
+/// (e.g. <code>_SYSTEM</code>) is granted every SQL privilege on every object
+/// via the <code>SuperUser</code> super-role short-circuit, which the
+/// underlying query enumerates as one derived row per object x privilege
+/// (15,341 rows / 2,900,478 characters for <code>_SYSTEM</code>, measured
+/// live 2026-08-17/18 — exceeds the client transport limit and diverts the
+/// response to a file). Per the project's <code>%All</code> discipline (Rule
+/// #6): rows whose <code>GRANTED_VIA</code> is <code>SuperUser</code> are
+/// OMITTED from <code>privileges</code>, and a <code>reason</code> field plus
+/// a <code>superUserPrivilegesOmitted</code> count are added whenever at
+/// least one row was actually omitted.</p>
+/// <p><b>The omission is driven off the ROW, not off the grantee.</b> This
+/// handler deliberately does NOT resolve the grantee's roles to decide
+/// whether it holds <code>%All</code>: the query already computed that and
+/// stamped the answer on every row it returns. Establishing that was
+/// empirical, not assumed — an instance-wide sweep on 2026-08-18 walked all
+/// <b>46</b> users and roles on this instance, comparing "does
+/// <code>UserPrivs</code> emit any <code>SuperUser</code> row?" against
+/// "does this principal effectively hold <code>%All</code>?" (transitive
+/// role closure). Exactly four principals emitted <code>SuperUser</code>
+/// rows — <code>_SYSTEM</code>, <code>SuperUser</code>, <code>_Ensemble</code>
+/// and one interactive <code>%All</code> holder — and all four hold
+/// <code>%All</code>. There was NO principal emitting <code>SuperUser</code>
+/// rows without it, including deliberately powerful non-<code>%All</code>
+/// controls (<code>Admin</code>, holding <code>%Manager</code> +
+/// <code>%EnsRole_Administrator</code> + <code>%EnsRole_Developer</code>:
+/// 11 rows, 0 derived). The column-level query behaves the same way
+/// (<code>_SYSTEM</code> against <code>%Dictionary.ClassDefinition</code>:
+/// 224 rows, all <code>SuperUser</code>; <code>Admin</code>: 0), so the
+/// filter on that loop is doing real work, not sitting inert.</p>
+/// <p>Reading the row rather than the role graph is what lets this handler
+/// stay entirely inside the query namespace. An earlier revision resolved
+/// <code>%All</code> by switching to <code>%SYS</code> and walking
+/// <class>Security.Users</class>/<class>Security.Roles</class>; that added a
+/// privilege requirement this read never had, could silently disable itself
+/// if the lookup failed, and was only ever correct to a bounded role-chain
+/// depth. The row signal has none of those failure modes and no name
+/// matching at all, so the <code>%AllCustom</code> substring hazard and the
+/// question of <code>%All</code> name case-sensitivity simply do not arise.
+/// Note the one asymmetry, which is harmless: the literal role
+/// <code>%All</code> AS a grantee, and a role holding <code>%All</code> via
+/// <code>GrantedRoles</code>, both emit ZERO <code>SuperUser</code> rows, so
+/// nothing is omitted and — because the response fields are gated on a
+/// non-zero omitted count — no <code>reason</code> is emitted either.</p>
+/// <p>This is information-preserving, not a bare verdict short-circuit: any
+/// REAL non-derived grants (e.g. <code>Owner Privilege</code> — 8 of the
+/// 15,341 rows for <code>_SYSTEM</code>) are still enumerated. Derived rows
+/// never consume the <code>maxRows</code> budget, and once any derived row
+/// has been omitted the fetch loop keeps scanning to the end of the result
+/// set even after the cap engages (live-probed at ~97ms for 15,341 rows on
+/// 2026-08-18 — cheap relative to the ~180ms the query already spends in
+/// <code>Execute()</code> before the first row is even fetched) so that
+/// <code>superUserPrivilegesOmitted</code> is the EXACT total rather than
+/// however many happened to be seen before the cap. A grantee with no
+/// derived rows keeps the cap's original early exit and pays nothing for
+/// that guarantee. Note the honest limits: non-derived rows beyond
+/// <code>maxRows</code> ARE dropped, here as on any other path —
+/// <code>rowsCapped: true</code> is the signal, and a caller who needs every
+/// real grant must raise <code>maxRows</code>.</p>
+/// <p><b>Story 35.4 — <code>maxRows</code> is an OUTPUT bound, not a scan
+/// bound.</b> Mirrors the <method>AuditStatus</method> idiom in this same
+/// class (~line 2577): the fetch loop stops pumping the cursor once
+/// <code>maxRows</code> non-omitted rows have been materialized, so rows
+/// beyond the cap are never JSON-serialized. It does NOT reduce the
+/// underlying privilege computation: live timing (2026-08-18, grantee
+/// <code>_SYSTEM</code>) showed <code>Execute()</code> alone costs
+/// ~180-220ms regardless of how many rows are ultimately fetched — a SQL
+/// <code>TOP</code> rewrite via <code>%SQL.Statement</code> against the same
+/// <code>%SQL_Manager.UserPrivs</code> stored procedure was probed and showed
+/// the same flat ~220-260ms floor for TOP 10 through TOP 5000 (only the fully
+/// uncapped 15,341-row fetch reached ~480ms), so switching to dynamic SQL
+/// would add <code>%Prepare</code> overhead without genuinely bounding the
+/// scan any better than the existing <code>%ResultSet</code> class-query
+/// idiom already in this file. <code>maxRows</code> is therefore implemented
+/// as a Fetch-side cap (like <method>AuditStatus</method>), not a SQL
+/// <code>TOP</code>, and a capped response carries <code>rowsCapped: true</code>
+/// so a caller can tell rows were dropped — present ONLY when the cap
+/// actually engaged, so an under-cap caller's response shape is byte-identical
+/// to the pre-Story-35.4 shape (AC 35.4.5).</p>
 ClassMethod SqlPrivilegeList() As %Status
 {
     Set tSC = $$$OK
@@ -8551,6 +8806,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tTarget = $Get(%request.Data("target", 1))
         Set tSystem = +$Get(%request.Data("system", 1))
         Set tReqNS = $Get(%request.Data("namespace", 1))
+        Set tMaxRows = +$Get(%request.Data("maxRows", 1), 100)
+        If tMaxRows < 1 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
 
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -8568,6 +8826,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tResult = {}
         Do tResult.%Set("grantee", tGrantee)
         Set tPrivs = []
+        Set tRowCount = 0
+        Set tCapped = 0
+        Set tSuperUserOmitted = 0
 
         If tTarget '= "" {
             ; Column-level listing for a specific schema.table
@@ -8584,6 +8845,25 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; Once ANY derived row has been omitted, the omitted-count
+                    ; must stay EXACT: derived rows never consume the cap
+                    ; (they Continue above), so quitting here would freeze
+                    ; tSuperUserOmitted mid-scan and report a partial count as
+                    ; though it were the total. Keep scanning to finish
+                    ; counting; only non-derived rows past the cap are
+                    ; dropped, and rowsCapped:true says so.
+                    ; When nothing derived has been seen, the cap keeps its
+                    ; original early-exit and stops pumping the cursor, so an
+                    ; ordinary grantee pays nothing for this guarantee.
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("column", tRS.Get("COLUMN_NAME"))
                 Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
@@ -8591,6 +8871,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -8606,6 +8887,20 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; See the column-level loop above: once derived rows are
+                    ; in play the omitted-count must keep accumulating past
+                    ; the cap, or superUserPrivilegesOmitted reports a partial
+                    ; figure (live-observed 10,961 instead of 15,333 at
+                    ; maxRows=7).
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("type", tRS.Get("TYPE"))
                 Do tRow.%Set("name", tRS.Get("NAME"))
@@ -8615,6 +8910,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tRow.%Set("hasColumnPriv", +tRS.Get("HAS_COLUMN_PRIV"), "boolean")
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -8622,6 +8918,19 @@ ClassMethod SqlPrivilegeList() As %Status
         Set $NAMESPACE = tOrigNS
         Do tResult.%Set("privileges", tPrivs)
         Do tResult.%Set("count", tPrivs.%Size())
+        If tCapped {
+            Do tResult.%Set("rowsCapped", 1, "boolean")
+        }
+        ; Gate on rows ACTUALLY omitted, not merely on the grantee holding
+        ; %All: a %All holder whose listing happens to contain no derived
+        ; rows (e.g. a column-level target with only explicit grants) would
+        ; otherwise get superUserPrivilegesOmitted:0 next to prose asserting
+        ; that privileges were omitted -- a self-contradicting response, and
+        ; a shape change with nothing to justify it (AC 35.4.5).
+        If tSuperUserOmitted > 0 {
+            Do tResult.%Set("superUserPrivilegesOmitted", tSuperUserOmitted, "number")
+            Do tResult.%Set("reason", "grantee holds %All super-role; privileges derived purely from %All (GRANTED_VIA=SuperUser) are omitted from enumeration - only directly-granted (non-derived) privileges are listed")
+        }
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
@@ -9063,9 +9372,24 @@ ClassMethod ItemManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "get" {
-            ; Query config item details via SQL
+            ; Query config item details via SQL. Optional 'production' filter
+            ; disambiguates an item name that exists in more than one production
+            ; in this namespace (#50 — a match key must carry every identity
+            ; dimension a row actually has: WHERE Name = ? alone can silently
+            ; return whichever production's row the extent yields first).
+            ; Omitted -> unchanged legacy query/output, so the single-production
+            ; case stays byte-identical (Rule #19). Story 35.1 AC 35.1.4 audit.
+            ; CR 35.1-4 (code review): strip surrounding whitespace so a whitespace-only value
+            ; collapses to "" (treated as omitted -> unchanged legacy query) rather than being
+            ; bound into the SQL predicate and reported as "not found in production ' '".
+            Set tProdFilter = $ZStrip(tBody.%Get("production"), "<>W")
             Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
-            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
+            If tProdFilter '= "" {
+                Set tSQL = tSQL _ " AND Production = ?"
+                Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName, tProdFilter)
+            } Else {
+                Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
+            }
             If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
                 Set $NAMESPACE = tOrigNS
                 Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
@@ -9076,7 +9400,9 @@ ClassMethod ItemManage() As %Status
             }
             If 'tRS.%Next() {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Set tNotFoundMsg = "Config item '"_tItemName_"' not found"
+                If tProdFilter '= "" { Set tNotFoundMsg = tNotFoundMsg _ " in production '"_tProdFilter_"'" }
+                Set tSC = $$$ERROR($$$GeneralError, tNotFoundMsg)
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -9108,19 +9434,101 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
-            ; Find the config item ID
-            If '##class(Ens.Config.Item).NameExists(tItemName, .tID) {
+            ; Resolve target production: explicit 'production' or the active one —
+            ; the SAME default idiom add/remove already use (lines ~523-531/656-664).
+            ; Story 35.1: Ens.Config.Item's Name index is composite
+            ; (Production, Name) (irislib/Ens/Config/Item.cls:150), so the item
+            ; lookup below requires the production resolved FIRST. Because the
+            ; lookup is always scoped to this ONE resolved production, an item
+            ; name that exists in a DIFFERENT production can never be silently
+            ; matched here (#29/#50) — it correctly reports "not found in
+            ; production '<name>'" instead.
+            ; CR 35.1-4 (code review): strip surrounding whitespace, mirroring add's className
+            ; handling (CR 18.0-1) — a stray leading/trailing space otherwise skips the
+            ; active-production default and produces a confusing "Production ' X' not found".
+            Set tProdName = $ZStrip(tBody.%Get("production"), "<>W")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for set")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
             }
 
-            Set tItem = ##class(Ens.Config.Item).%OpenId(tID)
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Rule #27: sync the config-object extent from the production class
+            ; XData (source of truth) BEFORE opening — SaveToClass writes the
+            ; class, not the extent, so an unsynced %OpenId/FindItemByConfigName
+            ; would see a stale item list.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Find the config item by its FULL composite key (Production, Name)
+            ; via the SAME instance method add/remove already use (lines
+            ; ~609/693) — NOT the one-arg Ens.Config.Item.NameExists class
+            ; method, which binds tItemName to the Production slot of the
+            ; composite index and can never match (the Story 35.1 defect,
+            ; live-verified: two-key NameExists/FindItemByConfigName resolve
+            ; the item; one-arg NameExists always returns 0).
+            Set tFindStatus = $$$OK
+            Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): FindItemByConfigName walks
+            ; Ens.Config.Production:findItemIdByName, which SKIPS any item whose ClassName no
+            ; longer resolves to a business type (irislib/Ens/Config/Production.cls:739 —
+            ; Continue:$$$eHostTypeUnknown=##class(Ens.Config.Item).GetBusinessType(...)) — a
+            ; deleted/renamed/uncompiled host class, or an item created before this story's
+            ; ValidateHostClassName guard existed. Such an item is reported "not found" here
+            ; while 'get' (raw SQL, line ~438) still returns it — the SAME get/set
+            ; contradiction AC 35.1.1 exists to kill, by a second route, and the item is
+            ; otherwise unrepairable through this tool (can't 'set' a valid className to fix
+            ; it, can't 'remove' it either). Fallback: resolve via the composite-key index
+            ; directly (two-arg NameExists — live-probed to resolve the item, Dev Notes), then
+            ; take the item from tProd.Items (NOT a standalone %OpenId(tID)) — the object
+            ; SaveToClass serializes, mirroring the library's own idiom at
+            ; irislib/Ens/Config/Production.cls:725-727. (The live swizzle probe, Dev Notes,
+            ; showed %OpenId(tID) returns the SAME already-swizzled OREF as tProd.Items in this
+            ; process and would also work — the tProd.Items idiom is kept for library
+            ; consistency, not because %OpenId was shown to be unsafe here.)
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Failed to open config item '"_tItemName_"'")
+                ; NOTE (code review 35.1): FindItemByConfigName's Output %Status is deliberately
+                ; NOT propagated here — it reports $$$EnsErrConfigItemNotFound for the ORDINARY
+                ; absence case too, so substituting it would replace this branch's pinned
+                ; production-naming contract text (AC 35.1.3) on the common path. Discriminating
+                ; the genuinely-actionable causes (SQL failure; a '||'/'|'-qualified itemName
+                ; naming another production) needs error-code inspection plus Rule #8 prefix
+                ; stripping — ledgered as 35-1-CR-2 rather than done as a drive-by.
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -9138,23 +9546,103 @@ ClassMethod ItemManage() As %Status
                 ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
-                ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                ; Story 35.1 cycle_iteration=2 (QA HIGH): a className update now goes
+                ; through the SAME guard 'add' already applies (ValidateHostClassName)
+                ; before it is ever persisted via SaveToClass below — an unguarded
+                ; className here would silently swallow SaveToClass's OnConfigChange
+                ; <METHOD DOES NOT EXIST> and durably persist a broken item.
+                ElseIf tKey = "className" { Set tNewClassName = $ZStrip(tValue, "<>W") Set tApplySC = ..ValidateHostClassName(tNewClassName) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Set tItem.ClassName = tNewClassName Do tUpdated.%Push(tKey) }
                 ; CR 17.2-1: propagate the helper's %Status — a failed setting
                 ; application must surface as an error, not be reported as updated.
                 Else { Set tApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Do tUpdated.%Push(tKey) }
             }
-            ; Stop after a setting-application failure inside the iterator.
+            ; Stop after a setting-application failure inside the iterator (covers both
+            ; the className guard above and ApplyArbitrarySetting).
             If $$$ISERR($Get(tApplySC, $$$OK)) Quit
 
-            Set tSC = tItem.%Save()
-            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            ; Story 35.1 cycle_iteration=2 (QA HIGH): %Save() alone only updates the
+            ; Ens_Config.Item SQL EXTENT (live-probed, Dev Notes) — it never touches the
+            ; production class XData, which Rule #27 makes the source of truth. Without
+            ; the second write below, the NEXT set/add/remove call's own LoadFromClass
+            ; resync (line ~517 above) — or a bare class recompile — silently discards
+            ; this call's change back to the XData baseline. Conversely, SaveToClass
+            ; ALONE (live-probed) never touches the extent, so a 'get' immediately after
+            ; 'set' (raw SQL, no LoadFromClass) would show stale data. Both writes are
+            ; required: %Save() for 'get''s immediate extent visibility, SaveToClass(tItem)
+            ; for durability across resync/recompile.
+            ; CR 35.1-5 (code review): nothing to persist -> do not rewrite the production class
+            ; XData and do not take the runtime lock. Without this, \`settings:{}\` regenerated the
+            ; whole ProductionDefinition XData and called UpdateProduction for a request that
+            ; changed nothing. The response shape is unchanged (updatedSettings: []).
+            If tUpdated.%Size() > 0 {
+                Set tSC = tItem.%Save()
+                If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            ; Apply changes to running production
-            Set tSC = ##class(Ens.Director).UpdateProduction()
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+                ; CR 35.1-15 (Task 7 code review): SaveToClass(pItem) commits the class XData
+                ; FIRST (Production.cls:146) and only THEN dispatches
+                ; $classmethod(pItem.ClassName,"OnConfigChange",...). Its Catch swallows ONLY
+                ; <METHOD DOES NOT EXIST> — a className naming a class that is not on this system
+                ; raises <CLASS DOES NOT EXIST> and falls through to $$$EnsSystemError
+                ; (Production.cls:148-157). The write has ALREADY landed at that point, so the
+                ; caller was told "failed" for a change 'get' then reports as applied — the exact
+                ; get/set contradiction this story exists to kill, inverted. Newly reachable: the
+                ; AC 35.1.7 fallback above is what first lets such an item get this far, and the
+                ; case is real precisely because the fallback's whole purpose is items whose host
+                ; class was DELETED or renamed (live-reproduced over real HTTP). The no-pItem
+                ; overload — exactly what 'remove' already calls — persists the identical XData
+                ; (pItem is used ONLY for that notification) while skipping a dispatch that is
+                ; meaningless for a class that does not exist. Existing valid-class behavior is
+                ; byte-for-byte unchanged.
+                If ##class(%Dictionary.CompiledClass).%ExistsId(tItem.ClassName) {
+                    Set tSC = tProd.SaveToClass(tItem)
+                } Else {
+                    Set tSC = tProd.SaveToClass()
+                }
+                If $$$ISERR(tSC) {
+                    ; CR 35.1-3 (code review): the %Save() above already COMMITTED this change to
+                    ; the SQL extent that 'get' reads directly. Leaving it there while the class
+                    ; XData (Rule #27's source of truth) does not have it re-creates the very
+                    ; get/set contradiction this story exists to remove — the caller is told the
+                    ; write failed while 'get' reports it applied, until some unrelated later
+                    ; LoadFromClass silently reverts it. Re-sync the extent from XData now so both
+                    ; sides agree with the error the caller is about to receive. Note the ORDER of
+                    ; the two writes is load-bearing and must NOT be swapped: FindItemByConfigName
+                    ; can return an item that is not the tProd.Items member SaveToClass serializes,
+                    ; and %Save()-first is what makes the XData export pick the new values up.
+                    Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
 
-            Set tResult = {"action": "set", "itemName": (tItemName), "updatedSettings": (tUpdated)}
+            ; Apply changes to the RUNNING production. CR 35.1-6 (code review): only when the
+            ; production we just wrote IS the running one. Ens.Director.UpdateProduction ignores
+            ; its caller's intent and always diffs/actualizes whichever production is running,
+            ; taking a 30s runtime lock and potentially restarting that production's hosts — so
+            ; calling it after editing a DIFFERENT (e.g. stopped) production disturbs an unrelated
+            ; production for no benefit. Newly reachable: pre-fix 'set' never got this far.
+            If (tUpdated.%Size() > 0) && (tProdName = ##class(Ens.Director).GetActiveProductionName()) {
+                Set tSC = ##class(Ens.Director).UpdateProduction()
+                Set $NAMESPACE = tOrigNS
+                ; CR 35.1-7 (code review): both durable writes have already COMMITTED at this
+                ; point — say so, so the caller does not read this as "nothing was written" and
+                ; retry a change that is already persisted.
+                If $$$ISERR(tSC) {
+                    ; AppendStatus keeps the REAL underlying reason (Rule #9) attached to the
+                    ; context line without hand-splicing error text (Rule #8 double-prefixing).
+                    Set tSC = $System.Status.AppendStatus($$$ERROR($$$GeneralError, "Settings were saved to production '"_tProdName_"' but refreshing the running production failed"), tSC)
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+            Else {
+                Set $NAMESPACE = tOrigNS
+            }
+
+            Set tResult = {"action": "set", "itemName": (tItemName), "production": (tProdName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "add" {
@@ -9179,37 +9667,16 @@ ClassMethod ItemManage() As %Status
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            ; CR 17.2-3: reject a host className that does not exist / is not compiled.
-            ; SaveToClass would otherwise swallow an OnConfigChange <METHOD DOES NOT
-            ; EXIST> and persist a broken item. %Dictionary.CompiledClass.%ExistsId
-            ; is true only for a successfully-compiled class (stricter than ClassDefinition).
-            If '##class(%Dictionary.CompiledClass).%ExistsId(tClassName) {
+            ; CR 17.2-3 / CR 18.0-1: reject a className that does not exist / is not
+            ; compiled, does not extend Ens.Host, or is abstract — SaveToClass would
+            ; otherwise swallow an OnConfigChange <METHOD DOES NOT EXIST> and persist a
+            ; broken item. Live-probed: Ens.BusinessService => abstract,
+            ; %Stream.GlobalCharacter => not Ens.Host, EnsLib.File.PassthroughService =>
+            ; accepted. Shared with the 'set' branch's className override (Story 35.1
+            ; cycle_iteration=2) via ValidateHostClassName — same checks, same order.
+            Set tSC = ..ValidateHostClassName(tClassName)
+            If $$$ISERR(tSC) {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' does not exist or is not compiled")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-
-            ; CR 18.0-1 (remaining half): reject a compiled-but-not-instantiable host class.
-            ; %ExistsId passes for an [Abstract] host (e.g. Ens.BusinessService) or a
-            ; non-host %Library.* class — both would fail later at production-start /
-            ; OnConfigChange rather than at add time. A valid config-item host must
-            ; (a) extend Ens.Host (the $classmethod "%Extends" idiom Ens.Config.Item itself
-            ; uses on a host className) and (b) be non-abstract (instantiable). Live-probed:
-            ; Ens.BusinessService => abstract, %Stream.GlobalCharacter => not Ens.Host,
-            ; EnsLib.File.PassthroughService => accepted.
-            If '$classmethod(tClassName, "%Extends", "Ens.Host") {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-            Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
-            If $IsObject(tHostCC) && tHostCC.Abstract {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is abstract and cannot be a production item")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -9245,8 +9712,19 @@ ClassMethod ItemManage() As %Status
 
             ; CR 17.2-3: reject a duplicate item Name in the production — the
             ; (Production,Name) index is not unique, so add is otherwise non-idempotent.
+            ; CR 35.1-14 (Task 7 code review, Rule #56 enumeration): this guard resolves through
+            ; FindItemByConfigName, which SKIPS any item whose ClassName no longer resolves to a
+            ; business type (Production.cls:739) — the exact class of item AC 35.1.7 exists to
+            ; keep reachable. Without the same composite-key fallback 'set'/'remove' now carry,
+            ; 'add' believed the name was FREE and inserted a SECOND item with the same Name into
+            ; the production (live-reproduced over real HTTP: the class XData ended up with two
+            ; <Item Name="DupTargetOp"> entries, HTTP 200 "added"), durably corrupting the
+            ; production the guard's own comment above exists to protect. Only presence matters
+            ; here, so the id from the two-arg NameExists is enough — no Items lookup needed.
             Set tDup = tProd.FindItemByConfigName(tItemName)
-            If $IsObject(tDup) {
+            Set tDupID = ""
+            If '$IsObject(tDup) { Do ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tDupID) }
+            If $IsObject(tDup) || (tDupID '= "") {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' already exists in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -9269,7 +9747,13 @@ ClassMethod ItemManage() As %Status
                     ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
-                    ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                    ; CR 35.1-1 (code review): a settings.className OVERRIDE must go through the
+                    ; SAME ValidateHostClassName guard as the top-level className above — it is
+                    ; applied AFTER that check and is what SaveToClass ultimately persists, so an
+                    ; unguarded override silently reinstated the exact OnConfigChange
+                    ; <METHOD DOES NOT EXIST> swallow (Production.cls:148-157) the guard exists to
+                    ; stop, returning HTTP 200 over a durably-broken item.
+                    ElseIf tKey = "className" { Set tNewClassName = $ZStrip(tValue, "<>W") Set tAddApplySC = ..ValidateHostClassName(tNewClassName) If $$$ISERR(tAddApplySC) Quit  Set tItem.ClassName = tNewClassName Do tUpdated.%Push(tKey) }
                     ; CR 17.2-1: propagate the helper's %Status instead of swallowing it.
                     Else { Set tAddApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tAddApplySC) Quit  Do tUpdated.%Push(tKey) }
                 }
@@ -9287,7 +9771,10 @@ ClassMethod ItemManage() As %Status
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tClassName), "updatedSettings": (tUpdated)}
+            ; CR 35.1-1 (code review): report the className actually PERSISTED, not the
+            ; top-level argument — a settings.className override (now guarded above) would
+            ; otherwise make the response disagree with what landed in the class XData.
+            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tItem.ClassName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "remove" {
@@ -9330,6 +9817,20 @@ ClassMethod ItemManage() As %Status
             }
 
             Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): same fallback as 'set' above —
+            ; an item whose ClassName no longer resolves to a business type is skipped by
+            ; findItemIdByName and must stay reachable through 'remove' too, or it can never
+            ; be cleaned up through this tool. See the 'set' branch (~line 548) for the full
+            ; rationale and the live swizzle-probe evidence (Dev Notes).
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
@@ -9353,6 +9854,54 @@ ClassMethod ItemManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Validate a config item's host className: must be a compiled, non-abstract class that
+/// extends Ens.Host. Called from ALL THREE paths that can set an item's ClassName —
+/// 'add's required top-level className argument, 'add's optional settings.className
+/// OVERRIDE (which is applied after the top-level check and is what actually gets
+/// persisted), and 'set's optional settings.className override. Every one of them
+/// ultimately persists via Ens.Config.Production:SaveToClass, and a bad className there
+/// silently swallows the resulting OnConfigChange &lt;METHOD DOES NOT EXIST&gt; and
+/// persists a broken item (CR 17.2-3 / CR 18.0-1; extended to 'set' by Story 35.1
+/// cycle_iteration=2 — QA HIGH; extended to add's settings override by the Story 35.1
+/// code review — CR 35.1-1).
+/// <p>Caller is responsible for any required-ness check (add). Whitespace is normalized
+/// internally, so callers need not strip pClassName first.</p>
+ClassMethod ValidateHostClassName(pClassName As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; CR 35.1-8 (code review): normalize here rather than relying on every caller to strip
+        ; first. Idempotent for the existing callers (which already strip), and it stops a future
+        ; third caller from getting "does not exist or is not compiled" for a class that exists.
+        Set pClassName = $ZStrip(pClassName, "<>W")
+        If '##class(%Dictionary.CompiledClass).%ExistsId(pClassName) {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' does not exist or is not compiled")
+            Quit
+        }
+        If '$classmethod(pClassName, "%Extends", "Ens.Host") {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
+            Quit
+        }
+        Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        ; CR 35.1-9 (code review, Rule #44 fail-safe direction): a null CompiledClass previously
+        ; fell through as VALID. Near-unreachable (%ExistsId passed three lines up), but the
+        ; permissive side is the wrong one for a guard whose whole job is to stop a broken
+        ; className reaching SaveToClass.
+        If '$IsObject(tHostCC) {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' could not be opened for validation")
+            Quit
+        }
+        If tHostCC.Abstract {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' is abstract and cannot be a production item")
+            Quit
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Apply an arbitrary host/adapter setting to a config item via Ens.Config.Setting.
@@ -10614,7 +11163,10 @@ ClassMethod TransformTest() As %Status
 
 /// Create, delete, or get a REST application.
 /// <p>Accepts a JSON body with <code>action</code> ("create", "delete", or "get"),
-/// <code>name</code> (REST application name),
+/// <code>name</code> (REST application name — an ObjectScript PACKAGE name such as
+/// <code>MyApi</code> or <code>MyCompany.MyApi</code>; it becomes the package of the
+/// generated classes and %REST.API validates it with $ZNAME, so URL-path values like
+/// "/myapi" are rejected),
 /// optional <code>spec</code> (OpenAPI JSON for create),
 /// and optional <code>namespace</code>.</p>
 ClassMethod RestManage() As %Status
@@ -14885,6 +15437,7 @@ ClassMethod CubeAction() As %Status
 {
     Set tSC = $$$OK
     Set tOrigNS = $NAMESPACE
+    Set tRedirected = 0
     Try {
         ; Read JSON body
         Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
@@ -14923,9 +15476,78 @@ ClassMethod CubeAction() As %Status
         Do tResult.%Set("cube", tCube)
 
         If tAction = "build" {
-            ; Synchronous build (pAsync=0)
-            Set tSC2 = ##class(%DeepSee.Utils).%BuildCube(tCube, 0)
+            ; Story 35.2 (AC 35.2.1/35.2.2, ledger 35-SWEEP-2): %DeepSee.Utils:
+            ; %BuildCube writes progress/diagnostic text directly to the CURRENT
+            ; DEVICE (the HTTP response stream), so it lands ahead of the JSON
+            ; envelope and makes the wire body unparseable (observed live:
+            ; "\\nERROR #20013: Cube 'NOSUCHCUBE' does not exist{"status":...}").
+            ; Its pVerbose parameter — 3rd positional; live signature is
+            ; pCubeList,pAsync=1,pVerbose=1,... — defaults to 1 and is NOT
+            ; overridden below, unlike %SynchronizeCube's explicit pVerbose=0 in
+            ; the "sync" branch, which is exactly why "sync" parsed cleanly and
+            ; "build" did not. Isolate it with the SAME null-device redirect
+            ; discipline already proven in Command.cls (Rule #7): bind the
+            ; mnemonic on a throw-away null device — never $IO, see Redirects()'s
+            ; banner below for why — restore FULLY before rendering, and render
+            ; exactly once via the single If/Else dispatch already in this method.
+            ;
+            ; DO NOT "optimize" this by silencing the source with pVerbose=0
+            ; (i.e. %BuildCube(tCube, 0, 0)). Story 35.2's code review probed
+            ; this live and BOTH the progress narration AND the error text are
+            ; gated by pVerbose: %BuildCube("NOSUCH",0,1) writes
+            ; "\\nERROR #20013: Cube ... does not exist" to the device, while
+            ; %BuildCube("NOSUCH",0,0) writes NOTHING. (An earlier revision of
+            ; this comment asserted the error path wrote unconditionally
+            ; regardless of pVerbose — that claim was FALSE and is corrected
+            ; here.) Silencing the source would leave the redirect below with
+            ; nothing to isolate, and the permanent regression gate at
+            ; packages/iris-data-mcp/src/__tests__/analytics-cubes-wire-gate.test.ts
+            ; would become structurally INCAPABLE of failing: deleting this
+            ; entire redirect block would still yield a clean wire body and a
+            ; green gate. That is precisely Rule #59's "an oracle that cannot
+            ; vary with the property it claims". The redirect is the mechanism;
+            ; pVerbose's default is what keeps the regression detectable.
+            Set %ExecuteMCPOutput = ""
+            Set %ExecuteMCPTruncated = 0
+            Set tInitIO = $IO
+            Set tNull = ##class(%Library.Device).GetNullDevice()
+            Open tNull:::1
+            Use tNull::("^"_$ZNAME)
+            Set tRedirected = 1
+            Do ##class(%Library.Device).ReDirectIO(1)
+
+            Try {
+                Set tSC2 = ##class(%DeepSee.Utils).%BuildCube(tCube, 0)
+            } Catch exBuild {
+                ; Flag ONLY — do NOT render here. An argumentless Quit inside
+                ; Catch exits only the catch body and falls through, so a
+                ; render here would be clobbered by the success render below
+                ; (Rule #7).
+                Set tSC2 = exBuild.AsStatus()
+            }
+
+            ; Restore I/O unconditionally, before any render. Bare \`Use
+            ; tInitIO\` (never \`Use tInitIO::("")\`, a NO-OP) is required to
+            ; actually clear the mnemonic bound above.
+            Do ##class(%Library.Device).ReDirectIO(0)
+            Use tInitIO
+            Close tNull
+            Set tRedirected = 0
             Set $NAMESPACE = tOrigNS
+
+            ; AC 35.2.3 disposition: the captured text is DISCARDED, not
+            ; surfaced. %BuildCube's progress narration is diagnostic noise
+            ; from a stock DeepSee API that no caller of this tool has ever
+            ; asked for — the same judgment ExecuteMCPv2.REST.UnitTest already
+            ; makes for %UnitTest.Manager.RunTest's own narration. Surfacing it
+            ; would need its own ApplyOutputCeiling budget and wire-level
+            ; truncation coverage for a field with no established consumer; if
+            ; a future story needs build diagnostics, add an additive \`output\`
+            ; field here bounded by ExecuteMCPv2.Utils.ApplyOutputCeiling
+            ; exactly as Command.cls does for its own captured output.
+            Kill %ExecuteMCPOutput
+            Kill %ExecuteMCPTruncated
+
             If $$$ISERR(tSC2) {
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC2))
                 Set tSC = $$$OK
@@ -14935,7 +15557,8 @@ ClassMethod CubeAction() As %Status
             Do tResult.%Set("status", "completed")
         }
         ElseIf tAction = "sync" {
-            ; Incremental synchronization (pVerbose=0)
+            ; Incremental synchronization (pVerbose=0) — verified clean of
+            ; device output (Story 35.2 AC 35.2.4 audit); no redirect needed.
             Set tSC2 = ##class(%DeepSee.Utils).%SynchronizeCube(tCube, 0, .tFactsUpdated)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC2) {
@@ -14951,11 +15574,51 @@ ClassMethod CubeAction() As %Status
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
+        ; Ensure redirection is restored on unexpected error before rendering
+        ; (Story 35.2, mirrors Command.cls's own outer-catch belt-and-braces
+        ; restore at Command.cls:132-138). Any errors during cleanup are
+        ; swallowed so the real exception is still what gets rendered below.
+        Try {
+            If tRedirected {
+                Do ##class(%Library.Device).ReDirectIO(0)
+                If $Get(tInitIO) '= "" { Use tInitIO }
+                If $Get(tNull) '= "" { Close tNull }
+            }
+        } Catch {}
+        Kill %ExecuteMCPOutput
+        Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// I/O redirect entry points for suppressing <code>%BuildCube</code>'s device
+/// output (Story 35.2, AC 35.2.1/35.2.2).
+/// <p>These label-based methods are referenced by the mnemonic routine set via
+/// <code>Use tNull::("^"_$ZNAME)</code> in <method>CubeAction</method> when I/O
+/// redirection is active. Captured output accumulates in the process-private
+/// <code>%ExecuteMCPOutput</code> — the SAME global <class>ExecuteMCPv2.REST.
+/// Command</class> uses — for consistency, even though this method's caller
+/// currently kills it unread (AC 35.2.3: the captured text is discarded, not
+/// surfaced). A separate copy of this tag routine is required in THIS class
+/// (rather than reusing Command.cls's) because <code>$ZNAME</code> binds the
+/// CURRENTLY EXECUTING routine, and the mnemonic entry points must live in
+/// that same compiled routine (Story 34.1 Constraint C-2) — copied verbatim
+/// from <class>ExecuteMCPv2.REST.Command</class>'s own <method>Redirects</method>
+/// (34-2-R1 fix: each label discriminates on <code>&lt;MAXSTRING&gt;</code> so a
+/// genuine crash is never mis-reported as a benign truncation).</p>
+ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
+{
+    Quit
+wstr(s) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ s } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wchr(a) New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(a) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wnl New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(10) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wff New mcpex Try { Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ $Char(12) } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+wtab(n) New chars,mcpex Try { Set $Piece(chars, " ", n+1) = "" Set %ExecuteMCPOutput = $Get(%ExecuteMCPOutput, "") _ chars } Catch mcpex { If mcpex.Name '= "<MAXSTRING>" { Throw mcpex } Set %ExecuteMCPTruncated = 1 } Quit
+rstr(len,time) Quit ""
+rchr(time) Quit ""
 }
 
 }`,

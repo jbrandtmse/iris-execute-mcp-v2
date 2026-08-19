@@ -754,6 +754,59 @@ describe("SQL caps propagate to non-default profiles (Story 24.2 CR patch)", () 
 });
 
 // ════════════════════════════════════════════════════════════════════
+// Story 35.3 code review: `mergeProfile` gained an `acceptLanguage`
+// conditional spread with NO test. That gap is invisible by construction —
+// `IrisHttpClient` falls back to the same English default when the field is
+// absent, so a dropped inheritance produces exactly the value a passing test
+// would expect. The override case below is what makes the inheritance
+// observable: only a NON-default value can distinguish "inherited" from
+// "fell back".
+// ════════════════════════════════════════════════════════════════════
+
+describe("acceptLanguage propagates to non-default profiles (Story 35.3 CR patch)", () => {
+  it("a named IRIS_PROFILES entry inherits a NON-DEFAULT acceptLanguage from the default profile", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      // Deliberately NOT the default value — the fallback would mask an
+      // inheritance bug if this were "en-US,en;q=0.9".
+      IRIS_ACCEPT_LANGUAGE: "fr-FR,fr;q=0.9",
+      IRIS_PROFILES: JSON.stringify({
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(defaultConfig.acceptLanguage).toBe("fr-FR,fr;q=0.9");
+
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    expect(def.acceptLanguage).toBe("fr-FR,fr;q=0.9");
+    expect(secondary.acceptLanguage).toBe("fr-FR,fr;q=0.9");
+    // The assertion that actually catches a dropped spread.
+    expect(secondary.acceptLanguage).not.toBe("en-US,en;q=0.9");
+  });
+
+  it("a named profile inherits the DEFAULT acceptLanguage when IRIS_ACCEPT_LANGUAGE is unset", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    // loadConfig always materializes the field, so it is always inherited —
+    // unlike sqlMaxRows/sqlTimeoutMs, which stay absent when unset.
+    expect(secondary.acceptLanguage).toBe("en-US,en;q=0.9");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // Story 31.0 — IRIS_SERVER_MANAGER minimal wire-in into loadProfileRegistry.
 //
 // Scope seam (Rule #52): loadProfileRegistry's ONLY new behavior in this

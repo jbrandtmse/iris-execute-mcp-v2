@@ -366,6 +366,13 @@ export function mergeProfile(
     // spread preserves the "unset -> field absent" shape (Rule #19).
     ...(base.sqlMaxRows !== undefined ? { sqlMaxRows: base.sqlMaxRows } : {}),
     ...(base.sqlTimeoutMs !== undefined ? { sqlTimeoutMs: base.sqlTimeoutMs } : {}),
+    // Story 35.3: inherit the operator's IRIS_ACCEPT_LANGUAGE (like the SQL
+    // caps above) — no per-profile override key exists in ProfileOverride
+    // (out of this story's scope), so every profile shares the default
+    // profile's request-locale pin. Conditional spread preserves the
+    // "unset -> field absent" shape (Rule #19); IrisHttpClient falls back to
+    // DEFAULT_ACCEPT_LANGUAGE when absent either way.
+    ...(base.acceptLanguage !== undefined ? { acceptLanguage: base.acceptLanguage } : {}),
     // Provenance (Story 31.3, AC 31.3.1) — always set, never left `undefined`,
     // for every profile this function builds.
     source,

@@ -503,6 +503,201 @@ describe("iris_rest_manage", () => {
     expect(result.content[0]!.text).toContain("Error managing REST application");
   });
 
+  // ── Story 35.6: legacy routing for get/delete on Mgmnt 404 ─────────
+  //
+  // Rule #36 oracle: the Mgmnt API answers a get/delete on a NON-spec-first
+  // name with HTTP 404 + a text/html CSP-gateway error page (live capture,
+  // IRIS 2026.1, 2026-08-18), which the shared http client renders as
+  // "IRIS returned HTTP 404 ... non-JSON response. Check the IRIS web server
+  // configuration." — misleading for a by-design scope boundary (Rule #12).
+  // `list` scope "legacy"/"all" returns hand-written %CSP.REST apps such as
+  // /api/executemcp/v2 (live capture, HSCUSTOM), so `get` must resolve them.
+  const legacyWebapps = [
+    {
+      name: "/api/executemcp/v2",
+      dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+      namespace: "HSCUSTOM",
+    },
+    { name: "/csp/user", dispatchClass: "", namespace: "USER" },
+  ];
+  const mgmnt404 = new IrisApiError(
+    404,
+    [],
+    "/api/mgmnt/v2/HSCUSTOM/%2Fapi%2Fexecutemcp%2Fv2",
+    "IRIS returned HTTP 404 for GET /api/mgmnt/v2/HSCUSTOM/%2Fapi%2Fexecutemcp%2Fv2 with a non-JSON response. Check the IRIS web server configuration.",
+  );
+
+  it("35.6: get on a Mgmnt 404 falls back to the legacy webapp list (legacy hit)", async () => {
+    mockHttp.get
+      .mockRejectedValueOnce(mgmnt404) // Mgmnt get 404s
+      .mockResolvedValueOnce(envelope(legacyWebapps)); // legacy webapp list
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/executemcp/v2", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({
+      name: "/api/executemcp/v2",
+      dispatchClass: "ExecuteMCPv2.REST.Dispatch",
+      namespace: "HSCUSTOM",
+      swaggerSpec: null,
+      explanation: expect.stringContaining("%CSP.REST"),
+    });
+    const text = result.content[0]!.text;
+    expect(text).not.toContain("web server configuration");
+  });
+
+  it("35.6: get + fullSpec:true on a legacy app keeps swaggerSpec null (no summary shaping)", async () => {
+    mockHttp.get
+      .mockRejectedValueOnce(mgmnt404)
+      .mockResolvedValueOnce(envelope(legacyWebapps));
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/executemcp/v2", namespace: "HSCUSTOM", fullSpec: true },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured.swaggerSpec).toBeNull();
+    expect(structured.name).toBe("/api/executemcp/v2");
+    expect(structured.explanation).toEqual(expect.stringContaining("%CSP.REST"));
+  });
+
+  it("35.6: get on a Mgmnt 404 with NO legacy hit => accurate not-found naming both scopes", async () => {
+    mockHttp.get
+      .mockRejectedValueOnce(mgmnt404)
+      .mockResolvedValueOnce(envelope([])); // no legacy apps
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/no/such/app", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain("/no/such/app");
+    expect(text).toContain("spec-first");
+    expect(text).toContain("legacy");
+    expect(text).not.toContain("web server configuration");
+  });
+
+  // Code review (Story 35.6): a FAILING legacy lookup must NOT be reported as
+  // proven absence in the legacy scope — that would be the same misdirection
+  // class this story removes. The message says the legacy scope could not be
+  // checked (and why), not "not found ... as a legacy %CSP.REST application".
+  it("35.6: a failing legacy lookup is reported as unchecked, NOT as proven absence", async () => {
+    mockHttp.get.mockRejectedValue(mgmnt404); // BOTH the Mgmnt get AND the legacy lookup reject
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/missing", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain("Error managing REST application");
+    expect(text).toContain("/api/missing");
+    expect(text).toContain("could not be checked");
+    // The failure reason is status-driven (HTTP code), never the endpoint's
+    // prose — which can itself carry the misleading gateway wording.
+    expect(text).toContain("(HTTP 404)");
+    expect(text).not.toContain("not found in namespace 'HSCUSTOM' as a spec-first REST application (IRIS Mgmnt API, /api/mgmnt/v2) or as a legacy");
+    expect(text).not.toContain("web server configuration");
+  });
+
+  it("35.6: delete with a failing legacy lookup also reports the scope as unchecked", async () => {
+    mockHttp.delete.mockRejectedValueOnce(mgmnt404);
+    mockHttp.get.mockRejectedValueOnce(mgmnt404); // legacy lookup fails too
+
+    const result = await restManageTool.handler(
+      { action: "delete", application: "/api/missing", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain("could not be checked");
+    expect(text).not.toContain("web server configuration");
+  });
+
+  it("35.6: a non-404 IrisApiError on get keeps the generic error path", async () => {
+    mockHttp.get.mockRejectedValue(
+      new IrisApiError(500, [], "/api/mgmnt/v2/USER/x", "Internal error"),
+    );
+
+    const result = await restManageTool.handler(
+      { action: "get", application: "/api/x" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Internal error");
+    // No legacy fallback call for non-404 statuses
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("35.6: delete on a Mgmnt 404 + legacy hit explains the spec-first-only scope", async () => {
+    mockHttp.delete.mockRejectedValueOnce(mgmnt404);
+    mockHttp.get.mockResolvedValueOnce(envelope(legacyWebapps));
+
+    const result = await restManageTool.handler(
+      { action: "delete", application: "/api/executemcp/v2", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain("legacy");
+    expect(text).toContain("spec-first");
+    expect(text).toContain("iris_webapp_manage");
+    expect(text).not.toContain("web server configuration");
+  });
+
+  // Code review (Story 35.6, Blind finding triaged): a legacy webapp with an
+  // EMPTY dispatchClass can NEVER reach the delete refusal — fetchLegacyApps
+  // filters empty dispatchClass out by design (non-REST webapps). So no
+  // "(dispatch class )" guard is needed; the refusal always names a class.
+  // (A test asserting the empty case was written at review and failed
+  // precisely because the filter makes the scenario unreachable — Rule #54.)
+  it("35.6: delete refusal always names the dispatch class (empty-class rows are filtered upstream)", async () => {
+    mockHttp.delete.mockRejectedValueOnce(mgmnt404);
+    mockHttp.get.mockResolvedValueOnce(envelope(legacyWebapps));
+
+    const result = await restManageTool.handler(
+      { action: "delete", application: "/api/executemcp/v2", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    expect(text).toContain("dispatch class ExecuteMCPv2.REST.Dispatch");
+    expect(text).toContain("iris_webapp_manage");
+  });
+
+  // QA (Story 35.6): pin the fallback ROUTE, not just the outcome — after the
+  // Mgmnt 404 the lookup must go to the ExecuteMCPv2 webapp endpoint for the
+  // SAME namespace (a regression to a second Mgmnt call or a wrong namespace
+  // would silently break legacy resolution).
+  it("35.6: legacy fallback queries the ExecuteMCPv2 webapp endpoint for the requested namespace", async () => {
+    mockHttp.get
+      .mockRejectedValueOnce(mgmnt404) // Mgmnt get 404s
+      .mockResolvedValueOnce(envelope(legacyWebapps)); // legacy webapp list
+
+    await restManageTool.handler(
+      { action: "get", application: "/api/executemcp/v2", namespace: "HSCUSTOM" },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledTimes(2);
+    expect(mockHttp.get).toHaveBeenNthCalledWith(
+      2,
+      "/api/executemcp/v2/security/webapp?namespace=HSCUSTOM",
+    );
+  });
+
   it("should handle IrisApiError on get", async () => {
     mockHttp.get.mockRejectedValue(
       new IrisApiError(404, [], "/api/mgmnt/v2/USER/missing", "Not found"),

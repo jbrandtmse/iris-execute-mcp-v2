@@ -424,9 +424,24 @@ ClassMethod ItemManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "get" {
-            ; Query config item details via SQL
+            ; Query config item details via SQL. Optional 'production' filter
+            ; disambiguates an item name that exists in more than one production
+            ; in this namespace (#50 — a match key must carry every identity
+            ; dimension a row actually has: WHERE Name = ? alone can silently
+            ; return whichever production's row the extent yields first).
+            ; Omitted -> unchanged legacy query/output, so the single-production
+            ; case stays byte-identical (Rule #19). Story 35.1 AC 35.1.4 audit.
+            ; CR 35.1-4 (code review): strip surrounding whitespace so a whitespace-only value
+            ; collapses to "" (treated as omitted -> unchanged legacy query) rather than being
+            ; bound into the SQL predicate and reported as "not found in production ' '".
+            Set tProdFilter = $ZStrip(tBody.%Get("production"), "<>W")
             Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
-            Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
+            If tProdFilter '= "" {
+                Set tSQL = tSQL _ " AND Production = ?"
+                Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName, tProdFilter)
+            } Else {
+                Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName)
+            }
             If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
                 Set $NAMESPACE = tOrigNS
                 Set tMsg = $Select('$IsObject(tRS): "SQL execution failed", 1: "SQL error: "_tRS.%Message)
@@ -437,7 +452,9 @@ ClassMethod ItemManage() As %Status
             }
             If 'tRS.%Next() {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Set tNotFoundMsg = "Config item '"_tItemName_"' not found"
+                If tProdFilter '= "" { Set tNotFoundMsg = tNotFoundMsg _ " in production '"_tProdFilter_"'" }
+                Set tSC = $$$ERROR($$$GeneralError, tNotFoundMsg)
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -469,19 +486,101 @@ ClassMethod ItemManage() As %Status
                 Quit
             }
 
-            ; Find the config item ID
-            If '##class(Ens.Config.Item).NameExists(tItemName, .tID) {
+            ; Resolve target production: explicit 'production' or the active one —
+            ; the SAME default idiom add/remove already use (lines ~523-531/656-664).
+            ; Story 35.1: Ens.Config.Item's Name index is composite
+            ; (Production, Name) (irislib/Ens/Config/Item.cls:150), so the item
+            ; lookup below requires the production resolved FIRST. Because the
+            ; lookup is always scoped to this ONE resolved production, an item
+            ; name that exists in a DIFFERENT production can never be silently
+            ; matched here (#29/#50) — it correctly reports "not found in
+            ; production '<name>'" instead.
+            ; CR 35.1-4 (code review): strip surrounding whitespace, mirroring add's className
+            ; handling (CR 18.0-1) — a stray leading/trailing space otherwise skips the
+            ; active-production default and produces a confusing "Production ' X' not found".
+            Set tProdName = $ZStrip(tBody.%Get("production"), "<>W")
+            If tProdName = "" { Set tProdName = ##class(Ens.Director).GetActiveProductionName() }
+            If tProdName = "" {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found")
+                Set tSC = $$$ERROR($$$GeneralError, "No active production; 'production' is required for set")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
             }
 
-            Set tItem = ##class(Ens.Config.Item).%OpenId(tID)
+            If '##class(%Dictionary.ClassDefinition).%ExistsId(tProdName) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tProdName_"' not found")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Rule #27: sync the config-object extent from the production class
+            ; XData (source of truth) BEFORE opening — SaveToClass writes the
+            ; class, not the extent, so an unsynced %OpenId/FindItemByConfigName
+            ; would see a stale item list.
+            Set tLoadSC = ##class(Ens.Config.Production).LoadFromClass(tProdName)
+            If $$$ISERR(tLoadSC) {
+                Set $NAMESPACE = tOrigNS
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tLoadSC))
+                Set tSC = $$$OK
+                Quit
+            }
+            Set tProd = ##class(Ens.Config.Production).%OpenId(tProdName)
+            If '$IsObject(tProd) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdName_"'")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            ; Find the config item by its FULL composite key (Production, Name)
+            ; via the SAME instance method add/remove already use (lines
+            ; ~609/693) — NOT the one-arg Ens.Config.Item.NameExists class
+            ; method, which binds tItemName to the Production slot of the
+            ; composite index and can never match (the Story 35.1 defect,
+            ; live-verified: two-key NameExists/FindItemByConfigName resolve
+            ; the item; one-arg NameExists always returns 0).
+            Set tFindStatus = $$$OK
+            Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): FindItemByConfigName walks
+            ; Ens.Config.Production:findItemIdByName, which SKIPS any item whose ClassName no
+            ; longer resolves to a business type (irislib/Ens/Config/Production.cls:739 —
+            ; Continue:$$$eHostTypeUnknown=##class(Ens.Config.Item).GetBusinessType(...)) — a
+            ; deleted/renamed/uncompiled host class, or an item created before this story's
+            ; ValidateHostClassName guard existed. Such an item is reported "not found" here
+            ; while 'get' (raw SQL, line ~438) still returns it — the SAME get/set
+            ; contradiction AC 35.1.1 exists to kill, by a second route, and the item is
+            ; otherwise unrepairable through this tool (can't 'set' a valid className to fix
+            ; it, can't 'remove' it either). Fallback: resolve via the composite-key index
+            ; directly (two-arg NameExists — live-probed to resolve the item, Dev Notes), then
+            ; take the item from tProd.Items (NOT a standalone %OpenId(tID)) — the object
+            ; SaveToClass serializes, mirroring the library's own idiom at
+            ; irislib/Ens/Config/Production.cls:725-727. (The live swizzle probe, Dev Notes,
+            ; showed %OpenId(tID) returns the SAME already-swizzled OREF as tProd.Items in this
+            ; process and would also work — the tProd.Items idiom is kept for library
+            ; consistency, not because %OpenId was shown to be unsafe here.)
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Failed to open config item '"_tItemName_"'")
+                ; NOTE (code review 35.1): FindItemByConfigName's Output %Status is deliberately
+                ; NOT propagated here — it reports $$$EnsErrConfigItemNotFound for the ORDINARY
+                ; absence case too, so substituting it would replace this branch's pinned
+                ; production-naming contract text (AC 35.1.3) on the common path. Discriminating
+                ; the genuinely-actionable causes (SQL failure; a '||'/'|'-qualified itemName
+                ; naming another production) needs error-code inspection plus Rule #8 prefix
+                ; stripping — ledgered as 35-1-CR-2 rather than done as a drive-by.
+                Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -499,23 +598,103 @@ ClassMethod ItemManage() As %Status
                 ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                 ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
-                ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                ; Story 35.1 cycle_iteration=2 (QA HIGH): a className update now goes
+                ; through the SAME guard 'add' already applies (ValidateHostClassName)
+                ; before it is ever persisted via SaveToClass below — an unguarded
+                ; className here would silently swallow SaveToClass's OnConfigChange
+                ; <METHOD DOES NOT EXIST> and durably persist a broken item.
+                ElseIf tKey = "className" { Set tNewClassName = $ZStrip(tValue, "<>W") Set tApplySC = ..ValidateHostClassName(tNewClassName) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Set tItem.ClassName = tNewClassName Do tUpdated.%Push(tKey) }
                 ; CR 17.2-1: propagate the helper's %Status — a failed setting
                 ; application must surface as an error, not be reported as updated.
                 Else { Set tApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tApplySC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tApplySC)) Set tSC = $$$OK Quit } Do tUpdated.%Push(tKey) }
             }
-            ; Stop after a setting-application failure inside the iterator.
+            ; Stop after a setting-application failure inside the iterator (covers both
+            ; the className guard above and ApplyArbitrarySetting).
             If $$$ISERR($Get(tApplySC, $$$OK)) Quit
 
-            Set tSC = tItem.%Save()
-            If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            ; Story 35.1 cycle_iteration=2 (QA HIGH): %Save() alone only updates the
+            ; Ens_Config.Item SQL EXTENT (live-probed, Dev Notes) — it never touches the
+            ; production class XData, which Rule #27 makes the source of truth. Without
+            ; the second write below, the NEXT set/add/remove call's own LoadFromClass
+            ; resync (line ~517 above) — or a bare class recompile — silently discards
+            ; this call's change back to the XData baseline. Conversely, SaveToClass
+            ; ALONE (live-probed) never touches the extent, so a 'get' immediately after
+            ; 'set' (raw SQL, no LoadFromClass) would show stale data. Both writes are
+            ; required: %Save() for 'get''s immediate extent visibility, SaveToClass(tItem)
+            ; for durability across resync/recompile.
+            ; CR 35.1-5 (code review): nothing to persist -> do not rewrite the production class
+            ; XData and do not take the runtime lock. Without this, `settings:{}` regenerated the
+            ; whole ProductionDefinition XData and called UpdateProduction for a request that
+            ; changed nothing. The response shape is unchanged (updatedSettings: []).
+            If tUpdated.%Size() > 0 {
+                Set tSC = tItem.%Save()
+                If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            ; Apply changes to running production
-            Set tSC = ##class(Ens.Director).UpdateProduction()
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+                ; CR 35.1-15 (Task 7 code review): SaveToClass(pItem) commits the class XData
+                ; FIRST (Production.cls:146) and only THEN dispatches
+                ; $classmethod(pItem.ClassName,"OnConfigChange",...). Its Catch swallows ONLY
+                ; <METHOD DOES NOT EXIST> — a className naming a class that is not on this system
+                ; raises <CLASS DOES NOT EXIST> and falls through to $$$EnsSystemError
+                ; (Production.cls:148-157). The write has ALREADY landed at that point, so the
+                ; caller was told "failed" for a change 'get' then reports as applied — the exact
+                ; get/set contradiction this story exists to kill, inverted. Newly reachable: the
+                ; AC 35.1.7 fallback above is what first lets such an item get this far, and the
+                ; case is real precisely because the fallback's whole purpose is items whose host
+                ; class was DELETED or renamed (live-reproduced over real HTTP). The no-pItem
+                ; overload — exactly what 'remove' already calls — persists the identical XData
+                ; (pItem is used ONLY for that notification) while skipping a dispatch that is
+                ; meaningless for a class that does not exist. Existing valid-class behavior is
+                ; byte-for-byte unchanged.
+                If ##class(%Dictionary.CompiledClass).%ExistsId(tItem.ClassName) {
+                    Set tSC = tProd.SaveToClass(tItem)
+                } Else {
+                    Set tSC = tProd.SaveToClass()
+                }
+                If $$$ISERR(tSC) {
+                    ; CR 35.1-3 (code review): the %Save() above already COMMITTED this change to
+                    ; the SQL extent that 'get' reads directly. Leaving it there while the class
+                    ; XData (Rule #27's source of truth) does not have it re-creates the very
+                    ; get/set contradiction this story exists to remove — the caller is told the
+                    ; write failed while 'get' reports it applied, until some unrelated later
+                    ; LoadFromClass silently reverts it. Re-sync the extent from XData now so both
+                    ; sides agree with the error the caller is about to receive. Note the ORDER of
+                    ; the two writes is load-bearing and must NOT be swapped: FindItemByConfigName
+                    ; can return an item that is not the tProd.Items member SaveToClass serializes,
+                    ; and %Save()-first is what makes the XData export pick the new values up.
+                    Do ##class(Ens.Config.Production).LoadFromClass(tProdName)
+                    Set $NAMESPACE = tOrigNS
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
 
-            Set tResult = {"action": "set", "itemName": (tItemName), "updatedSettings": (tUpdated)}
+            ; Apply changes to the RUNNING production. CR 35.1-6 (code review): only when the
+            ; production we just wrote IS the running one. Ens.Director.UpdateProduction ignores
+            ; its caller's intent and always diffs/actualizes whichever production is running,
+            ; taking a 30s runtime lock and potentially restarting that production's hosts — so
+            ; calling it after editing a DIFFERENT (e.g. stopped) production disturbs an unrelated
+            ; production for no benefit. Newly reachable: pre-fix 'set' never got this far.
+            If (tUpdated.%Size() > 0) && (tProdName = ##class(Ens.Director).GetActiveProductionName()) {
+                Set tSC = ##class(Ens.Director).UpdateProduction()
+                Set $NAMESPACE = tOrigNS
+                ; CR 35.1-7 (code review): both durable writes have already COMMITTED at this
+                ; point — say so, so the caller does not read this as "nothing was written" and
+                ; retry a change that is already persisted.
+                If $$$ISERR(tSC) {
+                    ; AppendStatus keeps the REAL underlying reason (Rule #9) attached to the
+                    ; context line without hand-splicing error text (Rule #8 double-prefixing).
+                    Set tSC = $System.Status.AppendStatus($$$ERROR($$$GeneralError, "Settings were saved to production '"_tProdName_"' but refreshing the running production failed"), tSC)
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+            }
+            Else {
+                Set $NAMESPACE = tOrigNS
+            }
+
+            Set tResult = {"action": "set", "itemName": (tItemName), "production": (tProdName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "add" {
@@ -540,37 +719,16 @@ ClassMethod ItemManage() As %Status
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tClassName, "className")
             If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            ; CR 17.2-3: reject a host className that does not exist / is not compiled.
-            ; SaveToClass would otherwise swallow an OnConfigChange <METHOD DOES NOT
-            ; EXIST> and persist a broken item. %Dictionary.CompiledClass.%ExistsId
-            ; is true only for a successfully-compiled class (stricter than ClassDefinition).
-            If '##class(%Dictionary.CompiledClass).%ExistsId(tClassName) {
+            ; CR 17.2-3 / CR 18.0-1: reject a className that does not exist / is not
+            ; compiled, does not extend Ens.Host, or is abstract — SaveToClass would
+            ; otherwise swallow an OnConfigChange <METHOD DOES NOT EXIST> and persist a
+            ; broken item. Live-probed: Ens.BusinessService => abstract,
+            ; %Stream.GlobalCharacter => not Ens.Host, EnsLib.File.PassthroughService =>
+            ; accepted. Shared with the 'set' branch's className override (Story 35.1
+            ; cycle_iteration=2) via ValidateHostClassName — same checks, same order.
+            Set tSC = ..ValidateHostClassName(tClassName)
+            If $$$ISERR(tSC) {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' does not exist or is not compiled")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-
-            ; CR 18.0-1 (remaining half): reject a compiled-but-not-instantiable host class.
-            ; %ExistsId passes for an [Abstract] host (e.g. Ens.BusinessService) or a
-            ; non-host %Library.* class — both would fail later at production-start /
-            ; OnConfigChange rather than at add time. A valid config-item host must
-            ; (a) extend Ens.Host (the $classmethod "%Extends" idiom Ens.Config.Item itself
-            ; uses on a host className) and (b) be non-abstract (instantiable). Live-probed:
-            ; Ens.BusinessService => abstract, %Stream.GlobalCharacter => not Ens.Host,
-            ; EnsLib.File.PassthroughService => accepted.
-            If '$classmethod(tClassName, "%Extends", "Ens.Host") {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-            Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
-            If $IsObject(tHostCC) && tHostCC.Abstract {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Host class '"_tClassName_"' is abstract and cannot be a production item")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
@@ -606,8 +764,19 @@ ClassMethod ItemManage() As %Status
 
             ; CR 17.2-3: reject a duplicate item Name in the production — the
             ; (Production,Name) index is not unique, so add is otherwise non-idempotent.
+            ; CR 35.1-14 (Task 7 code review, Rule #56 enumeration): this guard resolves through
+            ; FindItemByConfigName, which SKIPS any item whose ClassName no longer resolves to a
+            ; business type (Production.cls:739) — the exact class of item AC 35.1.7 exists to
+            ; keep reachable. Without the same composite-key fallback 'set'/'remove' now carry,
+            ; 'add' believed the name was FREE and inserted a SECOND item with the same Name into
+            ; the production (live-reproduced over real HTTP: the class XData ended up with two
+            ; <Item Name="DupTargetOp"> entries, HTTP 200 "added"), durably corrupting the
+            ; production the guard's own comment above exists to protect. Only presence matters
+            ; here, so the id from the two-arg NameExists is enough — no Items lookup needed.
             Set tDup = tProd.FindItemByConfigName(tItemName)
-            If $IsObject(tDup) {
+            Set tDupID = ""
+            If '$IsObject(tDup) { Do ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tDupID) }
+            If $IsObject(tDup) || (tDupID '= "") {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' already exists in production '"_tProdName_"'")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -630,7 +799,13 @@ ClassMethod ItemManage() As %Status
                     ElseIf tKey = "enabled" { Set tItem.Enabled = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "comment" { Set tItem.Comment = tValue Do tUpdated.%Push(tKey) }
                     ElseIf tKey = "category" { Set tItem.Category = tValue Do tUpdated.%Push(tKey) }
-                    ElseIf tKey = "className" { Set tItem.ClassName = tValue Do tUpdated.%Push(tKey) }
+                    ; CR 35.1-1 (code review): a settings.className OVERRIDE must go through the
+                    ; SAME ValidateHostClassName guard as the top-level className above — it is
+                    ; applied AFTER that check and is what SaveToClass ultimately persists, so an
+                    ; unguarded override silently reinstated the exact OnConfigChange
+                    ; <METHOD DOES NOT EXIST> swallow (Production.cls:148-157) the guard exists to
+                    ; stop, returning HTTP 200 over a durably-broken item.
+                    ElseIf tKey = "className" { Set tNewClassName = $ZStrip(tValue, "<>W") Set tAddApplySC = ..ValidateHostClassName(tNewClassName) If $$$ISERR(tAddApplySC) Quit  Set tItem.ClassName = tNewClassName Do tUpdated.%Push(tKey) }
                     ; CR 17.2-1: propagate the helper's %Status instead of swallowing it.
                     Else { Set tAddApplySC = ..ApplyArbitrarySetting(tItem, tKey, tValue) If $$$ISERR(tAddApplySC) Quit  Do tUpdated.%Push(tKey) }
                 }
@@ -648,7 +823,10 @@ ClassMethod ItemManage() As %Status
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tClassName), "updatedSettings": (tUpdated)}
+            ; CR 35.1-1 (code review): report the className actually PERSISTED, not the
+            ; top-level argument — a settings.className override (now guarded above) would
+            ; otherwise make the response disagree with what landed in the class XData.
+            Set tResult = {"action": "added", "itemName": (tItemName), "production": (tProdName), "className": (tItem.ClassName), "updatedSettings": (tUpdated)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "remove" {
@@ -691,6 +869,20 @@ ClassMethod ItemManage() As %Status
             }
 
             Set tItem = tProd.FindItemByConfigName(tItemName, .tFindStatus)
+            ; AC 35.1.7 (Task 7, closes ledger HIGH 35-1-CR-1): same fallback as 'set' above —
+            ; an item whose ClassName no longer resolves to a business type is skipped by
+            ; findItemIdByName and must stay reachable through 'remove' too, or it can never
+            ; be cleaned up through this tool. See the 'set' branch (~line 548) for the full
+            ; rationale and the live swizzle-probe evidence (Dev Notes).
+            If '$IsObject(tItem) {
+                Set tFallbackID = ""
+                If ##class(Ens.Config.Item).NameExists(tProdName, tItemName, .tFallbackID) {
+                    Set tFallbackPos = tProd.Items.FindObjectId(tFallbackID)
+                    If tFallbackPos '= "" {
+                        Set tItem = tProd.Items.GetAt(tFallbackPos)
+                    }
+                }
+            }
             If '$IsObject(tItem) {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Config item '"_tItemName_"' not found in production '"_tProdName_"'")
@@ -714,6 +906,54 @@ ClassMethod ItemManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Validate a config item's host className: must be a compiled, non-abstract class that
+/// extends Ens.Host. Called from ALL THREE paths that can set an item's ClassName —
+/// 'add's required top-level className argument, 'add's optional settings.className
+/// OVERRIDE (which is applied after the top-level check and is what actually gets
+/// persisted), and 'set's optional settings.className override. Every one of them
+/// ultimately persists via Ens.Config.Production:SaveToClass, and a bad className there
+/// silently swallows the resulting OnConfigChange &lt;METHOD DOES NOT EXIST&gt; and
+/// persists a broken item (CR 17.2-3 / CR 18.0-1; extended to 'set' by Story 35.1
+/// cycle_iteration=2 — QA HIGH; extended to add's settings override by the Story 35.1
+/// code review — CR 35.1-1).
+/// <p>Caller is responsible for any required-ness check (add). Whitespace is normalized
+/// internally, so callers need not strip pClassName first.</p>
+ClassMethod ValidateHostClassName(pClassName As %String) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        ; CR 35.1-8 (code review): normalize here rather than relying on every caller to strip
+        ; first. Idempotent for the existing callers (which already strip), and it stops a future
+        ; third caller from getting "does not exist or is not compiled" for a class that exists.
+        Set pClassName = $ZStrip(pClassName, "<>W")
+        If '##class(%Dictionary.CompiledClass).%ExistsId(pClassName) {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' does not exist or is not compiled")
+            Quit
+        }
+        If '$classmethod(pClassName, "%Extends", "Ens.Host") {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' is not an Ens.Host business host (must extend Ens.Host)")
+            Quit
+        }
+        Set tHostCC = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        ; CR 35.1-9 (code review, Rule #44 fail-safe direction): a null CompiledClass previously
+        ; fell through as VALID. Near-unreachable (%ExistsId passed three lines up), but the
+        ; permissive side is the wrong one for a guard whose whole job is to stop a broken
+        ; className reaching SaveToClass.
+        If '$IsObject(tHostCC) {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' could not be opened for validation")
+            Quit
+        }
+        If tHostCC.Abstract {
+            Set tSC = $$$ERROR($$$GeneralError, "Host class '"_pClassName_"' is abstract and cannot be a production item")
+            Quit
+        }
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Apply an arbitrary host/adapter setting to a config item via Ens.Config.Setting.
@@ -1975,7 +2215,10 @@ ClassMethod TransformTest() As %Status
 
 /// Create, delete, or get a REST application.
 /// <p>Accepts a JSON body with <code>action</code> ("create", "delete", or "get"),
-/// <code>name</code> (REST application name),
+/// <code>name</code> (REST application name — an ObjectScript PACKAGE name such as
+/// <code>MyApi</code> or <code>MyCompany.MyApi</code>; it becomes the package of the
+/// generated classes and %REST.API validates it with $ZNAME, so URL-path values like
+/// "/myapi" are rejected),
 /// optional <code>spec</code> (OpenAPI JSON for create),
 /// and optional <code>namespace</code>.</p>
 ClassMethod RestManage() As %Status

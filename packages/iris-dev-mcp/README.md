@@ -32,6 +32,7 @@ All servers use the same environment variables:
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
+| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also selects a message table per worker process independently of this header, so localized prefixes can still appear — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
 
 ### Multiple servers & the `server` parameter
 
@@ -145,7 +146,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | idempotent |
 
 ### Package Browsing Tools
@@ -174,7 +175,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import), not idempotent |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format. Import loads definitions WITHOUT compiling by default (the response says so); pass `compile: true` to compile in the same call | `action`, `docs?`, `content?`, `compile?`, `flags?`, `namespace?` | destructive (import), not idempotent |
 
 ### SQL Tools
 
@@ -353,6 +354,61 @@ throwaway test classes only.
   }
 }
 ```
+
+**Glob shape matters (Story 35.9).** The base for document-name mapping is the directory prefix
+before the first glob metacharacter, so the wildcard must come BEFORE the package directory.
+`.../src/ClineTest/*.cls` swallows the `ClineTest` package directory into the base and would map
+`ClineTest/Wumpus.cls` to the unqualified `Wumpus.cls`. The tool now REFUSES such uploads: for
+`.cls`/`.mac`/`.int`/`.inc` files whose own `Class <Pkg.Name>` / `ROUTINE <Name>` declaration
+disagrees with the path-derived name, the file lands in `failures[]` with both names named and is
+never uploaded or compiled (IRIS would otherwise store it under the content-declared name while the
+tool reported the wrong one). Headerless files (`.inc` fragments, CSP pages) have no declaration and
+keep pure path-derived naming.
+
+**BOM and server-reported per-file errors (Story 35.9 rework).** A leading UTF-8 BOM is stripped
+before upload (IRIS rejects a BOM'd first line as an illegal header). And a PUT that returns
+HTTP 200 can still fail per-document — Atelier reports it only as a string `status` field in the
+per-doc result (e.g. `ERROR #16021: Illegal Header Line: ...`) while storing nothing. The tool
+surfaces that string as an upload failure in `failures[]` instead of counting the file as uploaded.
+
+**Refused input (trap-shaped glob):**
+```json
+{
+  "path": ".../src/ClineTest/*.cls",
+  "compile": true
+}
+```
+
+**Refusal output:**
+```json
+{
+  "total": 2,
+  "uploaded": 0,
+  "failed": 2,
+  "failures": [
+    {
+      "file": ".../src/ClineTest/Wumpus.cls",
+      "docName": "Wumpus.cls",
+      "error": "Refusing to upload 'Wumpus.cls': the path-derived name does not match the file's declared identity 'ClineTest.Wumpus'. The glob pattern's base directory swallowed the package directory — use a wildcard before the package directory (e.g. '.../src/**/*.cls') or pass baseDir='.../src'."
+    }
+  ]
+}
+```
+
+**Two remedies, both work:** move the wildcard before the package directory
+(`"path": ".../src/**/*.cls"`), or keep the narrow glob and state the package root
+deterministically with the optional `baseDir` parameter:
+
+```json
+{
+  "path": ".../src/ClineTest/*.cls",
+  "baseDir": ".../src",
+  "compile": true
+}
+```
+
+Both upload `ClineTest.Wumpus.cls` / `ClineTest.WumpusCave.cls` and compile clean. `baseDir` does
+not bypass the content cross-check — it is defense-in-depth, not an override.
 </details>
 
 <details>
@@ -640,6 +696,34 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
 ```json
 {
   "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_doc_xml_export</strong> -- Import from XML (with compile)</summary>
+
+An import **loads definitions without compiling them** by default — the response then includes a note saying the documents are NOT compiled (remedy: `compile: true`, or `iris_doc_compile` afterwards). Pass `compile: true` to compile in the same call; `flags` (e.g. `"cku"`) is honoured only when `compile` is true, and the `c` compile qualifier is folded in automatically when absent or explicitly negated (IRIS qualifier letters are case-insensitive; `-c` negates, so `-c` becomes `-cc` — the last `c` wins). A compile failure still returns HTTP-level success from IRIS — the error text surfaces in the response as a `Per-file status (...)` note.
+
+**Input:**
+```json
+{
+  "action": "import",
+  "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Export generator=\"IRIS\" version=\"26\">\n<Class name=\"MyApp.Service\">\n<Super>%RegisteredObject</Super>\n</Class>\n</Export>",
+  "compile": true
+}
+```
+
+**Output:**
+```json
+{
+  "content": [
+    {
+      "file": "import.xml",
+      "imported": ["MyApp.Service.cls"],
+      "status": ""
+    }
+  ]
 }
 ```
 </details>

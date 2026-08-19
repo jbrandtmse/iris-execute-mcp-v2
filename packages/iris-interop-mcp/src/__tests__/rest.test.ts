@@ -24,15 +24,32 @@ describe("iris_interop_rest", () => {
     expect(interopRestTool.scope).toBe("NS");
   });
 
+  // 35.5 (AC 35.5.3): the documented example must be a value the real server
+  // ACCEPTS — %REST.API.CreateApplication validates $zname(name,4), so the name
+  // is an ObjectScript PACKAGE name and '/myapi' is rejected. Assert actual
+  // string content (not toBeTruthy) so a vacuous description fails the pin.
+  it("name description states the package-name contract (35.5)", () => {
+    const shape = interopRestTool.inputSchema.shape as Record<
+      string,
+      { description?: string }
+    >;
+    const desc = shape.name?.description ?? "";
+    expect(desc).toContain("package name");
+    expect(desc).toContain("'MyApi'");
+    // the rejected form must be documented AS rejected
+    expect(desc).toContain("'/myapi'");
+    expect(desc).toContain("rejected");
+  });
+
   it("should send POST with create action and spec", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "created", name: "/myapi" }),
+      envelope({ action: "created", name: "MyApi" }),
     );
 
     const spec = { openapi: "3.0.0", info: { title: "MyAPI", version: "1.0" } };
 
     const result = await interopRestTool.handler(
-      { action: "create", name: "/myapi", spec },
+      { action: "create", name: "MyApi", spec },
       ctx,
     );
 
@@ -40,7 +57,7 @@ describe("iris_interop_rest", () => {
       "/api/executemcp/v2/interop/rest",
       expect.objectContaining({
         action: "create",
-        name: "/myapi",
+        name: "MyApi",
         spec,
         namespace: "USER",
       }),
@@ -48,17 +65,17 @@ describe("iris_interop_rest", () => {
 
     const structured = result.structuredContent as { action: string; name: string };
     expect(structured.action).toBe("created");
-    expect(structured.name).toBe("/myapi");
+    expect(structured.name).toBe("MyApi");
     expect(result.isError).toBeUndefined();
   });
 
   it("should send POST with delete action", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "deleted", name: "/myapi" }),
+      envelope({ action: "deleted", name: "MyApi" }),
     );
 
     const result = await interopRestTool.handler(
-      { action: "delete", name: "/myapi" },
+      { action: "delete", name: "MyApi" },
       ctx,
     );
 
@@ -66,7 +83,7 @@ describe("iris_interop_rest", () => {
       "/api/executemcp/v2/interop/rest",
       expect.objectContaining({
         action: "delete",
-        name: "/myapi",
+        name: "MyApi",
       }),
     );
 
@@ -77,11 +94,11 @@ describe("iris_interop_rest", () => {
   it("should send POST with get action", async () => {
     const returnedSpec = { openapi: "3.0.0", info: { title: "MyAPI", version: "1.0" } };
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "get", name: "/myapi", spec: returnedSpec }),
+      envelope({ action: "get", name: "MyApi", spec: returnedSpec }),
     );
 
     const result = await interopRestTool.handler(
-      { action: "get", name: "/myapi" },
+      { action: "get", name: "MyApi" },
       ctx,
     );
 
@@ -89,7 +106,7 @@ describe("iris_interop_rest", () => {
       "/api/executemcp/v2/interop/rest",
       expect.objectContaining({
         action: "get",
-        name: "/myapi",
+        name: "MyApi",
       }),
     );
 
@@ -104,11 +121,11 @@ describe("iris_interop_rest", () => {
 
   it("should pass resolved namespace in body", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "created", name: "/test" }),
+      envelope({ action: "created", name: "TestApi" }),
     );
 
     await interopRestTool.handler(
-      { action: "create", name: "/test", namespace: "MYNS" },
+      { action: "create", name: "TestApi", namespace: "MYNS" },
       ctx,
     );
 
@@ -120,11 +137,11 @@ describe("iris_interop_rest", () => {
 
   it("should not include spec in body when not provided", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "deleted", name: "/test" }),
+      envelope({ action: "deleted", name: "TestApi" }),
     );
 
     await interopRestTool.handler(
-      { action: "delete", name: "/test" },
+      { action: "delete", name: "TestApi" },
       ctx,
     );
 
@@ -134,13 +151,13 @@ describe("iris_interop_rest", () => {
 
   it("should accept spec as string", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ action: "created", name: "/test" }),
+      envelope({ action: "created", name: "TestApi" }),
     );
 
     const specString = '{"openapi":"3.0.0"}';
 
     await interopRestTool.handler(
-      { action: "create", name: "/test", spec: specString },
+      { action: "create", name: "TestApi", spec: specString },
       ctx,
     );
 
@@ -158,20 +175,20 @@ describe("iris_interop_rest", () => {
     );
 
     const result = await interopRestTool.handler(
-      { action: "create", name: "/bad" },
+      { action: "create", name: "BadApi" },
       ctx,
     );
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Error managing REST application");
-    expect(result.content[0]?.text).toContain("/bad");
+    expect(result.content[0]?.text).toContain("BadApi");
   });
 
   it("should rethrow non-IrisApiError", async () => {
     mockHttp.post.mockRejectedValue(new Error("Network failure"));
 
     await expect(
-      interopRestTool.handler({ action: "create", name: "/test" }, ctx),
+      interopRestTool.handler({ action: "create", name: "TestApi" }, ctx),
     ).rejects.toThrow("Network failure");
   });
 });

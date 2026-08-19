@@ -271,13 +271,17 @@ describe("run-external-backup — thaw ALWAYS even on failure + journaling-resum
 });
 
 describe("deploy-and-test-class — glob-path guidance (Rule #17) + total-count check (Rule #35)", () => {
-  it("instructs a glob-prefixed path, warning that a bare path mis-maps the class name", async () => {
+  it("instructs a glob-prefixed path, warning that a bare path's upload is refused (Story 35.9 refusal contract; ledger 35-9-DEV-2)", async () => {
     const { pkg, prompt } = await findPrompt("deploy-and-test-class");
     expect(pkg).toBe("iris-dev-mcp");
     const body = prompt.build({ classOrPackage: "MyApp.MyClass" });
 
     expect(body.toLowerCase()).toContain("glob-prefixed path");
-    expect(body.toLowerCase()).toContain("mis-maps the class name");
+    // Post-35.9 the loader REFUSES a bare path whose derived name disagrees
+    // with the file's Class declaration — the warning must name the refusal,
+    // not the stale "mis-maps the class name" phrasing.
+    expect(body.toLowerCase()).toContain("refused");
+    expect(body.toLowerCase()).not.toContain("mis-maps the class name");
     // Concrete glob shape guidance, not just an abstract warning.
     expect(body).toMatch(/\*\*\/\*\.cls|\*\*\/<ClassName>\.cls/);
   });

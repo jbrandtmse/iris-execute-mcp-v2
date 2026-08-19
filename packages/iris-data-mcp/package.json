@@ -23,7 +23,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint src/",
     "type-check": "tsc --noEmit",
-    "prepublishOnly": "node ../../scripts/verify-iris-reachable.mjs"
+    "prepublishOnly": "node scripts/prepublish-gate.mjs"
   },
   "dependencies": {
     "@iris-mcp/shared": "workspace:*",

@@ -93,3 +93,4 @@ Notes for this run:
 2026-08-17T01:15:00Z	Story 34.8	committed	sha=eb75133 submodules=
 2026-08-17T01:15:30Z	Epic 34	epic_status_done	stories=9
 2026-08-17T10:00:00Z	Epic 34	epic_retro_complete	path=_bmad-output/implementation-artifacts/epic-34-retro-2026-08-17.md rules_codified=1_rule59 action_items=6
+2026-08-17T14:40:19Z	Epic 34	epic_merged_to_feature	repos=. feature_sha=ebfd6cb merge_sha=6fe1763 submodules= backfilled_by=epic-cycle-35 backfill_reason=write_ahead_gap_merge_landed_log_write_missed

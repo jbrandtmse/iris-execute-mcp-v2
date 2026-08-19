@@ -1609,6 +1609,18 @@ ClassMethod OAuthList() As %Status
 /// <p>Reads a JSON body with <code>action</code> (create|delete|discover),
 /// <code>entity</code> (server|client for create/delete), and action-specific
 /// parameters. Dispatches to the appropriate OAuth2 classes in <code>%SYS</code>.</p>
+/// <p>Discovery (action=discover) takes <code>issuerURL</code> plus an optional
+/// <code>sslConfiguration</code> naming an IRIS SSL/TLS client configuration — REQUIRED
+/// for https issuers (inspect existing configurations with iris_ssl_list, create one with
+/// iris_ssl_manage). Discovery SAVES an OAuth2.ServerDefinition keyed by the exact issuer
+/// URL.</p>
+/// <p>Client registration (create + entity=client) resolves <code>serverName</code> as the
+/// issuer URL of an EXISTING OAuth2.ServerDefinition — the exact issuer URL string passed
+/// to a prior successful discover (the match is exact; OpenID provider metadata gives no
+/// user-chosen server name). It then creates the OAuth2.Client record and calls the 1-arg
+/// %SYS.OAuth2.Registration.RegisterClient(applicationName). A failed remote registration
+/// (e.g. the issuer publishes no registration endpoint) leaves the local record saved —
+/// the Management Portal's configure-then-register semantics.</p>
 /// <p><b>CRITICAL</b>: Client secrets are NEVER included in response bodies
 /// or error messages (NFR6).</p>
 ClassMethod OAuthManage() As %Status
@@ -1653,28 +1665,49 @@ ClassMethod OAuthManage() As %Status
                 Quit
             }
 
-            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, .tConfig)
+            ; %SYS.OAuth2.Registration.Discover is 3-arg on this instance:
+            ; Discover(issuerEndpoint, sslConfiguration, Output server) — it SAVES an
+            ; OAuth2.ServerDefinition on success. sslConfiguration names an IRIS SSL/TLS
+            ; client configuration and is REQUIRED for https issuers (native ERROR #6159
+            ; otherwise). Validate before delegating so the caller gets actionable guidance.
+            ; Both inputs are whitespace-stripped so a padded/whitespace-only value cannot
+            ; slip past the friendly validation into the bare native error.
+            Set tSSLConfig = $ZStrip(tBody.%Get("sslConfiguration"), "<>W")
+            Set tIssuerURL = $ZStrip(tIssuerURL, "<>W")
+            If (tSSLConfig = "") && ($ZConvert($Extract(tIssuerURL, 1, 8), "L") = "https://") {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, "Discovering an https issuer requires an IRIS SSL/TLS client configuration: pass 'sslConfiguration' naming one (inspect existing configurations with iris_ssl_list; create one with iris_ssl_manage action='create')")
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            Set tSC = ##class(%SYS.OAuth2.Registration).Discover(tIssuerURL, tSSLConfig, .tServerDef)
             Set $NAMESPACE = tOrigNS
             If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
             Set tResult = {}
             Do tResult.%Set("action", "discovered")
             Do tResult.%Set("issuerURL", tIssuerURL)
-            ; Return discovered configuration as a nested object
+            ; Return discovered configuration as a nested object. tServerDef is the saved
+            ; OAuth2.ServerDefinition; its endpoint properties are Metadata-backed getters.
             Set tDiscovered = {}
-            If $IsObject(tConfig) {
-                If tConfig.%IsA("%DynamicObject") {
-                    Set tDiscovered = tConfig
+            If $IsObject($Get(tServerDef)) {
+                If tServerDef.%IsA("%DynamicObject") {
+                    Set tDiscovered = tServerDef
                 }
                 Else {
                     ; Convert discovered config properties to JSON
-                    If $Property(tConfig, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tConfig, "IssuerEndpoint"))
-                    If $Property(tConfig, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tConfig, "AuthorizationEndpoint"))
-                    If $Property(tConfig, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tConfig, "TokenEndpoint"))
-                    If $Property(tConfig, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tConfig, "UserinfoEndpoint"))
-                    If $Property(tConfig, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tConfig, "RevocationEndpoint"))
-                    If $Property(tConfig, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tConfig, "IntrospectionEndpoint"))
-                    If $Property(tConfig, "JWKSEndpoint") '= "" Do tDiscovered.%Set("jwksEndpoint", $Property(tConfig, "JWKSEndpoint"))
+                    If $Property(tServerDef, "IssuerEndpoint") '= "" Do tDiscovered.%Set("issuerEndpoint", $Property(tServerDef, "IssuerEndpoint"))
+                    If $Property(tServerDef, "AuthorizationEndpoint") '= "" Do tDiscovered.%Set("authorizationEndpoint", $Property(tServerDef, "AuthorizationEndpoint"))
+                    If $Property(tServerDef, "TokenEndpoint") '= "" Do tDiscovered.%Set("tokenEndpoint", $Property(tServerDef, "TokenEndpoint"))
+                    If $Property(tServerDef, "UserinfoEndpoint") '= "" Do tDiscovered.%Set("userinfoEndpoint", $Property(tServerDef, "UserinfoEndpoint"))
+                    If $Property(tServerDef, "RevocationEndpoint") '= "" Do tDiscovered.%Set("revocationEndpoint", $Property(tServerDef, "RevocationEndpoint"))
+                    If $Property(tServerDef, "IntrospectionEndpoint") '= "" Do tDiscovered.%Set("introspectionEndpoint", $Property(tServerDef, "IntrospectionEndpoint"))
+                    ; OAuth2.ServerDefinition has no JWKSEndpoint property — the JWKS URI
+                    ; lives in the server Metadata as "jwks_uri".
+                    Set tJwksUri = tServerDef.Metadata."jwks_uri"
+                    If tJwksUri '= "" Do tDiscovered.%Set("jwksEndpoint", tJwksUri)
                 }
             }
             Do tResult.%Set("configuration", tDiscovered)
@@ -1782,24 +1815,154 @@ ClassMethod OAuthManage() As %Status
                         Quit
                     }
 
-                    Set tProps("ApplicationName") = tClientName
-                    Set tProps("ServerDefinition") = tServerName
-                    If tBody.%IsDefined("redirectURIs") Set tProps("RedirectURL") = tBody.%Get("redirectURIs")
-                    If tBody.%IsDefined("grantTypes") Set tProps("GrantTypes") = tBody.%Get("grantTypes")
-                    If tBody.%IsDefined("clientType") Set tProps("ClientType") = tBody.%Get("clientType")
-                    If tBody.%IsDefined("description") Set tProps("Description") = tBody.%Get("description")
+                    ; %SYS.OAuth2.Registration.RegisterClient is 1-arg on this instance —
+                    ; RegisterClient(applicationName) opens an EXISTING OAuth2.Client record
+                    ; and POSTs its metadata to the issuer's registration endpoint. The real
+                    ; flow is therefore: resolve the server definition, create and save the
+                    ; client record, then register it.
 
-                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tServerName, .tProps)
+                    ; Pre-validate: serverName is the ISSUER URL of an existing
+                    ; OAuth2.ServerDefinition (created by a prior successful discover).
+                    ; OpenByIssuer is exact-match (SHA512 hash index over the EXACT-collated
+                    ; IssuerEndpoint) and returns "" with $$$OK when not found.
+                    Set tSC = $$$OK
+                    Set tServerDef = ##class(OAuth2.ServerDefinition).OpenByIssuer(tServerName, .tSC)
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    If '$IsObject(tServerDef) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 server definition exists for issuer '" _ tServerName _ "' (issuer match is exact — use the same issuer URL string passed to discover). Client registration requires a prior successful discover for that issuer (action='discover' with issuerURL); discover of an https issuer itself requires an IRIS SSL/TLS client configuration (inspect with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; ClientType is Required with no InitialExpression; the Management
+                    ; Portal's default (and IRIS convention) is 'confidential'.
+                    Set tClientType = tBody.%Get("clientType")
+                    If tClientType = "" Set tClientType = "confidential"
+
+                    ; OAuth2.Client.SSLConfiguration is Required (MINLEN=1); inherit the one
+                    ; discovery used for this issuer.
+                    If tServerDef.SSLConfiguration = "" {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "The server definition for issuer '" _ tServerName _ "' has no SSL/TLS configuration, but an OAuth2 client record requires one: re-run discover for that issuer passing 'sslConfiguration' (inspect configurations with iris_ssl_list; create one with iris_ssl_manage)")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    Set tClient = ##class(OAuth2.Client).%New()
+                    Set tClient.ApplicationName = tClientName
+                    Set tClient.ClientType = tClientType
+                    Set tClient.SSLConfiguration = tServerDef.SSLConfiguration
+                    Set tClient.ServerDefinition = tServerDef
+                    If tBody.%IsDefined("description") Set tClient.Description = tBody.%Get("description")
+
+                    ; RedirectionEndpoint is an OAuth2.Endpoint serial; sub-property
+                    ; assignment auto-instantiates it (the Management Portal idiom).
+                    ; Required for public/confidential clients. A client record holds ONE
+                    ; redirection endpoint — when a JSON array is supplied, take the first.
+                    Set tRedirectURI = ""
+                    If tBody.%IsDefined("redirectURIs") {
+                        Set tRedirectURIs = tBody.%Get("redirectURIs")
+                        If $IsObject(tRedirectURIs) {
+                            Set tRedirectURI = tRedirectURIs.%Get(0)
+                        } Else {
+                            Set tRedirectURI = tRedirectURIs
+                        }
+                    }
+                    If tRedirectURI '= "" {
+                        ; Same %Net.URLParser idiom as the server-create branch above.
+                        ; Decompose never errors on garbage — it yields an empty host —
+                        ; so validate the parse before building the endpoint serial;
+                        ; otherwise the caller who DID supply a URI gets a misleading
+                        ; "RedirectionEndpoint required" from the %Save validation.
+                        Do ##class(%Net.URLParser).Decompose(tRedirectURI, .tUrlParts)
+                        If $Get(tUrlParts("host")) = "" {
+                            Set $NAMESPACE = tOrigNS
+                            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'redirectURIs' value '" _ tRedirectURI _ "' is not a parseable absolute URL (no host found). Supply a full URL with a scheme and host, e.g. 'http://localhost:52773/csp/sys/oauth2/OAuth2.Response.cls'")
+                            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                            Set tSC = $$$OK
+                            Quit
+                        }
+                        Set tClient.RedirectionEndpoint.Host = $Get(tUrlParts("host"))
+                        Set tClient.RedirectionEndpoint.Port = $Get(tUrlParts("port"))
+                        Set tPrefix = $Get(tUrlParts("path"))
+                        If $Extract(tPrefix, 1) = "/" Set tPrefix = $Extract(tPrefix, 2, *)
+                        Set tClient.RedirectionEndpoint.Prefix = tPrefix
+                        Set tClient.RedirectionEndpoint.UseSSL = ($ZConvert($Get(tUrlParts("scheme")), "L") '= "http")
+                    }
+
+                    ; Grant types live on the client Metadata as a $list (portal idiom).
+                    ; Accept a JSON array or a comma/space-separated string.
+                    Set tGrantTypes = tBody.%Get("grantTypes")
+                    If tGrantTypes '= "" {
+                        Set tGTList = ""
+                        If $IsObject(tGrantTypes) {
+                            Set tGTIter = tGrantTypes.%GetIterator()
+                            While tGTIter.%GetNext(.tGTKey, .tGTVal) {
+                                Set tGTVal = $ZStrip(tGTVal, "<>W")
+                                If tGTVal '= "" Set tGTList = tGTList _ $ListBuild(tGTVal)
+                            }
+                        } Else {
+                            Set tGTNorm = $Translate(tGrantTypes, ",", " ")
+                            For tGTIdx = 1:1:$Length(tGTNorm, " ") {
+                                Set tGT = $ZStrip($Piece(tGTNorm, " ", tGTIdx), "<>W")
+                                If tGT '= "" Set tGTList = tGTList _ $ListBuild(tGT)
+                            }
+                        }
+                        If tGTList '= "" Set tClient.Metadata."grant_types" = tGTList
+                    }
+
+                    Set tSC = tClient.%Save()
+                    If $$$ISERR(tSC) {
+                        Set $NAMESPACE = tOrigNS
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+
+                    ; Register with the issuer (1-arg signature). A failed remote
+                    ; registration leaves the local client record saved for ANY failure
+                    ; class — matching the Management Portal's configure-then-register
+                    ; semantics — so disclose that (and the retry path) on every failure.
+                    ; The no-endpoint class is matched on its error CODE (#8881 survives
+                    ; message localization where an English substring would not).
+                    Set tSC = ##class(%SYS.OAuth2.Registration).RegisterClient(tClientName)
+                    If $$$ISERR(tSC) {
+                        Set tRegErrText = $System.Status.GetErrorText(tSC)
+                        If tRegErrText [ "#8881" {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration did not run: the issuer publishes no dynamic registration endpoint. Register the client manually on the authorization server and store the returned client id on the record. Native error: " _ tRegErrText)
+                        } Else {
+                            Set tSC = $$$ERROR($$$GeneralError, "Client record '" _ tClientName _ "' was created and remains saved, but remote registration failed. Fix the cause and retry; to re-run create with the same clientName, delete the saved record first (action='delete', entity='client'). Native error: " _ tRegErrText)
+                        }
+                    }
                     Set $NAMESPACE = tOrigNS
                     If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
-                    ; Return client ID but NEVER the client secret (NFR6)
+                    ; Return client ID but NEVER the client secret (NFR6). The reopen must
+                    ; happen in %SYS — OAuth2.Client is not visible in the caller's
+                    ; namespace — so switch back briefly.
+                    Set $NAMESPACE = "%SYS"
+                    Set tRegClientId = ""
+                    Set tOpenSC = $$$OK
+                    Set tSavedClient = ##class(OAuth2.Client).Open(tClientName, .tOpenSC)
+                    If $$$ISOK(tOpenSC) && $IsObject(tSavedClient) && (tSavedClient.ClientId '= "") {
+                        Set tRegClientId = tSavedClient.ClientId
+                    }
+                    Set $NAMESPACE = tOrigNS
+
                     Set tResult = {}
                     Do tResult.%Set("action", "created")
                     Do tResult.%Set("entity", "client")
                     Do tResult.%Set("clientName", tClientName)
                     Do tResult.%Set("serverName", tServerName)
-                    If $Data(tProps("ClientId")) Do tResult.%Set("clientId", tProps("ClientId"))
+                    If tRegClientId '= "" Do tResult.%Set("clientId", tRegClientId)
                     ; CRITICAL: Never include clientSecret in response
                     Do ..RenderResponseBody($$$OK, , tResult)
                 }
@@ -1821,7 +1984,19 @@ ClassMethod OAuthManage() As %Status
                     Set tSC = ##class(OAuth2.Server.Configuration).Delete()
                 }
                 ElseIf tEntity = "client" {
-                    Set tSC = ##class(OAuth2.Client).Delete(tName)
+                    ; OAuth2.Client has NO Delete classmethod on this instance — only
+                    ; DeleteId (verified live: the old call threw <METHOD DOES NOT EXIST>).
+                    ; ApplicationName is the IdKey, so DeleteId(name) is the correct call.
+                    ; Pre-check existence: DeleteId on a missing name fails internally on
+                    ; the open (%LoadData), so surface a clean not-found instead.
+                    If '##class(OAuth2.Client).%ExistsId(tName) {
+                        Set $NAMESPACE = tOrigNS
+                        Set tSC = $$$ERROR($$$GeneralError, "No OAuth2 client named '" _ tName _ "' exists")
+                        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                        Set tSC = $$$OK
+                        Quit
+                    }
+                    Set tSC = ##class(OAuth2.Client).DeleteId(tName)
                 }
                 Set $NAMESPACE = tOrigNS
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -3084,13 +3259,93 @@ ClassMethod SqlPrivilegeManage() As %Status
 /// query parameters: <code>grantee</code> (required — the user or role),
 /// optional <code>target</code> (a <code>schema.table</code> to scope a
 /// COLUMN-level listing), <code>system</code> (1 to include system objects),
-/// and <code>namespace</code> (defaults to the request namespace).</p>
+/// <code>namespace</code> (defaults to the request namespace), and
+/// <code>maxRows</code> (default 100, max 1000 — see Story 35.4).</p>
 /// <p>Without <code>target</code>: returns object-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserPrivs</query> (TYPE, NAME, PRIVILEGE,
 /// GRANTED_BY, GRANT_OPTION, GRANTED_VIA, HAS_COLUMN_PRIV). With a
 /// <code>schema.table</code> target: returns column-level privileges via
 /// <query>%SQL.Manager.CatalogPriv:UserColumnPrivs</query> (COLUMN_NAME,
 /// PRIVILEGE, GRANTED_BY, GRANT_OPTION, GRANTED_VIA).</p>
+/// <p><b>Story 35.4 — bounding.</b> A grantee holding <code>%All</code>
+/// (e.g. <code>_SYSTEM</code>) is granted every SQL privilege on every object
+/// via the <code>SuperUser</code> super-role short-circuit, which the
+/// underlying query enumerates as one derived row per object x privilege
+/// (15,341 rows / 2,900,478 characters for <code>_SYSTEM</code>, measured
+/// live 2026-08-17/18 — exceeds the client transport limit and diverts the
+/// response to a file). Per the project's <code>%All</code> discipline (Rule
+/// #6): rows whose <code>GRANTED_VIA</code> is <code>SuperUser</code> are
+/// OMITTED from <code>privileges</code>, and a <code>reason</code> field plus
+/// a <code>superUserPrivilegesOmitted</code> count are added whenever at
+/// least one row was actually omitted.</p>
+/// <p><b>The omission is driven off the ROW, not off the grantee.</b> This
+/// handler deliberately does NOT resolve the grantee's roles to decide
+/// whether it holds <code>%All</code>: the query already computed that and
+/// stamped the answer on every row it returns. Establishing that was
+/// empirical, not assumed — an instance-wide sweep on 2026-08-18 walked all
+/// <b>46</b> users and roles on this instance, comparing "does
+/// <code>UserPrivs</code> emit any <code>SuperUser</code> row?" against
+/// "does this principal effectively hold <code>%All</code>?" (transitive
+/// role closure). Exactly four principals emitted <code>SuperUser</code>
+/// rows — <code>_SYSTEM</code>, <code>SuperUser</code>, <code>_Ensemble</code>
+/// and one interactive <code>%All</code> holder — and all four hold
+/// <code>%All</code>. There was NO principal emitting <code>SuperUser</code>
+/// rows without it, including deliberately powerful non-<code>%All</code>
+/// controls (<code>Admin</code>, holding <code>%Manager</code> +
+/// <code>%EnsRole_Administrator</code> + <code>%EnsRole_Developer</code>:
+/// 11 rows, 0 derived). The column-level query behaves the same way
+/// (<code>_SYSTEM</code> against <code>%Dictionary.ClassDefinition</code>:
+/// 224 rows, all <code>SuperUser</code>; <code>Admin</code>: 0), so the
+/// filter on that loop is doing real work, not sitting inert.</p>
+/// <p>Reading the row rather than the role graph is what lets this handler
+/// stay entirely inside the query namespace. An earlier revision resolved
+/// <code>%All</code> by switching to <code>%SYS</code> and walking
+/// <class>Security.Users</class>/<class>Security.Roles</class>; that added a
+/// privilege requirement this read never had, could silently disable itself
+/// if the lookup failed, and was only ever correct to a bounded role-chain
+/// depth. The row signal has none of those failure modes and no name
+/// matching at all, so the <code>%AllCustom</code> substring hazard and the
+/// question of <code>%All</code> name case-sensitivity simply do not arise.
+/// Note the one asymmetry, which is harmless: the literal role
+/// <code>%All</code> AS a grantee, and a role holding <code>%All</code> via
+/// <code>GrantedRoles</code>, both emit ZERO <code>SuperUser</code> rows, so
+/// nothing is omitted and — because the response fields are gated on a
+/// non-zero omitted count — no <code>reason</code> is emitted either.</p>
+/// <p>This is information-preserving, not a bare verdict short-circuit: any
+/// REAL non-derived grants (e.g. <code>Owner Privilege</code> — 8 of the
+/// 15,341 rows for <code>_SYSTEM</code>) are still enumerated. Derived rows
+/// never consume the <code>maxRows</code> budget, and once any derived row
+/// has been omitted the fetch loop keeps scanning to the end of the result
+/// set even after the cap engages (live-probed at ~97ms for 15,341 rows on
+/// 2026-08-18 — cheap relative to the ~180ms the query already spends in
+/// <code>Execute()</code> before the first row is even fetched) so that
+/// <code>superUserPrivilegesOmitted</code> is the EXACT total rather than
+/// however many happened to be seen before the cap. A grantee with no
+/// derived rows keeps the cap's original early exit and pays nothing for
+/// that guarantee. Note the honest limits: non-derived rows beyond
+/// <code>maxRows</code> ARE dropped, here as on any other path —
+/// <code>rowsCapped: true</code> is the signal, and a caller who needs every
+/// real grant must raise <code>maxRows</code>.</p>
+/// <p><b>Story 35.4 — <code>maxRows</code> is an OUTPUT bound, not a scan
+/// bound.</b> Mirrors the <method>AuditStatus</method> idiom in this same
+/// class (~line 2577): the fetch loop stops pumping the cursor once
+/// <code>maxRows</code> non-omitted rows have been materialized, so rows
+/// beyond the cap are never JSON-serialized. It does NOT reduce the
+/// underlying privilege computation: live timing (2026-08-18, grantee
+/// <code>_SYSTEM</code>) showed <code>Execute()</code> alone costs
+/// ~180-220ms regardless of how many rows are ultimately fetched — a SQL
+/// <code>TOP</code> rewrite via <code>%SQL.Statement</code> against the same
+/// <code>%SQL_Manager.UserPrivs</code> stored procedure was probed and showed
+/// the same flat ~220-260ms floor for TOP 10 through TOP 5000 (only the fully
+/// uncapped 15,341-row fetch reached ~480ms), so switching to dynamic SQL
+/// would add <code>%Prepare</code> overhead without genuinely bounding the
+/// scan any better than the existing <code>%ResultSet</code> class-query
+/// idiom already in this file. <code>maxRows</code> is therefore implemented
+/// as a Fetch-side cap (like <method>AuditStatus</method>), not a SQL
+/// <code>TOP</code>, and a capped response carries <code>rowsCapped: true</code>
+/// so a caller can tell rows were dropped — present ONLY when the cap
+/// actually engaged, so an under-cap caller's response shape is byte-identical
+/// to the pre-Story-35.4 shape (AC 35.4.5).</p>
 ClassMethod SqlPrivilegeList() As %Status
 {
     Set tSC = $$$OK
@@ -3100,6 +3355,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tTarget = $Get(%request.Data("target", 1))
         Set tSystem = +$Get(%request.Data("system", 1))
         Set tReqNS = $Get(%request.Data("namespace", 1))
+        Set tMaxRows = +$Get(%request.Data("maxRows", 1), 100)
+        If tMaxRows < 1 Set tMaxRows = 100
+        If tMaxRows > 1000 Set tMaxRows = 1000
 
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
@@ -3117,6 +3375,9 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tResult = {}
         Do tResult.%Set("grantee", tGrantee)
         Set tPrivs = []
+        Set tRowCount = 0
+        Set tCapped = 0
+        Set tSuperUserOmitted = 0
 
         If tTarget '= "" {
             ; Column-level listing for a specific schema.table
@@ -3133,6 +3394,25 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; Once ANY derived row has been omitted, the omitted-count
+                    ; must stay EXACT: derived rows never consume the cap
+                    ; (they Continue above), so quitting here would freeze
+                    ; tSuperUserOmitted mid-scan and report a partial count as
+                    ; though it were the total. Keep scanning to finish
+                    ; counting; only non-derived rows past the cap are
+                    ; dropped, and rowsCapped:true says so.
+                    ; When nothing derived has been seen, the cap keeps its
+                    ; original early-exit and stops pumping the cursor, so an
+                    ; ordinary grantee pays nothing for this guarantee.
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("column", tRS.Get("COLUMN_NAME"))
                 Do tRow.%Set("privilege", tRS.Get("PRIVILEGE"))
@@ -3140,6 +3420,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantOption", tRS.Get("GRANT_OPTION"))
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -3155,6 +3436,20 @@ ClassMethod SqlPrivilegeList() As %Status
                 Quit
             }
             While tRS.Next() {
+                If tRS.Get("GRANTED_VIA") = "SuperUser" {
+                    Set tSuperUserOmitted = tSuperUserOmitted + 1
+                    Continue
+                }
+                If tRowCount >= tMaxRows {
+                    Set tCapped = 1
+                    ; See the column-level loop above: once derived rows are
+                    ; in play the omitted-count must keep accumulating past
+                    ; the cap, or superUserPrivilegesOmitted reports a partial
+                    ; figure (live-observed 10,961 instead of 15,333 at
+                    ; maxRows=7).
+                    If tSuperUserOmitted = 0 Quit
+                    Continue
+                }
                 Set tRow = {}
                 Do tRow.%Set("type", tRS.Get("TYPE"))
                 Do tRow.%Set("name", tRS.Get("NAME"))
@@ -3164,6 +3459,7 @@ ClassMethod SqlPrivilegeList() As %Status
                 Do tRow.%Set("grantedVia", tRS.Get("GRANTED_VIA"))
                 Do tRow.%Set("hasColumnPriv", +tRS.Get("HAS_COLUMN_PRIV"), "boolean")
                 Do tPrivs.%Push(tRow)
+                Set tRowCount = tRowCount + 1
             }
             Do tRS.Close()
         }
@@ -3171,6 +3467,19 @@ ClassMethod SqlPrivilegeList() As %Status
         Set $NAMESPACE = tOrigNS
         Do tResult.%Set("privileges", tPrivs)
         Do tResult.%Set("count", tPrivs.%Size())
+        If tCapped {
+            Do tResult.%Set("rowsCapped", 1, "boolean")
+        }
+        ; Gate on rows ACTUALLY omitted, not merely on the grantee holding
+        ; %All: a %All holder whose listing happens to contain no derived
+        ; rows (e.g. a column-level target with only explicit grants) would
+        ; otherwise get superUserPrivilegesOmitted:0 next to prose asserting
+        ; that privileges were omitted -- a self-contradicting response, and
+        ; a shape change with nothing to justify it (AC 35.4.5).
+        If tSuperUserOmitted > 0 {
+            Do tResult.%Set("superUserPrivilegesOmitted", tSuperUserOmitted, "number")
+            Do tResult.%Set("reason", "grantee holds %All super-role; privileges derived purely from %All (GRANTED_VIA=SuperUser) are omitted from enumeration - only directly-granted (non-derived) privileges are listed")
+        }
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {

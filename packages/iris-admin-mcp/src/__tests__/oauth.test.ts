@@ -375,6 +375,94 @@ describe("iris_oauth_manage", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  // ── 35.5: sslConfiguration additive parameter + precondition docs ──
+
+  it("35.5: should forward sslConfiguration on the wire for discover", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        action: "discovered",
+        issuerURL: "https://accounts.google.com",
+        configuration: {},
+      }),
+    );
+
+    await oauthManageTool.handler(
+      {
+        action: "discover",
+        issuerURL: "https://accounts.google.com",
+        sslConfiguration: "ISC.FeatureTracker.SSL.Config",
+      },
+      ctx,
+    );
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/oauth",
+      expect.objectContaining({
+        action: "discover",
+        issuerURL: "https://accounts.google.com",
+        sslConfiguration: "ISC.FeatureTracker.SSL.Config",
+      }),
+    );
+  });
+
+  it("35.5: should omit sslConfiguration from the body when not provided (optional, back-compat)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({
+        action: "discovered",
+        issuerURL: "https://example.com",
+        configuration: {},
+      }),
+    );
+
+    await oauthManageTool.handler(
+      { action: "discover", issuerURL: "https://example.com" },
+      ctx,
+    );
+
+    const callBody = mockHttp.post.mock.calls[0]![1] as Record<string, unknown>;
+    expect("sslConfiguration" in callBody).toBe(false);
+  });
+
+  it("35.5: should accept sslConfiguration in the schema and keep it optional", () => {
+    const shape = oauthManageTool.inputSchema.shape as Record<string, unknown>;
+    expect(shape).toHaveProperty("sslConfiguration");
+    const parsed = oauthManageTool.inputSchema.safeParse({
+      action: "discover",
+      issuerURL: "https://example.com",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  // Assert actual string content (not toBeTruthy) so a vacuous description
+  // fails the pin (35.4 lesson).
+  it("35.5: tool description documents the precondition chain", () => {
+    expect(oauthManageTool.description).toContain("PRIOR successful");
+    expect(oauthManageTool.description).toContain("sslConfiguration");
+    expect(oauthManageTool.description).toContain("https issuers");
+    expect(oauthManageTool.description).toContain("exact issuer URL");
+  });
+
+  it("35.5: serverName description states the issuer-URL contract", () => {
+    const shape = oauthManageTool.inputSchema.shape as Record<
+      string,
+      { description?: string }
+    >;
+    const desc = shape.serverName?.description ?? "";
+    expect(desc).toContain("Issuer URL");
+    expect(desc).toContain("discover");
+  });
+
+  it("35.5: sslConfiguration description names the https requirement and the SSL tools", () => {
+    const shape = oauthManageTool.inputSchema.shape as Record<
+      string,
+      { description?: string }
+    >;
+    const desc = shape.sslConfiguration?.description ?? "";
+    expect(desc).toContain("https");
+    expect(desc).toContain("iris_ssl_list");
+    expect(desc).toContain("iris_ssl_manage");
+  });
+
   // ── Error handling ──
 
   it("should return isError on IrisApiError", async () => {

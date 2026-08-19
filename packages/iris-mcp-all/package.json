@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "prepublishOnly": "node ../../scripts/verify-iris-reachable.mjs"
+    "prepublishOnly": "node scripts/prepublish-gate.mjs"
   },
   "dependencies": {
     "@iris-mcp/dev": "workspace:*",

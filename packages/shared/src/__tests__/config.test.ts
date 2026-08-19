@@ -155,6 +155,7 @@ describe("loadConfig", () => {
       https: false,
       baseUrl: "http://localhost:52773",
       timeout: 60_000,
+      acceptLanguage: "en-US,en;q=0.9",
     });
   });
 
@@ -247,5 +248,83 @@ describe("loadConfig", () => {
       IRIS_SQL_TIMEOUT: "Infinity",
     };
     expect(() => loadConfig(env)).toThrow("IRIS_SQL_TIMEOUT");
+  });
+
+  // ── IRIS_ACCEPT_LANGUAGE (Story 35.3) ───────────────────────────────
+
+  it("should default acceptLanguage to en-US,en;q=0.9 when IRIS_ACCEPT_LANGUAGE is not set", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+    };
+    const config = loadConfig(env);
+    expect(config.acceptLanguage).toBe("en-US,en;q=0.9");
+  });
+
+  it("should read acceptLanguage from IRIS_ACCEPT_LANGUAGE — the override is genuinely honored", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_ACCEPT_LANGUAGE: "ar;q=0.9",
+    };
+    const config = loadConfig(env);
+    expect(config.acceptLanguage).toBe("ar;q=0.9");
+    expect(config.acceptLanguage).not.toBe("en-US,en;q=0.9");
+  });
+
+  // Story 35.3 code review: an empty or whitespace-only value must be treated
+  // as UNSET, exactly like IRIS_SQL_MAX_ROWS/IRIS_SQL_TIMEOUT above. Before
+  // this guard `??` let "" through, and the client put an EMPTY
+  // `Accept-Language:` header on the wire (verified live against a local
+  // listener) — pinning nothing, which is the one outcome this variable
+  // exists to prevent.
+  it.each([
+    ["empty string", ""],
+    ["whitespace only", "   "],
+    ["tab only", "\t"],
+  ])(
+    "should fall back to the documented default when IRIS_ACCEPT_LANGUAGE is %s",
+    (_label, value) => {
+      const config = loadConfig({
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "secret",
+        IRIS_ACCEPT_LANGUAGE: value,
+      });
+      expect(config.acceptLanguage).toBe("en-US,en;q=0.9");
+      expect(config.acceptLanguage).not.toBe("");
+    },
+  );
+
+  // Story 35.3 code review: fail fast with a NAMED error, like every other
+  // IRIS_* var. Undici rejects these values with a bare TypeError at fetch
+  // time, which IrisHttpClient maps to NETWORK_ERROR ("Failed to connect to
+  // IRIS ... verify the host and port") — so without this guard a bad locale
+  // string broke every request while blaming the network.
+  it.each([
+    ["a CRLF-bearing value (header injection attempt / CRLF-authored env file)", "en\r\nX-Injected: 1"],
+    ["a trailing carriage return", "en-US,en;q=0.9\r"],
+    ["a non-ASCII value", "中文"],
+    ["a NUL byte", "en-US\u0000"],
+  ])("should throw a named error when IRIS_ACCEPT_LANGUAGE is %s", (_label, value) => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_ACCEPT_LANGUAGE: value,
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_ACCEPT_LANGUAGE");
+  });
+
+  it("should accept the documented default and a realistic override as valid header values", () => {
+    for (const value of ["en-US,en;q=0.9", "ar;q=0.9", "*", "fr-FR, fr;q=0.9, en;q=0.8"]) {
+      const config = loadConfig({
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "secret",
+        IRIS_ACCEPT_LANGUAGE: value,
+      });
+      expect(config.acceptLanguage).toBe(value);
+      // Wire-boundary check: the value must survive real Headers construction,
+      // which is what actually validates it at request time.
+      expect(() => new Headers({ "Accept-Language": value })).not.toThrow();
+    }
   });
 });

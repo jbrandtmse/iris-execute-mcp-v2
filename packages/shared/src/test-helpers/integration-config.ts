@@ -34,5 +34,10 @@ export function getIntegrationConfig(): IrisConnectionConfig {
     IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
     IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
     IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
+    // Forwarded so an operator can reproduce locale-dependent %Status
+    // rendering through the integration suite (Story 35.3 review). Left
+    // undefined when unexported — `loadConfig` then applies its documented
+    // default rather than an empty value.
+    IRIS_ACCEPT_LANGUAGE: process.env.IRIS_ACCEPT_LANGUAGE,
   });
 }

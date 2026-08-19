@@ -21,7 +21,9 @@ export const interopRestTool: ToolDefinition = {
   description:
     "Create, delete, or get a REST application. " +
     "'create' generates a REST application from an OpenAPI specification. " +
-    "'delete' removes a REST application. " +
+    "'delete' removes the application registration (spec + dispatch); the generated " +
+    "'.impl' implementation class is preserved by design (IRIS %REST.API) — delete it " +
+    "separately if unwanted. " +
     "'get' returns the OpenAPI spec for an existing REST application.",
   inputSchema: z.object({
     action: z
@@ -29,7 +31,11 @@ export const interopRestTool: ToolDefinition = {
       .describe("Action to perform: 'create', 'delete', or 'get'"),
     name: z
       .string()
-      .describe("REST application name (e.g., '/myapi')"),
+      .describe(
+        "REST application name — an ObjectScript package name (e.g., 'MyApi' or " +
+          "'MyCompany.MyApi'); it becomes the package of the generated classes. " +
+          "URL-path values like '/myapi' are rejected by IRIS ($ZNAME validation).",
+      ),
     spec: z
       .unknown()
       .optional()

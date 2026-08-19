@@ -19,6 +19,20 @@ export interface IrisConnectionConfig {
   namespace: string;
   /** Whether to use HTTPS. */
   https: boolean;
+  /**
+   * `Accept-Language` header value sent on every request (`IRIS_ACCEPT_LANGUAGE`,
+   * default {@link DEFAULT_ACCEPT_LANGUAGE}). Pins IRIS's request-locale
+   * negotiation so `%Status` error text renders in a predictable language
+   * instead of whatever locale an unspecified header resolves to (Story
+   * 35.3). {@link loadConfig} always sets this explicitly (Rule #10 — send
+   * documented defaults explicitly on the wire); optional here (Rule #19
+   * conditional-field idiom, same as `sqlMaxRows`/`sqlTimeoutMs`) only so
+   * hand-built config literals elsewhere (tests, ad-hoc registries) keep
+   * compiling unchanged. {@link IrisHttpClient} falls back to
+   * {@link DEFAULT_ACCEPT_LANGUAGE} when a config omits it, so the header is
+   * still sent on every request regardless.
+   */
+  acceptLanguage?: string;
   /** Computed base URL (`http(s)://host:port`). */
   baseUrl: string;
   /** Default HTTP request timeout in milliseconds. */
@@ -39,6 +53,14 @@ export interface IrisConnectionConfig {
 }
 
 /**
+ * Default `Accept-Language` header value (Story 35.3) — English, matching
+ * the instance's own `enuw` locale in the common case. Exported so
+ * {@link IrisHttpClient} can fall back to the same documented default when a
+ * hand-built config omits `acceptLanguage`, without duplicating the literal.
+ */
+export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
+
+/**
  * Load IRIS connection configuration from environment variables.
  *
  * | Variable          | Default      |
@@ -52,8 +74,11 @@ export interface IrisConnectionConfig {
  * | IRIS_TIMEOUT      | 60000        |
  * | IRIS_SQL_MAX_ROWS | *(unset — no cap)*  |
  * | IRIS_SQL_TIMEOUT  | *(unset — no per-request override)*, seconds |
+ * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
+ * @throws {Error} When IRIS_ACCEPT_LANGUAGE is set to a value that is not a
+ *   valid HTTP header field-value (non-printable-ASCII, CR, or LF).
  * @throws {Error} When IRIS_SQL_MAX_ROWS or IRIS_SQL_TIMEOUT is set to a
  *   non-positive or non-numeric value.
  */
@@ -144,6 +169,41 @@ export function loadConfig(
     sqlTimeoutMs = parsed * 1000;
   }
 
+  // IRIS_ACCEPT_LANGUAGE: pins the HTTP client's Accept-Language header so
+  // request-locale negotiation (independent of the per-worker-process
+  // message-table selection — Rule #13) is explicit and operator-overridable
+  // rather than left to whatever Node's fetch sends when the caller sets no
+  // header (undici injects `Accept-Language: *`, which IRIS resolves to the
+  // alphabetically-first locale — see the Story 35.3 record). Rule #10: send
+  // documented defaults explicitly on the wire.
+  //
+  // Story 35.3 code review: empty/whitespace-only is treated as UNSET, and an
+  // invalid header value is rejected at load time — matching the convention
+  // the two optional siblings above already use (`raw !== ""`) and the
+  // fail-fast-with-a-named-error convention every other IRIS_* var uses.
+  // Without the empty guard, `IRIS_ACCEPT_LANGUAGE=` (a blank .env line, a
+  // blank MCP-client config field, `-e IRIS_ACCEPT_LANGUAGE` in docker) put an
+  // EMPTY `Accept-Language:` header on the wire — verified live — silently
+  // un-pinning the very locale this variable exists to pin. Without the
+  // validity guard, a CR/LF- or non-ASCII-bearing value made `fetch` throw a
+  // `TypeError` that `IrisHttpClient` maps to `NETWORK_ERROR` ("Failed to
+  // connect to IRIS ... verify the host and port"), so EVERY request failed
+  // with a diagnostic pointing at the wrong thing entirely.
+  const rawAcceptLanguage = env.IRIS_ACCEPT_LANGUAGE;
+  let acceptLanguage = DEFAULT_ACCEPT_LANGUAGE;
+  if (rawAcceptLanguage !== undefined && rawAcceptLanguage.trim() !== "") {
+    // Header field-values are ASCII (RFC 9110); undici enforces this by
+    // throwing on CR/LF and on any code point outside ByteString range.
+    if (!/^[\t\x20-\x7E]+$/.test(rawAcceptLanguage)) {
+      throw new Error(
+        `IRIS_ACCEPT_LANGUAGE must be a valid HTTP header value — printable ASCII only, ` +
+          `with no carriage returns, line feeds, or control characters. Received: ` +
+          `${JSON.stringify(rawAcceptLanguage)}. Example: "en-US,en;q=0.9".`,
+      );
+    }
+    acceptLanguage = rawAcceptLanguage;
+  }
+
   const protocol = https ? "https" : "http";
   const baseUrl = `${protocol}://${host}:${port}`;
 
@@ -156,6 +216,7 @@ export function loadConfig(
     https,
     baseUrl,
     timeout,
+    acceptLanguage,
     ...(sqlMaxRows !== undefined ? { sqlMaxRows } : {}),
     ...(sqlTimeoutMs !== undefined ? { sqlTimeoutMs } : {}),
   };

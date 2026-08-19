@@ -717,6 +717,7 @@ Sourced from live bug report [docs/bugs-2026-08-14.md](../../docs/bugs-2026-08-1
 ### Reliability
 
 - Connection loss to IRIS must be detected within 2 seconds and reported with an error response containing error code, human-readable message, and recovery suggestion — not silently fail
+- Bulk multi-file document operations (e.g., `iris_doc_load`) must not silently produce a misleading success result when a derived identifier (such as an inferred IRIS document/class name) could plausibly diverge from caller intent — where ground truth exists (e.g., a file's own declared class/routine name), the tool must validate against it and surface an explicit, actionable error at the point of divergence rather than deferring to a confusing downstream failure (Epic 35, Story 35.9)
 - HTTP session expiration must be handled with automatic re-authentication
 - Auto-bootstrap must be idempotent — safe to run multiple times without side effects
 - Failed tool calls must not leave IRIS in an inconsistent state (e.g., partially created namespaces)

@@ -34,4 +34,4 @@ Before writing or editing any ObjectScript class, verify:
 - Indent every command at least one space or tab.
 
 **Deploy & test**
-- Create/edit `.cls` files on disk first, then `iris_doc_load` with a glob-prefixed path (a bare path mis-maps the class name), then `iris_execute_tests` — always compare the returned `total` against the expected test count before trusting a "0 failures" run; rerun if short.
+- Create/edit `.cls` files on disk first, then `iris_doc_load` with a glob-prefixed path (a bare path derives an unqualified class name and the upload is REFUSED when it disagrees with the file's Class declaration), then `iris_execute_tests` — always compare the returned `total` against the expected test count before trusting a "0 failures" run; rerun if short.

@@ -18,6 +18,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 > **Epic 33 — `@iris-mcp/client-config` is a configuration manager, not a sixth server.** The package (and its `iris-mcp-clients` CLI + the extension's "MCP Clients" view) wires the five servers below into any of 13 MCP clients by editing those clients' own config files. It registers **no MCP tool**, is not a dependency of any server runtime, and calls no IRIS API — nothing in this catalog changes. See [`packages/client-config/README.md`](packages/client-config/README.md).
 
+> **Story 35.3 — `IRIS_ACCEPT_LANGUAGE` is server CONFIG, not a tool.** Every HTTP request every tool below makes now carries an explicit `Accept-Language` header (default `en-US,en;q=0.9`, operator-overridable), set once in `@iris-mcp/shared`'s `IrisHttpClient` — no tool row, no governance key, **no tool count moves**. It pins ONE of TWO independent IRIS localization mechanisms: request-locale negotiation. The other — IRIS selecting a `%Status` message table per WORKER PROCESS, independent of any header — is untouched, so both English (`ERROR #`) and localized (e.g. `خطأ #`) prefixes can still appear across calls; the existing `ExecuteMCPv2.Utils`/`ExecuteMCPv2.Diagram.Loader` prefix-stripping remains required and unmodified. Details: [suite README](README.md#2-set-environment-variables).
+
 ---
 
 ## `@iris-mcp/dev` — Development Tools (28)
@@ -35,7 +37,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 9 | `iris_doc_index` | 🟦 Atelier | `POST /action/index` (class structure) |
 | 10 | `iris_doc_search` | 🟦 Atelier | `GET /action/search` |
 | 11 | `iris_doc_convert` | 🟦 Atelier | `GET /doc/{name}?format=...` (UDL ↔ XML) |
-| 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` |
+| 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` (load takes `?flags=` when `compile: true`) |
 | 13 | `iris_macro_info` | 🟦 Atelier | `POST /action/getmacrodefinition` + `POST /action/getmacrolocation` |
 | 14 | `iris_sql_execute` | 🟦 Atelier | `POST /action/query` |
 | 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest) |
@@ -64,6 +66,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 > **Epic 28 (2026-07-11) — SQL Performance Advisor, governance defaults:** added the `advise` action to `iris_sql_analyze` — evidence-cited SQL performance findings (`full-scan`, `missing-index`, `stale-stats`, `unused-index`, `plan-anomaly`) for a `query` or the recent statement `workload`. **Strictly advisory**: recommends and cites a plan excerpt for every finding; never applies anything (no `applyIndex` write ships in v1). `advise` is governance-classified `read` and is **enabled by default** (a `read` classification is still required for every new key). **Tool count is UNCHANGED** — `advise` is a new action on the existing `iris_sql_analyze` tool, not a new tool (Rule #31); the suite governance-key count moves **200 live / 59 post-foundation → 201 live / 60 post-foundation**. The frozen Epic-14 governance baseline (`1e62c5ad5bf7`, 141 keys) is **unchanged**. `workload` mode's `topN` (default 5, max 20) caps real analysis work, not just output size — each statement analyzed is a full endpoint round-trip (Rule #38). Backed by the new ObjectScript endpoint `ExecuteMCPv2.REST.SqlAdvisor:AdviseData` (`POST /dev/sql/advise-data`, Story 28.1; `BOOTSTRAP_VERSION` `1e2008753853` → `6422caf6ec31`) plus a pure-TypeScript heuristic engine (Story 28.2, no bootstrap contribution).
 
 > **Epic 34 (2026-08-17) — `iris_execute_command` / `iris_execute_classmethod` response fidelity:** both tools keep their rows, their endpoints (`POST /command`, `POST /classmethod`), their existing `write` classification and their default state — **no new tool, action, or governance key** (Rule #31 not triggered; the frozen baseline `1e62c5ad5bf7` and the 201-live/60-post-foundation key counts are unchanged). What changed is the ObjectScript handler `ExecuteMCPv2.REST.Command` and the two tools' **response shape**, strictly additively (Rule #19 — existing plain-scalar calls return the same `returnValue`/`argCount`): `/classmethod` now captures device output the same way `/command` always has (returned in `output`, so narrating methods and stock `%UnitTest.Manager.RunTest` no longer need a `%SYS.Capture` wrapper), accepts `{byRef: true, value?}` marker args and returns their post-call values in `byRefValues`, and raises the positional-arg ceiling from 10 to 20. `returnValue`, `byRefValues` and `output` share **ONE 32768-raw-character response budget** (spent in that order) with a machine-detectable `[IRIS-MCP-TRUNCATED ceiling=<N>chars]` marker and three flags (`returnValueTruncated`/`byRefTruncated`/`truncated`); per Rule #38 that ceiling bounds the **response payload only** — the target has already executed — and it is not Web-Gateway-timeout protection. Story 34.8 additionally fixed request-body decoding across **all 14 `ExecuteMCPv2.REST.*` handler classes** (46 call sites, every server in this catalog): `ExecuteMCPv2.Utils.ReadRequestBody` now decodes raw UTF-8 explicitly, so non-ASCII input is no longer silently corrupted on the way in (see [Known Limitations](README.md#known-limitations)). `BOOTSTRAP_VERSION` moved several times across the epic and ships at `01dc15bb27df`; per-tool detail lives in [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md).
+
+> **Epic 35 (2026-08-18) — `iris_doc_load` glob-shape validation (Story 35.9):** the base for document-name mapping is the directory prefix before the first glob metacharacter, so the wildcard must come BEFORE the package directory — `.../src/ClineTest/*.cls` swallows `ClineTest` into the base and would map `ClineTest/Wumpus.cls` to unqualified `Wumpus.cls`. For `.cls`/`.mac`/`.int`/`.inc` files the tool now parses the file's own `Class <Pkg.Name>` / `ROUTINE <Name>` declaration and REFUSES the upload when it disagrees with the path-derived name (both names named, plus the corrected-glob and `baseDir` remedies); IRIS would otherwise store the doc under the content-declared name while the tool reported the wrong one — the PUT mismatch signal arrives as a string-typed `status` field the shared HTTP client never throws on. Headerless files (`.inc` fragments, CSP pages) keep pure path-derived naming; the comparison is exact (case-sensitive — IRIS preserves case). New additive optional `baseDir` parameter: when supplied it is used verbatim (separators normalized) instead of glob-shape inference, and the cross-check still applies (defense-in-depth). **No new tool or action key** (Rule #31 — additive parameter only; tool/action counts unmoved); `extractBaseDir` inference with `baseDir` omitted is byte-identical to before (Rule #19). Pure TypeScript change — no bootstrap contribution, `BOOTSTRAP_VERSION` unmoved.
 
 ---
 
@@ -101,6 +105,10 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 **Mix:** 0 Atelier · 26 ExecuteMCPv2 · 0 other — **fully custom**. Atelier has no security or namespace management endpoints, which is why every one of these needs ObjectScript handlers.
 
 > **Epic 15 (2026-06-16):** added `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_audit_manage`, and extended `iris_resource_manage` with SQL object-privilege actions (`grant`/`revoke`/`listPrivileges`) backed by `/security/sqlprivilege`. The privilege extension adds governance keys but no new tool, so admin went 22 → 26 (4 new tools). Write actions (`grant`/`revoke` and the new service/ldap/x509/audit mutations) are governance-classified `write` (default-disabled under an `IRIS_GOVERNANCE` policy); reads (`list`/`get`/`status`/`test`/`listPrivileges`) are enabled by default.
+>
+> **Story 35.4 (2026-08-18):** `iris_resource_manage:listPrivileges` was unbounded — grantee `_SYSTEM` (holds `%All`) returned 15,341 rows / 2,900,478 characters, exceeding the client transport limit. Two additive parameters (no new tool, no new action key): `maxRows` (default 100, clamped at 1000 — an OUTPUT-only bound on the server-side fetch loop, not a scan bound, and therefore not timeout protection) and `cursor` (opt-in client-side pagination, 50 rows per page, within the `maxRows` ceiling, via `ctx.paginate`). Derived `GRANTED_VIA=SuperUser` rows — the cross-product a `%All` holder draws — are now omitted automatically (a `reason` string + `superUserPrivilegesOmitted` count explain why); real non-derived grants are still listed. The omission keys off each row's `GRANTED_VIA` value rather than resolving the grantee's roles, so it needs no `%SYS` access and holds however `%All` was acquired. A capped response carries `rowsCapped: true`; all three new fields (`rowsCapped`, `reason`, `superUserPrivilegesOmitted`) are present ONLY when actually triggered, and a caller who passes neither `maxRows` nor `cursor` is not paginated at all — so an under-cap, non-`%All` caller's response is byte-identical to the pre-35.4 shape.
+>
+> **Story 35.5 (2026-08-18) — `iris_oauth_manage` validates BEFORE delegating; `discover` accepts `sslConfiguration`.** Client create/delete and server create/discover pre-check preconditions (`OAuth2.Client.%ExistsId`, server-definition existence, `$ZNAME`-shape name) and fail with a clean, named reason instead of IRIS's raw `<PARAMETER>`/`<METHOD DOES NOT EXIST>` faults; client delete uses the real `OAuth2.Client.DeleteId` (the IdKey is the application name). `discover` takes an additive optional `sslConfiguration` (bound as `Discover(issuerEndpoint, sslConfiguration, *server)` — the 3-arg form; discovery of an HTTPS issuer without a matching SSL config previously returned an empty `configuration`). **Governance unchanged:** every `iris_oauth_manage` action is a pre-governance baseline key and stays **enabled by default** (verified mechanically against the default seed 2026-08-19).
 
 ### Fields returned — Security list/read tools
 
@@ -178,6 +186,8 @@ their Zod schemas but silently dropped them server-side.
 > **Epic 21 (2026-07-02) — governance defaults:** added `iris_message_diagram` (interop 20 → 21) — a Mermaid sequence diagram from a message-trace session (Visual-Trace equivalent as renderable text: request/response pairing, sync `->>` vs async `-->>` arrows, two-tier `loop` compression of repeated pairs and multi-hop episodes, `[ERROR]` flags, session-metadata header, cross-session dedup via `dedupOf` with a `dedup:false` opt-out). The tool is a pure **read** (`mutates: "read"`) and is **enabled by default** under `IRIS_GOVERNANCE`; `iris_production_messages` remains the tool for raw message rows and is unchanged. Backed by the clean-room ObjectScript library `ExecuteMCPv2.Diagram.*` (reference tool consulted for functional spec only — no code or sample data embedded).
 >
 > **Epic 26 (2026-07-09) — governance defaults:** added `iris_message_resend` (interop 21 → 22) — resend/replay Interoperability messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API, by explicit header IDs (`resend`) or a bounded item+status+time-window filter with a dry-run-first double gate (`resendFiltered`; executing requires `dryRun:false` AND `confirm:true`, Epic-20 double-gate pattern). `preview` is a pure **read** and is **enabled by default**. `resend`/`resendFiltered` are truthfully classified `write` and are **DEFAULT-DISABLED** — unlike `iris_production_control:clean`, this tool deliberately does NOT use the `defaultEnabled` mechanism, because resend duplicates business/clinical data flow downstream rather than recovering a wedged production; enable via `IRIS_GOVERNANCE` (e.g. `{"global":{"iris_message_resend:resend":true,"iris_message_resend:resendFiltered":true}}`). Backed by the new ObjectScript handler `ExecuteMCPv2.REST.MessageResend.cls` (`BOOTSTRAP_VERSION` `13b4b5f003ab` → `1f3afba4ac52`).
+>
+> **Epic 35 (2026-08-19) — `iris_production_item` composite-key correctness (Story 35.1) + `iris_interop_rest` contract notes (Story 35.5/35.8).** `Ens.Config.Item` is keyed by the composite `(production, name)` pair, not `name` alone: `get` and `set` accept an optional `production` to disambiguate an item name that exists in more than one production (omitted ⇒ `get` resolves the first matching row — unchanged legacy behavior; `set` defaults to the namespace's active production), and `set`/`remove` remain reachable for items whose host class no longer resolves to a business type (a two-arg `NameExists` + item-list fallback keeps them repairable). `set` now persists durably (`%Save()` + `SaveToClass` dual-write — the production class XData is the source of truth; the SQL extent is a re-synced cache). `iris_interop_rest`'s `name` is an ObjectScript **package name** (e.g. `MyApi`, `MyCompany.MyApi`) — URL-path values like `/myapi` are rejected by IRIS `$ZNAME` validation; `delete` removes the application registration (spec + dispatch) but the generated `.impl` implementation class is **preserved by design** (IRIS `%REST.API.DeleteApplication` — the impl class carries user-written endpoint code; delete it separately if unwanted). **No tool or action key moved** (Rule #31); `iris_production_item:set` stays a pre-governance baseline key (**enabled by default**) and `:add`/`:remove` stay **default-disabled** writes, exactly as the Epic 17 note above states — verified mechanically against the default seed 2026-08-19.
 
 ---
 
@@ -264,6 +274,8 @@ were silently returning stale or per-process data.
 | 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
 | 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (spec-first) · `/security/webapp` (legacy/all) |
 
+> The four DocDB tools require the `%Service_DocDB` service, which is **disabled by default** on IRIS — see the multi-API note below.
+
 **Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
 
 ### Fields returned — Data & Analytics tools
@@ -275,6 +287,14 @@ were silently returning stale or per-process data.
   `lastBuildTime` and preserves the original string in `lastBuildTimeRaw`
   for cross-checking via `$ZDATETIME` or debugging. Malformed or missing
   horolog values yield `lastBuildTime: ""` without throwing.
+- **`iris_analytics_cubes` build/sync** (Story 35.2): the response body is
+  guaranteed to be the JSON envelope alone — the `build` branch
+  (`%DeepSee.Utils:%BuildCube` with `pAsync=0`) now runs under a null-device
+  redirect, so its device output can no longer be prepended to the wire body
+  (a contamination that made the response unparseable JSON). The `sync`
+  branch was probed and verified clean of the defect (it binds `pVerbose=0`),
+  and was left untouched. No tool/action key moved; `build` and `sync` are
+  pre-governance baseline keys, **enabled by default**.
 - **`iris_rest_manage` list** row: `name, dispatchClass, namespace,
   swaggerSpec`. Added 2026-04-21 (Story 11.4): a `scope` parameter
   controls the backend. `scope: "spec-first"` (default) routes to the
@@ -290,6 +310,27 @@ were silently returning stale or per-process data.
   `{title, version, description, basePath, pathCount, definitionCount}`
   instead of the full OpenAPI spec object (which can be 50 KB+). Pass
   `fullSpec: true` to receive the complete spec.
+- **`iris_rest_manage` get/delete** — legacy routing (Story 35.6): on a
+  Management API 404, `get` falls back to the legacy webapp list and returns
+  `{name, dispatchClass, namespace, swaggerSpec: null, explanation}` for a
+  legacy `%CSP.REST` name (`fullSpec` has no effect — no spec exists), or an
+  accurate not-found naming BOTH scopes when the name is in neither (if the
+  legacy list itself cannot be queried, the error says that scope could not be
+  checked, with the reason — it never reports an unchecked scope as absent).
+  The gateway's misleading "Check the IRIS web server configuration" 404 text is
+  never surfaced. `delete` stays spec-first-only: a legacy name fails with an
+  explanation pointing at `iris_webapp_manage:delete`.
+- **`iris_doc_xml_export` import** — compile parity (Story 35.6): additive
+  `compile` (default false) and `flags` parameters mirror `iris_doc_load`.
+  `compile: true` sends the native Atelier `flags` query param with the `c`
+  compile qualifier folded in when absent or explicitly negated (IRIS
+  qualifiers are case-insensitive; `-c` negates, last `c` wins — so `-c`
+  becomes `-cc`), and loaded documents are compiled in the same call. When `compile` is omitted/false, NO `flags` param is sent
+  (byte-identical pre-35.6 request) and the response adds a note stating the
+  imported documents are NOT compiled, naming the remedy (`compile: true` or
+  `iris_doc_compile`). Non-empty per-file `status` text (e.g. a compile
+  error — IRIS reports it there, not in `status.errors`) is surfaced in the
+  response text.
 - **`iris_rule_list` / `iris_transform_list`** — filter/pagination (Story
   12.5, FEAT-3): both tools now accept `prefix` (startsWith), `filter`
   (case-insensitive substring), `cursor`, and `pageSize`. Filtering and
@@ -360,7 +401,7 @@ It's the only server that integrates with pre-existing IRIS APIs other than Atel
 - **Management API** (`/api/mgmnt/v2`) — 1 tool for REST application management
 - **ExecuteMCPv2** — 2 tools for DeepSee analytics (MDX queries, cube operations)
 
-If DocDB or the Management API aren't enabled on the IRIS instance (they typically are by default, but can be disabled), 5 of the 7 data tools would error — **independently of your custom REST deployment**.
+If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 data tools would error — **independently of your custom REST deployment**. Note the asymmetry: the Management API is typically enabled by default, but `%Service_DocDB` is **disabled by default on IRIS**. Until it is enabled (Management Portal > *System Administration > Security > Services > %Service_DocDB*, or `iris_service_manage` `action="enable"` — itself governance-default-disabled, needing an `IRIS_GOVERNANCE` override), the four DocDB tools fail with `ERROR #822: Access Denied`, which they translate into an actionable error naming both remedy routes.
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 

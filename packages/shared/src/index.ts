@@ -3,7 +3,7 @@
 export { booleanParam } from "./zod-helpers.js";
 export { isArgProvided, argOrPlaceholder } from "./prompt-helpers.js";
 export type { IrisConnectionConfig } from "./config.js";
-export { loadConfig } from "./config.js";
+export { loadConfig, DEFAULT_ACCEPT_LANGUAGE } from "./config.js";
 export {
   DEFAULT_PROFILE_NAME,
   ProfileResolutionError,
