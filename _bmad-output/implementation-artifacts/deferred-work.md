@@ -2762,3 +2762,36 @@ Story 35.3's code review closed **CLEAN** (3/3 layers delivered, `review_degrade
 **Disposition tally (Rule #51):** 2 items — **0 HIGH · 0 MEDIUM · 2 LOW**, both open.
 
 **Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 97 LOW = 122 open** across **199 distinct items** (76 terminal), derived mechanically: `35-7-QA-1` and `35-7-QA-2` added open (+2 LOW). Check: 0 + 25 + 97 = 122.
+
+## Story 35.9 dev pass — two new findings (35-9-DEV-1 is the lead observation from the pre-story probes, ledgered per the story; 35-9-DEV-2 is the dev's prompt-wording observation)
+
+| Item | Severity | Issue | Deferral rationale | Suggested resolution |
+|---|---|---|---|---|
+| `35-9-DEV-1` | LOW | **A `PUT /doc/{name}` name/content mismatch arrives as a string-typed `status` field the shared HTTP client never throws on** (`packages/shared/src/http-client.ts:411-422` throws only on `envelope.status.errors`). Live-probed by the lead (Story 35.9 pre-story probe) and independently re-probed in the 35.9 dev pass (story Dev Notes): PUT `/doc/DevSmoke359.UrlName.cls` whose content declares `Class DevSmoke359.ContentName` returns HTTP 200 with `"status":"ERROR #16023: ..."` as a STRING and stores under the content-declared name. Invisible to ANY `PUT /doc` caller — including `iris_doc_put` and no-identity (CSP) uploads that Story 35.9's content cross-check structurally cannot cover. | Out of 35.9 scope: the fix belongs in the shared HTTP client (suite-wide blast radius on every PUT caller) or per-PUT-caller; Story 35.9 closes the `iris_doc_load` symptom by refusing mismatches pre-PUT. Rule #37 re-deferral count **0** (first carry). | Lead-suggested direction: treat a non-empty string `status` on PUT /doc responses as a failure. Probe first (#16) how widespread string-typed `status` is across Atelier PUT responses (save-vs-mismatch cases) before gating on it in the shared client. |
+| `35-9-DEV-2` | LOW | **Prompt text for `deployAndTestClass`/`objectscriptReview` still says a bare path "mis-maps the class name"** — post-35.9 the actual behavior is a REFUSAL at upload time, not a mis-map. The prompts glob guidance itself stays correct. | Cosmetic wording accuracy in prompt surfaces; the tool behavior and tool-level docs are correct. Rule #37 count **0**. | Story 35.8 docs rollup (or any prompt-surface pass): change "mis-maps" wording to reflect the refusal. |
+
+**Disposition tally (Rule #51):** 2 items — **0 HIGH · 0 MEDIUM · 2 LOW**, open.
+
+**Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 99 LOW = 124 open** across **201 distinct items** (76 terminal), derived mechanically per Rule #51 from the prior state (0 HIGH / 25 MEDIUM / 97 LOW = 122 open / 199 distinct / 76 terminal): `35-9-DEV-1` and `35-9-DEV-2` added open (+2 LOW, +2 distinct); no item moved to terminal. So LOW 97 + 2 = 99; open 122 + 2 = 124; distinct 199 + 2 = 201; terminal unchanged at 76. Check: 0 + 25 + 99 = 124. *(Derivation parenthetical corrected by qa-35-9 — it originally accounted for only one of the two rows and its check arithmetic contradicted the headline; headline figures were and are correct.)*
+
+## Story 35.9 rework iteration 1 (lead smoke follow-up) — `35-9-DEV-1` RESOLVED in `iris_doc_load`
+
+The lead smoke proved `35-9-DEV-1` is a live SILENT-DROP class, not just a mismatch signal: a BOM-bearing `.cls` under a CORRECT glob passed the (parse-side) cross-check, the PUT returned HTTP 200 with `status.errors: []` and the per-doc error as a string `result.status` (`ERROR #16021: Illegal Header Line`), the loader counted it uploaded, and the server stored NOTHING. Fixed in the 35.9 rework (dev-35-9, 2026-08-18): (1) `iris_doc_load` strips a leading U+FEFF at read time so the uploaded content itself is BOM-free (the parse-side strip stays for the exported parser's robustness); (2) the upload loop inspects the PUT response and treats a non-empty string `result.status` as an upload FAILURE for that file (the exact success/failure envelope shapes were live-captured first — success carries `result.status === ""`). Both guards mutation-verified and live-proven on HSCUSTOM via the built dist (BOM fixture uploads under a correct glob, compiles clean, classmethod callable; trap-glob refusal legs still refuse).
+
+| Item | Severity | Issue | Disposition |
+|---|---|---|---|
+| `35-9-DEV-1` | LOW | String-typed `status` on PUT /doc responses invisible to the loader (see the 35.9 dev-pass row above for the full statement) | **RESOLVED** (Story 35.9 rework) — fixed in `iris_doc_load`'s upload loop per the item's suggested fix direction, now with live proof. Scope note: the fix is per-caller in `load.ts`, NOT in the shared HTTP client — the item's own rationale warned of suite-wide blast radius, and other `PUT /doc` callers (e.g. `iris_doc_put`) still do not inspect a string `result.status`. Lead may open a narrower follow-up row if the shared-client generalization is wanted. |
+
+**Disposition tally (Rule #51):** 1 item — **1 RESOLVED**.
+
+**Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 98 LOW = 123 open** across **201 distinct items** (77 terminal), derived mechanically per Rule #51 from the prior state (0 HIGH / 25 MEDIUM / 99 LOW = 124 open / 201 distinct / 76 terminal): `35-9-DEV-1` LOW open → RESOLVED (LOW 99 − 1 = 98; open 124 − 1 = 123; terminal 76 + 1 = 77; distinct unchanged at 201 — a disposition change, not a new row). Check: 0 + 25 + 98 = 123.
+
+## Story 35.9 rework review — one follow-up item
+
+| Item | Severity | Issue | Deferral rationale | Suggested resolution |
+|---|---|---|---|---|
+| `35-9-CR-1` | LOW | **`iris_doc_put` has no string-typed `result.status` inspection, no BOM strip, and reports success unconditionally** (`doc.ts:221` area). A BOM-bearing `doc_put` is the same live silent-drop class as `35-9-DEV-1` (server stores nothing; `result.status` carries `ERROR #16021: Illegal Header Line`) — mitigated only by the raw response still carrying the status text for a reader who looks. The bulk loader is fixed; the single-doc path is not. | Narrower follow-up with real blast-radius questions (shared client vs per-tool; `doc_put` response contract); the interactive path at least echoes the status text. Rule #37 count **0**. | Generalize the string-status failure detection (shared HTTP layer or per-caller in doc.ts) + BOM strip at read; decide whether `doc_put` should set `isError` on a non-empty string status. |
+
+**Disposition tally (Rule #51):** 1 item — **0 HIGH · 0 MEDIUM · 1 LOW**, open.
+
+**Ledger state after this pass:** **0 HIGH / 25 MEDIUM / 99 LOW = 124 open** across **202 distinct items** (77 terminal). Check: 0 + 25 + 99 = 124.

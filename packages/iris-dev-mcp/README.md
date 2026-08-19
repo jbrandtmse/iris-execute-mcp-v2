@@ -146,7 +146,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?`, `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | idempotent |
 
 ### Package Browsing Tools
@@ -354,6 +354,61 @@ throwaway test classes only.
   }
 }
 ```
+
+**Glob shape matters (Story 35.9).** The base for document-name mapping is the directory prefix
+before the first glob metacharacter, so the wildcard must come BEFORE the package directory.
+`.../src/ClineTest/*.cls` swallows the `ClineTest` package directory into the base and would map
+`ClineTest/Wumpus.cls` to the unqualified `Wumpus.cls`. The tool now REFUSES such uploads: for
+`.cls`/`.mac`/`.int`/`.inc` files whose own `Class <Pkg.Name>` / `ROUTINE <Name>` declaration
+disagrees with the path-derived name, the file lands in `failures[]` with both names named and is
+never uploaded or compiled (IRIS would otherwise store it under the content-declared name while the
+tool reported the wrong one). Headerless files (`.inc` fragments, CSP pages) have no declaration and
+keep pure path-derived naming.
+
+**BOM and server-reported per-file errors (Story 35.9 rework).** A leading UTF-8 BOM is stripped
+before upload (IRIS rejects a BOM'd first line as an illegal header). And a PUT that returns
+HTTP 200 can still fail per-document — Atelier reports it only as a string `status` field in the
+per-doc result (e.g. `ERROR #16021: Illegal Header Line: ...`) while storing nothing. The tool
+surfaces that string as an upload failure in `failures[]` instead of counting the file as uploaded.
+
+**Refused input (trap-shaped glob):**
+```json
+{
+  "path": ".../src/ClineTest/*.cls",
+  "compile": true
+}
+```
+
+**Refusal output:**
+```json
+{
+  "total": 2,
+  "uploaded": 0,
+  "failed": 2,
+  "failures": [
+    {
+      "file": ".../src/ClineTest/Wumpus.cls",
+      "docName": "Wumpus.cls",
+      "error": "Refusing to upload 'Wumpus.cls': the path-derived name does not match the file's declared identity 'ClineTest.Wumpus'. The glob pattern's base directory swallowed the package directory — use a wildcard before the package directory (e.g. '.../src/**/*.cls') or pass baseDir='.../src'."
+    }
+  ]
+}
+```
+
+**Two remedies, both work:** move the wildcard before the package directory
+(`"path": ".../src/**/*.cls"`), or keep the narrow glob and state the package root
+deterministically with the optional `baseDir` parameter:
+
+```json
+{
+  "path": ".../src/ClineTest/*.cls",
+  "baseDir": ".../src",
+  "compile": true
+}
+```
+
+Both upload `ClineTest.Wumpus.cls` / `ClineTest.WumpusCave.cls` and compile clean. `baseDir` does
+not bypass the content cross-check — it is defense-in-depth, not an override.
 </details>
 
 <details>

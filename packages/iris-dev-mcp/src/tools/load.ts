@@ -35,6 +35,109 @@ import { booleanParam } from "./zod-helpers.js";
 /** Extension regex matching the known Atelier doc extensions. */
 const DOC_EXTENSION_RE = /\.(cls|mac|int|inc|bas|mvi|mvb|csp|csr)$/i;
 
+// ── Content-identity cross-validation (Story 35.9) ────────────────────
+//
+// The IRIS server stores a PUT /doc/<name> whose content declares a
+// DIFFERENT identity under the CONTENT-DECLARED name, and reports the
+// mismatch only as a string-typed `status` field — which the shared HTTP
+// client never throws on (http-client.ts checks `status.errors` only).
+// A trap-shaped glob (wildcard AFTER the package directory, e.g.
+// `src/ClineTest/*.cls`) therefore used to "succeed" while uploading
+// `Wumpus.cls` instead of `ClineTest.Wumpus.cls`, surfacing only at
+// compile as `Class 'User.Wumpus' does not exist`. The fix is to
+// cross-validate BEFORE the PUT and refuse on divergence — never rename
+// silently.
+
+/** Extensions whose content can declare a Class/ROUTINE identity. */
+const IDENTITY_EXTENSION_RE = /\.(cls|mac|int|inc)$/i;
+
+/**
+ * Class declaration, anchored at line start (method bodies are indented,
+ * and `;` / `/*` / `///` comment lines cannot match `^Class`). The keyword
+ * is case-insensitive; the name allows `%`, dots, and word characters.
+ */
+const CLASS_DECL_RE = /^Class\s+([%\w.]+)/i;
+
+/**
+ * Routine declaration. Generated `.int` routines carry dotted names and a
+ * `[Type=...]` suffix (`ROUTINE MyClass.1 [Type=INT]`) — the capture stops
+ * at whitespace, so the suffix is ignored.
+ */
+const ROUTINE_DECL_RE = /^ROUTINE\s+([%\w.]+)/i;
+
+/**
+ * Extract a file's self-declared document identity (stem form, no
+ * extension): the `Class <Pkg.Name>` or `ROUTINE <Name>` declaration.
+ *
+ * Returns `undefined` when no declaration is found — CSP/slash-style
+ * docs, `.inc` fragments, and headerless `.mac` files have no embedded
+ * identity and keep today's pure path-derived naming.
+ */
+export function extractDeclaredIdentity(lines: string[]): string | undefined {
+  for (const line of lines) {
+    // Tolerate a leading UTF-8 BOM before matching (35-9-QA-1) — a BOM-bearing
+    // line would otherwise never match ^Class/^ROUTINE and the cross-check
+    // would be silently SKIPPED. The upload loop strips the BOM once at read
+    // time (so the uploaded content is BOM-free); this per-line strip keeps
+    // the exported parser BOM-tolerant for any caller handed unstripped lines.
+    const text = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
+    const match = CLASS_DECL_RE.exec(text) ?? ROUTINE_DECL_RE.exec(text);
+    const name = match?.[1];
+    if (name !== undefined) return name;
+  }
+  return undefined;
+}
+
+/**
+ * Build the refusal message for a path-derived name that disagrees with
+ * the file's declared identity. Names BOTH candidates. The remedy depends
+ * on the divergence shape: a trap-shaped glob (the declared name is the
+ * derived name plus leading package segments) gets the corrected-glob and
+ * `baseDir` remedies — with a concrete corrected base only when the base
+ * provably ENDS WITH the declared package path (stripping it then maps the
+ * file to exactly the declared name); a content-driven mismatch (wrong
+ * declaration, file in the wrong directory, case-only difference) is NOT
+ * caused by the glob shape, so the message says so instead of claiming the
+ * base swallowed a package directory or suggesting a recomputed base.
+ */
+function buildIdentityMismatchError(
+  docName: string,
+  declared: string,
+  effectiveBaseDir: string,
+): string {
+  const normBase = effectiveBaseDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const ext = path.extname(docName);
+  const derivedStem = docName.slice(0, docName.length - ext.length);
+  const prefix =
+    `Refusing to upload '${docName}': the path-derived name does not match ` +
+    `the file's declared identity '${declared}'.`;
+
+  if (derivedStem !== "" && declared.endsWith("." + derivedStem)) {
+    const declaredPkg = declared.slice(0, declared.length - derivedStem.length - 1);
+    const pkgPath = declaredPkg.replace(/\./g, "/");
+    if (normBase === pkgPath || normBase.endsWith("/" + pkgPath)) {
+      const corrected = normBase
+        .slice(0, normBase.length - pkgPath.length)
+        .replace(/\/+$/, "");
+      if (corrected !== "") {
+        return (
+          `${prefix} The glob pattern's base directory swallowed the package directory — ` +
+          `use a wildcard before the package directory (e.g. '${corrected}/**/*${ext}') or pass baseDir='${corrected}'.`
+        );
+      }
+    }
+    return (
+      `${prefix} The glob pattern's base directory swallowed the package directory — ` +
+      `use a glob whose wildcard precedes the package directory (e.g. 'src/**/*.cls') or pass the baseDir parameter.`
+    );
+  }
+
+  return (
+    `${prefix} The file's declaration disagrees with its location — fix the declaration or move the file ` +
+    `so the two agree; if the path mapping itself is wrong, pass baseDir to state the package root explicitly.`
+  );
+}
+
 /**
  * Convert a filesystem path to an IRIS document name.
  *
@@ -198,13 +301,31 @@ export const docLoadTool: ToolDefinition = {
     "Accepts a glob pattern to match files. File paths are mapped to IRIS document names " +
     "(path separators become dots). Optionally compiles all uploaded documents afterward. " +
     "This is the preferred way to deploy ObjectScript classes to IRIS — always create or edit .cls files on disk first, " +
-    "then use this tool to upload and compile. This ensures all code is source-controlled and reviewable.",
+    "then use this tool to upload and compile. This ensures all code is source-controlled and reviewable. " +
+    "Uploads whose path-derived document name disagrees with the file's own Class/ROUTINE declaration are refused " +
+    "with both names named — this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. " +
+    "'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and " +
+    "a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as " +
+    "an upload failure rather than counted as a success.",
   inputSchema: z.object({
     path: z
       .string()
       .describe(
         "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). " +
-        "The directory prefix before the first glob metacharacter is used as the base for document name mapping.",
+        "The directory prefix before the first glob metacharacter is used as the base for document name mapping — " +
+        "so the wildcard must come BEFORE the package directory: 'c:/projects/src/**/*.cls' maps " +
+        "MyPkg/ClassA.cls to 'MyPkg.ClassA.cls', but 'c:/projects/src/MyPkg/*.cls' swallows MyPkg into the " +
+        "base and would map to the unqualified 'ClassA.cls'. Mismatched uploads are refused when the file's " +
+        "own Class/ROUTINE declaration disagrees; pass baseDir to state the package root deterministically.",
+      ),
+    baseDir: z
+      .string()
+      .optional()
+      .describe(
+        "Optional. Directory used verbatim as the base for document name mapping, INSTEAD of inferring the base " +
+        "from the glob pattern's first wildcard segment (e.g. baseDir='c:/projects/src' with " +
+        "path='c:/projects/src/MyPkg/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls'). Use it to state the " +
+        "package root deterministically when the glob's wildcard cannot precede the package directory.",
       ),
     compile: booleanParam
       .optional()
@@ -231,12 +352,14 @@ export const docLoadTool: ToolDefinition = {
   handler: async (args, ctx) => {
     const {
       path: globPattern,
+      baseDir: explicitBaseDir,
       compile: shouldCompile,
       flags,
       namespace,
       ignoreConflict,
     } = args as {
       path: string;
+      baseDir?: string;
       compile?: boolean;
       flags?: string;
       namespace?: string;
@@ -244,7 +367,13 @@ export const docLoadTool: ToolDefinition = {
     };
 
     const ns = ctx.resolveNamespace(namespace);
-    const baseDir = extractBaseDir(globPattern);
+    // baseDir, when supplied, is used verbatim (separators normalized)
+    // INSTEAD of glob-shape inference. Omitted => extractBaseDir inference,
+    // byte-identical to the pre-baseDir behavior (Rule #19).
+    const baseDir =
+      explicitBaseDir !== undefined
+        ? explicitBaseDir.replace(/\\/g, "/").replace(/\/+$/, "")
+        : extractBaseDir(globPattern);
 
     // Resolve ignore-conflict default (true)
     const ignoreConflictFlag = ignoreConflict !== false;
@@ -271,8 +400,45 @@ export const docLoadTool: ToolDefinition = {
       const docName = filePathToDocName(String(filePath), baseDir);
 
       try {
-        const fileContent = readFileSync(String(filePath), "utf-8");
+        const rawContent = readFileSync(String(filePath), "utf-8");
+        // Strip a leading UTF-8 BOM (U+FEFF) before anything else (Story 35.9
+        // rework): a BOM carries no source meaning for IRIS, and left in the
+        // uploaded content the server rejects the first line as an illegal
+        // header (ERROR #16021) — reported only as a string-typed
+        // `result.status` the HTTP client never throws on, with the server
+        // storing NOTHING (a silent drop; live-proven 2026-08-18). Stripping
+        // here makes BOM-bearing files just work: the identity cross-check
+        // below parses the stripped text, and the PUT body is BOM-free.
+        const fileContent =
+          rawContent.charCodeAt(0) === 0xfeff ? rawContent.slice(1) : rawContent;
         const lines = fileContent.split(/\r?\n/);
+
+        // Cross-validate the path-derived doc name against the file's own
+        // declared identity BEFORE the PUT (Story 35.9 — the server stores
+        // a mismatched PUT under the CONTENT-DECLARED name and reports the
+        // mismatch only as a string `status` field the HTTP client never
+        // throws on, so a trap-shaped glob otherwise "succeeds" under the
+        // wrong name). Applies to .cls/.mac/.int/.inc with a findable
+        // Class/ROUTINE declaration; headerless files and CSP/slash-style
+        // docs keep pure path-derived naming. Comparison is exact
+        // (case-sensitive — IRIS preserves case, and a case-only divergence
+        // is worth surfacing). baseDir does NOT bypass this check; it is
+        // defense-in-depth, not an override.
+        if (IDENTITY_EXTENSION_RE.test(docName)) {
+          const declared = extractDeclaredIdentity(lines);
+          if (declared !== undefined) {
+            const ext = path.extname(docName);
+            const derivedStem = docName.slice(0, docName.length - ext.length);
+            if (declared !== derivedStem) {
+              failures.push({
+                file: String(filePath),
+                docName,
+                error: buildIdentityMismatchError(docName, declared, baseDir),
+              });
+              continue;
+            }
+          }
+        }
 
         const encodedName = encodeURIComponent(docName);
         const params = new URLSearchParams();
@@ -283,7 +449,26 @@ export const docLoadTool: ToolDefinition = {
           (qs ? `?${qs}` : "");
 
         const body = { enc: false, content: lines };
-        await ctx.http.put(apiPath, body);
+        const putResponse = await ctx.http.put(apiPath, body);
+
+        // A PUT can return HTTP 200 with an empty `status.errors` envelope yet
+        // still FAIL per-document: the Atelier PUT result carries the per-doc
+        // error as a string-typed `result.status` (e.g. "ERROR #16021:
+        // Illegal Header Line: ..."), which the shared HTTP client never
+        // throws on (it checks `status.errors` only) — and the server stores
+        // NOTHING (35-9-DEV-1, live-proven 2026-08-18: the loader reported
+        // uploaded:1 while the class was absent server-side). A successful
+        // PUT carries `result.status === ""` (live-captured same day). Treat
+        // a non-empty string status as an upload failure for this file.
+        const putResult = putResponse.result as { status?: unknown } | undefined;
+        if (typeof putResult?.status === "string" && putResult.status !== "") {
+          failures.push({
+            file: String(filePath),
+            docName,
+            error: `IRIS refused the upload: ${putResult.status}`,
+          });
+          continue;
+        }
         uploaded.push(docName);
       } catch (error: unknown) {
         failures.push({
