@@ -190,6 +190,24 @@ When `action:"get"`, the OpenAPI spec can be a large JSON document (50 KB+). By 
 
 Pass `fullSpec:true` to receive the complete OpenAPI spec object (returned as-is). When the application has no resolvable spec, `swaggerSpec` is `null`.
 
+**`iris_rest_manage` get action — legacy names (Story 35.6):**
+
+`get` resolves every name `list` returns. For a legacy `%CSP.REST` name (which the IRIS Management API does not know — it covers spec-first apps only), `get` falls back to the legacy webapp list and returns the legacy detail with an `explanation` field; `swaggerSpec` stays `null` (a legacy app has no OpenAPI spec by design) and `fullSpec` has no effect:
+
+```json
+{
+  "name": "/api/executemcp/v2",
+  "dispatchClass": "ExecuteMCPv2.REST.Dispatch",
+  "namespace": "HSCUSTOM",
+  "swaggerSpec": null,
+  "explanation": "Legacy hand-written %CSP.REST application — resolved via the ExecuteMCPv2 webapp list ..."
+}
+```
+
+A name found in neither scope fails with an accurate not-found naming BOTH scopes checked — never the CSP gateway's misleading "Check the IRIS web server configuration" 404 text. If the legacy webapp list itself cannot be queried, the error says the legacy scope could not be checked (with the reason) rather than claiming the name is absent from it.
+
+**`iris_rest_manage` delete action:** removes **spec-first** REST applications only. Deleting a legacy `%CSP.REST` name fails with an explanation pointing at `iris_webapp_manage:delete` (the correct tool for removing a legacy web application — there are no spec classes to remove).
+
 ---
 
 ## Prompts
@@ -544,6 +562,8 @@ companion spec class, so `swaggerSpec` is `null` for them.
   ]
 }
 ```
+
+For a legacy `%CSP.REST` name (e.g. `/api/executemcp/v2`, which `list` with `scope:"legacy"` or `"all"` returns), `get` falls back to the legacy webapp list and returns `{name, dispatchClass, namespace, swaggerSpec: null, explanation}` — see **get action — legacy names** above. A name in neither scope returns an accurate not-found naming both scopes checked.
 </details>
 
 ---

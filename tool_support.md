@@ -37,7 +37,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 9 | `iris_doc_index` | 🟦 Atelier | `POST /action/index` (class structure) |
 | 10 | `iris_doc_search` | 🟦 Atelier | `GET /action/search` |
 | 11 | `iris_doc_convert` | 🟦 Atelier | `GET /doc/{name}?format=...` (UDL ↔ XML) |
-| 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` |
+| 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` (load takes `?flags=` when `compile: true`) |
 | 13 | `iris_macro_info` | 🟦 Atelier | `POST /action/getmacrodefinition` + `POST /action/getmacrolocation` |
 | 14 | `iris_sql_execute` | 🟦 Atelier | `POST /action/query` |
 | 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest) |
@@ -294,6 +294,27 @@ were silently returning stale or per-process data.
   `{title, version, description, basePath, pathCount, definitionCount}`
   instead of the full OpenAPI spec object (which can be 50 KB+). Pass
   `fullSpec: true` to receive the complete spec.
+- **`iris_rest_manage` get/delete** — legacy routing (Story 35.6): on a
+  Management API 404, `get` falls back to the legacy webapp list and returns
+  `{name, dispatchClass, namespace, swaggerSpec: null, explanation}` for a
+  legacy `%CSP.REST` name (`fullSpec` has no effect — no spec exists), or an
+  accurate not-found naming BOTH scopes when the name is in neither (if the
+  legacy list itself cannot be queried, the error says that scope could not be
+  checked, with the reason — it never reports an unchecked scope as absent).
+  The gateway's misleading "Check the IRIS web server configuration" 404 text is
+  never surfaced. `delete` stays spec-first-only: a legacy name fails with an
+  explanation pointing at `iris_webapp_manage:delete`.
+- **`iris_doc_xml_export` import** — compile parity (Story 35.6): additive
+  `compile` (default false) and `flags` parameters mirror `iris_doc_load`.
+  `compile: true` sends the native Atelier `flags` query param with the `c`
+  compile qualifier folded in when absent or explicitly negated (IRIS
+  qualifiers are case-insensitive; `-c` negates, last `c` wins — so `-c`
+  becomes `-cc`), and loaded documents are compiled in the same call. When `compile` is omitted/false, NO `flags` param is sent
+  (byte-identical pre-35.6 request) and the response adds a note stating the
+  imported documents are NOT compiled, naming the remedy (`compile: true` or
+  `iris_doc_compile`). Non-empty per-file `status` text (e.g. a compile
+  error — IRIS reports it there, not in `status.errors`) is surfaced in the
+  response text.
 - **`iris_rule_list` / `iris_transform_list`** — filter/pagination (Story
   12.5, FEAT-3): both tools now accept `prefix` (startsWith), `filter`
   (case-insensitive substring), `cursor`, and `pageSize`. Filtering and

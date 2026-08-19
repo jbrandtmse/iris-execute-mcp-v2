@@ -175,7 +175,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris_doc_xml_export` | Export, import, or list documents in XML format | `action`, `docs?`, `content?`, `namespace?` | destructive (import), not idempotent |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format. Import loads definitions WITHOUT compiling by default (the response says so); pass `compile: true` to compile in the same call | `action`, `docs?`, `content?`, `compile?`, `flags?`, `namespace?` | destructive (import), not idempotent |
 
 ### SQL Tools
 
@@ -641,6 +641,34 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
 ```json
 {
   "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_doc_xml_export</strong> -- Import from XML (with compile)</summary>
+
+An import **loads definitions without compiling them** by default — the response then includes a note saying the documents are NOT compiled (remedy: `compile: true`, or `iris_doc_compile` afterwards). Pass `compile: true` to compile in the same call; `flags` (e.g. `"cku"`) is honoured only when `compile` is true, and the `c` compile qualifier is folded in automatically when absent or explicitly negated (IRIS qualifier letters are case-insensitive; `-c` negates, so `-c` becomes `-cc` — the last `c` wins). A compile failure still returns HTTP-level success from IRIS — the error text surfaces in the response as a `Per-file status (...)` note.
+
+**Input:**
+```json
+{
+  "action": "import",
+  "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Export generator=\"IRIS\" version=\"26\">\n<Class name=\"MyApp.Service\">\n<Super>%RegisteredObject</Super>\n</Class>\n</Export>",
+  "compile": true
+}
+```
+
+**Output:**
+```json
+{
+  "content": [
+    {
+      "file": "import.xml",
+      "imported": ["MyApp.Service.cls"],
+      "status": ""
+    }
+  ]
 }
 ```
 </details>
