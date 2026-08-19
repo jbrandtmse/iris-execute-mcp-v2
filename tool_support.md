@@ -268,6 +268,8 @@ were silently returning stale or per-process data.
 | 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
 | 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (spec-first) · `/security/webapp` (legacy/all) |
 
+> The four DocDB tools require the `%Service_DocDB` service, which is **disabled by default** on IRIS — see the multi-API note below.
+
 **Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
 
 ### Fields returned — Data & Analytics tools
@@ -385,7 +387,7 @@ It's the only server that integrates with pre-existing IRIS APIs other than Atel
 - **Management API** (`/api/mgmnt/v2`) — 1 tool for REST application management
 - **ExecuteMCPv2** — 2 tools for DeepSee analytics (MDX queries, cube operations)
 
-If DocDB or the Management API aren't enabled on the IRIS instance (they typically are by default, but can be disabled), 5 of the 7 data tools would error — **independently of your custom REST deployment**.
+If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 data tools would error — **independently of your custom REST deployment**. Note the asymmetry: the Management API is typically enabled by default, but `%Service_DocDB` is **disabled by default on IRIS**. Until it is enabled (Management Portal > *System Administration > Security > Services > %Service_DocDB*, or `iris_service_manage` `action="enable"` — itself governance-default-disabled, needing an `IRIS_GOVERNANCE` override), the four DocDB tools fail with `ERROR #822: Access Denied`, which they translate into an actionable error naming both remedy routes.
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 

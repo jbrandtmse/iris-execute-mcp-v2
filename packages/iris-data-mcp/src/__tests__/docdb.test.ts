@@ -713,3 +713,449 @@ describe("buildDocDbRestriction", () => {
     expect(buildDocDbRestriction({})).toBeNull();
   });
 });
+
+// ── Story 35.7: %Service_DocDB gate translation ──────────────
+//
+// Fixtures are pinned to the LIVE shapes captured 2026-08-19 (Rule #36/#54 —
+// never hand-reasoned, never a state the real system cannot produce):
+//
+//   curl -i -u _SYSTEM:SYS http://localhost:52773/api/docdb/v1/USER
+//   → HTTP 200 (NOT an error status) with body:
+//   {"status":{"errors":[{"error":"ERROR #822: Access Denied","code":822,
+//     "domain":"%ObjectErrors","id":"AccessDenied"}],
+//     "summary":"ERROR #822: Access Denied"},"content":null}
+//
+// The shared HTTP client throws IrisApiError on the non-empty status.errors
+// (http-client.ts) with statusCode 200 and the errors array intact.
+// _SYSTEM holds %All and still receives 822 while the service is off, which
+// proves 822 here is the service gate, not a privilege failure.
+//
+//   curl -u _SYSTEM:SYS \
+//     "http://localhost:52773/api/executemcp/v2/security/service?name=%25Service_DocDB"
+//   → result: {"name":"%Service_DocDB","enabled":false,
+//     "description":"Controls Doc DB applications","autheEnabled":1024,
+//     "clientSystems":""}
+
+const LIVE_822_ERRORS = [
+  {
+    error: "ERROR #822: Access Denied",
+    code: 822,
+    domain: "%ObjectErrors",
+    id: "AccessDenied",
+  },
+];
+
+/** Build an IrisApiError exactly as http-client.ts's Atelier-level throw does. */
+function makeLive822Error(path: string, method: string): IrisApiError {
+  return new IrisApiError(
+    200,
+    LIVE_822_ERRORS,
+    path,
+    `IRIS reported errors for ${method} ${path}. Review the error details and correct the request.`,
+  );
+}
+
+/** Live shape of the custom service-state route's result (captured 2026-08-19). */
+const SERVICE_DISABLED_RESULT = {
+  name: "%Service_DocDB",
+  enabled: false,
+  description: "Controls Doc DB applications",
+  autheEnabled: 1024,
+  clientSystems: "",
+};
+const SERVICE_ENABLED_RESULT = { ...SERVICE_DISABLED_RESULT, enabled: true };
+
+const SERVICE_ROUTE_FRAGMENT = "/api/executemcp/v2/security/service";
+const SERVICE_STATE_URL = `${SERVICE_ROUTE_FRAGMENT}?name=%25Service_DocDB`;
+
+/** AC 35.7.3: every mandatory element of the actionable message. */
+function expectActionableGateMessage(
+  text: string,
+  originalMessage: string,
+): void {
+  // Cause + live check
+  expect(text).toContain("%Service_DocDB");
+  expect(text).toContain("disabled by default on IRIS");
+  expect(text).toContain("currently DISABLED");
+  // Remedy route 1: Management Portal
+  expect(text).toContain("System Administration > Security > Services");
+  // Remedy route 2: the tool, WITH its governance catch and example override
+  expect(text).toContain("iris_service_manage");
+  expect(text).toContain('action="enable"');
+  expect(text).toContain('{"global": {"iris_service_manage:enable": true}}');
+  // The real 822 detail is preserved — pinned fail-capably (35.7 review):
+  // the original wrapped message must survive verbatim in the "Original
+  // error:" suffix, not just the helper's own hardcoded prefix.
+  expect(text).toContain("ERROR #822: Access Denied");
+  expect(text).toContain(`Original error: ${originalMessage}`);
+}
+
+describe("Story 35.7 — iris_docdb_manage service gate", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("translates a disabled-service 822 into an actionable error naming both remedy routes", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.resolve(envelope(SERVICE_DISABLED_RESULT))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expectActionableGateMessage(result.content[0]!.text, err.message);
+    // BOTH calls happened: the DocDB call AND the service-state follow-up —
+    // a translation that never checks the live state is the defect this
+    // story exists to prevent.
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining("/api/docdb/v1/USER"),
+    );
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining(SERVICE_STATE_URL),
+    );
+    expect(mockHttp.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes the original error through unchanged when the service is enabled (genuine privilege failure)", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.resolve(envelope(SERVICE_ENABLED_RESULT))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    // Rule #19 back-compat: byte-identical to the pre-story error text.
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing DocDB database: ${err.message}`,
+    );
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining(SERVICE_STATE_URL),
+    );
+  });
+
+  it("passes the original error through when the service-state check itself fails", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.reject(new Error("connection refused"))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing DocDB database: ${err.message}`,
+    );
+  });
+
+  it("passes a non-822 IrisApiError through unchanged and never probes the service", async () => {
+    const err = new IrisApiError(500, [
+      {
+        error: "ERROR #5002: ObjectScript error",
+        code: 5002,
+        domain: "%ObjectErrors",
+        id: "5002",
+      },
+    ], "/api/docdb/v1/USER");
+    mockHttp.get.mockRejectedValue(err);
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing DocDB database: ${err.message}`,
+    );
+    // The DocDB call only — no service-state follow-up for non-822 errors.
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("never matches on message text: a string-form 'ERROR #822' entry passes through", async () => {
+    // Locale-safety pin (Rules #8/#13): detection keys on the numeric code
+    // only; a bare string carrying the 822 text must NOT trigger translation.
+    const err = new IrisApiError(200, ["ERROR #822: Access Denied"], "/api/docdb/v1/USER");
+    mockHttp.get.mockRejectedValue(err);
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing DocDB database: ${err.message}`,
+    );
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes through unchanged when errors is a non-array (shape the http client can produce)", async () => {
+    // http-client.ts throws whenever envelope.status.errors.length > 0 — a
+    // non-empty STRING satisfies that check and is passed through as-is, so
+    // `errors` can be a non-array at runtime despite its unknown[] type
+    // (the shared formatIrisErrors guards the same shape). The helper must
+    // pass such an error through, never throw `.some is not a function` out
+    // of the tool's catch path (35.7 review finding).
+    const err = new IrisApiError(
+      200,
+      "ERROR #822: Access Denied" as unknown as unknown[],
+      "/api/docdb/v1/USER",
+    );
+    mockHttp.get.mockRejectedValue(err);
+
+    const result = await docdbManageTool.handler({ action: "list" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing DocDB database: ${err.message}`,
+    );
+    // No service-state probe: a non-array errors carries no numeric code.
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Story 35.7 — iris_docdb_document service gate", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("translates a disabled-service 822 into an actionable error", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/doc/TestDB/42", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.resolve(envelope(SERVICE_DISABLED_RESULT))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbDocumentTool.handler(
+      { action: "get", database: "TestDB", id: "42" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expectActionableGateMessage(result.content[0]!.text, err.message);
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining("/api/docdb/v1/USER/doc/TestDB/42"),
+    );
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining(SERVICE_STATE_URL),
+    );
+    expect(mockHttp.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes the original error through unchanged when the service is enabled", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/doc/TestDB/42", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.resolve(envelope(SERVICE_ENABLED_RESULT))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbDocumentTool.handler(
+      { action: "get", database: "TestDB", id: "42" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error managing document: ${err.message}`);
+  });
+
+  it("passes the original error through when the service-state check itself fails", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/doc/TestDB/42", "GET");
+    mockHttp.get.mockImplementation((url: string) =>
+      url.includes(SERVICE_ROUTE_FRAGMENT)
+        ? Promise.reject(new IrisApiError(500, [], "/api/executemcp/v2/security/service"))
+        : Promise.reject(err),
+    );
+
+    const result = await docdbDocumentTool.handler(
+      { action: "get", database: "TestDB", id: "42" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error managing document: ${err.message}`);
+  });
+
+  it("passes a non-822 IrisApiError through unchanged and never probes the service", async () => {
+    const err = new IrisApiError(404, [], "/api/docdb/v1/USER/doc/TestDB/99", "Not found");
+    mockHttp.get.mockRejectedValue(err);
+
+    const result = await docdbDocumentTool.handler(
+      { action: "get", database: "TestDB", id: "99" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error managing document: ${err.message}`);
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Story 35.7 — iris_docdb_find service gate", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("translates a disabled-service 822 into an actionable error", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/find/TestDB", "POST");
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockResolvedValue(envelope(SERVICE_DISABLED_RESULT));
+
+    const result = await docdbFindTool.handler(
+      { database: "TestDB", filter: { status: "active" } },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expectActionableGateMessage(result.content[0]!.text, err.message);
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/api/docdb/v1/USER/find/TestDB"),
+      expect.anything(),
+    );
+    // The service-state GET is a SEPARATE call from the DocDB POST.
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining(SERVICE_STATE_URL),
+    );
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the original error through unchanged when the service is enabled", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/find/TestDB", "POST");
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockResolvedValue(envelope(SERVICE_ENABLED_RESULT));
+
+    const result = await docdbFindTool.handler(
+      { database: "TestDB", filter: { status: "active" } },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error querying documents: ${err.message}`);
+  });
+
+  it("passes the original error through when the service-state check itself fails", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/find/TestDB", "POST");
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockRejectedValue(new Error("timeout"));
+
+    const result = await docdbFindTool.handler(
+      { database: "TestDB", filter: { status: "active" } },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error querying documents: ${err.message}`);
+  });
+
+  it("passes a non-822 IrisApiError through unchanged and never probes the service", async () => {
+    const err = new IrisApiError(400, [], "/api/docdb/v1/USER/find/TestDB", "Bad filter");
+    mockHttp.post.mockRejectedValue(err);
+
+    const result = await docdbFindTool.handler(
+      { database: "TestDB", filter: { invalid: true } },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(`Error querying documents: ${err.message}`);
+    expect(mockHttp.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("Story 35.7 — iris_docdb_property service gate", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("translates a disabled-service 822 into an actionable error", async () => {
+    const err = makeLive822Error(
+      "/api/docdb/v1/USER/prop/TestDB/name?type=%String",
+      "POST",
+    );
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockResolvedValue(envelope(SERVICE_DISABLED_RESULT));
+
+    const result = await docdbPropertyTool.handler(
+      { action: "create", database: "TestDB", property: "name", type: "%String" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expectActionableGateMessage(result.content[0]!.text, err.message);
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      expect.stringContaining("/api/docdb/v1/USER/prop/TestDB/name"),
+      {},
+    );
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      expect.stringContaining(SERVICE_STATE_URL),
+    );
+    expect(mockHttp.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the original error through unchanged when the service is enabled", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/prop/TestDB/name?type=%String", "POST");
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockResolvedValue(envelope(SERVICE_ENABLED_RESULT));
+
+    const result = await docdbPropertyTool.handler(
+      { action: "create", database: "TestDB", property: "name", type: "%String" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing property 'name': ${err.message}`,
+    );
+  });
+
+  it("passes the original error through when the service-state check itself fails", async () => {
+    const err = makeLive822Error("/api/docdb/v1/USER/prop/TestDB/name?type=%String", "POST");
+    mockHttp.post.mockRejectedValue(err);
+    mockHttp.get.mockRejectedValue(new Error("DNS failure"));
+
+    const result = await docdbPropertyTool.handler(
+      { action: "create", database: "TestDB", property: "name", type: "%String" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing property 'name': ${err.message}`,
+    );
+  });
+
+  it("passes a non-822 IrisApiError through unchanged and never probes the service", async () => {
+    const err = new IrisApiError(500, [], "/api/docdb/v1/USER/prop/TestDB/name", "Server error");
+    mockHttp.post.mockRejectedValue(err);
+
+    const result = await docdbPropertyTool.handler(
+      { action: "create", database: "TestDB", property: "name", type: "%String" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe(
+      `Error managing property 'name': ${err.message}`,
+    );
+    expect(mockHttp.get).not.toHaveBeenCalled();
+  });
+});

@@ -38,11 +38,14 @@
  * $gte → >=.  Multiple field/op pairs are combined as an array of predicates.
  */
 
-import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import { IrisApiError, type ToolContext, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the IRIS DocDB REST API. */
 const BASE_DOCDB_URL = "/api/docdb/v1";
+
+/** Base URL for the custom ExecuteMCPv2 REST service (service-state probes). */
+const BASE_EXECUTEMCP_URL = "/api/executemcp/v2";
 
 /**
  * Map from MongoDB-style comparison operator to IRIS DocDB SQL operator.
@@ -151,6 +154,107 @@ export function toStructured(value: unknown): Record<string, unknown> {
   return { value };
 }
 
+// ── %Service_DocDB gate translation (Story 35.7) ───────────────
+
+/**
+ * IRIS error code for "Access Denied" (ERROR #822). The numeric code is
+ * locale-stable — the message text is NOT (Rules #8/#13: IRIS localizes
+ * error prefixes/text), so detection keys on `code` only.
+ *
+ * Code 822 is SHARED between a disabled `%Service_DocDB` and a genuine
+ * privilege failure (lead live probe, 2026-08-19: `_SYSTEM` holding `%All`
+ * still receives 822 when the service is off), so the code alone is never
+ * a sufficient discriminator (Rule #54) — the live service state is.
+ */
+const IRIS_ERROR_CODE_ACCESS_DENIED = 822;
+
+/** The DocDB gateway service — disabled by default on IRIS. */
+const DOCDB_SERVICE_NAME = "%Service_DocDB";
+
+/**
+ * Translate a DocDB access-denied failure into an actionable error message
+ * when the root cause is a disabled `%Service_DocDB` (Story 35.7,
+ * AC 35.7.1/35.7.3/35.7.4).
+ *
+ * Returns the enriched message when (and only when) ALL of the following
+ * hold; returns `null` (caller passes the original error through unchanged)
+ * otherwise:
+ *
+ * - the error carries an `errors[]` entry with numeric `code === 822`
+ *   (the real disabled-service shape is HTTP 200 with a code-822 object in
+ *   `status.errors[]` — never match message text, never branch on the HTTP
+ *   status); AND
+ * - a follow-up `GET /api/executemcp/v2/security/service?name=...` reports
+ *   `%Service_DocDB` as `enabled: false`.
+ *
+ * Pass-through is total: service enabled (genuine privilege failure),
+ * service-state check itself failing, unexpected response shape, or a
+ * non-822 error all return `null` — a secondary failure must never mask
+ * the real error.
+ *
+ * This is a catch-path translation, not a pre-check: the extra round-trip
+ * happens only when a call has already failed with 822.
+ *
+ * @param ctx - Tool context (used for the single service-state follow-up).
+ * @param error - The `IrisApiError` thrown by the DocDB call.
+ * @returns The actionable message, or `null` for pass-through.
+ */
+export async function translateDocDbAccessDenied(
+  ctx: ToolContext,
+  error: IrisApiError,
+): Promise<string | null> {
+  // The runtime cast in http-client.ts passes envelope.status.errors through
+  // whenever it has a length — a non-empty STRING satisfies that check, so
+  // `errors` can be a non-array here despite the unknown[] type (the shared
+  // formatIrisErrors guards the same shape). Guard before .some so a
+  // malformed error can never throw out of the caller's catch path.
+  const hasAccessDenied =
+    Array.isArray(error.errors) &&
+    error.errors.some(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        (entry as Record<string, unknown>).code ===
+          IRIS_ERROR_CODE_ACCESS_DENIED,
+    );
+  if (!hasAccessDenied) return null;
+
+  let enabled: unknown;
+  try {
+    const response = await ctx.http.get(
+      `${BASE_EXECUTEMCP_URL}/security/service?name=${encodeURIComponent(DOCDB_SERVICE_NAME)}`,
+    );
+    const result = (response as { result?: unknown }).result;
+    enabled =
+      result !== null && typeof result === "object"
+        ? (result as Record<string, unknown>).enabled
+        : undefined;
+  } catch {
+    // The service-state check itself failed — never mask the original error.
+    return null;
+  }
+
+  if (enabled !== false) {
+    // Service enabled (genuine privilege/other failure) or an unexpected
+    // response shape — pass the original error through unchanged.
+    return null;
+  }
+
+  return (
+    `ERROR #822: Access Denied — this usually means the ${DOCDB_SERVICE_NAME} ` +
+    `service is disabled (it is disabled by default on IRIS). Checked live: ` +
+    `${DOCDB_SERVICE_NAME} is currently DISABLED on this instance. ` +
+    `To fix: enable it in the Management Portal (System Administration > ` +
+    `Security > Services > ${DOCDB_SERVICE_NAME}), or via the ` +
+    `iris_service_manage tool (in the @iris-mcp/admin server) with ` +
+    `action="enable" and ` +
+    `name="${DOCDB_SERVICE_NAME}" — note that action is itself ` +
+    `governance-default-disabled and needs an IRIS_GOVERNANCE override such ` +
+    `as {"global": {"iris_service_manage:enable": true}}. ` +
+    `Original error: ${error.message}`
+  );
+}
+
 // ── iris_docdb_manage ──────────────────────────────────────────
 
 export const docdbManageTool: ToolDefinition = {
@@ -160,7 +264,10 @@ export const docdbManageTool: ToolDefinition = {
     "Create, drop, or list IRIS document databases. " +
     "'list' returns all DocDB databases in the namespace. " +
     "'create' creates a new document database with optional property definitions. " +
-    "'drop' permanently removes a document database and all its data.",
+    "'drop' permanently removes a document database and all its data. " +
+    "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
+    "(it is disabled by default on IRIS) — a disabled service fails these calls " +
+    "with ERROR #822: Access Denied.",
   inputSchema: z.object({
     action: z
       .enum(["list", "create", "drop"])
@@ -241,11 +348,15 @@ export const docdbManageTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
+        // translate it into an actionable message (pass-through otherwise).
+        const gateMessage = await translateDocDbAccessDenied(ctx, error);
         return {
           content: [
             {
               type: "text" as const,
-              text: `Error managing DocDB database: ${error.message}`,
+              text:
+                gateMessage ?? `Error managing DocDB database: ${error.message}`,
             },
           ],
           isError: true,
@@ -266,7 +377,10 @@ export const docdbDocumentTool: ToolDefinition = {
     "'insert' adds a new document and returns its generated ID. " +
     "'get' retrieves a document by ID. " +
     "'update' replaces a document by ID. " +
-    "'delete' removes a document by ID.",
+    "'delete' removes a document by ID. " +
+    "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
+    "(it is disabled by default on IRIS) — a disabled service fails these calls " +
+    "with ERROR #822: Access Denied.",
   inputSchema: z.object({
     action: z
       .enum(["insert", "get", "update", "delete"])
@@ -390,11 +504,14 @@ export const docdbDocumentTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
+        // translate it into an actionable message (pass-through otherwise).
+        const gateMessage = await translateDocDbAccessDenied(ctx, error);
         return {
           content: [
             {
               type: "text" as const,
-              text: `Error managing document: ${error.message}`,
+              text: gateMessage ?? `Error managing document: ${error.message}`,
             },
           ],
           isError: true,
@@ -413,7 +530,10 @@ export const docdbFindTool: ToolDefinition = {
   description:
     "Query documents in an IRIS document database using filter criteria. " +
     "Supports comparison operators ($eq, $lt, $gt, $ne, $lte, $gte) " +
-    "and returns matching documents.",
+    "and returns matching documents. " +
+    "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
+    "(it is disabled by default on IRIS) — a disabled service fails these calls " +
+    "with ERROR #822: Access Denied.",
   inputSchema: z.object({
     database: z.string().min(1).describe("Document database name"),
     filter: z
@@ -467,11 +587,14 @@ export const docdbFindTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
+        // translate it into an actionable message (pass-through otherwise).
+        const gateMessage = await translateDocDbAccessDenied(ctx, error);
         return {
           content: [
             {
               type: "text" as const,
-              text: `Error querying documents: ${error.message}`,
+              text: gateMessage ?? `Error querying documents: ${error.message}`,
             },
           ],
           isError: true,
@@ -491,7 +614,10 @@ export const docdbPropertyTool: ToolDefinition = {
     "Create, drop, or index a property on an IRIS document database. " +
     "'create' defines a new property with a specified type. " +
     "'drop' removes a property definition. " +
-    "'index' creates an index on a property for faster queries.",
+    "'index' creates an index on a property for faster queries. " +
+    "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
+    "(it is disabled by default on IRIS) — a disabled service fails these calls " +
+    "with ERROR #822: Access Denied.",
   inputSchema: z.object({
     action: z
       .enum(["create", "drop", "index"])
@@ -575,11 +701,16 @@ export const docdbPropertyTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
+        // translate it into an actionable message (pass-through otherwise).
+        const gateMessage = await translateDocDbAccessDenied(ctx, error);
         return {
           content: [
             {
               type: "text" as const,
-              text: `Error managing property '${property}': ${error.message}`,
+              text:
+                gateMessage ??
+                `Error managing property '${property}': ${error.message}`,
             },
           ],
           isError: true,

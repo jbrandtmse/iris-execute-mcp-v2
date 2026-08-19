@@ -120,7 +120,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 
 ## Prerequisites
 
-In addition to the standard prerequisites, the DocDB tools require the `%Service_DocDB` service to be enabled on the IRIS instance. This can be enabled through the System Management Portal under *System Administration > Security > Services*.
+In addition to the standard prerequisites, the four DocDB tools require the `%Service_DocDB` service to be enabled on the IRIS instance. **`%Service_DocDB` is disabled by default on IRIS.** Enable it through the Management Portal under *System Administration > Security > Services > %Service_DocDB*, or via the `iris_service_manage` tool (`action="enable"`, `name="%Service_DocDB"` — that tool is provided by the `@iris-mcp/admin` server) — note that action is itself governance-default-disabled and needs an `IRIS_GOVERNANCE` override such as `{"global": {"iris_service_manage:enable": true}}`. While the service is disabled, every DocDB call fails with `ERROR #822: Access Denied`; the tools detect this case and return an actionable error naming both remedy routes. The detection performs one follow-up check of the live service state via the suite's custom ExecuteMCPv2 REST endpoint — on an instance without that endpoint deployed, the raw `ERROR #822` passes through unchanged.
 
 ---
 
@@ -144,6 +144,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_docdb_document` | Insert, get, update, or delete documents | `action`, `database`, `id?`, `document?`, `namespace?` | destructive |
 | `iris_docdb_find` | Query documents with filter criteria | `database`, `filter`, `namespace?` | readOnly, idempotent |
 | `iris_docdb_property` | Create, drop, or index properties | `action`, `database`, `property`, `type?`, `namespace?` | destructive |
+
+> All four DocDB tools require `%Service_DocDB` to be enabled on the instance (disabled by default on IRIS) — see [Prerequisites](#prerequisites). With the service disabled they return an actionable `ERROR #822: Access Denied` error naming both remedy routes.
 
 ### Analytics Tools
 
@@ -578,7 +580,7 @@ Analytics tools use the custom REST endpoint and pass namespace as a request par
 
 REST management tools use the IRIS built-in Management API at `/api/mgmnt/v2/{namespace}/...`.
 
-**Important:** DocDB tools require the `%Service_DocDB` service to be enabled in the target IRIS instance. Without this service, DocDB operations will fail with a service-not-available error.
+**Important:** DocDB tools require the `%Service_DocDB` service to be enabled in the target IRIS instance (it is disabled by default on IRIS). Without this service, DocDB operations fail with `ERROR #822: Access Denied` — the tools detect this case and return an actionable error naming the cause and both remedy routes (Management Portal, or `iris_service_manage` `action="enable"` under an `IRIS_GOVERNANCE` override).
 
 ---
 
@@ -590,7 +592,7 @@ REST management tools use the IRIS built-in Management API at `/api/mgmnt/v2/{na
 |-------|-------|------------|
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials | Check `IRIS_USERNAME` and `IRIS_PASSWORD` |
-| `DocDB service not available` | `%Service_DocDB` not enabled | Enable the service via SMP: *System Administration > Security > Services* |
+| `ERROR #822: Access Denied` (from `/api/docdb/v1/...`) | `%Service_DocDB` not enabled (disabled by default on IRIS) — the DocDB tools translate this into an actionable error naming both remedies | Enable the service via the Management Portal (*System Administration > Security > Services > %Service_DocDB*), or `iris_service_manage` `action="enable"` (itself governance-default-disabled; needs an `IRIS_GOVERNANCE` override) |
 | `Database not found` | DocDB database does not exist | Use `iris_docdb_manage` with action `list` to check available databases |
 | `Document not found` | Invalid document ID | Verify the document ID with `iris_docdb_find` |
 | `Cube not found` | DeepSee cube does not exist | Use `iris_analytics_cubes` with action `list` to see available cubes |
