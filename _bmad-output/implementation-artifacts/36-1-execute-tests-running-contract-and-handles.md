@@ -1,0 +1,187 @@
+# Story 36.1: MEDIUM - `iris_execute_tests` Running-Result Contract, Correlation Handles, Caller-Controlled Wait Budget
+
+Status: ready-for-dev
+
+<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
+
+## Story
+
+As an **agent or developer running a genuinely slow ObjectScript test suite through `iris_execute_tests`**,
+I want **a run that outlives the tool's wait budget to come back as an explicit non-error "still running" result carrying the run's handles (Atelier job id + `%UnitTest.Result` run index), a `timeout` I can set, and the same handles on every completed run**,
+so that **I never mistake a running job for a failed one, never re-submit it, and can correlate results by handle instead of guessing at `MAX(runIdx)`**.
+
+## Context — why this story exists
+
+First beta-feedback defect (2026-09-10, OcuPilot project, profile `ocupilot-iris`, IRIS 2026.2 Build 221U, Atelier v8): `docs/bugs-2026-09-10.md` (with the correct-course analysis addendum) and `sprint-change-proposal-2026-09-10-execute-tests-long-run.md`. The tool polls `/work/{id}` under a hard-coded 120 s budget and, on expiry, returns `Error: Test execution timed out` (`isError: true`, no `structuredContent`) while the `%UnitTest.Manager` run keeps executing for minutes; the job id it holds is discarded. The caller's only move — re-submit — created concurrent runs of the same class against shared fixtures and hours of misdirected debugging. Ledger item `34-6-CR-20` (b) predicted this verbatim and was sized LOW; Story 36.0 raises it to MEDIUM and this story closes it.
+
+**Scope discipline:** this is Tier 1 of two. Story 36.2 (`iris_test_status`) owns re-attach / read-by-run-index / cancel / in-flight detection and the only new tool of the epic. This story ships the complete-SHAPE contract and documents that seam (AC 36.1.10); it must not build any of 36.2's surface (Rule #52). The change proposal's PRD (FR143/FR144 + Reliability bullet) and `architecture.md` L1 edits are ALREADY applied — do not re-apply.
+
+**This story is pure TypeScript** — `packages/iris-dev-mcp/src/tools/execute.ts` (+ a one-line description fix in `compile.ts`, the env var in `packages/shared/src/config.ts`, tests, docs). No ObjectScript handler change, so NO bootstrap regen; `BOOTSTRAP_VERSION` must NOT move (currently `e1168c1ebe56`). Prove that.
+
+**Epic constraints in force:** E-1 (no new tool, no new action key — `iris_execute_tests` has no `action` enum and its governance key is the bare frozen-baseline member; an `action` enum is FORBIDDEN, it would rename the key and trip the Rule #23 drift test); E-2 (`gen:governance-baseline:check` ONLY, frozen `1e62c5ad5bf7`/141/201/60). Lead decisions (2026-09-10): **L-2** the 36.2 companion is `developer`-only and NOT paired, so this story's `hint` must name the manual re-attach route that works in `core` today; **L-3** changeset `@iris-mcp/dev` minor + `@iris-mcp/shared` patch.
+
+## Acceptance Criteria
+
+Sourced verbatim from `_bmad-output/planning-artifacts/epics.md`, "### Story 36.1" (added via correct-course 2026-09-10).
+
+1. **AC 36.1.1** - Root cause confirmed at `packages/iris-dev-mcp/src/tools/execute.ts:137` (`TEST_POLL_TIMEOUT = 120_000`, unchanged since the `/work` rewrite `82a5716`), `:328` (the `Location` job id is captured and never returned), `:359-391` (the poll loop — correct since `2ca6c3f`, keep its accumulate-every-drain shape byte-for-byte) and `:393-398` (expiry → `isError: true`, no `structuredContent`, no handle). Evidence alignment recorded: run 242 started 15:56:36 (finish − duration), the client error fired ≈15:58:36 (+120 s), and run 243 was re-submitted at 15:58:49.
+2. **AC 36.1.2** - Probe-first (#16), BEFORE coding, results recorded verbatim in Dev Notes (they also seed Story 36.2's design — Rule #52 seam): (a) **when** `^IRIS.TempAtelierAsyncQueue(id,"unittest","id")` becomes readable relative to the `POST /work` response — it is set inside the worker AFTER class load/compile (`%Api.Atelier.v8:730`), so the first poll may precede it; (b) whether the run index node is still readable on the poll that observes completion or already killed (`v8.cls:423` kills the whole `(id)` subtree on that poll) — this decides the capture strategy in AC 36.1.5; (c) `GET /work/{id}` on an ABANDONED, FINISHED job (use one of the 10 orphans on `ocupilot-iris` — note the GET consumes the node, one shot per job): does `$SYSTEM.WorkMgr.Attach` on the hours-stale token succeed and does the poll drain the full result? (d) `GET /work/{id}` on a job abandoned mid-run and re-polled after completion — does the remainder drain? (e) `DELETE /work/{id}` (`CancelAsync`) on a RUNNING unittest job — does the worker observably stop (`%UnitTest_Result` row absent/partial; `$D(^UnitTest.Result(idx))`)? (f) live-confirm `$D(^UnitTest.Result(idx))` = `10` while a run is executing and `11` after `SaveResult` (in-flight detection without touching the queue). (c)–(f) are 36.2's design inputs; 36.1 records them and builds nothing on them.
+3. **AC 36.1.3** - **Running-result contract.** On wait-budget expiry with a job that is still running (`Retry-After` still present on the last poll), the tool returns `isError: false` and a `structuredContent` whose top level is `{ status: "running", jobId, runIndex, runIndexSource, elapsedMs, timeoutMs, target, level, namespace, partial: { total, passed, failed, skipped, details }, hint }`. Counts appear ONLY under `partial` (clearly the drained-so-far subset — never a top-level `total` a consumer could mistake for a final count, the `2ca6c3f` under-report class). The `text` content leads with an unmistakable first line (e.g. `TEST RUN STILL EXECUTING — not finished, not failed. jobId=… runIndex=…. Do NOT re-submit.`) and `hint` names the re-attach routes: the Story 36.2 companion tool once it ships, and the route available TODAY in every preset — `iris_global_get` on `IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` for the run index, then `iris_sql_execute` against `%UnitTest_Result.TestInstance/TestCase/TestMethod/TestAssert` filtered by that `InstanceIndex` (never `MAX()`). `isError: false` follows the suite convention ratified at the Epic 35 retro (`35-6-CR-1`: partial/ongoing state lives in `structuredContent` without `isError`); the story's Dev Notes state this choice explicitly for review.
+4. **AC 36.1.4** - **`timeout` parameter (additive, E-1).** Optional positive number of SECONDS; explicit arg > operator env `IRIS_TEST_TIMEOUT` (seconds, parsed exactly like `IRIS_SQL_TIMEOUT` in `packages/shared/src/config.ts:155-169`, stored pre-converted) > default `120`. A documented hard upper cap (recommend `3600`) is clamped with an annotation in the response (the `IRIS_SQL_MAX_ROWS` `rowsCapped` precedent). The Zod description states plainly that MCP clients impose their own `tools/call` ceilings (TS SDK default 60 s; several clients 60 s–2 min, not all configurable) so a long synchronous wait may be abandoned upstream, and that the running result + re-attach is the robust route. Rule #59: prove the knob is NOT inert — `timeout: 1` against a slow class yields `status:"running"`; the default yields `status:"completed"` for a fast class; `IRIS_TEST_TIMEOUT` alone changes the observed budget.
+5. **AC 36.1.5** - **Handles on EVERY path.** The completed envelope gains additive `status: "completed"`, `jobId`, `runIndex`, `runIndexSource`; existing fields (`total`, `passed`, `failed`, `skipped`, `details`) stay byte-identical (Rule #19). `runIndex` capture strategy follows probe (a)/(b): read the queue node via the existing ExecuteMCPv2 `/global` GET route on each poll iteration until captured; if the run completed before capture (fast runs — the final poll kills the node), fall back to the `^UnitTest.Result` counter read BEFORE queueing vs AFTER completion — delta exactly 1 ⇒ `runIndex = after`, `runIndexSource: "counter"`; any other delta ⇒ `runIndex: null`, `runIndexSource: null` with a `runIndexNote` naming the ambiguity. NEVER derive it from `MAX(InstanceIndex)`. The zero-result guard envelope (`zeroResultGuardResponse`) also carries `jobId`/`runIndex` when known.
+6. **AC 36.1.6** - **Every early return carries `structuredContent`** — `no job ID` (`execute.ts:329-334`), the former `timed out` (now AC 36.1.3), and the `IrisApiError` catch — routed through ONE shared envelope helper so shapes cannot diverge (the `zeroResultGuardResponse` precedent). This closes ledger item **`34-6-CR-20` (b)** in full: disposition RESOLVED, ledger row updated with a Rule #51 mechanical recount.
+7. **AC 36.1.7** - **Tests.** Introduce a testability seam for the budget/clock (an injectable `now`/`sleep` or the first `vi.useFakeTimers` use in the repo — record which, and why) so the running branch is pinned WITHOUT burning wall-clock time. Pin the exact `running` envelope shape, the `timeout`/env/default precedence, the cap clamp, the counter-fallback for `runIndex` (delta 1 vs. delta >1 — both fakes must be shapes the real API returns, #54), and the shared-helper shape on all early returns. Rule #48/#59 mutation evidence: revert the running-result branch to the old terminal error → the pin goes RED; restore → GREEN. The three existing poll-loop tests (`execute.test.ts:1000/1044/1078`) pass UNCHANGED, and a `toEqual` pin of the pre-feature completed envelope minus the additive fields fails on any drift (Rule #19 mechanical proof).
+8. **AC 36.1.8** - **Live proof (#22/#26/#34) from the BUILT dist in a fresh Node process, on TWO genuinely different instances** — the default HSCUSTOM profile AND `ocupilot-iris` (the reporter's). Using a disposable `ExecuteMCPv2.Temp.*` test class with a deliberately slow method (`Hang`; delete before commit): `timeout: 5` ⇒ `status:"running"` with `jobId` and `runIndex`; `iris_global_get` on that `jobId`'s `"unittest","id"` node equals the reported `runIndex`; after the run finishes, `%UnitTest_Result.TestInstance` holds exactly that `InstanceIndex` with the expected duration (oracle from reality, #36) and NO second run was created; the SAME class with a sufficient budget ⇒ `status:"completed"` carrying the same handles. Mutation leg: with the fix reverted the same smoke reproduces the reporter's exact `Error: Test execution timed out`. Rule #59 statement names the guarded path for each leg (the tool layer over real HTTP — a curl below the TS layer does not count). Leave the instance at baseline; note in Dev Notes whether the smoke's own orphaned queue node was consumed or left (probe (c)).
+9. **AC 36.1.9** - **Docs (#43, self-documenting).** `iris_execute_tests`'s Zod `description` drops the "reliable execution" promise and states: the default budget, `timeout` + `IRIS_TEST_TIMEOUT`, the running contract and "do NOT re-submit", the re-attach routes, the client-ceiling caveat, and the concurrency caveat (same-class concurrent runs share instance fixtures AND Atelier predicts the run index before allocation — cross-attribution is possible). `packages/iris-dev-mcp/README.md` (table row `:215` + detail block `:1164-1200`), `tool_support.md:43`, and `CHANGELOG.md` updated; `packages/iris-mcp-all/README.md` checked with a recorded verdict (#56). `deployAndTestClass.ts` / `objectscriptReview.ts` prompts checked for test-execution guidance — if edited, `pnpm gen:skills` regenerates the skills (Rule #18) and `prompt-safety-invariants.test.ts` pins the wording. **Also** correct `iris_doc_compile`'s `async` description (`compile.ts:56-58`): it promises "a job ID for polling" that the tool does not return (`compile.ts:106-125`) — state what it actually returns. Run every documented example (35.5 lesson).
+10. **AC 36.1.10** - **Seam documented (Rule #52).** Dev Notes name exactly what Story 36.2 owns and 36.1 must NOT build: re-attach by `jobId` (`GET /work/{id}`), read-by-`runIndex` from `%UnitTest_Result`, `cancel` (`DELETE /work/{id}`), in-flight detection, and the `TOOL_PAIRS`/preset registration. 36.1's `hint` may reference the companion tool by name as forthcoming.
+11. **AC 36.1.11** - Gates: `pnpm turbo run build test lint type-check` green (per-package standalone runs acceptable per `35-1-DEV-1`, substitution recorded); `gen:governance-baseline:check` (`:check` ONLY) exit 0 at frozen `1e62c5ad5bf7`/141/201/60 (E-2); tool counts unmoved and no new action key (E-1, #31); `bootstrap-classes.ts` absent from the diff, `BOOTSTRAP_VERSION` stays `e1168c1ebe56`; changeset added (`@iris-mcp/dev` minor, `@iris-mcp/shared` patch — Lead decision L-3, decided 2026-09-10); Rule #35 count check on the OS suite unaffected (412 `Test*`).
+
+## Lead pre-story probe — what the correct-course session verified live (2026-09-10)
+
+Instances: `ocupilot-iris` (host port 52774, HSCUSTOM, IRIS 2026.2 Build 221U, Atelier v8 — the reporter's) for live data; the default HSCUSTOM profile for system-class source export. Re-run cheaply if you extend anything (Rule #16). **Everything below is READ-ONLY evidence; the four probes that consume or mutate server state — AC 36.1.2 (c), (d), (e), (f) — were deliberately NOT run and are yours.**
+
+**P1 — Orphaned queue nodes exist and survive abandonment.** `$O` loop over `^IRIS.TempAtelierAsyncQueue` via `iris_execute_command` (`server: ocupilot-iris`): 10 entries, all `requesttype=unittest`, all with `hasResult=0` (`"result"` is only written by the compile/testrtn branches; unittest results come from `UnitTestResultToJSON`) — job → run index: `8049973→245`, `14015698→242`, `17792443→250`, `19864482→253`, `25556966→249`, `31797604→256`, `34609192→248`, `47707851→203` (this one has `"unittest","sent"` markers = a partial drain happened before abandonment), `62059686→234`, `77206376→215`. For every one, `$D(^UnitTest.Result(id))=11` (root node present = `SaveResult` ran = finished). `^UnitTest.Result` counter = 260.
+
+**P2 — The run index is readable from the tool layer with an EXISTING route.** `iris_global_get` `global: IRIS.TempAtelierAsyncQueue`, `subscripts: 31797604,"unittest","id"` → `{"value":256,"defined":true}`. This is the mechanism AC 36.1.5's capture strategy reuses (same `/global` GET route the dev tool already calls). The root value (`subscripts` empty) is the counter for the fallback.
+
+**P3 — Evidence timeline reconciled (SQL, `ocupilot-iris`).** `SELECT TOP 20 InstanceIndex, DateTime, Duration, DATEADD('second', -Duration, DateTime) AS StartApprox FROM %UnitTest_Result.TestInstance ORDER BY InstanceIndex DESC` — run 242: finish 16:04:36, 480.5 s ⇒ start 15:56:36 ⇒ +120 s = 15:58:36 (the reporter's "≈15:56:3x–15:58" error) ⇒ run 243 started 15:58:49. Newer rows prove the reporter is still hitting it after filing: 253 (600.8 s, 22:20:26→22:30:26) and 256 (480.4 s, 22:30:52→22:38:52). `DateTime` = FINISH (class doc on `%UnitTest.Result.TestInstance.DateTime`); index allocated at START — so "out of order" indices are expected.
+
+**P4 — `%Api.Atelier.v8` (exported from IRISLIB; keep the export in your scratchpad, not the repo).** `QueueAsync` :134 — validates, `GenCryptToken` id, stores request + `"start"` `$ZH`, `tWQM.Queue(ExecuteAsyncRequest, tID)`, `Detach` token → `("wqm")`, `Location` header = id (:276), HTTP 202. `PollAsync` :310 — `Lock +…("work",pID):1` else 423 (:329); `WorkMgr.Attach(token)` (:346); `WaitOne(0)` (:350); drains `"cout"` lines; if `$$$MultiTimeout` ⇒ `Retry-After: 3` (:364) + re-`Detach` + re-store token; ELSE finished ⇒ `CleanUpAfterUnitTestRequest` (:385), `UnitTestResultToJSON` (:408) and **`Kill ^IRIS.TempAtelierAsyncQueue(pID)` (:423)**. `CancelAsync` :444 — `Attach`, `Kill tWQM`, cleanup, kill node. `ExecuteAsyncRequest` unittest branch :599-752 — builds testspec (`Test` prefix re-added at :698), compiles as needed, **`("unittest","id") = $G(^UnitTest.Result,0)+1` at :730** (a PREDICTION, set inside the worker after load/compile — hence AC 36.1.2 (a)), then `RunTest(spec,"/norecursive/noload/run/nodelete/nocleanup/display/nodebug")` (:736). `UnitTestResultToJSON` :794 walks `^UnitTest.Result(id,"(root)",class,method)` and marks `("unittest","sent",class[,method])` — the delta-drain semantics `2ca6c3f` relies on.
+
+**P5 — `%UnitTest.Manager` (exported).** `RunTest` :386 → `RunTestSuites` :475 → `realRunTestSuites` :489 → `%New` → `%OnNew` :1804 → `ReserveResultId` :1822 → **`Set ..ResultId = $i(^UnitTest.Result)` :2833** (lock only around first-time initialisation, :2827). `$$$KillRootNode(^IRIS.Temp.UnitState)` at :501 on EVERY run (shared global — concurrent runs stomp it). `SaveResult` :1664 writes the root node via `SaveResult^%SYS.UNITTEST` and files indices. So: Atelier's prediction (:730) and the Manager's allocation (:2833) are separated by milliseconds and no lock — near-simultaneous submissions can cross-attribute (document as a caveat, AC 36.1.9; do not fix).
+
+**P6 — TypeScript layer facts.** `retryafter` is set in ONE place (`packages/shared/src/http-client.ts:382-384`) and consumed in ONE (`execute.ts:363`); per-request HTTP default 60 s (`http-client.ts:54-56`) — poll GETs return fast (`WaitOne(0)`), so the effective budget is ≈120 s + 200 ms, not +60 s; the only automatic retry is a single 401 re-auth (`:256-261`). `McpServerBase` discards the SDK `extra` argument (`server-base.ts:1146-1149`) — `signal`/`sendNotification`/`progressToken` never reach `ToolContext` (`tool-types.ts:197-276`); `export.ts:200-214/484-491` already probes for hooks that can never exist. **No test covers the timeout branch; no fake timers exist anywhere in `packages/`** (`useFakeTimers`/`advanceTimersBy`: zero hits). No doc mentions the 120 s budget (`120_000`, "two minutes": zero hits across `docs/`, READMEs, `tool_support.md`, `CHANGELOG.md`). `iris_doc_compile` async (`compile.ts:92-97, 106-125`) uses `/action/compile?async=1` and returns the raw envelope — no job id, no poll companion, despite `compile.ts:58`.
+
+**P7 — MCP client ceilings (external; leads, not facts — Rule #16; re-verify for the beta client).** TS SDK `DEFAULT_REQUEST_TIMEOUT_MSEC` = 60,000 ms; Claude Code exposes `MCP_TOOL_TIMEOUT` (ms) plus an idle timeout and its `resetTimeoutOnProgress` handling is reported broken upstream; Cline ≈60 s (configurable); Cursor ≈60 s–2 min (configurable); VS Code Copilot agent mode ≈60 s and NOT configurable. Consequence baked into AC 36.1.4's description text: the running result + re-attach is the robust route; `timeout` is a convenience.
+
+**Not verified — yours (AC 36.1.2 c–f):** stale-token `Attach` on a finished orphan; mid-run abandonment + later re-drain; `DELETE /work/{id}` observable effect on a running worker; `$D(^UnitTest.Result(idx))=10` during a run. Each consumes or mutates state; use disposable `ExecuteMCPv2.Temp.*` classes and the orphans on `ocupilot-iris` (one shot each), and record exact outputs — Story 36.2's design is built on them.
+
+## Tasks / Subtasks
+
+- [ ] **Task 1 — Re-probe and record (AC 36.1.1, 36.1.2)**
+  - [ ] Walk `execute.ts:244-489` end to end against the reporter's timeline (P3) and record the mechanism in Dev Notes.
+  - [ ] Run probes (a)–(f); record verbatim outputs. (a)/(b) decide Task 3's capture strategy — do not code it first.
+- [ ] **Task 2 — Budget seam + `timeout` + `IRIS_TEST_TIMEOUT` (AC 36.1.4, 36.1.7 seam half)**
+  - [ ] Replace the module constant with a resolved budget: explicit `timeout` (seconds) > `ctx.config.testTimeoutMs` (new, from `IRIS_TEST_TIMEOUT`, parsed like `sqlTimeoutMs` in `config.ts:155-169`; docs row alongside `IRIS_SQL_TIMEOUT` in `config.ts` and the README env table) > `120`. Hard cap (3600 s recommended) with a `timeoutCapped: true` annotation in the response (the `rowsCapped` precedent).
+  - [ ] Inject `now`/`sleep` (or adopt `vi.useFakeTimers` — first in the repo; say why) so tests never wait wall-clock. Production defaults unchanged (Rule #19).
+- [ ] **Task 3 — Handles + running contract (AC 36.1.3, 36.1.5, 36.1.6)**
+  - [ ] Read `^UnitTest.Result` (root) via the `/global` GET route BEFORE `POST /work`; on each poll while `retryafter` is set, read `IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` until captured; after completion, if uncaptured, read the counter again and apply the delta-1 rule; never `MAX()`.
+  - [ ] One shared envelope helper for ALL non-completed returns (`no job ID`, running, `IrisApiError`, zero-result guard) — keep `zeroResultGuardResponse`'s `isError: true` + `structuredContent` contract (AC 34.6.4) intact; add `jobId`/`runIndex` when known.
+  - [ ] Running envelope exactly as AC 36.1.3; `text` first line unmistakable; `hint` names BOTH routes (36.2 companion "forthcoming", and the `iris_global_get` → `iris_sql_execute` by `InstanceIndex` route that works in `core` today — L-2).
+  - [ ] Completed envelope: additive `status`, `jobId`, `runIndex`, `runIndexSource`; existing keys byte-identical.
+- [ ] **Task 4 — Tests (AC 36.1.7)**
+  - [ ] `execute.test.ts`: running shape pin; precedence (arg > env > default); cap clamp + annotation; counter fallback delta 1 / delta >1 (fakes = real shapes, #54); shared-helper shape on the three early returns; pre-feature `toEqual` pin on the completed envelope minus additive fields; the three existing poll tests UNCHANGED.
+  - [ ] Mutation evidence: running branch reverted to the old terminal error → exactly the running pins RED; restored → GREEN. Record counts.
+- [ ] **Task 5 — Live proof (AC 36.1.8)**
+  - [ ] Forced clean rebuild (delete `tsconfig.tsbuildinfo` first — Epic 35 §3.3). Fresh-Node smoke script over the BUILT dist with the real `IrisHttpClient` + `buildToolContext`, on default HSCUSTOM AND `ocupilot-iris`; disposable `ExecuteMCPv2.Temp.*` class with a `Hang`-based slow method; legs: `timeout: 5` ⇒ running (+ `iris_global_get` cross-check of `runIndex`); wait; `%UnitTest_Result.TestInstance` has exactly that `InstanceIndex`, no sibling run; sufficient budget ⇒ completed with handles; fix reverted ⇒ the reporter's exact error. Delete the class (IRIS) and the script; note whether the smoke's queue node was consumed.
+  - [ ] Rule #59 statement per leg (path = tool layer over real HTTP).
+- [ ] **Task 6 — Docs + ledger + seam + gates (AC 36.1.9, 36.1.10, 36.1.11)**
+  - [ ] Description text (execute.ts) + `compile.ts:56-58` correction; dev README (`:215` row + `:1164-1200` block, env table); `tool_support.md:43`; `CHANGELOG.md`; `iris-mcp-all` README verdict recorded; prompts checked (regen skills if edited). Run every documented example.
+  - [ ] Dev Notes "Seam for Story 36.2" section (AC 36.1.10) + verbatim probe (c)–(f) outputs.
+  - [ ] Ledger: `34-6-CR-20` (b) → RESOLVED (Rule #51 recount; the (a)/(c)–(f) sub-items of that row stay open — say so explicitly). New rows only for genuine new findings.
+  - [ ] Gates: per-package standalone suites (dev/shared/all at minimum; record the `35-1-DEV-1` substitution); tsc + eslint; `gen:governance-baseline:check` exit 0 (frozen); tool counts unmoved; pure-TS diff (no `.cls`, no `bootstrap-classes.ts`), `BOOTSTRAP_VERSION` `e1168c1ebe56`; changeset (`@iris-mcp/dev` minor, `@iris-mcp/shared` patch).
+
+## Dev Notes
+
+### The two envelopes (target shapes — refine field names in review, keep the discriminator)
+
+```jsonc
+// wait budget expired, job still running  (isError: false)
+{
+  "status": "running",
+  "jobId": "31797604",
+  "runIndex": 256, "runIndexSource": "queue",          // or null / "counter"
+  "elapsedMs": 120204, "timeoutMs": 120000,
+  "target": "OcuPilot.Test.Demo", "level": "class", "namespace": "HSCUSTOM",
+  "partial": { "total": 2, "passed": 2, "failed": 0, "skipped": 0, "details": [ /* drained so far */ ] },
+  "hint": "Still executing server-side. Do NOT re-submit. Re-attach: iris_test_status (forthcoming, Story 36.2) or today: iris_global_get IRIS.TempAtelierAsyncQueue(31797604,\"unittest\",\"id\") → runIndex; iris_sql_execute against %UnitTest_Result.TestMethod/TestCase/TestSuite/TestInstance WHERE TestInstance = 256 (never MAX())."
+}
+// completed  (existing keys byte-identical; additive keys only)
+{ "status": "completed", "jobId": "31797604", "runIndex": 256, "runIndexSource": "queue",
+  "total": 5, "passed": 4, "failed": 1, "skipped": 0, "details": [ /* unchanged */ ] }
+```
+
+`isError: false` on `running` is a deliberate, reviewable choice: the request SUCCEEDED (the run was submitted and is executing); the Epic 35 retro ratified that ongoing/partial state lives in `structuredContent` without `isError` (`35-6-CR-1`). The compensating control is the discriminator + the unmistakable `text` first line + counts nested under `partial` only.
+
+### Traps
+
+- **Do not add an `action` enum to `iris_execute_tests`** (E-1 / Rule #23 — it renames the frozen governance key). Additive params and fields only.
+- **Do not touch the accumulate-every-drain loop shape** (`execute.ts:341-391`, the `2ca6c3f` fix). You are adding a handle read and changing what happens AFTER the loop exits without `testResults`.
+- **The final poll kills the queue node** (`v8.cls:423`), so the run-index read must happen on a poll that still returned `retryafter`, or fall back to the counter delta. Never `MAX(InstanceIndex)` — that is the exact attribution bug the reporter hit.
+- **Counter delta ≠ 1 means ambiguity, not "pick the newer one."** Return `null` + `runIndexNote`. Another client (or the reporter's second session) can allocate an index in the same window.
+- **`zeroResultGuardResponse` keeps `isError: true` + `structuredContent`** (AC 34.6.4, a recorded Lead decision) — extend it with handles; do not weaken it.
+- **Fakes must be real shapes (#54):** the queue-node GET returns `{value, defined}` from the `/global` route; the counter root read returns the integer; an undefined node returns `defined: false` — pin those, not invented shapes.
+- **Rule #55:** never generate file content through a shell heredoc. **Epic 35 §3.1:** region-scoped edits — `git diff` must show only your hunks (the ledger especially).
+- **Forced clean rebuild before any dist-level claim** (Epic 35 §3.3): delete `tsconfig.tsbuildinfo`; "restore-by-rebuild" alone is not proof.
+- **`readOnlyHint: true` vs `mutates: "write"`** on this tool is a pre-existing, justified divergence (`baseline-classifications.ts:108-111`: code execution). Do not "fix" it here.
+
+### Seam for Story 36.2 (Rule #52) — what this story must NOT build
+
+Re-attach by `jobId` (`GET /work/{id}`), read-by-`runIndex` from `%UnitTest_Result.*`, `cancel` (`DELETE /work/{id}`), in-flight detection (`$D(^UnitTest.Result(idx))`), the new tool's `mutates`/preset/`TOOL_PAIRS` registration and count pins. This story DELIVERS to 36.2: the verbatim probe (c)–(f) outputs, the shared envelope helper (36.2 must emit the identical `running`/`completed` shapes), and the `hint` wording that 36.2 updates from "forthcoming" to the shipped name.
+
+### Testing standards
+
+- `packages/iris-dev-mcp/src/__tests__/execute.test.ts` — `describe("iris_execute_tests")` from `:748`; poll-loop tests at `:1000/:1044/:1078` are the back-compat pin and must pass UNCHANGED; sibling error-path tests at `:1422/:1441` show the mocked-HTTP style.
+- Standalone suite baselines at Epic 35 close: dev 712 · shared 1326 · all 129 (per-package runs; `35-1-DEV-1` turbo-parallel flake is environmental). Re-measure at pickup (AC 36.0.5).
+- Rule #59: the running branch is proven RED on the path it guards — unit (budget seam) AND the fresh-Node dist smoke (real HTTP). Rule #48 mutation on both.
+- OS suite untouched (412 `Test*`, Rule #35 count check still runs in the gate).
+
+### Doc surfaces — enumerate exhaustively (#56)
+
+| File | What changes |
+|---|---|
+| `packages/iris-dev-mcp/src/tools/execute.ts` | tool `description` (budget, `timeout`/`IRIS_TEST_TIMEOUT`, running contract + "do NOT re-submit", re-attach routes, client-ceiling caveat, concurrency caveat); `timeout` Zod describe |
+| `packages/iris-dev-mcp/src/tools/compile.ts` | `:56-58` `async` describe — state what is actually returned (no job id) |
+| `packages/shared/src/config.ts` | `IRIS_TEST_TIMEOUT` parse + `testTimeoutMs` field + env-var doc comment (mirror `IRIS_SQL_TIMEOUT`) |
+| `packages/iris-dev-mcp/README.md` | table row `:215` (params gain `timeout?`); detail block `:1164-1200` (running contract, handles, env var, caveats); env-var table |
+| `tool_support.md` | `:43` row — note the running contract + `timeout` |
+| `CHANGELOG.md` | `### Added` (minor) — running result, handles, `timeout`, `IRIS_TEST_TIMEOUT`; `### Fixed` — compile async description |
+| `packages/iris-mcp-all/README.md` | CHECK and record verdict (mention or no-mention) |
+| `packages/iris-dev-mcp/src/prompts/deployAndTestClass.ts`, `objectscriptReview.ts` | CHECK for test-execution guidance; if edited → `pnpm gen:skills` (Rule #18) + `prompt-safety-invariants.test.ts` pin |
+| `.changeset/*.md` | `@iris-mcp/dev` minor, `@iris-mcp/shared` patch (L-3) |
+| `_bmad-output/implementation-artifacts/deferred-work.md` | `34-6-CR-20` (b) → RESOLVED, Rule #51 recount |
+
+### Project Structure Notes
+
+- Pure TS in `packages/iris-dev-mcp/src/tools/execute.ts` + `packages/shared/src/config.ts`; tests beside them; no `src/**/*.cls` change ⇒ no `pnpm run gen:bootstrap`, `bootstrap-classes.ts` absent from the diff.
+- The `/global` GET route (`ExecuteMCPv2.REST.Global:GetGlobal`, already bootstrapped) is the read mechanism for both the queue node and the `^UnitTest.Result` counter — reuse the exact request shape the existing `iris_global_get` tool builds (`packages/iris-dev-mcp/src/tools/`).
+- Governance key stays `iris_execute_tests` (bare; no `action`), frozen-baseline member, `write`.
+
+### Previous story intelligence
+
+- **34.5 / 34.6** — the zero-result guard and its `isError` + `structuredContent` decision (AC 34.6.4); `toAtelierMethodFilter`/`fromAtelierMethodName` show the `Test`-prefix wire quirk — untouched here.
+- **35.3** — env-var-with-override precedent (`IRIS_ACCEPT_LANGUAGE`), and "prove the knob is not inert" (Rule #59).
+- **35.4** — the `rowsCapped` annotation precedent for clamped caller values.
+- **35.9** — the lead smoke's lessons: fresh-Node dist smoke with hand-written hostile fixtures; forced clean rebuild; run every README example; a written finding is a lead, not a fact (the bug report's `iris_doc_compile` premise was wrong).
+- **2ca6c3f (2026-07-08)** — the delta-drain accumulation fix; its `CHANGELOG.md:675-700` narrative explains why the loop must not be touched.
+
+### References
+
+- [Source: docs/bugs-2026-09-10.md] — report + analysis addendum
+- [Source: _bmad-output/planning-artifacts/sprint-change-proposal-2026-09-10-execute-tests-long-run.md] — §1 root cause, §3 lead decisions L-1/L-2/L-3, §4.1 ACs
+- [Source: _bmad-output/planning-artifacts/epics.md#Epic 36] — constraints E-1/E-2/E-3, branching
+- [Source: _bmad-output/planning-artifacts/architecture.md#Long-Running Tool Calls Over Asynchronous Server Jobs] — decision L1
+- [Source: _bmad-output/planning-artifacts/prd.md] — FR143, Reliability NFR bullet (Epic 36)
+- [Source: _bmad-output/implementation-artifacts/deferred-work.md:2179] — `34-6-CR-20` (b)
+- [Source: packages/iris-dev-mcp/src/tools/execute.ts:134-398] — current implementation
+- [Source: packages/shared/src/http-client.ts:54-56, 256-261, 382-384] — timeout, retry, `retryafter`
+- [Source: packages/shared/src/config.ts:47-52, 155-169] — `IRIS_SQL_TIMEOUT` pattern to mirror
+- [Source: %Api.Atelier.v8.cls (IRISLIB export) — QueueAsync :134, PollAsync :310, CancelAsync :444, ExecuteAsyncRequest :490 (unittest :599-752, run-index prediction :730), UnitTestResultToJSON :794]
+- [Source: %UnitTest.Manager.cls (IRISLIB export) — RunTest :386, realRunTestSuites :489 (:501 UnitState kill), %OnNew :1804, ReserveResultId :2823-2834, SaveResult :1664]
+- [Source: .claude/rules/project-rules.md — #16, #19, #23, #28, #31, #35, #36, #43, #48, #52, #54, #55, #56, #59]
+
+## Dev Agent Record
+
+### Agent Model Used
+
+### Debug Log References
+
+### Completion Notes List
+
+### File List
+
+## Change Log
+
+| Date | Change | Author |
+|---|---|---|
+| 2026-09-10 | Story created via `/bmad-correct-course` (Sprint Change Proposal 2026-09-10 approved; Epic 36 opened). Lead pre-story probe section carries the session's live evidence: 10 orphaned unittest queue nodes on `ocupilot-iris` (all finished), run index readable via `iris_global_get` from the queue node (job 31797604 → 256), the reporter's timeline reconciled to the 120 s budget (run 242 start 15:56:36 → error ≈15:58:36 → run 243 at 15:58:49), `DateTime` = finish / index at start, Atelier prediction-vs-Manager allocation race, TS-layer facts (no timeout test, no fake timers, `extra` dropped by the base class), MCP client ceilings as leads. Probes (c)–(f) deliberately left to dev (state-consuming). Decisions L-1/L-2/L-3 recorded. | Mary / analyst (claude-fable-5-1) |

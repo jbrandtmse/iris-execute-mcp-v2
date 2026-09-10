@@ -582,3 +582,23 @@ development_status:
   35-8-docs-artifact-rollup-epic-gate: done
   35-9-doc-load-package-prefix-validation: done
   epic-35-retrospective: done
+  # Epic 36: Beta Feedback Remediation — long-running test execution fidelity
+  # (trigger docs/bugs-2026-09-10.md, first beta-feedback defect;
+  # sprint-change-proposal-2026-09-10-execute-tests-long-run.md).
+  # iris_execute_tests converts its hard-coded 120s poll budget into a terminal
+  # error while the %UnitTest run keeps executing; job id + run index discarded;
+  # no timeout knob (ledger 34-6-CR-20(b) predicted it). 36.1 = running-result
+  # contract + handles + caller budget (additive params/fields ONLY — no action
+  # enum, E-1; pure TS, no BOOTSTRAP bump). 36.2 = iris_test_status companion
+  # (the epic's ONLY new tool: mutates per action, both presets, L-2 decided:
+  # developer include / core exclude / not paired; counts +1). 36.0 RESERVED
+  # for the /epic-cycle retro-review gate (epic-35 retro exists; ledger carries
+  # 0H/26M/95L=121 open). Do NOT renumber.
+  # Branch (L-1, 2026-09-10): cut feature/feature-wave-5-beta-feedback off main
+  # (wave-4 merged 60be515); epic branch epic36 (ticketless convention — answer
+  # the SC-1 prompt with this convention).
+  epic-36: backlog
+  36-0-epic-35-deferred-cleanup: backlog
+  36-1-execute-tests-running-contract-and-handles: ready-for-dev
+  36-2-test-status-companion-tool: backlog
+  epic-36-retrospective: optional
