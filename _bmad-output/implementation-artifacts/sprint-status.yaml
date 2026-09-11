@@ -609,7 +609,7 @@ development_status:
   # 36.0 gate (2026-09-10): Rule #37 >=3 trigger FIRED - 48 Epic-33/34-era items
   # at count 2. 34-5-R2/R3/R4 fold into 36.1 (AC 36.1.12); the other 45 go to
   # 36.3 (burn-down, runs LAST, mandatory 45 only - Project Lead decisions).
-  epic-36: in-progress
+  epic-36: done
   36-0-epic-35-deferred-cleanup: done
   36-1-execute-tests-running-contract-and-handles: done
   36-2-test-status-companion-tool: done
