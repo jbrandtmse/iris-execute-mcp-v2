@@ -250,6 +250,72 @@ describe("loadConfig", () => {
     expect(() => loadConfig(env)).toThrow("IRIS_SQL_TIMEOUT");
   });
 
+  // ── IRIS_TEST_TIMEOUT (Story 36.1, AC 36.1.4) ───────────────────────
+
+  it("should leave testTimeoutMs undefined (and absent) when unset — Rule #19 byte-for-byte no-op", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+    };
+    const config = loadConfig(env);
+    expect(config.testTimeoutMs).toBeUndefined();
+    expect(config).not.toHaveProperty("testTimeoutMs");
+  });
+
+  it("should parse IRIS_TEST_TIMEOUT (seconds) and convert to milliseconds", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "45",
+    };
+    const config = loadConfig(env);
+    expect(config.testTimeoutMs).toBe(45_000);
+  });
+
+  it("should throw when IRIS_TEST_TIMEOUT is not a valid number", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "abc",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_TEST_TIMEOUT");
+  });
+
+  it("should throw when IRIS_TEST_TIMEOUT is zero or negative", () => {
+    const envZero = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "0",
+    };
+    expect(() => loadConfig(envZero)).toThrow("IRIS_TEST_TIMEOUT");
+
+    const envNeg = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "-5",
+    };
+    expect(() => loadConfig(envNeg)).toThrow("IRIS_TEST_TIMEOUT");
+  });
+
+  it("should throw when IRIS_TEST_TIMEOUT is Infinity (a non-finite value must be rejected, not forwarded)", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "Infinity",
+    };
+    expect(() => loadConfig(env)).toThrow("IRIS_TEST_TIMEOUT");
+  });
+
+  it("should treat an empty-string IRIS_TEST_TIMEOUT as unset (matches IRIS_SQL_TIMEOUT convention)", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "",
+    };
+    const config = loadConfig(env);
+    expect(config.testTimeoutMs).toBeUndefined();
+  });
+
   // ── IRIS_ACCEPT_LANGUAGE (Story 35.3) ───────────────────────────────
 
   it("should default acceptLanguage to en-US,en;q=0.9 when IRIS_ACCEPT_LANGUAGE is not set", () => {

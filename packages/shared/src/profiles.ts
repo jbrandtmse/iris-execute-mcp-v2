@@ -366,6 +366,12 @@ export function mergeProfile(
     // spread preserves the "unset -> field absent" shape (Rule #19).
     ...(base.sqlMaxRows !== undefined ? { sqlMaxRows: base.sqlMaxRows } : {}),
     ...(base.sqlTimeoutMs !== undefined ? { sqlTimeoutMs: base.sqlTimeoutMs } : {}),
+    // Story 36.1 code review: inherit the operator's IRIS_TEST_TIMEOUT
+    // (`iris_execute_tests`' default wait budget) the same way — without this
+    // spread the knob was silently INERT on every call resolving to a named
+    // profile (the handler reads `ctx.config.testTimeoutMs`, and `ctx.config`
+    // IS the resolved profile). Conditional spread keeps "unset -> absent".
+    ...(base.testTimeoutMs !== undefined ? { testTimeoutMs: base.testTimeoutMs } : {}),
     // Story 35.3: inherit the operator's IRIS_ACCEPT_LANGUAGE (like the SQL
     // caps above) — no per-profile override key exists in ProfileOverride
     // (out of this story's scope), so every profile shares the default

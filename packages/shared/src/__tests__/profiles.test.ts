@@ -754,6 +754,52 @@ describe("SQL caps propagate to non-default profiles (Story 24.2 CR patch)", () 
 });
 
 // ════════════════════════════════════════════════════════════════════
+// Story 36.1 code review: `IRIS_TEST_TIMEOUT` (loadConfig → testTimeoutMs)
+// was NOT inherited by `mergeProfile`, so the operator knob was silently
+// inert on every call resolving to a named profile — `iris_execute_tests`
+// reads `ctx.config.testTimeoutMs` and `ctx.config` IS the resolved profile
+// (server-base.ts buildToolContext). Third instance of this class after the
+// Story 24.2 (SQL caps) and Story 35.3 (acceptLanguage) patches above.
+// ════════════════════════════════════════════════════════════════════
+
+describe("testTimeoutMs propagates to non-default profiles (Story 36.1 CR patch)", () => {
+  it("a named IRIS_PROFILES entry inherits IRIS_TEST_TIMEOUT's testTimeoutMs from the default profile", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_TEST_TIMEOUT: "7",
+      IRIS_PROFILES: JSON.stringify({
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    expect(defaultConfig.testTimeoutMs).toBe(7_000);
+
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const def = registry.get(DEFAULT_PROFILE_NAME) as IrisProfile;
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    expect(def.testTimeoutMs).toBe(7_000);
+    expect(secondary.testTimeoutMs).toBe(7_000);
+  });
+
+  it("a named profile carries NO testTimeoutMs key when IRIS_TEST_TIMEOUT is unset (Rule #19 shape preserved)", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({
+        secondary: { host: "secondary.example.com" },
+      }),
+    };
+    const defaultConfig = loadConfig(env);
+    const registry = buildProfileRegistry(defaultConfig, env);
+    const secondary = registry.get("secondary") as IrisProfile;
+
+    expect(secondary).not.toHaveProperty("testTimeoutMs");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // Story 35.3 code review: `mergeProfile` gained an `acceptLanguage`
 // conditional spread with NO test. That gap is invisible by construction —
 // `IrisHttpClient` falls back to the same English default when the field is

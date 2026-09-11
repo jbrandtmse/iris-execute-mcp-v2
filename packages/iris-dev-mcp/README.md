@@ -189,6 +189,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 > **`advise` — SQL Performance Advisor (Epic 28):** given `query` (or `workload: true` to advise the top-`topN` recent statements instead, mutually exclusive with `query`), returns evidence-cited findings — `full-scan`, `missing-index` (with a suggested `CREATE INDEX` DDL), `stale-stats`, `unused-index`, `plan-anomaly` — each carrying a plan excerpt and a confidence level. **Strictly advisory: recommendations are heuristic; verify with `explain` before applying any change** — `advise` never applies anything itself (no write/`applyIndex` action ships in v1). `topN` (default 5, max 20) bounds real analysis work in `workload` mode, not just output size — each statement analyzed is a full endpoint round-trip (EXPLAIN + dictionary reads), so a larger `topN` is proportionally more work. If the recent-statement workload source is unavailable on your IRIS edition/version, `workload` mode returns a clear capability message rather than a raw SQL error.
 >
 > **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
+>
+> **`iris_execute_tests` wait budget (optional, opt-in — Story 36.1):** an operator may set `IRIS_TEST_TIMEOUT` (the tool's DEFAULT wait budget, in **seconds**, before it returns a "running" result instead of blocking further) as an environment variable. Unset by default — the tool keeps its 120-second default. It applies to every server profile (named `IRIS_PROFILES` entries inherit it, like `IRIS_SQL_TIMEOUT`). A per-call `timeout` argument, when given, takes precedence over `IRIS_TEST_TIMEOUT`. See the `iris_execute_tests` detail section below for the full running-result contract.
 
 ### Server Tools
 
@@ -212,7 +214,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
 | `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
-| `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
+| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below | `target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |
 
 ### Code Metrics Tools
 
@@ -1228,6 +1230,102 @@ above. Internally the tool strips that prefix before querying IRIS's Atelier
 test-runner endpoint (which matches on the unprefixed form) and restores it on
 every result row, so the documented prefixed form is what you should always
 pass and always see back; you do not need to do this stripping yourself.
+
+A completed run's `structuredContent` additionally carries `status: "completed"`,
+`jobId`, `runIndex`, and `runIndexSource` — Story 36.1, so a caller can
+correlate results by handle instead of guessing at `MAX(InstanceIndex)`.
+`runIndexSource` is `"queue"` (read from the job's own
+`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` node on a still-running
+poll) or `"counter"` (a run that finished before that node could be read: the
+`^UnitTest.Result` counter read just before queueing vs. after completion moved
+by exactly 1, and the run drained result rows). Otherwise both are `null` and a
+`runIndexNote` says why (e.g. a concurrent run also allocated an index). Existing
+fields (`total`/`passed`/`failed`/`skipped`/`details`) are unchanged.
+
+### Long-running suites: `timeout` and the "still running" result (Story 36.1)
+
+The tool waits up to 120 seconds by default before it stops blocking — override
+per call with `timeout` (a positive number of **seconds**; hard-capped at 3600s,
+a larger value is silently clamped and the response carries `timeoutCapped: true`)
+or set `IRIS_TEST_TIMEOUT` as an environment-level default (precedence:
+`timeout` argument > `IRIS_TEST_TIMEOUT` > the 120s default). **MCP clients
+impose their own `tools/call` ceiling independently of this budget** — the MCP
+TypeScript SDK defaults to 60 seconds, and several clients cap at 60s-2min (not
+always configurable) — so a long `timeout` value is a convenience, not a
+guarantee that the CLIENT will wait that long.
+
+If the wait budget expires while the ObjectScript run is **still executing
+server-side**, the tool returns a non-error result instead of a timeout error:
+
+```json
+{
+  "status": "running",
+  "jobId": "31797604",
+  "runIndex": 256,
+  "runIndexSource": "queue",
+  "elapsedMs": 120204,
+  "timeoutMs": 120000,
+  "target": "MyApp.Tests.SlowSuite",
+  "level": "class",
+  "namespace": "HSCUSTOM",
+  "partial": { "total": 2, "passed": 2, "failed": 0, "skipped": 0, "details": [] },
+  "hint": "Still executing server-side. Do NOT re-submit. ..."
+}
+```
+
+`isError` is `false` — the request succeeded; the run was submitted and is
+executing. **This is not a failure and not a final result — do NOT re-submit
+the same target**, which starts a SECOND concurrent run against shared test
+fixtures. `partial` is the drained-so-far subset ONLY (never a top-level
+`total` a consumer could mistake for a final count). Counts under `partial`
+can go up on a later look, never down. On a running result `runIndexSource` is
+`"queue"` or `null` — the counter fallback is never applied while a run is
+still executing (another client's run could be counted instead); a `null`
+index carries a `runIndexNote`. If polling an already-queued job fails
+(an HTTP error or a network timeout), the error result still carries the
+`jobId`, the drained-so-far `partial` rows and the same re-attach `hint`.
+
+To see the run through, re-attach rather than re-submit — the response's `hint`
+carries the exact calls:
+- **Today, in every preset:** the `runIndex` (the response's own, or
+  `iris_global_get` with global `IRIS.TempAtelierAsyncQueue` and subscripts
+  `<jobId>,"unittest","id"` while the job is queued or running), then
+  `iris_sql_execute`:
+
+  ```sql
+  SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, tm.Name AS MethodName,
+         tm.Status, tm.Duration, tm.ErrorDescription
+  FROM %UnitTest_Result.TestMethod tm
+  JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID
+  JOIN %UnitTest_Result.TestSuite ts ON tc.TestSuite = ts.ID
+  JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID
+  WHERE ti.InstanceIndex = ?   -- parameters: [runIndex]
+  ```
+
+  Only `%UnitTest_Result.TestInstance` has an `InstanceIndex` column — the other
+  result tables join down to it. **Never `MAX(InstanceIndex)`**, which can pick
+  up a different, concurrently-started run. These rows exist while the run is
+  still executing (a method still running already reads `Status` 1), so treat
+  them as final only once `FinishedAt` is non-empty.
+- **Forthcoming:** a dedicated re-attach/read-by-handle tool (Story 36.2)
+  will do this directly by `jobId`.
+
+**Concurrency caveat:** two runs of the SAME class started close together
+share that class's fixtures, and the Atelier endpoint *predicts* a run's
+index (reading the counter) slightly before `%UnitTest.Manager` actually
+*allocates* it — a race between near-simultaneous submissions can misattribute
+a run's own index. Avoid submitting the same target concurrently.
+
+**Method-level target validation (Story 36.1):** at `level: "method"`, the
+`ClassName:MethodName` target is trimmed and validated — more than one `:`
+separator, or an empty class segment before `:`, returns an explicit
+malformed-target error (distinct from the zero-result guard) instead of
+silently discarding part of the target or querying an empty class name. If
+the method name you typed doesn't match what actually ran (the endpoint's
+`Test`-prefix-stripped filter is many-to-one — `Class:Validate` and
+`Class:TestValidate` both resolve to the same wire filter), the response
+carries an additive `methodMismatchWarning` field naming the mismatch rather
+than staying silent about it.
 </details>
 
 ---

@@ -2,6 +2,72 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-09-10] — Story 36.1: `iris_execute_tests` running-result contract, handles, caller-controlled wait budget
+
+### Fixed — long-running `iris_execute_tests` calls no longer surface as a bare timeout error (`@iris-mcp/dev`, HIGH — first beta-feedback defect)
+
+External report (OcuPilot project, 2026-09-10): a genuinely slow test suite exceeded the tool's
+hard-coded 120-second poll budget and returned `Error: Test execution timed out` (`isError: true`,
+no `structuredContent`, no job handle) while the run kept executing server-side for minutes. The
+caller's only move was to re-submit, which created a SECOND concurrent run against shared fixtures
+and hours of misdirected debugging. Root-caused in `packages/iris-dev-mcp/src/tools/execute.ts`: the
+Atelier job id captured at queue time was discarded, and wait-budget expiry was treated identically
+to a genuine failure.
+
+### Added — running-result contract, `timeout` parameter, and run handles on every path (`@iris-mcp/dev`, `@iris-mcp/shared`)
+
+On wait-budget expiry with a job still executing, `iris_execute_tests` now returns `isError: false`
+with `structuredContent.status: "running"`, the run's `jobId` and (once populated) `runIndex`, and a
+`partial` snapshot of whatever has drained so far — never a failure, never a final count, and the
+response text leads with an unmistakable "Do NOT re-submit" instruction. Re-attach today with the
+exact calls the response's `hint` carries: `iris_global_get` on
+`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` for the run index, then `iris_sql_execute`
+joining `%UnitTest_Result.TestMethod` → `TestCase` → `TestSuite` → `TestInstance` filtered by that
+exact `InstanceIndex` (only `TestInstance` has the column; never `MAX(InstanceIndex)`), treating the
+rows as final only once `TestInstance.DateTime` is set — they exist, with not-yet-finished methods
+already reading `Status` 1, while the run executes. A dedicated re-attach tool is forthcoming
+(Story 36.2). A completed run's envelope gains the same additive `status: "completed"`, `jobId`,
+`runIndex`, and `runIndexSource` fields — `"queue"` (the job's own queue node, read on a
+still-running poll) or `"counter"` (a completed run whose `^UnitTest.Result` counter, read before
+queueing and after completion, moved by exactly 1); otherwise `null` with a `runIndexNote`. A
+still-running result is never counter-attributed. Existing `total`/`passed`/`failed`/`skipped`/`details`
+fields are byte-identical. If polling an already-queued job fails (an HTTP error or a network
+timeout), the error result now carries the `jobId`, the drained-so-far rows and the re-attach hint
+instead of losing the handle. The "no job ID" and HTTP-error results now carry `structuredContent`,
+so their `text` is the same JSON envelope the zero-result guard already used (no longer a bare
+`Error: …` string).
+
+A new optional `timeout` parameter (positive seconds) sets the wait budget per call; an operator may
+also set a default via the `IRIS_TEST_TIMEOUT` environment variable (precedence: `timeout` argument
+\> `IRIS_TEST_TIMEOUT` \> the existing 120-second default), inherited by every named server profile
+like `IRIS_SQL_TIMEOUT`. Both are hard-capped at 3600 seconds
+(`timeoutCapped: true` when clamped, mirroring the `IRIS_SQL_MAX_ROWS`/`rowsCapped` precedent). MCP
+clients impose their own `tools/call` ceiling independently of this budget (commonly 60 seconds, not
+always configurable) — the running-result-plus-re-attach contract is the robust path for a
+genuinely slow suite, not a large `timeout` value.
+
+Three narrow pre-existing defects in the same handler, carried in the deferred-work ledger since
+Story 34.5 (`34-5-R2`/`34-5-R3`/`34-5-R4`), were closed alongside this fix since they live in the
+exact code this story rewrites: a malformed `class:method` target (more than one `:`, or an empty
+class segment) now returns an explicit error instead of silently mis-parsing; a test method named
+literally `Test` is now counted and reported instead of being silently dropped by a truthiness
+check; and a `level: "method"` run whose returned method name doesn't match what was requested (the
+Atelier endpoint's `Test`-prefix-stripped filter is many-to-one) now carries an explicit
+`methodMismatchWarning` instead of staying silent about it.
+
+### Fixed — `iris_doc_compile`'s `async` description corrected (`@iris-mcp/dev`)
+
+The `async` parameter's description promised "a job ID for polling"; the tool has no such poll
+companion and returns `{mode: "async", docs, response}` immediately. The description now states
+what is actually returned.
+
+**Back-compat (Rule #19):** no new tool, action key, or governance key —
+`iris_execute_tests` keeps its existing bare (no-`action`) `write` classification and default
+state; the frozen Epic-14 governance baseline (`1e62c5ad5bf7`, 141 keys) is unchanged. Existing
+completed-envelope fields are byte-identical; the three pre-existing poll-loop regression tests
+pass with their test bodies and assertions unchanged (only the shared mock plumbing now routes the
+new `/global` reads to their own mock) and still fail on both historical truncation shapes.
+
 ## [Pre-release — 2026-08-14] — Epic 34: `iris_execute_classmethod` output capture, `ByRef`/`Output` support, 20-arg ceiling
 
 ### Fixed — `iris_execute_classmethod` no longer fails on classmethods that `Write` to the current device (`@iris-mcp/dev`)

@@ -40,7 +40,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` (load takes `?flags=` when `compile: true`) |
 | 13 | `iris_macro_info` | 🟦 Atelier | `POST /action/getmacrodefinition` + `POST /action/getmacrolocation` |
 | 14 | `iris_sql_execute` | 🟦 Atelier | `POST /action/query` |
-| 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest) |
+| 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest); a run outliving its wait budget returns a non-error "running" result (`jobId`/`runIndex` handles) instead of a timeout error (Story 36.1) — the run-index handle is captured via `GET /global` (🟥 ExecuteMCPv2, the pre-existing `iris_global_get` route), reading `IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` and, as a completed-runs-only fallback, `^UnitTest.Result`'s counter (read before queueing and after completion); no new governance key (bare `iris_execute_tests`, unchanged) |
 | 16 | `iris_execute_command` | 🟥 ExecuteMCPv2 | `POST /command` |
 | 17 | `iris_execute_classmethod` | 🟥 ExecuteMCPv2 | `POST /classmethod` |
 | 18 | `iris_global_get` | 🟥 ExecuteMCPv2 | `GET /global` |
