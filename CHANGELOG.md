@@ -2,6 +2,44 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-09-11] — Story 36.4: `/global` subscript-injection fix — read-only preset now actually means read-only
+
+### Security — `iris_global_get`/`iris_global_set`/`iris_global_kill` could execute arbitrary ObjectScript via the `subscripts` parameter, bypassing write governance (`@iris-mcp/dev` + ObjectScript, HIGH, ledger `36-2-CR-1`)
+
+`ExecuteMCPv2.REST.Global:BuildGlobalRef` wrapped a caller-supplied string subscript in a quoted
+literal WITHOUT doubling a quote character it contained, then the handlers evaluated the resulting
+reference by ObjectScript indirection (`$Get(@tRef)`, `Set @tRef`, `Kill @tRef`). A `subscripts` value
+containing a quote could close the literal early, and the rest of the value ran as ObjectScript code.
+
+**Exposure window.** The flaw has been present since the `/global` handler was introduced (Story 3.2,
+2026-04-06), so it is in `v0.1.0` and every pre-release since. It became a governance bypass once
+write governance existed: any `IRIS_GOVERNANCE` policy that disables writes (Pre-release 2026-06-15)
+and the `IRIS_GOVERNANCE_PRESET=read-only` preset (Pre-release 2026-07-08). Because `iris_global_get` is a
+READ-classified, default-enabled tool, a caller with only read access could execute code and write to
+the instance through a tool the governance layer reported as safe.
+
+Fixed: `BuildGlobalRef` (shared by all three handlers) now emits every subscript as a canonical number
+or as ONE escaped string literal — never as code. A string value is recovered from the piece (the text
+between the quotes of the documented `"key1","key2"` convention, or the whole piece; a doubled quote
+`""` is one literal quote), then every quote in it is doubled before it is wrapped once, so the literal
+can only end at its own closing quote whatever the value contains. Quotes, `_`, `$`, `@`, `(`, `)` and
+control characters are stored and addressed as literal data.
+
+**Behavior changes.** Every input that addressed a literal node before the fix yields the byte-identical
+reference string now — including every documented form (numeric, negative/decimal, quoted and unquoted
+string, multi-level, the Epic 36 `readGlobalNode` queue shape) — verified mechanically at the code review
+against the pre-fix builder over 20,000 random hostile inputs. Only inputs that previously ran as code or
+failed to parse behave differently: they are now addressed as a literal subscript, or — for a piece that
+begins or ends with an unmatched quote, which is what a quoted key containing a comma becomes after the
+comma split — rejected with a clear error instead of silently addressing a different node. A string key
+containing a comma remains unsupported.
+
+Live-verified before and after the fix on the real `/api/executemcp/v2/global` HTTP route, including the
+read-only-preset bypass through the real governance dispatch path. A permanent default-suite gate
+(`global-injection-epic-gate.test.ts`, armed in the pre-publish gate) and the ObjectScript test class
+`ExecuteMCPv2.Tests.GlobalSubscriptSafetyTest` pin the fix; both were proven RED against the pre-fix
+class.
+
 ## [Pre-release — 2026-09-11] — Story 36.2: `iris_test_status` companion tool — re-attach, read-by-runIndex, cancel
 
 ### Added — `iris_test_status`, the re-attach/read/cancel companion to `iris_execute_tests` (`@iris-mcp/dev`)

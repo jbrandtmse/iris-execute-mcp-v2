@@ -958,7 +958,7 @@ The `content` text renders the reference `cos_loc_counter.sh` ASCII metrics tabl
 **Output:**
 ```json
 {
-  "killed": true,
+  "deleted": true,
   "global": "TempData"
 }
 ```
@@ -986,6 +986,26 @@ The `filter` is applied client-side as a **case-insensitive** substring match by
 
 Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) behavior.
 </details>
+
+**`subscripts` contract and security note (Story 36.4):** `subscripts` is always treated as literal
+DATA, never as code. The rules:
+
+- The string is split on **every comma** — a string key that itself contains a comma is not
+  supported. Leading/trailing whitespace around each piece (space, tab, non-breaking space) is
+  trimmed.
+- A canonical number (`1`, `-1.5`) is a numeric subscript. Anything else is a string subscript.
+- Wrap a string key in quotes (`'"key1","key2"'`) and double any quote inside it (`'"a""b"'`
+  addresses the single subscript `a"b`). Quotes, `_`, `$`, `@`, `(`, `)`, `^`, `|` and control
+  characters inside a key are stored and addressed as that literal text — nothing in a subscript is
+  ever executed.
+- A piece that begins or ends with an unmatched quote — which is what a quoted key containing a
+  comma turns into after the split, e.g. `'"a,b"'` — is rejected with a clear error instead of
+  silently addressing a different node.
+
+Before Story 36.4, a quote inside a string subscript could close the literal and the rest of the
+value ran as ObjectScript — reachable through `iris_global_get` (a read-classified, default-enabled
+tool) even under `IRIS_GOVERNANCE_PRESET=read-only`. This is fixed; see the CHANGELOG `### Security`
+entry.
 
 <details>
 <summary><strong>iris_execute_command</strong> -- Execute ObjectScript</summary>
