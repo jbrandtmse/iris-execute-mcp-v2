@@ -617,4 +617,4 @@ development_status:
   # 36.4 added 2026-09-11 (Project Lead): HIGH 36-2-CR-1 /global subscript
   # injection (read-only preset bypass); runs AFTER 36.3; BOOTSTRAP moves.
   36-4-global-subscript-injection: done
-  epic-36-retrospective: optional
+  epic-36-retrospective: done
