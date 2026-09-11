@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { parse as parseToml } from "smol-toml";
 
 import {
   CLIENT_ADAPTERS,
@@ -264,11 +265,34 @@ describe("shape-guard and empty-document edge cases (AC 33.5.4, AC 33.5.7)", () 
     }
   });
 
-  it("a TOML datetime VALUE inside the root table is skipped as an entry, not classified as one", () => {
+  it("a TOML datetime VALUE inside the root table is never classified as a server entry — and (36.3, 33-5-L6) is surfaced as unsupported rather than invisible", () => {
     const content = '[mcp_servers]\nnot-a-server = 2026-07-28T10:00:00Z\n';
     const read = readConfigEntries(adapterOf("codex"), content);
     expect(read.ok).toBe(true);
-    if (read.ok) expect(Object.keys(read.entries)).toHaveLength(0);
+    if (read.ok) {
+      expect(Object.keys(read.entries)).toHaveLength(0);
+      expect(read.unsupported["not-a-server"]).toBe("a object"); // TomlDate is typeof "object"
+    }
+  });
+
+  it("33-5-L6: a canonical-named entry whose VALUE is not an object at all is surfaced as unsupported (mis-shaped), never silently absent", () => {
+    const cases: Array<[string, unknown, string]> = [
+      ["a string", "oops", "a string"],
+      ["a number", 42, "a number"],
+      ["a boolean", true, "a boolean"],
+      ["null", null, "null"],
+      ["an empty array", [], "an array (0 item(s))"],
+      ["an array of non-tables", ["x", "y"], "an array (2 item(s))"],
+    ];
+    for (const [label, value, expected] of cases) {
+      const content = JSON.stringify({ mcpServers: { "iris-dev-mcp": value } });
+      const read = readConfigEntries(adapterOf("claude-code"), content);
+      expect(read.ok, label).toBe(true);
+      if (read.ok) {
+        expect(read.entries["iris-dev-mcp"], label).toBeUndefined(); // never misread as a real entry
+        expect(read.unsupported["iris-dev-mcp"], label).toBe(expected); // never invisible either
+      }
+    }
   });
 
   it("a foreign entry literally named __proto__ is surfaced as an own key (33-5-11)", () => {
@@ -288,6 +312,129 @@ describe("shape-guard and empty-document edge cases (AC 33.5.4, AC 33.5.7)", () 
     if (read.ok) {
       expect(Object.keys(read.entries)).toHaveLength(0);
       expect(read.unsupported["iris-dev-mcp"]).toBe("array-of-tables");
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 36.3, 33-5-L5 — duplicate JSON/JSONC keys. Rule #16 probe
+// (2026-09-11): jsonc-parser's `parse()` does NOT report a duplicate key via
+// `errors` (probed directly: `parse('{"a":1,"a":2}', errors, ...)` returns
+// `{a:2}` with `errors` EMPTY) — the ledger's assumed mechanism does not
+// hold; a duplicate is picked up by a manual tree walk instead. TOML
+// (smol-toml) and YAML (`yaml`, default `uniqueKeys: true`) already REFUSE a
+// duplicate key as a genuine parse error (probed the same session) — this
+// gap is JSON/JSONC-only.
+// ════════════════════════════════════════════════════════════════════
+
+describe("duplicate keys — JSON/JSONC surfaced as unparseable, never silently last-wins (33-5-L5)", () => {
+  it("a duplicate key under the root key (two entries sharing one name) is unparseable", () => {
+    const content = '{"mcpServers": {"iris-dev-mcp": {"command": "x"}, "iris-dev-mcp": {"command": "y"}}}';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.error).toContain('duplicate key "iris-dev-mcp"');
+      expect(read.error).toContain("mcpServers");
+    }
+  });
+
+  // Story 36.3 code review: the dev-stage version of the next test pinned the
+  // OPPOSITE — that an unrelated duplicated top-level key makes the whole file
+  // unparseable. That blocked every manager operation on a hand-edited
+  // settings.json (the zed/gemini targets) over a setting the manager never
+  // reads or writes; only the ambiguity the manager can actually act on is
+  // refused now.
+  it("a duplicate top-level key UNRELATED to the root key does not make the file unreadable (the manager never reads or writes it)", () => {
+    const content = '{"mcpServers": {"iris-dev-mcp": {"command": "x"}}, "foo": 1, "foo": 2}';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(true);
+    if (read.ok) expect(Object.keys(read.entries)).toEqual(["iris-dev-mcp"]);
+  });
+
+  it("the same, in a realistic hand-edited zed settings.json (root key `context_servers`)", () => {
+    const content = '{\n  "theme": "One Dark",\n  "buffer_font_size": 14,\n  "buffer_font_size": 15,\n  "context_servers": {\n    "iris-dev-mcp": {"command": "npx"}\n  }\n}\n';
+    const read = readConfigEntries(adapterOf("zed"), content);
+    expect(read.ok).toBe(true);
+  });
+
+  it("a duplicated ROOT key (two server maps) is unparseable, with the second definition's line", () => {
+    const content = '{\n  "mcpServers": {"iris-dev-mcp": {"command": "x"}},\n  "mcpServers": {"iris-dev-mcp": {"command": "y"}}\n}\n';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.error).toContain('duplicate key "mcpServers" at line 3');
+  });
+
+  it("a duplicate key INSIDE a manager-owned entry is unparseable (the edit would target one definition while readers report the other)", () => {
+    const content = '{\n  "mcpServers": {\n    "iris-ops-mcp": {"command": "a"},\n    "iris-dev-mcp": {\n      "command": "x",\n      "command": "y"\n    }\n  }\n}\n';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.error).toContain('duplicate key "command" at line 6 in the manager-owned entry "iris-dev-mcp"');
+    }
+  });
+
+  it("a duplicate key inside a FOREIGN entry is never inspected — the file stays readable", () => {
+    const content = '{"mcpServers": {"someone-elses": {"command": "x", "command": "y"}, "iris-dev-mcp": {"command": "npx"}}}';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(true);
+  });
+
+  it("a duplicate key is caught even across an intervening JSONC comment between the two definitions", () => {
+    const content = '{\n  "mcpServers": {\n    "iris-dev-mcp": {"command": "x"},\n    // a comment between the duplicates\n    "iris-dev-mcp": {"command": "y"}\n  }\n}\n';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.error).toContain('duplicate key "iris-dev-mcp"');
+  });
+
+  it("a diagnostically clean, non-duplicate file still parses fine (no false positive)", () => {
+    const content = '{"mcpServers": {"iris-dev-mcp": {"command": "x"}, "iris-ops-mcp": {"command": "y"}}}';
+    const read = readConfigEntries(adapterOf("claude-code"), content);
+    expect(read.ok).toBe(true);
+  });
+
+  it("TOML and YAML already refuse duplicate keys on their own (no gap there)", () => {
+    const toml = readConfigEntries(adapterOf("codex"), '[mcp_servers.a]\ncommand="x"\n[mcp_servers.a]\ncommand="y"\n');
+    expect(toml.ok).toBe(false);
+    const yaml = readConfigEntries(adapterOf("goose"), "extensions:\n  a:\n    enabled: true\n  a:\n    enabled: false\n");
+    expect(yaml.ok).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 36.3, 33-5-L8 — smol-toml's parse() is provably always-a-table at
+// the top level (Rule #54 oracle): TOML has no non-object document root, and
+// smol-toml's own type declaration (`parse(): TomlTable`) plus its compiled
+// implementation (`res = {}` returned directly, node_modules/smol-toml/dist/
+// parse.js) confirm it. parseTomlSurface therefore models no "top-not-object"
+// branch for TOML — this pins the oracle itself, not just the reader.
+// ════════════════════════════════════════════════════════════════════
+
+describe("smol-toml always returns a table at the top level (33-5-L8 oracle)", () => {
+  it("every syntactically valid TOML document parses to a plain object, never a scalar/array top level", () => {
+    const documents = [
+      "", // empty
+      "a = 1\n",
+      "[table]\nb = 2\n",
+      '[[array_of_tables]]\nc = 3\n',
+      "d = 2026-01-01T00:00:00Z\n", // a bare datetime VALUE, not a bare datetime root
+    ];
+    for (const doc of documents) {
+      const parsed: unknown = parseToml(doc);
+      expect(typeof parsed, JSON.stringify(doc)).toBe("object");
+      expect(Array.isArray(parsed), JSON.stringify(doc)).toBe(false);
+      expect(parsed === null, JSON.stringify(doc)).toBe(false);
+    }
+  });
+
+  it("codex's readConfigEntries never produces a top-not-object diagnosis (the branch parseTomlSurface removed is genuinely unreachable)", () => {
+    // Every codex fixture/malformed-but-parseable probe should classify as
+    // either root-ok/root-absent/root-wrong-shape/syntax-error — NEVER
+    // top-not-object, because that would require smol-toml to return a
+    // non-table top level, which it cannot.
+    const probes = ["", "a = 1\n", "[mcp_servers]\n", "mcp_servers = 1\n"];
+    for (const content of probes) {
+      const diagnosis = diagnoseConfigSurface(adapterOf("codex"), content);
+      expect(diagnosis.status, content).not.toBe("top-not-object");
     }
   });
 });

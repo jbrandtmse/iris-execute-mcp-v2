@@ -273,6 +273,43 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
     { timeout: 30000 },
   );
 
+  it(
+    "repro 3b — several ZN switches interleaved with narration and a ByRef mutation between each (Story 36.3, ledger 34-1-R16 — repro 3's own shape, not the single-switch simplification above)",
+    async (testCtx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] execute-classmethod epic gate (repro 3b): ${skipReason}`);
+        testCtx.skip();
+        return;
+      }
+      // TargetMultiZNInterleaved: start -> ZN USER -> ZN %SYS -> ZN USER, writing
+      // narration and mutating the ByRef argument between EVERY switch — the actual
+      // bug-report repro 3 shape (several switches), which repro 3 above simplifies to
+      // a single switch. `ctx.resolveNamespace()` is the configured default (HSCUSTOM).
+      const origNs = ctx.resolveNamespace();
+      const result = await executeClassMethodTool.handler(
+        {
+          className: FIXTURE,
+          methodName: "TargetMultiZNInterleaved",
+          args: [{ byRef: true, value: "start" }],
+        },
+        ctx,
+      );
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as {
+        returnValue: string;
+        output: string;
+        byRefValues: Record<string, unknown>;
+      };
+      expect(structured.returnValue).toBe("multizn-ok");
+      expect(structured.output).toBe(
+        `start:${origNs}\nmid1:USER\nmid2:%SYS\nend:USER`,
+      );
+      expect(structured.byRefValues["0"]).toBe("start-mid1-mid2-end");
+    },
+    { timeout: 30000 },
+  );
+
   // ── Story 34.4 (AC 34.4.3 / 34-3-R4): AC 34.3.4 legs (b) Output-param, (c)
   // 20-arg, and (d) second-namespace joining leg (a) above in this DEFAULT-suite
   // file. Before this story these three legs lived ONLY in
@@ -333,8 +370,15 @@ describe("iris_execute_classmethod epic-done gate (Story 34.3 AC 34.3.4a, Rule #
         byRefValues: Record<string, unknown>;
       };
       expect(structured.returnValue).toBe("20-ok");
-      expect(structured.byRefValues["0"]).toBe("v0-m");
-      expect(structured.byRefValues["19"]).toBe("v19-m");
+      // Ledger 34-4-R2: the test's own title claims "every position" but the body
+      // used to check only 0 and 19 — positions 1-18 could silently be wrong (or
+      // missing) and this test would still pass. Loop every position AND assert
+      // the exact key count, so a silently-OMITTED position is caught too, not
+      // just a wrong value at a spot-checked index.
+      for (let i = 0; i < 20; i++) {
+        expect(structured.byRefValues[String(i)]).toBe(`v${i}-m`);
+      }
+      expect(Object.keys(structured.byRefValues)).toHaveLength(20);
     },
     { timeout: 30000 },
   );

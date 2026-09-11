@@ -1060,7 +1060,14 @@ Each `args` entry is either a plain scalar (by value) or a `{"byRef": true, "val
 marker for a `ByRef`/`Output` parameter — up to 20 positions total. Any `Write` output the
 target produces is captured (no wrapper class needed for narrating methods, stock runners
 like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
-in `output`; `argCount` is unchanged from prior versions of this tool.
+in `output`; `argCount` is unchanged from prior versions of this tool. Omitting `args` and
+passing `[]` are the same zero-argument call.
+
+**Capture caveat (ledger `34-3-R3` / `34-1-R13`, a documented limitation).** The capture
+lives in the process-private variables `%ExecuteMCPOutput`/`%ExecuteMCPTruncated`, so a
+target that KILLs them — an argumentless `KILL`, or a unit-test class whose setup/teardown
+clears them — silently loses everything captured before that point, and `truncated` does
+not report it. Run unit-test suites with `iris_execute_tests` rather than through this tool.
 
 **Response payload budget (Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 — ledger
 `34-6-CR2-6`).** `returnValue`, `byRefValues`, and `output` **share ONE 32768-RAW-character

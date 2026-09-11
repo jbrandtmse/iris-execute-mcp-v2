@@ -12,7 +12,7 @@
  * (empty-document apply, absent-no-op toggles).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import {
   CANONICAL_SERVERS,
@@ -281,6 +281,57 @@ describe("enable/disable mechanics (AC 33.1.3)", () => {
     expect(enable(ctx(), "claude-code", "user", "iris-dev-mcp", { fs }).changed).toBe(true);
     const e2 = enable(ctx(), "claude-code", "user", "iris-dev-mcp", { fs });
     expect(e2.changed).toBe(false);
+  });
+
+  it("no-write spy: a true no-op (nothing stashed) performs ZERO fs writes, incl. state.json (33-5-L3: extends the no-write sweep to the ENGINE's own no-op paths, not just detect/status)", () => {
+    const fs = new MemFs();
+    seedUser(fs, "cline", readFixture("cline/cline_mcp_settings.json"));
+    const writeSpy = vi.spyOn(fs, "writeFile");
+    const mkdirSpy = vi.spyOn(fs, "mkdir");
+    const removeSpy = vi.spyOn(fs, "remove");
+    // iris-dev-mcp is disabled in the fixture: disable is already-in-state.
+    expect(disable(ctx(), "cline", "user", "iris-dev-mcp", { fs }).changed).toBe(false);
+    // iris-admin-mcp has no flag set (present, no stash record): enable is
+    // already-in-state with NOTHING to drop.
+    expect(enable(ctx(), "cline", "user", "iris-admin-mcp", { fs }).changed).toBe(false);
+    expect(writeSpy, "no fs.writeFile call on a true no-op").not.toHaveBeenCalled();
+    expect(mkdirSpy, "no fs.mkdir call on a true no-op").not.toHaveBeenCalled();
+    expect(removeSpy, "no fs.remove call on a true no-op").not.toHaveBeenCalled();
+  });
+
+  it("33-1-R1: an enable no-op (entry already present) drops a STALE stash record instead of leaving it to self-heal only on the next disable", () => {
+    // Regression: this state arises when an EARLIER enable's config write
+    // succeeded but its state.json update failed (the persistState warning
+    // path) — the file already shows the entry present-enabled while
+    // state.json still carries the (now stale) stash record. Pre-fix,
+    // runEdit's already-in-state early return never called `updateState`,
+    // so the stale record survived every subsequent enable forever.
+    const fs = new MemFs();
+    const path = seedUser(fs, "claude-code", readFixture("claude-code/user.json"));
+    const before = fs.readFile(path); // iris-dev-mcp sits present-enabled in this fixture
+    fs.seed(
+      stateFilePath(STATE_DIR, "linux"),
+      JSON.stringify({
+        version: 1,
+        entries: [],
+        stashes: [
+          {
+            client: "claude-code",
+            scope: "user",
+            name: "iris-dev-mcp",
+            entry: { command: "npx", args: [] },
+            disabledAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const result = enable(ctx(), "claude-code", "user", "iris-dev-mcp", { fs });
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(false); // still a config no-op
+    expect(fs.readFile(path)).toBe(before); // config bytes untouched
+
+    expect(stateOf(fs).stashes).toHaveLength(0); // the stale record is gone
   });
 
   it("toggles on a MISSING file are absent-no-ops", () => {

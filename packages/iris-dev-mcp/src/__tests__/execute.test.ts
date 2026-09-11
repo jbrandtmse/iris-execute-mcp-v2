@@ -271,6 +271,33 @@ describe("iris_execute_classmethod", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  // Ledger 34-3-R5 (Rule #54): `toStructured` used to defensively wrap an
+  // `Array.isArray` branch (`{items, count}`) and a final `{value}`
+  // scalar/null fallback — neither shape the real `/classmethod` endpoint can
+  // ever emit (confirmed by reading `ExecuteMCPv2.REST.Command:ClassMethod`'s
+  // and `ExecuteMCPv2.REST.Base:RenderResponseBody`'s full success/error
+  // paths, both of which only ever hand `RenderResponseBody` a `%DynamicObject`
+  // — see `toStructured`'s own banner in execute.ts). This pin replaces those
+  // unreachable-shape assertions with the REAL shape: an arbitrary JSON object
+  // passes straight through as `structuredContent`, unmodified — a plain cast,
+  // not a remapping.
+  it("passes an arbitrary object result straight through as structuredContent unmodified (34-3-R5 — the only shape /classmethod can ever emit)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ returnValue: "ok", argCount: 0, someExtraKey: "value" }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething" },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual({
+      returnValue: "ok",
+      argCount: 0,
+      someExtraKey: "value",
+    });
+  });
+
   it("should include args in body when provided", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ returnValue: "1", argCount: 2 }),
@@ -455,6 +482,94 @@ describe("iris_execute_classmethod", () => {
         args: twentyOne,
       }),
     ).toThrow();
+  });
+
+  // ── Zod schema bounds (ledger 34-3-R8) ──────────────────────────────────
+  //
+  // The schema used to be `z.array(z.any())` — it advertised (and the MCP SDK
+  // enforced, at BOTH its own `validateToolInput` request-time check and this
+  // repo's own `dispatchToolCall` re-validation — confirmed by reading
+  // `server-base.ts`) NO real shape at all, even though the server's own
+  // `ExecuteMCPv2.Utils.ParseArgEntry` (the actual enforcement) accepts only a
+  // plain scalar or a `{byRef, value?}` marker object and rejects everything
+  // else with a clear error. This is a STRUCTURAL TIGHTENING to match that
+  // already-narrower server contract (Rule #19): every shape the server
+  // genuinely accepts must still pass the schema; every shape the server
+  // already rejected may now also be rejected earlier, at the schema/MCP
+  // layer, instead of only after a round trip to IRIS.
+  it("schema accepts every documented args shape (scalars and {byRef, value?} markers, 34-3-R8)", () => {
+    const schema = executeClassMethodTool.inputSchema;
+    // Plain scalars — string, number, boolean — passed by value.
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: ["hello", 42, true],
+      }).success,
+    ).toBe(true);
+    // {byRef: true} — Output-style undefined-in, value omitted entirely.
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [{ byRef: true }],
+      }).success,
+    ).toBe(true);
+    // {byRef: true, value: <scalar>} and {byRef: false, value: <scalar>} —
+    // both are valid marker shapes per ParseArgEntry (byRef:false requires a
+    // value, which this call supplies).
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [
+          { byRef: true, value: "start" },
+          { byRef: false, value: 1 },
+        ],
+      }).success,
+    ).toBe(true);
+    // No args at all — still optional.
+    expect(
+      schema.safeParse({ className: "MyClass", methodName: "DoSomething" }).success,
+    ).toBe(true);
+  });
+
+  it("schema rejects args entries ParseArgEntry itself rejects, at the schema level (34-3-R8)", () => {
+    const schema = executeClassMethodTool.inputSchema;
+    const base = { className: "MyClass", methodName: "DoSomething" };
+    // A nested array element — ParseArgEntry: "Argument N is a JSON array;
+    // expected a scalar or a {byRef, value} marker object".
+    expect(schema.safeParse({ ...base, args: [[1, 2]] }).success).toBe(false);
+    // A bare JSON null element — ParseArgEntry: "Argument N cannot be JSON
+    // null; use {"byRef":true} for an undefined argument, or "" for an empty
+    // string".
+    expect(schema.safeParse({ ...base, args: [null] }).success).toBe(false);
+    // An object missing the 'byRef' key — ParseArgEntry: "Argument N is an
+    // object without a 'byRef' key; expected a scalar or a {byRef, value}
+    // marker object".
+    expect(schema.safeParse({ ...base, args: [{ notAMarker: true }] }).success).toBe(
+      false,
+    );
+    // A marker 'value' that is JSON null — ParseArgEntry: "marker 'value'
+    // cannot be JSON null; omit 'value' entirely for an undefined argument".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: null }] }).success,
+    ).toBe(false);
+    // A marker 'value' that is an object — ParseArgEntry: "marker 'value'
+    // must be a scalar (string, number, or boolean)".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: { nested: 1 } }] })
+        .success,
+    ).toBe(false);
+    // A marker 'value' that is an array — same rejection as the object case.
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: [1] }] }).success,
+    ).toBe(false);
+    // 'byRef' present but not a boolean — ParseArgEntry: "'byRef' must be a
+    // JSON boolean".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: "true", value: "x" }] }).success,
+    ).toBe(false);
   });
 
   it("passes {byRef, value?} marker objects through to the REST body untouched (marker pass-through)", async () => {

@@ -12,10 +12,12 @@ import {
   status,
   entryPresence,
   REAL_STATUS_FS,
+  type ClientAdapter,
   type HostContext,
+  type StatusFs,
   type StatusReport,
 } from "../index.js";
-import { fixturePath, FOREIGN_SECRET_MARKERS } from "./helpers.js";
+import { fixturePath, FOREIGN_SECRET_MARKERS, PLANTED_FOREIGN_NAME, plantForeignSecrets } from "./helpers.js";
 
 function sandboxCtx(): HostContext {
   return { platform: "linux", env: {}, homeDir: fixturePath("sandbox-home") };
@@ -109,6 +111,44 @@ describe("status matrix over the sandbox tree", () => {
     }
   });
 
+  // Story 36.3 code review (33-5-L3 leg 2): the test above only proves
+  // anything for the one sandbox config that carries a marker. Plant every
+  // marker, as a genuine foreign entry, into EVERY detected client's config
+  // as the status engine reads it (a wrapping StatusFs — the sandbox tree on
+  // disk is never modified) and re-check the whole rendered report.
+  it("33-5-L3: a foreign secret planted into EVERY detected client's config never reaches the status surface", () => {
+    const pathToAdapter = new Map<string, ClientAdapter>();
+    for (const client of run().clients) {
+      const adapter = CLIENT_ADAPTERS[client.client];
+      if (!adapter) continue;
+      for (const scope of client.scopes) {
+        if (scope.file === "ok" && scope.path) pathToAdapter.set(scope.path, adapter);
+      }
+    }
+    expect(pathToAdapter.size).toBeGreaterThan(1);
+    const plantedFs: StatusFs = {
+      exists: REAL_STATUS_FS.exists,
+      readFile: (path) => {
+        const text = REAL_STATUS_FS.readFile(path);
+        const adapter = pathToAdapter.get(path);
+        return adapter ? plantForeignSecrets(adapter, text) : text;
+      },
+    };
+    const report = status(sandboxCtx(), plantedFs);
+    // Non-vacuous: every planted config was really read — its planted entry is surfaced by NAME.
+    let surfacedByName = 0;
+    for (const client of report.clients) {
+      for (const scope of client.scopes) {
+        if (scope.foreign.includes(PLANTED_FOREIGN_NAME)) surfacedByName++;
+      }
+    }
+    expect(surfacedByName).toBe(pathToAdapter.size);
+    const rendered = JSON.stringify(report);
+    for (const marker of FOREIGN_SECRET_MARKERS) {
+      expect(rendered).not.toContain(marker);
+    }
+  });
+
   it("stamps the report with the adapter data version", () => {
     expect(run().adapterDataVersion).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
@@ -168,5 +208,32 @@ describe("entryPresence", () => {
     if (!goose) throw new Error("registry missing goose");
     expect(entryPresence(goose, { enabled: false })).toBe("present-disabled");
     expect(entryPresence(goose, { enabled: true })).toBe("present-enabled");
+  });
+
+  it("33-5-L1 (Rule #16 probe: cline/cline + RooCodeInc/Roo-Code's own `if (server.disabled)` truthy check, 2026-09-11): a hand-edited non-boolean JSON flag reads by REAL-CLIENT truthiness, not strict equality", () => {
+    const cline = CLIENT_ADAPTERS["cline"];
+    const roo = CLIENT_ADAPTERS["roo-code"];
+    if (!cline || !roo) throw new Error("registry missing cline/roo-code");
+    for (const adapter of [cline, roo]) {
+      // Truthy non-boolean values a hand-edited JSON file could legitimately
+      // contain — the real client's `if (server.disabled)` treats every one
+      // of these as disabled, so this reader must agree.
+      expect(entryPresence(adapter, { disabled: 1 })).toBe("present-disabled");
+      expect(entryPresence(adapter, { disabled: "yes" })).toBe("present-disabled");
+      expect(entryPresence(adapter, { disabled: {} })).toBe("present-disabled");
+      // Falsy non-boolean values read as enabled, matching the same truthy check.
+      expect(entryPresence(adapter, { disabled: 0 })).toBe("present-enabled");
+      expect(entryPresence(adapter, { disabled: "" })).toBe("present-enabled");
+      expect(entryPresence(adapter, { disabled: null })).toBe("present-enabled");
+    }
+  });
+
+  it("33-5-L1: Codex (TOML) and Goose (YAML) stay STRICT — a non-boolean flag value is never read as disabled (serde+toml/serde_yaml reject it at the real client instead of coercing it)", () => {
+    const codex = CLIENT_ADAPTERS["codex"];
+    const goose = CLIENT_ADAPTERS["goose"];
+    if (!codex || !goose) throw new Error("registry missing codex/goose");
+    expect(entryPresence(codex, { enabled: 0 })).toBe("present-enabled"); // 0 !== false strictly
+    expect(entryPresence(goose, { enabled: 0 })).toBe("present-enabled");
+    expect(entryPresence(codex, { enabled: false })).toBe("present-disabled"); // the real boolean still works
   });
 });

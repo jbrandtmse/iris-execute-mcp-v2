@@ -18,11 +18,11 @@
  * reader and the diagnoser can never disagree about what "parses".
  */
 
-import { createScanner, parse as parseJsonc, type ParseError } from "jsonc-parser";
+import { createScanner, parse as parseJsonc, parseTree, type Node as JsoncNode, type ParseError } from "jsonc-parser";
 import { parse as parseToml } from "smol-toml";
 import { parseDocument, type YAMLError } from "yaml";
 
-import type { ClientAdapter, ConfigFormat } from "./types.js";
+import { CANONICAL_SERVERS, type ClientAdapter, type ConfigFormat } from "./types.js";
 
 /** One raw server entry as parsed from the client file (shape unvalidated). */
 export type RawEntry = Record<string, unknown>;
@@ -33,11 +33,15 @@ export type ReadEntriesResult =
       entries: Record<string, RawEntry>;
       /**
        * Root-key children that are NOT single server entries but must never
-       * be invisible (Story 33.5, 33-5-12): a TOML array-of-tables
-       * (`[[rootKey.name]]`) parses as an ARRAY of tables, which the
-       * table-model readers skip — silently hiding an entry. The name is
-       * surfaced here (name → form label); status lists it among foreign
-       * names and every write against it is a documented REFUSAL.
+       * be invisible: a TOML array-of-tables (`[[rootKey.name]]`, Story
+       * 33.5, 33-5-12) parses as an ARRAY of tables, and a value that is not
+       * an object at ALL — a bare string/number/boolean/null, or an array
+       * that is not every-element-a-table (36.3, 33-5-L6) — would otherwise
+       * be silently DROPPED from both `entries` and this map, reading as
+       * "absent" in the status matrix instead of "present but mis-shaped".
+       * The name is surfaced here (name → form label, e.g. "array-of-tables"
+       * or `describeValue`'s "a string"/"null"/etc.); status lists it among
+       * foreign names and every write against it is a documented REFUSAL.
        */
       unsupported: Record<string, string>;
     }
@@ -217,7 +221,104 @@ export function ownEntry<V>(map: Record<string, V>, name: string): V | undefined
   return Object.prototype.hasOwnProperty.call(map, name) ? map[name] : undefined;
 }
 
-function parseJsonSurface(content: string): SurfaceParse {
+// ════════════════════════════════════════════════════════════════════
+// Native disable-flag reading (Story 36.3, 33-5-L1) — single-sourced so
+// status.ts's entryPresence, diff.ts's enable/disable planning, and the
+// doctor's orphaned-stash check can never disagree about what "disabled"
+// means for a hand-edited, non-boolean flag value.
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * Whether a parsed entry's native disable flag reads as DISABLED — matching
+ * the REAL client's own truthiness rule, not an assumed one (Rule #16
+ * probe, 2026-09-11, against the clients' own source/deserializer):
+ *
+ * - Cline and Roo Code (JSON, `disabled` flag): both extensions' own
+ *   TypeScript source checks plain JS truthiness (`if (server.disabled)`),
+ *   never `=== true`. A hand-edited `"disabled": 1` IS treated as disabled
+ *   by the real client, so a strict `===` comparison here would
+ *   misclassify it as still-enabled. JSON/JSONC adapters therefore compare
+ *   by truthiness against the disabled value's own truthiness.
+ * - Codex (TOML, `enabled`, serde+toml) and Goose (YAML, `enabled`,
+ *   serde_yaml) deserialize the flag through a Rust `bool` field: a
+ *   non-boolean value FAILS TO DESERIALIZE and the whole config is
+ *   rejected by the real client — there is no "misread as enabled/disabled"
+ *   case to reconcile for those two formats (the real client never gets
+ *   that far), so strict equality stays the correct, conservative
+ *   comparison there.
+ */
+export function isFlagDisabled(adapter: ClientAdapter, entry: Record<string, unknown>): boolean {
+  const flag = adapter.nativeDisableFlag;
+  if (!flag) return false;
+  const value = entry[flag.key];
+  if (adapter.format === "json" || adapter.format === "jsonc") {
+    return Boolean(value) === Boolean(flag.disabledValue);
+  }
+  return value === flag.disabledValue;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Duplicate-key detection (Story 36.3, 33-5-L5). Rule #16 probe (2026-09-11):
+// jsonc-parser's `parse()` does NOT report a duplicate object key via its
+// `errors` output — probed directly (`parse('{"a":1,"a":2}', errors, ...)`
+// returns `{a:2}` with `errors` EMPTY). The ledger's suggested mechanism
+// ("jsonc-parser reports duplicates via errors") does not hold; a duplicate
+// key is silently resolved to its LAST definition with zero diagnostic. A
+// manual tree walk is the only way to detect it. TOML (smol-toml) and YAML
+// (`yaml`, `uniqueKeys` default) already REFUSE a duplicate key as a genuine
+// parse error (probed the same session) — this gap is JSON/JSONC-only.
+// ════════════════════════════════════════════════════════════════════
+
+/** The first duplicated own-key directly under `node` (an object node) and
+ * the offset of its SECOND definition — scanning ONLY that object's immediate
+ * property names, never recursing into a value, so a foreign entry's own
+ * nested content is never inspected (matching this module's "names only"
+ * discipline for foreign content). */
+function firstDuplicateKey(node: JsoncNode | undefined): { key: string; offset: number } | undefined {
+  if (node === undefined || node.type !== "object" || !node.children) return undefined;
+  const seen = new Set<string>();
+  for (const property of node.children) {
+    const keyNode = property.children?.[0];
+    if (keyNode?.type !== "string" || typeof keyNode.value !== "string") continue;
+    if (seen.has(keyNode.value)) return { key: keyNode.value, offset: keyNode.offset };
+    seen.add(keyNode.value);
+  }
+  return undefined;
+}
+
+/** Offset of the SECOND definition of `key` directly under `node`, if any. */
+function secondDefinitionOffset(node: JsoncNode | undefined, key: string): number | undefined {
+  if (node === undefined || node.type !== "object" || !node.children) return undefined;
+  let seen = false;
+  for (const property of node.children) {
+    const keyNode = property.children?.[0];
+    if (keyNode?.type !== "string" || keyNode.value !== key) continue;
+    if (seen) return keyNode.offset;
+    seen = true;
+  }
+  return undefined;
+}
+
+/** 1-based line number of `offset` in `content`. */
+function lineAt(content: string, offset: number): number {
+  return content.slice(0, offset).split("\n").length;
+}
+
+function isCanonicalServerName(name: string): boolean {
+  return (CANONICAL_SERVERS as readonly string[]).includes(name);
+}
+
+/** The object node holding `key` as an immediate top-level property, if any. */
+function childObjectNode(top: JsoncNode | undefined, key: string): JsoncNode | undefined {
+  if (top === undefined || top.type !== "object" || !top.children) return undefined;
+  for (const property of top.children) {
+    const keyNode = property.children?.[0];
+    if (keyNode?.type === "string" && keyNode.value === key) return property.children?.[1];
+  }
+  return undefined;
+}
+
+function parseJsonSurface(content: string, rootKey?: string): SurfaceParse {
   const errors: ParseError[] = [];
   let parsed: unknown;
   try {
@@ -246,6 +347,48 @@ function parseJsonSurface(content: string): SurfaceParse {
       found: describeValue(parsed),
     };
   }
+  // A duplicate key means jsonc-parser's object-literal-style build silently
+  // picked ONE definition (the last) — a genuinely ambiguous file (a
+  // different JSON reader could honor the FIRST instead), treated as
+  // unparseable rather than confidently guessed (33-5-L5) — but ONLY where
+  // the ambiguity reaches what the manager reads or writes (Story 36.3 code
+  // review): a duplicated ROOT KEY (which server map is real?), a duplicate
+  // under the root key (which entry?), and a duplicate INSIDE a
+  // manager-owned (canonical) entry (the edit would target one definition
+  // while every reader reports the other — apply "succeeds" and the value
+  // stays stale). A duplicated UNRELATED top-level setting — easy to leave in
+  // a hand-edited settings.json (the zed/gemini targets) — is never read or
+  // written by the manager, and refusing the whole file over it would block
+  // every operation on that client; foreign entries' own keys are never
+  // inspected at all.
+  const tree = parseTree(content);
+  const suffix =
+    "(JSON object keys must be unique; jsonc-parser silently keeps only the last definition, so the file is treated as unparseable rather than picking one)";
+  if (rootKey !== undefined) {
+    const rootRedefined = secondDefinitionOffset(tree, rootKey);
+    if (rootRedefined !== undefined) {
+      return { kind: "syntax-error", error: `duplicate key "${rootKey}" at line ${lineAt(content, rootRedefined)} ${suffix}` };
+    }
+    const rootNode = childObjectNode(tree, rootKey);
+    const rootDup = firstDuplicateKey(rootNode);
+    if (rootDup !== undefined) {
+      return {
+        kind: "syntax-error",
+        error: `duplicate key "${rootDup.key}" at line ${lineAt(content, rootDup.offset)} under "${rootKey}" ${suffix}`,
+      };
+    }
+    for (const property of rootNode?.type === "object" ? (rootNode.children ?? []) : []) {
+      const keyNode = property.children?.[0];
+      if (keyNode?.type !== "string" || typeof keyNode.value !== "string" || !isCanonicalServerName(keyNode.value)) continue;
+      const entryDup = firstDuplicateKey(property.children?.[1]);
+      if (entryDup !== undefined) {
+        return {
+          kind: "syntax-error",
+          error: `duplicate key "${entryDup.key}" at line ${lineAt(content, entryDup.offset)} in the manager-owned entry "${keyNode.value}" under "${rootKey}" ${suffix}`,
+        };
+      }
+    }
+  }
   return { kind: "object", top: parsed };
 }
 
@@ -256,14 +399,16 @@ function parseTomlSurface(content: string): SurfaceParse {
   } catch (err) {
     return { kind: "syntax-error", error: sanitizeTomlError(err) };
   }
-  if (!isPlainObject(parsed)) {
-    return {
-      kind: "top-not-object",
-      error: "top-level TOML value is not a table",
-      found: describeValue(parsed),
-    };
-  }
-  return { kind: "object", top: parsed };
+  // 33-5-L8 (Rule #54): smol-toml's `parse()` return type is `TomlTable` —
+  // TOML has no non-object document root (the spec requires a top-level
+  // table), and its implementation returns a bare `{}` object literal on
+  // every success path (probed 2026-07-28/2026-09-11: node_modules/smol-toml
+  // /dist/parse.js's `parse()` initializes `res = {}` and returns it
+  // directly; the .d.ts return type is unconditionally `TomlTable`). A
+  // "top-not-object" TOML result is therefore unreachable — no branch is
+  // modeled here (the shared `SurfaceParse` type keeps that variant for
+  // JSON/YAML, which genuinely can produce it).
+  return { kind: "object", top: parsed as Record<string, unknown> };
 }
 
 function parseYamlSurface(content: string): SurfaceParse {
@@ -297,7 +442,7 @@ function parseSurface(adapter: ClientAdapter, text: string): SurfaceParse {
   switch (adapter.format) {
     case "json":
     case "jsonc":
-      return parseJsonSurface(text);
+      return parseJsonSurface(text, adapter.rootKey);
     case "toml":
       return parseTomlSurface(text);
     case "yaml":
@@ -344,6 +489,15 @@ export function readConfigEntries(adapter: ClientAdapter, content: string): Read
           // TOML array-of-tables ([[rootKey.name]]): not a single server
           // entry — surfaced by NAME so it is never invisible (33-5-12).
           Object.defineProperty(unsupported, name, { value: "array-of-tables", enumerable: true, writable: true, configurable: true });
+        } else {
+          // 33-5-L6: a root-key child that is NOT an object at all (a
+          // string/number/boolean/null/empty array/array-of-non-tables) was
+          // previously DROPPED entirely — neither `entries` nor
+          // `unsupported` — so a canonical-named value in this shape read as
+          // "absent" in the status matrix instead of "present but
+          // mis-shaped". Surfaced by name + shape (never the value itself)
+          // through the SAME unsupported map array-of-tables already uses.
+          Object.defineProperty(unsupported, name, { value: describeValue(value), enumerable: true, writable: true, configurable: true });
         }
       }
       return { ok: true, entries, unsupported };

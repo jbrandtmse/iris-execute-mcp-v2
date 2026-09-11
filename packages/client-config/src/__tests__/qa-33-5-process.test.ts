@@ -533,7 +533,13 @@ describe("QA 33.5: apply-update preservation sweeps (built bin)", () => {
     expect(entry.timeout).toBe(45);
   }, T);
 
-  it("codex: a TOML datetime env value is a documented REFUSAL — exit 1, byte-identical file, reason names the form", () => {
+  it("codex: an UNCHANGED TOML datetime env value survives an apply-update byte-exact (36.3, 33-5-R2 leg b — per-key spans never touch an untouched key)", () => {
+    // Pre-36.3 this REFUSED (exit 1): the update re-rendered the WHOLE env
+    // sub-table, so every merged key had to round-trip through
+    // tomlSourceValue — including CREATED, which nothing here changes. Per-
+    // key spans mean an untouched key's line (and the entry it lives beside)
+    // is never even read for rendering, so the update now succeeds and
+    // CREATED's line is byte-identical.
     const sandbox = makeSandbox();
     const seed = [
       "[mcp_servers.iris-dev-mcp]",
@@ -543,6 +549,18 @@ describe("QA 33.5: apply-update preservation sweeps (built bin)", () => {
       "CREATED = 2026-01-01T00:00:00Z",
       "",
     ].join("\n");
+    const target = sandbox.seed("codex", seed);
+
+    const applied = sandbox.run(["apply", "--client", "codex", "--servers", "iris-dev-mcp", "--yes"]);
+    expect(applied.status).toBe(0);
+    const text = readFileSync(target, "utf8");
+    expect(text.split("\n")).toContain("CREATED = 2026-01-01T00:00:00Z"); // byte-exact, never rendered
+    expect(text).toContain('command = "npx"'); // the update did land
+  }, T);
+
+  it("codex: a TOML datetime env value INLINE is still a documented REFUSAL — exit 1, byte-identical file, reason names the form (no [name.env] sub-table means no per-key line structure to preserve)", () => {
+    const sandbox = makeSandbox();
+    const seed = ["[mcp_servers.iris-dev-mcp]", 'command = "old"', "env = { CREATED = 2026-01-01T00:00:00Z }", ""].join("\n");
     const target = sandbox.seed("codex", seed);
 
     const applied = sandbox.run(["apply", "--client", "codex", "--servers", "iris-dev-mcp", "--yes"]);

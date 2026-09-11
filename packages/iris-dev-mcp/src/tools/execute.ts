@@ -1278,23 +1278,69 @@ export const executeTestsTool: ToolDefinition = {
 // ── iris_execute_classmethod ────────────────────────────────────
 
 /**
- * Ensure a value is a record suitable for MCP `structuredContent` (never a
- * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
- * there is no shared exported version (each server keeps its own copy per
- * [[feedback_mcp_structured_content]]). The `/classmethod` endpoint always
- * returns a JSON object today, but every response on this surface is routed
- * through the same discipline as a matter of policy, not because a concrete
- * array-shaped response has been observed.
+ * Cast the `/classmethod` endpoint's `result` to the object shape MCP's
+ * `structuredContent` requires.
+ *
+ * Ledger `34-3-R5` (Rule #54): this used to defensively wrap an
+ * `Array.isArray` branch (`{ items, count }`) and a final `{ value }`
+ * scalar/null fallback, but neither is reachable for THIS tool, so both were
+ * removed. Confirmed by reading the full success AND error paths of
+ * `ExecuteMCPv2.REST.Command:ClassMethod` (its success render builds
+ * `tResult` as `{}` and only ever `%Set`s named keys onto it — never an
+ * array, never a bare scalar — and its error renders build `tErrorResult`
+ * the same way) and `ExecuteMCPv2.REST.Base:RenderResponseBody` (defaults a
+ * non-object `pResPart` to `{}` before it is ever rendered — see that
+ * method's banner, and its pre-flight-failure substitution path also renders
+ * `{}`), and live-verified against the deployed endpoint (2026-09-11, HSCUSTOM):
+ * a call's `result` is unconditionally a JSON object. This function is also
+ * the ONLY place that would ever see it — the `catch` block below never
+ * routes an error through `toStructured` at all; it builds its own
+ * `{ truncated }` shape directly from `IrisApiError.result` via
+ * {@link extractTruncated}. A direct cast is therefore honest: there is no
+ * real shape left to guard against. Contrast `sqlAnalyze.ts`'s own
+ * `toStructured`, a genuinely different endpoint where an array/scalar
+ * result IS a real possibility and its defensive branches remain warranted.
  */
 function toStructured(value: unknown): Record<string, unknown> {
-  if (Array.isArray(value)) {
-    return { items: value, count: value.length };
-  }
-  if (value !== null && typeof value === "object") {
-    return value as Record<string, unknown>;
-  }
-  return { value };
+  return value as Record<string, unknown>;
 }
+
+/**
+ * `args` entry shapes for `iris_execute_classmethod` (ledger `34-3-R8`).
+ *
+ * A plain scalar — passed by value. Mirrors exactly what
+ * `ExecuteMCPv2.Utils.ParseArgEntry` accepts on the non-object branch (any
+ * JSON string/number/boolean; a JSON `null` array element is the one scalar-
+ * looking shape it explicitly rejects, which is why `null` is deliberately
+ * absent from this union — see {@link classMethodByRefMarkerSchema}'s banner
+ * for the equivalent `value: null` rejection).
+ */
+const classMethodScalarArgSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+/**
+ * A `{byRef, value?}` marker object — passed by reference. Verified live
+ * against `ExecuteMCPv2.Utils.ParseArgEntry` (lines ~367-423): `byRef` must
+ * be present and a genuine JSON boolean (`true` OR `false` — a
+ * `byRef:false` marker is valid too, it just requires `value`, a business
+ * rule the SERVER still enforces since it depends on the value of `byRef`
+ * itself, not expressible as a plain Zod shape without narrowing what a
+ * `byRef:false` marker missing `value` even IS structurally); `value` may be
+ * omitted entirely (the Output-style undefined-in pattern — Zod's
+ * `.optional()` allows `undefined` but NOT JSON `null`, matching the
+ * server's own omitted-vs-null distinction exactly, confirmed against Zod's
+ * documented semantics) but when present must be a scalar, never JSON
+ * `null` and never an object/array.
+ */
+const classMethodByRefMarkerSchema = z.object({
+  byRef: z.boolean(),
+  value: classMethodScalarArgSchema.optional(),
+});
+
+/** One `args` array entry: a plain scalar, or a `{byRef, value?}` marker object. */
+const classMethodArgEntrySchema = z.union([
+  classMethodScalarArgSchema,
+  classMethodByRefMarkerSchema,
+]);
 
 export const executeClassMethodTool: ToolDefinition = {
   name: "iris_execute_classmethod",
@@ -1366,7 +1412,12 @@ export const executeClassMethodTool: ToolDefinition = {
     "`truncated` since they describe different response fields). None of these ceilings " +
     "are protection against the target's own execution time, resource usage, or a Web " +
     "Gateway timeout — the target has already fully run by the time these caps are " +
-    "applied to the response payload.",
+    "applied to the response payload. Capture caveat: `output` is accumulated in the " +
+    "process-private variables `%ExecuteMCPOutput`/`%ExecuteMCPTruncated`, so a target " +
+    "that KILLs them — an argumentless `KILL`, or a unit-test class whose setup/teardown " +
+    "clears them — silently loses everything captured before that point, and `truncated` " +
+    "does not report it; run unit-test suites with `iris_execute_tests` instead of " +
+    "driving them through this tool.",
   inputSchema: z.object({
     className: z
       .string()
@@ -1375,7 +1426,7 @@ export const executeClassMethodTool: ToolDefinition = {
       .string()
       .describe("Name of the class method to invoke"),
     args: z
-      .array(z.any())
+      .array(classMethodArgEntrySchema)
       .max(20)
       .optional()
       .describe(
@@ -1385,7 +1436,8 @@ export const executeClassMethodTool: ToolDefinition = {
           "parameter, whose post-call value is returned in the response's byRefValues " +
           "(e.g. [{\"byRef\": true}, {\"byRef\": true, \"value\": \"start\"}]). A " +
           "marker's value may be omitted (undefined-in, the Output pattern) but not " +
-          "JSON null, and must be a scalar, not an object or array.",
+          "JSON null, and must be a scalar, not an object or array. Omitting `args` " +
+          "and passing `[]` are the same zero-argument call.",
       ),
     namespace: z
       .string()

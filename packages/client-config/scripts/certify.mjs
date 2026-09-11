@@ -33,6 +33,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -43,7 +44,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { mergeCertificationRecord, passCreatedPaths } from "./certify-record.mjs";
+import { decideRestoreRung, excerpt, mergeCertificationRecord, parseCertifyArgs, passCreatedPaths, timeoutSuffix } from "./certify-record.mjs";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "dist", "cli", "clients-cli.js");
@@ -113,10 +114,6 @@ function envelope(result, label) {
   }
 }
 
-function excerpt(text, max = 400) {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
-}
 
 /** Recursively list files under dir (relative paths, sorted); [] when absent. */
 function listFiles(dir) {
@@ -154,24 +151,15 @@ function listDirs(dir) {
 // Argument parsing (manual, mirrors the repo's no-framework CLI style).
 // ────────────────────────────────────────────────────────────────────
 
-const argv = process.argv.slice(2);
-const subcommand = argv[0];
-const positional = [];
-const flags = new Set();
-for (let i = 1; i < argv.length; i++) {
-  const arg = argv[i];
-  if (arg === "--server") {
-    flags.server = argv[++i];
-  } else if (arg === "--residual-risk") {
-    flags.residualRisk = argv[++i];
-  } else if (arg.startsWith("--")) {
-    flags.add(arg);
-  } else {
-    positional.push(arg);
-  }
-}
+// 36.3, 33-5-L9: `flags` is a genuine Set (boolean switches only —
+// `.has("--foo")`); VALUED options (`--server`, `--residual-risk`) live in a
+// separate `options` Map. The pre-fix code stored `flags.server`/
+// `flags.residualRisk` as arbitrary OWN PROPERTIES on the same Set instance.
+// The parser lives in certify-record.mjs (unit-tested — see its banner for
+// the trailing-`--residual-risk` regression the review caught there).
+const { subcommand, positional, flags, options } = parseCertifyArgs(process.argv.slice(2));
 const clientId = positional[0];
-const server = flags.server ?? "iris-dev-mcp";
+const server = options.get("--server") ?? "iris-dev-mcp";
 
 if (subcommand !== "run" || !flags.has("--real-config")) {
   console.log(
@@ -228,20 +216,27 @@ function verifyFileLevel(client, entryName, agentNote) {
  * immediately certifiable and a missing one is refused BEFORE any write).
  */
 const VERIFIERS = {
-  "claude-code": (entryName) => {
+  // 36.3, 33-5-L9 leg (d): honor --skip-agent the same way kimi-code already
+  // does — file-level first (deterministic, no external process), the
+  // `claude mcp list` spawn only when the agent surface is NOT skipped.
+  "claude-code": (entryName, skipAgent) => {
+    if (skipAgent) {
+      return verifyFileLevel("claude-code", entryName, " (agent-surface probe skipped (--skip-agent))");
+    }
     const result = runMaybeShim("claude", ["mcp", "list"], { timeout: 240_000 });
     // 33-4-R3: line-anchored ("name:" at a line start), never a bare
     // substring — "iris-mcp-all" also matches "iris-mcp-all-2".
     const listed = result.stdout
       .split("\n")
       .some((line) => line.trimStart().startsWith(`${entryName}:`) || line.trim() === entryName);
+    const timeoutNote = timeoutSuffix(result);
     return {
       ok: listed,
       summary: listed
         ? `\`claude mcp list\` listed the manager-written entry "${entryName}"`
-        : `\`claude mcp list\` did NOT list "${entryName}"${result.spawnError ? ` (spawn error: ${result.spawnError})` : ""}`,
+        : `\`claude mcp list\` did NOT list "${entryName}"${timeoutNote}${result.spawnError ? ` (spawn error: ${result.spawnError})` : ""}`,
       evidence: [
-        `$ claude mcp list → ${excerpt(result.stdout.split("\n").find((line) => line.includes(entryName)) ?? result.stdout)}`,
+        `$ claude mcp list${timeoutNote} → ${excerpt(result.stdout.split("\n").find((line) => line.includes(entryName)) ?? result.stdout)}`,
       ],
     };
   },
@@ -260,8 +255,8 @@ const VERIFIERS = {
         ["-p", `List the MCP servers available in this session as a bare comma-separated list of names, then stop.`, "--output-format", "stream-json"],
         { timeout: 240_000, cwd: scratchWorkdir() },
       );
-      agentNote = excerpt(`${probe.stdout} ${probe.stderr}`, 600);
-      evidence.push(`$ kimi -p "list MCP servers" → ${excerpt(probe.stdout || probe.stderr, 300)}`);
+      agentNote = excerpt(`${probe.stdout} ${probe.stderr}`, 600) + timeoutSuffix(probe);
+      evidence.push(`$ kimi -p "list MCP servers"${timeoutSuffix(probe)} → ${excerpt(probe.stdout || probe.stderr, 300)}`);
     }
     return {
       ok: base.ok,
@@ -339,6 +334,30 @@ const userProbe = detected.probes.find((probe) => probe.kind === "config" && pro
 if (!userProbe) fail(`${clientId} has no user-scope config probe`);
 const configPath = userProbe.path;
 
+// 36.3, 33-5-L10 leg (c): a DANGLING symlink at the config path (the entry
+// exists, but its target does not) breaks the "absent" assumption `preConfigBytes`
+// relies on below — `existsSync` follows symlinks and reports false for a
+// dangling one, so the pass would silently treat a REAL (broken) symlink as
+// "no config file", write a fresh file straight through it, and then — since
+// `preConfigBytes` was null — delete the symlink itself on cleanup (rmSync
+// removes the directory entry, not just file content). Refuse cleanly
+// up front instead of discovering this the hard way mid-pass.
+function isDanglingSymlink(candidate) {
+  let stat;
+  try {
+    stat = lstatSync(candidate);
+  } catch {
+    return false; // nothing at all there — a normal "absent" case
+  }
+  return stat.isSymbolicLink() && !existsSync(candidate);
+}
+if (isDanglingSymlink(configPath)) {
+  fail(
+    `${configPath} is a dangling symlink (it exists as a directory entry but its target does not) — ` +
+      `refusing to certify against it; fix or remove the symlink first, then re-run`,
+  );
+}
+
 const preStatus = envelope(cli(["status", "--json"]), "status");
 const preRow = preStatus.data.clients
   .find((entry) => entry.client === clientId)
@@ -381,28 +400,35 @@ function bytesEqual(a, b) {
 
 function restoreAndClean() {
   const report = [];
-  // (a) Config bytes.
+  // (a) Config bytes — the restore LADDER. `decideRestoreRung` (33-5-L9 leg
+  // a) is the pure decision this function used to inline (untested); this
+  // function only performs the I/O the decision calls for.
   const nowBytes = existsSync(configPath) ? readFileSync(configPath) : null;
-  if (!bytesEqual(nowBytes, preConfigBytes)) {
-    // Engine restore from the EARLIEST pass-created backup (the pre-first-write snapshot).
-    const postBackups = listFiles(backupRoot);
-    const created = postBackups.filter((file) => !preBackups.includes(file)).sort();
-    if (created.length > 0) {
-      const earliest = path.basename(created[0]);
-      const restored = cli(["restore", "--client", clientId, "--backup", earliest, "--json"]);
-      report.push(`engine restore --backup ${earliest}: exit ${restored.status}`);
-    }
+  let decision = decideRestoreRung({
+    configMatches: bytesEqual(nowBytes, preConfigBytes),
+    availableBackups: listFiles(backupRoot).filter((file) => !preBackups.includes(file)),
+    engineRestoreAttempted: false,
+  });
+  if (decision.rung === "engine-restore") {
+    const earliest = path.basename(decision.backup);
+    const restored = cli(["restore", "--client", clientId, "--backup", earliest, "--json"]);
+    report.push(`engine restore --backup ${earliest}: exit ${restored.status}`);
     const afterEngine = existsSync(configPath) ? readFileSync(configPath) : null;
-    if (!bytesEqual(afterEngine, preConfigBytes)) {
-      // Last resort: write back the captured snapshot (a RESTORE, not an edit).
-      if (preConfigBytes === null) {
-        rmSync(configPath, { force: true });
-      } else {
-        writeFileSync(configPath, preConfigBytes);
-      }
-      const finalBytes = existsSync(configPath) ? readFileSync(configPath) : null;
-      report.push(`RAW snapshot restore performed (byte-exact: ${bytesEqual(finalBytes, preConfigBytes)}) — LOUD: investigate why the engine path did not converge`);
+    decision = decideRestoreRung({
+      configMatches: bytesEqual(afterEngine, preConfigBytes),
+      availableBackups: [],
+      engineRestoreAttempted: true,
+    });
+  }
+  if (decision.rung === "raw-restore") {
+    // Last resort: write back the captured snapshot (a RESTORE, not an edit).
+    if (preConfigBytes === null) {
+      rmSync(configPath, { force: true });
+    } else {
+      writeFileSync(configPath, preConfigBytes);
     }
+    const finalBytes = existsSync(configPath) ? readFileSync(configPath) : null;
+    report.push(`RAW snapshot restore performed (byte-exact: ${bytesEqual(finalBytes, preConfigBytes)}) — LOUD: investigate why the engine path did not converge`);
   }
   const configOk = bytesEqual(existsSync(configPath) ? readFileSync(configPath) : null, preConfigBytes);
   // (b) Manager state.json.
@@ -455,7 +481,7 @@ try {
   }
   const applied = cli(applyArgs, { input: applyInput });
   const applyOk = applied.status === 0;
-  step("add (engine apply)", applyOk, applyOk ? `${server} written to ${configPath}` : excerpt(applied.stderr));
+  step("add (engine apply)", applyOk, applyOk ? `${server} written to ${configPath}` : excerpt(applied.stderr) + timeoutSuffix(applied));
   if (!applyOk) throw new Error("apply failed — aborting the pass (restore follows)");
 
   // 4. Client surfaces the entry.
@@ -465,7 +491,7 @@ try {
 
   // 5. DISABLE through the engine; verify the entry is no longer active.
   const disabled = cli(["disable", "--client", clientId, "--server", server, "--json"]);
-  step("disable (engine)", disabled.status === 0, disabled.status === 0 ? "" : excerpt(disabled.stderr));
+  step("disable (engine)", disabled.status === 0, disabled.status === 0 ? "" : excerpt(disabled.stderr) + timeoutSuffix(disabled));
   const midStatus = envelope(cli(["status", "--json"]), "status");
   const midRow = midStatus.data.clients
     .find((entry) => entry.client === clientId)
@@ -476,7 +502,7 @@ try {
 
   // 6. REMOVE through the engine (purges the entry + ownership records).
   const removed = cli(["remove", "--client", clientId, "--server", server, "--json"]);
-  step("remove (engine)", removed.status === 0, removed.status === 0 ? "" : excerpt(removed.stderr));
+  step("remove (engine)", removed.status === 0, removed.status === 0 ? "" : excerpt(removed.stderr) + timeoutSuffix(removed));
 } finally {
   const { configOk, report } = restoreAndClean();
   for (const line of report) console.log(`  restore: ${line}`);
@@ -496,7 +522,7 @@ const record = {
   steps: steps.map((s) => `${s.ok ? "PASS" : "FAIL"} ${s.name}`),
   evidence,
 };
-if (flags.residualRisk) record.residualRisk = flags.residualRisk;
+if (options.has("--residual-risk")) record.residualRisk = options.get("--residual-risk");
 if (!passOk) process.exitCode = 1;
 const decision = mergeCertificationRecord(results.clients[clientId], record, passOk);
 if (decision.action === "keep") {
