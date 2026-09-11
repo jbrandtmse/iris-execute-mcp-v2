@@ -50,10 +50,10 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes from spec §2.5 (dev: core 12/16, developer 28/0)", () => {
+  it("pins the exact roster sizes (dev: core 12/17, developer 29/0 — Story 36.2 added iris_test_status, developer-include/core-exclude)", () => {
     expect(toolPresets.core.include.length).toBe(12);
-    expect(toolPresets.core.exclude.length).toBe(16);
-    expect(toolPresets.developer.include.length).toBe(28);
+    expect(toolPresets.core.exclude.length).toBe(17);
+    expect(toolPresets.developer.include.length).toBe(29);
     expect(toolPresets.developer.exclude.length).toBe(0);
   });
 

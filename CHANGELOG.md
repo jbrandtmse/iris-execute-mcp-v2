@@ -2,6 +2,71 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-09-11] — Story 36.2: `iris_test_status` companion tool — re-attach, read-by-runIndex, cancel
+
+### Added — `iris_test_status`, the re-attach/read/cancel companion to `iris_execute_tests` (`@iris-mcp/dev`)
+
+Epic 36's only new tool (dev 28 → 29). Re-attach to a test run Story 36.1's `iris_execute_tests`
+reported `status: "running"` for (or that your own client abandoned a long call) instead of
+re-submitting the same target, which starts a SECOND concurrent run against shared fixtures.
+
+`action: "poll"` (read, **enabled by default**) accepts `jobId` and/or `runIndex`. By `jobId`: while
+`Retry-After` is still present it returns the SAME `status: "running"` shape `iris_execute_tests`
+returns (built through the identical shared envelope helper), with a `partial` snapshot that is this
+ONE poll's DELTA drain only — never cumulative across separate calls; once finished, it returns
+`status: "completed"` built AUTHORITATIVELY from `%UnitTest_Result` by exact `InstanceIndex`
+(`runIndexSource: "result-table"`) — never from a single drain alone, since an earlier
+`iris_execute_tests` "running" response may already have consumed some rows, which never reappear.
+The job's queue node is read BEFORE any poll that could be terminal (a terminal poll — or a
+`cancel` — consumes it), so the run index is captured even on a job that finishes on this very call.
+A `jobId` Atelier no longer recognizes (HTTP 404 — already consumed, or stale) falls back to
+`runIndex` when supplied, else reports a clear not-found result naming that fallback. By `runIndex`
+alone: `status: "completed"` (the same SQL path) once `TestInstance.DateTime` is set, or
+`status: "unfinished"` when it is not — the result table alone CANNOT distinguish a still-running
+job from a cancelled/crashed one (a cancelled run's row never finishes), so an `unfinished` result
+carries interim rows only under `partial`, each explicitly labelled `"in-progress"` and excluded from
+the counts (never reported as a pass). A `jobId` whose queue node is gone AND whose `runIndex` shows
+unfinished is reported `status: "abandoned"`.
+
+`action: "cancel"` (write, **DEFAULT-DISABLED** — enable via `IRIS_GOVERNANCE`, e.g.
+`{"global":{"iris_test_status:cancel":true}}`) stops a RUNNING job (`DELETE /work/{jobId}`, reading
+the queue node's run index BEFORE the delete) and reports the OBSERVED outcome, never an assumed
+one — `status: "cancelled"` with what was actually seen (queue entry gone; result row never
+finalized), or, when the job had ALREADY finished but was never drained, `status: "completed"` with a
+note that only the queue entry was discarded and results are preserved at that `runIndex`. `cancel`
+requires `jobId` — there is no way to cancel by `runIndex` alone.
+
+`iris_execute_tests`'s own `hint` (on a `running`/error result) and description now name
+`iris_test_status` as the primary re-attach route, alongside the manual `iris_global_get` +
+`iris_sql_execute` route that still works in every preset (including `core`, which does not include
+the new tool — Lead decision L-2: `core` is already at its 13-runtime-tool ceiling).
+
+**Governance:** two new post-foundation keys, `iris_test_status:poll` (read, enabled) and
+`iris_test_status:cancel` (write, disabled) — the frozen Epic-14 baseline (`1e62c5ad5bf7`, 141 keys)
+is unchanged. **Visibility:** `developer`-preset include, `core`-preset exclude; NOT a `TOOL_PAIRS`
+member (pairing it with `iris_execute_tests` would force it into `core` too). Tool counts: dev 28 →
+29; suite `full` 104/109 → 105/110 (package/advertised), `developer` 76/81 → 77/82, `core` unchanged
+(49/54).
+
+**Hardened at the Story 36.2 code review:** a `completed` poll is VALUE-identical to
+`iris_execute_tests`' drain path for the same run — exact millisecond durations (a plain float
+`* 1000` of the SQL seconds is not), method-level errors (e.g. a thrown exception) in `message`, the
+drain's row order — and a finished run with no method-level results (e.g. a failed
+`OnBeforeAllTests`) returns the same `isError: true` zero-result guard, never a green `total: 0`; a
+terminal poll never reports `completed` for a run that did not finish; with no run index at all the
+drained rows come back under `partial` of an `isError: true` result, never as top-level counts.
+`jobId` must be the all-digits Atelier id (anything else is refused before any IRIS call), a `jobId`
+that is not a unit-test job is refused, `namespace` must be the run's own (the Atelier queue is
+instance-wide, `%UnitTest_Result` per-namespace — `iris_execute_tests`' hint now names it), and
+`cancel` reports what it re-read after the `DELETE`, keeping its handles on a failed `DELETE`.
+
+**Back-compat (Rule #19):** `iris_execute_tests`'s output shapes and its full pre-existing test
+suite are unchanged (the suite passes unmodified); the only `iris_execute_tests` text that changed is
+its `hint` (on a `running`/error result) and its description, which now name `iris_test_status`
+(with the run's namespace) as the primary re-attach route. The shared envelope builder's extension
+(new `unfinished`/`abandoned`/`cancelled` discriminator cases, and optional wait-budget-context
+fields on `running`) is strictly additive.
+
 ## [Pre-release — 2026-09-10] — Story 36.1: `iris_execute_tests` running-result contract, handles, caller-controlled wait budget
 
 ### Fixed — long-running `iris_execute_tests` calls no longer surface as a bare timeout error (`@iris-mcp/dev`, HIGH — first beta-feedback defect)
@@ -456,10 +521,10 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset. Roster summary (runtime
-tool counts): `full` 29/27/23/22/8 (dev/admin/interop/ops/data, default/unchanged), `core`
-13/13/10/10/8, `developer` 29/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
+tool counts, as of Story 36.2): `full` 30/27/23/22/8 (dev/admin/interop/ops/data), `core`
+13/13/10/10/8, `developer` 30/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
-[Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~67% fewer bytes under
+[Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under
 `core` on `@iris-mcp/dev`).
 
 **Strictly additive — `IRIS_TOOLS_PRESET` unset (the default) is byte-for-byte today's `tools/list`

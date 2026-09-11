@@ -235,7 +235,7 @@ function toAtelierMethodFilter(methodName: string): string {
 }
 
 /** Reverse of {@link toAtelierMethodFilter} — see that function's doc. */
-function fromAtelierMethodName(method: string): string {
+export function fromAtelierMethodName(method: string): string {
   return `Test${method}`;
 }
 
@@ -247,10 +247,18 @@ function fromAtelierMethodName(method: string): string {
  * always distinguish "never attempted" (fields absent — no `jobId` yet) from
  * "attempted, still unknown" (`null`).
  */
-interface RunHandles {
+export interface RunHandles {
   jobId?: string;
   runIndex?: number | null;
-  runIndexSource?: "queue" | "counter" | null;
+  /**
+   * `"result-table"` (Story 36.2) is additive: `iris_test_status` read this
+   * result from `%UnitTest_Result` by exact `InstanceIndex` (AC 36.2.2
+   * (ii)/(iv)) — the index itself came from the job's queue node, the
+   * caller's `runIndex`, or a `runIndex`-alone poll; never `MAX()` or the
+   * counter-delta fallback. `iris_execute_tests` (this file) never sets it —
+   * its own output is unaffected (Rule #19).
+   */
+  runIndexSource?: "queue" | "counter" | "result-table" | null;
   /** Present only when there is something specific to say about why
    * `runIndex` is `null` despite an attempt (e.g. an ambiguous counter
    * delta). */
@@ -270,7 +278,7 @@ interface RunHandles {
  * this path), returns `undefined` rather than a wrong value (Rule #54 — pin
  * only shapes the real endpoint can return: `{value, defined}`).
  */
-async function readGlobalNode(
+export async function readGlobalNode(
   ctx: { http: InstanceType<typeof import("@iris-mcp/shared").IrisHttpClient> },
   ns: string,
   globalName: string,
@@ -347,8 +355,8 @@ function resolveTestTimeout(
 
 /**
  * Build the `hint` field naming BOTH re-attach routes (AC 36.1.3) — the
- * Story 36.2 companion tool (forthcoming, AC 36.1.10) and the route that
- * works in EVERY preset today (`core` included, Lead decision L-2):
+ * shipped `iris_test_status` companion tool (Story 36.2) and the manual route
+ * that works in EVERY preset today (`core` included, Lead decision L-2):
  * `iris_global_get` on the jobId's queue node for the run index, then
  * `iris_sql_execute` joined down from `%UnitTest_Result.TestInstance` — the
  * ONLY `%UnitTest_Result` table carrying the `InstanceIndex` column
@@ -363,12 +371,27 @@ function resolveTestTimeout(
  * @param lead - The situation sentence ("Still executing server-side." for
  *   a running result; a "may still be executing" sentence for a polling
  *   error once the job exists).
+ * @param namespace - The run's own namespace (Story 36.2 code review): the
+ *   Atelier queue is instance-wide but `%UnitTest_Result` is per-namespace,
+ *   so the `iris_test_status` call the hint suggests must carry it.
  */
-function buildRunningHint(lead: string, jobId: string, runIndex: number | null): string {
+export function buildRunningHint(
+  lead: string,
+  jobId: string,
+  runIndex: number | null,
+  namespace?: string,
+): string {
   const capturedPart = runIndex !== null ? `already captured: ${runIndex} — ` : "";
   return (
     `${lead} Do NOT re-submit — re-submitting starts a SECOND concurrent run against shared fixtures. ` +
-    `Re-attach instead. Today, in every preset: (1) the runIndex (${capturedPart}re-readable while the job is ` +
+    `Re-attach instead. Easiest: call iris_test_status with action "poll" and jobId "${jobId}"` +
+    `${runIndex !== null ? ` (or runIndex ${runIndex})` : ""}` +
+    `${namespace ? ` and namespace "${namespace}" (the run's own — it must match)` : ""} — it reads the same ` +
+    `handles below and is enabled by default (if your tool-visibility preset hides it, e.g. core, use the ` +
+    `manual route below, or have the operator re-show it with IRIS_TOOLS_ENABLE=iris_test_status); its ` +
+    `"cancel" action can also stop this run if you no longer want it (default-DISABLED by governance, enable ` +
+    `via IRIS_GOVERNANCE). Today, in every preset, the manual route also still works: ` +
+    `(1) the runIndex (${capturedPart}re-readable while the job is ` +
     `queued or running via iris_global_get with global "IRIS.TempAtelierAsyncQueue" and subscripts ` +
     `'${jobId},"unittest","id"'); (2) iris_sql_execute "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
     `tm.Name AS MethodName, tm.Status, tm.Duration, tm.ErrorDescription FROM %UnitTest_Result.TestMethod tm ` +
@@ -377,9 +400,9 @@ function buildRunningHint(lead: string, jobId: string, runIndex: number | null):
     `ti.InstanceIndex = ?" with parameters [runIndex] — only %UnitTest_Result.TestInstance carries the ` +
     `InstanceIndex column; TestSuite/TestCase/TestMethod (and TestAssert, via TestMethod) join down to it. An ` +
     `EMPTY FinishedAt means the run is STILL executing: its rows are in-progress, not final (a method that is ` +
-    `still running already reads Status 1) — re-query until FinishedAt is set. Never MAX(InstanceIndex) — a ` +
-    `concurrent run can allocate a higher index first. Forthcoming: iris_test_status (Story 36.2) will ` +
-    `re-attach by jobId directly.`
+    `still running already reads Status 1) — re-query until FinishedAt is set. The manual route alone never ` +
+    `releases the job's Atelier queue entry: once FinishedAt is set, one iris_test_status poll by jobId ` +
+    `releases it. Never MAX(InstanceIndex) — a concurrent run can allocate a higher index first.`
   );
 }
 
@@ -456,7 +479,7 @@ function attributeRunIndexByCounter(
 }
 
 /** Result structure from the Atelier async unittest endpoint. */
-interface AtelierTestResult {
+export interface AtelierTestResult {
   class: string;
   method?: string;
   status: number; // 0 = Failed, 1 = Passed, 2 = Skipped
@@ -520,10 +543,10 @@ function zeroResultGuardResponse(error: string, handles: RunHandles = {}): ToolR
 }
 
 /** Method-level detail row of this tool's documented output. */
-type TestDetail = { class: string; method: string; status: string; duration: number; message: string };
+export type TestDetail = { class: string; method: string; status: string; duration: number; message: string };
 
 /** Drained-so-far counts + details (the `partial` object). */
-interface PartialSnapshot {
+export interface PartialSnapshot {
   total: number;
   passed: number;
   failed: number;
@@ -533,10 +556,11 @@ interface PartialSnapshot {
 
 /**
  * Every envelope `iris_execute_tests` returns (Story 36.1 AC 36.1.3/36.1.5/
- * 36.1.6). Story 36.2's companion tool must emit these SAME shapes — it
- * reuses {@link testRunEnvelope} rather than re-building them (Rule #52 seam).
+ * 36.1.6), extended (Story 36.2, Task 2) with the companion tool's own
+ * states. `iris_test_status` must emit these SAME shapes — it reuses
+ * {@link testRunEnvelope} rather than re-building them (Rule #52 seam).
  */
-type TestRunEnvelope =
+export type TestRunEnvelope =
   | {
       /** isError:true — AC 34.6.4 shape (top-level zero counts + `error`). */
       kind: "error";
@@ -548,24 +572,62 @@ type TestRunEnvelope =
       hint?: string;
     }
   | {
-      /** isError:false — the wait budget expired with the job still running (AC 36.1.3). */
+      /** isError:false — the wait budget expired with the job still running (AC 36.1.3),
+       * OR (Story 36.2) a one-shot `iris_test_status:poll` observed the SAME
+       * Retry-After-bearing state. `elapsedMs`/`timeoutMs`/`target`/`level` are
+       * wait-budget/original-request context `iris_execute_tests` always supplies
+       * (unchanged, Rule #19) and a re-attach poll has no way to know — they are
+       * simply omitted rather than fabricated (never invent a value, Rule #54). */
       kind: "running";
       handles: RunHandles & { jobId: string };
-      elapsedMs: number;
-      timeoutMs: number;
-      timeoutCapped: boolean;
-      target: string;
-      level: string;
-      namespace: string;
+      elapsedMs?: number;
+      timeoutMs?: number;
+      timeoutCapped?: boolean;
+      target?: string;
+      level?: string;
+      namespace?: string;
       partial: PartialSnapshot;
     }
   | {
-      /** No isError — a finished run; pre-36.1 keys first and byte-identical (Rule #19). */
+      /** No isError — a finished run; pre-36.1 keys first and byte-identical (Rule #19).
+       * `handles.jobId` is optional (Story 36.2): a `poll`/`cancel` resolved purely by
+       * `runIndex` has no jobId to report. `note` is additive free text (e.g. the
+       * cancel-on-finished-job preservation message, or a no-run-index incompleteness
+       * caveat) — `iris_execute_tests` never sets it. */
       kind: "completed";
       summary: PartialSnapshot;
-      handles: RunHandles & { jobId: string };
+      handles: RunHandles & { jobId?: string };
       timeoutCapped: boolean;
       methodMismatchWarning?: string;
+      note?: string;
+    }
+  | {
+      /** Story 36.2 — `poll` by `runIndex` alone: `%UnitTest_Result.TestInstance` shows
+       * the run has not finished. The result table cannot distinguish still-running
+       * from cancelled/crashed (probe (e)) — `partial` carries interim rows ONLY,
+       * never reported as a final pass (AC 36.2.2 (iv)). */
+      kind: "unfinished";
+      runIndex: number;
+      partial: PartialSnapshot;
+      note: string;
+    }
+  | {
+      /** Story 36.2 — `poll` by `jobId`: the Atelier queue node is gone (404/consumed)
+       * AND the run never finished. No live job references it any longer (cancelled,
+       * crashed, or its worker died) — this is the OBSERVER's (poll's) perspective;
+       * contrast `cancelled`, the ACTOR's (cancel's) own perspective on the same state. */
+      kind: "abandoned";
+      jobId: string;
+      runIndex: number | null;
+      note: string;
+    }
+  | {
+      /** Story 36.2 — `cancel`'s own observation of a job it just stopped mid-run
+       * (never an assumed success — AC 36.2.3). */
+      kind: "cancelled";
+      jobId: string;
+      runIndex: number | null;
+      observed: { queueNode: string; resultRow: string };
     };
 
 /** The handle fields, in their one canonical order and presence rules. */
@@ -581,7 +643,7 @@ function handleFields(handles: RunHandles): Record<string, unknown> {
 /**
  * The ONE shared envelope helper (AC 36.1.6) — see {@link TestRunEnvelope}.
  */
-function testRunEnvelope(envelope: TestRunEnvelope): ToolResult {
+export function testRunEnvelope(envelope: TestRunEnvelope): ToolResult {
   if (envelope.kind === "error") {
     const structured: Record<string, unknown> = {
       total: 0,
@@ -613,14 +675,19 @@ function testRunEnvelope(envelope: TestRunEnvelope): ToolResult {
       runIndex: handles.runIndex ?? null,
       runIndexSource: handles.runIndexSource ?? null,
       ...(handles.runIndexNote ? { runIndexNote: handles.runIndexNote } : {}),
-      elapsedMs: envelope.elapsedMs,
-      timeoutMs: envelope.timeoutMs,
-      target: envelope.target,
-      level: envelope.level,
-      namespace: envelope.namespace,
+      ...(envelope.elapsedMs !== undefined ? { elapsedMs: envelope.elapsedMs } : {}),
+      ...(envelope.timeoutMs !== undefined ? { timeoutMs: envelope.timeoutMs } : {}),
+      ...(envelope.target !== undefined ? { target: envelope.target } : {}),
+      ...(envelope.level !== undefined ? { level: envelope.level } : {}),
+      ...(envelope.namespace !== undefined ? { namespace: envelope.namespace } : {}),
       partial: envelope.partial,
       ...(envelope.timeoutCapped ? { timeoutCapped: true } : {}),
-      hint: buildRunningHint("Still executing server-side.", handles.jobId, handles.runIndex ?? null),
+      hint: buildRunningHint(
+        "Still executing server-side.",
+        handles.jobId,
+        handles.runIndex ?? null,
+        envelope.namespace,
+      ),
     };
     const firstLine =
       `TEST RUN STILL EXECUTING — not finished, not failed. jobId=${handles.jobId} ` +
@@ -632,25 +699,80 @@ function testRunEnvelope(envelope: TestRunEnvelope): ToolResult {
     };
   }
 
-  const { summary, handles } = envelope;
-  const result: Record<string, unknown> = {
-    total: summary.total,
-    passed: summary.passed,
-    failed: summary.failed,
-    skipped: summary.skipped,
-    details: summary.details,
-    // Additive (AC 36.1.5) — the pre-36.1 keys above stay byte-identical.
-    status: "completed",
-    jobId: handles.jobId,
-    runIndex: handles.runIndex ?? null,
-    runIndexSource: handles.runIndexSource ?? null,
-    ...(handles.runIndexNote ? { runIndexNote: handles.runIndexNote } : {}),
-    ...(envelope.timeoutCapped ? { timeoutCapped: true } : {}),
-    ...(envelope.methodMismatchWarning ? { methodMismatchWarning: envelope.methodMismatchWarning } : {}),
+  if (envelope.kind === "completed") {
+    const { summary, handles } = envelope;
+    const result: Record<string, unknown> = {
+      total: summary.total,
+      passed: summary.passed,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      details: summary.details,
+      // Additive (AC 36.1.5) — the pre-36.1 keys above stay byte-identical.
+      status: "completed",
+      ...(handles.jobId !== undefined ? { jobId: handles.jobId } : {}),
+      runIndex: handles.runIndex ?? null,
+      runIndexSource: handles.runIndexSource ?? null,
+      ...(handles.runIndexNote ? { runIndexNote: handles.runIndexNote } : {}),
+      ...(envelope.timeoutCapped ? { timeoutCapped: true } : {}),
+      ...(envelope.methodMismatchWarning ? { methodMismatchWarning: envelope.methodMismatchWarning } : {}),
+      ...(envelope.note ? { note: envelope.note } : {}),
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  }
+
+  if (envelope.kind === "unfinished") {
+    const structured: Record<string, unknown> = {
+      status: "unfinished",
+      runIndex: envelope.runIndex,
+      runIndexSource: "result-table",
+      partial: envelope.partial,
+      note: envelope.note,
+    };
+    const firstLine =
+      `TEST RUN STATUS UNKNOWN FROM RESULT TABLE — runIndex=${envelope.runIndex} has not finished. It may ` +
+      `still be running, or it was cancelled/crashed. Poll by jobId for an authoritative answer.`;
+    return {
+      content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+      structuredContent: structured,
+      isError: false,
+    };
+  }
+
+  if (envelope.kind === "abandoned") {
+    const structured: Record<string, unknown> = {
+      status: "abandoned",
+      jobId: envelope.jobId,
+      runIndex: envelope.runIndex,
+      note: envelope.note,
+    };
+    const firstLine =
+      `TEST RUN ABANDONED — jobId=${envelope.jobId} runIndex=${envelope.runIndex ?? "unknown"} is no longer ` +
+      `tracked by Atelier and never finished. It will not complete.`;
+    return {
+      content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+      structuredContent: structured,
+      isError: false,
+    };
+  }
+
+  // envelope.kind === "cancelled"
+  const structured: Record<string, unknown> = {
+    status: "cancelled",
+    jobId: envelope.jobId,
+    runIndex: envelope.runIndex,
+    observed: envelope.observed,
   };
+  const firstLine =
+    `TEST RUN CANCEL ACCEPTED — jobId=${envelope.jobId} runIndex=${envelope.runIndex ?? "unknown"}: the ` +
+    `DELETE /work request succeeded. Observed — queue entry: ${envelope.observed.queueNode}; result row: ` +
+    `${envelope.observed.resultRow}.`;
   return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    structuredContent: result,
+    content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+    structuredContent: structured,
+    isError: false,
   };
 }
 
@@ -674,7 +796,7 @@ interface SummarizedResults {
  * (return leg) fix noted below (AC 36.1.12 (b)) — sanctioned as one of the
  * two edits AC 36.1.1 permits outside the poll loop's own lines.
  */
-function summarizeAtelierResults(results: AtelierTestResult[]): SummarizedResults {
+export function summarizeAtelierResults(results: AtelierTestResult[]): SummarizedResults {
   const statusMap: Record<number, string> = { 0: "failed", 1: "passed", 2: "skipped" };
   let total = 0,
     passed = 0,
@@ -1068,6 +1190,7 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
             `This error came from polling job ${jobId}, not from the test run — the run may still be executing server-side.`,
             jobId,
             runIndex,
+            ns,
           ),
         });
       }
@@ -1104,7 +1227,9 @@ export const executeTestsTool: ToolDefinition = {
     "`InstanceIndex` column, so join `TestMethod` → `TestCase` → `TestSuite` → `TestInstance` and filter " +
     "`ti.InstanceIndex = <runIndex>` (never MAX(InstanceIndex) — a concurrent run can allocate a higher " +
     "index first); the rows exist while the run is still executing, so treat them as final only once " +
-    "`TestInstance.DateTime` is set. A dedicated re-attach tool is forthcoming. A " +
+    "`TestInstance.DateTime` is set. Easier: call `iris_test_status` with `action: \"poll\"` and the same " +
+    "`jobId`/`runIndex`/`namespace` — it builds the SAME shapes from the authoritative source and, via its `cancel` " +
+    "action (default-disabled by governance), can stop a run you no longer want. A " +
     "completed run also carries `status: \"completed\"`, `jobId`, `runIndex`, and `runIndexSource` " +
     "(\"queue\", or \"counter\" for a completed run whose queue node was never observed) so results can be " +
     "correlated by handle instead of guessed at; when the index cannot be attributed it is null with a " +

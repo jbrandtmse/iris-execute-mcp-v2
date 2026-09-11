@@ -3113,3 +3113,43 @@ Mechanical count over this section's own rows: 2 items move to terminal (`36-1-Q
 **Check:** prior state (Story 36.1 QA pass) was 1 HIGH / 30 MEDIUM / 95 LOW = 126 open / 209 distinct / 83 terminal. HIGH 1−1=0; MEDIUM 30−1=29; LOW 95+3=98; open 126−2+3=127; terminal 83+2=85; distinct 209+3=212. Verify: 0 + 29 + 98 = 127; 127 + 85 = 212.
 
 **Ledger state after the Story 36.1 code review:** **0 HIGH / 29 MEDIUM / 98 LOW = 127 open** across **212 distinct items** (85 terminal).
+
+### Story 36.2 — `36-1-CR-3` resolved by the shipped re-attach tool
+
+| Item | Disposition | Evidence |
+|---|---|---|
+| `36-1-CR-3` | **RESOLVED** | `iris_test_status:poll`'s `jobId` path drains the Atelier queue node exactly the way this item's suggested resolution named: a `GET /work/{jobId}` (via `ctx.http.get`, `packages/iris-dev-mcp/src/tools/test-status.ts`) is issued whenever a caller re-attaches by `jobId`, so a `running` result's queue node no longer sits unconsumed in `IRISTEMP` once the caller re-attaches — it is drained on the poll that observes completion (probe (b)) exactly like `iris_execute_tests`'s own poll loop. `buildRunningHint` (`execute.ts`) now names the shipped tool in place of "forthcoming". **Live evidence:** the Story 36.2 default-suite capstone (`test-status-epic-gate.test.ts`) submits a real slow run, polls it to completion via `iris_test_status:poll`, and confirms the queue node is gone before polling by `runIndex` alone; the disposable `ocupilot-iris` second-instance smoke (Rule #34) round-tripped the same drain and left the instance's 21 pre-existing orphans untouched, adding zero new ones of its own. **Mutation (#48):** reverting the queue-node pre-read to run AFTER the `GET`/`DELETE` call (instead of before) drove two live-capstone assertions RED (the cancel leg's captured `runIndex`, and the abandoned-fallback path); restored, the capstone passes clean. |
+
+**Rule #51 recount:** 1 item moves to terminal (`36-1-CR-3`, LOW, **RESOLVED**). No new items opened by this story. Check: prior state (Story 36.1 code review) was 0 HIGH / 29 MEDIUM / 98 LOW = 127 open / 212 distinct / 85 terminal. LOW 98−1=97; open 127−1=126; terminal 85+1=86; distinct unchanged=212. Verify: 0 + 29 + 97 = 126; 126 + 86 = 212.
+
+**Ledger state after Story 36.2:** **0 HIGH / 29 MEDIUM / 97 LOW = 126 open** across **212 distinct items** (86 terminal).
+
+### Story 36.2 QA pass (`bmad-qa-generate-e2e-tests`, 2026-09-11) — one doc-count finding, found and fixed in this pass
+
+| ID | Severity | Issue | Disposition | Evidence |
+|---|---|---|---|---|
+| `36-2-QA-1` | LOW | README.md's "In short" preset-rationale bullet (`## The rosters` section, the line beginning `- **\`@iris-mcp/dev\`\` \`core\` = …`) still read "the full **28**-tool server" after Story 36.2's own count-surface rollup (Task 4) had already updated every OTHER `@iris-mcp/dev` count reference in the same file (package table L15, preset table L602/603, payload table L620) to 29 — a genuine leftover the story's mechanical grep (`\b28\b`) would have caught had it been re-run after the edits, and one no test covers (`docs-visibility-roster-sync.test.ts` parses the tables, not this prose bullet). | **RESOLVED** — fixed directly in this QA pass (trivial, unambiguous single-word correction in a file this story already owns; not product code). | `git grep -n "28-tool"` across `README.md`/`tool_support.md`/both dev/all `README.md`s returned zero hits after the fix (one hit, this line, before it). `packages/iris-mcp-all` suite re-run post-fix: 129/129 unchanged (no test asserts this specific line either way, confirming the gap this finding names). |
+
+**Rule #51 recount:** 1 new distinct item opened AND resolved within this same pass (`36-2-QA-1`, LOW). Check: prior state (Story 36.2 dev-complete) was 0 HIGH / 29 MEDIUM / 97 LOW = 126 open / 212 distinct / 86 terminal. LOW 97 (+1 opened, −1 resolved) = 97 unchanged; open 126 unchanged; terminal 86+1=87; distinct 212+1=213. Verify: 0 + 29 + 97 = 126; 126 + 87 = 213.
+
+**Ledger state after the Story 36.2 QA pass:** **0 HIGH / 29 MEDIUM / 97 LOW = 126 open** across **213 distinct items** (87 terminal).
+
+## Deferred from: code review of 36-2-test-status-companion-tool (2026-09-11)
+
+Code review (`bmad-code-review`, `layers_mode=sequential_sync`, each layer against its own armed 20-minute timer — Blind Hunter 466 s, Edge Case Hunter 731 s, Acceptance Auditor 516 s, all DELIVERED; `review_degraded = false`). 55 raw findings deduplicated to 36: 25 fixed in-story (no ledger item — see the story file's Review Findings, `36-2-CR-A` … `36-2-CR-Y`), 1 deferred below, 10 dismissed. One terminal item's evidence is corrected below.
+
+### `36-1-CR-3` — evidence corrected (the item stays terminal)
+
+| Item | Disposition | Evidence |
+|---|---|---|
+| `36-1-CR-3` | **RESOLVED** (evidence corrected at the Story 36.2 code review) | The dev-stage evidence cell above over-claimed on two counts: the capstone did NOT read the queue node (it had no `/global` assertion), and the cited mutation ("two live-capstone assertions RED … the abandoned-fallback path") was a UNIT-test result — the capstone has no abandoned leg. The item's own suggested resolution also asked the hint to tell manual-route users to re-attach once `FinishedAt` is set, which it did not. True now: `buildRunningHint` (`execute.ts`) says the manual route alone never releases the job's queue entry and that one `iris_test_status` poll by `jobId` releases it once `FinishedAt` is set (with `IRIS_TOOLS_ENABLE=iris_test_status` for a `core`-preset user); capstone Leg 5 reads `^IRIS.TempAtelierAsyncQueue(jobId,"unittest","id")` through `/global` and asserts it undefined after the completing poll; mutation M4 (a poll resolving a finished run from `%UnitTest_Result` WITHOUT the terminal `GET`) drove Leg 5 RED live (`expected true to be false`), restored byte-identical. A `core` user who never re-shows the tool still leaves a node until something polls it — the separate operator orphan sweep the original row named remains an option, not a ledger item. |
+
+### New deferred items
+
+| ID | Severity | Issue | Deferral rationale | Suggested resolution |
+|---|---|---|---|---|
+| `36-2-CR-1` | HIGH | `ExecuteMCPv2.REST.Global:BuildGlobalRef` (`src/ExecuteMCPv2/REST/Global.cls:219`) wraps each non-numeric subscript piece in `"…"` WITHOUT doubling an embedded `"`, then evaluates the reference by indirection (`$Get(@tRef)`/`$Data(@tRef)`, `Set @tRef`, `Kill @tRef`). A piece containing a quote that is not at both ends breaks out of the string literal and runs as ObjectScript. Live-verified at this review on the default HSCUSTOM instance: `iris_global_get` (READ-classified, default-enabled, so allowed even under `IRIS_GOVERNANCE_PRESET=read-only`) with global `CRProbe362Target` and subscripts `x"_$Increment(^CRProbe362Side)_"x` set `^CRProbe362Side` to `2` (evaluated once by `$Get`, once by `$Data`); the disposable global was killed afterwards. Any caller that can reach `iris_global_get` can therefore execute code and write, bypassing write-governance and `iris_execute_command`'s own key. The same splice was reachable through `iris_test_status:poll`'s unvalidated `jobId` until `36-2-CR-A` (the tool now refuses any non-digit `jobId` before any IRIS call). | Pre-existing since the `/global` route shipped — not introduced by Story 36.2, whose own vector is closed by `36-2-CR-A`. The fix is an ObjectScript change to a bootstrapped class (`gen:bootstrap`; `BOOTSTRAP_VERSION` moves), outside this pure-TypeScript story's scope, and needs its own live tests. Rule #37 count 0. | Story 36.3 (Epic 36's Rule #37 burn-down, next) or a dedicated fix story: never evaluate caller text — build the reference with `$Name` over a subscript array (or at minimum escape string subscripts with `$Replace(tSub,"""","""""")` and reject control characters). Pin with live injection payloads through `iris_global_get`/`set`/`kill`, mutation-verified (Rule #48), and regenerate the bootstrap in the same story (Rule #24). |
+
+**Rule #51 recount:** 1 new distinct item opened (`36-2-CR-1`, HIGH, open); the `36-1-CR-3` evidence correction moves no count (already terminal). Check: prior state (Story 36.2 QA pass) was 0 HIGH / 29 MEDIUM / 97 LOW = 126 open / 213 distinct / 87 terminal. HIGH 0+1=1; MEDIUM 29; LOW 97; open 126+1=127; terminal 87 unchanged; distinct 213+1=214. Verify: 1 + 29 + 97 = 127; 127 + 87 = 214.
+
+**Ledger state after the Story 36.2 code review:** **1 HIGH / 29 MEDIUM / 97 LOW = 127 open** across **214 distinct items** (87 terminal).

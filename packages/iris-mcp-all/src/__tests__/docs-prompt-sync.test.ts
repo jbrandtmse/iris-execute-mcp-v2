@@ -115,13 +115,14 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("the root README still advertises 104 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+  it("the root README still advertises 105 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
     // The literal count itself moves only when a real TOOL is added/removed
     // (e.g. Epic 27's iris_env_diff/iris_env_promote, dev 26 -> 28, suite
-    // 102 -> 104) — never when a PROMPT is added/removed (Rule #31). This
-    // test's job is the latter guarantee, not pinning the literal forever.
+    // 102 -> 104; Story 36.2's iris_test_status, dev 28 -> 29, suite 104 ->
+    // 105) — never when a PROMPT is added/removed (Rule #31). This test's
+    // job is the latter guarantee, not pinning the literal forever.
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
-    expect(rootReadme).toContain("104 tools");
+    expect(rootReadme).toContain("105 tools");
   });
 
   // CR 27.4-1 (resolved Story 29.3 burn-down): `docs/migration-v1-v2.md` had
@@ -130,9 +131,9 @@ describe("prompts documentation stays in sync with the registered prompt catalog
   // surfaces, but the migration guide was NOT one of those 5 scoped
   // surfaces). This pins the fix and guards against the migration guide
   // silently drifting stale again alongside the root README's own count.
-  it("docs/migration-v1-v2.md advertises 104 tools, not the stale 100 (CR 27.4-1)", () => {
+  it("docs/migration-v1-v2.md advertises 105 tools, not the stale 100 (CR 27.4-1)", () => {
     const migrationGuide = readFileSync(resolve(root, "docs/migration-v1-v2.md"), "utf-8");
-    expect(migrationGuide).toContain("104 tools");
+    expect(migrationGuide).toContain("105 tools");
     expect(migrationGuide).not.toContain("100 tools");
   });
 
