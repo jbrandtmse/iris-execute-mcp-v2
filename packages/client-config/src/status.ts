@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS } from "./adapters.js";
 import { detectClients, REAL_DETECTION_FS, type DetectionFs } from "./detect.js";
 import { resolveScopePath } from "./paths.js";
-import { readConfigEntries } from "./readers.js";
+import { isFlagDisabled, readConfigEntries } from "./readers.js";
 import {
   CANONICAL_SERVERS,
   type CanonicalServerName,
@@ -76,14 +76,14 @@ export interface StatusReport {
   undetected: { client: string; displayName: string }[];
 }
 
-/** Classify one parsed entry's enable state per the adapter's flag. */
+/** Classify one parsed entry's enable state per the adapter's flag (36.3,
+ * 33-5-L1: `isFlagDisabled` compares per-format — see its own doc comment
+ * for the Rule #16 probe behind that split). */
 export function entryPresence(
   adapter: ClientAdapter,
   entry: Record<string, unknown>,
 ): "present-enabled" | "present-disabled" {
-  const flag = adapter.nativeDisableFlag;
-  if (flag && entry[flag.key] === flag.disabledValue) return "present-disabled";
-  return "present-enabled";
+  return isFlagDisabled(adapter, entry) ? "present-disabled" : "present-enabled";
 }
 
 function isCanonicalServer(name: string): name is CanonicalServerName {

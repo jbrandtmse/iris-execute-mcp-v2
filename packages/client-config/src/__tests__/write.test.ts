@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { parse as parseToml } from "smol-toml";
 
 import {
   CLIENT_ADAPTERS,
@@ -112,6 +113,112 @@ describe("executeNativeEdit (AC 33.1.1)", () => {
     expect(after).toContain("[mcp_servers.context7]");
   });
 
+  it("33-1-R2 / 33-5-R1: toml set-flag splices a CRLF-terminated line into a CRLF file — no bare LF introduced", () => {
+    const adapter = adapterOf("codex");
+    const content = ["[mcp_servers.iris-dev-mcp]", 'command = "npx"', 'args = ["-y", "@iris-mcp/dev"]', ""].join("\r\n");
+    const disable = diff(content, canonicalEntryForTest("iris-dev-mcp"), adapter, "user", "disable");
+    if (!disable.ok) throw new Error("diff must succeed");
+    const after = executeNativeEdit(content, disable.native);
+    expect(after).toContain("enabled = false\r\n");
+    // No bare (non-CRLF-preceded) LF anywhere in the result.
+    expect(/(?<!\r)\n/.test(after)).toBe(false);
+  });
+
+  it("33-1-R2 / 33-5-R1: toml INSERT (a new table) into a CRLF file carries CRLF on every new line, incl. the blank separator", () => {
+    const adapter = adapterOf("codex");
+    const content = ["[mcp_servers.context7]", 'command = "npx"', ""].join("\r\n");
+    const add = diff(content, canonicalEntryForTest("iris-dev-mcp"), adapter, "user", "apply");
+    if (!add.ok) throw new Error("diff must succeed");
+    const after = executeNativeEdit(content, add.native);
+    expect(after).toContain("[mcp_servers.iris-dev-mcp]\r\n");
+    expect(/(?<!\r)\n/.test(after)).toBe(false);
+    expect(parseToml(after)).toBeDefined(); // still valid TOML
+  });
+
+  it("33-5-R1: toml merge-update (command/args/env replacement spans) carries CRLF through every replaced AND inserted line, comment-bearing + 4-space-indented fixture", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp] # managed",
+      'command = "old" # keep me',
+      "startup_timeout_sec = 30",
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      'EXTRA = "keep-me"',
+      "",
+    ].join("\r\n");
+    const result = diff(content, canonicalEntryForTest("iris-dev-mcp"), adapter, "user", "apply");
+    if (!result.ok) throw new Error("diff must succeed");
+    expect((result.native as { op?: string })?.op).toBe("merge-update");
+    const after = executeNativeEdit(content, result.native);
+    expect(/(?<!\r)\n/.test(after)).toBe(false); // no bare LF anywhere
+    expect(after).toContain('command = "npx" # keep me\r\n'); // changed value, comment carried (33-5-R2 leg a)
+    expect(after).toContain("startup_timeout_sec = 30\r\n"); // untouched line, byte-exact
+    expect(after).toContain('EXTRA = "keep-me"\r\n'); // untouched env key, byte-exact
+    expect(after).toContain('IRIS_NAMESPACE = "HSCUSTOM"\r\n'); // new env key, CRLF too
+    expect(parseToml(after)).toBeDefined();
+  });
+
+  // ── Story 36.3 code review ────────────────────────────────────────────
+  // Rule #58 fixture diversity the dev-stage CRLF tests lacked: every one of
+  // them had an existing [mcp_servers.*] table AND a trailing CRLF, so the
+  // splice's reference line was always a real CRLF line. The commonest real
+  // write — a first `apply` into a config.toml with no MCP table yet — and
+  // every no-trailing-newline file still came out mixed. Oracle (no
+  // hand-authored bytes): the CRLF output must equal the LF output for the
+  // LF-normalized input with every "\n" as "\r\n", and carry no bare LF.
+  const TOML_EOL_CASES: Record<string, string> = {
+    "no [mcp_servers.*] table, trailing newline (first-time apply)": 'model = "o3"\n',
+    "no [mcp_servers.*] table, NO trailing newline": 'model = "o3"\napproval_policy = "never"',
+    "existing root table, NO trailing newline": '[mcp_servers.other]\ncommand = "x"',
+    "command-only owned entry, trailing newline (merge-update)": '[mcp_servers.iris-dev-mcp]\ncommand = "npx"\n',
+    "command-only owned entry, 4-space + trailing comment, NO trailing newline (merge-update)":
+      '[mcp_servers.iris-dev-mcp]\n    command = "npx" # pinned',
+  };
+  for (const [label, lfContent] of Object.entries(TOML_EOL_CASES)) {
+    it(`CRLF parity — ${label}: CRLF output is the LF output with CRLF terminators, no bare LF`, () => {
+      const adapter = adapterOf("codex");
+      const entry = canonicalEntryForTest("iris-dev-mcp");
+      const crlfContent = lfContent.replace(/\n/g, "\r\n");
+      const lfDiff = diff(lfContent, entry, adapter, "user", "apply");
+      const crlfDiff = diff(crlfContent, entry, adapter, "user", "apply");
+      if (!lfDiff.ok || !crlfDiff.ok) throw new Error("both diffs must succeed");
+      const lfAfter = executeNativeEdit(lfContent, lfDiff.native);
+      const crlfAfter = executeNativeEdit(crlfContent, crlfDiff.native);
+      expect(/(?<!\r)\n/.test(crlfAfter)).toBe(false);
+      expect(crlfAfter.endsWith("\r")).toBe(false); // never a dangling CR at EOF
+      expect(crlfAfter).toBe(lfAfter.replace(/\n/g, "\r\n"));
+      expect(parseToml(crlfAfter)).toEqual(parseToml(lfAfter));
+    });
+  }
+
+  it("merge-update tie order (Story 36.3 code review, HIGH): an `args` insert and a new env table landing on the SAME line keep push order — `args` never ends up inside the env table", () => {
+    const adapter = adapterOf("codex");
+    const entry = canonicalEntryForTest("iris-dev-mcp");
+    for (const content of ['[mcp_servers.iris-dev-mcp]\ncommand = "npx"\n', '[mcp_servers.iris-dev-mcp]\r\ncommand = "npx"\r\n']) {
+      const result = diff(content, entry, adapter, "user", "apply");
+      if (!result.ok) throw new Error("diff must succeed");
+      expect((result.native as { op?: string })?.op).toBe("merge-update");
+      const parsed = parseToml(executeNativeEdit(content, result.native)) as { mcp_servers: Record<string, Record<string, unknown>> };
+      const written = parsed.mcp_servers["iris-dev-mcp"] ?? {};
+      expect(written.command).toBe("npx");
+      expect(written.args).toEqual(["-y", "@iris-mcp/dev"]);
+      expect(written.env).toEqual({ IRIS_NAMESPACE: "HSCUSTOM" }); // pre-fix: { IRIS_NAMESPACE, args: [...] }
+    }
+  });
+
+  it("merge-update tie order: a `command` INSERT and an `args` REPLACEMENT on the same line (an entry whose first body line is `args`) — the replacement never overwrites the inserted command", () => {
+    const adapter = adapterOf("codex");
+    const content = '[mcp_servers.iris-dev-mcp]\nargs = ["old"]\n';
+    const result = diff(content, canonicalEntryForTest("iris-dev-mcp"), adapter, "user", "apply");
+    if (!result.ok) throw new Error("diff must succeed");
+    const after = executeNativeEdit(content, result.native);
+    const parsed = parseToml(after) as { mcp_servers: Record<string, Record<string, unknown>> };
+    const written = parsed.mcp_servers["iris-dev-mcp"] ?? {};
+    expect(written.command).toBe("npx");
+    expect(written.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(after.indexOf("command = ")).toBeLessThan(after.indexOf("args = "));
+  });
+
   it("yaml: set/delete via the Document API with comments preserved", () => {
     const adapter = adapterOf("goose");
     const content = readFixture("goose/config.yaml");
@@ -155,6 +262,32 @@ describe("applyWrite safety protocol (AC 33.1.2)", () => {
     expect(result.backupPath).toBe(expectedBackup);
     expect(fs.readFile(expectedBackup)).toBe(original); // exact prior bytes
     expect(fs.readFile("/h/.claude.json")).toBe(updated);
+  });
+
+  it("33-1-R4: two writes landing in the SAME millisecond disambiguate their backups instead of the second overwriting the first", () => {
+    const adapter = adapterOf("claude-code");
+    const fs = new MemFs();
+    const original = readFixture("claude-code/user.json");
+    fs.seed("/h/.claude.json", original);
+    const now = fixedNow(123, 123); // identical stamp on both calls
+    const firstUpdate = original.replace('"numStartups": 4', '"numStartups": 5');
+    const first = applyWrite("/h/.claude.json", original, firstUpdate, writeOptions(adapter, fs, now));
+    expect(first.ok).toBe(true);
+    const baseBackup = backupPathFor(STATE_DIR, "claude-code", "user", "/h/.claude.json", "linux", new Date(Date.UTC(2026, 6, 27, 12, 0, 0, 123)));
+    expect(first.backupPath).toBe(baseBackup);
+    expect(fs.readFile(baseBackup)).toBe(original); // the FIRST write's prior bytes
+
+    const secondUpdate = firstUpdate.replace('"numStartups": 5', '"numStartups": 6');
+    const second = applyWrite("/h/.claude.json", firstUpdate, secondUpdate, writeOptions(adapter, fs, now));
+    expect(second.ok).toBe(true);
+    expect(second.backupPath).not.toBe(baseBackup); // disambiguated, never overwriting the first
+    expect(second.backupPath).toBe(`${baseBackup}-1`);
+    expect(fs.readFile(baseBackup)).toBe(original); // the FIRST backup survives untouched
+    expect(fs.readFile(second.backupPath as string)).toBe(firstUpdate); // the SECOND write's own prior bytes
+
+    // Both backups are visible to listBackups, oldest first.
+    const listed = listBackups("/h/.claude.json", writeOptions(adapter, fs));
+    expect(listed).toEqual([baseBackup, second.backupPath]);
   });
 
   it("a brand-new file gets no backup and parses cleanly after the write", () => {

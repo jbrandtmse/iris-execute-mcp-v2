@@ -55,7 +55,13 @@ export const docCompileTool: ToolDefinition = {
       .describe("Compilation flags (e.g., 'ck', 'cku'). Default: server default"),
     async: booleanParam
       .optional()
-      .describe("When true, queue asynchronous compilation and return a job ID for polling"),
+      .describe(
+        "When true, queue asynchronous compilation and return immediately with " +
+          "`{mode: \"async\", docs, response}` — NOT a job ID for polling; there is no companion poll " +
+          "route on this tool today (unlike iris_execute_tests' async work-queue contract). Use this " +
+          "only to avoid a synchronous Web Gateway timeout on a very large package; the caller has no " +
+          "built-in way to learn when compilation finishes or whether it succeeded.",
+      ),
     namespace: z
       .string()
       .optional()

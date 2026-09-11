@@ -384,4 +384,70 @@ ClassMethod TargetReturnEscapeHeavyOverCeiling() As %String
     Quit tResult
 }
 
+/// Story 36.3 (ledger `34-1-R8`) — declares exactly TWO formals. Live-verified
+/// (2026-09-11, disposable `ExecuteMCPv2.Temp.Story363ArityProbe`) against a real
+/// user-class target: an OVER-supplied call (3 dot-passed args against 2 formals)
+/// raises `<PARAMETER>`; an UNDER-supplied call (1 arg against 2 formals) succeeds
+/// cleanly with the unsupplied trailing formal genuinely undefined (`$Get` returns
+/// `""`) — the same "unbound trailing formal, not an error" contract `Target20`'s own
+/// `$Data` guards already rely on, pinned here explicitly against an UNGUARDED target.
+ClassMethod TargetTwoFormals(pA As %String, pB As %String) As %String
+{
+    Quit "two:"_$Get(pA)_","_$Get(pB)
+}
+
+/// Story 36.3 (ledger `34-1-R5`) — ZNs to a real, existing namespace, THEN throws.
+/// Target2 (ZN, clean) and Target3 (throw, no ZN) in Story 34.1 were only ever probed
+/// SEPARATELY; this combines them so the catch-block ordering (I/O restore before
+/// namespace restore before the single render — <c>ExecuteMCPv2.REST.Command</c>'s own
+/// discipline) is exercised with the process genuinely left in a foreign namespace at
+/// the moment of the throw.
+ClassMethod TargetZNThenThrow() As %String
+{
+    ZN "USER"
+    Set tZero = 0
+    Quit 1 / tZero
+}
+
+/// Story 36.3 (ledger `34-1-R5`) — ZNs to a namespace that does not exist. Live-verified
+/// (2026-09-11) that `ZN` to a nonexistent namespace itself raises `<NAMESPACE>` — the
+/// throw happens INSIDE the ZN command, while the endpoint's own I/O redirect is still
+/// bound, before the target ever reaches its own body.
+ClassMethod TargetZNToNonexistentNamespace() As %String
+{
+    ZN "ExecuteMCPv2NonexistentNS12345"
+    Quit "never-reached"
+}
+
+/// Story 36.3 (ledger `34-1-R10`) — writes narration ending in an explicit trailing
+/// newline, THEN throws. Pins the "unpinned output contract" Story 34.1's own probe
+/// left open: whether the capture buffer preserves a target's trailing newline
+/// byte-exact up to a mid-execution throw (dev and QA captured different bytes for
+/// "the same" probe test — one with a trailing newline, one without).
+ClassMethod TargetWriteNewlineThenThrow() As %String
+{
+    Write "before-throw"_$Char(10)
+    Set tZero = 0
+    Quit 1 / tZero
+}
+
+/// Story 36.3 (ledger `34-1-R16`) — several ZN switches interleaved with Write
+/// narration AND a ByRef mutation between each switch — bug report repro 3's actual
+/// shape. The existing `TargetZNWriteByRef` simplifies repro 3 to a SINGLE switch;
+/// this exercises the multi-switch path the ledger item names as never exercised.
+ClassMethod TargetMultiZNInterleaved(ByRef pVal As %String) As %String
+{
+    Write "start:"_$NAMESPACE
+    ZN "USER"
+    Write $Char(10)_"mid1:"_$NAMESPACE
+    Set pVal = pVal_"-mid1"
+    ZN "%SYS"
+    Write $Char(10)_"mid2:"_$NAMESPACE
+    Set pVal = pVal_"-mid2"
+    ZN "USER"
+    Write $Char(10)_"end:"_$NAMESPACE
+    Set pVal = pVal_"-end"
+    Quit "multizn-ok"
+}
+
 }

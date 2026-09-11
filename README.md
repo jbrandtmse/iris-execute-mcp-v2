@@ -12,13 +12,13 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 28 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`) |
+| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 29 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`), long-running test-run re-attach/read/cancel (`iris_test_status`) |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay (duplication hazard — preview before executing) |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **104 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **105 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -84,6 +84,7 @@ All servers use the same environment variables:
 | `IRIS_AUDIT_LOG_PARAMS` | `false` | **Optional.** When `true`, audit entries also include each call's (redacted) parameter *values*; the default logs parameter *key names* only. Only relevant when `IRIS_AUDIT_LOG` is set. |
 | `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer ceiling on the number of rows `iris_sql_execute` **returns** — a post-fetch cap on the response (it bounds the returned row count, not the server-side result set or transfer). Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
 | `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for `iris_sql_execute`'s HTTP call. Omit to use the connection's default `IRIS_TIMEOUT`. |
+| `IRIS_TEST_TIMEOUT` | *(unset — 120s default)* | **Optional.** Positive number of **seconds** — the DEFAULT wait budget `iris_execute_tests` waits before returning a "running" result (with the run's `jobId`/`runIndex` handles) instead of blocking further. A per-call `timeout` argument takes precedence over this. Hard-capped at 3600s regardless of source. Omit for today's 120-second default. |
 | `IRIS_TOOLS_PRESET` | `full` | **Optional.** `"full"` (today's behavior) \| `"core"` (~10-tool small-model subset) \| `"developer"` (persona filter, security/enterprise admin hidden). Unknown value fails fast at startup naming the valid values. Omit for today's `tools/list`, byte-for-byte. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_DISABLE` | *(unset)* | **Optional.** Comma-separated tool names to hide from `tools/list`. Trailing-`*` wildcard supported (`iris_doc_*`); a bare `*` alone is rejected. Omit to hide nothing beyond the active preset. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_ENABLE` | *(unset)* | **Optional.** Comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE` (punches a hole in a hidden family). Omit for no overrides. See [Tool Visibility Presets](#tool-visibility-presets). |
@@ -93,7 +94,7 @@ All servers use the same environment variables:
 | `IRIS_SM_WORKSPACE` | *(unset — the process CWD)* | **Optional.** Directory whose `.vscode/settings.json` is used as the highest-precedence source. Set it explicitly when the MCP client's working directory is not the workspace you mean. Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required`. |
 | `IRIS_CREDENTIAL_HELPER` | *(unset)* | **Optional.** A command run with the Server-Manager profile name appended as its **final argument**; the command's trimmed stdout is the password. Because the name is always appended, point this at a small wrapper script that uses it (e.g. a script running `op read "op://vault/$1/password"` or `pass show "iris/$1"`) rather than at a bare `op read …`/`pass show …`, which would reject the extra argument. Run without a shell, so on Windows point it at a real `.exe` (a `.cmd`/`.bat` shim needs `cmd /c <your-helper.cmd>`). Runs synchronously per password-less profile with a 10s timeout, so keep `IRIS_SM_SERVERS` tight if the helper can hang. Link 3 of the credential chain — see [Server Manager connections](#server-manager-connections-optional). Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required` and a profile still lacks a password after the OS-keychain link. |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_GOVERNANCE_FILE`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, `IRIS_TOOLS_ENABLE`, `IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_SM_WORKSPACE`, and `IRIS_CREDENTIAL_HELPER` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_GOVERNANCE_FILE`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TEST_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, `IRIS_TOOLS_ENABLE`, `IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_SM_WORKSPACE`, and `IRIS_CREDENTIAL_HELPER` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need.
 
 #### Server Manager connections (optional)
 
@@ -594,17 +595,17 @@ Design intents differ per preset:
 - **`core`** attacks the **tool-count cliff** (research: LLM tool-selection accuracy degrades sharply past ~20 tools per server) — the everyday ~80% loop, **≤13 runtime tools per server**, tuned for small/cheap models. Destructive-and-rare and bulk/specialist tools are hidden.
 - **`developer`** attacks **persona relevance** — everything a developer touches (full dev server, production lifecycle + monitoring, namespace/database/webapp self-service config, runtime/task tools, all data tools) while hiding **security & enterprise administration** (users/roles/resources/SSL/OAuth/LDAP/X509/audit, backup/mirror/ECP). Counts stay above the cliff on `dev`/`interop` under `developer` — that's accepted; `core` is the count answer.
 
-`iris_server_profiles` is additionally visible on every server under every preset (the `+1` in every "runtime" count below). Two tools designed as a unit — `iris_env_diff` / `iris_env_promote` — are always co-visible in every preset (never one without the other, so an agent is never stranded mid-workflow).
+`iris_server_profiles` is additionally visible on every server under every preset (the `+1` in every "runtime" count below). Two tools designed as a unit — `iris_env_diff` / `iris_env_promote` — are always co-visible in every preset (never one without the other, so an agent is never stranded mid-workflow). `iris_test_status` (Story 36.2) is NOT one of those pairs: it is `developer`-include / `core`-exclude on its own (`core` is already at its 13-runtime-tool ceiling, and the manual re-attach route named in `iris_execute_tests`' `hint` still works there).
 
 | Preset | dev | admin | interop | ops | data | Package total | Runtime total |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **full** (default) | 28 | 26 | 22 | 21 | 7 | 104 | 109 |
-| **developer** | 28 | 10 | 22 | 9 | 7 | 76 | 81 |
+| **full** (default) | 29 | 26 | 22 | 21 | 7 | 105 | 110 |
+| **developer** | 29 | 10 | 22 | 9 | 7 | 77 | 82 |
 | **core** | 12 | 12 | 9 | 9 | 7 | 49 | 54 |
 
 Every `core` server lands at ≤13 runtime tools — inside the researched 5-15-tool window. The exact per-tool `include`/`exclude` disposition for each server is declared explicitly in that package's `src/tools/presets.ts` (transcribed from and kept in lockstep with [`research/feature-specs/11-tool-visibility-presets.md#2.5`](_bmad-output/planning-artifacts/research/feature-specs/11-tool-visibility-presets.md) — the authoritative per-tool table; a mismatch fails a per-package unit test AND a construction-time assert, so it cannot drift silently). In short:
 
-- **`@iris-mcp/dev`** `core` = the authoring loop (get/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute. `developer` = the full 28-tool server (every dev tool is dev-relevant).
+- **`@iris-mcp/dev`** `core` = the authoring loop (get/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute. `developer` = the full 29-tool server (every dev tool is dev-relevant).
 - **`@iris-mcp/admin`** `core` = the everyday admin loop (namespaces, databases, users, webapps, permission checks). `developer` = only what developers self-serve (namespace/db/mapping/webapp config) — no user/security administration.
 - **`@iris-mcp/interop`** `core` = the troubleshoot-a-production loop (status/summary/control, item config, logs/queues/messages, trace diagram, resend) — `iris_production_control` stays visible so the `recover`-first MCP guidance holds under every preset. `developer` = the full 22-tool server.
 - **`@iris-mcp/ops`** `core` = monitoring-persona basics (health, system metrics, alert metrics, jobs/locks/processes, tasks, license). `developer` = the runtime debugging slice (interop metrics + task history) — no backup/mirror/ECP/config surface.
@@ -616,13 +617,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 29 / 53,404 / ~13,351 | 13 / 17,749 / ~4,437 | 29 / 53,404 / ~13,351 |
-| @iris-mcp/admin | 27 / 44,873 / ~11,218 | 13 / 16,613 / ~4,153 | 11 / 15,973 / ~3,993 |
-| @iris-mcp/interop | 23 / 38,332 / ~9,583 | 10 / 20,103 / ~5,026 | 23 / 38,332 / ~9,583 |
-| @iris-mcp/ops | 22 / 30,563 / ~7,641 | 10 / 13,565 / ~3,391 | 10 / 14,016 / ~3,504 |
-| @iris-mcp/data | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 | 8 / 10,937 / ~2,734 |
+| @iris-mcp/dev | 30 / 70,119 / ~17,530 | 13 / 29,293 / ~7,323 | 30 / 70,119 / ~17,530 |
+| @iris-mcp/admin | 27 / 47,730 / ~11,933 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
+| @iris-mcp/interop | 23 / 39,727 / ~9,932 | 10 / 21,174 / ~5,294 | 23 / 39,727 / ~9,932 |
+| @iris-mcp/ops | 22 / 30,677 / ~7,669 | 10 / 13,679 / ~3,420 | 10 / 14,130 / ~3,533 |
+| @iris-mcp/data | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~67% fewer bytes (`@iris-mcp/dev`: 53,404 → 17,749).
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 47,730 → 16,727; `@iris-mcp/dev`: 70,119 → 29,293, ~58%). Re-measured at the Story 36.2 code review (`pnpm measure:tools-payload` after a forced clean rebuild — mechanical, Rule #51). The previously committed figures dated from Story 30.2 (`9c57d84`): byte counts are not test-pinned (only the tool counts are), and tool descriptions/schemas in every package changed across Epics 31–36 without a re-measure (e.g. `@iris-mcp/data`'s Story 35.6/35.7 fixes, Story 36.1's `iris_execute_tests` running-result contract) — so every row moved, not only `@iris-mcp/dev`; its `full`/`developer` rows additionally include `iris_test_status`, which `core` excludes.
 
 ---
 
@@ -654,7 +655,7 @@ See the [client configuration index](docs/client-config/README.md) — covering 
 
 Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) — parameterized, workflow-shaped instructions that teach an MCP client the *sequence* of tool calls an expert would use for a task, not just the tools themselves. This is a separate MCP protocol capability from tools: prompts are discoverable via `prompts/list` and rendered via `prompts/get`, on any client that supports the [MCP `prompts` capability](https://modelcontextprotocol.io/). A server only advertises `prompts` when it has at least one registered — servers with none behave exactly as before (Rule #19 back-compat).
 
-**Prompts do not change the 104-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
+**Prompts do not change the 105-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
 
 ### The v1 pack — 11 prompts, grouped by owning server
 
@@ -701,7 +702,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(28)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
+     │(29)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘

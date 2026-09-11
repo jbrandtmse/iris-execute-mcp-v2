@@ -3,6 +3,7 @@
   "version": "0.0.2",
   "description": "Meta-package that installs all five IRIS MCP server packages",
   "type": "module",
+  "files": [],
   "scripts": {
     "test": "vitest run",
     "prepublishOnly": "node scripts/prepublish-gate.mjs"

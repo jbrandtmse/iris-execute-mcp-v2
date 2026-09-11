@@ -11,6 +11,7 @@
 
 import {
   IrisApiError,
+  IrisConnectionError,
   atelierPath,
   ensureUnitTestRoot,
   type ToolDefinition,
@@ -133,10 +134,72 @@ export const executeCommandTool: ToolDefinition = {
 
 // ── iris_execute_tests ─────────────────────────────────────────
 
-/** Maximum time to wait for test results (ms). */
-const TEST_POLL_TIMEOUT = 120_000;
+/**
+ * Injectable clock/sleep seam (Story 36.1 AC 36.1.7) so the "still running"
+ * branch — and the counter/queue-node handle capture that runs alongside it
+ * — can be pinned in tests WITHOUT burning wall-clock time. Chosen over
+ * `vi.useFakeTimers()` (which would be the first use of fake timers in this
+ * repo): an explicit `now`/`sleep` pair is a smaller, tool-local seam that
+ * needs no global timer-mocking setup/teardown and composes simply with a
+ * deterministic fake that advances on each `sleep` call. Production callers
+ * never pass a `clock` — {@link executeTestsTool}'s exported `handler` is
+ * `createExecuteTestsHandler()` with no argument, using {@link realClock}
+ * (real `Date.now`/`setTimeout`), so today's behavior is byte-for-byte
+ * unchanged (Rule #19).
+ */
+export interface TestClock {
+  /** Current time in epoch milliseconds. */
+  now: () => number;
+  /** Resolve after (at least, in the real implementation) `ms` milliseconds. */
+  sleep: (ms: number) => Promise<void>;
+}
+
+/** Real-time clock — production default. */
+const realClock: TestClock = {
+  now: () => Date.now(),
+  sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
 /** Delay between poll requests (ms). */
 const TEST_POLL_INTERVAL = 200;
+/**
+ * Fallback wait budget (seconds) when neither an explicit `timeout` argument
+ * nor `IRIS_TEST_TIMEOUT` is set — today's hard-coded value (120s),
+ * unchanged (Rule #19).
+ */
+const DEFAULT_TEST_TIMEOUT_SECONDS = 120;
+/**
+ * Hard upper cap (seconds) on the resolved wait budget, regardless of
+ * source (AC 36.1.4). Mirrors the `IRIS_SQL_MAX_ROWS`/`rowsCapped`
+ * clamp-and-flag precedent (`sql.ts`) — a value above this is silently
+ * clamped and the response carries `timeoutCapped: true`.
+ */
+const MAX_TEST_TIMEOUT_SECONDS = 3600;
+/**
+ * Run-index capture strategy (AC 36.1.5, as ruled at the Story 36.1 code
+ * review — AC 36.1.5 wins over the former "gate the reads on the 2nd
+ * still-running poll" design, ledger `36-1-QA-1`/`36-1-QA-2`):
+ *
+ *  1. `^UnitTest.Result`'s root counter is read ONCE, BEFORE `POST /work` —
+ *     so the "before" snapshot can never already include this job's own
+ *     `$INCREMENT` (the worker allocates within tens of ms of queueing).
+ *  2. On EVERY still-running poll (the first one included) until captured,
+ *     `IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` is read — a value
+ *     keyed by OUR jobId, so it can never name another client's run. The
+ *     terminal poll kills that node before its HTTP response is sent
+ *     (`%Api.Atelier.v8` PollAsync), so only a `retryafter` poll can see it.
+ *  3. Only for a COMPLETED run whose queue capture never succeeded is the
+ *     counter read again and the delta applied (see
+ *     {@link attributeRunIndexByCounter}). A STILL-RUNNING run is never
+ *     counter-attributed: its worker may not have allocated its index yet,
+ *     so a delta of 1 there can be ANOTHER client's run (`36-1-QA-1`).
+ *
+ * The `/global` reads are best-effort: after this many CONSECUTIVE transport
+ * failures (e.g. the ExecuteMCPv2 `/global` route is not deployed on the
+ * instance) the per-poll queue-node read stops for the rest of the call,
+ * instead of adding one failing GET to every 200 ms poll for the whole budget.
+ */
+const MAX_CAPTURE_READ_FAILURES = 3;
 
 /**
  * The Atelier `/work` unittest endpoint's `methods` request filter and its
@@ -172,12 +235,251 @@ function toAtelierMethodFilter(methodName: string): string {
 }
 
 /** Reverse of {@link toAtelierMethodFilter} — see that function's doc. */
-function fromAtelierMethodName(method: string): string {
+export function fromAtelierMethodName(method: string): string {
   return `Test${method}`;
 }
 
+/**
+ * Run handles (Story 36.1 AC 36.1.5/36.1.6) carried on every non-completed
+ * return once a job exists, and additively on the completed envelope.
+ * `runIndex`/`runIndexSource` are explicit (including `null`) rather than
+ * omitted once a capture attempt has been made, so a structured consumer can
+ * always distinguish "never attempted" (fields absent — no `jobId` yet) from
+ * "attempted, still unknown" (`null`).
+ */
+export interface RunHandles {
+  jobId?: string;
+  runIndex?: number | null;
+  /**
+   * `"result-table"` (Story 36.2) is additive: `iris_test_status` read this
+   * result from `%UnitTest_Result` by exact `InstanceIndex` (AC 36.2.2
+   * (ii)/(iv)) — the index itself came from the job's queue node, the
+   * caller's `runIndex`, or a `runIndex`-alone poll; never `MAX()` or the
+   * counter-delta fallback. `iris_execute_tests` (this file) never sets it —
+   * its own output is unaffected (Rule #19).
+   */
+  runIndexSource?: "queue" | "counter" | "result-table" | null;
+  /** Present only when there is something specific to say about why
+   * `runIndex` is `null` despite an attempt (e.g. an ambiguous counter
+   * delta). */
+  runIndexNote?: string;
+}
+
+/**
+ * Read one global node via the EXISTING custom REST `/global` GET route
+ * (`ExecuteMCPv2.REST.Global::GetGlobal`, already bootstrapped — the exact
+ * request shape `iris_global_get` builds, per this story's Dev Notes). No
+ * new ObjectScript surface (this story is pure TypeScript).
+ *
+ * Never throws: this is a best-effort instrumentation read for the handle-
+ * capture mechanism, never a requirement for the tool's core result. A
+ * transport failure, or a response that doesn't look like a `/global`
+ * envelope (e.g. a stray atelier poll response accidentally read through
+ * this path), returns `undefined` rather than a wrong value (Rule #54 — pin
+ * only shapes the real endpoint can return: `{value, defined}`).
+ */
+export async function readGlobalNode(
+  ctx: { http: InstanceType<typeof import("@iris-mcp/shared").IrisHttpClient> },
+  ns: string,
+  globalName: string,
+  subscripts: string,
+): Promise<{ value: string; defined: boolean } | undefined> {
+  const params = new URLSearchParams();
+  params.set("global", globalName);
+  if (subscripts) params.set("subscripts", subscripts);
+  params.set("namespace", ns);
+  const path = `${BASE_URL}/global?${params.toString()}`;
+  try {
+    const response = await ctx.http.get<Record<string, unknown>>(path);
+    const result = response.result;
+    if (result && typeof result === "object" && "defined" in result) {
+      const defined = (result as Record<string, unknown>).defined === true;
+      const rawValue = (result as Record<string, unknown>).value;
+      const value =
+        typeof rawValue === "string"
+          ? rawValue
+          : rawValue === undefined || rawValue === null
+            ? ""
+            : String(rawValue);
+      return { value, defined };
+    }
+  } catch {
+    // Best-effort — see banner.
+  }
+  return undefined;
+}
+
+/** Read `^UnitTest.Result`'s root counter value (best-effort). Returns
+ * `undefined` only when the read itself failed/was unparseable — an unset
+ * global reads as `0` (matching ObjectScript's own `$GET(^UnitTest.Result,0)`
+ * fallback), not "unavailable". */
+async function readUnitTestCounter(
+  ctx: { http: InstanceType<typeof import("@iris-mcp/shared").IrisHttpClient> },
+  ns: string,
+): Promise<number | undefined> {
+  const node = await readGlobalNode(ctx, ns, "UnitTest.Result", "");
+  if (!node) return undefined;
+  const parsed = Number(node.value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+interface ResolvedTimeout {
+  timeoutMs: number;
+  timeoutCapped: boolean;
+}
+
+/**
+ * Resolve the effective wait budget (AC 36.1.4): explicit `timeout`
+ * (seconds) argument > `ctx.config.testTimeoutMs` (`IRIS_TEST_TIMEOUT`) >
+ * {@link DEFAULT_TEST_TIMEOUT_SECONDS}, clamped at
+ * {@link MAX_TEST_TIMEOUT_SECONDS}.
+ */
+function resolveTestTimeout(
+  explicitSeconds: number | undefined,
+  configTestTimeoutMs: number | undefined,
+): ResolvedTimeout {
+  let timeoutMs: number;
+  if (explicitSeconds !== undefined) {
+    timeoutMs = explicitSeconds * 1000;
+  } else if (configTestTimeoutMs !== undefined) {
+    timeoutMs = configTestTimeoutMs;
+  } else {
+    timeoutMs = DEFAULT_TEST_TIMEOUT_SECONDS * 1000;
+  }
+  const capMs = MAX_TEST_TIMEOUT_SECONDS * 1000;
+  if (timeoutMs > capMs) {
+    return { timeoutMs: capMs, timeoutCapped: true };
+  }
+  return { timeoutMs, timeoutCapped: false };
+}
+
+/**
+ * Build the `hint` field naming BOTH re-attach routes (AC 36.1.3) — the
+ * shipped `iris_test_status` companion tool (Story 36.2) and the manual route
+ * that works in EVERY preset today (`core` included, Lead decision L-2):
+ * `iris_global_get` on the jobId's queue node for the run index, then
+ * `iris_sql_execute` joined down from `%UnitTest_Result.TestInstance` — the
+ * ONLY `%UnitTest_Result` table carrying the `InstanceIndex` column
+ * (`TestSuite.TestInstance` → `TestCase.TestSuite` → `TestMethod.TestCase` →
+ * `TestAssert.TestMethod`; live-verified via INFORMATION_SCHEMA.COLUMNS at
+ * the Story 36.1 code review) — never `MAX(InstanceIndex)`. The query selects
+ * `TestInstance.DateTime AS FinishedAt` because the rows exist WHILE the run
+ * executes (live-captured at the code review: mid-run the TestInstance row
+ * has `DateTime ""`/`Duration 0` and the still-hanging method already reads
+ * `Status 1`) — an empty FinishedAt is the only signal they are not final.
+ *
+ * @param lead - The situation sentence ("Still executing server-side." for
+ *   a running result; a "may still be executing" sentence for a polling
+ *   error once the job exists).
+ * @param namespace - The run's own namespace (Story 36.2 code review): the
+ *   Atelier queue is instance-wide but `%UnitTest_Result` is per-namespace,
+ *   so the `iris_test_status` call the hint suggests must carry it.
+ */
+export function buildRunningHint(
+  lead: string,
+  jobId: string,
+  runIndex: number | null,
+  namespace?: string,
+): string {
+  const capturedPart = runIndex !== null ? `already captured: ${runIndex} — ` : "";
+  return (
+    `${lead} Do NOT re-submit — re-submitting starts a SECOND concurrent run against shared fixtures. ` +
+    `Re-attach instead. Easiest: call iris_test_status with action "poll" and jobId "${jobId}"` +
+    `${runIndex !== null ? ` (or runIndex ${runIndex})` : ""}` +
+    `${namespace ? ` and namespace "${namespace}" (the run's own — it must match)` : ""} — it reads the same ` +
+    `handles below and is enabled by default (if your tool-visibility preset hides it, e.g. core, use the ` +
+    `manual route below, or have the operator re-show it with IRIS_TOOLS_ENABLE=iris_test_status); its ` +
+    `"cancel" action can also stop this run if you no longer want it (default-DISABLED by governance, enable ` +
+    `via IRIS_GOVERNANCE). Today, in every preset, the manual route also still works: ` +
+    `(1) the runIndex (${capturedPart}re-readable while the job is ` +
+    `queued or running via iris_global_get with global "IRIS.TempAtelierAsyncQueue" and subscripts ` +
+    `'${jobId},"unittest","id"'); (2) iris_sql_execute "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
+    `tm.Name AS MethodName, tm.Status, tm.Duration, tm.ErrorDescription FROM %UnitTest_Result.TestMethod tm ` +
+    `JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID JOIN %UnitTest_Result.TestSuite ts ON ` +
+    `tc.TestSuite = ts.ID JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID WHERE ` +
+    `ti.InstanceIndex = ?" with parameters [runIndex] — only %UnitTest_Result.TestInstance carries the ` +
+    `InstanceIndex column; TestSuite/TestCase/TestMethod (and TestAssert, via TestMethod) join down to it. An ` +
+    `EMPTY FinishedAt means the run is STILL executing: its rows are in-progress, not final (a method that is ` +
+    `still running already reads Status 1) — re-query until FinishedAt is set. The manual route alone never ` +
+    `releases the job's Atelier queue entry: once FinishedAt is set, one iris_test_status poll by jobId ` +
+    `releases it. Never MAX(InstanceIndex) — a concurrent run can allocate a higher index first.`
+  );
+}
+
+/**
+ * Counter-delta run-index attribution for a COMPLETED run whose queue-node
+ * capture never succeeded (AC 36.1.5; see {@link MAX_CAPTURE_READ_FAILURES}'s
+ * banner for the full capture strategy). `counterBefore` was read BEFORE
+ * `POST /work` and `counterAfter` after completion, so this job's own
+ * allocation — if `%UnitTest.Manager` ever ran for it — lies inside the
+ * window: a delta of exactly 1 is therefore this job's index. Any other
+ * outcome yields `null` plus a `runIndexNote` saying why (never a guess).
+ *
+ * `drainedAnyRows` guards the one case where a delta of 1 is NOT ours: the
+ * Atelier worker quits BEFORE publishing the run index or calling
+ * `%UnitTest.Manager.RunTest` when the test class fails to compile (or there
+ * is nothing to run) — `%Api.Atelier.v8:ExecuteAsyncRequest`, read at the
+ * Story 36.1 code review — so a completed run that drained no result rows
+ * never allocated an index, and a delta of 1 in that window belongs to
+ * another client's run.
+ */
+function attributeRunIndexByCounter(
+  counterBefore: number | undefined,
+  counterAfter: number | undefined,
+  drainedAnyRows: boolean,
+): { runIndex: number | null; runIndexSource: "counter" | null; runIndexNote?: string } {
+  if (counterBefore === undefined || counterAfter === undefined) {
+    return {
+      runIndex: null,
+      runIndexSource: null,
+      runIndexNote:
+        "Run index not attributed: the run-index queue node was never observed and the ^UnitTest.Result " +
+        "counter could not be read before queueing and/or after completion.",
+    };
+  }
+  const delta = counterAfter - counterBefore;
+  if (delta === 0) {
+    return {
+      runIndex: null,
+      runIndexSource: null,
+      runIndexNote:
+        "No run index was allocated for this job: ^UnitTest.Result did not advance between queueing and " +
+        "completion (e.g. the test class failed to compile, so %UnitTest.Manager never started).",
+    };
+  }
+  if (!drainedAnyRows) {
+    return {
+      runIndex: null,
+      runIndexSource: null,
+      runIndexNote:
+        `Run index not attributed: the run completed without draining any result rows, so ^UnitTest.Result ` +
+        `advancing by ${delta} cannot be tied to this job (a job whose test class fails to compile never ` +
+        `allocates an index — the increment may be another run's).`,
+    };
+  }
+  if (delta === 1) {
+    return { runIndex: counterAfter, runIndexSource: "counter" };
+  }
+  if (delta < 0) {
+    return {
+      runIndex: null,
+      runIndexSource: null,
+      runIndexNote:
+        `Run index not attributed: ^UnitTest.Result moved backwards by ${-delta} between queueing and ` +
+        `completion (the counter was reset or purged).`,
+    };
+  }
+  return {
+    runIndex: null,
+    runIndexSource: null,
+    runIndexNote:
+      `Run index not attributed: ^UnitTest.Result advanced by ${delta} (expected 1) between queueing and ` +
+      `completion — another run allocated an index concurrently, so no single index can be attributed.`,
+  };
+}
+
 /** Result structure from the Atelier async unittest endpoint. */
-interface AtelierTestResult {
+export interface AtelierTestResult {
   class: string;
   method?: string;
   status: number; // 0 = Failed, 1 = Passed, 2 = Skipped
@@ -224,60 +526,379 @@ async function discoverPackageTests(
  * caller's target produced nothing — a failed request, not a clean run — so `isError`
  * is truthful). This is a recorded Project Lead decision (Story 34.6 AC 34.6.4): both
  * halves are required, not an either/or — see the story's Dev Notes for the rationale.
+ *
+ * Story 36.1 AC 36.1.6: this is the error-kind entry point of the ONE
+ * shared envelope helper, {@link testRunEnvelope}, which every return of this
+ * tool now goes through — the pre-existing two zero-result-guard call sites
+ * (package discovery, and the shared post-run zero-method-rows check), the
+ * "no job ID" early return, the transport-error catch, the "running" result
+ * and the completed result — so their shapes and handle fields can never
+ * diverge. `handles` is optional and additive (Rule #19): omitted entirely,
+ * the output is byte-for-byte what it was before this story (the
+ * pre-existing two call sites' own pinned tests exercise exactly that path,
+ * unchanged).
  */
-function zeroResultGuardResponse(error: string): ToolResult {
-  const structured = {
-    total: 0,
-    passed: 0,
-    failed: 0,
-    skipped: 0,
-    details: [] as { class: string; method: string; status: string; duration: number; message: string }[],
-    error,
+function zeroResultGuardResponse(error: string, handles: RunHandles = {}): ToolResult {
+  return testRunEnvelope({ kind: "error", error, handles });
+}
+
+/** Method-level detail row of this tool's documented output. */
+export type TestDetail = { class: string; method: string; status: string; duration: number; message: string };
+
+/** Drained-so-far counts + details (the `partial` object). */
+export interface PartialSnapshot {
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  details: TestDetail[];
+}
+
+/**
+ * Every envelope `iris_execute_tests` returns (Story 36.1 AC 36.1.3/36.1.5/
+ * 36.1.6), extended (Story 36.2, Task 2) with the companion tool's own
+ * states. `iris_test_status` must emit these SAME shapes — it reuses
+ * {@link testRunEnvelope} rather than re-building them (Rule #52 seam).
+ */
+export type TestRunEnvelope =
+  | {
+      /** isError:true — AC 34.6.4 shape (top-level zero counts + `error`). */
+      kind: "error";
+      error: string;
+      handles?: RunHandles;
+      /** Drained-so-far rows, when a job exists and polling it failed. */
+      partial?: PartialSnapshot;
+      /** Do-not-re-submit / re-attach guidance, when the job may still be running. */
+      hint?: string;
+    }
+  | {
+      /** isError:false — the wait budget expired with the job still running (AC 36.1.3),
+       * OR (Story 36.2) a one-shot `iris_test_status:poll` observed the SAME
+       * Retry-After-bearing state. `elapsedMs`/`timeoutMs`/`target`/`level` are
+       * wait-budget/original-request context `iris_execute_tests` always supplies
+       * (unchanged, Rule #19) and a re-attach poll has no way to know — they are
+       * simply omitted rather than fabricated (never invent a value, Rule #54). */
+      kind: "running";
+      handles: RunHandles & { jobId: string };
+      elapsedMs?: number;
+      timeoutMs?: number;
+      timeoutCapped?: boolean;
+      target?: string;
+      level?: string;
+      namespace?: string;
+      partial: PartialSnapshot;
+    }
+  | {
+      /** No isError — a finished run; pre-36.1 keys first and byte-identical (Rule #19).
+       * `handles.jobId` is optional (Story 36.2): a `poll`/`cancel` resolved purely by
+       * `runIndex` has no jobId to report. `note` is additive free text (e.g. the
+       * cancel-on-finished-job preservation message, or a no-run-index incompleteness
+       * caveat) — `iris_execute_tests` never sets it. */
+      kind: "completed";
+      summary: PartialSnapshot;
+      handles: RunHandles & { jobId?: string };
+      timeoutCapped: boolean;
+      methodMismatchWarning?: string;
+      note?: string;
+    }
+  | {
+      /** Story 36.2 — `poll` by `runIndex` alone: `%UnitTest_Result.TestInstance` shows
+       * the run has not finished. The result table cannot distinguish still-running
+       * from cancelled/crashed (probe (e)) — `partial` carries interim rows ONLY,
+       * never reported as a final pass (AC 36.2.2 (iv)). */
+      kind: "unfinished";
+      runIndex: number;
+      partial: PartialSnapshot;
+      note: string;
+    }
+  | {
+      /** Story 36.2 — `poll` by `jobId`: the Atelier queue node is gone (404/consumed)
+       * AND the run never finished. No live job references it any longer (cancelled,
+       * crashed, or its worker died) — this is the OBSERVER's (poll's) perspective;
+       * contrast `cancelled`, the ACTOR's (cancel's) own perspective on the same state. */
+      kind: "abandoned";
+      jobId: string;
+      runIndex: number | null;
+      note: string;
+    }
+  | {
+      /** Story 36.2 — `cancel`'s own observation of a job it just stopped mid-run
+       * (never an assumed success — AC 36.2.3). */
+      kind: "cancelled";
+      jobId: string;
+      runIndex: number | null;
+      observed: { queueNode: string; resultRow: string };
+    };
+
+/** The handle fields, in their one canonical order and presence rules. */
+function handleFields(handles: RunHandles): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (handles.jobId !== undefined) fields.jobId = handles.jobId;
+  if (handles.runIndex !== undefined) fields.runIndex = handles.runIndex;
+  if (handles.runIndexSource !== undefined) fields.runIndexSource = handles.runIndexSource;
+  if (handles.runIndexNote !== undefined) fields.runIndexNote = handles.runIndexNote;
+  return fields;
+}
+
+/**
+ * The ONE shared envelope helper (AC 36.1.6) — see {@link TestRunEnvelope}.
+ */
+export function testRunEnvelope(envelope: TestRunEnvelope): ToolResult {
+  if (envelope.kind === "error") {
+    const structured: Record<string, unknown> = {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      details: [] as TestDetail[],
+      error: envelope.error,
+      ...handleFields(envelope.handles ?? {}),
+      ...(envelope.partial !== undefined ? { partial: envelope.partial } : {}),
+      ...(envelope.hint !== undefined ? { hint: envelope.hint } : {}),
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(structured, null, 2) }],
+      structuredContent: structured,
+      isError: true,
+    };
+  }
+
+  if (envelope.kind === "running") {
+    const { handles } = envelope;
+    // isError: false — the request SUCCEEDED (the run was submitted and is
+    // executing); ratified at the Epic 35 retro (`35-6-CR-1`): ongoing/partial
+    // state lives in structuredContent without isError. Counts live ONLY under
+    // `partial` — never a top-level total a consumer could take as final.
+    const structured: Record<string, unknown> = {
+      status: "running",
+      jobId: handles.jobId,
+      runIndex: handles.runIndex ?? null,
+      runIndexSource: handles.runIndexSource ?? null,
+      ...(handles.runIndexNote ? { runIndexNote: handles.runIndexNote } : {}),
+      ...(envelope.elapsedMs !== undefined ? { elapsedMs: envelope.elapsedMs } : {}),
+      ...(envelope.timeoutMs !== undefined ? { timeoutMs: envelope.timeoutMs } : {}),
+      ...(envelope.target !== undefined ? { target: envelope.target } : {}),
+      ...(envelope.level !== undefined ? { level: envelope.level } : {}),
+      ...(envelope.namespace !== undefined ? { namespace: envelope.namespace } : {}),
+      partial: envelope.partial,
+      ...(envelope.timeoutCapped ? { timeoutCapped: true } : {}),
+      hint: buildRunningHint(
+        "Still executing server-side.",
+        handles.jobId,
+        handles.runIndex ?? null,
+        envelope.namespace,
+      ),
+    };
+    const firstLine =
+      `TEST RUN STILL EXECUTING — not finished, not failed. jobId=${handles.jobId} ` +
+      `runIndex=${handles.runIndex ?? "unknown"}. Do NOT re-submit.`;
+    return {
+      content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+      structuredContent: structured,
+      isError: false,
+    };
+  }
+
+  if (envelope.kind === "completed") {
+    const { summary, handles } = envelope;
+    const result: Record<string, unknown> = {
+      total: summary.total,
+      passed: summary.passed,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      details: summary.details,
+      // Additive (AC 36.1.5) — the pre-36.1 keys above stay byte-identical.
+      status: "completed",
+      ...(handles.jobId !== undefined ? { jobId: handles.jobId } : {}),
+      runIndex: handles.runIndex ?? null,
+      runIndexSource: handles.runIndexSource ?? null,
+      ...(handles.runIndexNote ? { runIndexNote: handles.runIndexNote } : {}),
+      ...(envelope.timeoutCapped ? { timeoutCapped: true } : {}),
+      ...(envelope.methodMismatchWarning ? { methodMismatchWarning: envelope.methodMismatchWarning } : {}),
+      ...(envelope.note ? { note: envelope.note } : {}),
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  }
+
+  if (envelope.kind === "unfinished") {
+    const structured: Record<string, unknown> = {
+      status: "unfinished",
+      runIndex: envelope.runIndex,
+      runIndexSource: "result-table",
+      partial: envelope.partial,
+      note: envelope.note,
+    };
+    const firstLine =
+      `TEST RUN STATUS UNKNOWN FROM RESULT TABLE — runIndex=${envelope.runIndex} has not finished. It may ` +
+      `still be running, or it was cancelled/crashed. Poll by jobId for an authoritative answer.`;
+    return {
+      content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+      structuredContent: structured,
+      isError: false,
+    };
+  }
+
+  if (envelope.kind === "abandoned") {
+    const structured: Record<string, unknown> = {
+      status: "abandoned",
+      jobId: envelope.jobId,
+      runIndex: envelope.runIndex,
+      note: envelope.note,
+    };
+    const firstLine =
+      `TEST RUN ABANDONED — jobId=${envelope.jobId} runIndex=${envelope.runIndex ?? "unknown"} is no longer ` +
+      `tracked by Atelier and never finished. It will not complete.`;
+    return {
+      content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
+      structuredContent: structured,
+      isError: false,
+    };
+  }
+
+  // envelope.kind === "cancelled"
+  const structured: Record<string, unknown> = {
+    status: "cancelled",
+    jobId: envelope.jobId,
+    runIndex: envelope.runIndex,
+    observed: envelope.observed,
   };
+  const firstLine =
+    `TEST RUN CANCEL ACCEPTED — jobId=${envelope.jobId} runIndex=${envelope.runIndex ?? "unknown"}: the ` +
+    `DELETE /work request succeeded. Observed — queue entry: ${envelope.observed.queueNode}; result row: ` +
+    `${envelope.observed.resultRow}.`;
   return {
-    content: [{ type: "text", text: JSON.stringify(structured, null, 2) }],
+    content: [{ type: "text", text: `${firstLine}\n\n${JSON.stringify(structured, null, 2)}` }],
     structuredContent: structured,
-    isError: true,
+    isError: false,
   };
 }
 
-export const executeTestsTool: ToolDefinition = {
-  name: "iris_execute_tests",
-  title: "Execute Tests",
-  description:
-    "Run ObjectScript unit tests at package, class, or method level with structured results. " +
-    "Uses the Atelier async work queue for reliable execution. " +
-    "Returns total, passed, failed, skipped counts and per-test details.",
-  inputSchema: z.object({
-    target: z
-      .string()
-      .describe(
-        "Test target: package name (e.g., 'MyApp.Tests'), class name (e.g., 'MyApp.Tests.UtilsTest'), " +
-          "or class:method (e.g., 'MyApp.Tests.UtilsTest:TestSomething')",
-      ),
-    level: z
-      .enum(["package", "class", "method"])
-      .describe("Granularity of test execution"),
-    namespace: z
-      .string()
-      .optional()
-      .describe("Target namespace (default: configured)"),
-  }),
-  annotations: {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-  scope: "NS",
-  handler: async (args, ctx) => {
-    const { target, level, namespace } = args as {
+/** One summarized method/class-level drain (shared by the completed AND the
+ * "still running" partial-snapshot envelopes). */
+interface SummarizedResults {
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  details: { class: string; method: string; status: string; duration: number; message: string }[];
+  classLevelErrors: string[];
+}
+
+/**
+ * Transform accumulated Atelier result rows into this tool's documented
+ * shape. Extracted (Story 36.1) so the identical transform can be reused for
+ * BOTH a completed run and a "running" envelope's `partial` snapshot,
+ * without duplicating the counting/restoration logic. Behavior is
+ * UNCHANGED from the pre-36.1 inline version except the ledger `34-5-R3`
+ * (return leg) fix noted below (AC 36.1.12 (b)) — sanctioned as one of the
+ * two edits AC 36.1.1 permits outside the poll loop's own lines.
+ */
+export function summarizeAtelierResults(results: AtelierTestResult[]): SummarizedResults {
+  const statusMap: Record<number, string> = { 0: "failed", 1: "passed", 2: "skipped" };
+  let total = 0,
+    passed = 0,
+    failed = 0,
+    skipped = 0;
+  const details: SummarizedResults["details"] = [];
+  // Diagnostics carried by class-level (summary) rows — rows with no
+  // `method`. Normally these are a harmless per-class roll-up and are
+  // dropped, but the runner ALSO uses them to report a failure that
+  // prevented any method from running at all (verified live on HSCUSTOM
+  // 2026.1 Build 235U: a `%UnitTest.TestCase` subclass whose
+  // `OnBeforeAllTests` returns an error drains exactly one row —
+  // `{class, status: 0, failures: [], error: "OnBeforeAllTests: ERROR
+  // #5001: ..."}` — and no method rows at all). Capturing them here lets
+  // the zero-result guard report WHY nothing ran instead of blaming the
+  // caller's target name for a run that failed in setup.
+  const classLevelErrors: string[] = [];
+
+  for (const r of results) {
+    // 34-5-R3 (return leg, AC 36.1.12 (b)): presence check, not truthiness.
+    // A method literally named `Test` restores to `r.method === ""` after
+    // the Atelier endpoint's own prefix-stripping — a valid, PRESENT value
+    // that the pre-36.1 `if (r.method)` truthiness check silently dropped,
+    // collapsing it into the class-summary branch below and colliding with
+    // the real class-summary row in the poll loop's accumulator key.
+    if (r.method !== undefined) {
+      total++;
+      const status = statusMap[r.status] ?? "unknown";
+      if (r.status === 1) passed++;
+      else if (r.status === 0) failed++;
+      else skipped++;
+
+      const messages: string[] = [];
+      if (r.error) messages.push(r.error);
+      for (const f of r.failures ?? []) {
+        if (f.message) messages.push(f.message);
+      }
+
+      details.push({
+        class: r.class,
+        method: fromAtelierMethodName(r.method),
+        status,
+        duration: r.duration,
+        message: messages.join("; "),
+      });
+    } else if (r.error || r.status === 0) {
+      // Class-level row reporting a run-level failure (see
+      // `classLevelErrors` above). Kept out of the counts — it is not a
+      // test method — but retained so the guard can surface it.
+      classLevelErrors.push(
+        r.error ? `${r.class}: ${r.error}` : `${r.class}: the test runner reported a class-level failure`,
+      );
+    }
+    // Other class-level results are summary — we only report method-level details
+  }
+
+  return { total, passed, failed, skipped, details, classLevelErrors };
+}
+
+/**
+ * Handler factory (Story 36.1 AC 36.1.7 testability seam) — see
+ * {@link TestClock}'s banner. {@link executeTestsTool}'s exported `handler`
+ * is `createExecuteTestsHandler()` (no argument, real clock); tests import
+ * this factory directly to inject a deterministic fake.
+ */
+export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDefinition["handler"] {
+  return async (args, ctx) => {
+    const { target, level, namespace, timeout } = args as {
       target: string;
       level: "package" | "class" | "method";
       namespace?: string;
+      timeout?: number;
     };
 
     const ns = ctx.resolveNamespace(namespace);
+    const { timeoutMs, timeoutCapped } = resolveTestTimeout(timeout, ctx.config.testTimeoutMs);
+
+    // Run handles (AC 36.1.5/36.1.6) — outer-scoped so the transport-error
+    // catch below can report whatever was captured before the failure.
+    let jobId: string | undefined;
+    let runIndex: number | null = null;
+    let runIndexSource: "queue" | "counter" | null = null;
+    let runIndexNote: string | undefined;
+    // AC 36.1.12 (c) / 34-5-R4: the raw (as-typed) requested method name at
+    // `level: "method"`, for the post-run mismatch check.
+    let requestedMethodName: string | undefined;
+    // Best-effort `^UnitTest.Result` counter snapshot, read BEFORE `POST
+    // /work` (AC 36.1.5) — see MAX_CAPTURE_READ_FAILURES's banner.
+    let counterBefore: number | undefined;
+    // Accumulated drains (see the poll loop below) — outer-scoped so the
+    // transport-error catch can report the rows drained before the failure.
+    const accumulated = new Map<string, AtelierTestResult>();
+
+    const currentHandles = (): RunHandles => ({
+      ...(jobId !== undefined ? { jobId } : {}),
+      ...(jobId !== undefined ? { runIndex, runIndexSource } : {}),
+      ...(runIndexNote ? { runIndexNote } : {}),
+    });
+    const partialSnapshot = (): PartialSnapshot => {
+      const s = summarizeAtelierResults([...accumulated.values()]);
+      return { total: s.total, passed: s.passed, failed: s.failed, skipped: s.skipped, details: s.details };
+    };
 
     try {
       // Build the tests array for the Atelier async unittest request
@@ -292,10 +913,34 @@ export const executeTestsTool: ToolDefinition = {
       } else if (level === "class") {
         tests = [{ class: target }];
       } else {
-        // method level: "ClassName:MethodName"
-        const [className, methodName] = target.split(":");
-        const testEntry: { class: string; methods?: string[] } = { class: className! };
-        if (methodName) testEntry.methods = [toAtelierMethodFilter(methodName)];
+        // method level: "ClassName:MethodName" (AC 36.1.12 (a), ledger
+        // `34-5-R2`): trim segments; reject more than one ':' separator or
+        // an empty class segment with an explicit malformed-target error,
+        // distinct from the zero-result guard. The Story 34.5-pinned edges
+        // are UNCHANGED: no ':' at all (whole class runs unfiltered) and a
+        // single trailing ':' with an empty method part (also runs the
+        // whole class unfiltered, guarded generically by the zero-result
+        // check below on a genuine zero-match) — neither is "malformed" by
+        // this check, only >1 colon or an empty class segment are.
+        const segments = target.split(":");
+        if (segments.length > 2) {
+          return zeroResultGuardResponse(
+            `Malformed method-level target '${target}': at most one ':' separator is allowed (got ${segments.length - 1}).`,
+          );
+        }
+        const className = (segments[0] ?? "").trim();
+        if (className === "") {
+          return zeroResultGuardResponse(
+            `Malformed method-level target '${target}': the class segment before ':' must not be empty.`,
+          );
+        }
+        const rawMethodName = segments.length > 1 ? segments[1] : undefined;
+        const methodName = rawMethodName !== undefined ? rawMethodName.trim() : undefined;
+        const testEntry: { class: string; methods?: string[] } = { class: className };
+        if (methodName) {
+          testEntry.methods = [toAtelierMethodFilter(methodName)];
+          requestedMethodName = methodName;
+        }
         tests = [testEntry];
       }
 
@@ -316,6 +961,12 @@ export const executeTestsTool: ToolDefinition = {
         // missing-global error in its response if the global is still unset.
       }
 
+      // AC 36.1.5: the counter "before" snapshot is taken BEFORE queueing, so
+      // it can never already include this job's own allocation (see
+      // MAX_CAPTURE_READ_FAILURES's banner). Best-effort — `undefined` if the
+      // read fails, in which case no counter attribution is attempted.
+      counterBefore = await readUnitTestCounter(ctx, ns);
+
       // Queue the async unittest request via Atelier work endpoint
       const workPath = atelierPath(ctx.atelierVersion, ns, "work");
       const queueResp = await ctx.http.post<Record<string, unknown>>(workPath, {
@@ -325,17 +976,17 @@ export const executeTestsTool: ToolDefinition = {
       });
 
       const queueResult = queueResp.result as Record<string, unknown>;
-      const jobId = (queueResult?.location ?? (queueResult?.content as Record<string, unknown>)?.location) as string | undefined;
+      jobId = (queueResult?.location ?? (queueResult?.content as Record<string, unknown>)?.location) as
+        | string
+        | undefined;
       if (!jobId) {
-        return {
-          content: [{ type: "text", text: "Error: Failed to queue test execution — no job ID returned" }],
-          isError: true,
-        };
+        return zeroResultGuardResponse("Failed to queue test execution — no job ID returned");
       }
 
       // Poll for results with timeout
       const pollPath = atelierPath(ctx.atelierVersion, ns, `work/${jobId}`);
-      const deadline = Date.now() + TEST_POLL_TIMEOUT;
+      const startTime = clock.now();
+      const deadline = startTime + timeoutMs;
       let testResults: AtelierTestResult[] | undefined;
 
       // Accumulate results across polls. The Atelier /work/{id} endpoint
@@ -352,11 +1003,16 @@ export const executeTestsTool: ToolDefinition = {
       // So: collect EVERY poll's chunk into a map (keyed by class::method —
       // also correct if the endpoint ever returns cumulative sets, since the
       // key dedupes repeats), and finalize only when Retry-After is absent.
-      const accumulated = new Map<string, AtelierTestResult>();
+      // (`accumulated` itself is declared above the try block so the
+      // transport-error catch can report the drained-so-far rows.)
+      // 34-5-R3 (return leg, AC 36.1.12 (b)): presence check, not
+      // truthiness — see summarizeAtelierResults' matching fix.
       const resultKey = (r: AtelierTestResult): string =>
-        r.method ? `${r.class}::${r.method}` : `class-summary::${r.class}`;
+        r.method !== undefined ? `${r.class}::${r.method}` : `class-summary::${r.class}`;
 
-      while (Date.now() < deadline) {
+      let captureReadFailures = 0;
+
+      while (clock.now() < deadline) {
         const pollResp = await ctx.http.get<unknown>(pollPath);
         const pollResult = pollResp.result;
         const pollEnvelope = pollResp as unknown as Record<string, unknown>;
@@ -386,65 +1042,75 @@ export const executeTestsTool: ToolDefinition = {
           break;
         }
 
+        // Job still running (AC 36.1.5 per-iteration run-index read —
+        // additions only; this does not alter how a drain is collected,
+        // keyed, or finalized above). Attempted from the FIRST still-running
+        // poll until captured; the node is keyed by OUR jobId, so it can
+        // never name another client's run. See MAX_CAPTURE_READ_FAILURES.
+        if (runIndexSource === null && captureReadFailures < MAX_CAPTURE_READ_FAILURES) {
+          const node = await readGlobalNode(ctx, ns, "IRIS.TempAtelierAsyncQueue", `${jobId},"unittest","id"`);
+          if (node === undefined) {
+            captureReadFailures++;
+          } else {
+            captureReadFailures = 0;
+            if (node.defined) {
+              const parsed = Number(node.value);
+              if (Number.isFinite(parsed)) {
+                runIndex = parsed;
+                runIndexSource = "queue";
+              }
+            }
+          }
+        }
+
         // Job still running — wait and re-poll for the next drain.
-        await new Promise((resolve) => setTimeout(resolve, TEST_POLL_INTERVAL));
+        await clock.sleep(TEST_POLL_INTERVAL);
       }
 
       if (!testResults) {
-        return {
-          content: [{ type: "text", text: "Error: Test execution timed out" }],
-          isError: true,
-        };
-      }
-
-      // Transform Atelier results into our structured format
-      const statusMap: Record<number, string> = { 0: "failed", 1: "passed", 2: "skipped" };
-      let total = 0, passed = 0, failed = 0, skipped = 0;
-      const details: { class: string; method: string; status: string; duration: number; message: string }[] = [];
-      // Diagnostics carried by class-level (summary) rows — rows with no
-      // `method`. Normally these are a harmless per-class roll-up and are
-      // dropped, but the runner ALSO uses them to report a failure that
-      // prevented any method from running at all (verified live on HSCUSTOM
-      // 2026.1 Build 235U: a `%UnitTest.TestCase` subclass whose
-      // `OnBeforeAllTests` returns an error drains exactly one row —
-      // `{class, status: 0, failures: [], error: "OnBeforeAllTests: ERROR
-      // #5001: ..."}` — and no method rows at all). Capturing them here lets
-      // the zero-result guard below report WHY nothing ran instead of
-      // blaming the caller's target name for a run that failed in setup.
-      const classLevelErrors: string[] = [];
-
-      for (const r of testResults) {
-        if (r.method) {
-          // Method-level result
-          total++;
-          const status = statusMap[r.status] ?? "unknown";
-          if (r.status === 1) passed++;
-          else if (r.status === 0) failed++;
-          else skipped++;
-
-          const messages: string[] = [];
-          if (r.error) messages.push(r.error);
-          for (const f of r.failures ?? []) {
-            if (f.message) messages.push(f.message);
-          }
-
-          details.push({
-            class: r.class,
-            method: fromAtelierMethodName(r.method),
-            status,
-            duration: r.duration,
-            message: messages.join("; "),
-          });
-        } else if (r.error || r.status === 0) {
-          // Class-level row reporting a run-level failure (see
-          // `classLevelErrors` above). Kept out of the counts — it is not a
-          // test method — but retained so the guard can surface it.
-          classLevelErrors.push(
-            r.error ? `${r.class}: ${r.error}` : `${r.class}: the test runner reported a class-level failure`,
-          );
+        // Wait budget expired with the job still running (AC 36.1.3). The
+        // counter fallback is deliberately NOT applied here (`36-1-QA-1`):
+        // this job's worker may not have allocated its index yet, so a
+        // counter delta of 1 could be another client's run.
+        if (runIndexSource === null) {
+          runIndexNote =
+            captureReadFailures >= MAX_CAPTURE_READ_FAILURES
+              ? `Run index not captured: reading IRIS.TempAtelierAsyncQueue(${jobId},"unittest","id") via the ` +
+                `ExecuteMCPv2 /global route failed repeatedly. Re-attach by jobId (see hint).`
+              : `Run index not yet allocated/captured: the async worker had not published it to ` +
+                `IRIS.TempAtelierAsyncQueue(${jobId},"unittest","id") when the wait budget expired. It is never ` +
+                `inferred from the ^UnitTest.Result counter while the run is executing (a concurrent run could ` +
+                `be counted instead). Re-attach by jobId (see hint).`;
         }
-        // Other class-level results are summary — we only report method-level details
+        return testRunEnvelope({
+          kind: "running",
+          handles: { jobId, runIndex, runIndexSource, ...(runIndexNote ? { runIndexNote } : {}) },
+          elapsedMs: clock.now() - startTime,
+          timeoutMs,
+          timeoutCapped,
+          target,
+          level,
+          namespace: ns,
+          partial: partialSnapshot(),
+        });
       }
+
+      // Counter-delta fallback (AC 36.1.5) — COMPLETED runs only, and only
+      // when the queue-node capture never succeeded (a fast run can finish
+      // on its first poll, whose response is sent after the node is killed).
+      if (runIndexSource === null) {
+        const attribution = attributeRunIndexByCounter(
+          counterBefore,
+          await readUnitTestCounter(ctx, ns),
+          accumulated.size > 0,
+        );
+        runIndex = attribution.runIndex;
+        runIndexSource = attribution.runIndexSource;
+        runIndexNote = attribution.runIndexNote;
+      }
+
+      const summarized = summarizeAtelierResults(testResults);
+      const { total, passed, failed, skipped, details, classLevelErrors } = summarized;
 
       // AC 34.5.3 (34-4-R10): `package` partially guards a zero-match run via
       // the discovery-time check above (empty `tests` array). `class` and
@@ -477,53 +1143,204 @@ export const executeTestsTool: ToolDefinition = {
           classLevelErrors.length > 0
             ? `Test run for '${target}' at level '${level}' produced no method-level results — ${classLevelErrors.join("; ")}`
             : `No tests found for '${target}' at level '${level}'`;
-        return zeroResultGuardResponse(reason);
+        return zeroResultGuardResponse(reason, currentHandles());
       }
 
-      const result = { total, passed, failed, skipped, details };
-      return {
-        content: [
-          { type: "text", text: JSON.stringify(result, null, 2) },
-        ],
-        structuredContent: result,
-      };
+      // AC 36.1.12 (c) / 34-5-R4: at level "method", verify the drained
+      // rows' restored names actually match what was requested. The
+      // Atelier endpoint's Test-prefix-stripped filter is many-to-one
+      // (`Class:Validate` and `Class:TestValidate` both send filter
+      // "Validate"), so a caller who omits the documented "Test" prefix can
+      // silently execute a DIFFERENTLY-named method and see a normal-looking
+      // passing result. Report the mismatch explicitly rather than staying
+      // silent about it.
+      let methodMismatchWarning: string | undefined;
+      if (level === "method" && requestedMethodName && details.length > 0) {
+        const distinctActual = [...new Set(details.map((d) => d.method))];
+        if (!distinctActual.every((name) => name === requestedMethodName)) {
+          methodMismatchWarning =
+            `Requested method '${requestedMethodName}' does not match the method(s) actually returned ` +
+            `(${distinctActual.join(", ")}). The Atelier endpoint's Test-prefix-stripped filter can match a ` +
+            `differently-named method when the requested name's stripped form collides with another method's ` +
+            `— verify the correct method ran.`;
+        }
+      }
+
+      return testRunEnvelope({
+        kind: "completed",
+        summary: { total, passed, failed, skipped, details },
+        handles: { jobId, runIndex, runIndexSource, ...(runIndexNote ? { runIndexNote } : {}) },
+        timeoutCapped,
+        ...(methodMismatchWarning ? { methodMismatchWarning } : {}),
+      });
     } catch (error: unknown) {
+      // Once a job exists server-side, a transport failure while POLLING it
+      // (an HTTP error — IrisApiError — or a network/per-request timeout —
+      // IrisConnectionError) says nothing about the run itself, which may
+      // still be executing. Never lose the handle (architecture L1: return
+      // every handle held; AC 36.1.6): report it with the drained-so-far rows
+      // and the do-not-re-submit / re-attach guidance.
+      if (jobId !== undefined && (error instanceof IrisApiError || error instanceof IrisConnectionError)) {
+        return testRunEnvelope({
+          kind: "error",
+          error: `Error executing tests for '${target}': ${error.message}`,
+          handles: currentHandles(),
+          partial: partialSnapshot(),
+          hint: buildRunningHint(
+            `This error came from polling job ${jobId}, not from the test run — the run may still be executing server-side.`,
+            jobId,
+            runIndex,
+            ns,
+          ),
+        });
+      }
       if (error instanceof IrisApiError) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error executing tests for '${target}': ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+        return zeroResultGuardResponse(
+          `Error executing tests for '${target}': ${error.message}`,
+          currentHandles(),
+        );
       }
       throw error;
     }
+  };
+}
+
+export const executeTestsTool: ToolDefinition = {
+  name: "iris_execute_tests",
+  title: "Execute Tests",
+  description:
+    "Run ObjectScript unit tests at package, class, or method level with structured results. " +
+    "Uses the Atelier async work queue. Default wait budget: 120 seconds — override per-call with " +
+    "`timeout` (seconds) or set the IRIS_TEST_TIMEOUT environment variable (precedence: `timeout` " +
+    "argument > IRIS_TEST_TIMEOUT > 120s default; hard-capped at 3600s, and a larger value is silently " +
+    "clamped with `timeoutCapped: true` in the response). MCP clients impose their OWN `tools/call` " +
+    "ceiling independently of this budget (the MCP TypeScript SDK defaults to 60 seconds; several " +
+    "clients cap at 60s-2min, not always configurable) — a long synchronous wait may be abandoned by " +
+    "the CLIENT even while the run keeps executing server-side, so a large `timeout` is a convenience, " +
+    "not a guarantee. If the wait budget expires while the run is STILL EXECUTING, the tool returns " +
+    "`isError: false` with `status: \"running\"`, the run's `jobId` and (once populated) `runIndex`, " +
+    "and a `partial` snapshot of whatever has drained so far under a `partial.total`/etc — this is NOT " +
+    "a failure and NOT a final result. Do NOT re-submit the same target on a running result — that " +
+    "starts a SECOND concurrent run against shared fixtures. Re-attach instead (the response's `hint` " +
+    "carries the exact calls): today, `iris_global_get` on `IRIS.TempAtelierAsyncQueue(<jobId>,\"unittest\",\"id\")` " +
+    "for the runIndex, then `iris_sql_execute` over `%UnitTest_Result` — only `TestInstance` carries the " +
+    "`InstanceIndex` column, so join `TestMethod` → `TestCase` → `TestSuite` → `TestInstance` and filter " +
+    "`ti.InstanceIndex = <runIndex>` (never MAX(InstanceIndex) — a concurrent run can allocate a higher " +
+    "index first); the rows exist while the run is still executing, so treat them as final only once " +
+    "`TestInstance.DateTime` is set. Easier: call `iris_test_status` with `action: \"poll\"` and the same " +
+    "`jobId`/`runIndex`/`namespace` — it builds the SAME shapes from the authoritative source and, via its `cancel` " +
+    "action (default-disabled by governance), can stop a run you no longer want. A " +
+    "completed run also carries `status: \"completed\"`, `jobId`, `runIndex`, and `runIndexSource` " +
+    "(\"queue\", or \"counter\" for a completed run whose queue node was never observed) so results can be " +
+    "correlated by handle instead of guessed at; when the index cannot be attributed it is null with a " +
+    "`runIndexNote` saying why. Concurrency caveat: two runs of the SAME class started close together " +
+    "share that class's fixtures, AND the Atelier endpoint predicts each run's index before " +
+    "%UnitTest.Manager actually allocates it — a race between near-simultaneous submissions can " +
+    "misattribute a run's own index. Returns total, passed, failed, skipped counts and per-test details.",
+  inputSchema: z.object({
+    target: z
+      .string()
+      .describe(
+        "Test target: package name (e.g., 'MyApp.Tests'), class name (e.g., 'MyApp.Tests.UtilsTest'), " +
+          "or class:method (e.g., 'MyApp.Tests.UtilsTest:TestSomething')",
+      ),
+    level: z
+      .enum(["package", "class", "method"])
+      .describe("Granularity of test execution"),
+    timeout: z
+      .coerce.number()
+      .positive()
+      .optional()
+      .describe(
+        "Maximum time to wait for results, in SECONDS, before returning a 'running' result instead of " +
+          "blocking further (default: 120, or IRIS_TEST_TIMEOUT if set; hard-capped at 3600s — a larger " +
+          "value is silently clamped and the response carries timeoutCapped:true). MCP clients impose " +
+          "their own tools/call ceiling independently of this value (commonly 60s, not all configurable) " +
+          "— a long wait may be abandoned by the client before this budget elapses. Treat the " +
+          "running-result-plus-re-attach contract as the robust path for a genuinely slow suite, not a " +
+          "large timeout value.",
+      ),
+    namespace: z
+      .string()
+      .optional()
+      .describe("Target namespace (default: configured)"),
+  }),
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
   },
+  scope: "NS",
+  handler: createExecuteTestsHandler(),
 };
 
 // ── iris_execute_classmethod ────────────────────────────────────
 
 /**
- * Ensure a value is a record suitable for MCP `structuredContent` (never a
- * bare array). Local copy — mirrors `iris-data-mcp/docdb.ts`'s `toStructured`;
- * there is no shared exported version (each server keeps its own copy per
- * [[feedback_mcp_structured_content]]). The `/classmethod` endpoint always
- * returns a JSON object today, but every response on this surface is routed
- * through the same discipline as a matter of policy, not because a concrete
- * array-shaped response has been observed.
+ * Cast the `/classmethod` endpoint's `result` to the object shape MCP's
+ * `structuredContent` requires.
+ *
+ * Ledger `34-3-R5` (Rule #54): this used to defensively wrap an
+ * `Array.isArray` branch (`{ items, count }`) and a final `{ value }`
+ * scalar/null fallback, but neither is reachable for THIS tool, so both were
+ * removed. Confirmed by reading the full success AND error paths of
+ * `ExecuteMCPv2.REST.Command:ClassMethod` (its success render builds
+ * `tResult` as `{}` and only ever `%Set`s named keys onto it — never an
+ * array, never a bare scalar — and its error renders build `tErrorResult`
+ * the same way) and `ExecuteMCPv2.REST.Base:RenderResponseBody` (defaults a
+ * non-object `pResPart` to `{}` before it is ever rendered — see that
+ * method's banner, and its pre-flight-failure substitution path also renders
+ * `{}`), and live-verified against the deployed endpoint (2026-09-11, HSCUSTOM):
+ * a call's `result` is unconditionally a JSON object. This function is also
+ * the ONLY place that would ever see it — the `catch` block below never
+ * routes an error through `toStructured` at all; it builds its own
+ * `{ truncated }` shape directly from `IrisApiError.result` via
+ * {@link extractTruncated}. A direct cast is therefore honest: there is no
+ * real shape left to guard against. Contrast `sqlAnalyze.ts`'s own
+ * `toStructured`, a genuinely different endpoint where an array/scalar
+ * result IS a real possibility and its defensive branches remain warranted.
  */
 function toStructured(value: unknown): Record<string, unknown> {
-  if (Array.isArray(value)) {
-    return { items: value, count: value.length };
-  }
-  if (value !== null && typeof value === "object") {
-    return value as Record<string, unknown>;
-  }
-  return { value };
+  return value as Record<string, unknown>;
 }
+
+/**
+ * `args` entry shapes for `iris_execute_classmethod` (ledger `34-3-R8`).
+ *
+ * A plain scalar — passed by value. Mirrors exactly what
+ * `ExecuteMCPv2.Utils.ParseArgEntry` accepts on the non-object branch (any
+ * JSON string/number/boolean; a JSON `null` array element is the one scalar-
+ * looking shape it explicitly rejects, which is why `null` is deliberately
+ * absent from this union — see {@link classMethodByRefMarkerSchema}'s banner
+ * for the equivalent `value: null` rejection).
+ */
+const classMethodScalarArgSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+/**
+ * A `{byRef, value?}` marker object — passed by reference. Verified live
+ * against `ExecuteMCPv2.Utils.ParseArgEntry` (lines ~367-423): `byRef` must
+ * be present and a genuine JSON boolean (`true` OR `false` — a
+ * `byRef:false` marker is valid too, it just requires `value`, a business
+ * rule the SERVER still enforces since it depends on the value of `byRef`
+ * itself, not expressible as a plain Zod shape without narrowing what a
+ * `byRef:false` marker missing `value` even IS structurally); `value` may be
+ * omitted entirely (the Output-style undefined-in pattern — Zod's
+ * `.optional()` allows `undefined` but NOT JSON `null`, matching the
+ * server's own omitted-vs-null distinction exactly, confirmed against Zod's
+ * documented semantics) but when present must be a scalar, never JSON
+ * `null` and never an object/array.
+ */
+const classMethodByRefMarkerSchema = z.object({
+  byRef: z.boolean(),
+  value: classMethodScalarArgSchema.optional(),
+});
+
+/** One `args` array entry: a plain scalar, or a `{byRef, value?}` marker object. */
+const classMethodArgEntrySchema = z.union([
+  classMethodScalarArgSchema,
+  classMethodByRefMarkerSchema,
+]);
 
 export const executeClassMethodTool: ToolDefinition = {
   name: "iris_execute_classmethod",
@@ -595,7 +1412,12 @@ export const executeClassMethodTool: ToolDefinition = {
     "`truncated` since they describe different response fields). None of these ceilings " +
     "are protection against the target's own execution time, resource usage, or a Web " +
     "Gateway timeout — the target has already fully run by the time these caps are " +
-    "applied to the response payload.",
+    "applied to the response payload. Capture caveat: `output` is accumulated in the " +
+    "process-private variables `%ExecuteMCPOutput`/`%ExecuteMCPTruncated`, so a target " +
+    "that KILLs them — an argumentless `KILL`, or a unit-test class whose setup/teardown " +
+    "clears them — silently loses everything captured before that point, and `truncated` " +
+    "does not report it; run unit-test suites with `iris_execute_tests` instead of " +
+    "driving them through this tool.",
   inputSchema: z.object({
     className: z
       .string()
@@ -604,7 +1426,7 @@ export const executeClassMethodTool: ToolDefinition = {
       .string()
       .describe("Name of the class method to invoke"),
     args: z
-      .array(z.any())
+      .array(classMethodArgEntrySchema)
       .max(20)
       .optional()
       .describe(
@@ -614,7 +1436,8 @@ export const executeClassMethodTool: ToolDefinition = {
           "parameter, whose post-call value is returned in the response's byRefValues " +
           "(e.g. [{\"byRef\": true}, {\"byRef\": true, \"value\": \"start\"}]). A " +
           "marker's value may be omitted (undefined-in, the Output pattern) but not " +
-          "JSON null, and must be a scalar, not an object or array.",
+          "JSON null, and must be a scalar, not an object or array. Omitting `args` " +
+          "and passing `[]` are the same zero-argument call.",
       ),
     namespace: z
       .string()

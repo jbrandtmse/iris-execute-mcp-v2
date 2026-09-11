@@ -157,6 +157,12 @@ the aggregate if you want it.
   refusal, timestamped backup, post-write re-parse with auto-restore) and an
   exact-match ownership check (entries outside the iris-mcp namespace are
   foreign and refused unless recorded manager-created).
+  **Known limitation (stash clients, 36.3/33-1-R3):** the disable→enable
+  stash round-trip is byte-exact for the OWNED entry the manager itself
+  rendered, but a comment a user hand-added INSIDE that entry (never
+  elsewhere in the file) is lost — the stash holds the parsed entry, not its
+  original source span. Manager-owned entries are manager-rendered in every
+  v1 flow, so this only bites a hand-edited comment placed inside one.
 - `synthesizeEntry` — canonical entries in four env modes (`server-manager`,
   `env-reference`, `governance-file`, `explicit`).
 - `ensureInputs` / `presentInputIds` — the VS Code native `inputs` merge

@@ -35,7 +35,14 @@ import {
   type TomlNativeEdit,
   type YamlNativeEdit,
 } from "../index.js";
-import { ADAPTER_FIXTURES, readFixture, FOREIGN_ENTRY_NAMES, FOREIGN_SECRET_MARKERS } from "./helpers.js";
+import {
+  ADAPTER_FIXTURES,
+  readFixture,
+  FOREIGN_ENTRY_NAMES,
+  FOREIGN_SECRET_MARKERS,
+  PLANTED_FOREIGN_NAME,
+  plantForeignSecrets,
+} from "./helpers.js";
 
 const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
   "iris-dev-mcp": "@iris-mcp/dev",
@@ -92,8 +99,13 @@ function applyTomlSplice(content: string, edit: TomlNativeEdit): string {
   }
   if (edit.op === "merge-update") {
     // Mirror the 33.5 executor exactly: disjoint spans applied BOTTOM-UP; a
-    // span with endLine < startLine is a pure insert.
-    const ordered = [...(edit.spans ?? [])].sort((a, b) => b.startLine - a.startLine);
+    // span with endLine < startLine is a pure insert. Equal-startLine ties
+    // (Story 36.3 code review): the replacement first, then pure inserts in
+    // REVERSE push order — see write.ts's merge-update case.
+    const ordered = (edit.spans ?? [])
+      .map((span, index) => ({ span, index, replaces: span.endLine >= span.startLine }))
+      .sort((a, b) => b.span.startLine - a.span.startLine || Number(b.replaces) - Number(a.replaces) || b.index - a.index)
+      .map(({ span }) => span);
     for (const span of ordered) {
       const count = Math.max(0, span.endLine - span.startLine + 1);
       lines.splice(span.startLine, count, ...span.lines);
@@ -257,6 +269,22 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     if (parsedDisable.ok) {
       expect(parsedDisable.entries["iris-admin-mcp"]?.["disabled"]).toBe(true);
     }
+  });
+
+  it("33-5-L1: diff()'s own presence/disabled reading agrees with entryPresence — a hand-edited truthy non-boolean `disabled` is already-disabled, never re-toggled", () => {
+    const adapter = adapterOf("cline");
+    const content = JSON.stringify({
+      mcpServers: { "iris-dev-mcp": { command: "npx", args: [], disabled: 1 } },
+    });
+    // disable on an already-(truthily)-disabled entry is already-in-state —
+    // NOT a redundant native-flag write (which would also stamp `disabled`
+    // back to the literal boolean `true`, an unrequested value change).
+    const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
+    expect(disable.mechanism).toBe("already-in-state");
+    // enable on it DOES need a real flag flip (native-flag), since the real
+    // client currently treats it as disabled.
+    const enable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "enable"));
+    expect(enable.mechanism).toBe("native-flag");
   });
 
   it("native-flag enable/disable on an absent entry refuses cleanly", () => {
@@ -664,6 +692,39 @@ describe("refusals and the full-registry sweep (AC 33.0.4)", () => {
       }
     }
   });
+
+  // Story 36.3 code review (33-5-L3 leg 2): the sweep above is vacuous for
+  // its secret half on every fixture that carries no marker — all but
+  // claude-code. Plant every marker into EVERY adapter fixture as a genuine
+  // foreign entry and re-run the same render sweep: markers × fixtures.
+  it("33-5-L3: every secret marker × every adapter fixture — a planted foreign secret never reaches any rendered edit surface", () => {
+    let sweptSurfaces = 0;
+    for (const [id, fixtureRel] of Object.entries(ADAPTER_FIXTURES)) {
+      const adapter = adapterOf(id);
+      const content = plantForeignSecrets(adapter, readFixture(fixtureRel));
+      for (const marker of FOREIGN_SECRET_MARKERS) expect(content, `${id}: marker planted`).toContain(marker);
+      const parsed = readConfigEntries(adapter, content);
+      if (!parsed.ok) throw new Error(`${id}: planted fixture must still parse: ${parsed.error}`);
+      expect(Object.prototype.hasOwnProperty.call(parsed.entries, PLANTED_FOREIGN_NAME), `${id}: planted entry is a real foreign entry`).toBe(true);
+      const present = CANONICAL_SERVERS.find((name) => name in parsed.entries);
+      const absent = CANONICAL_SERVERS.find((name) => !(name in parsed.entries));
+      const results: Array<Extract<DiffResult, { ok: true }>> = [];
+      if (absent) results.push(expectOk(diff(content, canonicalEntry(absent), adapter, "user", "apply")));
+      if (present) {
+        results.push(expectOk(diff(content, canonicalEntry(present), adapter, "user", "apply")));
+        results.push(expectOk(diff(content, canonicalEntry(present), adapter, "user", "disable")));
+      }
+      for (const result of results) {
+        const surface = renderSurface(result);
+        for (const marker of FOREIGN_SECRET_MARKERS) {
+          expect(surface, `${id}/${result.action}/${result.mechanism} leaked a planted foreign secret`).not.toContain(marker);
+        }
+        sweptSurfaces++;
+      }
+    }
+    // Non-vacuous: every fixture contributed at least one rendered surface.
+    expect(sweptSurfaces).toBeGreaterThanOrEqual(Object.keys(ADAPTER_FIXTURES).length);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -759,7 +820,13 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
     expect(parseToml(after)).toBeDefined(); // the result is valid TOML
   });
 
-  it("TOML: an unmanaged datetime env value is a documented REFUSAL, never a corruption", () => {
+  it("TOML: an UNCHANGED unmanaged datetime env value in a [name.env] sub-table survives byte-exact (33-5-R2 leg b: per-key spans never touch it)", () => {
+    // 36.3, 33-5-R2 leg (b): the OLD whole-table re-render iterated (and had
+    // to re-render, hence refuse-on-unsupported) every merged env key —
+    // including ones nothing was actually changing. Per-key spans mean an
+    // untouched key's line is never even READ for rendering, so a datetime
+    // this update does not touch no longer blocks it (Rule #54: a value
+    // that is never passed to tomlSourceValue can never trip its refusal).
     const adapter = adapterOf("codex");
     const content = [
       "[mcp_servers.iris-dev-mcp]",
@@ -769,9 +836,71 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       "CREATED = 2026-01-01T00:00:00Z",
       "",
     ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: [], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+    );
+    const after = executeNativeEdit(content, result.native);
+    const lines = after.split("\n");
+    expect(lines).toContain("CREATED = 2026-01-01T00:00:00Z"); // byte-exact, never rendered
+    expect(lines).toContain('IRIS_NAMESPACE = "HSCUSTOM"'); // the new key still lands
+  });
+
+  it("TOML: an unmanaged datetime value INLINE (`env = {...}`, no [name.env] sub-table) still refuses when the update must touch it — an inline table has no per-key line structure to preserve", () => {
+    const adapter = adapterOf("codex");
+    const content = ["[mcp_servers.iris-dev-mcp]", 'command = "old"', "env = { CREATED = 2026-01-01T00:00:00Z }", ""].join("\n");
     const result = diff(content, { name: "iris-dev-mcp", command: "npx", args: [], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("datetime");
+  });
+
+  it("33-5-R2 leg (a): a CHANGED command/args line carries its OLD trailing comment forward", () => {
+    const adapter = adapterOf("codex");
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "old" # pinned by ops',
+      'args = ["--old"] # do not touch the flags',
+      "",
+    ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"] }, adapter, "user", "apply"),
+    );
+    const after = executeNativeEdit(content, result.native);
+    const lines = after.split("\n");
+    expect(lines).toContain('command = "npx" # pinned by ops');
+    expect(lines).toContain('args = ["-y", "@iris-mcp/dev"] # do not touch the flags');
+  });
+
+  it("33-5-R2 leg (b): per-key env spans — a SIBLING key's line, its OWN quoting style, and its trailing/interior comments survive byte-exact even though another key in the SAME table changes", () => {
+    const adapter = adapterOf("codex");
+    // EXTRA_KEY is written with a single-quoted TOML literal string — the
+    // renderer always emits DOUBLE-quoted strings, so this value would come
+    // out re-punctuated (a VISIBLE difference) if it were re-rendered at
+    // all, even redundantly with an unchanged value. Its true byte-exactness
+    // therefore depends on the per-key SKIP itself, not just on the
+    // re-render happening to produce identical bytes.
+    const content = [
+      "[mcp_servers.iris-dev-mcp]",
+      'command = "npx"',
+      "",
+      "[mcp_servers.iris-dev-mcp.env]",
+      "# a hand-written note about EXTRA_KEY",
+      "EXTRA_KEY = 'keep-me' # do not remove",
+      'IRIS_NAMESPACE = "OLD_NS"',
+      "",
+    ].join("\n");
+    const result = expectOk(
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: [], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+    );
+    const after = executeNativeEdit(content, result.native);
+    const lines = after.split("\n");
+    // The UNTOUCHED sibling key's line (incl. its OWN quote style) AND its
+    // own comments are byte-exact.
+    expect(lines).toContain("# a hand-written note about EXTRA_KEY");
+    expect(lines).toContain("EXTRA_KEY = 'keep-me' # do not remove");
+    // Only the CHANGED key's own line moved.
+    expect(lines).toContain('IRIS_NAMESPACE = "HSCUSTOM"');
+    expect(lines).not.toContain('IRIS_NAMESPACE = "OLD_NS"');
+    expect(parseToml(after)).toBeDefined();
   });
 
   it("YAML (goose): unmanaged keys + enabled:false survive an apply-update", () => {
@@ -1028,6 +1157,22 @@ describe("TOML array-of-tables entries (33-5-12)", () => {
       const result = diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", action);
       expect(result.ok, action).toBe(false);
       if (!result.ok) expect(result.reason, action).toContain("array-of-tables");
+    }
+  });
+
+  it("Story 36.3 code review: a NON-object canonical entry (33-5-L6 form) refuses with guidance for ITS shape — never TOML [[…]] syntax for a JSON/YAML scalar", () => {
+    const cases: [string, string, string][] = [
+      ["claude-code", '{"mcpServers": {"iris-dev-mcp": "oops"}}', "a string"],
+      ["claude-code", '{"mcpServers": {"iris-dev-mcp": null}}', "null"],
+      ["goose", "extensions:\n  iris-dev-mcp: 42\n", "a number"],
+    ];
+    for (const [adapterId, content, form] of cases) {
+      const result = diff(content, canonicalEntry("iris-dev-mcp"), adapterOf(adapterId), "user", "apply");
+      expect(result.ok, `${adapterId} ${form}`).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain(`holds ${form} instead of a server-entry object`);
+        expect(result.reason).not.toContain("[[");
+      }
     }
   });
 });

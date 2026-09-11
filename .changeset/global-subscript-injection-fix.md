@@ -1,0 +1,18 @@
+---
+"@iris-mcp/shared": patch
+"@iris-mcp/dev": patch
+---
+
+fix(global): `subscripts` is now always literal data, never evaluated as code (Story 36.4, ledger `36-2-CR-1`, HIGH)
+
+**The defect.** `ExecuteMCPv2.REST.Global:BuildGlobalRef` wrapped a caller-supplied string subscript in a quoted literal WITHOUT doubling a quote character it contained, then the handlers evaluated the resulting reference by ObjectScript indirection (`$Get(@tRef)`/`$Data(@tRef)` for `iris_global_get`, `Set @tRef` for `iris_global_set`, `Kill @tRef` for `iris_global_kill`). A `subscripts` value containing a quote could close the literal early and the rest of the value ran as ObjectScript code. Present since the `/global` handler shipped (Story 3.2, 2026-04-06). Because `iris_global_get` is READ-classified and default-enabled, this was reachable under `IRIS_GOVERNANCE_PRESET=read-only` and any policy that disables writes — the read-only safety preset did not, in fact, mean read-only.
+
+**The fix.** `BuildGlobalRef` (shared by all three handlers) now emits every subscript as a canonical number or as ONE escaped string literal. The string value is recovered from the piece (the text between the quotes of the documented `"key1","key2"` convention, or the whole piece; a doubled quote `""` is one literal quote), then every quote in it is doubled before it is wrapped once — the literal can only end at its own closing quote, whatever the value contains. Quotes, `_`, `$`, `@`, `(`, `)` and control characters are stored and addressed as literal data. A piece that begins or ends with an unmatched quote — what a quoted key containing a comma becomes after the comma split — is rejected with a clear error instead of silently addressing a different node (a string key containing a comma remains unsupported).
+
+**Design decision, probe-first (Rule #16).** "Escape-in-place" was chosen over building the reference with `$Name` over a subscript array, because a live probe showed `$Name` canonicalizes a numeric-looking quoted string (`^G("1")` renders as `^G(1)` — the same node, a DIFFERENT reference string).
+
+**Back-compat (Rule #19), proven mechanically.** Every input that addressed a literal node before the fix yields the byte-identical reference string now — including every documented form (numeric, negative/decimal, quoted and unquoted string, multi-level, and the Epic 36 `readGlobalNode` queue-fixture shape `<jobId>,"unittest","id"`) — verified at the code review against the pre-fix builder over 20,000 random hostile inputs (0 mismatches). Only inputs that previously ran as code or failed to parse behave differently. The 12 pre-existing `ExecuteMCPv2.Tests.GlobalTest` methods are byte-identical to before; the Story 36.4 tests live in a new class, `ExecuteMCPv2.Tests.GlobalSubscriptSafetyTest` (12 methods), whose back-compat pins pass against BOTH the pre-fix and the fixed builder.
+
+**Live-verified, RED then GREEN, on the real HTTP route.** Reproduced first from the BUILT dist against disposable globals on the default instance, including the read-only-preset leg (through a real `McpServerBase` with `IRIS_GOVERNANCE_PRESET=read-only`: `iris_global_set` correctly denied, `iris_global_get` allowed and still vulnerable pre-fix). A permanent default-suite gate (`global-injection-epic-gate.test.ts`, 20 tests) is armed in `prepublish-gate.mjs` alongside the Epic 36 gates; with the pre-fix class deployed, 17 of its 20 tests go RED (every payload, the edge-quote rejection and the read-only leg — the 3 that stay green are back-compat pins), and all return to GREEN with the fix restored.
+
+No new tool, no new governance key, no tool-count change (Rule #31) — this is a fix to an existing, already-governed route.

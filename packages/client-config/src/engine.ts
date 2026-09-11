@@ -219,6 +219,18 @@ interface RunEditArgs {
   containsSecret?: boolean;
   /** Update state.json after a successful write. */
   updateState?: (state: ManagerState) => ManagerState;
+  /**
+   * 33-1-R1: also run `updateState` when the diff renders already-in-state
+   * (no config write). Default false — apply/disable keep their existing
+   * "no write, no backup, no state change" no-op contract. `enable` sets
+   * this true ONLY when a stash record actually exists to drop (a stash
+   * client's entry can be present-in-file AND still stashed when an earlier
+   * enable's config write succeeded but its state.json update failed — the
+   * config-write-succeeded-but-writeState-failed warning path): without
+   * this, the stale stash record survives a re-run enable forever (the
+   * early no-op return never reached `updateState`).
+   */
+  updateStateOnNoop?: boolean;
   options: EngineOptions;
 }
 
@@ -237,7 +249,13 @@ function runEdit(args: RunEditArgs): EngineResult {
     return fail(target.adapter.id, args.scope, action, target.path, rendered.reason);
   }
   if (rendered.native === null) {
-    // already-in-state: no write, no backup, no state change (idempotent).
+    // already-in-state: no write, no backup (idempotent). State normally
+    // stays untouched too — except 33-1-R1's narrow opt-in (enable, only
+    // when a stash record needs dropping): a config-only no-op there would
+    // strand the stale stash forever.
+    if (args.updateStateOnNoop && args.updateState) {
+      persistState(ctx, fs, target.stateDir, args.updateState(target.state), warnings);
+    }
     return {
       ok: true,
       client: target.adapter.id,
@@ -248,6 +266,7 @@ function runEdit(args: RunEditArgs): EngineResult {
       changed: false,
       note: "already in the requested state",
       restartHint: target.adapter.restartHint,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 
@@ -385,6 +404,11 @@ export function enable(
     content: current.content,
     ...(diffOptions !== undefined ? { diffOptions } : {}),
     updateState: (state) => dropStash(state, client, scope, name),
+    // 33-1-R1: a no-op enable (entry already present in the file) still
+    // must drop a STALE stash record when one exists — only fires when
+    // `stash` was actually found above, so the common no-op (nothing
+    // stashed) stays a true zero-write, zero-state-touch idempotent return.
+    updateStateOnNoop: stash !== undefined,
     options: { ...options, now },
   });
 }

@@ -19,7 +19,7 @@
 import { parseTree, findNodeAtLocation, type Edit as JsoncEdit, type Node as JsoncNode } from "jsonc-parser";
 import { Document } from "yaml";
 
-import { readConfigEntries, hasJsonTokens, ownEntry, type RawEntry } from "./readers.js";
+import { readConfigEntries, hasJsonTokens, isFlagDisabled, ownEntry, type RawEntry } from "./readers.js";
 import type { CanonicalEntry, ClientAdapter, ClientScope } from "./types.js";
 
 export type DiffAction = "apply" | "enable" | "disable" | "remove";
@@ -417,7 +417,7 @@ export function findTomlEntryRegion(
   const topLevel = scanTomlStructure(content);
   const escapedRoot = rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const ownedHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}\\.${escapedName}(\\..+)?\\]\\s*(#.*)?$`);
+  const ownedHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}\\.${escapedName}(\\..+)?\\]\\s*(#.*)?\\r?$`);
   const anyHeader = /^\s*\[/;
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -461,7 +461,7 @@ export function findTomlInsertLine(content: string, rootKey: string): number {
   const lines = content.split("\n");
   const topLevel = scanTomlStructure(content);
   const escapedRoot = rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const rootHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}(\\..+)?\\]\\s*(#.*)?$`);
+  const rootHeader = new RegExp(`^\\s*\\[\\s*${escapedRoot}(\\..+)?\\]\\s*(#.*)?\\r?$`);
   const anyHeader = /^\s*\[/;
   let insertAfter = lines.length - 1;
   let inRoot = false;
@@ -562,18 +562,26 @@ export function diff(
     const parsed = readConfigEntries(adapter, content);
     if (!parsed.ok) return fail(`config is unparseable: ${parsed.error}`);
     // 33-5-12: an array-of-tables entry is a documented REFUSAL on every
-    // write action (never a silent add/update/remove guess).
+    // write action (never a silent add/update/remove guess). 33-5-L6 routed
+    // the non-object forms (a string/number/boolean/null/non-table array)
+    // into the same map — Story 36.3 code review: the repair hint must match
+    // the form (TOML table syntax is wrong guidance for a JSON/YAML scalar).
     const unsupportedForm = ownEntry(parsed.unsupported, entry.name);
     if (unsupportedForm !== undefined) {
       return fail(
-        `entry "${entry.name}" exists in ${unsupportedForm} form (e.g. [[${adapter.rootKey}.${entry.name}]]), ` +
-          `which the manager cannot model as a single server entry; refusing — restructure it as one [${adapter.rootKey}.${entry.name}] table`,
+        unsupportedForm === "array-of-tables"
+          ? `entry "${entry.name}" exists in ${unsupportedForm} form (e.g. [[${adapter.rootKey}.${entry.name}]]), ` +
+              `which the manager cannot model as a single server entry; refusing — restructure it as one [${adapter.rootKey}.${entry.name}] table`
+          : `entry "${entry.name}" under "${adapter.rootKey}" holds ${unsupportedForm} instead of a server-entry object, ` +
+              `which the manager cannot model; refusing — replace it with an object entry (or remove it) by hand first`,
       );
     }
     existing = ownEntry(parsed.entries, entry.name);
     present = existing !== undefined;
     if (present && adapter.nativeDisableFlag && existing) {
-      disabled = existing[adapter.nativeDisableFlag.key] === adapter.nativeDisableFlag.disabledValue;
+      // 36.3, 33-5-L1: per-format truthiness (see isFlagDisabled) — the same
+      // fix status.ts's entryPresence needed, same root cause.
+      disabled = isFlagDisabled(adapter, existing);
     }
   }
 
@@ -1146,6 +1154,65 @@ function tomlSourceValue(value: unknown): string | null {
   return null; // TomlDate / undefined / functions — unsupported
 }
 
+/**
+ * The trailing `#...` comment on a TOML line, OUTSIDE any string literal
+ * (basic `"..."` with `\`-escapes, or literal `'...'`) — null when the line
+ * carries none. Single-line scan only (command/args/env-key spans this
+ * helper serves are one rendered line each).
+ *
+ * 33-5-R2 leg (a): a single-line value REPLACEMENT (command/args/an env
+ * key whose value genuinely changed) previously dropped a trailing comment
+ * on the OLD line — the new line now carries the same comment forward
+ * (dropping the OLD value, keeping the OLD annotation). An unchanged line
+ * is never touched at all (already byte-exact) — this only applies to the
+ * CHANGED-value case, the documented seam this leg closes.
+ */
+function trailingTomlComment(line: string): string | null {
+  let inBasic = false;
+  let inLiteral = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inBasic) {
+      if (ch === "\\") {
+        i++; // skip the escaped character (e.g. a literal \")
+        continue;
+      }
+      if (ch === '"') inBasic = false;
+      continue;
+    }
+    if (inLiteral) {
+      if (ch === "'") inLiteral = false;
+      continue;
+    }
+    if (ch === '"') {
+      inBasic = true;
+      continue;
+    }
+    if (ch === "'") {
+      inLiteral = true;
+      continue;
+    }
+    if (ch === "#") return line.slice(i);
+  }
+  return null;
+}
+
+/** Append a value line's OLD trailing comment (if any) when the span being
+ * replaced ends on `oldLine` — leg (a) of 33-5-R2, shared by command, args,
+ * and per-env-key replacements. */
+function withCarriedComment(newLine: string, oldLine: string): string {
+  const comment = trailingTomlComment(oldLine);
+  return comment ? `${newLine} ${comment}` : newLine;
+}
+
+/** Render one env entry's TOML source line, or `null` when the value is in
+ * an unsupported form (a datetime literal — Rule #54: smol-toml's TomlDate
+ * does not round-trip through tomlSourceValue). */
+function renderTomlEnvLine(key: string, value: unknown): string | null {
+  const rendered = tomlSourceValue(value);
+  return rendered === null ? null : `${tomlKey(key)} = ${rendered}`;
+}
+
 /** A key line's value span: the key line itself plus its continuation lines
  * (a multi-line array/string value spans lines that are NOT top-level). */
 function tomlKeySpan(
@@ -1208,7 +1275,12 @@ function tomlMergeUpdate(
   // comment on a CHANGED line is lost (documented seam, 33-5-R-ledger).
   const commandUnchanged = typeof existing.command === "string" && existing.command === String(fresh.command ?? "");
   if (commandSpan) {
-    if (!commandUnchanged) spans.push({ ...commandSpan, lines: [commandLine] });
+    if (!commandUnchanged) {
+      // 33-5-R2 leg (a): a CHANGED value still carries the OLD line's
+      // trailing comment forward (never silently dropped).
+      const withComment = withCarriedComment(commandLine, lines[commandSpan.endLine] ?? "");
+      spans.push({ ...commandSpan, lines: [withComment] });
+    }
   } else {
     spans.push({ startLine: region.startLine + 1, endLine: region.startLine, lines: [commandLine] });
   }
@@ -1224,7 +1296,10 @@ function tomlMergeUpdate(
   const argsLine = `args = [${freshArgs}]`;
   const argsUnchanged = Array.isArray(existing.args) && jsonDeepEqual(existing.args, fresh.args);
   if (argsSpan) {
-    if (!argsUnchanged) spans.push({ ...argsSpan, lines: [argsLine] });
+    if (!argsUnchanged) {
+      const withComment = withCarriedComment(argsLine, lines[argsSpan.endLine] ?? "");
+      spans.push({ ...argsSpan, lines: [withComment] });
+    }
   } else {
     const after = commandSpan ? commandSpan.endLine : region.startLine;
     spans.push({ startLine: after + 1, endLine: after, lines: [argsLine] });
@@ -1240,18 +1315,8 @@ function tomlMergeUpdate(
     : undefined;
   const envUnchanged = mergedEnv !== undefined && isRecord(existing.env) && jsonDeepEqual(existing.env, mergedEnv);
   if (mergedEnv !== undefined && !envUnchanged) {
-    const envLines: string[] = [];
-    for (const [key, value] of Object.entries(mergedEnv)) {
-      const rendered = tomlSourceValue(value);
-      if (rendered === null) {
-        return refuse(
-          `entry "${entry.name}" holds an env value in a TOML form the update cannot re-render (e.g. a datetime literal — its parsed form does not round-trip); refusing the update rather than corrupting the key`,
-        );
-      }
-      envLines.push(`${tomlKey(key)} = ${rendered}`);
-    }
     const envHeader = new RegExp(
-      `^\\s*\\[\\s*${adapter.rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.${entry.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.env\\s*\\]\\s*(#.*)?$`,
+      `^\\s*\\[\\s*${adapter.rootKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.${entry.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.env\\s*\\]\\s*(#.*)?\\r?$`,
     );
     let envTableStart = -1;
     let envTableEnd = -1;
@@ -1275,16 +1340,62 @@ function tomlMergeUpdate(
       if (trimmed !== "" && !trimmed.startsWith("#")) break;
       envTableEnd--;
     }
-    const envBlock = [`[${tablePath.map(tomlKey).join(".")}.env]`, ...envLines];
     if (envTableStart !== -1) {
-      spans.push({ startLine: envTableStart, endLine: envTableEnd, lines: envBlock });
+      // 33-5-R2 leg (b): the env sub-table ALREADY EXISTS — per-key spans
+      // (the JSONC/YAML per-key discipline), never a whole-table re-render.
+      // A key whose value is unchanged is never touched at all (its own
+      // line AND any comment on/around it stay byte-exact even though a
+      // SIBLING key changed); a changed key's own line is replaced (with its
+      // OLD trailing comment carried forward, leg (a)); brand-new keys are
+      // appended together as one combined insert at the table's end.
+      const newKeyLines: string[] = [];
+      for (const [key, value] of Object.entries(mergedEnv)) {
+        const keySpan = tomlKeySpan(lines, topLevel, envTableStart + 1, envTableEnd, key);
+        const existingValue = isRecord(existing.env) ? (existing.env as Record<string, unknown>)[key] : undefined;
+        if (keySpan && jsonDeepEqual(existingValue, value)) continue; // byte-exact, untouched
+        // `value` here is ALWAYS reachable-through-fresh.env (an unchanged
+        // existing value was already `continue`d above) and CanonicalEntry's
+        // `env` type is `Record<string, string>` — so `renderTomlEnvLine`
+        // cannot actually return null on this path; the check stays as a
+        // type-narrowing defensive fallback (Rule #54: kept, never expected
+        // to fire — the reachable refusal for an unsupported existing value
+        // lives in the inline/no-sub-table branch below, which DOES still
+        // render an untouched existing value wholesale).
+        const rendered = renderTomlEnvLine(key, value);
+        if (rendered === null) {
+          return refuse(
+            `entry "${entry.name}" holds an env value for "${key}" in a TOML form the update cannot re-render (e.g. a datetime literal — its parsed form does not round-trip); refusing the update rather than corrupting the key`,
+          );
+        }
+        if (keySpan) {
+          spans.push({ ...keySpan, lines: [withCarriedComment(rendered, lines[keySpan.endLine] ?? "")] });
+        } else {
+          newKeyLines.push(rendered); // a genuinely new key — batched below
+        }
+      }
+      if (newKeyLines.length > 0) {
+        spans.push({ startLine: envTableEnd + 1, endLine: envTableEnd, lines: newKeyLines });
+      }
     } else {
+      // No env sub-table yet: nothing existing to preserve per-key — render
+      // every merged entry fresh (a pure ADD, inline replace, or new table).
+      const envLines: string[] = [];
+      for (const [key, value] of Object.entries(mergedEnv)) {
+        const rendered = renderTomlEnvLine(key, value);
+        if (rendered === null) {
+          return refuse(
+            `entry "${entry.name}" holds an env value for "${key}" in a TOML form the update cannot re-render (e.g. a datetime literal — its parsed form does not round-trip); refusing the update rather than corrupting the key`,
+          );
+        }
+        envLines.push(rendered);
+      }
       const inlineSpan = tomlKeySpan(lines, topLevel, region.startLine + 1, mainEnd, "env");
       if (inlineSpan) {
         // Inline form (`env = { A = "1" }`): replace with the merged inline render.
         const inlinePairs = envLines.join(", ");
         spans.push({ ...inlineSpan, lines: [`env = { ${inlinePairs} }`] });
       } else {
+        const envBlock = [`[${tablePath.map(tomlKey).join(".")}.env]`, ...envLines];
         spans.push({ startLine: region.endLine + 1, endLine: region.endLine, lines: ["", ...envBlock] });
       }
     }

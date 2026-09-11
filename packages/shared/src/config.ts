@@ -50,6 +50,16 @@ export interface IrisConnectionConfig {
    * timeout override is passed (today's behavior).
    */
   sqlTimeoutMs?: number;
+  /**
+   * Optional operator-set DEFAULT wait budget (in milliseconds, pre-converted
+   * from the `IRIS_TEST_TIMEOUT` env var which is specified in seconds) for
+   * `iris_execute_tests`'s poll loop (Story 36.1 AC 36.1.4). Sits BELOW an
+   * explicit per-call `timeout` argument and ABOVE the tool's own hard-coded
+   * 120-second default in the resolution order (`timeout` arg > this >
+   * 120s). `undefined` when unset — the tool's 120-second default applies
+   * unchanged (today's behavior).
+   */
+  testTimeoutMs?: number;
 }
 
 /**
@@ -74,6 +84,7 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_TIMEOUT      | 60000        |
  * | IRIS_SQL_MAX_ROWS | *(unset — no cap)*  |
  * | IRIS_SQL_TIMEOUT  | *(unset — no per-request override)*, seconds |
+ * | IRIS_TEST_TIMEOUT | *(unset — `iris_execute_tests` keeps its 120s default)*, seconds |
  * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
@@ -81,6 +92,8 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  *   valid HTTP header field-value (non-printable-ASCII, CR, or LF).
  * @throws {Error} When IRIS_SQL_MAX_ROWS or IRIS_SQL_TIMEOUT is set to a
  *   non-positive or non-numeric value.
+ * @throws {Error} When IRIS_TEST_TIMEOUT is set to a non-positive or
+ *   non-numeric value.
  */
 export function loadConfig(
   env: Record<string, string | undefined> = process.env,
@@ -169,6 +182,25 @@ export function loadConfig(
     sqlTimeoutMs = parsed * 1000;
   }
 
+  // IRIS_TEST_TIMEOUT (Story 36.1 AC 36.1.4): optional positive number of
+  // SECONDS forwarded as `iris_execute_tests`'s DEFAULT poll-loop wait budget
+  // (milliseconds), sitting between an explicit per-call `timeout` argument
+  // and the tool's own 120-second hard-coded default. Parsed identically to
+  // IRIS_SQL_TIMEOUT above (same finite-positive-number contract, same
+  // empty-string-is-unset convention). Unset -> testTimeoutMs stays
+  // undefined (today's 120s default, unchanged).
+  const rawTestTimeout = env.IRIS_TEST_TIMEOUT;
+  let testTimeoutMs: number | undefined;
+  if (rawTestTimeout !== undefined && rawTestTimeout !== "") {
+    const parsed = Number(rawTestTimeout);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(
+        `IRIS_TEST_TIMEOUT must be a positive number of seconds. Received: "${rawTestTimeout}".`,
+      );
+    }
+    testTimeoutMs = parsed * 1000;
+  }
+
   // IRIS_ACCEPT_LANGUAGE: pins the HTTP client's Accept-Language header so
   // request-locale negotiation (independent of the per-worker-process
   // message-table selection — Rule #13) is explicit and operator-overridable
@@ -219,5 +251,6 @@ export function loadConfig(
     acceptLanguage,
     ...(sqlMaxRows !== undefined ? { sqlMaxRows } : {}),
     ...(sqlTimeoutMs !== undefined ? { sqlTimeoutMs } : {}),
+    ...(testTimeoutMs !== undefined ? { testTimeoutMs } : {}),
   };
 }

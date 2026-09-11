@@ -154,11 +154,13 @@ Method TestTwentyArgsAllMutated() As %Status
     Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(..#FIXTURE, "Target20", tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated)
     Do $$$AssertStatusOK(tSC, "20-arg call should succeed")
     Do $$$AssertEquals(tArgCount, 20, "argCount should be 20")
-    Do $$$AssertEquals(tByRefValues.%Get("0"), "v0-m", "position 0 mutated")
-    Do $$$AssertEquals(tByRefValues.%Get("19"), "v19-m", "position 19 mutated")
+    ; 34-3-R7: the title claims "every position" but only 0 and 19 were ever actually
+    ; checked — positions 1-18 could silently be wrong (or missing) and this test would
+    ; still pass. Loop every position's VALUE, not just the boundary count.
     Set tCount = 0
     For i=0:1:19 {
         If tByRefValues.%IsDefined(i) Set tCount = tCount + 1
+        Do $$$AssertEquals(tByRefValues.%Get(i), "v"_i_"-m", "position "_i_" must be mutated correctly")
     }
     Do $$$AssertEquals(tCount, 20, "all 20 positions should be present in byRefValues")
     Quit $$$OK
@@ -508,7 +510,12 @@ Method TestMaxStringTruncation() As %Status
 
     Do $$$AssertStatusOK(tSC, "a <MAXSTRING> capture overflow should be a partial success, not an error")
     Do $$$AssertTrue(tTruncated, "truncated flag should be set")
-    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > 1000000, "a large partial capture should still be preserved")
+    ; 34-3-R9: derive the floor from the platform's own long-string ceiling instead of a
+    ; hand-picked constant that silently stops proving anything if a future IRIS version
+    ; changes it — half of $SYSTEM.SYS.MaxLocalLength() is comfortably below the actual
+    ; <MAXSTRING> truncation point (live-measured ~3.6M chars on this instance) while still
+    ; requiring a genuinely large partial capture, not a token one.
+    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > ($SYSTEM.SYS.MaxLocalLength() \ 2), "a large partial capture should still be preserved")
     Kill %ExecuteMCPOutput
     Quit $$$OK
 }

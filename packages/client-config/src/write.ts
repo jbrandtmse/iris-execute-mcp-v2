@@ -87,6 +87,16 @@ export interface WriteResult {
  * blank/blank or blank/EOF or blank/header adjacency — making insert → remove
  * a byte-exact inverse (the AC 33.1.3 golden round-trip) without ever
  * touching a non-blank line.
+ *
+ * Line-terminator discipline (33-1-R2 / 33-5-R1): `content.split("\n")`
+ * leaves a CRLF line's trailing "\r" attached to its array element (only the
+ * "\n" delimiter is consumed), so an UNTOUCHED line's terminator survives a
+ * splice for free. A freshly BUILT line (an inserted block, a replaced flag
+ * line, a merge-update span) carries none by construction — spliced next to
+ * CRLF neighbors, that diluted the file to mixed line endings. Every case
+ * below reads the terminator off the "matched" existing line adjacent to the
+ * edit (`lineTerminatorAt`) and carries it onto every new/replaced line
+ * (`withLineTerminator`) — one shared model for every TOML splice op.
  */
 export function executeNativeEdit(content: string, native: NativeEdit | null): string {
   if (native === null) return content;
@@ -100,21 +110,79 @@ export function executeNativeEdit(content: string, native: NativeEdit | null): s
   }
 }
 
+/** The file's own line-terminator convention, read off its FIRST line break
+ * ("\r" for CRLF, "" for LF). A file with no line break at all has no
+ * convention and gets "" (LF), matching prior behavior. */
+function fileLineTerminator(content: string): "\r" | "" {
+  const nl = content.indexOf("\n");
+  return nl > 0 && content[nl - 1] === "\r" ? "\r" : "";
+}
+
+/** The line terminator trailing `lines[index]` in the split-by-"\n" model: a
+ * literal trailing "\r" survives on a CRLF line's element; an LF line's
+ * element carries none. The FINAL element never has a "\n" after it — it is
+ * either the phantom "" behind a trailing newline or an unterminated last
+ * line — so it carries NO terminator evidence; it, and an out-of-range index
+ * (inserting at file start), fall back to the file's own convention (Story
+ * 36.3 code review: reading "" there diluted the commonest CRLF write — a
+ * first insert into a config.toml with no `[mcp_servers.*]` table yet — to
+ * bare LF on every inserted line). An LF file's fallback is "" — its output
+ * is byte-identical to before. */
+function lineTerminatorAt(lines: string[], index: number, fallback: "\r" | ""): "\r" | "" {
+  if (index < 0 || index >= lines.length - 1) return fallback;
+  return (lines[index] ?? "").endsWith("\r") ? "\r" : "";
+}
+
+/** New lines are about to be spliced in AFTER `lines[index]`: when that
+ * element is the current FINAL element it is about to gain a following "\n",
+ * so in a CRLF file it must gain the "\r" too — otherwise the junction is a
+ * bare LF (an unterminated last line, or the phantom "" behind a trailing
+ * CRLF, which would otherwise become an LF-only blank line). */
+function terminateIfFinal(lines: string[], index: number, term: "\r" | ""): void {
+  if (term !== "\r" || index < 0 || index !== lines.length - 1) return;
+  const line = lines[index] ?? "";
+  if (!line.endsWith("\r")) lines[index] = `${line}\r`;
+}
+
+/** Join the spliced lines. A "\r" can only be legitimate on the final element
+ * when the original file itself ended in one; otherwise it is a terminator
+ * that `withTerminator` put on a line nothing follows — strip it rather than
+ * leave a dangling CR at EOF. */
+function joinLines(lines: string[], original: string): string {
+  const lastIndex = lines.length - 1;
+  const last = lines[lastIndex];
+  if (last !== undefined && last.endsWith("\r") && !original.endsWith("\r")) {
+    lines[lastIndex] = last.slice(0, -1);
+  }
+  return lines.join("\n");
+}
+
+/** Apply `term` to one freshly-built line, stripping any trailing "\r" first
+ * so the call is idempotent regardless of how the caller assembled the text
+ * (diff.ts never embeds "\r" itself — this is defensive). */
+function withTerminator(line: string, term: "\r" | ""): string {
+  return line.replace(/\r$/, "") + term;
+}
+
 function executeTomlSplice(content: string, edit: TomlNativeEdit): string {
   const lines = content.split("\n");
+  const fileTerm = fileLineTerminator(content);
   switch (edit.op) {
     case "insert": {
       const block = (edit.insertText ?? "").split("\n");
       if (content.trim() === "") return block.join("\n") + "\n";
       const at = (edit.insertAfterLine ?? -1) + 1;
-      lines.splice(at, 0, "", ...block);
-      return lines.join("\n");
+      const term = lineTerminatorAt(lines, at - 1, fileTerm);
+      terminateIfFinal(lines, at - 1, term);
+      lines.splice(at, 0, term, ...block.map((line) => withTerminator(line, term)));
+      return joinLines(lines, content);
     }
     case "replace-region": {
       if (!edit.region) throw new Error("toml replace-region descriptor is missing its region");
+      const term = lineTerminatorAt(lines, edit.region.startLine, fileTerm);
       const count = edit.region.endLine - edit.region.startLine + 1;
-      lines.splice(edit.region.startLine, count, ...(edit.insertText ?? "").split("\n"));
-      return lines.join("\n");
+      lines.splice(edit.region.startLine, count, ...(edit.insertText ?? "").split("\n").map((line) => withTerminator(line, term)));
+      return joinLines(lines, content);
     }
     case "remove-region": {
       if (!edit.region) throw new Error("toml remove-region descriptor is missing its region");
@@ -130,29 +198,59 @@ function executeTomlSplice(content: string, edit: TomlNativeEdit): string {
       ) {
         lines.splice(at - 1, 1);
       }
-      return lines.join("\n");
+      return joinLines(lines, content);
     }
     case "set-flag": {
       const flagLine = edit.insertText ?? "";
       if (edit.region) {
-        lines.splice(edit.region.startLine, edit.region.endLine - edit.region.startLine + 1, flagLine);
+        const term = lineTerminatorAt(lines, edit.region.startLine, fileTerm);
+        lines.splice(edit.region.startLine, edit.region.endLine - edit.region.startLine + 1, withTerminator(flagLine, term));
       } else {
         const at = (edit.insertAfterLine ?? -1) + 1;
-        lines.splice(at, 0, flagLine);
+        const term = lineTerminatorAt(lines, edit.insertAfterLine ?? -1, fileTerm);
+        terminateIfFinal(lines, at - 1, term);
+        lines.splice(at, 0, withTerminator(flagLine, term));
       }
-      return lines.join("\n");
+      return joinLines(lines, content);
     }
     case "merge-update": {
       // AC 33.5.2 apply-update surgery: apply the disjoint line spans
       // BOTTOM-UP so earlier spans' line numbers stay valid. A span with
-      // endLine < startLine is a pure insert at startLine.
+      // endLine < startLine is a pure insert BEFORE original line startLine.
+      // Each span's terminator reference is read BEFORE that span's own
+      // splice — safe because bottom-up processing never mutates a position
+      // at or before the span currently being applied.
+      //
+      // Ties (Story 36.3 code review): several spans can share one
+      // startLine — e.g. an `args` insert and a new `[….env]` table insert
+      // both landing right after a command-only entry, or a `command` insert
+      // plus an `args` REPLACEMENT when the entry's first body line is
+      // `args`. A plain startLine sort applied equal-startLine spans in push
+      // order, so the LATER-pushed insert landed ABOVE the earlier one: the
+      // `args` line ended up inside the `[….env]` table (parsed as
+      // `env.args`, a silently wrong but still-valid TOML file), and the
+      // command insert got overwritten by the args replacement. Correct
+      // order at one startLine: the replacement of original line startLine
+      // first, then the pure inserts in REVERSE push order, so the final
+      // file carries every insert before that line in push order.
       if (!edit.spans) throw new Error("toml merge-update descriptor is missing its spans");
-      const ordered = [...edit.spans].sort((a, b) => b.startLine - a.startLine);
+      const ordered = edit.spans
+        .map((span, index) => ({ span, index, replaces: span.endLine >= span.startLine }))
+        .sort(
+          (a, b) =>
+            b.span.startLine - a.span.startLine ||
+            Number(b.replaces) - Number(a.replaces) ||
+            b.index - a.index,
+        )
+        .map(({ span }) => span);
       for (const span of ordered) {
         const count = Math.max(0, span.endLine - span.startLine + 1);
-        lines.splice(span.startLine, count, ...span.lines);
+        const refIndex = count > 0 ? span.startLine : span.startLine - 1;
+        const term = lineTerminatorAt(lines, refIndex, fileTerm);
+        if (count === 0) terminateIfFinal(lines, refIndex, term);
+        lines.splice(span.startLine, count, ...span.lines.map((line) => withTerminator(line, term)));
       }
-      return lines.join("\n");
+      return joinLines(lines, content);
     }
   }
 }
@@ -255,10 +353,20 @@ export function applyWrite(
   }
 
   // (2) Timestamped backup before every write (only when there is something
-  // to back up).
+  // to back up). 33-1-R4: two writes landing in the same MILLISECOND render
+  // the same stamp — append a short "-N" disambiguator when the candidate
+  // path is already taken (checked against the injected fs, so a fixed
+  // clock in tests exercises this deterministically) rather than silently
+  // overwriting the first backup.
   let backupPath: string | undefined;
   if (content !== null) {
-    backupPath = backupPathFor(options.stateDir, options.client, options.scope, path, options.platform, now());
+    const basePath = backupPathFor(options.stateDir, options.client, options.scope, path, options.platform, now());
+    backupPath = basePath;
+    let disambiguator = 1;
+    while (fs.exists(backupPath)) {
+      backupPath = `${basePath}-${disambiguator}`;
+      disambiguator++;
+    }
     try {
       fs.mkdir(backupDir(options.stateDir, options.client, options.scope, options.platform));
       fs.writeFile(backupPath, content);
@@ -337,21 +445,24 @@ export interface RestoreOptions {
 
 /**
  * List the backups for one config file, oldest first (the ISO timestamp in
- * the filename sorts chronologically). Returns absolute paths.
+ * the filename sorts chronologically; a `-N` disambiguator suffix, 33-1-R4,
+ * sorts immediately after its bare stamp since it's a strict suffix of it).
+ * Returns absolute paths.
  *
  * Only files matching the manager's own timestamped naming
- * `<basename>.<YYYY-MM-DD>T<HH-MM-SS-mmm>Z` count as backups: a stray file
- * sharing the basename prefix (e.g. `config.toml.zzz-notes`) must never be
- * picked as "the latest backup" — it sorts after every ISO stamp and would
- * otherwise be silently restored over the real config (QA 33.1: confirmed
- * live with a planted non-timestamp file).
+ * `<basename>.<YYYY-MM-DD>T<HH-MM-SS-mmm>Z[-N]` count as backups: a stray
+ * file sharing the basename prefix (e.g. `config.toml.zzz-notes`) must never
+ * be picked as "the latest backup" — it sorts after every ISO stamp and
+ * would otherwise be silently restored over the real config (QA 33.1:
+ * confirmed live with a planted non-timestamp file). The optional `-N` suffix
+ * (33-1-R4) disambiguates two writes landing in the same millisecond.
  */
 export function listBackups(path: string, options: RestoreOptions): string[] {
   const fs = options.fs ?? REAL_WRITE_FS;
   const dir = backupDir(options.stateDir, options.client, options.scope, options.platform);
   const base = path.split(/[\\/]/).pop() ?? path;
   const backupName = new RegExp(
-    `^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z$`,
+    `^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z(-\\d+)?$`,
   );
   let names: string[];
   try {
