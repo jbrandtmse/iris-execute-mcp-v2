@@ -35,11 +35,13 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -489,6 +491,25 @@ describe("QA 33.4: certify.mjs writes nothing without the full explicit pass", (
     expect(md5(RESULTS_PATH)).toBe(before);
     expect(existsSync(path.join(home, ".iris-mcp"))).toBe(false);
     expect(treeEntries(home)).toEqual([]);
+  }, T);
+
+  it("36.3, 33-5-L10 leg (c): a DANGLING symlink at the config path is refused cleanly (exit 2) BEFORE any write — never silently treated as \"absent\"", () => {
+    const home = mkTmp("qa334-cert-home-");
+    // The appDir alone makes claude-code "detected" even though the config
+    // FILE is a dangling symlink (existsSync follows symlinks and reports
+    // false for one whose target is missing — a realistic state, e.g. a
+    // dotfiles-managed symlink whose target was moved/deleted).
+    mkdirSync(path.join(home, ".claude"), { recursive: true });
+    symlinkSync(path.join(home, "moved-away.json"), path.join(home, ".claude.json"));
+    const before = md5(RESULTS_PATH);
+
+    const result = runCertify(["run", "claude-code", "--real-config"], home);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("dangling symlink");
+    expect(md5(RESULTS_PATH)).toBe(before);
+    expect(existsSync(path.join(home, ".iris-mcp"))).toBe(false); // no state dir, no backups
+    // The symlink itself survives untouched (never destructively replaced).
+    expect(lstatSync(path.join(home, ".claude.json")).isSymbolicLink()).toBe(true);
   }, T);
 
   it("the clobber gate: --real-config with the server ALREADY present refuses (exit 2) — config byte-identical", () => {

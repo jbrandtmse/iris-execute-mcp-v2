@@ -216,6 +216,44 @@ ClassMethod ListGlobals() As %Status
 /// <p>Returns a string suitable for use with the <code>@</code> indirection operator.
 /// Subscripts are parsed from a comma-separated string. Numeric subscripts are
 /// left unquoted; string subscripts are quoted.</p>
+/// <p><b>Security (Story 36.4 / ledger <code>36-2-CR-1</code>):</b> caller text is
+/// NEVER evaluated — every subscript is emitted as a canonical number or as ONE
+/// well-formed string literal, never as code. Before the fix, a string piece was
+/// wrapped in quotes WITHOUT doubling a quote it contained, so a quote inside the
+/// value could close the literal and the rest of the piece ran as ObjectScript
+/// through the callers' <code>@tRef</code> indirection. Now every quote in a
+/// string VALUE is doubled before the value is wrapped once, so the literal can
+/// only end at its own closing quote. Quotes, <code>_</code>, <code>$</code>,
+/// <code>@</code>, <code>(</code>, <code>)</code>, <code>^</code>, <code>|</code>
+/// and control characters are all stored as literal subscript data (a control
+/// character inside a string literal is inert under indirection — verified live
+/// at the Story 36.4 code review for <code>$C(0)</code>, <code>$C(9)</code>,
+/// <code>$C(10)</code>, <code>$C(13)</code>, <code>$C(127)</code>,
+/// <code>$C(133)</code>, <code>$C(150)</code> and <code>$C(8232)</code>).</p>
+/// <p>Parsing rules (the tool contract): <code>pSubscripts</code> is split on
+/// EVERY comma — a string key containing a comma is not supported. Leading and
+/// trailing whitespace around each piece is trimmed (<code>$ZStrip</code> class
+/// <code>"W"</code>: space, tab and non-breaking space — unchanged pre-fix
+/// behavior). An empty piece is skipped. A canonical number (<code>1</code>,
+/// <code>-1.5</code>) is emitted unquoted. Any other piece is a string: if it is
+/// wrapped in quotes (the documented <code>"key1","key2"</code> convention) the
+/// value is the text between them; otherwise the whole piece is the value. In
+/// both cases a doubled quote (<code>""</code>) decodes to one literal quote,
+/// ObjectScript's own string-literal convention (<code>"a""b"</code> and
+/// <code>a""b</code> both address the subscript <code>a"b</code>). An UNWRAPPED
+/// piece that begins or ends with an unmatched quote (an odd-length run of
+/// quotes at either edge — what a quoted key containing a comma looks like after
+/// the comma split, e.g. <code>"a,b"</code>) is rejected with a clear error
+/// rather than silently addressing a different node.</p>
+/// <p>Back-compat (Rule #19): every input for which the pre-fix builder produced
+/// a valid literal reference yields the byte-identical reference string now —
+/// mechanically verified at the Story 36.4 code review (20,000 random hostile
+/// inputs, pre-fix vs fixed builder, 0 mismatches). The only inputs whose
+/// outcome changed are those that previously evaluated as code or failed to
+/// parse. "Escape-in-place" was chosen over a <code>$Name</code>-built reference
+/// (probe-first, Rule #16) because <code>$Name</code> canonicalizes a
+/// numeric-looking string subscript (<code>^G("1")</code> renders as
+/// <code>^G(1)</code> — same node, different reference STRING).</p>
 ClassMethod BuildGlobalRef(pGlobal As %String, pSubscripts As %String = "") As %String [ Private ]
 {
     ; Start with the caret-prefixed global name
@@ -230,17 +268,42 @@ ClassMethod BuildGlobalRef(pGlobal As %String, pSubscripts As %String = "") As %
     For i = 1:1:tLen {
         Set tSub = $ZStrip($Piece(pSubscripts, ",", i), "<>W")
         If tSub = "" Continue
+
         ; Check if subscript is numeric (integer or decimal, optionally negative)
         If (tSub = (+tSub)) {
-            ; Numeric subscript — use as-is
+            ; Numeric subscript — use as-is. A piece reaches this branch only
+            ; when it equals its own canonical number (digits, "-" and "."),
+            ; which is inert unquoted.
             Set $Piece(tSubList, ",", i) = tSub
         } Else {
-            ; Strip surrounding quotes if present
-            If ($Extract(tSub, 1) = """") && ($Extract(tSub, *) = """") {
-                Set tSub = $Extract(tSub, 2, *-1)
+            ; String subscript (Story 36.4). Recover the caller's intended
+            ; VALUE, then emit it as ONE escaped string literal.
+            If ($Length(tSub) >= 2) && ($Extract(tSub, 1) = """") && ($Extract(tSub, *) = """") {
+                ; Wrapped in quotes (the documented convention): the value is
+                ; the text between them.
+                Set tValue = $Extract(tSub, 2, *-1)
+            } Else {
+                ; Unwrapped. An odd-length run of quotes at either edge is an
+                ; unmatched quote — the shape a quoted key containing a comma
+                ; takes after the comma split. Reject it instead of silently
+                ; addressing a different node (pre-fix, every such piece was a
+                ; <SYNTAX> error, a <SUBSCRIPT> error or evaluated as code).
+                Set tLead = $Length(tSub) - $Length($ZStrip(tSub, "<", """"))
+                Set tTrail = $Length(tSub) - $Length($ZStrip(tSub, ">", """"))
+                If (tLead # 2) || (tTrail # 2) {
+                    Throw ##class(%Exception.StatusException).CreateFromStatus($$$ERROR($$$GeneralError, "Invalid subscript: a piece begins or ends with an unmatched quote. Wrap a string key in quotes and double any quote inside it; a comma always separates subscripts, so a string key containing a comma is not supported"))
+                }
+                Set tValue = tSub
             }
-            ; String subscript — quote it
-            Set $Piece(tSubList, ",", i) = """"_tSub_""""
+            ; Decode ObjectScript's doubled-quote convention ("" is one quote)
+            ; for wrapped and unwrapped pieces alike, so every input that
+            ; addressed a literal node before the fix still addresses the
+            ; byte-identical reference (Rule #19).
+            Set tValue = $Replace(tValue, """""", """")
+            ; THE FIX: double EVERY quote in the value, then wrap once. The
+            ; literal can now only end at its own closing quote, whatever the
+            ; value contains, so no part of it is ever evaluated as code.
+            Set $Piece(tSubList, ",", i) = """" _ $Replace(tValue, """", """""") _ """"
         }
     }
 

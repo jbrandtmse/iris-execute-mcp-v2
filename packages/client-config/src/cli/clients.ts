@@ -67,6 +67,7 @@ import {
 import { resolveScopePath } from "../paths.js";
 import {
   diagnoseConfigSurface,
+  isFlagDisabled,
   ownEntry,
   readConfigEntries,
   type ConfigSurfaceDiagnosis,
@@ -1253,30 +1254,55 @@ interface DoctorFinding {
   adapterDataVersion?: string;
 }
 
+/** 33-5-L11: a bound on `walkEntry`'s recursion — generous for any
+ * legitimate MCP server entry (a handful of levels: command/args/env, at
+ * most one nested object), but finite against a hostile or corrupt owned
+ * entry with runaway nesting (a JSON/YAML/TOML document CAN encode
+ * thousands of nested levels; unbounded recursion on it is a real
+ * stack-overflow crash, not a hypothetical one). */
+const MAX_ENTRY_WALK_DEPTH = 64;
+
 /** Recursively walk a parsed entry, invoking `onString` for every string
  * value and `onKey` for every object key (owned entries only — foreign
- * entries are never walked; they may hold third-party secrets). */
-function walkEntry(value: unknown, onString: (text: string) => void, onKey: (key: string) => void): void {
+ * entries are never walked; they may hold third-party secrets). Returns
+ * `true` when the walk hit `MAX_ENTRY_WALK_DEPTH` and stopped early (33-5-L11)
+ * — the caller reports a finding instead of the scan silently truncating. */
+function walkEntry(
+  value: unknown,
+  onString: (text: string) => void,
+  onKey: (key: string) => void,
+  depth = 0,
+): boolean {
+  if (depth > MAX_ENTRY_WALK_DEPTH) return true;
   if (typeof value === "string") {
     onString(value);
-    return;
+    return false;
   }
   if (Array.isArray(value)) {
-    for (const item of value) walkEntry(item, onString, onKey);
-    return;
+    let truncated = false;
+    for (const item of value) {
+      if (walkEntry(item, onString, onKey, depth + 1)) truncated = true;
+    }
+    return truncated;
   }
   if (typeof value === "object" && value !== null) {
+    let truncated = false;
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       onKey(key);
-      walkEntry(item, onString, onKey);
+      if (walkEntry(item, onString, onKey, depth + 1)) truncated = true;
     }
+    return truncated;
   }
+  return false;
 }
 
-/** Parse a backup filename's flattened-ISO timestamp back into a Date; null when it does not match. */
+/** Parse a backup filename's flattened-ISO timestamp back into a Date; null when it does not match.
+ * Accepts the optional `-N` same-millisecond disambiguator (33-1-R4) that
+ * `listBackups` accepts — Story 36.3 code review: without it a disambiguated
+ * backup was listed but never aged, so it could never be reported stale. */
 function backupTimestamp(path: string): Date | null {
   const base = path.split(/[\\/]/).pop() ?? path;
-  const match = /(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(base);
+  const match = /(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z(?:-\d+)?$/.exec(base);
   if (!match) return null;
   const [, y, mo, d, h, mi, s, ms] = match;
   return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s), Number(ms)));
@@ -1398,18 +1424,42 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
         if (entry === undefined) continue;
         const strings: string[] = [];
         const keys = new Set<string>();
-        walkEntry(entry, (text) => strings.push(text), (key) => keys.add(key));
+        const truncated = walkEntry(entry, (text) => strings.push(text), (key) => keys.add(key));
+        if (truncated) {
+          findings.push({
+            check: "env-references",
+            client: client.client,
+            scope: scope.scope,
+            path: scope.path,
+            entry: name,
+            detail:
+              `entry "${name}" is nested deeper than ${MAX_ENTRY_WALK_DEPTH} levels; env-reference scanning stopped early ` +
+              `(a legitimate MCP server entry never nests this deep — treat this as a corrupt or hostile config)`,
+          });
+        }
         const unresolved = (variable: string): boolean =>
           deps.env[variable] === undefined || deps.env[variable] === "";
         if (adapter.envExpansion === "claude" || adapter.envExpansion === "shell") {
           const found = new Set<string>();
+          // 33-5-L11, refined at the Story 36.3 code review. SHELL: "$$" is
+          // the PID special parameter, so a `$` starts a reference only after
+          // an EVEN run of `$` — "$$VAR" is PID + literal "VAR", but "$$$VAR"
+          // is PID + a real $VAR (a bare `(?<!\$)` lookbehind missed that
+          // one). The prefix `(?<!\$)(?:\$\$)*` consumes the whole leading
+          // run of PID pairs. CLAUDE-style `${VAR}` expansion has no "$$"
+          // escape, so a `$` in front of "${" is just a literal and the
+          // reference still expands — no prefix there (the lookbehind had
+          // silently hidden `$${VAR}` references in claude mode).
+          const pidPairs = adapter.envExpansion === "shell" ? String.raw`(?<!\$)(?:\$\$)*` : "";
+          const braceRef = new RegExp(String.raw`${pidPairs}\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}`, "g");
+          const bareRef = new RegExp(String.raw`${pidPairs}\$([A-Za-z_][A-Za-z0-9_]*)`, "g");
           for (const text of strings) {
-            for (const match of text.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/g)) {
+            for (const match of text.matchAll(braceRef)) {
               const hasDefault = match[2] !== undefined;
               if (!hasDefault && unresolved(match[1] as string)) found.add(match[1] as string);
             }
             if (adapter.envExpansion === "shell") {
-              for (const match of text.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)/g)) {
+              for (const match of text.matchAll(bareRef)) {
                 if (unresolved(match[1] as string)) found.add(match[1] as string);
               }
             }
@@ -1550,8 +1600,9 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
       if (!entries.ok) continue; // unparseable is check 1's finding
       const present = ownEntry(entries.entries, stash.name);
       if (present !== undefined) {
-        const flag = adapter.nativeDisableFlag;
-        const disabled = flag !== undefined && present[flag.key] === flag.disabledValue;
+        // 36.3, 33-5-L1: same per-format truthiness as entryPresence/diff()
+        // — a hand-edited truthy non-boolean flag reads disabled here too.
+        const disabled = isFlagDisabled(adapter, present);
         if (!disabled) {
           findings.push({
             check: "orphaned-stashes",

@@ -61,9 +61,21 @@ console.log(
 // is the ONLY end-to-end proof that non-ASCII request bodies decode correctly; omitting it
 // meant a publish could ship that fix entirely unexecuted — the same defect class already
 // recorded as ledger `34-4-R3` / AC 34.6.3 and fixed for the epic gate.
+// Story 36.2 code review: Epic 36's two live gates were absent from this list, so
+// `IRIS_REQUIRE_LIVE` was never set on them on any path (Rule #59 — "an arming env var
+// nothing sets"): Story 36.1's running-result contract gate, and Story 36.2's
+// `iris_test_status` capstone (AC 36.2.4, "armed like epic35-defect-gate.test.ts").
+// Both need the `src/ExecuteMCPv2/QAFixtures/*.cls` fixtures deployed on the target.
+// Story 36.4: the `iris_global_get`/`set`/`kill` subscript-injection security gate
+// (ledger `36-2-CR-1`) — pins that the fixed `ExecuteMCPv2.REST.Global:BuildGlobalRef`
+// addresses every payload as literal data, including the read-only-preset governance
+// bypass leg, on the real HTTP route this package ships.
 const gateTestFiles = [
   "src/__tests__/execute-classmethod-epic-gate.test.ts",
   "src/__tests__/request-body-utf8-decode.test.ts",
+  "src/__tests__/execute-tests-running-contract-epic-gate.test.ts",
+  "src/__tests__/test-status-epic-gate.test.ts",
+  "src/__tests__/global-injection-epic-gate.test.ts",
 ];
 
 const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];

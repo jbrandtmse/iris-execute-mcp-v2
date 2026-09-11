@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "e1168c1ebe56";
+export const BOOTSTRAP_VERSION = "2159ec9e6f69";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "e1168c1ebe56";
+Parameter BOOTSTRAPVERSION = "2159ec9e6f69";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3967,6 +3967,44 @@ ClassMethod ListGlobals() As %Status
 /// <p>Returns a string suitable for use with the <code>@</code> indirection operator.
 /// Subscripts are parsed from a comma-separated string. Numeric subscripts are
 /// left unquoted; string subscripts are quoted.</p>
+/// <p><b>Security (Story 36.4 / ledger <code>36-2-CR-1</code>):</b> caller text is
+/// NEVER evaluated — every subscript is emitted as a canonical number or as ONE
+/// well-formed string literal, never as code. Before the fix, a string piece was
+/// wrapped in quotes WITHOUT doubling a quote it contained, so a quote inside the
+/// value could close the literal and the rest of the piece ran as ObjectScript
+/// through the callers' <code>@tRef</code> indirection. Now every quote in a
+/// string VALUE is doubled before the value is wrapped once, so the literal can
+/// only end at its own closing quote. Quotes, <code>_</code>, <code>$</code>,
+/// <code>@</code>, <code>(</code>, <code>)</code>, <code>^</code>, <code>|</code>
+/// and control characters are all stored as literal subscript data (a control
+/// character inside a string literal is inert under indirection — verified live
+/// at the Story 36.4 code review for <code>$C(0)</code>, <code>$C(9)</code>,
+/// <code>$C(10)</code>, <code>$C(13)</code>, <code>$C(127)</code>,
+/// <code>$C(133)</code>, <code>$C(150)</code> and <code>$C(8232)</code>).</p>
+/// <p>Parsing rules (the tool contract): <code>pSubscripts</code> is split on
+/// EVERY comma — a string key containing a comma is not supported. Leading and
+/// trailing whitespace around each piece is trimmed (<code>$ZStrip</code> class
+/// <code>"W"</code>: space, tab and non-breaking space — unchanged pre-fix
+/// behavior). An empty piece is skipped. A canonical number (<code>1</code>,
+/// <code>-1.5</code>) is emitted unquoted. Any other piece is a string: if it is
+/// wrapped in quotes (the documented <code>"key1","key2"</code> convention) the
+/// value is the text between them; otherwise the whole piece is the value. In
+/// both cases a doubled quote (<code>""</code>) decodes to one literal quote,
+/// ObjectScript's own string-literal convention (<code>"a""b"</code> and
+/// <code>a""b</code> both address the subscript <code>a"b</code>). An UNWRAPPED
+/// piece that begins or ends with an unmatched quote (an odd-length run of
+/// quotes at either edge — what a quoted key containing a comma looks like after
+/// the comma split, e.g. <code>"a,b"</code>) is rejected with a clear error
+/// rather than silently addressing a different node.</p>
+/// <p>Back-compat (Rule #19): every input for which the pre-fix builder produced
+/// a valid literal reference yields the byte-identical reference string now —
+/// mechanically verified at the Story 36.4 code review (20,000 random hostile
+/// inputs, pre-fix vs fixed builder, 0 mismatches). The only inputs whose
+/// outcome changed are those that previously evaluated as code or failed to
+/// parse. "Escape-in-place" was chosen over a <code>$Name</code>-built reference
+/// (probe-first, Rule #16) because <code>$Name</code> canonicalizes a
+/// numeric-looking string subscript (<code>^G("1")</code> renders as
+/// <code>^G(1)</code> — same node, different reference STRING).</p>
 ClassMethod BuildGlobalRef(pGlobal As %String, pSubscripts As %String = "") As %String [ Private ]
 {
     ; Start with the caret-prefixed global name
@@ -3981,17 +4019,42 @@ ClassMethod BuildGlobalRef(pGlobal As %String, pSubscripts As %String = "") As %
     For i = 1:1:tLen {
         Set tSub = $ZStrip($Piece(pSubscripts, ",", i), "<>W")
         If tSub = "" Continue
+
         ; Check if subscript is numeric (integer or decimal, optionally negative)
         If (tSub = (+tSub)) {
-            ; Numeric subscript — use as-is
+            ; Numeric subscript — use as-is. A piece reaches this branch only
+            ; when it equals its own canonical number (digits, "-" and "."),
+            ; which is inert unquoted.
             Set $Piece(tSubList, ",", i) = tSub
         } Else {
-            ; Strip surrounding quotes if present
-            If ($Extract(tSub, 1) = """") && ($Extract(tSub, *) = """") {
-                Set tSub = $Extract(tSub, 2, *-1)
+            ; String subscript (Story 36.4). Recover the caller's intended
+            ; VALUE, then emit it as ONE escaped string literal.
+            If ($Length(tSub) >= 2) && ($Extract(tSub, 1) = """") && ($Extract(tSub, *) = """") {
+                ; Wrapped in quotes (the documented convention): the value is
+                ; the text between them.
+                Set tValue = $Extract(tSub, 2, *-1)
+            } Else {
+                ; Unwrapped. An odd-length run of quotes at either edge is an
+                ; unmatched quote — the shape a quoted key containing a comma
+                ; takes after the comma split. Reject it instead of silently
+                ; addressing a different node (pre-fix, every such piece was a
+                ; <SYNTAX> error, a <SUBSCRIPT> error or evaluated as code).
+                Set tLead = $Length(tSub) - $Length($ZStrip(tSub, "<", """"))
+                Set tTrail = $Length(tSub) - $Length($ZStrip(tSub, ">", """"))
+                If (tLead # 2) || (tTrail # 2) {
+                    Throw ##class(%Exception.StatusException).CreateFromStatus($$$ERROR($$$GeneralError, "Invalid subscript: a piece begins or ends with an unmatched quote. Wrap a string key in quotes and double any quote inside it; a comma always separates subscripts, so a string key containing a comma is not supported"))
+                }
+                Set tValue = tSub
             }
-            ; String subscript — quote it
-            Set $Piece(tSubList, ",", i) = """"_tSub_""""
+            ; Decode ObjectScript's doubled-quote convention ("" is one quote)
+            ; for wrapped and unwrapped pieces alike, so every input that
+            ; addressed a literal node before the fix still addresses the
+            ; byte-identical reference (Rule #19).
+            Set tValue = $Replace(tValue, """""", """")
+            ; THE FIX: double EVERY quote in the value, then wrap once. The
+            ; literal can now only end at its own closing quote, whatever the
+            ; value contains, so no part of it is ever evaluated as code.
+            Set $Piece(tSubList, ",", i) = """" _ $Replace(tValue, """", """""") _ """"
         }
     }
 
@@ -4052,6 +4115,40 @@ ClassMethod ValidateGlobalName(pGlobal As %String) As %Status [ Private ]
 Class ExecuteMCPv2.REST.Command Extends ExecuteMCPv2.REST.Base
 {
 
+/// Tear down the output-capture I/O redirect established by <method>Execute</method>/
+/// <method>ClassMethod</method> (Story 36.3, ledger <c>34-2-R6</c>/<c>34-4-R7</c>).
+/// <p><b>34-2-R6:</b> each teardown step — disabling the redirect, <code>Use</code>-ing
+/// back to <var>pInitIO</var>, and <code>Close</code>-ing <var>pNull</var> — is now
+/// attempted INDEPENDENTLY (its own <code>Try/Catch</code>). Before this fix the three
+/// were one unguarded sequence: a throw from the <code>Use</code> step (the middle one)
+/// skipped <code>Close</code> entirely, leaking the scratch null device.</p>
+/// <p><b>34-4-R7:</b> the defect was a render landing on the scratch null device (HTTP
+/// 200, empty body) after a failed <code>Use</code>. What actually closes it is the
+/// INDEPENDENT <code>Close</code> step above: closing the current device reverts
+/// <code>$IO</code> to <code>$PRINCIPAL</code>, and in a CSP worker the request's
+/// <var>pInitIO</var> IS <code>$PRINCIPAL</code> (live probe, Story 36.3 code review,
+/// 2026-09-11: inside a <code>/classmethod</code> request the process held exactly
+/// <code>|TCP|1972|&lt;pid&gt;</code> = <code>$PRINCIPAL</code> plus the null device) — so
+/// even when the <code>Use</code> step throws, <code>$IO</code> can no longer be left on
+/// the capture device. If <code>$IO</code> is still not <var>pInitIO</var> after that (a
+/// non-principal <var>pInitIO</var>), one corrective <code>Use</code> retry is made.</p>
+/// <p>Returns true when <code>$IO</code> ends up equal to <var>pInitIO</var> (or
+/// <var>pInitIO</var> is empty — nothing was ever redirected, so there is nothing to
+/// restore); false only when a device fault survives the corrective retry. The result is
+/// informational (pinned by <class>ExecuteMCPv2.Tests.ClassMethodEdgeTest</class>): the
+/// two handlers do not branch on it, because there is no alternate path to the HTTP
+/// response stream — a render goes to whatever <code>$IO</code> is either way.</p>
+ClassMethod TeardownRedirect(pInitIO As %String, pNull As %String) As %Boolean
+{
+    Try { Do ##class(%Library.Device).ReDirectIO(0) } Catch {}
+    Try { If pInitIO '= "" { Use pInitIO } } Catch {}
+    Try { If pNull '= "" { Close pNull } } Catch {}
+    If (pInitIO '= "") && ($IO '= pInitIO) {
+        Try { Use pInitIO } Catch {}
+    }
+    Quit (pInitIO = "") || ($IO = pInitIO)
+}
+
 /// Execute an ObjectScript command with captured I/O output.
 /// <p>Reads a JSON body with <code>command</code> and optional <code>namespace</code>.
 /// Uses <code>##class(%Device).ReDirectIO(1)</code> with label-based tag methods
@@ -4099,9 +4196,21 @@ ClassMethod Execute() As %Status
         Set %ExecuteMCPTruncated = 0
         Set tInitIO = $IO
         Set tNull = ##class(%Library.Device).GetNullDevice()
+        ; 34-2-R5: tRedirected is set the MOMENT Open runs (BEFORE Use, not after), so
+        ; a subsequent Use failure still runs this method's own cleanup (both Catch
+        ; blocks below only attempt teardown when tRedirected is set).
+        ; NO $Test check here, deliberately: "Open tNull:::1" is an UNTIMED open — the
+        ; "1" fills the MNEMONIC-SPACE slot, the timeout slot is empty — and an untimed
+        ; OPEN never sets $Test (live probe, Story 36.3 code review, 2026-09-11: $Test
+        ; passes through unchanged; a timed "Open tNull::1" reports $Test=1 even on an
+        ; already-open device). A $Test check here read a STALE value from earlier code,
+        ; which is what broke every /command and /classmethod request when one was
+        ; tried and reverted on 2026-09-11. An untimed Open that fails THROWS into the
+        ; outer Catch before tRedirected is set, having opened nothing — there is no
+        ; leak path for a $Test check to guard (Rule #54).
         Open tNull:::1
-        Use tNull::("^"_$ZNAME)
         Set tRedirected = 1
+        Use tNull::("^"_$ZNAME)
         Do ##class(%Library.Device).ReDirectIO(1)
 
         ; Execute the command
@@ -4116,13 +4225,11 @@ ClassMethod Execute() As %Status
             Set tCmdStatus = exCmd.AsStatus()
         }
 
-        ; Restore the original I/O state. Disable redirect, switch back to the
-        ; original HTTP response stream ($IO), and close the scratch null device.
-        ; Since the mnemonic was bound on tNull (not tInitIO), $IO is untouched
-        ; and CSP's response buffer flush path is clean.
-        Do ##class(%Library.Device).ReDirectIO(0)
-        Use tInitIO
-        Close tNull
+        ; Restore the original I/O state — see TeardownRedirect's own banner
+        ; (34-2-R6/34-4-R7): each step is attempted independently, so the capture
+        ; device is always closed and $IO can never be left on it when this method
+        ; renders below.
+        Do ..TeardownRedirect(tInitIO, tNull)
         Set tRedirected = 0
 
         ; Restore namespace before rendering response
@@ -4160,20 +4267,25 @@ ClassMethod Execute() As %Status
         }
     } Catch ex {
         ; Ensure redirection is restored on unexpected error before rendering.
-        ; Switch back to the untouched HTTP response stream; close the null
-        ; device if it was opened. Any errors during cleanup are swallowed.
+        ; Any errors during cleanup are swallowed — see TeardownRedirect's own
+        ; banner (34-2-R6/34-4-R7) for why each step is attempted independently.
         Try {
             If tRedirected {
-                Do ##class(%Library.Device).ReDirectIO(0)
-                If $Get(tInitIO) '= "" { Use tInitIO }
-                If $Get(tNull) '= "" { Close tNull }
+                Do ..TeardownRedirect($Get(tInitIO), $Get(tNull))
             }
         } Catch {}
         ; 34-3-R1 fix: capture whatever truncated state exists before it is
         ; killed, and surface it on the error envelope (AC 34.4.2).
         Set tErrorResult = {}
         Do tErrorResult.%Set("truncated", $Get(%ExecuteMCPTruncated, 0), "boolean")
+        ; 34-3-R6/34-4-R5: kill BOTH process-private capture slots here (hygiene — it
+        ; releases a capture buffer that can be megabytes at the point of failure).
+        ; A leftover slot was never OBSERVABLE by a later request: every reader resets
+        ; the slot before capture starts (lines above in this method; ClassMethod()'s
+        ; own reset; InvokeWithArgs' entry Kill) — pinned by ClassMethodEdgeTest's
+        ; stale-slot test, which seeds the slots WITHOUT a harness pre-scrub.
         Kill %ExecuteMCPTruncated
+        Kill %ExecuteMCPOutput
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()), , tErrorResult)
         Set tSC = $$$OK
@@ -4243,6 +4355,11 @@ ClassMethod ClassMethod() As %Status
             Set tClassName = tBody.%Get("className")
             Set tMethodName = tBody.%Get("methodName")
             Set tNamespace = tBody.%Get("namespace")
+            ; 34-2-R7 (CLOSED-BY-DECISION, documented alias, not a bug): %Get collapses
+            ; an omitted "args" key, a JSON "args":null, and a JSON "args":"" to the same
+            ; "" value here — InvokeWithArgs treats all three identically as a zero-
+            ; argument call. Rejecting any of them would break a caller relying on the
+            ; alias (Rule #19); no code change intended.
             Set tArgs = tBody.%Get("args")
         }
 
@@ -4267,9 +4384,13 @@ ClassMethod ClassMethod() As %Status
         Set %ExecuteMCPOutput = ""
         Set tInitIO = $IO
         Set tNull = ##class(%Library.Device).GetNullDevice()
+        ; 34-2-R5: tRedirected is set the MOMENT Open runs, before Use, so a
+        ; subsequent Use failure still runs this method's own cleanup. No $Test
+        ; check: this Open is UNTIMED and never sets $Test — see Execute()'s matching
+        ; comment above for the live probe.
         Open tNull:::1
-        Use tNull::("^"_$ZNAME)
         Set tRedirected = 1
+        Use tNull::("^"_$ZNAME)
         Do ##class(%Library.Device).ReDirectIO(1)
 
         ; Argument materialization, by-ref marker handling, and the 20-arg dispatch
@@ -4280,12 +4401,10 @@ ClassMethod ClassMethod() As %Status
         ; as the explicit ceiling for \`output\`, last in the shared-budget priority order.
         Set tSC = ##class(ExecuteMCPv2.Utils).InvokeWithArgs(tClassName, tMethodName, tArgs, .tReturn, .tByRefValues, .tArgCount, .tTruncated, .tByRefTruncated, .tOutputBudget)
 
-        ; Restore the original I/O state — same discipline as Execute() (Rule #7):
-        ; disable redirect, switch back to the untouched initial device, close the
-        ; scratch null device, unconditionally and before rendering.
-        Do ##class(%Library.Device).ReDirectIO(0)
-        Use tInitIO
-        Close tNull
+        ; Restore the original I/O state — same discipline as Execute() (Rule #7), via
+        ; TeardownRedirect (34-2-R6/34-4-R7: independent steps, so the capture device
+        ; is always closed), unconditionally and before rendering.
+        Do ..TeardownRedirect(tInitIO, tNull)
         Set tRedirected = 0
         Set tOutput = $Get(%ExecuteMCPOutput, "")
         Kill %ExecuteMCPOutput
@@ -4344,15 +4463,19 @@ ClassMethod ClassMethod() As %Status
         Do tResult.%Set("returnValueTruncated", tReturnValueTruncated, "boolean")
         Do ..RenderResponseBody($$$OK, , tResult)
     } Catch ex {
-        ; Ensure redirection is restored on unexpected error before rendering.
+        ; Ensure redirection is restored on unexpected error before rendering — see
+        ; TeardownRedirect's own banner (34-2-R6/34-4-R7).
         Try {
             If tRedirected {
-                Do ##class(%Library.Device).ReDirectIO(0)
-                If $Get(tInitIO) '= "" { Use tInitIO }
-                If $Get(tNull) '= "" { Close tNull }
+                Do ..TeardownRedirect($Get(tInitIO), $Get(tNull))
             }
         } Catch {}
         Kill %ExecuteMCPOutput
+        ; 34-3-R6/34-4-R5: kill %ExecuteMCPTruncated here too (hygiene, symmetric with
+        ; Execute()'s Catch). A leftover flag was never observable by a later request:
+        ; InvokeWithArgs Kills it at entry before any capture can set it — pinned by
+        ; ClassMethodEdgeTest's stale-slot test.
+        Kill %ExecuteMCPTruncated
         Set $NAMESPACE = tOrigNS
         ; 34-3-R1 fix: tTruncated may be undefined here (an exception before
         ; InvokeWithArgs returned), so default it rather than assume it exists. Same for

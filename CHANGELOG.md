@@ -2,6 +2,175 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-09-11] — Story 36.4: `/global` subscript-injection fix — read-only preset now actually means read-only
+
+### Security — `iris_global_get`/`iris_global_set`/`iris_global_kill` could execute arbitrary ObjectScript via the `subscripts` parameter, bypassing write governance (`@iris-mcp/dev` + ObjectScript, HIGH, ledger `36-2-CR-1`)
+
+`ExecuteMCPv2.REST.Global:BuildGlobalRef` wrapped a caller-supplied string subscript in a quoted
+literal WITHOUT doubling a quote character it contained, then the handlers evaluated the resulting
+reference by ObjectScript indirection (`$Get(@tRef)`, `Set @tRef`, `Kill @tRef`). A `subscripts` value
+containing a quote could close the literal early, and the rest of the value ran as ObjectScript code.
+
+**Exposure window.** The flaw has been present since the `/global` handler was introduced (Story 3.2,
+2026-04-06), so it is in `v0.1.0` and every pre-release since. It became a governance bypass once
+write governance existed: any `IRIS_GOVERNANCE` policy that disables writes (Pre-release 2026-06-15)
+and the `IRIS_GOVERNANCE_PRESET=read-only` preset (Pre-release 2026-07-08). Because `iris_global_get` is a
+READ-classified, default-enabled tool, a caller with only read access could execute code and write to
+the instance through a tool the governance layer reported as safe.
+
+Fixed: `BuildGlobalRef` (shared by all three handlers) now emits every subscript as a canonical number
+or as ONE escaped string literal — never as code. A string value is recovered from the piece (the text
+between the quotes of the documented `"key1","key2"` convention, or the whole piece; a doubled quote
+`""` is one literal quote), then every quote in it is doubled before it is wrapped once, so the literal
+can only end at its own closing quote whatever the value contains. Quotes, `_`, `$`, `@`, `(`, `)` and
+control characters are stored and addressed as literal data.
+
+**Behavior changes.** Every input that addressed a literal node before the fix yields the byte-identical
+reference string now — including every documented form (numeric, negative/decimal, quoted and unquoted
+string, multi-level, the Epic 36 `readGlobalNode` queue shape) — verified mechanically at the code review
+against the pre-fix builder over 20,000 random hostile inputs. Only inputs that previously ran as code or
+failed to parse behave differently: they are now addressed as a literal subscript, or — for a piece that
+begins or ends with an unmatched quote, which is what a quoted key containing a comma becomes after the
+comma split — rejected with a clear error instead of silently addressing a different node. A string key
+containing a comma remains unsupported.
+
+Live-verified before and after the fix on the real `/api/executemcp/v2/global` HTTP route, including the
+read-only-preset bypass through the real governance dispatch path. A permanent default-suite gate
+(`global-injection-epic-gate.test.ts`, armed in the pre-publish gate) and the ObjectScript test class
+`ExecuteMCPv2.Tests.GlobalSubscriptSafetyTest` pin the fix; both were proven RED against the pre-fix
+class.
+
+## [Pre-release — 2026-09-11] — Story 36.2: `iris_test_status` companion tool — re-attach, read-by-runIndex, cancel
+
+### Added — `iris_test_status`, the re-attach/read/cancel companion to `iris_execute_tests` (`@iris-mcp/dev`)
+
+Epic 36's only new tool (dev 28 → 29). Re-attach to a test run Story 36.1's `iris_execute_tests`
+reported `status: "running"` for (or that your own client abandoned a long call) instead of
+re-submitting the same target, which starts a SECOND concurrent run against shared fixtures.
+
+`action: "poll"` (read, **enabled by default**) accepts `jobId` and/or `runIndex`. By `jobId`: while
+`Retry-After` is still present it returns the SAME `status: "running"` shape `iris_execute_tests`
+returns (built through the identical shared envelope helper), with a `partial` snapshot that is this
+ONE poll's DELTA drain only — never cumulative across separate calls; once finished, it returns
+`status: "completed"` built AUTHORITATIVELY from `%UnitTest_Result` by exact `InstanceIndex`
+(`runIndexSource: "result-table"`) — never from a single drain alone, since an earlier
+`iris_execute_tests` "running" response may already have consumed some rows, which never reappear.
+The job's queue node is read BEFORE any poll that could be terminal (a terminal poll — or a
+`cancel` — consumes it), so the run index is captured even on a job that finishes on this very call.
+A `jobId` Atelier no longer recognizes (HTTP 404 — already consumed, or stale) falls back to
+`runIndex` when supplied, else reports a clear not-found result naming that fallback. By `runIndex`
+alone: `status: "completed"` (the same SQL path) once `TestInstance.DateTime` is set, or
+`status: "unfinished"` when it is not — the result table alone CANNOT distinguish a still-running
+job from a cancelled/crashed one (a cancelled run's row never finishes), so an `unfinished` result
+carries interim rows only under `partial`, each explicitly labelled `"in-progress"` and excluded from
+the counts (never reported as a pass). A `jobId` whose queue node is gone AND whose `runIndex` shows
+unfinished is reported `status: "abandoned"`.
+
+`action: "cancel"` (write, **DEFAULT-DISABLED** — enable via `IRIS_GOVERNANCE`, e.g.
+`{"global":{"iris_test_status:cancel":true}}`) stops a RUNNING job (`DELETE /work/{jobId}`, reading
+the queue node's run index BEFORE the delete) and reports the OBSERVED outcome, never an assumed
+one — `status: "cancelled"` with what was actually seen (queue entry gone; result row never
+finalized), or, when the job had ALREADY finished but was never drained, `status: "completed"` with a
+note that only the queue entry was discarded and results are preserved at that `runIndex`. `cancel`
+requires `jobId` — there is no way to cancel by `runIndex` alone.
+
+`iris_execute_tests`'s own `hint` (on a `running`/error result) and description now name
+`iris_test_status` as the primary re-attach route, alongside the manual `iris_global_get` +
+`iris_sql_execute` route that still works in every preset (including `core`, which does not include
+the new tool — Lead decision L-2: `core` is already at its 13-runtime-tool ceiling).
+
+**Governance:** two new post-foundation keys, `iris_test_status:poll` (read, enabled) and
+`iris_test_status:cancel` (write, disabled) — the frozen Epic-14 baseline (`1e62c5ad5bf7`, 141 keys)
+is unchanged. **Visibility:** `developer`-preset include, `core`-preset exclude; NOT a `TOOL_PAIRS`
+member (pairing it with `iris_execute_tests` would force it into `core` too). Tool counts: dev 28 →
+29; suite `full` 104/109 → 105/110 (package/advertised), `developer` 76/81 → 77/82, `core` unchanged
+(49/54).
+
+**Hardened at the Story 36.2 code review:** a `completed` poll is VALUE-identical to
+`iris_execute_tests`' drain path for the same run — exact millisecond durations (a plain float
+`* 1000` of the SQL seconds is not), method-level errors (e.g. a thrown exception) in `message`, the
+drain's row order — and a finished run with no method-level results (e.g. a failed
+`OnBeforeAllTests`) returns the same `isError: true` zero-result guard, never a green `total: 0`; a
+terminal poll never reports `completed` for a run that did not finish; with no run index at all the
+drained rows come back under `partial` of an `isError: true` result, never as top-level counts.
+`jobId` must be the all-digits Atelier id (anything else is refused before any IRIS call), a `jobId`
+that is not a unit-test job is refused, `namespace` must be the run's own (the Atelier queue is
+instance-wide, `%UnitTest_Result` per-namespace — `iris_execute_tests`' hint now names it), and
+`cancel` reports what it re-read after the `DELETE`, keeping its handles on a failed `DELETE`.
+
+**Back-compat (Rule #19):** `iris_execute_tests`'s output shapes and its full pre-existing test
+suite are unchanged (the suite passes unmodified); the only `iris_execute_tests` text that changed is
+its `hint` (on a `running`/error result) and its description, which now name `iris_test_status`
+(with the run's namespace) as the primary re-attach route. The shared envelope builder's extension
+(new `unfinished`/`abandoned`/`cancelled` discriminator cases, and optional wait-budget-context
+fields on `running`) is strictly additive.
+
+## [Pre-release — 2026-09-10] — Story 36.1: `iris_execute_tests` running-result contract, handles, caller-controlled wait budget
+
+### Fixed — long-running `iris_execute_tests` calls no longer surface as a bare timeout error (`@iris-mcp/dev`, HIGH — first beta-feedback defect)
+
+External report (OcuPilot project, 2026-09-10): a genuinely slow test suite exceeded the tool's
+hard-coded 120-second poll budget and returned `Error: Test execution timed out` (`isError: true`,
+no `structuredContent`, no job handle) while the run kept executing server-side for minutes. The
+caller's only move was to re-submit, which created a SECOND concurrent run against shared fixtures
+and hours of misdirected debugging. Root-caused in `packages/iris-dev-mcp/src/tools/execute.ts`: the
+Atelier job id captured at queue time was discarded, and wait-budget expiry was treated identically
+to a genuine failure.
+
+### Added — running-result contract, `timeout` parameter, and run handles on every path (`@iris-mcp/dev`, `@iris-mcp/shared`)
+
+On wait-budget expiry with a job still executing, `iris_execute_tests` now returns `isError: false`
+with `structuredContent.status: "running"`, the run's `jobId` and (once populated) `runIndex`, and a
+`partial` snapshot of whatever has drained so far — never a failure, never a final count, and the
+response text leads with an unmistakable "Do NOT re-submit" instruction. Re-attach today with the
+exact calls the response's `hint` carries: `iris_global_get` on
+`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` for the run index, then `iris_sql_execute`
+joining `%UnitTest_Result.TestMethod` → `TestCase` → `TestSuite` → `TestInstance` filtered by that
+exact `InstanceIndex` (only `TestInstance` has the column; never `MAX(InstanceIndex)`), treating the
+rows as final only once `TestInstance.DateTime` is set — they exist, with not-yet-finished methods
+already reading `Status` 1, while the run executes. A dedicated re-attach tool is forthcoming
+(Story 36.2). A completed run's envelope gains the same additive `status: "completed"`, `jobId`,
+`runIndex`, and `runIndexSource` fields — `"queue"` (the job's own queue node, read on a
+still-running poll) or `"counter"` (a completed run whose `^UnitTest.Result` counter, read before
+queueing and after completion, moved by exactly 1); otherwise `null` with a `runIndexNote`. A
+still-running result is never counter-attributed. Existing `total`/`passed`/`failed`/`skipped`/`details`
+fields are byte-identical. If polling an already-queued job fails (an HTTP error or a network
+timeout), the error result now carries the `jobId`, the drained-so-far rows and the re-attach hint
+instead of losing the handle. The "no job ID" and HTTP-error results now carry `structuredContent`,
+so their `text` is the same JSON envelope the zero-result guard already used (no longer a bare
+`Error: …` string).
+
+A new optional `timeout` parameter (positive seconds) sets the wait budget per call; an operator may
+also set a default via the `IRIS_TEST_TIMEOUT` environment variable (precedence: `timeout` argument
+\> `IRIS_TEST_TIMEOUT` \> the existing 120-second default), inherited by every named server profile
+like `IRIS_SQL_TIMEOUT`. Both are hard-capped at 3600 seconds
+(`timeoutCapped: true` when clamped, mirroring the `IRIS_SQL_MAX_ROWS`/`rowsCapped` precedent). MCP
+clients impose their own `tools/call` ceiling independently of this budget (commonly 60 seconds, not
+always configurable) — the running-result-plus-re-attach contract is the robust path for a
+genuinely slow suite, not a large `timeout` value.
+
+Three narrow pre-existing defects in the same handler, carried in the deferred-work ledger since
+Story 34.5 (`34-5-R2`/`34-5-R3`/`34-5-R4`), were closed alongside this fix since they live in the
+exact code this story rewrites: a malformed `class:method` target (more than one `:`, or an empty
+class segment) now returns an explicit error instead of silently mis-parsing; a test method named
+literally `Test` is now counted and reported instead of being silently dropped by a truthiness
+check; and a `level: "method"` run whose returned method name doesn't match what was requested (the
+Atelier endpoint's `Test`-prefix-stripped filter is many-to-one) now carries an explicit
+`methodMismatchWarning` instead of staying silent about it.
+
+### Fixed — `iris_doc_compile`'s `async` description corrected (`@iris-mcp/dev`)
+
+The `async` parameter's description promised "a job ID for polling"; the tool has no such poll
+companion and returns `{mode: "async", docs, response}` immediately. The description now states
+what is actually returned.
+
+**Back-compat (Rule #19):** no new tool, action key, or governance key —
+`iris_execute_tests` keeps its existing bare (no-`action`) `write` classification and default
+state; the frozen Epic-14 governance baseline (`1e62c5ad5bf7`, 141 keys) is unchanged. Existing
+completed-envelope fields are byte-identical; the three pre-existing poll-loop regression tests
+pass with their test bodies and assertions unchanged (only the shared mock plumbing now routes the
+new `/global` reads to their own mock) and still fail on both historical truncation shapes.
+
 ## [Pre-release — 2026-08-14] — Epic 34: `iris_execute_classmethod` output capture, `ByRef`/`Output` support, 20-arg ceiling
 
 ### Fixed — `iris_execute_classmethod` no longer fails on classmethods that `Write` to the current device (`@iris-mcp/dev`)
@@ -390,10 +559,10 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset. Roster summary (runtime
-tool counts): `full` 29/27/23/22/8 (dev/admin/interop/ops/data, default/unchanged), `core`
-13/13/10/10/8, `developer` 29/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
+tool counts, as of Story 36.2): `full` 30/27/23/22/8 (dev/admin/interop/ops/data), `core`
+13/13/10/10/8, `developer` 30/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
-[Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~67% fewer bytes under
+[Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under
 `core` on `@iris-mcp/dev`).
 
 **Strictly additive — `IRIS_TOOLS_PRESET` unset (the default) is byte-for-byte today's `tools/list`

@@ -7,11 +7,18 @@
  * debug loop (command/classmethod/tests, global get/set/kill — kill stays
  * because the documented `^ClineDebug` debug pattern ends with a cleanup
  * kill) + SQL execute. 12 package tools = 13 runtime (+ `iris_server_profiles`).
- * `developer` = the full 28-tool dev server (all dev tools are dev-relevant).
+ * `developer` = the full 29-tool dev server (all dev tools are dev-relevant).
  *
- * `include ∪ exclude` MUST equal the package's full 28-tool set for both
+ * `include ∪ exclude` MUST equal the package's full 29-tool set for both
  * presets — enforced at `McpServerBase` construction by `assertPresetCoverage`
  * (see `index.ts`) and at test time by `presets.test.ts`.
+ *
+ * `iris_test_status` (Story 36.2, Lead decision L-2, 2026-09-10): `developer`
+ * include / `core` exclude — `core` is already at its 13-runtime-tool ceiling
+ * (12 package + `iris_server_profiles`), and the manual re-attach route
+ * (`iris_global_get` + `iris_sql_execute`, named in `iris_execute_tests`'
+ * `hint`) already works there today. NOT in `TOOL_PAIRS` — pairing it with
+ * `iris_execute_tests` would force it into `core` too, over the ceiling.
  *
  * [Source: research/feature-specs/11-tool-visibility-presets.md#2.5 "iris-dev-mcp"]
  */
@@ -52,6 +59,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_loc_count",
       "iris_env_diff",
       "iris_env_promote",
+      "iris_test_status",
     ],
   },
   developer: {
@@ -84,6 +92,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_loc_count",
       "iris_env_diff",
       "iris_env_promote",
+      "iris_test_status",
     ],
     exclude: [],
   },

@@ -12,6 +12,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { applyEdits as applyJsoncEdits, modify as modifyJsonc } from "jsonc-parser";
+import { parseDocument as parseYamlDocument } from "yaml";
+
+import type { ClientAdapter } from "../types.js";
+
 export const FIXTURES_DIR = path.join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
 
 export function fixturePath(...segments: string[]): string {
@@ -66,6 +71,38 @@ export const FOREIGN_ENTRY_NAMES = [
 /** Secret-looking VALUES planted in foreign entries — must never leak onto
  * any status or diff surface (spec §3.5.5). */
 export const FOREIGN_SECRET_MARKERS = ["ghp_foreignSecretValue123", "BSA_foreignKeyABC"] as const;
+
+/** The foreign entry name `plantForeignSecrets` adds. */
+export const PLANTED_FOREIGN_NAME = "zz-planted-foreign";
+
+/**
+ * Story 36.3 code review (ledger 33-5-L3, leg 2): only the claude-code and
+ * vscode fixtures actually CARRY a FOREIGN_SECRET_MARKERS value, so every
+ * leak sweep over the other adapters' fixtures was vacuous — a value absent
+ * from the input can never leak. This plants one extra FOREIGN entry holding
+ * EVERY marker into any adapter's config text, in that adapter's own format
+ * and under its own root key, so a sweep can iterate markers × fixtures.
+ */
+export function plantForeignSecrets(adapter: ClientAdapter, content: string): string {
+  const env = Object.fromEntries(FOREIGN_SECRET_MARKERS.map((marker, index) => [`PLANTED_${index}`, marker]));
+  const entry = { command: "third-party-server", env };
+  if (adapter.format === "json" || adapter.format === "jsonc") {
+    const edits = modifyJsonc(content, [adapter.rootKey, PLANTED_FOREIGN_NAME], entry, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    });
+    return applyJsoncEdits(content, edits);
+  }
+  if (adapter.format === "yaml") {
+    const doc = parseYamlDocument(content);
+    doc.setIn([adapter.rootKey, PLANTED_FOREIGN_NAME], doc.createNode(entry));
+    return doc.toString();
+  }
+  const envPairs = Object.entries(env)
+    .map(([key, value]) => `${key} = "${value}"`)
+    .join(", ");
+  const body = content.endsWith("\n") || content === "" ? content : `${content}\n`;
+  return `${body}\n[${adapter.rootKey}.${PLANTED_FOREIGN_NAME}]\ncommand = "${entry.command}"\nenv = { ${envPairs} }\n`;
+}
 
 /**
  * Story 33.1 — an in-memory `WriteFs` for write-engine tests. Returns only

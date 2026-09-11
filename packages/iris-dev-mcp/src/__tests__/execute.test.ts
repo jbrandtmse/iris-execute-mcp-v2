@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError } from "@iris-mcp/shared";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { ToolContext, IrisHttpClient } from "@iris-mcp/shared";
+import { IrisApiError, IrisConnectionError } from "@iris-mcp/shared";
 import {
   executeCommandTool,
   executeClassMethodTool,
   executeTestsTool,
+  createExecuteTestsHandler,
+  type TestClock,
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
@@ -269,6 +271,33 @@ describe("iris_execute_classmethod", () => {
     expect(result.isError).toBeUndefined();
   });
 
+  // Ledger 34-3-R5 (Rule #54): `toStructured` used to defensively wrap an
+  // `Array.isArray` branch (`{items, count}`) and a final `{value}`
+  // scalar/null fallback — neither shape the real `/classmethod` endpoint can
+  // ever emit (confirmed by reading `ExecuteMCPv2.REST.Command:ClassMethod`'s
+  // and `ExecuteMCPv2.REST.Base:RenderResponseBody`'s full success/error
+  // paths, both of which only ever hand `RenderResponseBody` a `%DynamicObject`
+  // — see `toStructured`'s own banner in execute.ts). This pin replaces those
+  // unreachable-shape assertions with the REAL shape: an arbitrary JSON object
+  // passes straight through as `structuredContent`, unmodified — a plain cast,
+  // not a remapping.
+  it("passes an arbitrary object result straight through as structuredContent unmodified (34-3-R5 — the only shape /classmethod can ever emit)", async () => {
+    mockHttp.post.mockResolvedValue(
+      envelope({ returnValue: "ok", argCount: 0, someExtraKey: "value" }),
+    );
+
+    const result = await executeClassMethodTool.handler(
+      { className: "MyClass", methodName: "DoSomething" },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual({
+      returnValue: "ok",
+      argCount: 0,
+      someExtraKey: "value",
+    });
+  });
+
   it("should include args in body when provided", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ returnValue: "1", argCount: 2 }),
@@ -453,6 +482,94 @@ describe("iris_execute_classmethod", () => {
         args: twentyOne,
       }),
     ).toThrow();
+  });
+
+  // ── Zod schema bounds (ledger 34-3-R8) ──────────────────────────────────
+  //
+  // The schema used to be `z.array(z.any())` — it advertised (and the MCP SDK
+  // enforced, at BOTH its own `validateToolInput` request-time check and this
+  // repo's own `dispatchToolCall` re-validation — confirmed by reading
+  // `server-base.ts`) NO real shape at all, even though the server's own
+  // `ExecuteMCPv2.Utils.ParseArgEntry` (the actual enforcement) accepts only a
+  // plain scalar or a `{byRef, value?}` marker object and rejects everything
+  // else with a clear error. This is a STRUCTURAL TIGHTENING to match that
+  // already-narrower server contract (Rule #19): every shape the server
+  // genuinely accepts must still pass the schema; every shape the server
+  // already rejected may now also be rejected earlier, at the schema/MCP
+  // layer, instead of only after a round trip to IRIS.
+  it("schema accepts every documented args shape (scalars and {byRef, value?} markers, 34-3-R8)", () => {
+    const schema = executeClassMethodTool.inputSchema;
+    // Plain scalars — string, number, boolean — passed by value.
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: ["hello", 42, true],
+      }).success,
+    ).toBe(true);
+    // {byRef: true} — Output-style undefined-in, value omitted entirely.
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [{ byRef: true }],
+      }).success,
+    ).toBe(true);
+    // {byRef: true, value: <scalar>} and {byRef: false, value: <scalar>} —
+    // both are valid marker shapes per ParseArgEntry (byRef:false requires a
+    // value, which this call supplies).
+    expect(
+      schema.safeParse({
+        className: "MyClass",
+        methodName: "DoSomething",
+        args: [
+          { byRef: true, value: "start" },
+          { byRef: false, value: 1 },
+        ],
+      }).success,
+    ).toBe(true);
+    // No args at all — still optional.
+    expect(
+      schema.safeParse({ className: "MyClass", methodName: "DoSomething" }).success,
+    ).toBe(true);
+  });
+
+  it("schema rejects args entries ParseArgEntry itself rejects, at the schema level (34-3-R8)", () => {
+    const schema = executeClassMethodTool.inputSchema;
+    const base = { className: "MyClass", methodName: "DoSomething" };
+    // A nested array element — ParseArgEntry: "Argument N is a JSON array;
+    // expected a scalar or a {byRef, value} marker object".
+    expect(schema.safeParse({ ...base, args: [[1, 2]] }).success).toBe(false);
+    // A bare JSON null element — ParseArgEntry: "Argument N cannot be JSON
+    // null; use {"byRef":true} for an undefined argument, or "" for an empty
+    // string".
+    expect(schema.safeParse({ ...base, args: [null] }).success).toBe(false);
+    // An object missing the 'byRef' key — ParseArgEntry: "Argument N is an
+    // object without a 'byRef' key; expected a scalar or a {byRef, value}
+    // marker object".
+    expect(schema.safeParse({ ...base, args: [{ notAMarker: true }] }).success).toBe(
+      false,
+    );
+    // A marker 'value' that is JSON null — ParseArgEntry: "marker 'value'
+    // cannot be JSON null; omit 'value' entirely for an undefined argument".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: null }] }).success,
+    ).toBe(false);
+    // A marker 'value' that is an object — ParseArgEntry: "marker 'value'
+    // must be a scalar (string, number, or boolean)".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: { nested: 1 } }] })
+        .success,
+    ).toBe(false);
+    // A marker 'value' that is an array — same rejection as the object case.
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: true, value: [1] }] }).success,
+    ).toBe(false);
+    // 'byRef' present but not a boolean — ParseArgEntry: "'byRef' must be a
+    // JSON boolean".
+    expect(
+      schema.safeParse({ ...base, args: [{ byRef: "true", value: "x" }] }).success,
+    ).toBe(false);
   });
 
   it("passes {byRef, value?} marker objects through to the REST body untouched (marker pass-through)", async () => {
@@ -747,11 +864,33 @@ describe("iris_execute_classmethod", () => {
 
 describe("iris_execute_tests", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
+  /** `/global` GET reads (run-index capture) — see beforeEach. */
+  let globalGet: ReturnType<typeof vi.fn>;
   let ctx: ToolContext;
 
   beforeEach(() => {
     mockHttp = createMockHttp();
-    ctx = createMockCtx(mockHttp);
+    // MOCK PLUMBING ONLY (Story 36.1 code review — lead ruling on
+    // `36-1-QA-2`, AC 36.1.7 as amended): the tool reads `^UnitTest.Result`
+    // BEFORE `POST /work` and the run-index queue node on every
+    // still-running poll, both via the ExecuteMCPv2 `/global` GET route —
+    // the SAME `ctx.http.get` transport the Atelier polls use. Route those
+    // reads to their own mock (`globalGet`) so every Atelier-poll fixture
+    // below (`mockHttp.get` chains and call counts) is served exactly as it
+    // was; no test body or assertion changes. Default answer: an undefined
+    // node, `{value: "", defined: false}` — a shape the real route returns
+    // (`ExecuteMCPv2.REST.Global:GetGlobal`, Rule #54).
+    globalGet = vi.fn(async () => ({
+      status: { errors: [] },
+      console: [],
+      result: { value: "", defined: false },
+    }));
+    const routedHttp = {
+      ...mockHttp,
+      get: (path: string, options?: unknown) =>
+        path.startsWith("/api/executemcp/v2/global?") ? globalGet(path, options) : mockHttp.get(path, options),
+    };
+    ctx = createMockCtx(routedHttp as unknown as IrisHttpClient);
   });
 
   /** Helper: mock queue + immediate poll response (no retryafter) */
@@ -1462,5 +1601,719 @@ describe("iris_execute_tests", () => {
   it("should have correct name and title", () => {
     expect(executeTestsTool.name).toBe("iris_execute_tests");
     expect(executeTestsTool.title).toBe("Execute Tests");
+  });
+
+  // ── Story 36.1: running-result contract, handles, timeout budget ──
+  //
+  // Testability seam (AC 36.1.7): an injectable `now`/`sleep` pair
+  // (TestClock), not `vi.useFakeTimers()` — see execute.ts's TestClock
+  // banner for why. `createExecuteTestsHandler(clock)` is a factory the
+  // production export (`executeTestsTool.handler`) wraps with NO argument
+  // (real clock) — every test above this point exercises exactly that
+  // real-clock, real-`setTimeout` path unchanged, which is itself the Rule
+  // #19 proof that introducing the seam altered nothing about today's
+  // default behavior.
+
+  /** Deterministic fake clock: `sleep` advances `now()` synchronously —
+   * no real wall-clock time is ever spent, however many iterations a test
+   * needs to reach its deadline. */
+  function createFakeClock(): TestClock {
+    let current = 0;
+    return {
+      now: () => current,
+      sleep: async (ms: number) => {
+        current += ms;
+      },
+    };
+  }
+
+  /** Parse the `global`/`subscripts` query params off a `/global` GET path
+   * built by execute.ts's `readGlobalNode` (the same shape `iris_global_get`
+   * builds). */
+  function parseGlobalPath(path: string): { global: string; subscripts: string } {
+    const qs = path.slice(path.indexOf("?") + 1);
+    const params = new URLSearchParams(qs);
+    return { global: params.get("global") ?? "", subscripts: params.get("subscripts") ?? "" };
+  }
+
+  /**
+   * Serve the Atelier polls (`mockHttp.get`) in order from `pollResponses`
+   * (the last entry repeats), and the `/global` reads (`globalGet`, routed
+   * in this describe's beforeEach) from `globalStubs`, keyed
+   * `"<global>|<subscripts>"` — a stub value may be a function of the read
+   * count for that key, to model a node that changes over time. An
+   * unconfigured key answers `{value: "", defined: false}` (an undefined
+   * node — a real shape the route returns, Rule #54).
+   */
+  function installPathAwareGet(
+    pollResponses: Array<{ result: unknown; retryafter?: string }>,
+    globalStubs: Record<
+      string,
+      { value: string; defined: boolean } | ((readCount: number) => { value: string; defined: boolean })
+    > = {},
+  ) {
+    const readCounts = new Map<string, number>();
+    globalGet.mockImplementation(async (path: string) => {
+      const { global: g, subscripts } = parseGlobalPath(path);
+      const key = `${g}|${subscripts}`;
+      const count = (readCounts.get(key) ?? 0) + 1;
+      readCounts.set(key, count);
+      const entry = globalStubs[key];
+      const stub = typeof entry === "function" ? entry(count) : (entry ?? { value: "", defined: false });
+      return { status: { errors: [] }, console: [], result: stub };
+    });
+    let pollIndex = 0;
+    mockHttp.get.mockImplementation(async () => {
+      const resp = pollResponses[pollIndex] ?? pollResponses[pollResponses.length - 1] ?? { result: [] };
+      pollIndex++;
+      return {
+        status: { errors: [] },
+        console: [],
+        result: resp.result,
+        ...(resp.retryafter ? { retryafter: resp.retryafter } : {}),
+      };
+    });
+  }
+
+  describe("running-result contract, handles, and timeout budget (Story 36.1)", () => {
+    it("returns a 'running' envelope (isError:false) with jobId/runIndex captured via the queue node when the wait budget expires mid-run", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-running-1" }));
+      // Always still-running — never terminates within the test's budget.
+      installPathAwareGet(
+        [{ result: [], retryafter: "1" }],
+        {
+          'IRIS.TempAtelierAsyncQueue|job-running-1,"unittest","id"': { value: "42", defined: true },
+          "UnitTest.Result|": { value: "41", defined: true },
+        },
+      );
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      expect(result.isError).toBe(false);
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("running");
+      expect(structured.jobId).toBe("job-running-1");
+      expect(structured.runIndex).toBe(42);
+      expect(structured.runIndexSource).toBe("queue");
+      expect(structured.timeoutMs).toBe(1000);
+      expect(structured.elapsedMs).toBe(1000);
+      expect(structured.target).toBe("MyApp.Tests.SlowClass");
+      expect(structured.level).toBe("class");
+      expect(structured.partial).toEqual({ total: 0, passed: 0, failed: 0, skipped: 0, details: [] });
+      expect(typeof structured.hint).toBe("string");
+      expect(structured.hint as string).toContain("Do NOT re-submit");
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("TEST RUN STILL EXECUTING");
+      expect(text).toContain("Do NOT re-submit");
+      expect(text).toContain("jobId=job-running-1");
+      expect(text).toContain("runIndex=42");
+    });
+
+    it("Rule #59/#48 mutation-guard companion: the running branch carries a partial snapshot of whatever drained before expiry", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-running-2" }));
+      installPathAwareGet([
+        { result: [{ class: "MyApp.Tests.SlowClass", method: "A", status: 1, duration: 10, failures: [] }], retryafter: "1" },
+      ]);
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      const structured = result.structuredContent as { partial: { total: number; passed: number; details: { method: string }[] } };
+      expect(structured.partial.total).toBe(1);
+      expect(structured.partial.passed).toBe(1);
+      expect(structured.partial.details[0]?.method).toBe("TestA");
+    });
+
+    /**
+     * Shared driver for the counter-fallback tests: the queue node NEVER
+     * becomes defined (an undefined node — a real shape, Rule #54), the run
+     * completes on the 3rd poll (two still-running polls, then terminal),
+     * and the `^UnitTest.Result` counter root answers `counterBeforeValue`
+     * on its FIRST read (the pre-`POST /work` snapshot) and
+     * `counterAfterValue` on every later one (the post-completion read).
+     */
+    function installCounterFallbackDriver(
+      counterBeforeValue: string,
+      counterAfterValue: string,
+      terminalRows: unknown[] = [
+        { class: "MyApp.Tests.FastClass", method: "Only", status: 1, duration: 5, failures: [] },
+      ],
+    ) {
+      installPathAwareGet(
+        [{ result: [], retryafter: "1" }, { result: [], retryafter: "1" }, { result: terminalRows }],
+        {
+          "UnitTest.Result|": (n) => ({ value: n === 1 ? counterBeforeValue : counterAfterValue, defined: true }),
+        },
+      );
+    }
+
+    it("falls back to the ^UnitTest.Result counter (delta exactly 1) when the queue node was never captured", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-fallback-1" }));
+      installCounterFallbackDriver("9", "10");
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.FastClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("completed");
+      expect(structured.runIndex).toBe(10);
+      expect(structured.runIndexSource).toBe("counter");
+      expect(structured).not.toHaveProperty("runIndexNote");
+    });
+
+    it("reports runIndex:null with a runIndexNote when the counter delta is ambiguous (not exactly 1)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-fallback-2" }));
+      installCounterFallbackDriver("9", "12"); // delta 3 — ambiguous.
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.FastClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexSource).toBeNull();
+      expect(typeof structured.runIndexNote).toBe("string");
+      expect(structured.runIndexNote as string).toContain("advanced by 3");
+    });
+
+    // ── Story 36.1 code review: ledger 36-1-QA-1 / 36-1-QA-2 (lead ruling — AC 36.1.5 wins) ──
+
+    it("36-1-QA-1: a STILL-RUNNING result whose queue node was never observed reports runIndex:null — never another client's run via the counter", async () => {
+      // Real interleaving (Rule #54 — every fake is a shape the `/global`
+      // route really returns): our worker is slow to start (WQM backlog / a
+      // slow class compile), so IRIS.TempAtelierAsyncQueue(<jobId>,"unittest",
+      // "id") is still UNDEFINED on every poll before the budget expires,
+      // while ANOTHER client's run allocates the next ^UnitTest.Result index
+      // during our wait (41 at our pre-POST read, 42 on any later read). A
+      // counter delta of 1 here is NOT ours — the pre-fix code reported 42.
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-slow-start" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }], {
+        "UnitTest.Result|": (n) => ({ value: n === 1 ? "41" : "42", defined: true }),
+      });
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      expect(result.isError).toBe(false);
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("running");
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexSource).toBeNull();
+      expect(structured.runIndexNote as string).toContain("not yet allocated/captured");
+      expect(structured.runIndexNote as string).toContain("Re-attach by jobId");
+      expect(result.content[0]?.text).toContain("runIndex=unknown");
+    });
+
+    it("36-1-QA-2: the ^UnitTest.Result 'before' snapshot is read BEFORE POST /work, so a run finishing on its FIRST poll still gets a handle", async () => {
+      // A fast run: completes on the first poll (no retryafter ever seen, so
+      // the queue node — killed by that same terminal poll — is never
+      // readable). The pre-fix code took no counter snapshot at all here
+      // and returned runIndex:null with no note (the common case, per QA).
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-fast" }));
+      installPathAwareGet(
+        [{ result: [{ class: "MyApp.Tests.FastClass", method: "Only", status: 1, duration: 5, failures: [] }] }],
+        { "UnitTest.Result|": (n) => ({ value: n === 1 ? "9" : "10", defined: true }) },
+      );
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.FastClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("completed");
+      expect(structured.runIndex).toBe(10);
+      expect(structured.runIndexSource).toBe("counter");
+      // Ordering pin (AC 36.1.5 "read BEFORE queueing"): the first counter
+      // read happens before the POST /work.
+      const firstCounterRead = globalGet.mock.calls.findIndex(([p]) => String(p).includes("global=UnitTest.Result"));
+      const workPost = mockHttp.post.mock.calls.findIndex(([p]) => String(p).endsWith("/work"));
+      expect(firstCounterRead).toBeGreaterThanOrEqual(0);
+      expect(workPost).toBeGreaterThanOrEqual(0);
+      expect(globalGet.mock.invocationCallOrder[firstCounterRead]!).toBeLessThan(
+        mockHttp.post.mock.invocationCallOrder[workPost]!,
+      );
+    });
+
+    it("36-1-QA-2: the queue node is read from the FIRST still-running poll (no 2-poll threshold)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-one-retry" }));
+      installPathAwareGet(
+        [
+          { result: [], retryafter: "1" },
+          { result: [{ class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 900, failures: [] }] },
+        ],
+        { 'IRIS.TempAtelierAsyncQueue|job-one-retry,"unittest","id"': { value: "77", defined: true } },
+      );
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowTest", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("completed");
+      expect(structured.runIndex).toBe(77);
+      expect(structured.runIndexSource).toBe("queue");
+      expect(structured).not.toHaveProperty("runIndexNote");
+    });
+
+    it("36-1-QA-2: a counter delta of 0 on a completed run reports null with a 'no run index was allocated' note", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-delta-0" }));
+      installCounterFallbackDriver("9", "9");
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.FastClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexSource).toBeNull();
+      expect(structured.runIndexNote as string).toContain("No run index was allocated");
+    });
+
+    it("a completed run that drained NO rows is never counter-attributed, even at delta 1 (compile failure + a concurrent run)", async () => {
+      // %Api.Atelier.v8:ExecuteAsyncRequest quits BEFORE publishing the run
+      // index or calling %UnitTest.Manager.RunTest when the test class fails
+      // to compile, so this job allocated nothing; the single increment in
+      // the window is another client's run.
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-compile-fail" }));
+      installCounterFallbackDriver("9", "10", []);
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.Broken", level: "class" }, ctx);
+
+      expect(result.isError).toBe(true); // the zero-result guard, carrying the handles
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.jobId).toBe("job-compile-fail");
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexSource).toBeNull();
+      expect(structured.runIndexNote as string).toContain("without draining any result rows");
+    });
+
+    it("a counter that moved backwards (reset/purge) reports null with an explicit note", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-reset" }));
+      installCounterFallbackDriver("12", "3");
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.FastClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexNote as string).toContain("moved backwards by 9");
+    });
+
+    it("a network/timeout error while POLLING an existing job returns its handles, the drained rows and the re-attach hint instead of throwing", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-net-blip" }));
+      mockHttp.get
+        .mockResolvedValueOnce({
+          status: { errors: [] },
+          console: [],
+          result: [{ class: "MyApp.Tests.SlowTest", method: "A", status: 1, duration: 10, failures: [] }],
+          retryafter: "1",
+        })
+        .mockRejectedValueOnce(
+          new IrisConnectionError("TIMEOUT", "Connection to IRIS timed out after 60000ms", "Check that IRIS is running"),
+        );
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowTest", level: "class" }, ctx);
+
+      expect(result.isError).toBe(true);
+      const structured = result.structuredContent as {
+        jobId: string;
+        error: string;
+        partial: { total: number; details: { method: string }[] };
+        hint: string;
+      };
+      expect(structured.jobId).toBe("job-net-blip");
+      expect(structured.error).toContain("timed out");
+      expect(structured.partial.total).toBe(1);
+      expect(structured.partial.details[0]?.method).toBe("TestA");
+      expect(structured.hint).toContain("may still be executing");
+      expect(structured.hint).toContain("Do NOT re-submit");
+    });
+
+    it("stops the per-poll queue-node read after 3 consecutive /global transport failures (route unavailable)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-no-global" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }]);
+      globalGet.mockRejectedValue(
+        new IrisApiError(404, [], "/api/executemcp/v2/global", "IRIS returned HTTP 404 for GET /api/executemcp/v2/global."),
+      );
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 10 }, ctx);
+
+      // 10 s budget / 200 ms interval = 50 polls, but at most 3 queue-node reads.
+      expect(mockHttp.get).toHaveBeenCalledTimes(50);
+      const queueReads = globalGet.mock.calls.filter(([p]) => String(p).includes("IRIS.TempAtelierAsyncQueue"));
+      expect(queueReads).toHaveLength(3);
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("running");
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexNote as string).toContain("failed repeatedly");
+    });
+
+    it("the running hint names BOTH re-attach routes — the jobId's queue node even once runIndex is captured, and SQL joined down from TestInstance (the only table with InstanceIndex)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-hint" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }], {
+        'IRIS.TempAtelierAsyncQueue|job-hint,"unittest","id"': { value: "42", defined: true },
+      });
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      const hint = (result.structuredContent as { hint: string }).hint;
+      expect(hint).toContain("already captured: 42");
+      expect(hint).toContain(`iris_global_get with global "IRIS.TempAtelierAsyncQueue" and subscripts 'job-hint,"unittest","id"'`);
+      // The route as live-run at the Story 36.1 code review: InstanceIndex
+      // exists ONLY on TestInstance (INFORMATION_SCHEMA.COLUMNS), so the
+      // method rows are joined down to it...
+      expect(hint).toContain(
+        "JOIN %UnitTest_Result.TestSuite ts ON tc.TestSuite = ts.ID JOIN %UnitTest_Result.TestInstance ti ON " +
+          "ts.TestInstance = ti.ID WHERE ti.InstanceIndex = ?",
+      );
+      // ...and, because those rows exist mid-run (a still-hanging method
+      // already reads Status 1), the query carries the completion signal.
+      expect(hint).toContain("ti.DateTime AS FinishedAt");
+      expect(hint).toContain("EMPTY FinishedAt means the run is STILL executing");
+      expect(hint).toContain("Never MAX(InstanceIndex)");
+      expect(hint).toContain("iris_test_status");
+    });
+
+    // ── timeout precedence + cap clamp (AC 36.1.4, Rule #59) ──
+
+    it("timeout precedence: explicit arg beats ctx.config.testTimeoutMs (IRIS_TEST_TIMEOUT)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-prec-1" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }]);
+      ctx.config = { ...ctx.config, testTimeoutMs: 5_000 };
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 10 }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.status).toBe("running");
+      expect(structured.timeoutMs).toBe(10_000);
+    });
+
+    it("timeout precedence: IRIS_TEST_TIMEOUT (ctx.config.testTimeoutMs) applies when no explicit timeout arg is given", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-prec-2" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }]);
+      ctx.config = { ...ctx.config, testTimeoutMs: 7_000 };
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.timeoutMs).toBe(7_000);
+    });
+
+    it("timeout default: neither explicit arg nor IRIS_TEST_TIMEOUT set -> 120s (unchanged default, Rule #19)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-prec-3" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }]);
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class" }, ctx);
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.timeoutMs).toBe(120_000);
+    });
+
+    it("clamps an over-cap timeout to 3600s and flags timeoutCapped:true (rowsCapped precedent)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-cap-1" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }]);
+
+      const clock = createFakeClock();
+      const handler = createExecuteTestsHandler(clock);
+      const result = await handler(
+        { target: "MyApp.Tests.SlowClass", level: "class", timeout: 999_999 },
+        ctx,
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.timeoutMs).toBe(3_600_000);
+      expect(structured.timeoutCapped).toBe(true);
+    });
+
+    it("does not set timeoutCapped when the resolved budget is under the cap", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.UtilsTest", level: "class", timeout: 30 },
+        ctx,
+      );
+
+      expect(result.structuredContent).not.toHaveProperty("timeoutCapped");
+    });
+
+    // ── Rule #19 back-compat pin: completed envelope minus additive fields ──
+
+    it("back-compat (Rule #19): the completed envelope's PRE-36.1 fields (total/passed/failed/skipped/details) are byte-identical; only status/jobId/runIndex/runIndexSource/runIndexNote are additive", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 10, failures: [] },
+        { class: "MyApp.Tests.UtilsTest", method: "Format", status: 0, duration: 15, failures: [{ message: "boom" }] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.UtilsTest", level: "class" },
+        ctx,
+      );
+
+      const structured = result.structuredContent as Record<string, unknown>;
+      // runIndexNote is the AC 36.1.5 additive explanation carried whenever
+      // runIndex is null (this fixture's counter never moves: delta 0).
+      const { status, jobId, runIndex, runIndexSource, runIndexNote, ...preFeatureShape } = structured;
+      expect(status).toBe("completed");
+      expect(typeof jobId).toBe("string");
+      expect(runIndex === null || typeof runIndex === "number").toBe(true);
+      expect(runIndexSource === null || runIndexSource === "queue" || runIndexSource === "counter").toBe(true);
+      expect(runIndexNote === undefined || typeof runIndexNote === "string").toBe(true);
+      expect(preFeatureShape).toEqual({
+        total: 2,
+        passed: 1,
+        failed: 1,
+        skipped: 0,
+        details: [
+          { class: "MyApp.Tests.UtilsTest", method: "TestValidate", status: "passed", duration: 10, message: "" },
+          { class: "MyApp.Tests.UtilsTest", method: "TestFormat", status: "failed", duration: 15, message: "boom" },
+        ],
+      });
+    });
+
+    // ── Shared envelope helper on every non-completed return (AC 36.1.6) ──
+
+    it("the 'no job ID' early return carries structuredContent (isError:true) via the shared envelope helper", async () => {
+      mockHttp.post.mockResolvedValue(envelope({}));
+
+      const result = await executeTestsTool.handler({ target: "MyApp.Tests", level: "class" }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toEqual({
+        total: 0,
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        details: [],
+        error: "Failed to queue test execution — no job ID returned",
+      });
+      // No job ever existed — jobId/runIndex are absent, not null.
+      expect(result.structuredContent).not.toHaveProperty("jobId");
+      expect(result.structuredContent).not.toHaveProperty("runIndex");
+    });
+
+    it("the IrisApiError catch carries jobId (when already known) alongside its pre-existing human-readable text", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-cancelled" }));
+      mockHttp.get
+        .mockResolvedValueOnce({ status: { errors: [] }, console: [], result: [], retryafter: "1" })
+        .mockRejectedValueOnce(
+          new IrisApiError(
+            404,
+            [],
+            "/api/atelier/v7/USER/work/job-cancelled",
+            "IRIS returned HTTP 404 for GET /api/atelier/v7/USER/work/job-cancelled. Check the request parameters and try again.",
+          ),
+        );
+
+      const result = await executeTestsTool.handler({ target: "MyApp.Tests.Cancellable", level: "class" }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("Error executing tests for 'MyApp.Tests.Cancellable'");
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.jobId).toBe("job-cancelled");
+      expect(structured.error).toContain("HTTP 404");
+      // The one still-running poll before the throw read the queue node and
+      // found it undefined (this describe's default `/global` answer).
+      expect(structured.runIndex).toBeNull();
+      expect(structured.runIndexSource).toBeNull();
+      // The job exists server-side, so the error carries the re-attach
+      // guidance and the drained-so-far rows (architecture L1).
+      expect(structured.hint as string).toContain("Do NOT re-submit");
+      expect(structured.partial).toEqual({ total: 0, passed: 0, failed: 0, skipped: 0, details: [] });
+    });
+
+    it("the zero-result guard also carries jobId/runIndex when known (AC 36.1.5)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-empty-slow" }));
+      installPathAwareGet(
+        [
+          { result: [], retryafter: "1" },
+          { result: [], retryafter: "1" },
+          { result: [] },
+        ],
+        {
+          'IRIS.TempAtelierAsyncQueue|job-empty-slow,"unittest","id"': { value: "7", defined: true },
+        },
+      );
+
+      const result = await executeTestsTool.handler({ target: "MyApp.Tests.EmptySlow", level: "class" }, ctx);
+
+      expect(result.isError).toBe(true);
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.error).toContain("No tests found");
+      expect(structured.jobId).toBe("job-empty-slow");
+      expect(structured.runIndex).toBe(7);
+      expect(structured.runIndexSource).toBe("queue");
+    });
+
+    // ── Ledger 34-5-R2 (AC 36.1.12 (a)): malformed method-level target ──
+
+    it("rejects a method-level target with more than one ':' separator (34-5-R2)", async () => {
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.UtilsTest:TestFoo:TestBar", level: "method" },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(mockHttp.post).not.toHaveBeenCalled();
+      const structured = result.structuredContent as { error: string };
+      expect(structured.error).toContain("at most one ':' separator");
+    });
+
+    it("rejects a method-level target with an empty class segment (34-5-R2)", async () => {
+      const result = await executeTestsTool.handler(
+        { target: ":TestFoo", level: "method" },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(mockHttp.post).not.toHaveBeenCalled();
+      const structured = result.structuredContent as { error: string };
+      expect(structured.error).toContain("must not be empty");
+    });
+
+    it("trims whitespace around a method-level target's segments (34-5-R2 fix)", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Foo", status: 1, duration: 5, failures: [] },
+      ]);
+
+      await executeTestsTool.handler({ target: "MyApp.Tests.UtilsTest : TestFoo", level: "method" }, ctx);
+
+      expect(mockHttp.post).toHaveBeenCalledWith(
+        expect.stringContaining("/work"),
+        expect.objectContaining({ tests: [{ class: "MyApp.Tests.UtilsTest", methods: ["Foo"] }] }),
+      );
+    });
+
+    it("still runs the whole class unfiltered for the pinned missing-colon edge (Story 34.5 pin preserved)", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler({ target: "MyApp.Tests.UtilsTest", level: "method" }, ctx);
+
+      expect(mockHttp.post).toHaveBeenCalledWith(
+        expect.stringContaining("/work"),
+        expect.objectContaining({ tests: [{ class: "MyApp.Tests.UtilsTest" }] }),
+      );
+      expect(result.isError).toBeUndefined();
+    });
+
+    it("still runs the whole class unfiltered for the pinned trailing-colon edge (Story 34.5 pin preserved)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-empty-trailing-colon-2" }));
+      mockHttp.get.mockResolvedValueOnce({ status: { errors: [] }, console: [], result: [] });
+
+      const result = await executeTestsTool.handler({ target: "MyApp.Tests.EmptyTest:", level: "method" }, ctx);
+
+      expect(mockHttp.post).toHaveBeenCalledWith(
+        expect.stringContaining("/work"),
+        expect.objectContaining({ tests: [{ class: "MyApp.Tests.EmptyTest" }] }),
+      );
+      expect(result.isError).toBe(true);
+    });
+
+    // ── Ledger 34-5-R3 (AC 36.1.12 (b), return leg): a method literally named "Test" ──
+
+    it("counts and restores a method literally named 'Test' instead of silently dropping it (34-5-R3 return leg)", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.LiteralTest", method: "", status: 1, duration: 3, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.LiteralTest", level: "class" },
+        ctx,
+      );
+
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as { total: number; details: { method: string }[] };
+      expect(structured.total).toBe(1);
+      expect(structured.details[0]?.method).toBe("Test");
+    });
+
+    it("a method literally named 'Test' does not collide with the class-summary accumulator key (34-5-R3 return leg)", async () => {
+      // Both an empty-drain class-summary row AND a method-named-"Test" row
+      // in the SAME poll — the pre-36.1 truthiness-keyed accumulator would
+      // key them identically ("class-summary::Class"), the fix keys them
+      // distinctly (presence, not truthiness).
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.LiteralTest", method: "", status: 1, duration: 3, failures: [] },
+        { class: "MyApp.Tests.LiteralTest", status: 1, duration: 9, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.LiteralTest", level: "class" },
+        ctx,
+      );
+
+      const structured = result.structuredContent as { total: number; details: { method: string }[] };
+      expect(structured.total).toBe(1);
+      expect(structured.details[0]?.method).toBe("Test");
+    });
+
+    // ── Ledger 34-5-R4 (AC 36.1.12 (c)): method-name mismatch detection ──
+
+    it("reports methodMismatchWarning when the drained row's restored name does not match the requested method (34-5-R4)", async () => {
+      // Caller omits the documented "Test" prefix ("Validate" instead of
+      // "TestValidate"); toAtelierMethodFilter leaves it unchanged (it
+      // doesn't start with "Test"), so the SAME wire filter a correctly-
+      // typed "TestValidate" caller would send is used, and the endpoint
+      // returns the REAL method's stripped name ("Validate", i.e.
+      // TestValidate restored).
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.UtilsTest:Validate", level: "method" },
+        ctx,
+      );
+
+      expect(result.isError).toBeUndefined();
+      const structured = result.structuredContent as { methodMismatchWarning?: string; details: { method: string }[] };
+      expect(structured.details[0]?.method).toBe("TestValidate");
+      expect(structured.methodMismatchWarning).toContain("Requested method 'Validate'");
+      expect(structured.methodMismatchWarning).toContain("TestValidate");
+    });
+
+    it("does not report methodMismatchWarning for a correctly-typed (prefixed) method-level target", async () => {
+      mockQueueAndPoll([
+        { class: "MyApp.Tests.UtilsTest", method: "Validate", status: 1, duration: 5, failures: [] },
+      ]);
+
+      const result = await executeTestsTool.handler(
+        { target: "MyApp.Tests.UtilsTest:TestValidate", level: "method" },
+        ctx,
+      );
+
+      expect(result.structuredContent).not.toHaveProperty("methodMismatchWarning");
+    });
+
+    // ── timeout Zod schema ──
+
+    it("schema accepts an optional positive `timeout` and rejects a non-positive value", () => {
+      expect(() =>
+        executeTestsTool.inputSchema.parse({ target: "X", level: "class", timeout: 5 }),
+      ).not.toThrow();
+      expect(() =>
+        executeTestsTool.inputSchema.parse({ target: "X", level: "class" }),
+      ).not.toThrow();
+      expect(() =>
+        executeTestsTool.inputSchema.parse({ target: "X", level: "class", timeout: 0 }),
+      ).toThrow();
+      expect(() =>
+        executeTestsTool.inputSchema.parse({ target: "X", level: "class", timeout: -5 }),
+      ).toThrow();
+    });
   });
 });

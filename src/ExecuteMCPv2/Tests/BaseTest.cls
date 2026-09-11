@@ -24,6 +24,14 @@ Method OnAfterOneTest() As %Status
 }
 
 /// Redirect $IO to the null device and bind the capture mnemonic on THIS routine.
+/// <p><b>34-4-R8 — deliberately no <code>$Test</code> check:</b> <code>Open tNull:::1</code>
+/// is an UNTIMED open (the <code>1</code> fills the mnemonic-space slot; the timeout slot
+/// is empty), and an untimed <code>OPEN</code> never sets <code>$Test</code> — live probe,
+/// Story 36.3 code review (2026-09-11): <code>$Test</code> passes through unchanged. A
+/// check here would read a STALE value (which is what broke every test in this class
+/// when one was tried and reverted on 2026-09-11), and there is no timeout for the
+/// following <code>Use</code> to trip over: a failing untimed <code>Open</code> throws.
+/// See <method>ExecuteMCPv2.REST.Command</method>'s matching comment.</p>
 Method StartCapture() As %String
 {
     Set tInitIO = $IO

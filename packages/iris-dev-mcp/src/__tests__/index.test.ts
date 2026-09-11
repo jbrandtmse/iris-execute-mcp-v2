@@ -19,8 +19,8 @@ describe("iris-dev-mcp", () => {
       expect(Array.isArray(tools)).toBe(true);
     });
 
-    it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, execute, LOC, env-diff, and env-promote tools", () => {
-      expect(tools).toHaveLength(28);
+    it("should export the document CRUD, compilation, intelligence, format, SQL, server, global, execute, LOC, env-diff, env-promote, and test-status tools", () => {
+      expect(tools).toHaveLength(29);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris_doc_get");
       expect(names).toContain("iris_doc_put");
@@ -50,6 +50,7 @@ describe("iris-dev-mcp", () => {
       expect(names).toContain("iris_loc_count");
       expect(names).toContain("iris_env_diff");
       expect(names).toContain("iris_env_promote");
+      expect(names).toContain("iris_test_status");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -70,9 +71,9 @@ describe("iris-dev-mcp", () => {
         tools,
       });
       expect(server).toBeDefined();
-      // 28 package tools + the framework `iris_server_profiles` discovery tool
+      // 29 package tools + the framework `iris_server_profiles` discovery tool
       // (Epic 19, decision E1 — registered on every server by the shared base).
-      expect(server.toolCount).toBe(29);
+      expect(server.toolCount).toBe(30);
     });
 
     it("should report all tool names", () => {
@@ -110,6 +111,7 @@ describe("iris-dev-mcp", () => {
         "iris_loc_count",
         "iris_env_diff",
         "iris_env_promote",
+        "iris_test_status",
         // The framework discovery tool is registered last by the shared base
         // (Epic 19, decision E1), after the package's own tools.
         "iris_server_profiles",

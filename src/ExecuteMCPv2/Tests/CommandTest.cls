@@ -268,7 +268,9 @@ Method TestRedirectsSetsTruncatedFlagOnCaptureOverflow() As %Status
 
     Do $$$AssertTrue('tCaught, "the capture overflow must never propagate as an exception to the caller of Write")
     Do $$$AssertEquals($Get(%ExecuteMCPTruncated, 0), 1, "the capture-buffer overflow must be recorded in %ExecuteMCPTruncated")
-    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > 1000000, "the partial capture up to the ceiling must still be preserved")
+    ; 34-3-R9: derive the floor from the platform's own long-string ceiling rather than a
+    ; hand-picked constant coupled to today's config (Rule #54-adjacent oracle discipline).
+    Do $$$AssertTrue($Length($Get(%ExecuteMCPOutput,"")) > ($SYSTEM.SYS.MaxLocalLength() \ 2), "the partial capture up to the ceiling must still be preserved")
     Kill %ExecuteMCPOutput
     Kill %ExecuteMCPTruncated
     Quit $$$OK

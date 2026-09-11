@@ -46,7 +46,7 @@ Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **13-tool runtime roster** (12 package tools + `iris_server_profiles`) — the authoring loop (get/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `IRIS_TOOLS_PRESET=developer` keeps all **29 runtime tools** (28 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **13-tool runtime roster** (12 package tools + `iris_server_profiles`) — the authoring loop (get/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `IRIS_TOOLS_PRESET=developer` keeps all **30 runtime tools** (29 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
 
 > **Prompt-pack limitation.** Two of this server's prompts call tools `core` hides: `diagnose-slow-query` calls `iris_sql_analyze` (hidden under `core`), and `promote-environment-change` calls `iris_env_diff`/`iris_env_promote` (both hidden together under `core` — they are always co-visible). Both prompts work unchanged under `full` or `developer`. Running under `core`, either switch to `full`/`developer` or set `IRIS_TOOLS_ENABLE` to re-show the specific tool(s) the prompt needs.
 
@@ -189,6 +189,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 > **`advise` — SQL Performance Advisor (Epic 28):** given `query` (or `workload: true` to advise the top-`topN` recent statements instead, mutually exclusive with `query`), returns evidence-cited findings — `full-scan`, `missing-index` (with a suggested `CREATE INDEX` DDL), `stale-stats`, `unused-index`, `plan-anomaly` — each carrying a plan excerpt and a confidence level. **Strictly advisory: recommendations are heuristic; verify with `explain` before applying any change** — `advise` never applies anything itself (no write/`applyIndex` action ships in v1). `topN` (default 5, max 20) bounds real analysis work in `workload` mode, not just output size — each statement analyzed is a full endpoint round-trip (EXPLAIN + dictionary reads), so a larger `topN` is proportionally more work. If the recent-statement workload source is unavailable on your IRIS edition/version, `workload` mode returns a clear capability message rather than a raw SQL error.
 >
 > **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
+>
+> **`iris_execute_tests` wait budget (optional, opt-in — Story 36.1):** an operator may set `IRIS_TEST_TIMEOUT` (the tool's DEFAULT wait budget, in **seconds**, before it returns a "running" result instead of blocking further) as an environment variable. Unset by default — the tool keeps its 120-second default. It applies to every server profile (named `IRIS_PROFILES` entries inherit it, like `IRIS_SQL_TIMEOUT`). A per-call `timeout` argument, when given, takes precedence over `IRIS_TEST_TIMEOUT`. See the `iris_execute_tests` detail section below for the full running-result contract.
 
 ### Server Tools
 
@@ -212,7 +214,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
 | `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
-| `iris_execute_tests` | Run unit tests (package, class, or method level) | `target`, `level`, `namespace?` | readOnly, idempotent |
+| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below | `target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |
 
 ### Code Metrics Tools
 
@@ -230,6 +232,14 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_env_promote` | Turn a prior `iris_env_diff` result into an ordered promotion plan (`action: "plan"`), or execute an allowlisted subset of that plan against `target` (`action: "execute"`) behind four refuse-before-any-write gates: `confirm`, a `steps` allowlist, plan-hash freshness (the same `diff` re-hashed), and the target profile's own governance. Halts on the first failed step; never deletes a target-only item | `action`, `source`, `target`, `diff?`, `plan?`, `steps?`, `confirm?`, `namespace?` | -- |
 
 > **Governance defaults:** `iris_env_diff` and `iris_env_promote`'s `plan` action are classified `read` and are therefore **enabled by default** — neither is gated behind `IRIS_GOVERNANCE`. `iris_env_promote`'s `execute` action is truthfully classified `write` and is **DEFAULT-DISABLED** (unlike `iris_production_control:clean`, it deliberately does not use the `defaultEnabled` mechanism — promotion is a real environment-mutating write, not a recovery action); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}` — `execute` ALSO requires the **target** profile's own governance to allow the underlying write families it uses (a fourth gate on top of this one). **Safety:** nothing on the target is ever deleted — items that exist on the target only (`onlyInTarget`) are always informational warnings, never steps — and System Default Settings values that look like credentials are redacted in both diff and plan/execute output; their plaintext never appears in any tool result. Credentials/users/roles promotion is out of scope entirely.
+
+### Test Status Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_test_status` | Companion to `iris_execute_tests` (Story 36.2): re-attach to a test run by `jobId` and/or read it by `runIndex` (`action: "poll"`), or stop a running one (`action: "cancel"`) — see detail below | `action`, `jobId?`, `runIndex?`, `namespace?` | destructive |
+
+> **Governance defaults:** `iris_test_status:poll` is classified `read` and is therefore **enabled by default**. `iris_test_status:cancel` is truthfully classified `write` and is **DEFAULT-DISABLED** (it deliberately does not use the `defaultEnabled` mechanism — stopping a run is not a recovery-of-last-resort action like `iris_production_control:clean`); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_status:cancel":true}}`.
 
 ---
 
@@ -948,7 +958,7 @@ The `content` text renders the reference `cos_loc_counter.sh` ASCII metrics tabl
 **Output:**
 ```json
 {
-  "killed": true,
+  "deleted": true,
   "global": "TempData"
 }
 ```
@@ -976,6 +986,26 @@ The `filter` is applied client-side as a **case-insensitive** substring match by
 
 Pass `caseSensitive: true` to restore the old case-sensitive (exact substring) behavior.
 </details>
+
+**`subscripts` contract and security note (Story 36.4):** `subscripts` is always treated as literal
+DATA, never as code. The rules:
+
+- The string is split on **every comma** — a string key that itself contains a comma is not
+  supported. Leading/trailing whitespace around each piece (space, tab, non-breaking space) is
+  trimmed.
+- A canonical number (`1`, `-1.5`) is a numeric subscript. Anything else is a string subscript.
+- Wrap a string key in quotes (`'"key1","key2"'`) and double any quote inside it (`'"a""b"'`
+  addresses the single subscript `a"b`). Quotes, `_`, `$`, `@`, `(`, `)`, `^`, `|` and control
+  characters inside a key are stored and addressed as that literal text — nothing in a subscript is
+  ever executed.
+- A piece that begins or ends with an unmatched quote — which is what a quoted key containing a
+  comma turns into after the split, e.g. `'"a,b"'` — is rejected with a clear error instead of
+  silently addressing a different node.
+
+Before Story 36.4, a quote inside a string subscript could close the literal and the rest of the
+value ran as ObjectScript — reachable through `iris_global_get` (a read-classified, default-enabled
+tool) even under `IRIS_GOVERNANCE_PRESET=read-only`. This is fixed; see the CHANGELOG `### Security`
+entry.
 
 <details>
 <summary><strong>iris_execute_command</strong> -- Execute ObjectScript</summary>
@@ -1050,7 +1080,14 @@ Each `args` entry is either a plain scalar (by value) or a `{"byRef": true, "val
 marker for a `ByRef`/`Output` parameter — up to 20 positions total. Any `Write` output the
 target produces is captured (no wrapper class needed for narrating methods, stock runners
 like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returned
-in `output`; `argCount` is unchanged from prior versions of this tool.
+in `output`; `argCount` is unchanged from prior versions of this tool. Omitting `args` and
+passing `[]` are the same zero-argument call.
+
+**Capture caveat (ledger `34-3-R3` / `34-1-R13`, a documented limitation).** The capture
+lives in the process-private variables `%ExecuteMCPOutput`/`%ExecuteMCPTruncated`, so a
+target that KILLs them — an argumentless `KILL`, or a unit-test class whose setup/teardown
+clears them — silently loses everything captured before that point, and `truncated` does
+not report it. Run unit-test suites with `iris_execute_tests` rather than through this tool.
 
 **Response payload budget (Story 34.6 AC 34.6.1, revised by Story 34.7 AC 34.7.3 — ledger
 `34-6-CR2-6`).** `returnValue`, `byRefValues`, and `output` **share ONE 32768-RAW-character
@@ -1228,6 +1265,209 @@ above. Internally the tool strips that prefix before querying IRIS's Atelier
 test-runner endpoint (which matches on the unprefixed form) and restores it on
 every result row, so the documented prefixed form is what you should always
 pass and always see back; you do not need to do this stripping yourself.
+
+A completed run's `structuredContent` additionally carries `status: "completed"`,
+`jobId`, `runIndex`, and `runIndexSource` — Story 36.1, so a caller can
+correlate results by handle instead of guessing at `MAX(InstanceIndex)`.
+`runIndexSource` is `"queue"` (read from the job's own
+`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` node on a still-running
+poll) or `"counter"` (a run that finished before that node could be read: the
+`^UnitTest.Result` counter read just before queueing vs. after completion moved
+by exactly 1, and the run drained result rows). Otherwise both are `null` and a
+`runIndexNote` says why (e.g. a concurrent run also allocated an index). Existing
+fields (`total`/`passed`/`failed`/`skipped`/`details`) are unchanged.
+
+### Long-running suites: `timeout` and the "still running" result (Story 36.1)
+
+The tool waits up to 120 seconds by default before it stops blocking — override
+per call with `timeout` (a positive number of **seconds**; hard-capped at 3600s,
+a larger value is silently clamped and the response carries `timeoutCapped: true`)
+or set `IRIS_TEST_TIMEOUT` as an environment-level default (precedence:
+`timeout` argument > `IRIS_TEST_TIMEOUT` > the 120s default). **MCP clients
+impose their own `tools/call` ceiling independently of this budget** — the MCP
+TypeScript SDK defaults to 60 seconds, and several clients cap at 60s-2min (not
+always configurable) — so a long `timeout` value is a convenience, not a
+guarantee that the CLIENT will wait that long.
+
+If the wait budget expires while the ObjectScript run is **still executing
+server-side**, the tool returns a non-error result instead of a timeout error:
+
+```json
+{
+  "status": "running",
+  "jobId": "31797604",
+  "runIndex": 256,
+  "runIndexSource": "queue",
+  "elapsedMs": 120204,
+  "timeoutMs": 120000,
+  "target": "MyApp.Tests.SlowSuite",
+  "level": "class",
+  "namespace": "HSCUSTOM",
+  "partial": { "total": 2, "passed": 2, "failed": 0, "skipped": 0, "details": [] },
+  "hint": "Still executing server-side. Do NOT re-submit. ..."
+}
+```
+
+`isError` is `false` — the request succeeded; the run was submitted and is
+executing. **This is not a failure and not a final result — do NOT re-submit
+the same target**, which starts a SECOND concurrent run against shared test
+fixtures. `partial` is the drained-so-far subset ONLY (never a top-level
+`total` a consumer could mistake for a final count). Counts under `partial`
+can go up on a later look, never down. On a running result `runIndexSource` is
+`"queue"` or `null` — the counter fallback is never applied while a run is
+still executing (another client's run could be counted instead); a `null`
+index carries a `runIndexNote`. If polling an already-queued job fails
+(an HTTP error or a network timeout), the error result still carries the
+`jobId`, the drained-so-far `partial` rows and the same re-attach `hint`.
+
+To see the run through, re-attach rather than re-submit — the response's `hint`
+carries the exact calls:
+- **Today, in every preset:** the `runIndex` (the response's own, or
+  `iris_global_get` with global `IRIS.TempAtelierAsyncQueue` and subscripts
+  `<jobId>,"unittest","id"` while the job is queued or running), then
+  `iris_sql_execute`:
+
+  ```sql
+  SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, tm.Name AS MethodName,
+         tm.Status, tm.Duration, tm.ErrorDescription
+  FROM %UnitTest_Result.TestMethod tm
+  JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID
+  JOIN %UnitTest_Result.TestSuite ts ON tc.TestSuite = ts.ID
+  JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID
+  WHERE ti.InstanceIndex = ?   -- parameters: [runIndex]
+  ```
+
+  Only `%UnitTest_Result.TestInstance` has an `InstanceIndex` column — the other
+  result tables join down to it. **Never `MAX(InstanceIndex)`**, which can pick
+  up a different, concurrently-started run. These rows exist while the run is
+  still executing (a method still running already reads `Status` 1), so treat
+  them as final only once `FinishedAt` is non-empty.
+- **Easier — `iris_test_status`** (Story 36.2, enabled by default): call it
+  with `action: "poll"` and the same `jobId` (and/or `runIndex`) and the run's
+  own `namespace` (the Atelier queue is instance-wide but `%UnitTest_Result` is
+  per-namespace, so it must match) — it builds
+  the SAME `running`/`completed` shapes shown above, but sourced authoritatively
+  from `%UnitTest_Result` by exact `InstanceIndex` once finished (never from a
+  single drain alone). See its own detail block below.
+
+**Concurrency caveat:** two runs of the SAME class started close together
+share that class's fixtures, and the Atelier endpoint *predicts* a run's
+index (reading the counter) slightly before `%UnitTest.Manager` actually
+*allocates* it — a race between near-simultaneous submissions can misattribute
+a run's own index. Avoid submitting the same target concurrently.
+
+**Method-level target validation (Story 36.1):** at `level: "method"`, the
+`ClassName:MethodName` target is trimmed and validated — more than one `:`
+separator, or an empty class segment before `:`, returns an explicit
+malformed-target error (distinct from the zero-result guard) instead of
+silently discarding part of the target or querying an empty class name. If
+the method name you typed doesn't match what actually ran (the endpoint's
+`Test`-prefix-stripped filter is many-to-one — `Class:Validate` and
+`Class:TestValidate` both resolve to the same wire filter), the response
+carries an additive `methodMismatchWarning` field naming the mismatch rather
+than staying silent about it.
+</details>
+
+<details>
+<summary><strong>iris_test_status</strong> -- Re-attach, read, or cancel a test run (Story 36.2)</summary>
+
+Companion to `iris_execute_tests`: use it after that tool returns
+`status: "running"` (or after your own client abandoned a long call) instead
+of re-submitting the same target — re-submitting starts a SECOND concurrent
+run against shared fixtures.
+
+**`action: "poll"` (read, enabled by default) — Input:**
+```json
+{ "jobId": "31797604", "namespace": "HSCUSTOM" }
+```
+`jobId` is the all-digits Atelier work-queue id `iris_execute_tests` returned —
+anything else is refused before any IRIS call, as is a `jobId` whose queue
+entry is not a unit-test job (a poll would otherwise drain another client's
+result). Pass the run's own `namespace` (the one `iris_execute_tests`
+reported): the Atelier work queue is instance-wide, but `%UnitTest_Result` is
+per-namespace, so a different namespace reads a different run.
+or, once the job is no longer known to Atelier (already consumed, or stale):
+```json
+{ "runIndex": 256 }
+```
+
+**Output while still running** (identical shape to `iris_execute_tests`'
+own `running` result, `partial` being the DELTA this ONE poll drained —
+never cumulative across separate calls):
+```json
+{ "status": "running", "jobId": "31797604", "runIndex": 256, "runIndexSource": "queue",
+  "partial": { "total": 0, "passed": 0, "failed": 0, "skipped": 0, "details": [] },
+  "hint": "..." }
+```
+
+**Output once finished** — built AUTHORITATIVELY from `%UnitTest_Result` by
+exact `InstanceIndex` (`runIndexSource: "result-table"`), never from a single
+drain alone (an earlier `iris_execute_tests` "running" response may already
+have drained some rows, which never reappear). Every `details` row is
+value-identical to what `iris_execute_tests` itself returns for the same run —
+millisecond `duration`, drain order, and `message` including a method-level
+error such as a thrown exception:
+```json
+{ "total": 1, "passed": 1, "failed": 0, "skipped": 0,
+  "details": [{ "class": "MyApp.Tests.SlowSuite", "method": "TestSlow", "status": "passed", "duration": 10009.4, "message": "" }],
+  "status": "completed", "jobId": "31797604", "runIndex": 256, "runIndexSource": "result-table" }
+```
+A finished run that recorded NO method-level results (e.g. a failed
+`OnBeforeAllTests`) returns the same `isError: true` zero-result guard
+`iris_execute_tests` returns (top-level zeros + an `error` naming the
+class-level reason) — never a green `completed` with `total: 0`. If Atelier
+reports the job finished but no run index could be captured at all (the
+`/global` route unavailable), the rows that poll drained come back under
+`partial` of an `isError: true` result — they may be missing rows an earlier
+call drained, so they are never presented as a final count; pass `runIndex`
+for the authoritative result.
+
+**`runIndex` alone** reads `%UnitTest_Result` directly: `status: "completed"`
+(SQL path, as above) once `TestInstance.DateTime` is set, or
+`status: "unfinished"` when it is not — the result table alone CANNOT tell a
+still-running job from a cancelled/crashed one (a cancelled run's row never
+finishes), so an `unfinished` result carries interim rows only under
+`partial` (each labelled `"in-progress"`, never counted as a pass) and
+recommends polling by `jobId` for an authoritative answer:
+```json
+{ "status": "unfinished", "runIndex": 61, "runIndexSource": "result-table",
+  "partial": { "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+    "details": [{ "class": "MyApp.Tests.SlowSuite", "method": "TestSlow", "status": "in-progress", "duration": 0, "message": "Row not final — this method has not finished executing yet." }] },
+  "note": "The result table shows InstanceIndex 61 has not finished. ..." }
+```
+
+A `jobId` Atelier no longer recognizes (HTTP 404 — already consumed by an
+earlier poll/cancel, or stale) falls back to `runIndex` when supplied, else
+reports a clear not-found result naming that fallback. A `jobId` whose queue
+node is gone AND whose `runIndex` shows unfinished is reported
+`status: "abandoned"` — no live Atelier job references it any longer
+(cancelled, crashed, or its worker died).
+
+**`action: "cancel"` (write, DEFAULT-DISABLED — enable via `IRIS_GOVERNANCE`,
+e.g. `{"global":{"iris_test_status:cancel":true}}`) — Input:**
+```json
+{ "jobId": "31797604" }
+```
+Stops a RUNNING job (`DELETE /work/{jobId}`) and reports the OBSERVED
+outcome, never an assumed one — the queue entry is re-read after the
+`DELETE`, and the result row is reported as found (`unfinished`, or `absent`
+when the run never started):
+```json
+{ "status": "cancelled", "jobId": "31797604", "runIndex": 256,
+  "observed": { "queueNode": "gone", "resultRow": "unfinished — TestInstance 256 has no finish time right after the DELETE; a run whose worker was stopped never finalizes (poll by runIndex 256 later to confirm it stays unfinished)" } }
+```
+A `DELETE` that itself fails (e.g. HTTP 423 while another caller holds the
+job's lock) returns `isError: true` with the `jobId`/`runIndex` kept and a
+note that whether it took effect is unknown — poll before retrying.
+Cancelling a job that had ALREADY finished but was never drained discards
+only the queue entry — the results are preserved and returned:
+```json
+{ "total": 1, "passed": 1, "failed": 0, "skipped": 0, "details": [ /* ... */ ],
+  "status": "completed", "jobId": "31797604", "runIndex": 256, "runIndexSource": "result-table",
+  "note": "The job had already finished; cancelling discarded only its queue entry. Results are preserved — poll by runIndex 256." }
+```
+`cancel` requires `jobId` — there is no way to cancel by `runIndex` alone (the
+Atelier work-queue `DELETE` route operates on the job id).
 </details>
 
 ---
@@ -1236,7 +1476,7 @@ pass and always see back; you do not need to do this stripping yourself.
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 28 tools in this package accept the `namespace` parameter** except:
+**All 29 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter. `iris_env_diff`/`iris_env_promote` are the exception in spirit rather than mechanism: their `namespace` overrides BOTH the `source` and `target` profile's namespace identically (each side otherwise falls back to its own profile's configured default), rather than targeting one connection's namespace like every other tool here.

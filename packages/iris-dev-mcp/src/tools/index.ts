@@ -41,6 +41,7 @@ import {
   executeClassMethodTool,
   executeTestsTool,
 } from "./execute.js";
+import { testStatusTool } from "./test-status.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -72,4 +73,5 @@ export const tools: ToolDefinition[] = [
   locCountTool,
   envDiffTool,
   envPromoteTool,
+  testStatusTool,
 ];

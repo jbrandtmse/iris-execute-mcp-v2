@@ -90,6 +90,23 @@ describe("CLIENT_ADAPTERS registry", () => {
     }
   });
 
+  it("33-5-L7: every adapter declares an appDir detection rule covering all three platforms it claims to support (a registry-sweep pin against silent platform-completeness drift)", () => {
+    // Every v1 adapter in the CURRENT roster claims win32/darwin/linux
+    // support (there is no "not applicable" adapter yet) — this sweep pins
+    // that AND would flag a future adapter that omits an appDir rule
+    // entirely, or one whose appDir paths object is missing a platform.
+    for (const adapter of adapters) {
+      const appDirRules = adapter.detection.filter((rule) => rule.kind === "appDir");
+      expect(appDirRules.length, `${adapter.id} declares no appDir detection rule`).toBeGreaterThan(0);
+      for (const rule of appDirRules) {
+        if (rule.kind !== "appDir") continue;
+        for (const platform of ["win32", "darwin", "linux"] as const) {
+          expect(rule.paths[platform].length, `${adapter.id} appDir rule missing a ${platform} path`).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
   it("every detection config rule references a scope the adapter declares", () => {
     for (const adapter of adapters) {
       const declared = new Set(adapter.scopes.map((s) => s.scope));

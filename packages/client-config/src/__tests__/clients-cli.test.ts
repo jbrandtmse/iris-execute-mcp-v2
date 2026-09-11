@@ -684,6 +684,72 @@ describe("doctor", () => {
     expect(await h2.run(["doctor"])).toBe(0);
   });
 
+  it("33-5-L11: a literal shell `$$` (e.g. a PID-suffixed placeholder) is never misread as an env-var reference; a REAL bare $VAR reference right next to it still IS", async () => {
+    const h = harness();
+    // gemini uses the "shell" env-expansion convention ($VAR / ${VAR}).
+    h.fs.seed(
+      `${HOME}/.gemini/settings.json`,
+      JSON.stringify({
+        mcpServers: {
+          "iris-dev-mcp": {
+            command: "npx",
+            args: ["-y", "@iris-mcp/dev", "--pidfile", "/tmp/app-$$LEGACY_SUFFIX.pid"],
+            env: { REAL_REF: "$REAL_MISSING_VAR" },
+          },
+        },
+      }),
+    );
+    expect(await h.run(["doctor"])).toBe(1);
+    // The REAL reference is flagged...
+    expect(h.stdout.text).toContain("REAL_MISSING_VAR");
+    // ...but the "$$"-adjacent text is never misread as a variable name.
+    expect(h.stdout.text).not.toContain("LEGACY_SUFFIX");
+  });
+
+  it("Story 36.3 code review: shell `$$$VAR` is PID + a REAL $VAR reference (odd `$` run) and `$$$$VAR` is not; claude-style `$${VAR}` still expands VAR (no `$$` escape there)", async () => {
+    const h = harness();
+    h.fs.seed(
+      `${HOME}/.gemini/settings.json`,
+      JSON.stringify({
+        mcpServers: {
+          "iris-dev-mcp": {
+            command: "npx",
+            args: ["-y", "@iris-mcp/dev", "--tag", "$$$ODD_RUN_MISSING", "--tag2", "$$$$EVEN_RUN_LITERAL"],
+            env: {},
+          },
+        },
+      }),
+    );
+    h.fs.seed(
+      `${HOME}/.claude.json`,
+      JSON.stringify({
+        mcpServers: {
+          "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev"], env: { SECRET: "$${CLAUDE_MODE_MISSING}" } },
+        },
+      }),
+    );
+    expect(await h.run(["doctor"])).toBe(1);
+    expect(h.stdout.text).toContain("ODD_RUN_MISSING");
+    expect(h.stdout.text).not.toContain("EVEN_RUN_LITERAL");
+    expect(h.stdout.text).toContain("CLAUDE_MODE_MISSING");
+  });
+
+  it("33-5-L11: a hostile/corrupt deeply-nested owned entry is a bounded finding, not a stack-overflow crash", async () => {
+    const h = harness();
+    let deep: Record<string, unknown> = { leaf: "$STILL_FINDABLE" };
+    for (let i = 0; i < 500; i++) deep = { next: deep };
+    h.fs.seed(
+      `${HOME}/.gemini/settings.json`,
+      JSON.stringify({
+        mcpServers: {
+          "iris-dev-mcp": { command: "npx", args: [], env: {}, corrupted: deep },
+        },
+      }),
+    );
+    expect(await h.run(["doctor"])).toBe(1);
+    expect(h.stdout.text).toContain("nested deeper than");
+  });
+
   it("a stale backup (age derived from the filename timestamp) is a finding", async () => {
     const h = harness();
     seedFamilies(h.fs);
@@ -695,6 +761,18 @@ describe("doctor", () => {
     expect(await h.run(["doctor"])).toBe(1);
     expect(h.stdout.text).toContain("stale-backups");
     expect(h.stdout.text).toContain("older than 30 days");
+  });
+
+  it("Story 36.3 code review: a stale backup carrying the 33-1-R4 same-millisecond `-N` disambiguator is aged and reported too", async () => {
+    const h = harness();
+    seedFamilies(h.fs);
+    h.fs.seed(
+      `${stateDirOf(h.deps)}/backups/claude-code/user/.claude.json.2020-01-01T00-00-00-000Z-1`,
+      "{}",
+    );
+    expect(await h.run(["doctor"])).toBe(1);
+    expect(h.stdout.text).toContain("stale-backups");
+    expect(h.stdout.text).toContain(".claude.json.2020-01-01T00-00-00-000Z-1");
   });
 
   it("a fresh backup is NOT a finding", async () => {
