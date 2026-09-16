@@ -33,6 +33,8 @@ Setting `IRIS_SERVER_MANAGER=auto` **does not let you omit them.** Omitting `IRI
 Fatal: Error: IRIS_USERNAME environment variable is required.
 ```
 
+Note the difference between a **missing** setting and an **unreachable** instance: the former fails startup fast, as above; the latter does not. Since Story 37.1, a `default` instance that is down (or that refuses the connection — a wrong password, a disabled `/api/atelier` web app) no longer stops the server from starting. It logs the reason plus a continuation line naming host:port, starts anyway, serves every other profile, and returns a per-call connection error for `default` until it recovers. See [Backward Compatibility](../../README.md#backward-compatibility) in the suite README.
+
 Server Manager import is **additive** — it adds *extra* addressable profiles alongside `default`. It is not a replacement for your primary connection.
 
 ### 2. The OS keychain covers Server-Manager profiles only — not `IRIS_PASSWORD`
@@ -286,4 +288,4 @@ All use the standard `mcpServers` JSON shape shown in the Claude Code snippet �
 
 Ask the client to call `iris_server_profiles` — it returns every addressable profile with its `source` (`env` or `server-manager`), which is the fastest way to confirm both your base connection and any Server Manager import.
 
-For Claude Code specifically, `claude mcp list` performs a health check per server.
+For Claude Code specifically, `claude mcp list` performs a health check per server. That check only confirms the MCP *process* is running and answering the protocol handshake — **a running server no longer implies the default IRIS instance is reachable** (Story 37.1): startup no longer exits when `default` is down, so a healthy-looking `claude mcp list` entry can still front an unreachable `default`. Call a cheap read tool, e.g. `iris_server_info` (or `iris_server_profiles`, which never connects), to actually confirm IRIS connectivity.

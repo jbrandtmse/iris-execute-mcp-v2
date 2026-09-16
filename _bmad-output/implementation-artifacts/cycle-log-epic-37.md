@@ -1,0 +1,17 @@
+# Cycle Log — Epic 37
+
+TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
+
+2026-09-16T11:19:42Z	Epic 37	epic_branch_checked_out	repos=. head=eb28124 mode=adopted_existing note=branch_precreated_by_correct_course_commit_eb28124_no_story_work
+2026-09-16T11:19:54Z	Epic 37	sprint_planning_complete	model=claude-opus-5 result=no_op_already_current drift=0 orphans=0 duplicates=0 validator=scripts/check-epics-sync.mjs epics=1 stories=1
+2026-09-16T11:19:54Z	Epic 37	retro_review_skipped	reason=lead_direction_L-5_no_burndown_this_epic forward_obligation=rule37_36items_count2_transfers_to_epic38_gate ref=deferred-work.md_L2939
+2026-09-16T11:20:23Z	Story 37.1	story_created	path=_bmad-output/implementation-artifacts/37-1-default-profile-outage-degrade-and-retry.md mode=adopted_existing_from_correct_course acs=12 tasks=7 status=ready-for-dev epic_status=in-progress integration_ac=not_applicable_not_service_introducing anchors_reverified=6_of_6 model=claude-opus-5
+2026-09-16T11:43:57Z	Story 37.1	dev_complete	spawn_at=2026-09-16T11:22:00Z model=claude-sonnet-5 files=13 loc_added=247 loc_removed=77 clarifications=0 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 closing_sections_present=true
+2026-09-16T11:44:31Z	Story 37.1	adr_verifications_complete	tool=source_conformance_read+vitest_mutation adr=architecture.md_M1_line492 acs=ac3,ac4,ac5,ac6,ac7,ac11 result=pass m1_clauses=4_of_4_conformant f3_config_exits_preserved=2_of_2 exits_removed=1_health_only ac6_test_diff=1_modified+2_new baseline_frozen=141_live=203_postfoundation=62 red_proof=3_of_5_red_on_revert_restored_green model=claude-opus-5
+2026-09-16T11:53:20Z	Story 37.1	qa_complete	spawn_at=2026-09-16T11:45:00Z model=claude-sonnet-5 tests=packages/shared/src/__tests__/server-base-default-outage-coverage.test.ts tests_added=5 first_run_failures=1 clarifications=0 rule54_refusal=1_unreachable_string_error_branch red_proof=4_of_5 closing_sections_present=true cycle_iteration=1
+2026-09-16T12:04:58Z	Story 37.1	adr_verifications_amended	corrects=adr_verifications_complete_1144Z finding=m1_clauses_4_of_4_overstated detail=clause2_one_path_holds_on_failure_path_only_success_path_keeps_inline_eager_sequence_per_AC3_F2 clause1_config_vs_unreachable_is_not_a_code_branch_IrisConnectionError.code_unused deferred_as=37-1-CR-12,37-1-CR-1 shipped_defect=false source=code_review_layers model=claude-opus-5
+2026-09-16T12:04:58Z	Story 37.1	cr_complete	spawn_at=2026-09-16T11:54:00Z model=claude-opus-5 resolved=12 deferred=12 dismissed=8 high=1 med=5 low=7 clarifications=0 close_kind=CLEAN layers_mode=parallel_async layers_delivered=3_of_3 review_degraded=false frozen_snapshot_lines=1743 high_fix=gate_armed_by_nothing_prepublish_roster status=done closing_sections_present=true cycle_iteration=1
+2026-09-16T12:07:06Z	Story 37.1	smoke_complete	method=cli_stdio_jsonrpc_built_dist result=pass iterations=3 defects_caught=0 packages=iris-dev-mcp,iris-ops-mcp checks=8_of_8_each red_proof=live_mutated_dist_2_of_6_exit1_no_transport bootstrap_write=none_rest_service_current_2159ec9e6f69 instance_touched=read_only_never_stopped evidence=inline_cycle_log model=claude-opus-5
+2026-09-16T12:07:58Z	Story 37.1	committed	sha=cdf1d29 submodules= branch=epic37 pushed=origin/epic37
+2026-09-16T12:08:02Z	Epic 37	epic_status_done	stories=1 note=single_story_epic_per_lead_decision_L-5_no_37_0_no_burndown
+2026-09-16T13:21:11Z	Epic 37	epic_retro_skipped	reason=user_declined

@@ -58,13 +58,18 @@ if (!selfCheck.ok) {
   process.exit(1);
 }
 
-// The packages whose BUILT dists the gate drives (see the header).
+// The packages whose BUILT dists the gates drive (see the header).
+// `iris-ops-mcp` carries no Epic 35 fix, but the Epic 37 default-outage gate
+// (Story 37.1, AC 37.1.8) SPAWNS its built dist as a child process, so a stale
+// ops dist would let that gate pass over code that is not what ships — the
+// same reason every other entry is here.
 const DRIVEN_PACKAGES = [
   ["shared", "@iris-mcp/shared"],
   ["iris-dev-mcp", "@iris-mcp/dev"],
   ["iris-admin-mcp", "@iris-mcp/admin"],
   ["iris-data-mcp", "@iris-mcp/data"],
   ["iris-interop-mcp", "@iris-mcp/interop"],
+  ["iris-ops-mcp", "@iris-mcp/ops"],
 ];
 
 for (const [dir, name] of DRIVEN_PACKAGES) {
@@ -97,7 +102,17 @@ for (const [dir, name] of DRIVEN_PACKAGES) {
 // shape today: live but unarmed); arming one means adding the REQUIRE_LIVE
 // contract to the file AND listing it here (the standing instruction from
 // `packages/iris-dev-mcp/scripts/prepublish-gate.mjs`, applied per-package).
-const gateTestFiles = ["src/__tests__/epic35-defect-gate.test.ts"];
+const gateTestFiles = [
+  "src/__tests__/epic35-defect-gate.test.ts",
+  // Story 37.1 (AC 37.1.8): the Epic 37 default-profile-outage gate honors the
+  // IRIS_REQUIRE_LIVE contract, so by the membership rule above it MUST be
+  // listed here. Added by the 37.1 code review — the story shipped the
+  // REQUIRE_LIVE contract in the file but not the roster entry, leaving the
+  // arming env var set by nothing that runs it (Rule #59's named
+  // disqualifier). It drives the BUILT iris-dev-mcp / iris-ops-mcp dists over
+  // real stdio JSON-RPC, hence the ops entry in DRIVEN_PACKAGES above.
+  "src/__tests__/epic37-default-outage-gate.test.ts",
+];
 
 const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
 
@@ -130,7 +145,7 @@ if (result.error) {
 
 if (result.status !== 0) {
   console.error(
-    "[prepublish-gate] FAILED CLOSED: the Epic 35 defect gate did not pass with IRIS_REQUIRE_LIVE=1. " +
+    "[prepublish-gate] FAILED CLOSED: a live-IRIS gate did not pass with IRIS_REQUIRE_LIVE=1. " +
       "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD at a " +
       "reachable IRIS instance with src/ExecuteMCPv2/ (including src/ExecuteMCPv2/Tests/) loaded, then retry.",
   );
