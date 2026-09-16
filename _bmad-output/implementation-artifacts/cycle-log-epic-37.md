@@ -15,3 +15,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-09-16T12:07:58Z	Story 37.1	committed	sha=cdf1d29 submodules= branch=epic37 pushed=origin/epic37
 2026-09-16T12:08:02Z	Epic 37	epic_status_done	stories=1 note=single_story_epic_per_lead_decision_L-5_no_37_0_no_burndown
 2026-09-16T13:21:11Z	Epic 37	epic_retro_skipped	reason=user_declined
+2026-09-16T13:21:42Z	Epic 37	epic_merged_to_feature	repos=. feature=feature/feature-wave-5-beta-feedback feature_sha=63bf908 merge_sha=11ba165 submodules= epic_branch_deleted=local_and_remote deleted_with=-d_fully_merged_check
+2026-09-16T13:21:42Z	Epic 37	epic_summary	stories=1 total_high=1 total_med=5 total_low=7 total_smoke_defects=0 rework_events=0 opus_stage_count=1 sonnet_stage_count=2 close=clean review_degraded=false
