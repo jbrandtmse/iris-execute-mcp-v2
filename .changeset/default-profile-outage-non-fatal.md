@@ -1,0 +1,17 @@
+---
+"@iris-mcp/shared": patch
+---
+
+fix(server-base): an unreachable `default` IRIS instance no longer exits the whole MCP server at startup (Story 37.1, architecture record M1)
+
+**The defect.** `McpServerBase.start()` eagerly establishes the reserved `default` profile (health check, then Atelier-version negotiation, then a one-time custom-REST bootstrap) before connecting the MCP transport. A health-check rejection called `process.exit(1)` before the transport ever connected, so ONE unreachable instance took the whole server down — every other registered, reachable `IRIS_PROFILES` entry became unusable too, since no call could ever reach them. Present since multi-server profiles were introduced (Story 14.1, `213756b`) and reported as a second beta-feedback defect (2026-09-16).
+
+**The fix.** On a `default` health-check rejection, `start()` now logs the existing error plus a continuation line, drops the un-established client (the same disposal a non-default first-touch failure already gets — AC 14.2.8 symmetry), skips negotiation/bootstrap/the `profileMeta` seed for `default` this one time, and still connects the transport. The first subsequent call targeting `default` establishes it through the exact same lazy `getOrCreateClient`/`establishProfile` path every non-default profile already uses (no new establishment logic), recovering automatically with no restart. A call against `default` while it is still unreachable returns the pre-existing structured `isError` envelope (`Could not connect to server profile "default": …`) — never a crash, never a second exit.
+
+**Architecture record M1** (`architecture.md`, amending D1) states the corrected principle: a CONFIGURATION error (missing credentials, malformed `IRIS_GOVERNANCE`/`IRIS_PROFILES`, an unwritable `IRIS_AUDIT_LOG` directory) still fails startup fast; an unreachable PEER never does — `default` included, and this holds even with only `default` registered.
+
+**Back-compat (Rule #19), byte-for-byte on the success path.** The only existing test that changes is the exit pin at `server-base.test.ts:558` (flipped to assert non-fatal continuation); every eager-establishment pin (`server-base.test.ts:728`, `server-param.test.ts:340`, `server-param-integration.test.ts:357`, `governance-enforcement.test.ts:285`, `governance-preset-cross-surface.test.ts:329`) and all 38 `stageDefaultStartup`-based test files pass unmodified. A `toEqual` pin of the exact startup fetch-call sequence under a reachable `default` guards future drift.
+
+**Live-verified, mutation-proven RED then GREEN.** Against the BUILT dist over real stdio JSON-RPC on two server packages (`iris-dev-mcp`, `iris-ops-mcp`), with `default` pointed at a closed local port and `other` at a reachable instance: `initialize` succeeds, `server:"other"` calls succeed, `server` omitted returns the `isError` envelope naming `default`, stderr carries the continuation line and `Connected via stdio transport`. The pre-fix dist reproducibly exits 1 against the identical closed port (mutation leg). A permanent default-suite gate (`packages/iris-mcp-all/src/__tests__/epic37-default-outage-gate.test.ts`) pins the round trip; `packages/shared/src/__tests__/server-base-default-outage.test.ts` covers the degrade/recover/bootstrap-once/coalescing unit contract.
+
+No new tool, no new governance key, no tool-count change (Rule #31), no `BOOTSTRAP_VERSION` change (TypeScript-only) — this is a fix to an existing startup path.

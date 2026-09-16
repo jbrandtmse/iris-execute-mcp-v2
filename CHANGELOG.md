@@ -2,6 +2,40 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-09-16] — Story 37.1: default-profile outage no longer takes down the server
+
+### Fixed — an unreachable `default` IRIS instance made the ENTIRE server exit at startup, even when every other registered profile was healthy (`@iris-mcp/shared`, MEDIUM, second beta-feedback defect)
+
+`McpServerBase.start()` eagerly establishes the reserved `default` profile (health check, then Atelier-version
+negotiation, then a one-time custom-REST bootstrap) before connecting the MCP transport. A health-check
+rejection called `process.exit(1)` — the transport never connected, so a `server:"other"` call could never even
+be attempted, regardless of how many other profiles were configured and reachable.
+
+**Exposure window.** This asymmetry (only the `default` profile's startup failure was fatal; every non-default
+profile has always failed non-fatally, per call) was introduced with multi-server profiles themselves (Story
+14.1, `213756b`), so it is present in every pre-release since profiles existed.
+
+**Behavior change.** A `default` instance that is unreachable at startup no longer stops the server: startup
+logs the existing health-check error plus a line naming the `host:port` and stating that it is continuing
+without `default` and that calls targeting it will return a connection error until it recovers; the transport
+still connects; every other profile serves normally. The same non-fatal path also covers a startup health
+check that IRIS *answered and refused* — HTTP 401/403 from a wrong-but-present `IRIS_PASSWORD`, or 404 from a
+disabled `/api/atelier` web application. Those causes do **not** clear on their own, so that second log line
+says so explicitly: fix the setting and restart. A call against `default` while it is still unreachable returns the SAME structured
+`isError` envelope every other profile's first-touch failure already returns (`Could not connect to server
+profile "default": …`) — never a crash, never a second server exit. The moment `default` becomes reachable,
+the next call against it establishes the connection automatically through the identical lazy path every
+non-default profile already uses — no restart required. Architecture record M1 (`architecture.md`) states the
+corrected principle: a CONFIGURATION error (missing credentials, malformed `IRIS_GOVERNANCE`/`IRIS_PROFILES`,
+an unwritable audit-log directory) still fails startup fast; an unreachable PEER never does, `default` included.
+
+Live-verified against the built dist over real stdio JSON-RPC, on two server packages, with `default` pointed
+at a closed local port and `other` at a reachable instance: `initialize` succeeds, `server:"other"` calls
+succeed, `server` omitted returns the `isError` envelope naming `default`, and — the mutation proof — the
+pre-fix dist reproducibly exits 1 against the identical closed port. A permanent default-suite gate
+(`epic37-default-outage-gate.test.ts`) pins the round trip; `server-base-default-outage.test.ts` covers the
+degrade/recover/coalesce unit contract.
+
 ## [Pre-release — 2026-09-11] — Story 36.4: `/global` subscript-injection fix — read-only preset now actually means read-only
 
 ### Security — `iris_global_get`/`iris_global_set`/`iris_global_kill` could execute arbitrary ObjectScript via the `subscripts` parameter, bypassing write governance (`@iris-mcp/dev` + ObjectScript, HIGH, ledger `36-2-CR-1`)
