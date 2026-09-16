@@ -642,6 +642,6 @@ development_status:
   # to the wave-5 tip 63bf908); the planning commit is its first commit. At SC-1 name
   # the existing feature/feature-wave-5-beta-feedback; SC-2 finds epic37
   # present; at close merge epic37 → wave-5 → main.
-  epic-37: in-progress
+  epic-37: done
   37-1-default-profile-outage-degrade-and-retry: done
   epic-37-retrospective: optional
