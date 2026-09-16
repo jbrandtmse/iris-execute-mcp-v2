@@ -652,10 +652,15 @@ export function resolveProfile(
  * never handing the same client to two profiles — there is no shared mutable
  * session state to leak.
  *
- * Creation policy (D1/D8):
+ * Creation policy (D1/D8; M1, Epic 37):
  * - The default profile's client may be created eagerly (the caller — the MCP
  *   server base — does this in `start()` to preserve today's health-check /
- *   Atelier-version negotiation / bootstrap behavior).
+ *   Atelier-version negotiation / bootstrap behavior on the success path). If
+ *   that eager health check finds the default instance unreachable, `start()`
+ *   drops the client via {@link ProfileClientRegistry.drop} (a startup error
+ *   is never fatal to an otherwise-reachable server — M1) and the default
+ *   profile falls back to the SAME lazy creation policy below, exactly as a
+ *   non-default profile.
  * - Non-default profiles' clients are created lazily on first
  *   {@link getOrCreate}, then cached so each profile pays one-time negotiation
  *   latency at most once.

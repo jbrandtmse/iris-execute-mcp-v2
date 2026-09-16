@@ -11,6 +11,7 @@ import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
 import { IrisHttpClient } from "../http-client.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
+import { logger } from "../logger.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -555,18 +556,36 @@ describe("server-base", () => {
       exitMock.mockRestore();
     });
 
-    it("should call process.exit when health check fails", async () => {
-      // Health check will fail because fetch throws
+    it("continues startup, logs, and does not exit when the default profile's health check fails (M1, Epic 37)", async () => {
+      // Health check will fail because fetch throws (closed-port-style
+      // rejection — the real shape Node's fetch produces on ECONNREFUSED).
       fetchMock.mockRejectedValue(new TypeError("Connection refused"));
+      const errorSpy = vi.spyOn(logger, "error");
+      const infoSpy = vi.spyOn(logger, "info");
 
       const server = new McpServerBase(
         makeServerOpts([], makeConfig()),
       );
 
-      // start() calls process.exit(1) on health check failure and
-      // then returns early (guarded by `return` after process.exit).
-      await server.start("stdio");
-      expect(exitMock).toHaveBeenCalledWith(1);
+      // An unreachable default instance is a warm-up failure, never a startup
+      // gate (architecture record M1): start() resolves, process.exit is NOT
+      // called, and the transport still connects.
+      await expect(server.start("stdio")).resolves.toBeUndefined();
+      expect(exitMock).not.toHaveBeenCalled();
+      // The transport-connected assertion is the central property of Story
+      // 37.1 and belongs in the pin that OWNS the flip (added by the 37.1 code
+      // review — the comment claimed it, the assertions did not): a half-fix
+      // that logs both lines, skips process.exit, then returns early before
+      // the connect step would otherwise leave this test green.
+      expect(infoSpy).toHaveBeenCalledWith("Connected via stdio transport");
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("IRIS health check failed"),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Continuing startup without the "default" profile',
+        ),
+      );
     });
 
     it("should throw for HTTP transport (not yet implemented)", async () => {

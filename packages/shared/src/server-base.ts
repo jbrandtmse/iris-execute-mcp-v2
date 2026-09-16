@@ -377,7 +377,17 @@ export class McpServerBase {
     string,
     Promise<{ client: IrisHttpClient; atelierVersion: number }>
   > = new Map();
-  /** Negotiated Atelier version for the default profile (unchanged back-compat field). */
+  /**
+   * Negotiated Atelier version for the default profile (unchanged back-compat field).
+   *
+   * **Log-only — never a call-path source of truth (M1, Epic 37).** Every read
+   * outside `start()` goes through `ToolContext.atelierVersion`, which comes
+   * from `getOrCreateClient`'s RETURN VALUE (`profileMeta`, or
+   * `establishProfile`'s own local). When `start()`'s eager attempt fails this
+   * field keeps its `1` default and is never corrected on recovery, so a new
+   * reader added here would silently talk v1 to a v8 instance. Read
+   * `profileMeta` instead.
+   */
   private atelierVersion = 1;
 
   /**
@@ -1505,7 +1515,10 @@ export class McpServerBase {
 
     // Get-or-create the resolved profile's client (health-check + version
     // negotiation on first touch of a non-default profile, then cached). The
-    // default profile returns its eagerly-established client + version. Custom
+    // default profile normally returns its eagerly-established client +
+    // version from start(); if that eager attempt found it unreachable (M1,
+    // Epic 37 — non-fatal), start() dropped the client and this call takes
+    // the SAME first-touch path a non-default profile always uses. Custom
     // REST servers pass needsCustomRest so the one-time per-profile bootstrap is
     // attempted on first custom-REST touch (D8). A first-touch failure surfaces
     // as a structured isError result, not a thrown error out of the SDK handler.
@@ -1932,6 +1945,18 @@ export class McpServerBase {
    * decision D1/D8), so startup cost and behavior for single-server installs is
    * unchanged.
    *
+   * **Default-profile reachability (architecture record M1, Epic 37):** step 3's
+   * health check is a warm-up attempt, never a startup gate — a CONFIGURATION
+   * error (missing credentials, malformed governance/audit settings) still fails
+   * startup fast, but an unreachable `default` instance does not. When the
+   * eager attempt fails, steps 4-5 and the `profileMeta` seed are skipped for
+   * `default` this one time, the un-established client is dropped, and step 6
+   * still runs — the server starts and serves every reachable profile. The
+   * first subsequent call that targets `default` re-establishes it through the
+   * same lazy {@link getOrCreateClient}/`establishProfile` path every
+   * non-default profile already uses, recovering automatically with no
+   * restart. See {@link getOrCreateClient} for that path.
+   *
    * @param transport - `"stdio"` (default) or `"http"`.
    */
   async start(transport: "stdio" | "http" = "stdio"): Promise<void> {
@@ -2019,70 +2044,117 @@ export class McpServerBase {
     }
 
     // 2. Eagerly create the default profile's HTTP client (preserves today's
-    //    bootstrap/health-check/negotiation for the default profile exactly).
+    //    bootstrap/health-check/negotiation for the default profile exactly
+    //    on the success path).
     const defaultClient = this.clients.getOrCreate(DEFAULT_PROFILE_NAME);
 
-    // 3. Health check (default profile). A failure here is fatal at startup,
-    //    exactly as before — the default profile must be reachable.
+    // 3. Health check (default profile). Architecture record M1 (Epic 37):
+    //    a CONFIGURATION error still fails startup fast (the process.exit(1)
+    //    calls above for audit config, and the loadConfig()/governance throws
+    //    each entry point's `Fatal:` catch handles) — but an UNREACHABLE peer
+    //    never does, the default profile included. On a health-check
+    //    rejection: log it, log a continuation line, and drop the
+    //    un-established client (the same disposal a non-default first-touch
+    //    failure already gets — AC 14.2.8 symmetry) so the first call after
+    //    startup re-establishes the profile through the exact same lazy path
+    //    getOrCreateClient()/establishProfile() already use for every
+    //    non-default profile (Rule #47 — no new establishment logic is added
+    //    here). Negotiation, the startup bootstrap and the profileMeta seed
+    //    are skipped for this request only; they run on that later first
+    //    touch instead.
+    let defaultEstablished = true;
     try {
       await checkHealth(defaultClient);
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : String(error);
       logger.error(`IRIS health check failed: ${message}`);
-      process.exit(1);
-      return; // Guard: prevent continued execution when process.exit is mocked
+      // Name host:port on THIS line too (AC 37.1.4). `checkHealth` only carries
+      // it on the NETWORK_ERROR/TIMEOUT variants; when the probe reached IRIS
+      // and was refused (an IrisApiError for HTTP 401/403/404, which
+      // checkHealth re-wraps as HEALTH_CHECK_FAILED) the message above names
+      // neither host nor port — and after this story that startup log is the
+      // ONLY diagnostic, because the process no longer exits.
+      logger.error(
+        `Continuing startup without the "${DEFAULT_PROFILE_NAME}" profile ` +
+          `(${this.config.host}:${this.config.port}): tools targeting it will ` +
+          `return a connection error until it is reachable, then recover automatically ` +
+          `(no restart needed). If the cause is configuration rather than an outage ` +
+          `(e.g. an HTTP 401/403/404 in the line above — wrong credentials, or the ` +
+          `/api/atelier web application disabled), it will NOT clear on its own: fix ` +
+          `the setting and restart.`,
+      );
+      this.clients.drop(DEFAULT_PROFILE_NAME);
+      // Keep the "no metadata recorded for an unestablished default" invariant
+      // true even when start() is re-entered after an earlier SUCCESSFUL start
+      // (`clients` is rebuilt per start(), but `profileMeta` is readonly and
+      // never cleared). Without this, the stale entry would send the next call
+      // down getOrCreateClient's fast path and hand out a freshly constructed
+      // client that was never health-checked, negotiated, or bootstrapped.
+      // A no-op on a first start, where no entry exists yet.
+      this.profileMeta.delete(DEFAULT_PROFILE_NAME);
+      defaultEstablished = false;
     }
 
-    // 4. Negotiate Atelier version (default profile).
-    try {
-      this.atelierVersion = await negotiateVersion(defaultClient);
-    } catch {
-      logger.warn("Version negotiation failed, defaulting to v1");
-      this.atelierVersion = 1;
-    }
-
-    logger.info(
-      `${this.options.name} v${this.options.version} starting with Atelier API v${this.atelierVersion}`,
-    );
-
-    // 4.5. Bootstrap custom REST service if needed (default profile).
-    if (this.options.needsCustomRest) {
+    if (defaultEstablished) {
+      // 4. Negotiate Atelier version (default profile).
       try {
-        const result = await bootstrap(
-          defaultClient,
-          this.config,
-          this.atelierVersion,
-        );
-        if (result.errors.length > 0) {
+        this.atelierVersion = await negotiateVersion(defaultClient);
+      } catch {
+        logger.warn("Version negotiation failed, defaulting to v1");
+        this.atelierVersion = 1;
+      }
+
+      logger.info(
+        `${this.options.name} v${this.options.version} starting with Atelier API v${this.atelierVersion}`,
+      );
+
+      // 4.5. Bootstrap custom REST service if needed (default profile).
+      if (this.options.needsCustomRest) {
+        try {
+          const result = await bootstrap(
+            defaultClient,
+            this.config,
+            this.atelierVersion,
+          );
+          if (result.errors.length > 0) {
+            logger.warn(
+              `Bootstrap completed with errors: ${result.errors.join("; ")}`,
+            );
+          }
+          if (result.manualInstructions) {
+            logger.warn(result.manualInstructions);
+          }
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : String(error);
           logger.warn(
-            `Bootstrap completed with errors: ${result.errors.join("; ")}`,
+            `Bootstrap failed: ${message}. Custom REST tools may not work.`,
           );
         }
-        if (result.manualInstructions) {
-          logger.warn(result.manualInstructions);
-        }
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        logger.warn(
-          `Bootstrap failed: ${message}. Custom REST tools may not work.`,
-        );
       }
-    }
 
-    // Record the default profile's metadata (negotiated version + bootstrap
-    // attempted) so getOrCreateClient short-circuits re-establishing it.
-    // `bootstrapAttempted` reflects whether bootstrap ACTUALLY ran above —
-    // it is true only when this server needs the custom-REST service. If it
-    // were hard-coded true on a `needsCustomRest: false` server, a later
-    // getOrCreateClient(DEFAULT_PROFILE_NAME, true) (the seam Story 14.2 wires)
-    // would wrongly skip the default profile's first-use bootstrap, matching
-    // the non-default path which seeds `bootstrapAttempted: false`.
-    this.profileMeta.set(DEFAULT_PROFILE_NAME, {
-      atelierVersion: this.atelierVersion,
-      bootstrapAttempted: this.options.needsCustomRest === true,
-    });
+      // Record the default profile's metadata (negotiated version + bootstrap
+      // attempted) so getOrCreateClient short-circuits re-establishing it.
+      // `bootstrapAttempted` reflects whether bootstrap ACTUALLY ran above —
+      // it is true only when this server needs the custom-REST service. If it
+      // were hard-coded true on a `needsCustomRest: false` server, a later
+      // getOrCreateClient(DEFAULT_PROFILE_NAME, true) (the seam Story 14.2 wires)
+      // would wrongly skip the default profile's first-use bootstrap, matching
+      // the non-default path which seeds `bootstrapAttempted: false`.
+      this.profileMeta.set(DEFAULT_PROFILE_NAME, {
+        atelierVersion: this.atelierVersion,
+        bootstrapAttempted: this.options.needsCustomRest === true,
+      });
+    } else {
+      // The default profile was not established: there is no negotiated
+      // version to report (printing "Atelier API v1" here would be
+      // misleading — P5), so state plainly that establishment is deferred to
+      // first use, exactly like a non-default profile's lazy establishment.
+      logger.info(
+        `${this.options.name} v${this.options.version} starting; "${DEFAULT_PROFILE_NAME}" profile not yet established`,
+      );
+    }
 
     // 5. Connect transport
     if (transport === "stdio") {
@@ -2131,14 +2203,20 @@ export class McpServerBase {
    * Get the established {@link IrisHttpClient} for a profile, creating and
    * establishing it lazily on first use (architecture decisions D1/D8).
    *
-   * - **Default profile:** created and established eagerly in {@link start};
-   *   this method returns the cached client + negotiated version without
-   *   re-establishing it (byte-for-byte today's behavior).
+   * - **Default profile:** normally created and established eagerly in
+   *   {@link start}; this method returns the cached client + negotiated
+   *   version without re-establishing it (byte-for-byte today's behavior). If
+   *   `start`'s eager health check instead found the default instance
+   *   unreachable (architecture record M1, Epic 37 — non-fatal), no
+   *   `profileMeta` entry exists for it, so this method falls through to the
+   *   SAME first-touch establishment below that every non-default profile
+   *   uses.
    * - **Non-default profile:** on first call, creates the profile's own client,
    *   runs the health check and Atelier-version negotiation, then caches the
    *   result so the one-time negotiation latency is paid at most once. A
    *   health-check failure is surfaced as a thrown error (NOT `process.exit`) —
-   *   only the default profile's startup failure is fatal.
+   *   no profile's first-touch (or retry) failure is fatal to the running
+   *   server; only a CONFIGURATION error at startup is (M1).
    * - **Lazy bootstrap (D8):** when `needsBootstrap` is true (a custom-REST
    *   tool's first call against this profile), the existing auto-bootstrap flow
    *   is attempted once per profile. On failure it surfaces the existing
@@ -2161,7 +2239,9 @@ export class McpServerBase {
    * @param needsBootstrap - Whether to attempt the one-time custom-REST bootstrap.
    * @returns The profile's established client and its negotiated Atelier version.
    * @throws {ProfileResolutionError} When `profileName` is not registered.
-   * @throws {Error} When a non-default profile fails its health check.
+   * @throws {Error} When the profile's first-touch (or retry) health check
+   *   fails — including `default` when {@link start}'s eager attempt failed
+   *   (M1).
    */
   async getOrCreateClient(
     profileName: string,
@@ -2213,9 +2293,11 @@ export class McpServerBase {
    * Always invoked through {@link getOrCreateClient}'s in-flight coalescing, so
    * it runs at most once concurrently per profile.
    *
-   * On a non-default first-touch health-check failure, the cached client is
-   * destroyed and dropped (AC 14.2.8) before the error is re-thrown, so no
-   * un-established client lingers and the next call retries cleanly.
+   * On a first-touch health-check failure (any profile, `default` included
+   * when {@link start}'s eager attempt did not establish it — M1), the cached
+   * client is destroyed and dropped (AC 14.2.8) before the error is
+   * re-thrown, so no un-established client lingers and the next call retries
+   * cleanly.
    */
   private async establishProfile(
     profile: IrisProfile,
