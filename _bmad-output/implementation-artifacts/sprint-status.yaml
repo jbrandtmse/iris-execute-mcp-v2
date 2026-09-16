@@ -618,3 +618,27 @@ development_status:
   # injection (read-only preset bypass); runs AFTER 36.3; BOOTSTRAP moves.
   36-4-global-subscript-injection: done
   epic-36-retrospective: done
+  # Epic 37: Beta Feedback Remediation — startup resilience with an unreachable
+  # default profile (trigger docs/bugs-2026-09-16.md, second beta-feedback
+  # defect; sprint-change-proposal-2026-09-16-default-profile-outage.md).
+  # McpServerBase.start() calls process.exit(1) when the reserved default
+  # profile fails its startup health check, before the transport connects, so
+  # healthy IRIS_PROFILES / Server-Manager profiles never get to serve (all 5
+  # servers; since Story 14.1). 37.1 = eager-but-non-fatal default
+  # establishment with lazy retry (option A, non-fatal everywhere per L-2; pure
+  # TS in @iris-mcp/shared; no tool/action key; no BOOTSTRAP bump).
+  # ONE story by Project Lead decision L-5 (2026-09-16): the 37.0 retro-review
+  # gate is SKIPPED by Lead direction at kickoff (answer the epic-cycle's gate
+  # step with this decision) and NO burn-down runs here. The Epic 36 gate's
+  # Rule #37 forward obligation (36 items at count 2, deferred-work.md L2939)
+  # transfers UNCHANGED to the Epic 38 gate — recorded exception; see the Epic
+  # 37 preamble in epics.md and the ledger's 2026-09-16 section. 36-4-CR-1
+  # (HIGH) stays deferred to its own pre-publish story. Ledger carries
+  # 1H/24M/62L=87 open. Do NOT renumber.
+  # Branch (L-1, 2026-09-16): epic37 DIRECTLY off main (2ed83ff; identical tree
+  # to the wave-5 tip 63bf908); the planning commit is its first commit. At SC-1 name
+  # the existing feature/feature-wave-5-beta-feedback; SC-2 finds epic37
+  # present; at close merge epic37 → wave-5 → main.
+  epic-37: backlog
+  37-1-default-profile-outage-degrade-and-retry: backlog
+  epic-37-retrospective: optional
