@@ -1,4 +1,0 @@
-[workflow]
-persistent_facts = [
-  "file:{project-root}/_bmad/custom/skill-rules.md",
-]

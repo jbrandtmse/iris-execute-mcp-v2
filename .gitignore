@@ -42,3 +42,6 @@ _bmad-output/implementation-artifacts/review-diff-snapshot-*.diff
 
 # BMAD installer backups of the previous install (content is in git history)
 _bmad/**/*.bak
+
+# /epic-cycle kit backups (<file>.bak-<UTC>; the originals are in git history)
+*.bak-[0-9]*

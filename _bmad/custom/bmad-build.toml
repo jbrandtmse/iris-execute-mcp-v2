@@ -1,0 +1,8 @@
+# /epic-cycle: the interactive build skill is NOT a pipeline stage, but developers run it
+# by hand in pipeline projects. Load the rules registry, and disable open_spec (its default
+# launches `code -r` — an editor window — which must never fire from an unattended session).
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/skill-rules.md",
+]
+open_spec = ""

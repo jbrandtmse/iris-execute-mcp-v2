@@ -1,0 +1,87 @@
+# /epic-cycle: rules registry + Rule 18 containment for the unattended build skill's internal subagents.
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/skill-rules.md",
+]
+
+implementation_handoff = """
+Launch a subagent with no prior conversation context, synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+> Read {spec_file} fully and implement it — the spec is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> When done, report what you changed, how you verified it, and anything left incomplete or risky.
+>
+> Containment (/epic-cycle Rule 18): work only in the working directory you were given — verify `git rev-parse --show-toplevel` matches it before acting. You may edit files. You may NOT run `git commit`, `git push`, `git reset`, `git rebase`, or anything that mutates a remote or triggers CI or a deploy — the agent that spawned you commits. You may NOT `SendMessage` any agent, and you will not be messaged after you return: return exactly once, when your work is complete, with the full report above; a partial or interim return strands your work. Run stateful tests against a shared runtime (a live database, an instance, a dev server) one test class or suite per tool call and wait for each to complete — never several test-runner calls in one message, never a re-submit on a client-side timeout. Every call that touches a runtime names its target explicitly — never a tool's default target — and you tear down only what you started. Run every command and test in the foreground of its own tool call with `timeout: 600000` and wait for it — the default timeout is 2 minutes, and a call that reaches its timeout is moved to the background, where it dies when you return. Never `run_in_background: true` on a shell call, never a `Monitor` wait, and any `Agent` call you make passes `run_in_background: false`. Work that would outlast one call's maximum timeout is split into foreground calls that each finish inside it — one test class per call is always safe; batch classes only as far as the project's recorded timings allow — never detached. Arming `Monitor` and stopping is returning, whatever you meant: never end your turn while anything you started is still running — that is an interim return. Read each file once and work from what you hold; re-read only what may have changed since (your own edit, a merge), by line range. If you cannot finish, say exactly what is missing in the report and stop.
+"""
+
+[[workflow.review_layers]]
+id = "blind-hunter"
+name = "Blind Hunter"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Conduct a review of CONTENT.
+Look for what's missing, not only what's wrong.
+Find every real issue to fix or improve. As a guide to how hard to look — not a quota — expect about N = min(floor(sqrt(kB) + 1), 10) of them, where kB is the diff file's size in kilobytes; if you find fewer, say so rather than pad the list.
+Output a Markdown list of findings only — no severity, priority, or ranking.
+If the content is empty, stop and say so.
+If you have zero findings, re-check once; an empty list after a second pass is a valid result — report it as such, do not manufacture findings.
+
+CONTENT: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
+[[workflow.review_layers]]
+id = "edge-case-hunter"
+name = "Edge Case Hunter"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Read `{skill-root}/review-prompts/edge-case-hunter.md` completely and follow it as your review instructions.
+
+claims_file (leave unread until your instructions call for it): {claims_file}
+
+Review content: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
+[[workflow.review_layers]]
+id = "verification-gap"
+name = "Verification Gap Reviewer"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Read `{skill-root}/review-prompts/verification-gap.md` completely and follow it as your review instructions. Additionally (/epic-cycle Rule 19, falsifiability and hermeticity): flag every assertion that cannot fail — an expected value the type system makes the only possible value (e.g. `toEqual([])` against a `never[]`), a subject that was never constructed, two runs compared that both produce nothing, a test whose green depends on the defect it guards against, a module with no executed test host — every acceptance criterion whose pinning test has no `mutation:` line in the spec's `## Verification`, and every added or changed test that is not self-contained: it relies on state it did not create, on another test's leftovers or on run order, or it acts before the system under test signals that it is ready.
+
+Review content: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
+[[workflow.review_layers]]
+id = "intent-alignment"
+name = "Intent Alignment Auditor"
+instruction = """
+Launch a subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+You are an intent-alignment auditor. You have no other context about how this change was produced. Here is the verbatim intent this work started from:
+
+{verbatim_intent}
+
+The diff is the unified diff at `{diff_file}`. Read that file — it is the change under review.
+
+Your task is strictly descriptive — do not prescribe additional work. Report: (1) the defensible readings of the intent, enumerated; (2) which reading this diff implements; (3) where the readings and the diff diverge — specifically, which surface the intent's expectations live at versus which surface the diff's changes and its tests exercise.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""

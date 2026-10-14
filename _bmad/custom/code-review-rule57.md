@@ -1,6 +1,6 @@
 # Rule #57 — review-layer discipline (`bmad-code-review` overlay)
 
-Loaded as a `persistent_facts` entry by `_bmad/custom/bmad-code-review.toml`. These rules AMEND the installed step files; where a step's wording conflicts with a rule here, the rule here wins. They live here — not in the step files — because the BMAD installer overwrites `.claude/skills/` on every upgrade (the 6.12.2 upgrade erased Story 34.0's original in-step edits).
+Loaded as a `persistent_facts` entry by `_bmad/custom/bmad-code-review.toml`, where the `/epic-cycle` overlay (`_bmad/custom/epic-cycle-overlay.md`) inserts it on every kit install. These rules AMEND the installed step files; where a step's wording conflicts with a rule here, the rule here wins. They live here — not in the step files or the kit-generated override — because the BMAD installer overwrites `.claude/skills/` on every upgrade (the 6.12.2 upgrade erased Story 34.0's original in-step edits) and the `/epic-cycle` kit rewrites `bmad-code-review.toml` on every install.
 
 Rule #57 (`.claude/rules/project-rules.md`) has three parts: BOUNDED-CLOSE, FROZEN-DIFF, DELIVERY RECEIPTS. Upstream now satisfies two of them natively; this file supplies the rest.
 
@@ -15,12 +15,12 @@ A layer is **DELIVERED** only when its final message carries an explicit payload
 
 | Layer | DELIVERED payload | FAILED |
 |---|---|---|
-| Blind Hunter | a Markdown findings list (its prompt enforces a finding floor N ≥ 1, so it never legitimately returns empty) | empty / missing / error / "content was empty" |
+| Blind Hunter | a Markdown findings list, or an explicit statement that it found nothing after its second pass (the `/epic-cycle` override softened upstream's finding quota, so an empty result is valid when stated) | silence / missing / error / "content was empty" |
 | Edge Case Hunter | a JSON array — `[]` is a valid clean pass | unparseable, or the lone `"Input empty or undecodable"` sentinel entry |
 | Verification Gap Reviewer | gap blocks, or the exact line `No verification gaps found.` | anything else, incl. silence |
-| Acceptance Auditor | a Markdown findings list, or the explicit line `No findings — clean pass.` (required by the team override of its instruction) | anything else |
+| Acceptance Auditor | a Markdown findings list, or the explicit line `No findings — clean pass.` (required by the overlay's `rule57-auditor-empty` entry) | anything else |
 
-Upstream instruction 4's "returns empty results" means *returned no payload*. An explicit empty payload (`[]`, `No verification gaps found.`, `No findings — clean pass.`) is DELIVERED and clean — recording it as FAILED would manufacture a false DEGRADED close.
+Upstream instruction 4's "returns empty results" means *returned no payload*. An explicit empty payload (`[]`, `No verification gaps found.`, `No findings — clean pass.`, Blind Hunter's stated empty list) is DELIVERED and clean — recording it as FAILED would manufacture a false DEGRADED close. A layer whose findings are discarded because it edited or committed something (an `/epic-cycle` Rule 18 protocol violation) counts as FAILED.
 
 **Manual-paste mode** (no subagents; step-02 writes prompt files and HALTs): no clock applies to the human round-trip. Ask the user which layers they actually ran before classifying. A layer whose payload is pasted back (findings or an explicit empty statement) is DELIVERED; a layer declined, not run, or not mentioned is FAILED. Never infer a clean pass from silence.
 
@@ -37,6 +37,8 @@ When `review_degraded` = `true`:
 5. **Completion block** gains `**Review Outcome:** DEGRADED` and `**Failed Layers:** <failed_layers>`.
 
 In `no-spec` mode there is no story file, so the chat announcement is the only record — say so plainly rather than implying a durable record exists.
+
+**Under `/epic-cycle`** the "story file" is the `bmad-build-auto` spec: the DEGRADED marker leads the `### Review Findings` subsection under its `## Tasks & Acceptance`, the spec's frontmatter `status:` is never touched (the spawn prompt forbids it), `in-progress` reaches the tracker through the pre-answered sprint-status sync, and the closing summary's `## Decisions` carries `review_outcome=<CLEAN|NORMAL|DEGRADED> failed_layers=<csv or none>` for the lead, which re-runs a DEGRADED review instead of reworking the story (`_bmad/custom/epic-cycle-overlay.md`).
 
 When `review_degraded` = `false`, upstream behavior is unchanged except the completion block gains `**Review Outcome:** CLEAN` (status `done`) or `NORMAL` (status `in-progress`).
 

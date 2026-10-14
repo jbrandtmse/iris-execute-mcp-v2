@@ -1,28 +1,76 @@
+# /epic-cycle: rules registry + Rule 18 containment for the code-review skill's review layers.
+
 [workflow]
 persistent_facts = [
   "file:{project-root}/_bmad/custom/skill-rules.md",
   "file:{project-root}/_bmad/custom/code-review-rule57.md",
 ]
 
-# Rule #57 delivery receipts: upstream's Acceptance Auditor prompt defines no
-# explicit empty-findings payload, so a genuinely clean audit is indistinguishable
-# from a silent failure. Arrays of tables keyed by `id` REPLACE the matching
-# upstream entry, so this is the BMAD 6.12.2 text verbatim plus the final
-# empty-findings paragraph. Re-sync against
-# .claude/skills/bmad-code-review/customize.toml after every BMAD upgrade.
+[[workflow.review_layers]]
+id = "blind-hunter"
+name = "Blind Hunter"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Conduct a review of CONTENT.
+Look for what's missing, not only what's wrong.
+Find every real issue to fix or improve. As a guide to how hard to look — not a quota — expect about N = min(floor(sqrt(kB) + 1), 10) of them, where kB is the diff file's size in kilobytes; if you find fewer, say so rather than pad the list.
+Output a Markdown list of findings only — no severity, priority, or ranking.
+If the content is empty, stop and say so.
+If you have zero findings, re-check once; an empty list after a second pass is a valid result — report it as such, do not manufacture findings.
+
+CONTENT: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
+[[workflow.review_layers]]
+id = "edge-case-hunter"
+name = "Edge Case Hunter"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Read `{skill-root}/review-prompts/edge-case-hunter.md` completely and follow it as your review instructions.
+
+claims_file (leave unread until your instructions call for it): {claims_file}
+
+Review content: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
+[[workflow.review_layers]]
+id = "verification-gap"
+name = "Verification Gap Reviewer"
+instruction = """
+Launch a context-free subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
+
+Read `{skill-root}/review-prompts/verification-gap.md` completely and follow it as your review instructions. Additionally (/epic-cycle Rule 19, falsifiability and hermeticity): flag every assertion that cannot fail — an expected value the type system makes the only possible value (e.g. `toEqual([])` against a `never[]`), a subject that was never constructed, two runs compared that both produce nothing, a test whose green depends on the defect it guards against, a module with no executed test host — every acceptance criterion whose pinning test has no `mutation:` line in the spec's `## Verification`, and every added or changed test that is not self-contained: it relies on state it did not create, on another test's leftovers or on run order, or it acts before the system under test signals that it is ready.
+
+Review content: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
+"""
+
 [[workflow.review_layers]]
 id = "acceptance-auditor"
 name = "Acceptance Auditor"
 when = 'Only when {review_mode} = "full".'
 instruction = """
-Launch a subagent with this prompt:
+Launch a subagent synchronously — pass `run_in_background: false` on the Agent call and wait for its report (several such calls in one message still run in parallel) — with this prompt:
 
 You are an Acceptance Auditor. Review the provided diff against `{spec_file}` and any loaded context docs. Check for: violations of acceptance criteria, deviations from spec intent, missing implementation of specified behavior, contradictions between spec constraints and actual code. Output findings as a Markdown list. Each finding: one-line title, which AC/constraint it violates, and evidence from the diff.
+If you find nothing, you MUST still end your final message with the exact line `No findings — clean pass.` Silence, an empty response, or a bare "done" is recorded as a FAILED layer, not a clean one.
 
 Diff: the unified diff at `{diff_file}`. Read that file — it is the content under review.
 
 Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
 
-If you find nothing, you MUST still end your final message with the exact line `No findings — clean pass.` Silence, an empty response, or a bare "done" is recorded as a FAILED layer, not a clean one.
-
+Containment (/epic-cycle Rule 18): you read and report only — do not edit files, do not run any git command that writes, do not SendMessage any agent, run at most one test class or suite at a time, in the foreground (never several test-runner calls in one message, never in the background), and return exactly once.
 """
