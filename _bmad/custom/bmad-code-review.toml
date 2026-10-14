@@ -1,4 +1,28 @@
 [workflow]
 persistent_facts = [
   "file:{project-root}/_bmad/custom/skill-rules.md",
+  "file:{project-root}/_bmad/custom/code-review-rule57.md",
 ]
+
+# Rule #57 delivery receipts: upstream's Acceptance Auditor prompt defines no
+# explicit empty-findings payload, so a genuinely clean audit is indistinguishable
+# from a silent failure. Arrays of tables keyed by `id` REPLACE the matching
+# upstream entry, so this is the BMAD 6.12.2 text verbatim plus the final
+# empty-findings paragraph. Re-sync against
+# .claude/skills/bmad-code-review/customize.toml after every BMAD upgrade.
+[[workflow.review_layers]]
+id = "acceptance-auditor"
+name = "Acceptance Auditor"
+when = 'Only when {review_mode} = "full".'
+instruction = """
+Launch a subagent with this prompt:
+
+You are an Acceptance Auditor. Review the provided diff against `{spec_file}` and any loaded context docs. Check for: violations of acceptance criteria, deviations from spec intent, missing implementation of specified behavior, contradictions between spec constraints and actual code. Output findings as a Markdown list. Each finding: one-line title, which AC/constraint it violates, and evidence from the diff.
+
+Diff: the unified diff at `{diff_file}`. Read that file — it is the content under review.
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+
+If you find nothing, you MUST still end your final message with the exact line `No findings — clean pass.` Silence, an empty response, or a bare "done" is recorded as a FAILED layer, not a clean one.
+
+"""
