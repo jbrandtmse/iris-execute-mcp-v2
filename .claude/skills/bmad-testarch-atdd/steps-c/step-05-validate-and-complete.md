@@ -1,7 +1,7 @@
 ---
 name: 'step-05-validate-and-complete'
 description: 'Validate ATDD outputs and summarize'
-outputFile: '{test_artifacts}/atdd-checklist-{story_id}.md'
+outputFile: '{test_artifacts}/atdd-checklist-{story_key}.md'
 ---
 
 # Step 5: Validate & Complete
@@ -42,7 +42,16 @@ Use `checklist.md` to validate:
 - Prerequisites satisfied
 - Test files created correctly
 - Checklist matches acceptance criteria
-- Tests are designed to fail before implementation
+- Tests are generated as red-phase scaffolds and marked with `test.skip()`
+- Preflight preserved supplied criterion ids and assigned stable, collision-free ids to unnamed criteria
+- Every executable leaf title carries exactly one id from the persisted criterion registry
+- Every declared acceptance criterion has exactly one red-phase leaf scaffold
+- Secondary branches and journeys are checklist work for green-phase automation
+- The criterion-defining assertion is the first assertion that can fail and directly isolates the exact newly promised status, scalar, or property
+- API setup responses from unimplemented endpoints remain opaque before the criterion assertion
+- Each E2E primary scaffold begins with the criterion-defining assertion as its first potentially failing operation
+- State-transition criteria exercise the transition-bearing branch in their primary scaffold
+- Story metadata and handoff paths are captured for downstream workflows
 - [ ] CLI sessions cleaned up (no orphaned browsers)
 - [ ] Temp artifacts stored in `{test_artifacts}/` not random locations
 
@@ -67,8 +76,9 @@ Report:
 
 - Test files created
 - Checklist output path
+- Story key / story file handoff path
 - Key risks or assumptions
-- Next recommended workflow (e.g., implementation or `automate`)
+- Next recommended workflow (usually `dev-story`; `automate` comes after implementation)
 
 ---
 
@@ -83,6 +93,11 @@ Report:
   stepsCompleted: ['step-05-validate-and-complete']
   lastStep: 'step-05-validate-and-complete'
   lastSaved: '{date}'
+  storyId: '{story_id}'
+  storyKey: '{story_key}'
+  storyFile: '{story_file}'
+  atddChecklistPath: '{outputFile}'
+  generatedTestFiles: []
   ---
   ```
 
@@ -92,6 +107,8 @@ Report:
   - Add `'step-05-validate-and-complete'` to `stepsCompleted` array (only if not already present)
   - Set `lastStep: 'step-05-validate-and-complete'`
   - Set `lastSaved: '{date}'`
+  - Ensure `storyId`, `storyKey`, `storyFile`, and `atddChecklistPath` are present and populated
+  - Ensure `generatedTestFiles` remains populated with the deterministic list of present generated test paths
   - Append this step's output to the appropriate section.
 
 ## 🚨 SYSTEM SUCCESS/FAILURE METRICS:
@@ -104,3 +121,11 @@ Report:
 
 - Skipped sequence steps or missing outputs
   **Master Rule:** Skipping steps is FORBIDDEN.
+
+## On Complete
+
+Run: `uv run {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key workflow.on_complete`
+
+If the resolver succeeds and returns a non-empty `workflow.on_complete`, execute that value as the final terminal instruction before exiting.
+
+If the resolver fails, returns no output, or resolves an empty value, skip the hook and exit normally.

@@ -1,7 +1,7 @@
 ---
 name: 'step-01-load-context'
 description: 'Load NFR requirements, evidence sources, and knowledge base'
-nextStepFile: './step-02-define-thresholds.md'
+nextStepFile: '{skill-root}/steps-c/step-02-define-thresholds.md'
 knowledgeIndex: './resources/tea-index.csv'
 outputFile: '{test_artifacts}/nfr-assessment.md'
 ---
@@ -10,7 +10,7 @@ outputFile: '{test_artifacts}/nfr-assessment.md'
 
 ## STEP GOAL
 
-Gather NFR requirements, evidence sources, and knowledge fragments needed for assessment.
+Gather NFR requirements, evidence sources, and knowledge fragments needed for the evidence audit.
 
 ## MANDATORY EXECUTION RULES
 
@@ -54,15 +54,9 @@ From `{config_source}`:
 
 ---
 
-### Tiered Knowledge Loading
+### Deterministic Knowledge Selection
 
-Load fragments based on their `tier` classification in `tea-index.csv`:
-
-1. **Core tier** (always load): Foundational fragments required for this workflow
-2. **Extended tier** (load on-demand): Load when deeper analysis is needed or when the user's context requires it
-3. **Specialized tier** (load only when relevant): Load only when the specific use case matches (e.g., contract-testing only for microservices, email-auth only for email flows)
-
-> **Context Efficiency**: Loading only core fragments reduces context usage by 40-50% compared to loading all fragments.
+The fragment list for this step is a closed set. Start empty, evaluate the complete conditions under **Load Knowledge Base Fragments**, and add every fragment from each matching list. A config flag opens a branch only when every stack, runner, package, and relevance condition on that branch also matches. Do not add fragments from tier labels, index descriptions, nearby mentions, general usefulness, or possible future need. Deduplicate while preserving the order below. Identical facts and config must produce an identical list.
 
 ## 3. Load Knowledge Base Fragments
 

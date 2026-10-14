@@ -1,8 +1,8 @@
 ---
 name: 'step-03-risk-and-testability'
 description: 'Perform testability review (system-level) and risk assessment'
-nextStepFile: './step-04-coverage-plan.md'
-outputFile: '{test_artifacts}/test-design-progress.md'
+nextStepFile: '{skill-root}/steps-c/step-04-coverage-plan.md'
+outputFile: '{test_artifacts}/test-design-progress-{run_key}.md'
 ---
 
 # Step 3: Testability & Risk Assessment
@@ -60,6 +60,8 @@ Also identify **ASRs** (Architecturally Significant Requirements):
 Using `risk-governance.md` and `probability-impact.md` (if loaded):
 
 - Identify real risks (not just features)
+- Ground every risk in an explicit statement from the supplied epic or a named artifact loaded for this run. Record the supporting statement in the risk description or mitigation notes so another reader can trace the row.
+- Keep the register bounded by the scope supported by the supplied epic or a named artifact loaded for this run. Do not add plausible risks merely because they are common in other systems. If a concern has no supporting statement, record it as an assumption or clarification outside the risk register.
 - Classify by category: TECH / SEC / PERF / DATA / BUS / OPS
 - Score Probability (1–3) and Impact (1–3)
 - Calculate Risk Score (P × I)
@@ -68,13 +70,27 @@ Using `risk-governance.md` and `probability-impact.md` (if loaded):
 
 ---
 
-## 3. Summarize Risk Findings
+## 3. NFR Planning Assessment
+
+Using `nfr-criteria.md` when loaded:
+
+- Identify NFR categories in scope: security, performance, reliability, scalability, maintainability, compliance, and any project-specific categories
+- Extract measurable thresholds from PRD, architecture, ADRs, epics, or stories
+- Mark missing thresholds as **UNKNOWN** and convert them into clarification items or risks; do not guess values
+- Define planned evidence sources for later validation (tests, scans, metrics, logs, monitoring, CI reports)
+- Convert NFR gaps into the existing risk register using SEC / PERF / OPS / TECH / DATA categories
+
+**Boundary:** This workflow plans NFR validation. It does not assess final PASS/CONCERNS/FAIL from implementation evidence. Use `nfr-assess` after implementation evidence exists.
+
+---
+
+## 4. Summarize Risk Findings
 
 Summarize the highest risks and their mitigation priorities.
 
 ---
 
-### 4. Save Progress
+### 5. Save Progress
 
 **Save this step's accumulated work to `{outputFile}`.**
 
@@ -82,8 +98,13 @@ Summarize the highest risks and their mitigation priorities.
 
   ```yaml
   ---
+  runScope: '{run_scope}'
+  runKey: '{run_key}'
+  workflowStatus: 'in-progress'
+  totalSteps: 5
   stepsCompleted: ['step-03-risk-and-testability']
   lastStep: 'step-03-risk-and-testability'
+  nextStep: '{nextStepFile}'
   lastSaved: '{date}'
   ---
   ```
@@ -91,8 +112,12 @@ Summarize the highest risks and their mitigation priorities.
   Then write this step's output below the frontmatter.
 
 - **If `{outputFile}` already exists**, update:
+  - Leave `runScope` and `runKey` exactly as step 1 wrote them
+  - Set `workflowStatus: 'in-progress'`
+  - Set `totalSteps: 5`
   - Add `'step-03-risk-and-testability'` to `stepsCompleted` array (only if not already present)
   - Set `lastStep: 'step-03-risk-and-testability'`
+  - Set `nextStep: '{nextStepFile}'`
   - Set `lastSaved: '{date}'`
   - Append this step's output to the appropriate section of the document.
 

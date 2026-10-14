@@ -39,3 +39,6 @@ irissys/
 
 # Code-review diff snapshots (bmad-code-review step-01 frozen-diff artifact)
 _bmad-output/implementation-artifacts/review-diff-snapshot-*.diff
+
+# BMAD installer backups of the previous install (content is in git history)
+_bmad/**/*.bak

@@ -90,6 +90,12 @@ Review the complete epic and story breakdown to ensure EVERY FR is covered:
 - Dependencies flow naturally
 - Foundation stories only setup what's needed
 - No big upfront technical work
+- **File Churn Check:** Do multiple epics repeatedly modify the same core files?
+  - Assess whether the overlap pattern suggests unnecessary churn or is incidental
+  - If overlap is significant: Validate that splitting provides genuine value (risk mitigation, feedback loops, context size limits)
+  - If no justification for the split: Recommend consolidation into fewer epics
+  - ❌ WRONG: Multiple epics each modify the same core files with no feedback loop between them
+  - ✅ RIGHT: Epics target distinct files/components, OR consolidation was explicitly considered and rejected with rationale
 
 ### 5. Dependency Validation (CRITICAL)
 
@@ -113,19 +119,23 @@ For each epic, review stories in order:
 
 ### 6. Complete and Save
 
-If all validations pass:
-
 - Update any remaining placeholders in the document
 - Ensure proper formatting
-- Save the final epics.md
+- Save epics.md with frontmatter `status: draft`
+
+If any validation failed, list each failed check with what is missing, keep `status: draft`, and tell the user "epics.md saved as draft, N checks open". Offer to fix the open checks now and re-run this validation; if the user declines, end the workflow with the document still a draft. Do not offer [C].
+
+If all validations pass:
 
 **Present Final Menu:**
 **All validations complete!** [C] Complete Workflow
 
 HALT — wait for user input before proceeding.
 
-When C is selected, the workflow is complete and the epics.md is ready for development.
+When C is selected, set epics.md frontmatter `status: final`, tell the user the epics.md is complete and ready for development, invoke the `bmad-help` skill, and offer to answer any questions about the Epics and Stories.
 
-Epics and Stories complete. Invoke the `bmad-help` skill.
+## On Complete
 
-Upon Completion of task output: offer to answer any questions about the Epics and Stories.
+Run: `uv run {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key workflow.on_complete`
+
+If the resolved `workflow.on_complete` is non-empty, follow it as the final terminal instruction before exiting.

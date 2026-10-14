@@ -1,8 +1,8 @@
 ---
-diff_output: '' # set at runtime
-diff_snapshot_path: '' # set at runtime — path to the frozen diff snapshot written at the end of instruction 3 (AC 34.0.2)
+diff_file: '' # set at runtime: path to the diff file
+claims_file: '' # set at runtime (path or empty)
 spec_file: '' # set at runtime (path or empty)
-review_mode: '' # set at runtime: "full" or "no-spec"
+review_mode: '' # set at runtime: full or no-spec
 story_key: '' # set at runtime when discovered from sprint status
 ---
 
@@ -12,22 +12,44 @@ story_key: '' # set at runtime when discovered from sprint status
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
 - The prompt that triggered this workflow IS the intent — not a hint.
-- This step is read-only with ONE sanctioned exception: instruction 3's final action writes the frozen `{diff_output}` snapshot to `{diff_snapshot_path}`. That write exists solely to freeze the reviewed diff so later layers can never review a stale, since-patched tree (Rule #57 FROZEN-DIFF) — it is not a license to modify, format, or otherwise touch the code under review, which stays strictly read-only.
+- Writing `{diff_file}` and the claims file is the only change this step may make. Otherwise it is read-only.
 
 ## INSTRUCTIONS
 
-1. **Detect review intent from invocation text.** Check the triggering prompt for phrases that map to a review mode:
-   - "staged" / "staged changes" → Staged changes only
-   - "uncommitted" / "working tree" / "all changes" → Uncommitted changes (staged + unstaged)
-   - "branch diff" / "vs main" / "against main" / "compared to {branch}" → Branch diff (extract base branch if mentioned)
-   - "commit range" / "last N commits" / "{sha}..{sha}" → Specific commit range
-   - "this diff" / "provided diff" / "paste" → User-provided diff (do not match bare "diff" — it appears in other modes)
-   - When multiple phrases match, prefer the most specific match (e.g., "branch diff" over bare "diff").
-   - **If a clear match is found:** Announce the detected mode (e.g., "Detected intent: review staged changes only"). **First resolve `{story_key}` (34-0-R2), then construct `{diff_output}`** using the corresponding sub-case from instruction 3 — the key must be known BEFORE instruction 3 writes the frozen snapshot, whose filename embeds it — then skip to instruction 4 (spec question). This branch previously jumped straight to instruction 4 without ever running the sprint-status scan below, so `{story_key}` stayed empty and step-04's sprint-status sync silently self-skipped on every review triggered by a matched invocation phrase, which is the common path. Resolution is a silent lookup, never a new HALT (the review mode is already decided by the matched phrase): look for a sprint status file (`*sprint-status*`) in `{implementation_artifacts}` or `{planning_artifacts}`; if the invocation text NAMES a story — its key, its slug, or its story number (e.g. `36.3` ↔ a key starting `36-3-`) — that matches a story in `review` status, set `{story_key}` to that match; otherwise leave `{story_key}` unset. Never adopt a `review` story the invocation did not name, even when it is the only one: the matched phrase can select a diff unrelated to that story, and step-04 would then rewrite the wrong story's status. If no sprint status file exists, leave `{story_key}` unset.
-   - **If no match from invocation text, check sprint tracking.** Look for a sprint status file (`*sprint-status*`) in `{implementation_artifacts}` or `{planning_artifacts}`. If found, scan for any story with status `review`. Handle as follows:
-     - **Exactly one `review` story:** Set `{story_key}` to the story's key (e.g., `1-2-user-auth`). Suggest it: "I found story {{story-id}} in `review` status. Would you like to review its changes? [Y] Yes / [N] No, let me choose". If confirmed, use the story context to determine the diff source (branch name derived from story slug, or uncommitted changes). If declined, clear `{story_key}` and fall through to instruction 2.
-     - **Multiple `review` stories:** Present them as numbered options alongside a manual choice option. Wait for user selection. If the user selects a story, set `{story_key}` to the selected story's key and use the selected story's context to determine the diff source as in the single-story case above, and proceed to instruction 3. If the user selects the manual choice, clear `{story_key}` and fall through to instruction 2.
-   - **If no match and no sprint tracking:** Fall through to instruction 2.
+1. **Find the review target.** The conversation context before this skill was triggered IS your starting point — not a blank slate. Check in this order — stop as soon as the review target is identified:
+
+   **Tier 1 — Explicit argument.**
+   Did the user pass a PR, commit SHA, branch, spec file, or diff source this message?
+   - PR reference → resolve to branch/commit via `gh pr view`. If resolution fails, ask for a SHA or branch.
+   - Commit or branch → use directly.
+   - Spec file → set `spec_file` to the provided path. Check its frontmatter for `baseline_commit`. If found, use as diff baseline. If not found, continue the cascade (a spec alone does not identify a diff source).
+   - Also scan the argument for diff-mode keywords that narrow the scope:
+     - "staged" / "staged changes" → Staged changes only
+     - "uncommitted" / "working tree" / "all changes" → Uncommitted changes (staged + unstaged)
+     - "branch diff" / "vs main" / "against main" / "compared to <branch>" → Branch diff (extract base branch if mentioned)
+     - "commit range" / "last N commits" / "<from-sha>..<to-sha>" → Specific commit range
+     - "this diff" / "provided diff" / "paste" → User-provided diff (do not match bare "diff" — it appears in other modes)
+   - When multiple keywords match, prefer the most specific (e.g., "branch diff" over bare "diff").
+
+   **Tier 2 — Recent conversation.**
+   Do the last few messages reveal what the user wants to be reviewed? Look for spec paths, commit refs, branches, PRs, or descriptions of a change. Apply the same diff-mode keyword scan and routing as Tier 1.
+
+   **Tier 3 — Sprint tracking.**
+   Look for a sprint status file (`*sprint-status*`) in `{implementation_artifacts}` or `{planning_artifacts}`. If found, scan for stories with status `review`:
+   - **Exactly one `review` story:** Set `story_key` to the story's key (e.g., `1-2-user-auth`). HALT and give the user a choice:
+     - **Review this story** — review the detected story `<story-id>` (status `review`).
+     - **Choose another target** — pick a different review target.
+     If the user chooses **Review this story**, use the story context to determine the diff source (branch name derived from story slug, or uncommitted changes). If they choose **Choose another target**, clear `story_key` and fall through.
+   - **Multiple `review` stories:** Present them as numbered options alongside a manual choice option. Wait for user selection. If a story is selected, set `story_key` and use its context to determine the diff source. If manual choice is selected, clear `story_key` and fall through.
+   - **None:** Fall through.
+
+   **Tier 4 — Current git state.**
+   If version control is unavailable, skip to Tier 5. Otherwise, check the current branch and HEAD. If the branch is not `main` (or the default branch), confirm: "I see HEAD is `<short-sha>` on `<branch>` — do you want to review this branch's changes?" If confirmed, treat as a branch diff against `main`. If declined, fall through.
+
+   **Tier 5 — Ask.**
+   Fall through to instruction 2.
+
+   Never ask extra questions beyond what the cascade prescribes. If a tier above already identified the target, skip the remaining tiers and proceed to instruction 3 (construct diff).
 
 2. HALT. Ask the user: **What do you want to review?** Present these options:
    - **Uncommitted changes** (staged + unstaged)
@@ -36,32 +58,36 @@ story_key: '' # set at runtime when discovered from sprint status
    - **Specific commit range** (ask for the range)
    - **Provided diff or file list** (user pastes or provides a path)
 
-3. Construct `{diff_output}` from the chosen source.
-   - For **branch diff**: verify the base branch exists before running `git diff`. If it does not exist, HALT and ask the user for a valid branch.
-   - For **commit range**: verify the range resolves. If it does not, HALT and ask the user for a valid range.
-   - For **provided diff**: validate the content is non-empty and parseable as a unified diff. If it is not parseable, HALT and ask the user to provide a valid diff.
-   - For **file list**: validate each path exists in the working tree. Construct `{diff_output}` by running `git diff HEAD -- <path1> <path2> ...`. If any paths are untracked (new files not yet staged), use `git diff --no-index /dev/null <path>` to include them. If the diff is empty (files have no uncommitted changes and are not untracked), ask the user whether to review the full file contents or to specify a different baseline.
-   - After constructing `{diff_output}`, verify it is non-empty regardless of source type. If empty, HALT and tell the user there is nothing to review.
-   - **Freeze the diff (AC 34.0.2).** Once `{diff_output}` is confirmed non-empty, persist it verbatim to a snapshot file so every review layer in step-02 reads the identical frozen content no matter when it returns. Compute the path as `{implementation_artifacts}/review-diff-snapshot-{key}-{run}.diff`, where `{key}` is `{story_key}` if it is set, otherwise `unkeyed`, and `{run}` is the current UTC timestamp as `YYYYMMDD-HHMMSS`. Write `{diff_output}` to that path exactly as constructed, and set `{diff_snapshot_path}` to the path written. This is the ONE sanctioned file write of this step (see RULES) — its purpose is to freeze the diff under review, never to change it.
-     - **The `{run}` component is required, not decorative.** A DEGRADED close routes the story back to `in-progress`, and step-04 section 7 offers "Re-run code review" — so a second review of the SAME `{story_key}` is an ordinary path. Without the per-run suffix, that second run overwrites the first run's snapshot in place, and any still-outstanding layer from the first run that re-reads `{diff_snapshot_path}` would silently review the NEW diff. That would defeat FROZEN-DIFF in exactly the late-return scenario it exists for. Never reuse or overwrite an existing snapshot path.
-     - **Never assume `{story_key}` is set here.** It is set only when instruction 1 resolved it — on the sprint-status branch, or on the invocation-text branch when the invocation named a `review`-status story (34-0-R2) — and stays empty otherwise. The `unkeyed` fallback keeps the write well-defined either way.
-     - **Retention:** the snapshot is a disposable review artifact, not a deliverable. It is excluded from version control via the `review-diff-snapshot-*.diff` pattern in `.gitignore`, so it must never appear as a file to commit at the lead's commit gate, and must never be picked up as content by a later review's `{diff_output}`. Leave it in place for the duration of the review (a late-returning layer may still be reading it); step-04 handles disposal.
-   - **Back-compat (AC 34.0.5):** this snapshot step is purely additive. It does not change how `{diff_output}` is constructed, validated, or presented — it only adds a second, frozen copy for the layers to consume in step-02.
+3. Write the diff for the chosen source to `{diff_file}` — a uniquely-named file in the system temp directory, so concurrent reviews cannot collide. The review layers read that file; the diff text is never pasted into their prompts.
+   - For **staged changes only**: run `git diff --cached > {diff_file}`.
+   - For **uncommitted changes** (staged + unstaged): run `git diff HEAD > {diff_file}`.
+   - For **branch diff**: verify the base branch exists, then run `git diff <base-branch>...HEAD > {diff_file}`. If it does not exist, HALT and ask the user for a valid branch.
+   - For **commit range**: verify the range resolves, then run `git diff <range> > {diff_file}`. If it does not resolve, HALT and ask the user for a valid range.
+   - For **provided diff**: validate the content is non-empty and parseable as a unified diff. If it is not parseable, HALT and ask the user to provide a valid diff. Write the validated diff to `{diff_file}`.
+   - For **file list**: validate each path exists in the working tree. Run `git diff HEAD -- <path1> <path2> ... > {diff_file}`. If any paths are untracked (new files not yet staged), append them with `git diff --no-index /dev/null <path> >> {diff_file}`. If the diff is empty (files have no uncommitted changes and are not untracked), ask the user whether to review the full file contents or to specify a different baseline.
+   - After writing `{diff_file}`, verify it is non-empty regardless of source type. If empty, HALT and tell the user there is nothing to review.
+   - Read `{diff_file}` yourself whenever you need the diff for your own context — triage and presentation later in this workflow.
 
-4. Ask the user: **Is there a spec or story file that provides context for these changes?**
-   - If yes: set `{spec_file}` to the path provided, verify the file exists and is readable, then set `{review_mode}` = `"full"`.
-   - If no: set `{review_mode}` = `"no-spec"`.
+4. **Stage the claims file.** Collect the change's own narrative: for a branch diff or commit range, the commit messages it covers (`git log <base>..<head>`); for other sources, whatever description of the change the user or conversation supplied. Write it verbatim to a uniquely-named file in the system temp directory and set `claims_file` to its path. If there is no narrative, set `claims_file` = `''`. Do not analyze or summarize the narrative — it is input for one review layer, staged as a file precisely so the other layers never see it.
 
-5. If `{review_mode}` = `"full"` and the file at `{spec_file}` has a `context` field in its frontmatter listing additional docs, load each referenced document. Warn the user about any docs that cannot be found.
+5. **Set the spec context.**
+   - If the triggering request or recent conversation **explicitly** states there is no spec (e.g. "no spec", "without a spec", "no-spec"): set `review_mode` = `no-spec` and clear `spec_file` (set it to `''`). Do **not** ask for a spec. Do **not** infer no-spec mode merely because the invocation omitted a spec path.
+   - Else if `spec_file` is already set (from Tier 1 or Tier 2): verify the file exists and is readable, then set `review_mode` = `full`.
+   - Else (neither a spec path nor an explicit no-spec declaration is present): ask the user to choose:
+     1. Provide a spec or story file path for context; or
+     2. Continue without a spec.
+     - If the user provides a path: set `spec_file` to that path, verify the file exists and is readable, then set `review_mode` = `full`.
+     - If the user explicitly chooses to continue without a spec: set `review_mode` = `no-spec`.
 
-6. Sanity check: if `{diff_output}` exceeds approximately 3000 lines, warn the user and offer to chunk the review by file group.
-   - If the user opts to chunk: agree on the first group, narrow `{diff_output}` accordingly, and list the remaining groups for the user to note for follow-up runs.
+6. If `review_mode` = `full` and the file at `{spec_file}` has a `context` field in its frontmatter listing additional docs, load each referenced document. Warn the user about any docs that cannot be found.
+
+7. Sanity check: if `wc -l {diff_file}` exceeds approximately 3000 lines, warn the user and offer to chunk the review by file group.
+   - If the user opts to chunk: agree on the first group, rebuild `{diff_file}` narrowed to that group, and list the remaining groups for the user to note for follow-up runs.
    - If the user declines: proceed as-is with the full diff.
 
 ### CHECKPOINT
 
 Present a summary before proceeding: diff stats (files changed, lines added/removed), `{review_mode}`, and loaded spec/context docs (if any). HALT and wait for user confirmation to proceed.
-
 
 ## NEXT
 

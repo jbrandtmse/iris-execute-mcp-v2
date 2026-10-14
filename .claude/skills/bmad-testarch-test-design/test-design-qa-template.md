@@ -1,6 +1,9 @@
 ---
+workflowStatus: ''
+totalSteps: 5
 stepsCompleted: []
 lastStep: ''
+nextStep: ''
 lastSaved: ''
 workflowType: 'testarch-test-design'
 inputDocuments: []
@@ -120,6 +123,21 @@ test('example test @p0', async ({ apiRequest }) => {
 
 ---
 
+## NFR Test Coverage Plan
+
+**Purpose:** Map NFR requirements to planned validation work. This section defines what evidence QA should create or collect; it does not assign final PASS/CONCERNS/FAIL status.
+
+| NFR Category    | Requirement / Threshold | Planned Validation                         | Tool / Level         | Evidence Artifact             | Priority |
+| --------------- | ----------------------- | ------------------------------------------ | -------------------- | ----------------------------- | -------- |
+| Security        | {Requirement}           | {Auth/authz/security validation}           | {API/E2E/SAST/DAST}  | {Report or test result path}  | {P0-P3}  |
+| Performance     | {Requirement}           | {Load/stress/baseline validation}          | {k6/APM/Lighthouse}  | {Report or dashboard}         | {P0-P3}  |
+| Reliability     | {Requirement}           | {Error/retry/failover validation}          | {API/E2E/monitoring} | {Burn-in/log/metric evidence} | {P0-P3}  |
+| Maintainability | {Requirement}           | {Coverage/static analysis/docs validation} | {CI/static analysis} | {Coverage or quality report}  | {P0-P3}  |
+
+**Missing thresholds or evidence sources:** {List NFRs that need stakeholder clarification or tooling before `nfr-assess`.}
+
+---
+
 ## Entry Criteria
 
 **QA testing cannot begin until ALL of the following are met:**
@@ -163,7 +181,7 @@ test('example test @p0', async ({ apiRequest }) => {
 
 ### P0 (Critical)
 
-**Criteria:** Blocks core functionality + High risk (≥6) + No workaround + Affects majority of users
+**Criteria:** Critical business, security, data-integrity, or compliance impact with no safe workaround. Risk score is supporting evidence and is not a required condition.
 
 | Test ID    | Requirement   | Test Level | Risk Link | Notes   |
 | ---------- | ------------- | ---------- | --------- | ------- |
@@ -176,7 +194,7 @@ test('example test @p0', async ({ apiRequest }) => {
 
 ### P1 (High)
 
-**Criteria:** Important features + Medium risk (3-4) + Common workflows + Workaround exists but difficult
+**Criteria:** Core, frequent, or complex behavior with material user reach and a limited workaround. Risk score is supporting evidence and is not a required condition.
 
 | Test ID    | Requirement   | Test Level | Risk Link | Notes   |
 | ---------- | ------------- | ---------- | --------- | ------- |
@@ -189,7 +207,7 @@ test('example test @p0', async ({ apiRequest }) => {
 
 ### P2 (Medium)
 
-**Criteria:** Secondary features + Low risk (1-2) + Edge cases + Regression prevention
+**Criteria:** Secondary behavior with narrower user reach and an acceptable workaround. Risk score is supporting evidence and is not a required condition.
 
 | Test ID    | Requirement   | Test Level | Risk Link | Notes   |
 | ---------- | ------------- | ---------- | --------- | ------- |
@@ -201,11 +219,11 @@ test('example test @p0', async ({ apiRequest }) => {
 
 ### P3 (Low)
 
-**Criteria:** Nice-to-have + Exploratory + Performance benchmarks + Documentation validation
+**Criteria:** Rare, cosmetic, or experimental behavior with minimal impact and an easy workaround. Risk score is supporting evidence and is not a required condition.
 
-| Test ID    | Requirement   | Test Level | Notes   |
-| ---------- | ------------- | ---------- | ------- |
-| **P3-001** | {Requirement} | {Level}    | {Notes} |
+| Test ID    | Requirement   | Test Level | Risk Link | Notes   |
+| ---------- | ------------- | ---------- | --------- | ------- |
+| **P3-001** | {Requirement} | {Level}    | {R-ID}    | {Notes} |
 
 **Total P3:** ~{N} tests
 
@@ -387,7 +405,7 @@ npx playwright test
 - **Risk Governance**: `risk-governance.md` - Risk scoring methodology
 - **Test Priorities Matrix**: `test-priorities-matrix.md` - P0-P3 criteria
 - **Test Levels Framework**: `test-levels-framework.md` - E2E vs API vs Unit selection
-- **Test Quality**: `test-quality.md` - Definition of Done (no hard waits, <300 lines, <1.5 min)
+- **Test Quality**: `test-quality.md` - Definition of Done (no hard waits, ≤1000 lines, <1.5 min)
 
 ---
 
