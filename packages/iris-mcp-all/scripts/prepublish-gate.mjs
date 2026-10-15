@@ -112,6 +112,10 @@ const gateTestFiles = [
   // disqualifier). It drives the BUILT iris-dev-mcp / iris-ops-mcp dists over
   // real stdio JSON-RPC, hence the ops entry in DRIVEN_PACKAGES above.
   "src/__tests__/epic37-default-outage-gate.test.ts",
+  // Armed by the membership rule above: each refuses to skip under IRIS_REQUIRE_LIVE when the
+  // built dists it reads are missing or stale (neither contacts IRIS; they use local stubs).
+  "src/__tests__/story-38-0-qa-doc-claims.test.ts",
+  "src/__tests__/story-38-0-qa-process.test.ts",
 ];
 
 const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];

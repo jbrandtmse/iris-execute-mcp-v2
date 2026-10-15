@@ -362,7 +362,10 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
             action: "iris_test_status:cancel",
           });
           const stillRunning = await testStatusTool.handler({ action: "poll", jobId: secondJobId }, ctx);
-          expect((stillRunning.structuredContent as { status: string }).status).toBe("running");
+          expect(
+            (stillRunning.structuredContent as { status: string }).status,
+            `status !== "running" after the denied cancel; last Atelier work/ response: ${lastWork()}`,
+          ).toBe("running");
 
           // Explicit override, THIS PROCESS ONLY: cancel is now allowed.
           process.env.IRIS_GOVERNANCE = JSON.stringify({ global: { "iris_test_status:cancel": true } });

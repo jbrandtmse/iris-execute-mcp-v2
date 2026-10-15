@@ -42,20 +42,27 @@ const FUTURE_MTIME_TOLERANCE_MS = 60_000;
 class FreshnessFinding extends Error {}
 
 /**
- * Normalize one `files` entry for the dist-shipping comparison: `./dist`, `dist/`,
- * `dist/*`, `dist/**` and `dist/**\/*` all name the `dist` directory. Negations
- * (`!dist/**\/__tests__`) and non-string entries never name it.
+ * Normalize one `files` entry for the dist-shipping comparison: the entry's first path
+ * segment, after any leading `./` or `/`. Every entry that names `dist` or a path under
+ * it (`dist`, `./dist`, `/dist`, `dist/`, `dist/*`, `dist/**`, `dist/**\/*.js`,
+ * `dist/index.js`, ...) normalizes to `dist`. Negations (`!dist/**\/__tests__`) and
+ * non-string entries never name it.
  *
  * @param {unknown} entry
  * @returns {string | undefined}
  */
 function normalizeFilesEntry(entry) {
   if (typeof entry !== 'string' || entry.startsWith('!')) return undefined;
-  return entry
-    .replace(/^(\.\/)+/, '')
-    .replace(/(\/\*\*)?(\/\*)?$/, '')
-    .replace(/\/+$/, '');
+  return entry.replace(/^(\.?\/)+/, '').split('/')[0];
 }
+
+/**
+ * Directories under `src/` whose files never reach the published build: every package
+ * ships `files: ["dist", "!dist/**\/__tests__"]`, so a test or fixture edit cannot make
+ * the shipped `dist/` stale (and a non-TypeScript fixture would never be re-emitted by a
+ * rebuild, leaving the comparison stale for good).
+ */
+const SRC_DIRS_NOT_SHIPPED = new Set(['__tests__']);
 
 /**
  * Recursively find the newest file modification time under `dir`.
@@ -65,14 +72,16 @@ function normalizeFilesEntry(entry) {
  * raises a {@link FreshnessFinding} (fail closed) rather than being skipped silently.
  *
  * @param {string} dir
+ * @param {ReadonlySet<string>} [skipDirs] - Directory names not descended into, at any depth.
  * @returns {number} Newest mtime in milliseconds, or `-Infinity` if `dir` contains no
  *   files at all (distinguishes "no build output ever happened" from "genuinely fresh").
  * @throws {FreshnessFinding | Error} On an unreadable entry or an unsupported symlink;
  *   the caller converts either to a `{ ok: false }` result.
  */
-function newestMtimeMs(dir) {
+function newestMtimeMs(dir, skipDirs = new Set()) {
   let newest = -Infinity;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && skipDirs.has(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isSymbolicLink()) {
       let target;
@@ -86,7 +95,7 @@ function newestMtimeMs(dir) {
       }
       if (target.isFile() && target.mtimeMs > newest) newest = target.mtimeMs;
     } else if (entry.isDirectory()) {
-      const childNewest = newestMtimeMs(full);
+      const childNewest = newestMtimeMs(full, skipDirs);
       if (childNewest > newest) newest = childNewest;
     } else if (entry.isFile()) {
       const mtime = statSync(full).mtimeMs;
@@ -128,12 +137,14 @@ function collectDeclaredTargets(pkgJson) {
 
 /**
  * Verify `pkgDir`'s own `dist/` is present, non-empty, not dated in the future, at
- * least as new as `src/` (when `src/` exists), and contains every `dist/` file the
+ * least as new as `src/` (when `src/` exists; files under a `src/` `__tests__` directory
+ * are not compared, because they never ship), and contains every `dist/` file the
  * manifest's `main`, `module`, `bin` and `exports` declare. Skips (returns
- * `{ ok: true, skipped: true }`) when `pkgDir`'s own `package.json` does not declare a
- * dist-shipping `files` entry (`dist`, `dist/`, `./dist` or `dist/**`; negations are
- * ignored) - a package with no build step of its own has nothing for this check to
- * verify.
+ * `{ ok: true, skipped: true }`) when `pkgDir`'s own `package.json` has no `files` entry
+ * that names `dist` or a path under it (`dist`, `./dist`, `dist/`, `dist/**`,
+ * `dist/*.js`, ...; negations are ignored) - including a manifest with no `files` array,
+ * or an empty one - since a package with no build step of its own has nothing for this
+ * check to verify.
  *
  * Never throws. A missing or malformed `package.json`, an unreadable file or directory,
  * a dangling or directory symlink, a future-dated `dist/` file and a missing declared
@@ -253,7 +264,7 @@ function inspectDist(pkgDir, pkgName, now) {
     return { ok: true };
   }
 
-  const srcNewest = newestMtimeMs(srcDir);
+  const srcNewest = newestMtimeMs(srcDir, SRC_DIRS_NOT_SHIPPED);
   if (srcNewest > distNewest) {
     return {
       ok: false,

@@ -29,7 +29,7 @@ export {
   atelierPath,
   atelierDocStatusError,
 } from "./atelier.js";
-export { stripLeadingBom } from "./lines.js";
+export { stripLeadingBom, stripLeadingBomFromLines } from "./lines.js";
 export type {
   ToolAnnotations,
   ToolDefinition,

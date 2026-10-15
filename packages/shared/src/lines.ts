@@ -24,3 +24,21 @@ const BYTE_ORDER_MARK = "\uFEFF";
 export function stripLeadingBom(text: string): string {
   return text.startsWith(BYTE_ORDER_MARK) ? text.slice(BYTE_ORDER_MARK.length) : text;
 }
+
+/**
+ * Remove a single leading UTF-8 byte-order mark from the first element of a
+ * document's line array (the `content` array shape Atelier's `PUT /doc` takes).
+ *
+ * The caller's array is never mutated: when the first line carries a BOM a
+ * copy is returned, otherwise the same array. Every other line, and a U+FEFF
+ * anywhere but the very first character, is preserved.
+ *
+ * @param lines - Document lines, the first possibly BOM-prefixed.
+ * @returns `lines` without a leading BOM; the same array when there is none.
+ */
+export function stripLeadingBomFromLines(lines: string[]): string[] {
+  const first = lines[0];
+  if (first === undefined) return lines;
+  const stripped = stripLeadingBom(first);
+  return stripped === first ? lines : [stripped, ...lines.slice(1)];
+}

@@ -72,10 +72,12 @@ added only when it is missing, so a network error and an HTTP 401/403/404 refusa
 
 ### Fixed — release tooling and test gates (internal; DW-388, DW-413 to DW-417, DW-490, DW-492, DW-495, DW-496, DW-511, DW-524)
 
-`checkDistFresh` now accepts every `files` spelling of `dist`, never throws (a missing or malformed `package.json`, an
-unreadable entry and a dangling or directory symlink under `src/` each return `{ ok: false, reason }`), follows a
-symlinked file, refuses a `dist/` file dated more than 60 s in the future, and checks that every `dist/` target of
-`main`, `module`, `bin` and `exports` exists. The epic 35 and epic 37 live gates use it instead of an existence check,
+`checkDistFresh` now checks any package whose `files` has an entry naming `dist` or a path under it (`dist`, `./dist`,
+`dist/`, `dist/**`, `dist/*.js`, ...; a manifest with no `files` entry for `dist` is still skipped), never throws (a
+missing or malformed `package.json`, an unreadable entry and a dangling or directory symlink under `src/` each return
+`{ ok: false, reason }`), follows a symlinked file, refuses a `dist/` file dated more than 60 s in the future, checks
+that every `dist/` target of `main`, `module`, `bin` and `exports` exists, and no longer counts files under a `src/`
+`__tests__` directory (they never ship, and a fixture edit could never be cleared by a rebuild). The epic 35 and epic 37 live gates use it instead of an existence check,
 so a stale dist fails an armed run by package name before any IRIS call. `scripts/verify-iris-reachable.mjs` names every
 IRIS variable it defaulted on stderr and, under `CI`, refuses to default any of them (exit 1 before any network call).
 The dev package's prepublish gate runs its live files sequentially (`--no-file-parallelism`) and a failing running-state

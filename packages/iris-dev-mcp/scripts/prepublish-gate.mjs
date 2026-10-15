@@ -76,6 +76,9 @@ const gateTestFiles = [
   "src/__tests__/execute-tests-running-contract-epic-gate.test.ts",
   "src/__tests__/test-status-epic-gate.test.ts",
   "src/__tests__/global-injection-epic-gate.test.ts",
+  // `iris_doc_put` / `iris_doc_load` against the real Atelier `PUT /doc`: BOM strip and a
+  // refused write reported as an error (writes only disposable ExecuteMCPv2.Temp.QaStory380* docs).
+  "src/__tests__/doc-put-bom-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

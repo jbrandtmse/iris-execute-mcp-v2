@@ -415,10 +415,21 @@ Method TestHttpResendFilteredMatchCountExceedsMaxMessagesGuard()
 /// <class>ExecuteMCPv2.Tests.MessageResendLiveTest</class>.
 Method TestResendBatchReportsEveryNonexistentHeader()
 {
+    ; The headers must not exist: ResendBatch really resends one that does. The ids are taken
+    ; above the namespace's highest Ens.MessageHeader id (with headroom for rows a running
+    ; production adds meanwhile), never assumed free.
+    Set tMax = 0
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT MAX(ID) FROM Ens.MessageHeader")
+    If $IsObject(tRS) && (tRS.%SQLCODE >= 0) && tRS.%Next() Set tMax = +tRS.%GetData(1)
+    Set tBase = $Select(tMax < 999999990: 999999990, 1: tMax + 1000000)
     Set tIds(0) = 3
-    Set tIds(1) = 999999990
-    Set tIds(2) = 999999991
-    Set tIds(3) = 999999992
+    Set tTaken = 0
+    For tI = 0:1:2 {
+        Set tIds(tI + 1) = tBase + tI
+        If ##class(Ens.MessageHeader).%ExistsId(tBase + tI) Set tTaken = 1
+    }
+    Do $$$AssertTrue('tTaken, "precondition: headers " _ tBase _ " to " _ (tBase + 2) _ " do not exist (an existing one would really be resent)")
+    If tTaken Quit
     Set tResult = {}
     Do ##class(ExecuteMCPv2.REST.MessageResend).ResendBatch(.tIds, 0, tResult)
 
@@ -427,7 +438,7 @@ Method TestResendBatchReportsEveryNonexistentHeader()
     If tResults.%Size() '= 3 Quit
     For tI = 0:1:2 {
         Set tRow = tResults.%Get(tI)
-        Do $$$AssertEquals(tRow.%Get("originalId"), 999999990 + tI, "result " _ tI _ " echoes its header id, in order")
+        Do $$$AssertEquals(tRow.%Get("originalId"), tBase + tI, "result " _ tI _ " echoes its header id, in order")
         Do $$$AssertEquals(tRow.%Get("ok"), 0, "result " _ tI _ " reports the nonexistent header as failed")
         Do $$$AssertTrue(tRow.%Get("error") '= "", "result " _ tI _ " carries a non-empty error")
     }

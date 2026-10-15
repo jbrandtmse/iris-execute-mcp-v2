@@ -15,23 +15,11 @@ import {
   atelierPath,
   IrisApiError,
   stripLeadingBom,
+  stripLeadingBomFromLines,
   type ToolDefinition,
 } from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
-
-/**
- * Return `lines` with a leading BOM removed from its first element.
- *
- * The caller's array is never mutated: when a BOM is present a copy is
- * returned, otherwise the same array.
- */
-function withoutLeadingBom(lines: string[]): string[] {
-  const first = lines[0];
-  if (first === undefined) return lines;
-  const stripped = stripLeadingBom(first);
-  return stripped === first ? lines : [stripped, ...lines.slice(1)];
-}
 
 /**
  * Validate a document name to prevent path traversal attacks.
@@ -234,7 +222,7 @@ export const docPutTool: ToolDefinition = {
     // store nothing, so it never reaches the wire. A caller-supplied array is
     // copied, never mutated.
     const lines = Array.isArray(content)
-      ? withoutLeadingBom(content)
+      ? stripLeadingBomFromLines(content)
       : stripLeadingBom(content).split(/\r?\n/);
     const encodedName = encodeURIComponent(name);
     const params = new URLSearchParams();

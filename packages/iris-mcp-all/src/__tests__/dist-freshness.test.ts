@@ -234,6 +234,11 @@ describe("checkDistFresh - `files` spellings (Story 38.0, DW-413)", () => {
     ["dist/*"],
     ["dist/**/*"],
     ["./dist/**/*"],
+    ["dist/**/*.js"],
+    ["dist/*.js"],
+    ["dist/index.js"],
+    ["dist/**/"],
+    ["/dist"],
     ["dist", "!dist/**/__tests__"],
   ]) {
     it(`treats files ${JSON.stringify(files)} as dist-shipping (checked, not skipped)`, () => {
@@ -253,6 +258,37 @@ describe("checkDistFresh - `files` spellings (Story 38.0, DW-413)", () => {
     writePackageJson(workDir, { files: ["src", "!dist/**"] });
     const result = checkDistFresh(workDir, "@test/pkg");
     expect(result).toEqual({ ok: true, skipped: true });
+  });
+
+  it("does not treat a sibling name that merely starts with dist (files [\"dist-types\"]) as dist-shipping", () => {
+    writePackageJson(workDir, { files: ["dist-types"] });
+    expect(checkDistFresh(workDir, "@test/pkg")).toEqual({ ok: true, skipped: true });
+  });
+});
+
+describe("checkDistFresh - src/__tests__ is not part of the shipped build", () => {
+  it("a test fixture edited after the build does not make dist/ stale (it never ships and is never re-emitted)", () => {
+    writePackageJson(workDir, {});
+    const { now } = layOutFreshBuild(workDir);
+    const fixture = join(workDir, "src", "__tests__", "fixtures", "client.json");
+    mkdirSync(join(workDir, "src", "__tests__", "fixtures"), { recursive: true });
+    writeFileSync(fixture, "{}");
+    utimesSync(fixture, new Date(now + 1_000), new Date(now + 1_000));
+
+    expect(checkDistFresh(workDir, "@test/pkg", { now: now + 2_000 })).toEqual({ ok: true });
+  });
+
+  it("a shipped source file edited after the build still makes dist/ stale beside an unchanged __tests__ tree", () => {
+    writePackageJson(workDir, {});
+    const { srcFile, now } = layOutFreshBuild(workDir);
+    mkdirSync(join(workDir, "src", "__tests__"), { recursive: true });
+    writeFileSync(join(workDir, "src", "__tests__", "index.test.ts"), "export {};");
+    utimesSync(join(workDir, "src", "__tests__", "index.test.ts"), new Date(now - 7_200_000), new Date(now - 7_200_000));
+    utimesSync(srcFile, new Date(now + 1_000), new Date(now + 1_000));
+
+    const result = checkDistFresh(workDir, "@test/pkg", { now: now + 2_000 });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("STALE");
   });
 });
 

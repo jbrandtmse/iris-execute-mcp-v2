@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripLeadingBom } from "../lines.js";
+import { stripLeadingBom, stripLeadingBomFromLines } from "../lines.js";
 import * as shared from "../index.js";
 
 describe("stripLeadingBom", () => {
@@ -29,5 +29,33 @@ describe("stripLeadingBom", () => {
 
   it("is exported from the @iris-mcp/shared barrel", () => {
     expect(shared.stripLeadingBom).toBe(stripLeadingBom);
+  });
+});
+
+describe("stripLeadingBomFromLines", () => {
+  it("returns a copy with the first line's BOM removed and leaves the caller's array untouched", () => {
+    const caller = ["﻿Class A.B {", "﻿{", "}"];
+
+    const result = stripLeadingBomFromLines(caller);
+
+    expect(result).toEqual(["Class A.B {", "﻿{", "}"]);
+    expect(result).not.toBe(caller);
+    expect(caller).toEqual(["﻿Class A.B {", "﻿{", "}"]);
+  });
+
+  it("returns the same array when the first line has no BOM", () => {
+    const caller = ["Class A.B {", "}"];
+
+    expect(stripLeadingBomFromLines(caller)).toBe(caller);
+  });
+
+  it("returns the same empty array for an empty document", () => {
+    const caller: string[] = [];
+
+    expect(stripLeadingBomFromLines(caller)).toBe(caller);
+  });
+
+  it("is exported from the @iris-mcp/shared barrel", () => {
+    expect(shared.stripLeadingBomFromLines).toBe(stripLeadingBomFromLines);
   });
 });

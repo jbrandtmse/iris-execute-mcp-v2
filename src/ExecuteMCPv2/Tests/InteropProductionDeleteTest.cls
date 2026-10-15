@@ -34,6 +34,10 @@ Parameter MISSING = "ExecuteMCPv2.Temp.Story380Missing";
 /// Prefix shared by every fixture this class may create.
 Parameter FIXTUREPREFIX = "ExecuteMCPv2.Temp.Story380";
 
+/// Name of the configuration item the orphan-with-items test gives the orphan row (under the
+/// disposable prefix, so the by-name sweep in <method>RemoveFixtures</method> can only reach it).
+Parameter ORPHANITEM = "ExecuteMCPv2.Temp.Story380OrphanItem";
+
 Method OnBeforeOneTest() As %Status
 {
     Do ..RemoveFixtures()
@@ -71,6 +75,8 @@ Method RemoveFixtures()
         Quit:tName=""
         If ##class(Ens.Config.Production).%ExistsId(tName) { Do ##class(Ens.Config.Production).%DeleteId(tName) }
     }
+    ; An item left behind with no owning production (a failed run) is removed by its fixture name.
+    Do ##class(%SQL.Statement).%ExecDirect(, "DELETE FROM Ens_Config.Item WHERE Name = ?", ..#ORPHANITEM)
 }
 
 /// Count the Ens.Config.Production rows under the fixture prefix.
@@ -159,6 +165,45 @@ Method TestDeleteOrphanRowRemoved() As %Status
     Do $$$AssertEquals(tEnv.result.orphanRemoved, 1, "response reports orphanRemoved")
     Do $$$AssertTrue('##class(Ens.Config.Production).%ExistsId(..#ORPHAN), "the orphan row is gone")
     Quit $$$OK
+}
+
+/// DW-55 - the orphan row is removed together with its configuration items: the row is deleted
+/// through <code>Ens.Config.Production:%DeleteId</code>, which also removes the items the row owns,
+/// so no <class>Ens.Config.Item</class> row is left pointing at a production that no longer exists.
+Method TestDeleteOrphanRowRemovesItsItems() As %Status
+{
+    Set tRow = ##class(Ens.Config.Production).%New()
+    Set tRow.Name = ..#ORPHAN
+    Set tItem = ##class(Ens.Config.Item).%New()
+    Set tItem.Name = ..#ORPHANITEM
+    Set tItem.ClassName = "EnsLib.File.PassthroughOperation"
+    ; The item row carries its production, exactly as LoadFromClass leaves it; without this
+    ; reference the item is not owned by the production and %DeleteId does not remove it.
+    Set tItem.Production = tRow
+    Do tRow.Items.Insert(tItem)
+    Do $$$AssertStatusOK(tRow.%Save(), "the orphan row and its item are created")
+    Kill tItem, tRow
+    Do $$$AssertTrue('##class(%Dictionary.ClassDefinition).%ExistsId(..#ORPHAN), "precondition: the orphan has no production class")
+    Do $$$AssertEquals(..ItemCount(..#ORPHANITEM), 1, "precondition: the orphan row owns one item")
+
+    Set tSC = ..PostJson("/api/executemcp/v2/interop/production", ..ManageBody("delete", ..#ORPHAN), .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the delete HTTP call must succeed at the transport level")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertEquals(..EnvelopeErrorCount(tEnv), 0, "removing an orphan row carries no errors (got: " _ tEnv.%ToJSON() _ ")")
+    Do $$$AssertEquals(tEnv.result.orphanRemoved, 1, "response reports orphanRemoved")
+    Do $$$AssertTrue('##class(Ens.Config.Production).%ExistsId(..#ORPHAN), "the orphan row is gone")
+    Do $$$AssertEquals(..ItemCount(..#ORPHANITEM), 0, "the row's item is gone with it, not left behind without a production")
+    Quit $$$OK
+}
+
+/// Number of <class>Ens.Config.Item</class> rows named <var>pItemName</var>, whichever production (if any) they
+/// point at: an item left behind with no production must still be counted.
+Method ItemCount(pItemName As %String) As %Integer
+{
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM Ens_Config.Item WHERE Name = ?", pItemName)
+    If '$IsObject(tRS) || (tRS.%SQLCODE < 0) Quit -1
+    Do tRS.%Next()
+    Quit +tRS.%GetData(1)
 }
 
 /// DW-54 normal path - a production created through the create action and never started is not
