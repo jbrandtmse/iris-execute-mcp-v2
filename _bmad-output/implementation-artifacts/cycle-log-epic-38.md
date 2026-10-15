@@ -37,3 +37,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-15T14:34:47Z	Story 38.0	fresh_check	env=clean-checkout_worktree_at_e8ed614_pnpm_install_frozen+turbo_build tests=615 files=33 result=pass order=forward,shuffle_seed7 live_gates=armed os_tests=shared_instance_no_throwaway_available model=claude-opus-5-5
 2026-10-15T14:34:59Z	Story 38.0	committed	sha=6ec5d68 code_sha=e8ed614 build_sha=05b26d9 submodules= ci=none run=none branch=epic38 pushed=origin/epic38 verified=merge-base amendments=epics.md:Story-38.0-inserted,ARCHITECTURE-SPINE.md:AD-15
 2026-10-15T14:34:59Z	Story 38.0	story_cycle	plan_to_commit_min=164 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-15T14:37:21Z	Story 38.1	stage_spawned	stage=plan spawn_at=2026-10-15T14:37:21Z model=claude-opus-5-5 agent_name=38-1-reject-the-unimplemented-http-transport-plan-1 cycle_iteration=1
