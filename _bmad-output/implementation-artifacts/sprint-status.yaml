@@ -503,7 +503,7 @@ development_status:
   38-2-line-range-document-read: done
   38-3-storage-block-drop-guard: done
   38-4-surgical-line-edit-tool: done
-  38-5-sql-write-safety: ready-for-dev
+  38-5-sql-write-safety: in-progress
   38-6-editing-and-sql-safety-docs-prompt-and-capstone: backlog
   epic-38-retrospective: optional
 
