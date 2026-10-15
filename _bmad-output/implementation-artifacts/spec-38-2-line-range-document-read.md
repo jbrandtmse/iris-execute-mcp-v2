@@ -5,7 +5,6 @@ created: '2026-10-15'
 status: 'done'
 baseline_revision: '8fae074ba9870f32d1f0555e3b977138db4f80d8'
 baseline_commit: '8fae074ba9870f32d1f0555e3b977138db4f80d8'
-baseline_commit: '7d685770ddd6590a48e671dbc3bb417bfdf0c054'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
