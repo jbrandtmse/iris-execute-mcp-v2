@@ -52,9 +52,12 @@ const epics = readFileSync(EPICS, "utf8");
 
 // Story keys: `  N-M-slug: status` lines (epic keys `epic-N` and
 // `epic-N-retrospective` do not match the \d+-\d+- shape and are excluded).
+// The slug class admits `_` because sprint_plan.py's `_slug` keeps word
+// characters: a title naming a tool (`iris_package_list`) yields an
+// underscore key (tracker reconciled to generated slugs 2026-10-14).
 const storyKeys = [];
 for (const line of sprint.split("\n")) {
-  const m = line.match(/^\s{2}(\d+-\d+-[a-z0-9-]+):\s*\S+/);
+  const m = line.match(/^\s{2}(\d+-\d+-[A-Za-z0-9_-]+):\s*\S+/);
   if (m) storyKeys.push(m[1]);
 }
 

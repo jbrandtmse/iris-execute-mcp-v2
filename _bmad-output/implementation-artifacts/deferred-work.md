@@ -156,6 +156,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:8.6 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Pre-existing publish-readiness concern across all packages; later routed to the publishing checklist item A2.
 - 2026-10-14T10:47:49Z status=wontfix-accepted owner=8-6-meta-package-iris-mcp-all by=migration note=reopen_if=the npm publish decision is taken and a package.json still lacks license/repository/author
+- 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: npm publish decided (decision-record-2026-10-14)
 
 ### DW-32: [L8.retro-post-project-1-npm-publishing-session] Retro Post-Project Action #1: npm publishing session
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -171,6 +172,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Publishing activity; belongs to the publishing checklist and post-project planning.
 - 2026-10-14T10:47:49Z status=dropped owner=8-0-epic-7-deferred-cleanup by=migration note=not pipeline work: IPM publishing
+- 2026-10-15T02:51:51Z status=routed owner=42-4-ipm-package-revival by=correct-course note=reopened by D6 (decision-record-2026-10-14): revive IPM, generated manifest, offline install proof, publish
 
 ### DW-35: [L8.retro-followthrough-mcp-test-harness] Retro Follow-Through: MCP test harness
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -236,6 +238,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:11.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Deferred to the pre-publish session; routed to publishing checklist.
 - 2026-10-14T10:47:49Z status=decision-pending owner=burndown by=migration note=human=run the pre-publish smoke test (Story 9.3 rerun) in the pre-publish session
+- 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D2 (decision-record-2026-10-14): local tarball smoke required before 1.0.0
 
 ### DW-48: [L11.retro-3-retrospective-skill-rules-enforcement] Epic 11 retro action #3: update /bmad-retrospective skill to enforce Rules codification
 - source: legacy:11.0 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1301,6 +1304,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:31.4 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Both halves are publish-coupled product decisions assigned to the end-of-Epic-32 merge gate with the @iris-mcp/* publish decision; minimum remediation named (neutral cwd + packageVersion setting).
 - 2026-10-14T10:47:53Z status=wontfix-accepted owner=31-4-broker-extension by=migration note=reopen_if=the @iris-mcp/* publish decision is taken and the launcher spawns published packages
+- 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: publish decided; D3 (decision-record-2026-10-14) major pin @1; neutral-cwd half probed in 42.1
 
 ### DW-261: [31-4-8] extension.exports cached without shape validation: a truthy-but-wrong Server Manager API is cached permanently
 - source: legacy:31.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1501,6 +1505,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:32.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Nothing on npm; npx -y @iris-mcp/<pkg> fails for external users; published-mode paths remain dev-mode-only; Epic 33 docs must target the local-path reality.
 - 2026-10-14T10:47:54Z status=decision-pending owner=burndown by=migration note=human=Project Lead decision to npm-publish the @iris-mcp packages
+- 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D1/D2/D7 (decision-record-2026-10-14): publish 1.0.0 through the CI release workflow
 
 ### DW-301: [32-4-R1] helpRequested valuedOptions set is a second hand-maintained mirror of parseArgs's per-command valued options
 - source: legacy:32.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1936,6 +1941,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Publish order client-config, shared, admin, data, dev, interop, ops, all; add a root-level pre-flight release script that runs the full gate set once before pnpm -r publish.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: add a root-level pre-flight release script as the sole supported publish command
+- 2026-10-15T02:51:51Z status=routed owner=42-5-release-workflow by=correct-course note=decided D7 (decision-record-2026-10-14): release workflow with root pre-flight script as sole publish command
 
 ### DW-388: [34-6-CR-13] verify-iris-reachable.mjs silently falls back to hard-coded local dev credentials when env vars are unset
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -1946,6 +1952,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work; replace the publisher placeholder before any marketplace release.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work
+- 2026-10-15T02:51:51Z status=routed owner=42-7-vs-code-extension-publish by=correct-course note=decided D5 (decision-record-2026-10-14): project-name publisher on Marketplace + Open VSX; private:true for npm
 
 ### DW-390: [34-6-CR-15] The TS tool layer discards byRefTruncated on the error path (execute.ts extracts only truncated)
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -1971,6 +1978,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: New response fields and a newly truthy isError are feat-shaped; decide the initial minor/patch boundary before the first publish (free now, uncorrectable afterwards); consider stripping prepublishOnly via publishConfig.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=human=Project Lead decides the initial minor/patch version boundary before the first npm publish
+- 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=decided D2 (decision-record-2026-10-14): align every @iris-mcp/* package at 1.0.0
 
 ### DW-395: [34-6-CR-20] Documentation and bookkeeping accuracy cluster: (a) error envelope can carry truncated:true for an absent output
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2196,6 +2204,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Gated on Epic 35 completing (Stories 35.1-35.8 make the hand-off safe); jointly blocked with #2.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=Project Lead runs the beta distribution to the test group
+- 2026-10-15T02:51:51Z status=dropped by=correct-course note=not pipeline work - human action complete: git-clone beta ran by 2026-09-11 (epic-36-retro-2026-09-11.md:62-63); public beta declined by D2 (decision-record-2026-10-14)
 
 ### DW-440: [L33.retro4-3-kimi-code-vscode-extension-half] Epic 33 retro section 4 #3: Kimi Code VS Code extension half
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2206,6 +2215,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Deliberately re-sequenced behind beta; blocked on the Epic 33 publish decision (section 4 #1).
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=re-run client certification after the npm publish happens
+- 2026-10-15T02:51:51Z status=routed owner=42-9-install-docs-and-client-re-certification by=correct-course note=decided (decision-record-2026-10-14 story 8); human-only client rows recorded as such
 
 ### DW-442: [L33.retro4-6-find-a-copilot-user] Epic 33 retro section 4 #6: find a Copilot user
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2216,6 +2226,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED on the tarball path specifically (Rule #59).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED
+- 2026-10-15T02:51:51Z status=routed owner=42-3-ci-workflow by=correct-course note=D7 (decision-record-2026-10-14): CI gates; prove RED on the tarball path (Rule #59)
 
 ### DW-444: [35-1-DEV-1] The full parallel turbo run build test lint is not reliably green in this dev environment
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2531,6 +2542,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pre-existing since the subpaths were added; found by an exports-vs-tarball check; before the first publish drop the subpaths via publishConfig.exports or move them to a dev-only mechanism
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Pre-existing since the subpaths were added; found by an exports-vs-tarball check
+- 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=pre-publish fix table (decision-record-2026-10-14)
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2541,6 +2553,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.4 | severity: high | fix-risk: high | footprint: out-of-footprint
 - evidence: probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality only; fix: embed a monotonic seq:hash, add a newer status so bootstrap() does not redeploy; servers already built without it will always downgrade.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality
+- 2026-10-15T02:51:51Z status=routed owner=42-2-bootstrap-downgrade-guard by=correct-course note=pre-publish fix table (decision-record-2026-10-14); must land before 42.6 publishes
 
 ### DW-509: [36-4-CR-2] BuildGlobalRef's numeric test tSub = (+tSub) throws <MAXNUMBER> for a string key whose numeric prefix overflows (e.g. 1E999)
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint

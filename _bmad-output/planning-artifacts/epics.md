@@ -505,6 +505,10 @@ So that I have confidence the HTTP client, auth, health check, and version negot
 
 A developer can manage ObjectScript documents, compile code with error feedback, search across codebases, work with macros, execute SQL queries, and get server/namespace info — all through their AI assistant via Atelier API-based tools.
 
+### Story 2.0: Epic 1 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/2-0-epic-1-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `2-0-epic-1-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 2.1: iris-dev-mcp Package Setup & Server Entry Point
 
 As a developer,
@@ -752,6 +756,10 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 ## Epic 3: Custom REST Service, Auto-Bootstrap & Execution Tools
 
 The IRIS-side REST service is deployed (automatically or manually), enabling global operations, ObjectScript command execution, class method calls, and unit test execution. The auto-bootstrap flow handles installation transparently.
+
+### Story 3.0: Epic 2 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/3-0-epic-2-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `3-0-epic-2-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
 
 ### Story 3.1: ObjectScript REST Dispatch & Utils Classes
 
@@ -1074,6 +1082,10 @@ So that I can efficiently deploy entire packages or project directories without 
 
 An administrator can provision complete IRIS environments — namespaces, databases, users, roles, resources, web applications, SSL configs, and OAuth2 — entirely through AI-directed MCP tool calls, without opening the Management Portal.
 
+### Story 4.0: Epic 3 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/4-0-epic-3-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `4-0-epic-3-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 4.1: iris-admin-mcp Package Setup & Server Entry Point
 
 As an administrator,
@@ -1366,6 +1378,10 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 An integration engineer can create, control, monitor, and debug Interoperability productions — including credentials, lookup tables, rules, transforms, and REST API management — through MCP tools.
 
+### Story 5.0: Epic 4 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/5-0-epic-4-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `5-0-epic-4-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 5.1: iris-interop-mcp Package Setup & Server Entry Point
 
 As an integration engineer,
@@ -1607,6 +1623,10 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 An operations engineer can monitor system health, manage scheduled tasks, inspect jobs/locks/journals/mirrors, query audit logs, check license and ECP status, and manage system configuration — all through AI-driven MCP tools.
 
+### Story 6.0: Epic 5 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/6-0-epic-5-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `6-0-epic-5-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 6.1: iris-ops-mcp Package Setup & Server Entry Point
 
 As an operations engineer,
@@ -1846,6 +1866,10 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 A data engineer or analyst can create and query document databases, manage documents and indexes, execute MDX queries on DeepSee cubes, and manage REST APIs — through MCP tools.
 
+### Story 7.0: Epic 6 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/7-0-epic-6-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `7-0-epic-6-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 7.1: iris-data-mcp Package Setup & Server Entry Point
 
 As a data engineer,
@@ -2015,6 +2039,10 @@ So that I can verify parameter validation, response parsing, and end-to-end beha
 
 Users can find comprehensive documentation — suite-level README, per-package tool references, v1-to-v2 migration guide, and MCP client config examples — enabling self-service installation and adoption.
 
+### Story 8.0: Epic 7 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/8-0-epic-7-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `8-0-epic-7-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 8.1: Suite-Level README & Architecture Overview
 
 As a potential user,
@@ -2151,6 +2179,10 @@ The epic flattens all 85 tool names from `iris.<domain>.<verb>` to `iris_<domain
 - Any rename beyond the dot-strip character swap (no server-scoping, no hyphens)
 
 **Driving document:** [`sprint-change-proposal-2026-04-09.md`](sprint-change-proposal-2026-04-09.md)
+
+### Story 9.0: Epic 8 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/9-0-epic-8-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `9-0-epic-8-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
 
 ### Story 9.1: Rename Tool Identifiers in Source and Tests
 
@@ -2899,6 +2931,10 @@ So that the first npm publish ships a suite that is verified to work on the plat
 - Deeper refactor of the redirect-I/O charset path — only fix if BUG-8 traces to the ObjectScript side rather than TS decode.
 - Any changes to Epic 11-era handlers beyond the specific methods these stories touch.
 
+### Story 12.0: Epic 11 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/12-0-epic-11-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `12-0-epic-11-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 12.1: Password change fix + validate response policy surface
 
 **As an** admin calling `iris_user_password action:"change"`,
@@ -3323,6 +3359,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - Server-side (IRIS) governance enforcement — enforcement is at the MCP server layer only.
 - Profile/policy hot-reload — config read at startup; restart to change.
 
+### Story 14.0: Epic 13 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/14-0-epic-13-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `14-0-epic-13-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 14.1: Multi-Server Profiles — Config Model & Connection Resolution
 
 **As an** operator running the MCP suite against more than one IRIS instance,
@@ -3451,6 +3491,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 
 **Out of scope (deferred)**: encryption key management, phone providers (2FA), authentication-method wizards — deferred per research doc Tier 3.
 
+### Story 15.0: Epic 14 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/15-0-epic-14-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `15-0-epic-14-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 15.1: `iris_service_manage` — IRIS Service Configuration
 **As an** administrator, **I want** to list and toggle IRIS services and their auth settings, **so that** I can harden an instance (e.g. disable `%Service_Telnet`) via the agent.
 **Acceptance Criteria**:
@@ -3534,6 +3578,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 
 **Out of scope (deferred)**: CSP session management, transaction listing, ECP config — Tier 3.
 
+### Story 16.0: Epic 15 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/16-0-epic-15-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `16-0-epic-15-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ### Story 16.1: `iris_process_manage` — Process Detail & Control
 **As an** operator, **I want** process detail and the ability to terminate/suspend/resume, **so that** I can manage runaway or stuck processes (extends read-only `jobs_list`).
 **Acceptance Criteria**:
@@ -3592,6 +3640,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - 17.4 BOOTSTRAP_VERSION bump + live verification + documentation rollup
 
 **Out of scope (deferred)**: rule write/test, pub/sub, workflow, business partners, deployment, archive — all deferred per research doc §5.6 (future epics).
+
+### Story 17.0: Epic 16 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/17-0-epic-16-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `17-0-epic-16-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
 
 ### Story 17.1: `iris_default_settings_manage` — System Default Settings
 **As an** integration engineer, **I want** to manage Interoperability System Default Settings, **so that** I can configure the production-portable settings override layer via the agent.
@@ -4501,6 +4553,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 33.4.3** — Docs rollup (Rule #30): `@iris-mcp/client-config` README (adapter table with per-client paths/formats/disable mechanism/restart hints, certification dispositions); root README section; per-client recipes superseded by `iris-mcp-clients apply` guidance with the old manual snippets retained as fallback; CHANGELOG.
 - **AC 33.4.4** — Kimi Code dual-surface verification: one config written to `~/.kimi-code/mcp.json` is confirmed visible in BOTH the Kimi Code CLI/TUI and its VS Code extension; repo `.mcp.json` sharing between Claude Code and Kimi Code verified and documented (binding-spec claim, proven live per Rule #14/#16). *(Amended 2026-07-28, Story 33.4 dev, Rule #42 — the live verification FALSIFIED the spec's `.mcp.json`-fallback claim: kimi-code 0.29.0 loaded NO project-scope server from `.mcp.json` (or from the docs-documented `.kimi-code/mcp.json`) in print mode — a distinctive working probe server answered TOOL-NOT-LOADED — and the official docs document only `.kimi-code/mcp.json`. The AC is therefore satisfied as: CLI/TUI half verified live (user scope), VS Code extension half fixture-only-with-residual-risk (extension not installed), `.mcp.json` sharing verified for the Claude Code side and recorded as FALSIFIED/residual-risk for the Kimi side, with the adapter-data fallback removed (`ADAPTER_DATA_VERSION` → 2026-07-28.1). Project-scope loading may be TUI-only — recorded residual risk.)*
 
+### Story 33.5: Late Findings Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/33-5-late-findings-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `33-5-late-findings-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
+
 ## Epic 34: `iris_execute_classmethod` Fidelity — Write Capture, ByRef/Output Args, 20-Arg Ceiling (added 2026-08-14)
 
 **Goal**: Make `iris_execute_classmethod` faithfully round-trip everything a classmethod invocation produces. Today a target method that `Write`s to the current device corrupts the JSON envelope ("non-JSON response") because `ClassMethod()` in `ExecuteMCPv2.REST.Command` has no I/O capture — unlike `Execute()` 100 lines up in the same class, which already has the null-device redirect pattern. Additionally there is no way to pass or retrieve `ByRef`/`Output` arguments (an unfulfilled part of **FR38**), and the positional-arg ceiling is 10 (raise to 20). Trigger: [docs/bugs-2026-08-14.md](../../docs/bugs-2026-08-14.md) (three live reproductions) + stakeholder request; see [sprint-change-proposal-2026-08-14.md](./sprint-change-proposal-2026-08-14.md).
@@ -4523,6 +4579,10 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 **Story-numbering note (2026-08-14, stakeholder decision)**: this epic's own work starts at **34.1**, departing from the project's usual X.0-is-the-probe convention (Epics 23–33). `/epic-cycle`'s mandatory retro-review gate auto-creates "Story {N}.0: Epic {N-1} Deferred Cleanup" whenever the prior epic's retro or `deferred-work.md` has unresolved items — Epic 33's retro exists and the ledger carries 15 unresolved LOW items from Story 33.5 — so 34.0 is left free for that story rather than colliding with it. Per Rule #37 those items are on their FIRST deferral, so the gate's triage may legitimately re-defer any of them; a burn-down is only mandatory at 3 consecutive re-deferrals.
 
 **Out of scope**: streaming/chunked output for very large captures; `ByRef` object (OREF) arguments; `iris_execute_command` changes (already has capture).
+
+### Story 34.0: Epic 33 Deferred Cleanup
+
+*Runtime story created during the epic cycle, not planned in this document; its record is `_bmad-output/implementation-artifacts/34-0-epic-33-deferred-cleanup.md`. Heading added 2026-10-14 so `sprint_plan.py generate` keeps the tracker key `34-0-epic-33-deferred-cleanup` (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md, section 4.2).*
 
 ### Story 34.1: ClassMethod Invocation Probe
 
@@ -4872,3 +4932,907 @@ Source: [sprint-change-proposal-2026-06-15.md](./sprint-change-proposal-2026-06-
 - **AC 37.1.12** - **Gate duties folded in (no 37.0 in this epic — L-5).** Confirm `epic37` exists off `main` (`2ed83ff` or later) and is the current branch before any code lands (L-1; HALT and escalate otherwise); Rule #57 machinery armed for this story's review (bounded-close, frozen-diff snapshot, delivery receipts — Epic 36 closed non-degraded, hold that bar); suite baselines re-measured at pickup with per-package standalone runs (prior figures in `deferred-work.md` → "Epic 36 retro-review gate" → "Suite baselines", per `36-0-CR-Z`; the `35-1-DEV-1` and `36-4-CR-4` parallel flakes are environmental); the ledger is NOT triaged here — the Rule #37 exception in the epic preamble stands and the Epic 38 gate owns the transferred obligation.
 
 **Out of scope for Epic 37**: existence of the `default` profile (`IRIS_USERNAME`/`IRIS_PASSWORD` remain required at startup — README `:109`, `config.ts:135-141`); a strictness env var restoring fail-fast (ledger candidate with a named trigger, L-3); per-profile reachability in `iris_server_profiles` (ledger candidate, L-4); periodic re-ping / background monitoring; the Rule #37 burn-down of the 36 count-2 items (transferred to the Epic 38 gate — Lead exception L-5, recorded above); `36-4-CR-1` (HIGH bootstrap downgrade — its own pre-publish story in a later epic, per the Epic 36 retro §7 and L-5); the SDK `extra`-argument wiring (Epic 36 carry); the npm publish (post-beta, Project Lead action).
+
+# Competitive Response, Skills Pack & Published Install (Epics 38–42 — added 2026-10-14)
+
+Source: the Project Lead decision record [decision-record-2026-10-14-distribution-and-skills.md](./decision-record-2026-10-14-distribution-and-skills.md) and the competitive teardown [research/competitive-iris-agentic-dev-mcp-tools-gap-analysis-2026-10-14/research.md](./research/competitive-iris-agentic-dev-mcp-tools-gap-analysis-2026-10-14/research.md) (gap IDs `G<n>` resolve in its gap register). See [sprint-change-proposal-2026-10-14-competitive-skills-distribution.md](./sprint-change-proposal-2026-10-14-competitive-skills-distribution.md) for the Lead decisions S-1 to S-4 and L-1 to L-4 cited below. All were approved 2026-10-14 as recommended:
+
+- L-1: one wave branch per group;
+- L-2: PHI policy default `redact`;
+- L-3: add the read-classified `iris_sql_query`;
+- L-4: the new interop tools and the new dev tools join `core`.
+
+The epics run in order **38 → 39 → 40 → 41 → 43 → 42**. Epic 43 (MCP SDK v2 migration) was added on 2026-10-15 by Project Lead decision, after the architecture-spine review found that the MCP TypeScript SDK v2 and specification revision `2026-07-28` had shipped. It runs before Epic 42 so that `1.0.0` publishes on the current SDK line. Epic numbers are labels; the run order above governs.
+
+**Shared by every epic in this wave:**
+
+- **The architecture spine binds every story.** It is `architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md` (AD-1 to AD-34, plus its Consistency Conventions). Where a story's text and the spine disagree, the spine wins and the story is amended in place.
+- Story numbers start at N.1. N.0 is left free for `/epic-cycle`'s retro-review gate, which inserts it.
+- **Branching (L-1).** One wave branch per group, each cut off `main` when its first epic starts:
+  - `feature/feature-wave-6-competitive-gaps` for Epics 38–40;
+  - `feature/feature-wave-7-skills-pack` for Epic 41;
+  - `feature/feature-wave-8-published-install` for Epic 43 and then Epic 42.
+
+  Epic branches are `epic{N}`, per `_bmad/custom/branch-naming.yaml`. At the SC-1 prompt, name the wave branch.
+- **Probe before building.** Each story verifies its API claims live before coding (Rules #14/#16/#47) and amends this text in place if a claim is wrong.
+- **Classification and visibility.** A new tool or action carries `mutates` (Rule #28) and a visibility disposition in every preset (Rule #53).
+- **Bootstrap discipline.** A story that changes a bootstrapped class regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to (Rule #24). A new class enters both rosters (Rule #39).
+- **Frozen baseline.** `GOVERNANCE_BASELINE` stays frozen at `1e62c5ad5bf7`/141, checked with `:check` only (Rules #23/#25).
+- **Live proof.** Endpoint-backed stories smoke the live HTTP route, including one destructive-path refusal (Rule #26). Every gate is proven red on the path it guards (Rule #59).
+- **Shared IRIS instance.** Other projects use it, and it is never stopped. Writes go only to disposable `ExecuteMCPv2.Temp.*` classes, tables and namespaces, which the story removes afterwards. Message-body fixtures are synthetic only; a story never reads another project's messages.
+
+## Epic 38: Agent Code Editing & Write Safety (added 2026-10-14)
+
+**Goal:** An agent can read a document by line range, change only the lines it means to change under an expected-text check, and cannot silently drop a class's Storage block. SQL writes can be confined to read-only or capped by rows affected. The suite no longer accepts a transport it cannot run.
+
+**Context:** P1 gaps G1, G2, G5, G21 and G22 (SQL write safety, a story set), and G48 (our own defect), from research recommendations 1, 3 and 5. The competitor's `iris_doc` modes `fragment`, `insert`, `delete_lines` (with a `STALE_CONTENT` guard) and its storage guard are their implementation (research [3]). Their put ignores conflicts. Ours does not (`doc.ts:184,215`), and our line edits keep that check. `iris_sql_execute` runs any DML with no limit; it is a frozen-baseline write, so the `read-only` preset blocks even SELECTs (research [26]; `baseline-classifications.ts:204`).
+
+**Constraints:**
+
+- `iris_doc_edit` is a new write tool enabled by default (Lead decision S-3, extending Rule #32's `defaultEnabled` beyond recovery tooling). It must never be classified `read`, never enter the frozen baseline, and stays blocked under `IRIS_GOVERNANCE_PRESET=read-only`.
+- `core`'s 13 runtime tools per server is a guideline, not a hard limit (Project Lead, 2026-10-14). `iris_doc_edit` and `iris_sql_query` join dev `core` (L-3, L-4). Each story records the resulting `core` size and why the tool is everyday-loop. No existing `core` tool is removed.
+
+**Out of scope:**
+
+- Implementing Streamable HTTP. That is a P2 candidate that needs an auth design (S-2).
+- Server-side source control (G4, P2).
+- Compile-by-wildcard (G6).
+- Inline multi-document fetch (G3).
+- A storage guard on `iris_doc_load`. 38.3 records it as a candidate with a reopen trigger.
+
+### Story 38.1: Reject the Unimplemented HTTP Transport
+
+G48, "fix now" (S-2). Pure TypeScript in `@iris-mcp/shared` plus the five entry points. No tool, key or bootstrap change.
+
+- **AC 38.1.1** — Root cause confirmed and recorded:
+  - `resolveTransport()` (`packages/shared/src/transport.ts:9-26`) accepts `http` from the environment variable and the CLI flag;
+  - `McpServerBase.start()` reaches `server-base.ts:2165-2173` and throws "HTTP transport not yet implemented" after startup work has begun.
+
+  Record the variable and flag names exactly.
+- **AC 38.1.2** — `http`, and any value other than `stdio`, is rejected at **configuration time**: inside `resolveTransport`, before any IRIS traffic. The error names the value, says stdio is the only supported transport, and exits non-zero, the same fail-fast class as the other configuration errors (architecture M1). The dead HTTP branch in `start()` is removed and its signature narrows to `stdio`.
+- **AC 38.1.3** — Back-compat (Rule #19): with no transport configured, or `stdio`, startup behavior and the startup fetch sequence are byte-identical to today, pinned with `toEqual`. The 38 `stageDefaultStartup` test files pass unmodified.
+- **AC 38.1.4** — Unit tests cover the environment and flag forms of `http` and an unknown value: message, exit, and no fetch. Reverting the fix turns them red on the real entry path, `resolveTransport` as called by each `index.ts` (Rule #59).
+- **AC 38.1.5** — Live check: launch the built `iris-dev-mcp` dist in a fresh Node process with the transport set to `http`, `IRIS_HOST=127.0.0.1` and `IRIS_PORT=9`. It exits with the message and opens no connection.
+- **AC 38.1.6** — Docs: every mention of Streamable HTTP or `--transport http` is listed with a verdict (Rule #56). That covers the root README, the five server READMEs and `docs/client-config/*`. `CHANGELOG.md` and a changeset are updated. A real HTTP transport is filed through `ledger.sh new` as `decision-pending`, with `note=human=` naming the auth design it needs.
+- **AC 38.1.7** — Gates:
+  - `pnpm turbo run build test lint type-check` passes;
+  - governance `:check` exits 0;
+  - tool counts are unchanged;
+  - `bootstrap-classes.ts` is absent from the diff.
+
+### Story 38.2: Line-Range Document Read
+
+G1. `iris_doc_get` gains an optional line range. The read key is unchanged and no tool is added.
+
+- **AC 38.2.1** — Probe and record:
+  - the line structure the Atelier `GET /doc` returns for `.cls` (UDL), `.mac`, `.int` and `.inc`;
+  - how `metadataOnly` interacts with a range.
+
+  Line numbers are defined once, as 1-based indexes into that `content` array. 38.4 uses the same numbering.
+- **AC 38.2.2** — New optional parameters `startLine` and `endLine` (1-based, inclusive):
+  - `endLine` past the end clamps to the last line;
+  - `startLine` past the end, `startLine > endLine`, or a range combined with `metadataOnly` returns a clear `isError` and never an empty success.
+- **AC 38.2.3** — Response:
+  - the text form carries line numbers in one documented format;
+  - `structuredContent` carries `name`, `startLine`, `endLine`, `totalLines` and the lines.
+- **AC 38.2.4** — Back-compat (Rule #19): with neither parameter, the request and the response are byte-identical to today, pinned with `toEqual` against pre-feature output.
+- **AC 38.2.5** — Oracle (Rule #36): for a live class over 500 lines, every ranged read equals the matching slice of a full read. Boundary cases (first line, last line, a single line, a clamped end) are pinned from the live capture.
+- **AC 38.2.6** — The tool description and docs explain when to use a range: large classes, and a read before `iris_doc_edit`. Minimal docs ship in this story (Rule #43).
+
+### Story 38.3: Storage Block Drop Guard
+
+G5. A cheap safety check on the document write path that 38.4 reuses.
+
+- **AC 38.3.1** — Probe and record, with live captures:
+  - how Storage definitions appear in the UDL that Atelier returns (`Storage Default { … }`, several storage definitions, `%Storage.SQL`, classes without one);
+  - whether `iris_doc_put` today regenerates storage when it is omitted;
+  - the data-layout consequence, on a disposable persistent class with rows.
+- **AC 38.3.2** — The guard is one shared function. It takes the current server source and the proposed new source of a `.cls` document, and returns the names of any Storage definitions that the new source drops.
+- **AC 38.3.3** — On `iris_doc_put` for an existing `.cls` whose current source has a Storage definition that the new content drops, the tool refuses:
+  - with a distinct error code that names the dropped definitions;
+  - writing nothing;
+  - unless `allowStorageRegeneration: true` is passed.
+
+  Changed storage content is allowed; only a drop is guarded. Non-class documents and new classes never pay the extra read. The parameter is documented with its default (Rule #10).
+- **AC 38.3.4** — Back-compat (Rule #19): a put that keeps its storage, targets a non-class document, or creates a new class has a byte-identical fetch sequence and response, pinned. The refusal is the only behavior change. It is recorded in `CHANGELOG.md` as a safety change, anchored to this story.
+- **AC 38.3.5** — Live check (Rule #26): on a disposable persistent class with rows:
+  - a storage-dropping put is refused, and the row count and the storage definition are unchanged;
+  - the override succeeds;
+  - the fixture is removed afterwards.
+
+  Fixtures are varied (Rule #58): several storage definitions, CRLF content, a Storage keyword inside a comment or string (which must not count), and a class whose storage was already absent.
+- **AC 38.3.6** — `iris_doc_load` and `iris_env_promote` `execute` are out of scope. `iris_env_promote` writes target documents with `ignoreConflict=1` as part of a sync. Each is filed as a `wontfix-accepted` ledger row with `reopen_if=` naming an observable trigger (spine AD-24). *(Amended 2026-10-14 by the spine reconcile: `iris_env_promote` added.)*
+
+### Story 38.4: Surgical Line Edit Tool
+
+G2. New dev tool `iris_doc_edit` (S-3). This story owns applying edits; it reuses 38.2's numbering and 38.3's guard and does not redesign them (Rule #52).
+
+- **AC 38.4.1** — Probe first (Rules #47/#45): verify the research claim that `client-config/src/diff.ts` holds a reusable line-span and diff engine (research [57]). It is a JSONC/YAML/TOML pending-edit renderer, so the probe records whether any part of it is generic. A server never imports `client-config`. Reused code moves into `@iris-mcp/shared`; otherwise a small line-diff utility is written there.
+- **AC 38.4.2** — Input: `action` (an enum with the single value `apply`), `name`, an `edits` array and optional `namespace`. The governance key is therefore `iris_doc_edit:apply`. The enum is required: the `defaultEnabled` marker addresses only `tool:action` keys, and `buildDefaultEnabledWrites` throws on a scalar `mutates` (`governance.ts:570-605`). *(Amended 2026-10-14 by the spine reconcile; spine AD-4.)* Each edit is one of:
+  - `insert` (`afterLine`, `text`);
+  - `delete` (`startLine`, `endLine`);
+  - `replace` (`startLine`, `endLine`, `text`).
+
+  Every edit carries `expected`: the exact current text of the lines it addresses, or of the anchor line for an insert. All edits are addressed against the document as read, applied bottom-up, and are all-or-nothing. Overlapping ranges are rejected before any write.
+- **AC 38.4.3** — If any `expected` differs from the server's current text, the tool refuses with a `STALE_CONTENT` error, writes nothing, and returns the current text of each mismatched range. The write never uses `ignoreConflict`. A change between our read and our write surfaces as a conflict error and is never retried silently.
+- **AC 38.4.4** — 38.3's storage guard applies, and an edit that removes a Storage definition is refused.
+  - The override is a separate write action, `regenerateStorage`, on the same tool. It is classified `mutates: "write"` and is **not** a `defaultEnabled` holder, so it ships disabled.
+  - It is never a parameter of `apply`. S-3 enabled `apply` by default because it is guarded, and a caller must not be able to switch the guard off (spine AD-4).
+  - *(Amended 2026-10-15 by the spine review.)*
+- **AC 38.4.5** — Response:
+  - a unified diff of the change;
+  - a renumbered excerpt around each edit (with a documented number of context lines);
+  - the new `totalLines`;
+
+  never the whole document. `structuredContent` mirrors it.
+- **AC 38.4.6** — Governance and visibility:
+  - `mutates: { apply: "write", regenerateStorage: "write" }` and `defaultEnabled: ["apply"]` per S-3, accepted by registration-time cross-validation (a test proves it);
+  - `parent: iris_doc_put`. When an operator has explicitly disabled `iris_doc_put` at any layer, `iris_doc_edit:apply` seeds disabled; an explicit setting on `iris_doc_edit:apply` still wins.
+    - This story adds the parent mechanism to the governance engine (Lead decision, 2026-10-15; spine AD-6), and Story 38.5 reuses it.
+    - Tests cover both directions, and `iris_server_profiles` reports the inherited verdict.
+  - annotations follow the MCP definitions: `destructiveHint: true` (edits can delete and overwrite lines), `readOnlyHint: false`, `idempotentHint: false`. `iris_doc_put`'s grandfathered `destructiveHint: false` is not copied (spine AD-4);
+  - disabled under the `read-only` preset (test);
+  - absent from the frozen baseline;
+  - `developer` and `core` include it (L-4; dev `core` 13 → 14 runtime, a guideline figure);
+  - a new `TOOL_PAIRS` pair with `iris_doc_get`, because its edits are addressed by `iris_doc_get`'s line numbers.
+
+  Counts: dev 29 → 30, with advertised and suite counts moving per Rule #31. Docs state "enabled by default", why (S-3), and how to disable it (Rule #30).
+- **AC 38.4.7** — Fixtures are varied (Rule #58): CRLF and LF, tabs, a missing final newline, a BOM, an edit at line 1 and at the last line, an empty-text replace, and multi-line `expected`. The live smoke uses a disposable class:
+  - a valid edit applies and compiles;
+  - a stale `expected` is refused and the document is byte-identical afterwards;
+  - a concurrent change is reported as a conflict;
+  - the fixture is removed.
+- **AC 38.4.8** — Compiling is not part of this tool. The description directs agents to `iris_doc_compile`.
+
+### Story 38.5: SQL Write Safety
+
+G21 with G22 folded in. It changes `iris_sql_execute` (a write key) and adds the read-classified `iris_sql_query` (L-3).
+
+- **AC 38.5.1** — Probe first and record:
+  - how `iris_sql_execute` executes today (endpoint, statement path);
+  - how to classify a statement reliably. Prefer the statement type from preparing it through `%SQL.Statement` over a keyword blocklist; compare both on adversarial fixtures (comments, string literals containing keywords, CTEs, `CALL`, multi-statement input);
+  - whether DML can run inside a transaction and be rolled back by our endpoint, with the effects of triggers and non-transactional side effects;
+  - whether a custom endpoint is needed (if so, the bootstrap moves).
+- **AC 38.5.2** — Read-only mode:
+  - a `readOnly: true` parameter;
+  - an operator variable `IRIS_SQL_READ_ONLY` that forces the mode for every call; a parameter cannot weaken it.
+
+  In read-only mode, any non-query statement is refused before execution, naming its statement type.
+- **AC 38.5.3** — Rows-affected cap:
+  - a `maxRowsAffected` parameter;
+  - an operator ceiling `IRIS_SQL_MAX_ROWS_AFFECTED`.
+
+  Enforcement uses the mechanism the probe chose (a transaction, then a check of `%ROWCOUNT`, then rollback over the cap). The refusal reports the row count and the cap. Residual side effects found by the probe are documented.
+- **AC 38.5.4** — Every DML result returns `rowsAffected` (`%ROWCOUNT`), an additive field. `countOnly: true` returns `totalCount`, a query's row count, without transferring rows (G22).
+  - The existing `rowCount` keeps its one meaning, the number of rows returned, unchanged (spine Conventions, "Tool results").
+  - The story proves that both new names are absent from today's output.
+  - *(Amended 2026-10-15 by the spine review: `rowCount` already exists with another meaning in `sql.ts:112-118`.)*
+- **AC 38.5.5** — Defaults: all new controls are off by default, so behavior is byte-identical to today (Rule #19, `toEqual` pin), and the defaults are stated explicitly (Rule #10). The new variables are documented with their defaults (Rule #43).
+- **AC 38.5.6** — A new read-classified tool `iris_sql_query` (L-3):
+  - server-enforced read-only, using the same statement classification as AC 38.5.2;
+  - `mutates: "read"`, so it is enabled by default and available under the `read-only` preset, which a test proves;
+  - in the `developer` and `core` presets (L-4; dev `core` 14 → 15 runtime), so `core` setups under the `read-only` preset can still query;
+  - the operator SQL controls (`IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY`) apply to it exactly as to `iris_sql_execute`, and a parameter can tighten them but never loosen them (spine AD-9 and AD-25; *amended 2026-10-14 by the spine reconcile*);
+  - `parent: iris_sql_execute`, through the mechanism added by 38.4. An operator's explicit disable of `iris_sql_execute` also seeds `iris_sql_query` disabled.
+  - Its statement is classified and executed on the same prepared statement, in one IRIS call, inside a transaction that is always rolled back. The remaining non-transactional effects (for example, globals set by a SQL function, `JOB`, `$INCREMENT`) are listed in the tool description. The docs call the mode "statement-level read-only, not side-effect-free" (spine AD-25).
+  - *(Amended 2026-10-15 by the spine review; parent inheritance is a Lead decision of 2026-10-15.)*
+  - dev 30 → 31.
+- **AC 38.5.7** — Live check on a disposable table:
+  - a `DELETE` over the cap is refused and the rows are intact;
+  - read-only mode refuses `UPDATE`;
+  - `countOnly` equals the `COUNT(*)` oracle;
+  - the table is dropped afterwards.
+
+### Story 38.6: Editing and SQL Safety Docs, Prompt and Capstone
+
+The epic's closing story. It enriches the docs; each earlier story already shipped minimal docs (Rule #43).
+
+- **AC 38.6.1** — Docs:
+  - root README, the `iris-dev-mcp` README and `tool_support.md` cover every new parameter, tool and variable with its default state (Rule #30);
+  - `CHANGELOG.md` and changesets are updated.
+- **AC 38.6.2** — A new MCP prompt that edits a class in place: ranged read → `iris_doc_edit` with `expected` → `iris_doc_compile` → `iris_execute_tests`, with a total-count check. Update `deploy-and-test-class` where it now overlaps. Then:
+  - `pnpm gen:skills`;
+  - `gen:skills:check` passes clean;
+  - `validate:prompts` passes.
+- **AC 38.6.3** — Capstone (Rule #21), one integration test in the **default** suite, armed by the existing live-gate convention and listed in `prepublish-gate.mjs`'s `gateTestFiles` (the lesson from Epic 37's HIGH). It runs:
+  1. a ranged read;
+  2. an edit with `expected`;
+  3. a stale edit, which is refused;
+  4. a storage-dropping put, which is refused;
+  5. a read-only SQL refusal;
+  6. a rows-affected refusal.
+
+  It runs against live IRIS on disposable fixtures and is proven red by reverting one guard (Rule #59: name the path).
+- **AC 38.6.4** — Epic-close checks are recorded:
+  - governance `:check`;
+  - tool counts;
+  - `BOOTSTRAP_VERSION` from → to;
+  - `check-epics-sync.mjs` OK.
+
+## Epic 39: Interop Message Forensics (added 2026-10-14)
+
+**Goal:** An integration engineer can find messages by header fields, body content and Search Table values, and can read any message body. Everything that returns body content or body-derived values is governed by a per-profile PHI data policy.
+
+**Context:** P1 gaps G32, G33, G34, G35 and G50, from research recommendation 2.
+
+- G32 is nearly free: `iris_message_resend`'s `resendFiltered` dry run already searches headers by item, status and time window. It is write-classified and disabled by default, so nobody can use it to search (research [34]).
+- The competitor reads 3 body classes and pastes unescaped input into generated ObjectScript (research [15][16]). We cover every body class and never interpolate caller input.
+
+**Constraints:**
+
+- Message fixtures are synthetic, created in a disposable interop-enabled namespace (or a documented scratch namespace the story creates), and removed afterwards. A story never reads another project's namespace.
+- Search requires a scope filter (Rule #38): a time window, or an item plus a window. Output caps are documented as output caps, never as timeout protection.
+- The new tools (`iris_message_search`, `iris_message_body`) are a `TOOL_PAIRS` unit, and both join interop `core` (L-4; 10 → 12 runtime).
+- The PHI policy default is `redact` (L-2).
+
+**Out of scope:**
+
+- G31 (production needs-update check);
+- G37 (lookup table listing);
+- G38 (HL7 schema browsing; probe first, P2);
+- G36 (same-server drift).
+
+### Story 39.1: Message Header Search
+
+G32. New read tool `iris_message_search`, action `headers`.
+
+*(Amended 2026-10-15 by the spine review.)* The search kinds are `action` values, not `mode` values: `headers` (this story), `body` (39.3) and `searchTable` (39.4).
+- Each action has its own read governance key (`iris_message_search:headers`, `:body`, `:searchTable`) and its own audit `action`. That lets an operator disable body-derived searches separately, and lets the audit trail tell them apart (spine AD-4).
+- This story fixes the `action` enum with all three values declared. Until 39.3 and 39.4 land, `body` and `searchTable` return a structured `NOT_IMPLEMENTED` refusal.
+
+- **AC 39.1.1** — Probe first (Rule #47): read `MessageResend.cls` and `message-resend.ts`, and record the exact filter set `resendFiltered`'s dry run supports, how it queries `Ens.MessageHeader`, and its caps and window rules.
+- **AC 39.1.2** — The search logic is extracted into one shared ObjectScript helper used by both `resendFiltered` and the new endpoint. `resendFiltered`'s requests and responses stay byte-identical (Rule #19 pin). The bootstrap moves (Rule #24); a new class enters both rosters (Rule #39).
+- **AC 39.1.3** — Action `headers` filters by:
+  - source or target config item;
+  - status;
+  - a time window (required, bounded);
+  - session id;
+  - body class name;
+  - error-only.
+
+  Results are paged, with a cap. Timestamps are ISO 8601 with a `…Raw` sibling (Rule #11).
+- **AC 39.1.4** — Governance and visibility:
+  - `mutates: { headers: "read", body: "read", searchTable: "read" }`, all enabled by default;
+  - `developer` and `core` include it (L-4; interop `core` 10 → 11 runtime), and 39.5 declares the `TOOL_PAIRS` membership when its partner lands;
+  - interop 22 → 23.
+
+  Docs state the default state (Rule #30).
+- **AC 39.1.5** — Oracle (Rule #36): results equal a hand-written `Ens.MessageHeader` SQL query over the same synthetic fixture.
+  - Not-configured branch (Rule #41): a namespace without interoperability returns `notApplicable`, not an error.
+  - Second-namespace smoke (Rule #34).
+
+### Story 39.2: PHI Data Policy
+
+G50. A framework policy that the body-touching stories consume. This story owns the model and the redaction engine; 39.3–39.5 own applying it to their outputs (Rule #52).
+
+- **AC 39.2.1** — Policy model:
+  - a per-profile `dataPolicy` of `block`, `redact` or `allow`, plus an operator default variable;
+  - configuration is accepted from the `IRIS_PROFILES` entry and the governance file;
+  - the precedence is documented and validated fail-fast, like other configuration (architecture M1);
+  - the default is `redact` (L-2).
+
+  The model is recorded in the architecture's dated decision record (Rule 20).
+- **AC 39.2.2** — Redaction engine for HL7 v2: field-level redaction of a PHI field list that is **exhaustive as of a named date with its source** (Rule #56). For example, the HIPAA Safe Harbor identifiers mapped to the segments and fields that carry them: PID, NK1, GT1, IN1, PV1, and others as the source dictates. The tests use varied fixtures (Rule #58):
+  - escape sequences;
+  - repetitions and components;
+  - Z-segments;
+  - a missing PID;
+  - CR and CRLF segment terminators.
+- **AC 39.2.3** — Under `redact`, a body type the engine cannot redact reliably is **blocked** with a reason, never passed through. Under `block`, every body value is withheld. Under `allow`, nothing changes.
+- **AC 39.2.4** — The existing `iris_message_resend` preview `bodySummary` falls under the policy. Under `allow` it is byte-identical to today (pin). Under the default `redact` (L-2), HL7 v2 bodies are redacted and other body types are blocked with a reason. The change is recorded in `CHANGELOG.md`.
+- **AC 39.2.5** — Policy outcomes (redacted or blocked) are visible in the response and in the JSONL audit log.
+  - The audit `outcome` keeps its closed domain (`ok`, `error`, `denied`), and policy effects go in a new additive field, for example `dataPolicy: { policy, redacted, blocked }`. A policy refusal is `error` with a distinct refusal code (spine AD-19; *amended 2026-10-15 by the spine review*).
+  - When `IRIS_AUDIT_LOG_PARAMS` captures parameters, search values and body-filter values are redacted under `redact` and `block`.
+  - Body content never reaches console logs.
+  - The docs say the policy reduces exposure and is not a compliance certification.
+  - Record the policy's scope (spine AD-26): which surfaces it governs, and that generic SQL, global and document tools are a documented residual exposure unless this story brings them in.
+
+  *(Amended 2026-10-14 by the spine reconcile.)*
+
+### Story 39.3: Message Body Content Search
+
+G33. Action `body` on `iris_message_search` (key `iris_message_search:body`).
+
+- **AC 39.3.1** — Input:
+  - `bodyClass` (required);
+  - a structured filter `[{property, op, value}]`, validated against that class's SQL-projected properties from the class dictionary;
+  - the 39.1 scope filters.
+
+  The search **never accepts raw SQL `WHERE` text**, and caller values are always passed as parameters.
+- **AC 39.3.2** — The search returns header rows only, never body values. Under `block` the action is refused (it reveals presence); under `redact` and `allow` it runs.
+- **AC 39.3.3** — An injection fuzz over property names, operators and values, in the style of the 36.4 subscript fuzz, finds 0 violations. It runs in the default suite with an independent oracle.
+  - The fuzz drives the custom REST route directly, not only the TypeScript tool.
+  - Property and operator validation runs IRIS-side, in the handler that builds the statement: properties resolve to their dictionary `SqlFieldName` and are emitted as delimited identifiers, and operators come from a closed enum (spine AD-26; *amended 2026-10-15*).
+- **AC 39.3.4** — Oracle (Rule #36): results equal a hand-written JOIN of `Ens.MessageHeader` and the body table over synthetic fixtures.
+
+### Story 39.4: Search Table Lookup
+
+G34. Action `searchTable` on `iris_message_search` (key `iris_message_search:searchTable`).
+
+- **AC 39.4.1** — Probe first (Rule #16) and record live:
+  - the `Ens.Config.SearchTableProp` shape;
+  - how the search table classes in use store values (for example `EnsLib.HL7.SearchTable`);
+  - how the competitor's lookup maps to it (research [15]).
+- **AC 39.4.2** — Input:
+  - a search table class;
+  - a property name, validated against the namespace's configured `SearchTableProp` rows;
+  - a value and an operator;
+  - the scope filters.
+
+  The lookup returns header rows only.
+- **AC 39.4.3** — A namespace with no search tables configured returns `notApplicable` (Rule #41). The policy applies as in 39.3.
+- **AC 39.4.4** — Live check: a synthetic HL7 message indexed by a medical record number in the disposable namespace is found by that number. The oracle is SQL over the search table (Rule #36).
+
+### Story 39.5: Message Body Reader
+
+G35. New read tool `iris_message_body`.
+
+- **AC 39.5.1** — Input: 1–N header ids (bounded). The tool resolves each body class and id.
+- **AC 39.5.2** — Renders by body kind. The renderer list is **exhaustive as of a named date with its source** (Rule #56):
+  - HL7 v2 → ER7 text;
+  - XML virtual documents → XML;
+  - persistent objects → JSON (`%JSONExport` where available; otherwise a property dump from the dictionary);
+  - streams → text;
+  - anything else → class and id only, with a reason.
+
+  A size cap applies, with a `truncated` flag.
+- **AC 39.5.3** — The policy is enforced per body (39.2). The response states the outcome for each body.
+- **AC 39.5.4** — Governance and visibility:
+  - `mutates: "read"`;
+  - a `TOOL_PAIRS` unit with `iris_message_search`;
+  - `developer` and `core` include it (L-4; interop `core` 11 → 12 runtime);
+  - interop 23 → 24.
+- **AC 39.5.5** — Live check on synthetic fixtures. Under `redact`, an assertion proves that no synthetic PHI value appears anywhere in the output (text or structured). Under `allow`, the value appears.
+
+### Story 39.6: Message Forensics Docs, Prompt and Capstone
+
+- **AC 39.6.1** — Docs:
+  - root and interop READMEs and `tool_support.md` cover the new tools, modes and policy configuration, with default states (Rule #30);
+  - `CHANGELOG.md` and changesets are updated.
+- **AC 39.6.2** — Prompts: update `trace-message-flow` to search, read the body, then draw the diagram. Add one new prompt for finding a patient's messages by Search Table value, under the policy. Then run `gen:skills`, `gen:skills:check` and `validate:prompts`.
+- **AC 39.6.3** — Capstone (Rule #21), in the default suite and listed in the live-gate roster:
+  1. synthetic HL7 traffic is generated in the disposable namespace;
+  2. header search finds it;
+  3. Search Table lookup finds it;
+  4. the body read under `redact` leaks no PHI value;
+  5. the body read under `allow` shows the value.
+
+  It is proven red by disabling redaction (Rule #59).
+
+## Epic 40: Developer Test Depth (added 2026-10-14)
+
+**Goal:** A developer can measure line-by-line code coverage of the classes their tests exercise, as a per-class and per-method summary and as Cobertura XML with a target check, and can run TestProduction-based tests without disturbing the instance.
+
+**Context:** P1 gap G23 (then G24 at P2), from research recommendation 4. The competitor measures `.1` routines only and never writes Cobertura (research [13]). Prior art to evaluate, not assume: the community TestCoverage tool on Open Exchange (it uses `%Monitor.System.LineByLine` and maps INT lines back to class source). If any code is adapted, it gets the same notice treatment as Epic 41.
+
+**Constraints:**
+
+- `%Monitor.System.LineByLine` is an **instance-wide** monitor on a shared instance. A coverage run must refuse when a monitor session is already active, stop only its own session (always, in a `finally`), and never stop someone else's.
+- TestProduction runs must not disturb any running production. They are refused when a different production is running in the target namespace, and smoked only in a disposable namespace.
+
+**Out of scope:**
+
+- Coverage of code outside the selected classes' routines;
+- performance profiling;
+- G25 (INT-offset mapping as a standalone tool).
+
+### Story 40.1: Line Coverage Probe and Engine
+
+This story ships per-routine INT-line coverage, with a complete response shape. 40.2 owns class-source mapping, aggregation, Cobertura and targets (Rule #52).
+
+- **AC 40.1.1** — Probe first (Rule #16) and record:
+  - the `%Monitor.System.LineByLine` API (start, stop, routine list, metrics, process scope);
+  - its privileges;
+  - whether a second session can start while one is active;
+  - its overhead;
+  - how to enumerate every INT routine generated for a class (`.1` … `.N`).
+- **AC 40.1.2** — Execution-path decision, recorded with evidence: the Atelier work queue that `iris_execute_tests` uses today, or our custom `POST /tests` route, which has no tool caller today (research [55]). Whichever path is not chosen is either given its caller or documented.
+- **AC 40.1.3** — The surface and its governance go to the Project Lead at planning, with the probe evidence (spine AD-4 and AD-27; *amended 2026-10-15 by the spine review*). Coverage adds two kinds of side effect that running tests does not have today: an instance-wide monitor and a local file write. So, under AD-4, it is a new operation.
+  - The default is a new governed tool, `mutates: "write"`, default-disabled (Rule #28), paired with `iris_test_status`.
+  - Keeping it as an option on the enabled `iris_execute_tests` key needs a recorded Lead decision.
+
+  The new endpoint enters the bootstrap and both rosters (Rules #24/#39).
+- **AC 40.1.4** — Shared-instance guard (spine AD-27).
+  - One IRIS-side job owns the monitor: it starts the monitor, runs the tests and stops the monitor in its own cleanup. A client wait budget, a poll or a cancel never starts or stops the monitor directly; a cancel only signals the job.
+    - So coverage cannot use an execution path whose job the suite does not control, and that decides AC 40.1.2's execution path.
+  - The suite records its session's owner (job id and start time) durably.
+    - A later run may reclaim a suite-owned session whose owning job is dead.
+    - A session with no suite ownership record is refused and left untouched.
+  - Tests:
+    - a run killed mid-flight leaves no monitor running;
+    - a pre-started foreign session causes a refusal;
+    - coverage oracles are captured in a disposable namespace whose routines nobody else runs.
+- **AC 40.1.5** — Output: for each routine of each selected class, the covered and executable INT lines and a percentage. The live oracle is a fixture class with hand-countable branches, with the expected values captured from the live run (Rule #36).
+
+### Story 40.2: Coverage Reports and Targets
+
+- **AC 40.2.1** — INT lines are mapped to class source lines and methods, using the mapping the probe found. Accuracy is verified on fixtures that include generated methods, macros, embedded SQL and multi-line statements (Rule #58).
+- **AC 40.2.2** — Summary: per class and per method, the coverage percentage and the uncovered line ranges, in `structuredContent` and in a compact text form.
+- **AC 40.2.3** — Cobertura XML is written to a caller-supplied local path, following the path conventions of `iris_doc_export`. The XML validates against the Cobertura DTD, and one known file is checked round-trip.
+- **AC 40.2.4** — A `minCoverage` target gives a pass/fail verdict per class and overall. The verdict never turns a completed test run into a tool error.
+
+### Story 40.3: TestProduction Runs
+
+G24.
+
+- **AC 40.3.1** — Probe first: does `iris_execute_tests` already run `%UnitTest.TestProduction` subclasses, and how do they start and stop their production? If they already run, this story adds only the safety guard and the docs.
+- **AC 40.3.2** — Guard: a TestProduction run is refused when a production other than the test's own is running in the namespace. The refusal names that production, and it is left untouched.
+- **AC 40.3.3** — Live check in a disposable namespace:
+  - a passing and a failing TestProduction fixture each report correctly;
+  - the guard refuses while a different production runs;
+  - the namespace is removed afterwards.
+
+### Story 40.4: Test Depth Docs, Prompt and Capstone
+
+- **AC 40.4.1** — Docs:
+  - the `coverage` option, its shared-instance guard, the Cobertura path and the targets, each documented with its default (Rule #30);
+  - `CHANGELOG.md` and changesets are updated.
+- **AC 40.4.2** — Update the `deploy-and-test-class` prompt with an optional coverage step, then run `gen:skills`, `gen:skills:check` and `validate:prompts`.
+- **AC 40.4.3** — Fixes found by the research (recommendation 8):
+  - `iris_test_status` returns `structuredContent` (research [56]);
+  - `iris_execute_tests`' `readOnlyHint`/`idempotentHint` contradict its write classification and its "do not re-submit" contract. This is DW-498; the Epic 40 gate is recommended to route it here.
+- **AC 40.4.4** — Capstone (Rule #21), in the default suite and listed in the live-gate roster: a coverage run over a fixture yields the expected summary and a valid Cobertura file, and a pre-started monitor session causes a refusal. It is proven red by removing the guard (Rule #59).
+
+## Epic 41: Companion Skills & Rules Pack (added 2026-10-14)
+
+**Goal:** Every agent working on ObjectScript gets our hard-won rules as one always-on pre-write checklist, 6–10 model-invoked knowledge skills, and the workflow skills generated from our MCP prompts. The pack is installed into each client's native location, with the competitor's MIT notice shipped wherever any adapted content ships.
+
+**Context:** decision record Part 2.
+
+- The pack is our own equivalent of the competitor's kit, not a copy. The core is written from `.claude/rules/` and our epic retros. Competitor content is adapted only where it is clearly the better start, for example the list and SQL pattern skills.
+- Claude Code constraints, confirmed 2026-10-14:
+  - skills load from `.claude/skills/`, `~/.claude/skills/` and plugin `skills/`, never from `.agents/skills/`;
+  - `AGENTS.md` is read natively only when there is no `CLAUDE.md`;
+  - `.claude/rules/*.md` loads automatically, scoped by a `paths:` glob;
+  - plugins cannot carry rules;
+  - MCP prompts are user-invoked slash commands, while skills are model-invoked from their description.
+
+**Constraints (licensing):** the competitor's kit is MIT, © 2025 InterSystems Corporation.
+
+- `THIRD_PARTY_NOTICES.md` carries their full MIT text and a provenance table mapping each derived file to its source at commit `b6205bb`.
+- The notice ships wherever the skills ship.
+- Each derived `SKILL.md` carries one header line: "Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see THIRD_PARTY_NOTICES".
+- The named authors, Tim Leavitt and Tom Dyar, are credited.
+- Nothing is derived from `kb/ipm-module-authoring.md` or `iris-objectscript-eval`.
+- The pack is never presented as InterSystems' and never implies endorsement. "IRIS" and "ObjectScript" may be used descriptively.
+
+**No benchmarking in this repo.** The Project Lead benchmarks elsewhere. The in-repo checks are the tool-name validator, extended to the whole pack, plus live probes of factual claims (Rule #16).
+
+**Out of scope:**
+
+- The Claude Code plugin (Story 42.8, which consumes this pack);
+- a compile-on-save hook (a 42.8 candidate);
+- skills about MCP server internals.
+
+### Story 41.1: Pack Layout, Licensing and Provenance
+
+- **AC 41.1.1** — Layout decision, recorded in the architecture (Rule 20):
+  - a source tree for hand-authored knowledge skills and rules;
+  - generated workflow skills stay generated and DO-NOT-EDIT (Rule #18);
+  - one build step assembles a distributable pack directory that 41.6's installer and 42.8's plugin both consume;
+  - the pack ships inside `@iris-mcp/client-config`, the installer's npm package, unless the decision records why not.
+
+  `gen:skills:check` keeps passing and never treats hand-authored files as stale.
+- **AC 41.1.2** — The competitor source is fetched at `b6205bb` into a scratch directory as untrusted data: read only, never executed.
+- **AC 41.1.3** — `THIRD_PARTY_NOTICES.md` holds:
+  - their full MIT text;
+  - the provenance table;
+  - author credits;
+  - a statement that the pack is not endorsed by InterSystems.
+
+  It is exact to their LICENSE file, which is verified byte for byte.
+- **AC 41.1.4** — A mechanical check runs in the default suite and is proven red (Rule #59). It confirms that:
+  - every file carrying the adaptation header has a provenance row;
+  - every row's file exists and carries the header;
+  - no row cites an excluded source;
+  - the notice is listed in every distribution manifest that exists so far.
+
+  41.6 and 42.8 extend this check to the installer payload and the plugin folder.
+- **AC 41.1.5** — `validate:prompts` is extended to every `SKILL.md` and rule file in the pack, so tool-name tokens are checked against the live catalog.
+
+### Story 41.2: Always-On ObjectScript Pre-Write Rule
+
+- **AC 41.2.1** — Content: a short pre-write checklist distilled from `.claude/rules/iris-objectscript-basics.md`, `object-script-testing.md` and the code-level project rules (#7, #8, #15 and others). It is user-facing wording: no internal rule numbers and no project paths.
+- **AC 41.2.2** — Single source. It and the existing `objectscript-review` prompt (and its generated skill) never diverge: either one generates the other, or the prompt is retired with a recorded reason.
+- **AC 41.2.3** — It is emitted in two forms:
+  - a Claude Code rule file with **no** `paths:` frontmatter, so it loads in every session of a project that installed it;
+  - an `AGENTS.md` section between stable markers, so the installer can insert and update it idempotently.
+
+  *Amended 2026-10-15 by Project Lead decision:* a `paths:`-scoped rule loads only when Claude reads or writes a matching **local** file, so it would never load when agents write classes through `iris_doc_put` or `iris_doc_edit`. The checklist stays short, because it is loaded every session in projects that opt in.
+- **AC 41.2.4** — Every factual claim, such as which `$$$Assert*` macros exist or the Quit-in-Try/Catch rule, is probed live on the instance (Rule #16), and the probe log is kept in the story record. A claim that fails its probe is corrected, and the source rule file is flagged for the retro.
+- **AC 41.2.5** — Re-check against the current Claude Code docs, recording the date (Rule #14), that a rule without `paths:` loads unconditionally. A live check confirms the rule is in context when an agent writes a class through `iris_doc_put` with no local file involved.
+
+### Story 41.3: Core Knowledge Skills
+
+ObjectScript gotchas, `%Status` and error handling, `%UnitTest`.
+
+- **AC 41.3.1** — Three `SKILL.md` files, each with `name` and a model-invocation `description` that says when to load it. They are written from our rules and retros. Any competitor-derived passage carries the header and a provenance row (41.1).
+- **AC 41.3.2** — Every factual claim is probed live, with a probe log. Code snippets are compiled in a disposable `ExecuteMCPv2.Temp.*` class, and test snippets run through `iris_execute_tests` with a total-count check (Rule #35). Then the fixtures are deleted.
+- **AC 41.3.3** — Tool-name tokens validate. No internal rule numbers or repository paths appear in user-facing text.
+
+### Story 41.4: Platform Knowledge Skills
+
+Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapted list and SQL pattern skills are included only where the competitor's is clearly the better start.
+
+- **AC 41.4.1** — System-class discipline covers:
+  - `Config.*` (configuration), `SYS.*` (runtime) and `Security.*` (authorization), and when to join them;
+  - checking for deprecated properties;
+  - safe `%SYS` switching (no `New $NAMESPACE` in REST handlers);
+  - per-process versus instance-wide counters.
+
+  Each claim is probed live.
+- **AC 41.4.2** — Interoperability patterns cover:
+  - business service, process and operation signatures;
+  - `Ens.Request` and `Ens.Response`;
+  - adapters;
+  - production XData as the source of truth.
+
+  Each claim is probed live.
+- **AC 41.4.3** — The total knowledge-skill count is 6–10, counted mechanically (Rule #51), and every adapted skill passes 41.1's provenance check.
+
+### Story 41.5: Workflow Skills Refresh
+
+- **AC 41.5.1** — The 11 generated workflow skills, plus every prompt added by 38.6, 39.6 and 40.4, are regenerated. Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
+- **AC 41.5.2** — A generated pack catalog (README) lists the knowledge skills, the workflow skills and the rule, with what each is for.
+- **AC 41.5.3** — `gen:skills:check` and the extended `validate:prompts` pass.
+
+### Story 41.6: Skills and Rules Installer
+
+`packages/client-config` installs the pack into each client's native location.
+
+- **AC 41.6.1** — A per-client disposition table covers **all 16 adapters** in `adapters.ts`. It is exhaustive as of a named date, with the documentation source for each row (Rule #56). For each client it gives the native skill location, the rule location and format, or "`AGENTS.md` fallback" with the reason. The minimum:
+  - Claude Code → `.claude/skills/` and `.claude/rules/`;
+  - VS Code / Copilot → `.github/instructions/` (`*.instructions.md` with `applyTo:`);
+  - Cursor → `.cursor/rules/`;
+  - other agents → `.agents/skills/` and `AGENTS.md`.
+
+  Review asks what is missing (Rule #56).
+- **AC 41.6.2** — The installer is driven by the existing engine:
+  - a dry-run diff before any write;
+  - idempotent re-install;
+  - update and uninstall of only the files it owns;
+  - `THIRD_PARTY_NOTICES.md` written alongside every installed copy of adapted content.
+
+  An existing `AGENTS.md`, `CLAUDE.md` or instructions file is preserved byte for byte outside the marked block. The fixtures are varied (Rule #58): CRLF, a BOM, comments, no trailing newline, and an existing foreign block.
+- **AC 41.6.3** — When a project has a `CLAUDE.md`, the Claude Code route uses `.claude/rules/`, and the installer reports how to import `AGENTS.md` (`@AGENTS.md`) instead of assuming it is read.
+- **AC 41.6.4** — It is a CLI command on `iris-mcp-clients`. The extension UI is out of scope.
+
+### Story 41.7: Skills Pack Docs and Capstone
+
+- **AC 41.7.1** — Docs: the root README gets a pack section; the client-config README covers the installer commands; `skills/README.md` is superseded by the generated catalog.
+- **AC 41.7.2** — Capstone (Rule #21), in the default suite: the installer CLI runs against a temporary project for every client route, and the test asserts:
+  - the exact paths;
+  - valid frontmatter;
+  - the notice is present;
+  - a re-install is idempotent;
+  - an uninstall leaves foreign content intact.
+
+  It is proven red (Rule #59).
+- **AC 41.7.3** — A one-time live check, recorded: a real Claude Code session in the temporary project lists the installed skills, and the rule activates for a `.cls` path.
+
+## Epic 42: Published Install & Distribution (added 2026-10-14)
+
+**Goal:** Installing the suite becomes "install Node 22, run one command":
+
+- npm `1.0.0` of every `@iris-mcp/*` package, published with provenance by a gated release workflow;
+- the VS Code extension on the Marketplace and Open VSX;
+- the IPM package on the IPM registry and Open Exchange;
+- a Claude Code plugin that brings all five servers and the skills pack;
+- an MCP Registry listing.
+
+**Context:** decision record Part 3, decisions D1–D7.
+
+- The original plan made npm primary, kept IPM secondary, and listed on the MCP Registry and Open Exchange (`prd.md:202-211`).
+- Publishing was deferred twice. The git-clone beta ran by 2026-09-11 (`epic-36-retro-2026-09-11.md:62-63`).
+- The code already targets `npx`, but nothing is published.
+- CI follows the OcuPilot reference design (`../OcuPilot/.github/workflows/ci.yml`), adapted rather than copied. It is the Lead's own code, so there is no licensing question.
+
+**Ledger:** 12 entries are routed to this epic's stories by the 2026-10-14 correct-course, and DW-439 is closed: DW-300, DW-394, DW-389, DW-260, DW-34, DW-443, DW-387, DW-47, DW-31, DW-506, DW-508, DW-441.
+
+**Runs after Epic 43** (Project Lead decision, 2026-10-15). `1.0.0` publishes on MCP TypeScript SDK v2. Epic 42's stories assume Epic 43 is done; 42.1's SDK-floor bump applies only if 42.1 lands first.
+
+**Release mechanics to probe in Story 42.5** (spine review, 2026-10-15; npm docs fetched 2026-10-14):
+- **Release-job toolchain.** Trusted publishing needs npm 11.5.1 or later and Node 22.14 or later on a GitHub-hosted runner, with `id-token: write`. pnpm 9 delegates publishing to the system `npm`. The Changesets fix for already-published errors under OIDC is in `@changesets/cli` 3.x, which needs pnpm 10 or later.
+- **First publish.** A trusted publisher cannot be configured before the package exists, so the first `1.0.0` publish needs a granular token, an interactive two-factor publish, or `npm stage publish`. Staging creates a public `0.0.0-stage` placeholder, which conflicts with D2 ("no beta tag"). The choice goes to the Lead with this tradeoff.
+- **Configuration defaults.** Trusted-publisher configurations created after 2026-09-03 allow only staged publishing unless direct publish is enabled.
+- **VS Code Marketplace.** Azure DevOps global PATs stop working on 2026-12-01. Story 42.7 verifies the current Marketplace authentication method (Entra ID workload identity) against Microsoft's publishing page.
+
+**Accounts only the Project Lead can create:**
+
+| Account | Needed by |
+|---|---|
+| npm account with 2FA and the `iris-mcp` organization (D1) | 42.5. Confirm or create it before 42.1, because the scope is baked into every pin |
+| VS Code Marketplace publisher | 42.7 |
+| Open VSX namespace | 42.7 |
+| InterSystems Developer Community account | 42.8 |
+| GitHub Actions environment with required approval, and npm trusted publishing or a token | 42.5 |
+
+**Constraints:**
+
+- CI never touches the shared IRIS instance: the throwaway refuses the live ports.
+- The CI workflow is secret-free and publishes nothing. Secrets live only in the release workflow.
+- There is no beta tag (D2).
+- The pin is major-only: `@1` (D3).
+- The floor is Node 22+ (D4).
+- **The IRIS support claim stays 2023.1+, labelled best effort** below the oldest image CI can test (Project Lead decision, 2026-10-15). InterSystems' own minimum supported version is 2024.1 (since 2026-07-01), and the oldest Docker Hub community image is 2024.3. Story 42.3 tests the oldest image it can pull, and Story 42.9's README states the claim and the tested range.
+
+**Out of scope:**
+
+- A public beta;
+- `2.0` planning;
+- OcuPilot's parallel test shards.
+
+### Story 42.1: Pre-Publish Package Fixes
+
+The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW-394, DW-31, DW-506, DW-260.
+
+- **AC 42.1.1** — Node floor:
+  - `engines.node` is `>=22` in the root and in every publishable `package.json`;
+  - every mention of Node 18 or 20 in docs is listed with a verdict and fixed (Rule #56);
+  - a test asserts that every manifest declares the floor.
+- **AC 42.1.2** — `@iris-mcp/all` (`"files": []`, no `bin`): probe what a global install of its tarball actually links. Then either add a real launcher or correct the README's `npm i -g @iris-mcp/all` claim. The choice and the evidence are recorded.
+- **AC 42.1.3** — DW-506: the `./test-helpers` subpaths are removed from the published exports (through `publishConfig.exports` or a dev-only mechanism). An exports-versus-tarball check (`npm pack --dry-run` list against `exports`) runs in the default suite and is proven red.
+- **AC 42.1.4** — DW-394: all `@iris-mcp/*` packages are aligned at `1.0.0` under the existing Changesets `fixed` group. Probe how the 22 pending changesets interact (`changeset status`) and record the mechanism that makes the release produce exactly `1.0.0`, with one consolidated `1.0.0` CHANGELOG section.
+- **AC 42.1.5** — DW-31: every package carries `license` (MIT, matching the root `LICENSE`), `repository` (with `directory`), `author`, `keywords`, `homepage` and `bugs`, asserted by a mechanical test.
+  - Also probe the current MCP Registry requirements for published packages, such as a namespace-verification field in `package.json`. Whatever the registry needs must be present before 42.6 publishes `1.0.0`; otherwise a `1.0.1` would be forced.
+  - No name, description or keyword presents the suite as InterSystems' (spine AD-28).
+
+  *(Amended 2026-10-14 by the spine reconcile.)*
+- **AC 42.1.6** — DW-260 (D3): every `npx` spec the suite writes, spawns or documents carries the pinned major, taken from one exported constant (spine AD-29; *amended 2026-10-15 by the spine review*). That covers:
+  - synthesized client entries (`synthesize.ts:126`);
+  - the extension's server definitions (`serverDefinitionProvider.ts`);
+  - the extension's `client-config` CLI fallback (`clientsEngine.ts:25`);
+  - the governance CLI spawns (`governanceEngine.ts:62`);
+  - the plugin's server entries (42.8).
+
+  A test searches the extension, `client-config` and the docs for an unpinned `@iris-mcp/` spec. The other half of DW-260, the launcher's missing neutral `cwd` (a local `node_modules` can shadow the package), is probed with a recorded verdict and fixed if it is real. Certification fixtures and docs are updated.
+  - Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile. `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
+- **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
+- **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
+
+### Story 42.2: Bootstrap Downgrade Guard
+
+DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
+
+- **AC 42.2.1** — Root cause confirmed: `probeCustomRest` compares the deployed hash with the embedded `BOOTSTRAP_VERSION` for equality only, so any mismatch redeploys, including a **downgrade**. An older build can silently reinstall the vulnerable pre-36.4 `Global.cls`.
+- **AC 42.2.2** — Fix: the embedded and deployed version carries a monotonic sequence plus the hash. The probe distinguishes older (upgrade, as today), equal (current) and **newer**. When the deployed version is newer, the bootstrap does not redeploy and logs a warning naming both versions and the remedy.
+- **AC 42.2.3** — The generator, the drift test and the version scheme are updated together (Rules #18/#24). The rosters change only if a class is added (Rule #39).
+- **AC 42.2.4** — Residual, documented: a server built before this fix will still downgrade. The README tells operators to upgrade every client on a shared instance together.
+- **AC 42.2.5** — Live check (Rule #48) in a disposable namespace:
+  - classes deployed by a newer build are **not** redeployed by an older-sequenced build, and the class bodies are byte-identical before and after;
+  - an older deployment is upgraded.
+
+  Proven red by reverting to equality comparison.
+
+### Story 42.3: CI Workflow
+
+DW-443. A secret-free `.github/workflows/ci.yml`.
+
+- **AC 42.3.1** — Gates job:
+  - build, test, lint and type-check;
+  - governance `:check`, `gen:skills:check`, `validate:prompts` and `check-epics-sync.mjs`;
+  - the version, metadata and exports checks from 42.1.
+
+  It runs on a Node matrix of one exact version at the floor of each supported major (22.x, 24.x, 26.x). A self-test keeps the matrix equal to `engines.node`.
+- **AC 42.3.2** — One throwaway-IRIS job. `scripts/ci-throwaway.sh` is adapted from OcuPilot's:
+  - a pinned `iris-community` 2026.2 image;
+  - its own scratch compose file;
+  - a readiness wait;
+  - logs captured on failure;
+  - teardown always.
+
+  It refuses the live instance's ports. The live suites (`IRIS_REQUIRE_LIVE`), `prepublish-gate.mjs` and `verify-iris-reachable.mjs` run against it.
+- **AC 42.3.3** — Package job: `npm pack` every package, install the tarballs in a clean directory, launch each `bin` through `npx` with a stdio `initialize`, and smoke-test it. The IPM offline proof joins this job in 42.4 (seam).
+- **AC 42.3.4** — Pipeline hygiene:
+  - every action is pinned to a commit SHA and every tool to an exact version;
+  - `permissions: contents: read`;
+  - superseded runs are cancelled;
+  - no `continue-on-error` and no `|| true`;
+  - a `sysctl` port reservation prevents the runner port race;
+  - a self-test asserts the pins and that the checks declared in code equal the workflow's `run:` steps.
+- **AC 42.3.5** — DW-443: the publish-time gates also run at a point the tarball path actually reaches (`prepack` and/or CI as the gate), and they are proven red on the tarball path specifically (Rule #59).
+- **AC 42.3.6** — Each self-test and gate is broken once in a throwaway branch and the run goes red. The run URLs are recorded.
+
+### Story 42.4: IPM Package Revival
+
+DW-34, D6.
+
+- **AC 42.4.1** — `ipm/module.xml` is generated from the bootstrap's class manifest (`gen-bootstrap.mjs` `classes[]`), with its version taken from the npm version (single source). It is generated and output-only (Rule #18). A drift test in the default suite is proven red. The class count is pinned mechanically (Rule #51).
+- **AC 42.4.2** — Offline install proof in CI, adapted from OcuPilot's `ci-ipm-archive.sh`: build the archive on one throwaway container and install it on a second one with `--network none`. The test asserts:
+  - nothing was fetched from a registry;
+  - the classes compiled;
+  - the REST application was configured.
+
+  It runs on both `iris-community` and `irishealth-community` (edition matrix).
+- **AC 42.4.3** — The bootstrap's `zpm "install iris-execute-mcp-v2"` fallback message (`bootstrap.ts:95-96`) is made accurate for the published package.
+- **AC 42.4.4** — Publishing to the IPM registry happens in 42.5's release workflow; the Open Exchange listing is in 42.8.
+
+### Story 42.5: Release Workflow
+
+DW-387, D7. New, with no OcuPilot precedent.
+
+- **AC 42.5.1** — `.github/workflows/release.yml` triggers on a version tag and runs only after CI has passed on that commit. It requires approval through a protected GitHub environment, and secrets live only in this workflow.
+- **AC 42.5.2** — A root pre-flight release script runs the full gate set once, then publishes in dependency order (client-config, shared, admin, data, dev, interop, ops, all) with npm provenance. It is the only supported publish command (DW-387).
+- **AC 42.5.3** — After npm: the extension to both stores (42.7), then the IPM package (42.4). A failed step stops the rest and reports which channels were published.
+- **AC 42.5.4** — A dry-run mode exercises every step without publishing, and is proven before the first real run.
+
+### Story 42.6: Tarball Smoke and 1.0.0 Publish
+
+DW-47, DW-300, D2.
+
+- **AC 42.6.1** — Local tarball smoke, the Story 9.3 rerun:
+  1. `npm pack` every package;
+  2. install the tarballs in a clean directory;
+  3. launch through `npx` in a real MCP client (Claude Code) against IRIS;
+  4. make one read call per server.
+
+  The result is recorded.
+- **AC 42.6.2** — `1.0.0` is published through the release workflow by tagging `v1.0.0`. Prerequisites: 42.1–42.5 done, and the Lead's npm organization and environment in place.
+- **AC 42.6.3** — Post-publish verification:
+  - every package is at `1.0.0` with a provenance attestation;
+  - `npx -y @iris-mcp/dev@1` starts in a clean environment;
+  - the registry 404s are gone.
+
+### Story 42.7: VS Code Extension Publish
+
+DW-389, D5.
+
+- **AC 42.7.1** — The publisher is a project-name publisher (for example `iris-mcp`), with "intersystems" kept out of the name. `extensions/iris-mcp-launcher` gets `private: true` for npm (DW-389), after confirming that `vsce package` and `vsce publish` still work.
+- **AC 42.7.2** — The extension launches `npx -y @iris-mcp/<pkg>@1` (from 42.1). It is published to the VS Code Marketplace and to Open VSX through the release workflow, after npm `1.0.0`.
+- **AC 42.7.3** — Install from each store into a clean VS Code and into an Open VSX client (VSCodium or Cursor). The extension starts the servers, and the result is recorded.
+
+### Story 42.8: Claude Code Plugin and Registry Listings
+
+- **AC 42.8.1** — `.claude-plugin/plugin.json` and a `marketplace.json` in this repo. The plugin brings:
+  - all 5 MCP servers (`npx -y @iris-mcp/<pkg>@1`, with the IRIS connection supplied through the plugin's user configuration or environment);
+  - Epic 41's skills pack;
+  - `THIRD_PARTY_NOTICES.md`.
+
+  41.1's provenance check is extended to the plugin folder. The format is verified against the current Claude Code plugin docs (Rule #14).
+- **AC 42.8.2** — Rules cannot ride in a plugin. The plugin README points to the 41.6 installer for the always-on rule.
+- **AC 42.8.3** — The optional compile-on-save hook is evaluated, the result recorded, and the hook shipped as opt-in only if the Lead approves. Otherwise it is filed as a candidate.
+- **AC 42.8.4** — Live check: in a clean Claude Code, add the marketplace, install the plugin, and confirm the five servers connect and the skills list. The result is recorded.
+- **AC 42.8.5** — An MCP Registry listing (the current registry requirements are probed; namespace verification as required), and an Open Exchange listing for the IPM package. Listing needs the Lead's InterSystems Developer Community account.
+
+### Story 42.9: Install Docs and Client Re-Certification
+
+DW-441.
+
+- **AC 42.9.1** — README rewrite: install becomes "install Node 22, run one command", with one path per client:
+  - the plugin for Claude Code;
+  - the extension for VS Code;
+  - the `iris-mcp-clients` CLI for the rest.
+
+  Every "not yet published" or clone-and-build caveat in the docs is listed with a verdict and removed (Rule #56).
+- **AC 42.9.2** — Post-publish re-certification: each client adapter is re-certified against the published `1.0.0` packages with the existing certify scripts, and the certification table is regenerated. Rows that only a human can certify are marked as such, with the date.
+- **AC 42.9.3** — The CHANGELOG `1.0.0` release notes and the PRD's distribution section match what shipped.
+
+## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
+
+**Runs after Epic 41 and before Epic 42**, on `feature/feature-wave-8-published-install`. The number is a label; the wave's run order governs.
+
+**Goal:** The suite runs on the MCP TypeScript SDK v2 before `1.0.0` is published, so the first public release is built on the SDK's stable line rather than its maintenance line.
+- On the 2025-11-25 protocol revision, behavior is byte-identical for today's clients.
+- Every server also serves revision `2026-07-28` over stdio, from the same process.
+  - The live probe of 2026-10-15 settled that SDK v2 supports this ([research/mcp-sdk-v2-stdio-probe-2026-10-15.md](./research/mcp-sdk-v2-stdio-probe-2026-10-15.md)).
+  - Claude Code already negotiates `2026-07-28` with stdio servers that offer it, so the modern path becomes our primary client's path.
+
+**Context:** found by the architecture-spine review on 2026-10-14 (`architecture/architecture-iris-execute-mcp-v2-2026-10-14/reviews/review-tech-currency.md`, T1), and confirmed by the lead the same day.
+- **The specification.** Revision `2026-07-28` shipped on 2026-07-28 ([announcement](https://blog.modelcontextprotocol.io/posts/2026-07-28/)). It makes the protocol stateless: the `initialize` handshake and protocol sessions are removed, `server/discover` is required, and every request carries its version and capabilities in `_meta`.
+- **The SDK.** TypeScript SDK v2 shipped on 2026-07-27 as new packages, `@modelcontextprotocol/server` and `@modelcontextprotocol/client` (with `@modelcontextprotocol/core`). It is ESM-first, needs Node 20 or later and zod `^4.2.0`, and ships a v1-to-v2 codemod ([upgrade guide](https://ts.sdk.modelcontextprotocol.io/v2/migration/upgrade-to-v2)).
+- **v1.** `@modelcontextprotocol/sdk` v1.x implements specifications up to `2025-11-25` only, and receives fixes for at least six months after v2's release, to about 2027-01-27.
+- **Compatibility.** A v2 server keeps speaking the 2025-era protocol unless the 2026 revision is explicitly enabled. Clients that speak `2026-07-28` fall back to `initialize` against older servers.
+- **Our footprint.** One source file imports the SDK: `packages/shared/src/server-base.ts` (`McpServer`, `ResourceTemplate`, `StdioServerTransport`, `McpError`, `ErrorCode` and types). That is AD-2 and AD-3 at work. Tests in `@iris-mcp/shared`, `iris-mcp-all` and the extension also use it. The five server packages declare the dependency but do not import it.
+
+**Constraints:**
+- **Back-compat (Rule #19).** The SDK stays confined to `@iris-mcp/shared`, per spine AD-2 and AD-3. On the 2025-11-25 era, `tools/list`, `prompts/list`, the resources capability, error envelopes, governance denials and the `instructions` string are byte-identical to today, each proven by a pin that fails on drift.
+- **Transport.** Streamable HTTP remains rejected (spine AD-23), so the stateless revision's HTTP benefits are out of scope.
+- **Bootstrap.** `BOOTSTRAP_VERSION` does not move, because this epic makes no ObjectScript change.
+
+**In scope since 2026-10-15 (Project Lead decision):** multi-round-trip requests, for one purpose only. Existing confirmation gates ask the human through elicitation (Story 43.3). The probe proved that one handler works on both eras over stdio, and that Claude Code shows the dialog.
+
+**Out of scope:**
+- the Tasks extension: our long-running test runs already work on every client through the `running` result and `iris_test_status` (spine AD-16), SDK v2 supports it only partially, and Claude Code doesn't document it;
+- MCP Apps;
+- `subscriptions/listen`;
+- sampling, roots and URL-mode elicitation;
+- an operator setting that requires a human, and so refuses clients that cannot elicit. That setting is a recorded candidate;
+- any new tool.
+
+### Story 43.1: Framework Migration to SDK v2
+
+- **AC 43.1.1** — Probe first (Rules #14 and #47). Record:
+  - **Import inventory.** Every import of `@modelcontextprotocol/sdk` across `packages/`, `extensions/` and `scripts/`, exhaustive as of a named date (Rule #56), source and tests separately.
+  - **Codemod.** What `npx @modelcontextprotocol/codemod v1-to-v2` rewrites, run in a scratch copy, and what stays manual.
+  - **Changed v2 APIs.** The v2 API for every symbol `server-base.ts` uses (`McpError` → `ProtocolError`; `ErrorCode` → `ProtocolErrorCode`; the stdio transport's subpath; `registerResource` metadata; prompt registration), with the installed v2 version pinned.
+- **AC 43.1.2** — Migrate `@iris-mcp/shared` to the v2 packages, and remove `@modelcontextprotocol/sdk` from every `package.json` that does not need it. The servers keep speaking the 2025-11-25 era by default.
+- **AC 43.1.3** — Back-compat pins (Rule #19).
+  - Through the real client path:
+    - the advertised `tools/list` (names, schemas, annotations);
+    - `prompts/list` and `prompts/get`;
+    - the resources capability;
+    - the `instructions` string;
+    - a governance denial;
+    - an unknown-tool error;
+    - a Zod validation error.
+  - Each is captured before the migration and compared after with `toEqual`.
+  - The 38 `stageDefaultStartup` test files pass unmodified.
+- **AC 43.1.4** — The test suites that use the SDK client (in-memory transport pairs in `@iris-mcp/shared`, `iris-mcp-all` and the extension) move to `@modelcontextprotocol/client`, and their assertions are unchanged.
+- **AC 43.1.5** — Gates:
+  - build, test, lint and type-check pass;
+  - governance `:check`;
+  - tool counts are unchanged;
+  - `bootstrap-classes.ts` is absent from the diff;
+  - `pnpm audit` on production dependencies is recorded, and the HTTP-stack advisories that v1 carried are expected to drop.
+
+### Story 43.2: Serve MCP Revision 2026-07-28
+
+*Viability settled on 2026-10-15 by a live probe* ([research/mcp-sdk-v2-stdio-probe-2026-10-15.md](./research/mcp-sdk-v2-stdio-probe-2026-10-15.md)). One `serveStdio` process served:
+- a client pinned to `2026-07-28`;
+- `auto` negotiation, which is what Claude Code uses;
+- a 2025-era v2 client;
+- this repo's v1.29.0 client.
+
+All four saw identical `tools/list` and `instructions`.
+
+- **AC 43.2.1** — Design (verified):
+  - `McpServerBase` serves stdio through `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`, with the default `legacy: 'serve'`. The factory builds the `McpServer` and registers every tool, prompt and resource. Over stdio, there is one connection per process, so the factory runs once per process.
+  - Record which certified clients in client-config's 16-adapter registry negotiate `2026-07-28` today, and how `MCP_PROTOCOL_NEGOTIATION=legacy` forces Claude Code back to the old path.
+- **AC 43.2.2** — Every server answers both eras from one process:
+  - a `2026-07-28` client (the v2 client, pinned to that revision) discovers capabilities with `server/discover` and calls tools;
+  - a 2025-11-25 client is unaffected, which 43.1's pins prove.
+- **AC 43.2.2a** — Cross-era equivalence pin. The logical content of each surface is identical on both eras:
+  - `tools/list` (names, schemas, annotations, order), `prompts/list` and `prompts/get`, resources, and `instructions`;
+  - a governance denial, a validation error and an `isError` result.
+
+  The pin ignores only fields the revision itself mandates, such as `resultType`, `ttlMs`/`cacheScope` and `_meta` identity, and names each one. This matters because Claude Code takes the modern path once 43.2 ships.
+- **AC 43.2.3** — Per-request metadata never weakens the AD-3 chokepoint. `server` and namespace resolution, the governance gate, visibility and audit behave identically on both eras, and a test drives each gate on each era.
+
+### Story 43.3: Human Confirmation Through Elicitation
+
+Added on 2026-10-15 by Project Lead decision. Today's `confirm: true` gates are a parameter the agent sets itself: they catch accidents, but not an agent that decides to proceed. On a client that supports elicitation, this story makes the same gates ask the person. The live probe ([research/mcp-sdk-v2-stdio-probe-2026-10-15.md](./research/mcp-sdk-v2-stdio-probe-2026-10-15.md)) proved that one `inputRequired.elicit()` handler works on both eras over stdio. It also found the two traps this story must avoid.
+
+- **AC 43.3.1** — Inventory, exhaustive as of a named date (Rule #56). List every confirmation gate in the suite and give each a verdict. As of 2026-10-15 the gates are:
+  - `iris_audit_manage` (`purge`);
+  - `iris_env_promote` (`execute`);
+  - `iris_production_control` (`clean` with `killAppData`);
+  - `iris_message_resend` (`resend` and `resendFiltered` execute);
+  - `iris_doc_edit:regenerateStorage` (Story 38.4);
+  - any gate Epics 38–41 add.
+
+  Review asks what is missing.
+- **AC 43.3.2** — One shared confirmation helper in `@iris-mcp/shared`. Handlers call the helper, never the SDK (spine AD-2 and AD-3). For a given action, target and scope summary:
+  - **When the calling client declares form elicitation**, the helper returns an `inputRequired` elicitation whose message names the action, the target and the scope (for example: the item, the window and the match count). On the retry:
+    - an **accept** proceeds;
+    - a **decline or cancel** ends the call with the refusal code `CONFIRMATION_DECLINED`, changes nothing, and never asks again. The probe showed that re-asking loops until the client's 10-round limit.
+  - **When the client does not declare elicitation**, the helper falls back to today's `confirm: true` contract, unchanged. The probe showed that an unconditional elicitation request errors on such clients.
+  - The story probes how to read the calling client's capability per request on each era. On modern connections the client capabilities travel in the request envelope.
+- **AC 43.3.3** — The existing contract stays. Callers still pass `confirm: true` (and `dryRun: false`, where it applies), and every existing check (bounds, dry-run, governance, AD-17) runs first. On an elicitation-capable client, the human dialog is an **additional** gate, after those checks, never a replacement. This is a behavior change for those clients, sanctioned by the Lead (spine AD-15), and is recorded in `CHANGELOG.md`.
+- **AC 43.3.4** — The confirmation is bound to exactly what the human saw. The helper checks that the retried call's arguments match the confirmed ones (for example, by a hash of the normalized arguments), and asks again if they differ. If the helper uses `requestState`, the state is integrity-protected (HMAC or AEAD) and verified, because it comes back from the client as untrusted input.
+- **AC 43.3.5** — Tests on both eras, through the real SDK client over stdio (`serveStdio`), covering:
+  - accept;
+  - decline;
+  - cancel;
+  - the fallback on a client without elicitation capability;
+  - arguments that change between rounds;
+  - a v1.29-era client.
+
+  A live check in Claude Code records that the dialog appears, an accept executes and a decline refuses. It also records how headless `claude -p` behaves.
+- **AC 43.3.6** — Governance and docs:
+  - no new governance key, tool or annotation change (the gate belongs to existing actions), and tool counts are unchanged;
+  - each gated tool's description and the README say that clients supporting elicitation ask the human;
+  - the docs say that a Claude Code `Elicitation` hook can auto-answer, which is the user's choice;
+  - the fallback is documented.
+
+### Story 43.4: SDK v2 Docs, Smokes and Capstone
+
+- **AC 43.4.1** — Live smokes from the built dist in a fresh Node process (Rule #22):
+  - each server through a real client (Claude Code, plus one other certified client);
+  - one call through each of the two eras, with Claude Code on its default `auto` negotiation and once with `MCP_PROTOCOL_NEGOTIATION=legacy`;
+  - one confirmation round trip (43.3) on each era.
+- **AC 43.4.2** — Capstone (Rule #21), in the default suite. One test drives a server through the real SDK client on both eras. It covers listing, a read call, a governance denial, a validation error, and a confirmation that is accepted once and declined once. It is proven red by breaking the era negotiation, or the decline handling (Rule #59: name the path).
+- **AC 43.4.3** — Docs and records:
+  - the README and the client docs state the supported protocol revisions and the confirmation behavior;
+  - `CHANGELOG.md` and a changeset are updated;
+  - the architecture spine's Stack rows, AD-32 and AD-34 are updated (Rule 20);
+  - the PRD's MCP compliance line is updated.

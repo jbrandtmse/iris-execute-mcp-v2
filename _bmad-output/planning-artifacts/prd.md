@@ -85,9 +85,9 @@ Target users are IRIS developers using AI coding assistants (primary), system ad
 
 - All 86 consolidated tools implemented and functional across all 5 servers
 - Zero SuperServer/native driver dependencies — web port HTTP only
-- MCP specification v2025-11-25 compliance: pagination, tool annotations, listChanged, structured output
+- MCP specification compliance: revision 2025-11-25 (pagination, tool annotations, listChanged, structured output), plus revision 2026-07-28 over stdio from Epic 43 (FR161)
 - Self-bootstrap succeeds fully with %Admin_Manage privileges; degrades gracefully with %Development only
-- Each server stays under 25 tools (MCP best practice threshold)
+- Each server's *advertised* tool set stays within the MCP best-practice range through visibility presets (Epic 30, FR138). The `core` preset targets about 13 runtime tools per server; that is a guideline, not a hard limit (Project Lead, 2026-10-14). A server's full catalog may exceed the original 25-tool threshold: dev had 29 tools at Epic 37's close and is planned at 31 after Epic 38.
 - Tool response times under 2 seconds for read operations, under 10 seconds for compilation/deployment
 
 ### Measurable Outcomes
@@ -210,18 +210,25 @@ Mei is a data analyst who uses IRIS as the backend for a document management sys
 - **Secondary distribution:** IPM registry for IRIS-side ObjectScript component
 - **Installation:** `npm install -g @iris-mcp/dev` (or any individual package)
 - **No native dependencies** — pure Node.js, no compiled modules, no Python runtime
+- **Status 2026-10-14** (decision record D1–D7, [decision-record-2026-10-14-distribution-and-skills.md](./decision-record-2026-10-14-distribution-and-skills.md); Epic 42):
+  - npm `1.0.0` of every `@iris-mcp/*` package, published with provenance by a gated GitHub Actions release workflow, with no beta tag;
+  - clients launch `npx -y @iris-mcp/<pkg>@1` (major pin);
+  - IPM is revived with a manifest generated from the bootstrap class list and an offline install proof, and listed on Open Exchange;
+  - the VS Code extension is published on the Marketplace and Open VSX;
+  - a Claude Code plugin brings all five servers plus the skills pack;
+  - the suite is listed on the MCP Registry.
 
 ### API Surface
 
-- **Inbound:** MCP protocol (JSON-RPC 2.0) via stdio or Streamable HTTP transport
-- **Outbound:** HTTP/REST to IRIS web port — Atelier API (auto-negotiated up to v8) and custom REST service (`/api/executemcp/v1/`)
-- **Tool naming convention:** `iris.{category}.{action}` with dot-namespaced hierarchy
+- **Inbound:** MCP protocol (JSON-RPC 2.0) via stdio (Streamable HTTP is not yet offered; see FR7)
+- **Outbound:** HTTP/REST to IRIS web port — Atelier API (auto-negotiated up to v8) and custom REST service (`/api/executemcp/v2/`)
+- **Tool naming convention:** flat `iris_<domain>_<verb>` (lowercase letters, digits and underscores; renamed from dotted names in Epic 9 for Anthropic API compatibility)
 - **Tool count per server:** 9-22 (within MCP best practice range)
 - **Schema:** JSON Schema 2020-12 for all inputSchema and outputSchema definitions
 
 ### MCP Client Compatibility
 
-No custom IDE extension required. Compatible with any MCP client that supports stdio or Streamable HTTP transport:
+No custom IDE extension required. Compatible with any MCP client that supports the stdio transport (Streamable HTTP is not yet offered; see FR7):
 - Claude Desktop
 - Claude Code (CLI and VS Code extension)
 - Cursor
@@ -270,9 +277,9 @@ Each server is configured independently in the client's MCP configuration with i
 
 | Runtime/Language | Supported Versions | Notes |
 |-----------------|-------------------|-------|
-| Node.js | 18 LTS, 20 LTS, 22 LTS | Minimum 18 for native `fetch` support |
+| Node.js | 22 and later (CI tests the floor of 22, 24, 26) | Minimum 22: iris-dev-mcp uses `fs.globSync`; Node 18 and 20 are end-of-life (2025-04-30, 2026-04-30). Decision D4, 2026-10-14 |
 | TypeScript | 5.0+ | Source language; compiled to ES2022 JavaScript |
-| IRIS | 2023.1+ | Atelier API v1+ required; v8 for full feature set |
+| IRIS | 2023.1+ (best effort below the oldest CI-tested image) | Atelier API v1+ required; v8 for the full feature set. InterSystems' own minimum supported version is 2024.1 (since 2026-07-01); Project Lead decision 2026-10-15 to keep the 2023.1 claim, labelled best effort |
 | npm | 9+ | Required for workspace support |
 
 ### Representative Tool Call Examples
@@ -318,7 +325,7 @@ Each server is configured independently in the client's MCP configuration with i
 
 ### Implementation Considerations
 
-- **Node.js minimum version:** 18+ (LTS) for native fetch support
+- **Node.js minimum version:** 22+ (decision D4, 2026-10-14; see Language & Runtime Support)
 - **Build system:** TypeScript with tsconfig project references for monorepo
 - **Versioning:** Semver with synchronized versions across all packages in the monorepo
 - **Build scripts:** Turborepo tasks for build, test, lint, and type-check
@@ -437,7 +444,7 @@ Each server is configured independently in the client's MCP configuration with i
 - FR4: Server can report its available tools via `tools/list` with cursor-based pagination
 - FR5: Server can declare tool annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) for each tool
 - FR6: Server can emit `notifications/tools/list_changed` when its tool set changes
-- FR7: Server can operate via stdio or Streamable HTTP transport
+- FR7: Server operates via the stdio transport. Any other configured transport, including `http`, is rejected at startup with a clear configuration error. An authenticated Streamable HTTP transport is a post-MVP candidate pending an auth design (decision 2026-10-14, Epic 38 Story 38.1).
 - FR7b: Developer can specify an optional `namespace` parameter on any namespace-scoped tool to override the configured default (environment variable `IRIS_NAMESPACE`); system-scoped tools always execute in %SYS. See **Appendix A: Tool Namespace Scope Reference** for the complete per-tool mapping.
 - FR7c: Developer can execute namespace-scoped tools in any accessible namespace without affecting the namespace context of other concurrent tool calls or the server's default namespace.
 
@@ -689,6 +696,30 @@ Sourced from live bug report [docs/bugs-2026-08-14.md](../../docs/bugs-2026-08-1
 - FR143: Developer can control the wait budget of a unit-test run (`iris_execute_tests` `timeout` parameter, operator default via `IRIS_TEST_TIMEOUT`) and, when a run outlives it, receives a distinct non-error "running" result carrying the run's correlation handles — the Atelier work-queue job id and the `%UnitTest.Result` run index — plus the partial results drained so far, instead of a terminal error; the same handles are returned on every completed run. (Epic 36, Story 36.1)
 - FR144: Developer can re-attach to, read, or cancel a previously submitted unit-test run by its correlation handle through a companion read tool (`iris_test_status`: `poll` by job id or run index; `cancel`, write, default-disabled), so a run that outlived the caller's wait budget is never re-submitted to obtain its result. (Epic 36, Story 36.2)
 - FR145: Operator running several server profiles keeps a working MCP server when the reserved `default` profile's IRIS instance is unreachable: server startup completes, calls against reachable profiles succeed, calls against the unreachable profile return the standard structured connection error (code, message, recovery suggestion), and that profile recovers on its next call once reachable — no server restart required. The same applies to a single-server install (the server starts and recovers rather than exiting). Invalid configuration remains fail-fast at startup. (Epic 37, Story 37.1)
+
+**Epics 38–42 — Competitive Response, Skills Pack & Published Install (added 2026-10-14)**
+
+Sourced from the Project Lead decision record [decision-record-2026-10-14-distribution-and-skills.md](./decision-record-2026-10-14-distribution-and-skills.md) and the competitive teardown [research/competitive-iris-agentic-dev-mcp-tools-gap-analysis-2026-10-14/research.md](./research/competitive-iris-agentic-dev-mcp-tools-gap-analysis-2026-10-14/research.md); see [sprint-change-proposal-2026-10-14-competitive-skills-distribution.md](./sprint-change-proposal-2026-10-14-competitive-skills-distribution.md) for the Lead decisions S-1 to S-4 and L-1 to L-4.
+
+- FR146: Developer can read a document by 1-based line range (`iris_doc_get` `startLine`/`endLine`) and gets the total line count. (Epic 38, Story 38.2)
+- FR147: Developer can edit a document surgically with `iris_doc_edit`: insert, delete or replace line ranges, each guarded by the expected current text. A mismatch is refused with no write, conflicts are never ignored, and the response is a unified diff rather than the whole document. It is a write enabled by default (Lead decision S-3) and blocked under the `read-only` preset. (Epic 38, Story 38.4)
+- FR148: A document write that would drop a class's existing Storage definition is refused unless explicitly overridden. (Epic 38, Story 38.3)
+- FR149: Operator and developer can confine `iris_sql_execute` to read-only statements, cap the rows a DML statement may affect, receive `%ROWCOUNT`, and count rows without transferring them. A read-classified `iris_sql_query` serves queries under the `read-only` preset (Lead decision L-3). (Epic 38, Story 38.5)
+- FR150: Integration engineer can search messages by header fields, by body content (a structured, parameterized filter on a body class) and by Search Table value, within a required scope window (`iris_message_search`). (Epic 39, Stories 39.1, 39.3 and 39.4)
+- FR151: Integration engineer can read any message body by header id: HL7 as ER7, XML, persistent objects as JSON, and streams as text (`iris_message_body`). (Epic 39, Story 39.5)
+- FR152: Operator can set a per-profile PHI data policy (`block`, `redact` or `allow`; default `redact`, Lead decision L-2) that governs every surface returning body content or body-derived values, including the existing resend preview. (Epic 39, Story 39.2)
+- FR153: Developer can measure line-by-line coverage of the classes a test run exercises: per class and method, uncovered ranges, Cobertura XML and a target verdict. The run never disturbs another monitor session on a shared instance. (Epic 40, Stories 40.1 and 40.2)
+- FR154: Developer can run `%UnitTest.TestProduction` tests without disturbing a different running production. (Epic 40, Story 40.3)
+- FR155: Agents get an always-on ObjectScript pre-write rule and 6–10 knowledge skills alongside the generated workflow skills, shipped with the competitor's MIT notice wherever adapted content ships. (Epic 41, Stories 41.1–41.5)
+- FR156: Developer can install the skills and rules pack into each supported client's native location from `iris-mcp-clients`, with a dry run, idempotent re-install and uninstall. (Epic 41, Story 41.6)
+- FR157: User can install the suite from npm (`@iris-mcp/*` `1.0.0`, Node 22+), with clients launching `@1`. (Epic 42, Stories 42.1 and 42.6)
+- FR158: The bootstrap never downgrades IRIS-side classes deployed by a newer build. (Epic 42, Story 42.2)
+- FR159: IRIS administrator can install the IRIS-side classes through IPM, with an offline install proof. (Epic 42, Story 42.4)
+- FR160: Claude Code users can install the whole suite plus skills as one plugin, and VS Code users can install the extension from the Marketplace or Open VSX. (Epic 42, Stories 42.7 and 42.8)
+- FR161: The servers run on the MCP TypeScript SDK v2 before `1.0.0` is published. They behave byte-identically for clients on the 2025-11-25 protocol revision, and also serve revision `2026-07-28` over stdio from the same process, with identical logical content on both. (Epic 43, added 2026-10-15 by Project Lead decision; stdio support verified by live probe on 2026-10-15)
+- FR162: On a client that supports MCP elicitation, every confirmation gate asks the human directly before executing; examples are audit purge, promote execute, `clean` with `killAppData`, resend execute and `regenerateStorage`. A decline refuses and changes nothing. The confirmation is bound to the exact arguments shown. On clients that cannot elicit, today's `confirm: true` contract applies unchanged. (Epic 43, Story 43.3, added 2026-10-15 by Project Lead decision)
+
+Release requirement (non-functional): releases run only from a tagged commit with green CI, through an approved protected environment, with npm provenance. (Epic 42, Stories 42.3 and 42.5)
 
 ### Performance
 

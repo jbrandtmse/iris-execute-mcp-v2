@@ -71,8 +71,8 @@ The FR distribution reveals architectural weight: iris-dev-mcp (FR16-FR39, 24 FR
 ### Technical Constraints & Dependencies
 
 - Web port only (HTTP/HTTPS on default 52773) — no SuperServer, no native driver
-- Node.js 18+ LTS (native fetch), TypeScript 5.0+, IRIS 2023.1+
-- MCP spec v2025-11-25 compliance is non-negotiable
+- Node.js 22+ (decision D4, 2026-10-14: iris-dev-mcp uses `fs.globSync`; Node 18 and 20 are end-of-life), TypeScript 5.0+, IRIS 2023.1+
+- MCP spec compliance is non-negotiable: revision 2025-11-25, plus 2026-07-28 from Epic 43 (spine AD-32)
 - Custom REST service must live in %SYS namespace for admin operations
 - npm as primary distribution, IPM as secondary for IRIS-side components
 - Local IRIS instance available at localhost:52773, namespace HSCUSTOM (from workspace config)
@@ -125,7 +125,7 @@ npx create-turbo@latest iris-mcp-v2 --package-manager pnpm
 - TypeScript 5.0+ with strict mode
 - Target: ES2022, Module: Node16, ModuleResolution: Node16
 - Base tsconfig.json with project references per package
-- Node.js 18+ LTS (native fetch, no polyfills)
+- Node.js 22+ (native fetch, no polyfills; floor raised from 18 by decision D4, 2026-10-14)
 
 **Build Tooling:**
 - Turborepo for task orchestration and caching (`turbo.json`)
@@ -338,12 +338,13 @@ This convention matches the Anthropic Messages API `tools[].name` regex `^[a-zA-
 - All packages share the same version number (e.g., all at `2.3.0`)
 - `@changesets/cli` manages version bumps and changelog generation
 - Rationale: Simpler for consumers ("use v2.3.0 of everything"), avoids compatibility matrix across 7 packages
+- `1.0.0` is the first published version, and clients pin the major (`@1`). Decisions D2 and D3, 2026-10-14.
 
 **Build & Test: Local Development**
 - Integration tests run against the local IRIS development instance (connected via VS Code)
 - Build and test orchestration via Turborepo tasks (`turbo build`, `turbo test`, `turbo lint`)
-- CI/CD pipeline (GitHub Actions) deferred to post-MVP
-- npm publish workflow deferred to post-MVP
+- CI/CD pipeline (GitHub Actions): built in Epic 42 (decision D7, 2026-10-14). See the N-series record under "Competitive Response, Skills Pack and Published Install".
+- npm publish workflow: a gated release workflow in Epic 42 (D7)
 
 **npm Scope: `@iris-mcp/*` Public Packages**
 - `@iris-mcp/shared`, `@iris-mcp/dev`, `@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops`, `@iris-mcp/data`, `@iris-mcp/all`
@@ -490,6 +491,52 @@ Added via `sprint-change-proposal-2026-09-10-execute-tests-long-run.md`, trigger
 Added via `sprint-change-proposal-2026-09-16-default-profile-outage.md`, triggered by `docs/bugs-2026-09-16.md` (the second beta-feedback defect). Decision D1 (Epic 14) made the reserved `default` profile's client eager at startup "preserving today's bootstrap/health-check/negotiation exactly" — and with it, silently, the pre-multi-server consequence that a failed health check is fatal (`process.exit(1)` before the transport connects). Non-default profiles were given lazy, retryable, per-call-error semantics (AC 14.2.8). A multi-profile process therefore died with its anchor: one instance down made every other configured instance unreachable through the suite, at exactly the moment an operator wants the others.
 
 **M1 — A configuration error fails startup fast; an unreachable peer never does.** Concretely: (1) `start()` distinguishes INVALID CONFIGURATION — malformed `IRIS_GOVERNANCE*`/`IRIS_PROFILES`/preset values, missing credentials, an unwritable audit path — which fails fast naming the variable, from an UNREACHABLE IRIS INSTANCE, which is logged (host:port, reason, continuation semantics) and never exits the process; (2) every profile, the reserved `default` included, is established through ONE path (`getOrCreateClient` → `establishProfile`) with retryable first-touch semantics; the default's startup attempt is an eager WARM-UP of that path (kept so single-server installs retain startup-time bootstrap and diagnostics), never a gate — on failure its client is dropped and no metadata is recorded, so the first call re-establishes exactly as a non-default profile would; (3) unreachability surfaces per call as the structured `isError` connection envelope and recovers without restart; (4) a running server process therefore does not imply that any IRIS instance is reachable — discovery (`iris_server_profiles`) stays connection-agnostic by design, and reachability is learned per call (a cheap read such as `iris_server_info`). *Rationale:* the suite's multi-server value ("one process, several instances") is worthless if one outage takes down the process; the lazy path already had the right semantics, so the fix is to stop exempting `default` from them. *Recorded, not decided:* an opt-in strictness knob restoring fail-fast (precedent `IRIS_SERVER_MANAGER=required`) and a per-profile reachability field on discovery are ledger candidates with named triggers, not features. This is a single-pattern decision like K1/L1 — recorded because it amends the failure-mode consequence of D1 without changing D1's success path.
+
+### Competitive Response, Skills Pack and Published Install (Epics 38–42 — added 2026-10-14)
+
+Added via `sprint-change-proposal-2026-10-14-competitive-skills-distribution.md`, from the Project Lead decision record `decision-record-2026-10-14-distribution-and-skills.md` and the iris-agentic-dev teardown (`research/competitive-iris-agentic-dev-mcp-tools-gap-analysis-2026-10-14/research.md`). Lead decisions cited: S-2 (reject HTTP), S-3 (`iris_doc_edit` enabled by default), L-2 (PHI default `redact`), L-3 (read-classified `iris_sql_query`), and D1–D7 (distribution). Stories 39.2 and 41.1 add their recorded detail here (Rule 20).
+
+**N1 — A transport the server cannot run is a configuration error.** Unsupported transports, `http` included, fail fast in `resolveTransport` under M1's configuration class, before any IRIS traffic. An HTTP transport returns only with an auth, bind-address and session design (Story 38.1).
+
+**N2 — Document writes are guarded and minimal.**
+- Line numbers are 1-based indexes into the content array that Atelier's `GET /doc` returns. They are defined once and shared by ranged reads (`iris_doc_get`) and edits (`iris_doc_edit`).
+- Edits are guarded by expected text, all-or-nothing, and never use `ignoreConflict`.
+- The Storage-drop guard is one shared function, applied on every document-writing path that adopts it (put and edit in Epic 38).
+- `iris_doc_edit` is a `defaultEnabled` write by Lead decision S-3. That uses Rule #32's marker beyond its original recovery-tooling purpose. It is never classified `read`, never enters the frozen baseline, and stays blocked under the `read-only` preset (Stories 38.2–38.4).
+
+**N3 — SQL safety is enforced server-side by statement type**, not keyword matching, wherever the Story 38.5 probe confirms that the statement type is available.
+- Rows-affected caps are enforced transactionally, and residual non-transactional side effects are documented.
+- Read-only access under the `read-only` preset is a separate read-classified tool, `iris_sql_query` (L-3), never a weakened write key.
+
+**N4 — Message forensics never interpolates caller input.**
+- Body and Search Table filters are structured and validated against the class dictionary and `Ens.Config.SearchTableProp`.
+- A per-profile PHI data policy (`block`, `redact` or `allow`; default `redact`, L-2) governs every output derived from a body, the existing resend preview included.
+- Under `redact`, any body type the engine cannot redact reliably is blocked, never passed through.
+
+Story 39.2 records the configuration precedence here.
+
+**N5 — Instance-wide monitors on a shared instance are refuse-if-busy and always-release.** This covers `%Monitor.System.LineByLine` coverage sessions and TestProduction production control. A run never stops a session or production it did not start, and always releases its own, including after a timeout or error (Epic 40).
+
+**N6 — The skills pack has one source per artifact and ships its notice everywhere.**
+- Hand-authored knowledge skills and the always-on rule have exactly one source each.
+- Generated workflow skills stay generated (Rule #18).
+- One assembled pack directory is consumed by both the `client-config` installer and the Claude Code plugin.
+- `THIRD_PARTY_NOTICES.md` ships wherever adapted content ships, checked mechanically.
+
+Rules reach Claude Code only through the installer, because plugins cannot carry rules. Story 41.1 records the layout here.
+
+**N7 — Distribution.**
+- npm is the primary channel: `1.0.0`, Node 22+, clients pinned to `@1` (D2–D4).
+- The IPM manifest is generated from the bootstrap class manifest, with its version taken from npm (D6).
+- CI is secret-free and runs on throwaway IRIS containers that refuse the shared instance's ports.
+- Releases come only from a tagged, CI-green commit, through an approved protected environment, with npm provenance (D7).
+- The bootstrap version is monotonic (a sequence plus the hash), so a deployment by a newer build is never downgraded (DW-508, Story 42.2).
+
+**From 2026-10-15 the decision registry is the architecture spine:** `architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md` (AD-1 to AD-34). It adopts every decision recorded in this document, and the `/epic-cycle` pipeline reads it under Rules 6 and 20. New decisions go there, not here, and where the two disagree, the spine wins. The spine's review on 2026-10-15 added three Lead decisions:
+
+- the MCP TypeScript SDK v2 migration lands before `1.0.0`, as Epic 43 (spine AD-32);
+- a new key inherits its parent key's explicit disable (spine AD-4 and AD-6);
+- the always-on ObjectScript rule is unscoped (spine AD-28).
 
 ## Implementation Patterns & Consistency Rules
 
@@ -1062,7 +1109,7 @@ IrisHttpClient (http-client.ts)
 
 **Important Gaps: 2**
 1. **Atelier API version negotiation algorithm** — Architecture says "auto-detect highest version (v1-v8)" but doesn't specify the exact algorithm. Resolve during Epic 1 by referencing `sources/vscode-objectscript/src/api/`. Not blocking — `GET /api/atelier/` response includes version info.
-2. **Streamable HTTP transport configuration** — Architecture specifies both stdio and Streamable HTTP transports but doesn't detail the HTTP server setup (port, host binding). Resolve during Epic 1 — the MCP SDK handles most of this.
+2. **Streamable HTTP transport configuration** — Architecture specifies both stdio and Streamable HTTP transports but doesn't detail the HTTP server setup (port, host binding). Resolve during Epic 1 — the MCP SDK handles most of this. *Closed 2026-10-14: the HTTP transport is rejected at configuration time until an authenticated design exists (Story 38.1, decision S-2; record N1).*
 
 **Nice-to-Have Gaps: 2**
 1. MCP Inspector integration for development/debugging — add as dev dependency during implementation
@@ -1109,7 +1156,7 @@ IrisHttpClient (http-client.ts)
 
 **Areas for Future Enhancement:**
 - Atelier API version negotiation algorithm (resolve in Epic 1)
-- Streamable HTTP transport server config (resolve in Epic 1)
+- Streamable HTTP transport server config (closed 2026-10-14: rejected until an authenticated design exists; record N1)
 - OAuth2 for MCP servers themselves (post-MVP)
 - WebSocket debug/terminal tools (post-MVP, FR106-107)
 

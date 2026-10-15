@@ -36,16 +36,20 @@ separator: "-"
 #
 # ── ACTIVE feature branch ────────────────────────────────────────────────────
 #
-# feature/feature-wave-5-beta-feedback
+# feature/feature-wave-6-competitive-gaps   (Epics 38–40; not yet created)
 #
-# wave-4 merged to main 2026-08-19 (60be515) and is closed; wave-3 is closed.
-# wave-5 carries the beta-feedback epics: Epic 36 merged to main 2026-09-11
-# (2ed83ff). Epic 37 (second beta-feedback epic; Project Lead decision L-1,
-# 2026-09-16, sprint-change-proposal-2026-09-16-default-profile-outage.md):
-# epic37 is cut DIRECTLY off main (2ed83ff — identical tree to the wave-5 tip
-# 63bf908). At the SC-1 prompt name this existing wave-5 branch; SC-2 finds
-# epic37 present and checks it out; at close merge epic37 → wave-5 → main.
-# Three feature branches match feature_pattern — this line resolves the SC-7
+# Project Lead decision L-1, 2026-10-14
+# (sprint-change-proposal-2026-10-14-competitive-skills-distribution.md):
+# one wave branch per group of epics, each cut off main when its first epic
+# starts, with epic branches epic{N} under it:
+#   feature/feature-wave-6-competitive-gaps     Epics 38, 39, 40   (ACTIVE next)
+#   feature/feature-wave-7-skills-pack          Epic 41            (planned)
+#   feature/feature-wave-8-published-install    Epics 43, 42       (planned; 43 runs first)
+# At the SC-1 prompt name the wave branch for the epic being started.
+#
+# wave-5 (beta feedback, Epics 36–37) is merged to main and closed; it still
+# exists locally and on origin. wave-3 and wave-4 are closed. Because closed
+# wave branches still match feature_pattern, this line resolves the SC-7
 # ambiguity.
 #
 # NOTE: neither this comment nor the ACTIVE marker is a field /epic-cycle reads
