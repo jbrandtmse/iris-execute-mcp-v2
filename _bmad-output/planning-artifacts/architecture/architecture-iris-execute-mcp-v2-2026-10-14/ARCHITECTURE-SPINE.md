@@ -410,7 +410,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - The response is computed from a re-read after the PUT, never from the locally applied array.
   - **Storage guard.** One shared Storage-drop guard covers `iris_doc_put` and `iris_doc_edit`.
     - Story 38.3 enumerates every document-writing path (Atelier PUT, `xml/load`, bootstrap PUT), exhaustive as of a named date, and gives each a verdict.
-    - Recorded exclusions so far: `iris_doc_load` and the `iris_env_promote` `execute` sync, each with a ledger reopen trigger.
+    - Recorded exclusions so far: `iris_doc_load`, the `iris_env_promote` `execute` sync, and the `iris_doc_xml_export` import (`xml/load`), each with a ledger reopen trigger. The xml import was added at the Story 38.3 spec gate, 2026-10-15, as orchestrator decision #8 under the Lead's delegation.
+    - **Existing documents (Story 38.3, DW-540).** Without `If-None-Match`, Atelier refuses a PUT to an existing document with a 409 that carries the current document and its `ts`, and writes nothing. `iris_doc_put` uses that 409 as the guard's read and as the version token: it retries the save once with `If-None-Match: <ts>`. A 409 on that version-checked save is a conflict, and it is never retried.
     - A grep test fails on any new path that has no verdict.
   - **`iris_doc_edit`.** It exposes `apply`, a `defaultEnabled` write, and `regenerateStorage`, a default-disabled override action (AD-4).
 
