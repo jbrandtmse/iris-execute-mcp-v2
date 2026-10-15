@@ -499,7 +499,7 @@ development_status:
 
   epic-38: in-progress
   38-0-epic-37-deferred-cleanup: done
-  38-1-reject-the-unimplemented-http-transport: ready-for-dev
+  38-1-reject-the-unimplemented-http-transport: in-progress
   38-2-line-range-document-read: backlog
   38-3-storage-block-drop-guard: backlog
   38-4-surgical-line-edit-tool: backlog
