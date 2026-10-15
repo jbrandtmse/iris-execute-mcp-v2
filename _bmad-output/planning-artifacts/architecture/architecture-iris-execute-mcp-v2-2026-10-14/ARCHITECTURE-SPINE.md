@@ -429,6 +429,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - The remaining non-transactional effects are listed in the tool description.
     - The docs call the mode "statement-level read-only".
   - **Caps.** Rows-affected caps are enforced transactionally, inside IRIS, before commit. The existing `IRIS_SQL_MAX_ROWS` and `IRIS_SQL_TIMEOUT` clamps stay.
+    - Under a cap, only SELECT, INSERT, UPDATE and DELETE run. Every other statement type (DDL, `CALL`, `TRUNCATE`) is refused before execution. Its row count is not trustworthy: `TRUNCATE` reports -1 and `CALL` reports 0, so it would get past the ceiling unseen. This is orchestrator decision #13 at the Story 38.5 spec gate, 2026-10-15.
+    - All `iris_sql_execute` calls run on the custom SQL endpoint, so there is one serializer. SQL error text keeps the SQLCODE and the IRIS message. This is orchestrator decision #12.
+    - The 38.5 probe found that a rollback does not undo `$INCREMENT`/`$SEQUENCE` counters, row-ID counters, process-private and IRISTEMP globals, `JOB` or device output, or a function, procedure or trigger that ends or opens a transaction (`TCOMMIT` inside a function persists its writes).
   - **One serializer.** All SQL tools share one result serializer and select mode, pinned against `action/query` output on a fixture with dates, nulls, `%List` values and streams.
   - **The `read-only` preset.** Queries under it go through the read-classified `iris_sql_query`, whose parent key is `iris_sql_execute`. A weakened write key is never the route.
   - **Which tools the operator SQL controls bind.** Every tool that executes caller-supplied SQL text (`iris_sql_execute`, `iris_sql_query`).

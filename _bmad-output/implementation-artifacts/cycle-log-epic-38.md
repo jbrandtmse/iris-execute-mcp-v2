@@ -107,3 +107,6 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-15T22:06:34Z	Story 38.4	story_cycle	plan_to_commit_min=138 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
 2026-10-15T22:09:55Z	Epic 38	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=139
 2026-10-15T22:09:55Z	Story 38.5	stage_spawned	stage=plan spawn_at=2026-10-15T22:09:55Z model=claude-opus-5-5 agent_name=38-5-sql-write-safety-plan-1 cycle_iteration=1
+2026-10-15T22:43:12Z	Story 38.5	story_created	spawn_at=2026-10-15T22:09:55Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md build_status=ready-for-dev epic_context=reused orchestrator_decisions=12,13 bootstrap_moves=new_class_ExecuteMCPv2.REST.Sql cycle_iteration=1
+2026-10-15T22:43:12Z	Epic 38	spine_updated	ad=AD-25 reason=clarification by=lead story=38-5-sql-write-safety lint=ok
+2026-10-15T22:43:12Z	Story 38.5	spec_validated	service_introducing=true integration_ac=present adr_constrained_acs=AD-4,AD-6,AD-7,AD-9,AD-15,AD-25 decision_dependency=none orchestrator_decisions=12,13 sections_created=none owned_ledger=none addressed=0 declined=0 mutates_shared_runtime=true throwaway=ExecuteMCPv2.Temp.QaStory385*_HSCUSTOM model=claude-opus-5-5
