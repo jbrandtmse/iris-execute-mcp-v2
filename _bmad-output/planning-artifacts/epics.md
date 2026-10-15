@@ -5086,6 +5086,8 @@ G5. A cheap safety check on the document write path that 38.4 reuses.
 
   Fixtures are varied (Rule #58): several storage definitions, CRLF content, a Storage keyword inside a comment or string (which must not count), and a class whose storage was already absent.
 - **AC 38.3.6** — `iris_doc_load` and `iris_env_promote` `execute` are out of scope. `iris_env_promote` writes target documents with `ignoreConflict=1` as part of a sync. Each is filed as a `wontfix-accepted` ledger row with `reopen_if=` naming an observable trigger (spine AD-24). *(Amended 2026-10-14 by the spine reconcile: `iris_env_promote` added.)*
+- DW-540: `iris_doc_put` without `ignoreConflict` gets HTTP 409 for every existing document. Atelier saves an existing document only when `If-None-Match` equals its `ts`, and the tool never sends that header. Send the version token this story's guard already reads, and correct the `ignoreConflict` description. (ledger; routed by harvest 2026-10-15)
+- DW-541: `iris_doc_get` `metadataOnly` reads a `Last-Modified` header that Atelier never sends, and its unit test fakes that header (Rule #54). Drop the dead read and the impossible fake. (ledger; routed by harvest 2026-10-15)
 
 ### Story 38.4: Surgical Line Edit Tool
 

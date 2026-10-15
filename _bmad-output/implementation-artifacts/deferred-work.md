@@ -2864,3 +2864,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: extensions/iris-mcp-launcher/src/env.ts LAUNCHER_OWNED_VARS (ambient vars nulled because McpStdioServerDefinition.env is additive over the extension host env) omits MCP_TRANSPORT; resolveTransport now rejects every non-stdio value
 - 2026-10-15T15:52:02Z status=escalated owner=burndown by=cr note=launcher only spawns stdio, so nulling MCP_TRANSPORT loses nothing; rec: add it to LAUNCHER_OWNED_VARS (suite red here, DW-532)
+
+### DW-540: iris_doc_put without ignoreConflict gets HTTP 409 for every EXISTING document (it can only create); its ignoreConflict description is wrong
+- source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: Live probe 2026-10-15 IRIS 2026.2 Atelier v8: second iris_doc_put to an existing doc -> 409; %Api.Atelier.v2 PutDoc saves only when new or HTTP_IF_NONE_MATCH equals TS(); the tool never sends If-None-Match (doc.ts:193; bootstrap.ts:233-241 documents the same 409)
+- 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=38.3 owns the iris_doc_put write path (its guard reads current source first, so it has the ts to send); 38.4 must send the version header too
+
+### DW-541: iris_doc_get metadataOnly reads a Last-Modified header Atelier never sends, so timestamp is always absent; the unit test fakes the header (Rule #54)
+- source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: Atelier v1-v8 and %Atelier.REST set only ETag (=ts); live metadataOnly returns {exists,name,etag}; doc.test.ts:103-127 fakes Last-Modified; 38.2 corrected only the description
+- 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=two-way door (drop the dead read + the impossible fake); 38.3 edits doc.ts anyway
