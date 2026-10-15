@@ -501,7 +501,7 @@ development_status:
   38-0-epic-37-deferred-cleanup: done
   38-1-reject-the-unimplemented-http-transport: done
   38-2-line-range-document-read: done
-  38-3-storage-block-drop-guard: ready-for-dev
+  38-3-storage-block-drop-guard: in-progress
   38-4-surgical-line-edit-tool: backlog
   38-5-sql-write-safety: backlog
   38-6-editing-and-sql-safety-docs-prompt-and-capstone: backlog
