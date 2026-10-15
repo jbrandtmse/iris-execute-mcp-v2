@@ -297,7 +297,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - the `iris_execute_tests` annotation correction;
     - the possible retirement of the `objectscript-review` prompt;
     - the `@1` pin (D3) and the Node 22 floor (D4);
-    - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3).
+    - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3);
+    - the `IRIS_NAMESPACE` default moving from `HSCUSTOM` to `USER` (the documented value, which exists on every IRIS instance), in `config.ts` and the VS Code launcher, recorded under CHANGELOG "Changed" (DW-469, Story 38.0). The orchestrator decided this under the Lead's delegation for the unattended run of 2026-10-15; see `orchestrator-decisions-wave-6.md` #5.
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
