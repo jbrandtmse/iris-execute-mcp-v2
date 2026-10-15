@@ -409,8 +409,8 @@ export class McpServerBase {
    * Parsed `IRIS_GOVERNANCE_FILE` policy (Epic 32, Story 32.0, AC 32.0.1;
    * architecture decision J1), or `undefined` when the var is unset — the two
    * file layers of the cascade, strictly BELOW both env layers
-   * (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ??
-   * defaultSeed`, AC 32.0.2).
+   * (`env.profile ?? env.global ?? file.profile ?? file.global ??
+   * inheritedDisable ?? presetSeed ?? defaultSeed`, AC 32.0.2).
    *
    * `undefined` is also the constructed-but-not-yet-{@link start}ed default —
    * every cascade helper treats an absent file config as byte-for-byte the

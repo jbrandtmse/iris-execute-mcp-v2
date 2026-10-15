@@ -116,6 +116,9 @@ const gateTestFiles = [
   // built dists it reads are missing or stale (neither contacts IRIS; they use local stubs).
   "src/__tests__/story-38-0-qa-doc-claims.test.ts",
   "src/__tests__/story-38-0-qa-process.test.ts",
+  // `iris_doc_edit` and the governance parent keys over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory384WireEdit.cls and ...WireStore.cls (persistent, compiled) documents.
+  "src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts",
 ];
 
 const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];

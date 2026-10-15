@@ -260,7 +260,10 @@ describe("universe — full-universe render over the real built dist", { timeout
     const oraclePackages = await loadOracleTools();
     const oracleTools = [...oraclePackages.flatMap((pkg) => pkg.tools), serverDiscoveryTool];
     const parentKeys = buildParentKeys(oracleTools);
-    expect(parentKeys.size).toBeGreaterThan(0);
+    expect(
+      parentKeys.size,
+      "no built server dist declares a parent key: the dists predate Story 38.4, so rebuild them (pnpm turbo run build)",
+    ).toBeGreaterThan(0);
 
     const expectedPolicy = getEffectivePolicy(
       "default",

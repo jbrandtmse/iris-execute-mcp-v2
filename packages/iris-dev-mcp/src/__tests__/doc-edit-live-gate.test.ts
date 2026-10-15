@@ -25,8 +25,9 @@
  * instance at localhost:52773 / HSCUSTOM. Writes only the disposable `ExecuteMCPv2.Temp.QaStory384Edit.cls`
  * (compiled by the test), `...Store.cls` (persistent, compiled, no rows) and `...Rtn.mac` documents. Before
  * and after the run the gate removes the documents and every data global whose name starts `ExecuteMCPv` and
- * contains `QaStory384`, then asserts that no document (generated ones included) and no global named
- * `QaStory384` is left. Skips when IRIS is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed
+ * carries one of its fixture stems (`QaStory384Edit`, `QaStory384Store`, `QaStory384Rtn`), then asserts that no
+ * such document (generated ones included) or global is left; another gate's `QaStory384Wire*` fixtures are
+ * not this gate's. Skips when IRIS is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed
  * (same arming convention as the other live gates in this directory).
  */
 
@@ -69,6 +70,18 @@ const STORE_DOC = `${STORE}.cls`;
 const RTN_DOC = `${RTN}.mac`;
 const ALL_DOCS = [EDIT_DOC, STORE_DOC, RTN_DOC];
 
+/**
+ * The name stems of this gate's fixtures. The listing filter `QaStory384` also matches other gates'
+ * fixtures (the `iris-mcp-all` wire gate's `QaStory384Wire*`), which may exist while this gate runs, so
+ * this gate lists, kills and asserts only names that carry one of its own stems.
+ */
+const OWN_STEMS = ["QaStory384Edit", "QaStory384Store", "QaStory384Rtn"];
+
+/** Whether a listed document or global name belongs to this gate's fixtures. */
+function isOwnFixture(name: string): boolean {
+  return OWN_STEMS.some((stem) => name.includes(stem));
+}
+
 let skipReason: string | undefined;
 let ctx: ToolContext;
 let client: IrisHttpClient;
@@ -108,30 +121,32 @@ const RTN_SOURCE = [`ROUTINE ${RTN} [Type=MAC]`, "Main ; entry point", "    Writ
 
 // -- Cleanup ---------------------------------------------------------
 
-/** The globals whose name contains `QaStory384`, with the caret IRIS lists them with. */
+/** This gate's fixture globals (see {@link OWN_STEMS}), with the caret IRIS lists them with. */
 async function listFixtureGlobals(): Promise<string[]> {
   const listed = await globalListTool.handler({ filter: "QaStory384", namespace: IRIS_NAMESPACE }, ctx);
   expect(listed.isError, "the global listing").toBeUndefined();
-  return (listed.structuredContent as { globals: string[] }).globals;
+  return (listed.structuredContent as { globals: string[] }).globals.filter(isOwnFixture);
 }
 
-/** Kill every global whose name starts `ExecuteMCPv` and contains `QaStory384`. */
+/** Kill every global of this gate's fixtures whose name starts `ExecuteMCPv`. */
 async function killFixtureGlobals(): Promise<void> {
   for (const listed of await listFixtureGlobals()) {
     const name = listed.replace(/^\^/, "");
-    if (!name.startsWith("ExecuteMCPv") || !name.includes("QaStory384")) continue;
+    if (!name.startsWith("ExecuteMCPv")) continue;
     const result = await globalKillTool.handler({ global: name, namespace: IRIS_NAMESPACE }, ctx);
     expect(result.isError, `killing global ${name}`).toBeUndefined();
   }
 }
 
-/** The documents IRIS lists for `QaStory384`, generated documents included. */
+/** This gate's fixture documents (see {@link OWN_STEMS}), generated documents included. */
 async function listFixtureDocuments(): Promise<string[]> {
   const listed = await docListTool.handler(
     { filter: "QaStory384", generated: true, namespace: IRIS_NAMESPACE },
     ctx,
   );
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+  return (listed.structuredContent as { items: Array<{ name: string }> }).items
+    .map((item) => item.name)
+    .filter(isOwnFixture);
 }
 
 /** Remove everything the gate writes: the data globals, then the documents. */
@@ -602,7 +617,7 @@ describe("a routine edited at its last line with a CRLF text (Story 38.4, AC-7)"
 // -- Nothing left behind ---------------------------------------------
 
 describe("cleanup (Story 38.4, AC-7)", () => {
-  it("after the gate removes its fixtures, no document, generated routine or global named QaStory384 remains", async (testCtx) => {
+  it("after the gate removes its fixtures, no document, generated routine or global of its QaStory384 fixtures remains", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     await removeFixtures();

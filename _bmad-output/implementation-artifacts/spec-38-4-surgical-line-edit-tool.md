@@ -332,7 +332,7 @@ It reuses 38.2's line numbering and 38.3's Storage guard and refusal catalog unc
 - `packages/shared/src/__tests__/lines.test.ts` -- cover the new exports. -- AC-1, AC-9.
   - `splitLines` equals `split(/\r?\n/)` on CRLF/LF/trailing-newline fixtures.
   - `textToLines`, as in Always.
-  - `unifiedDiff`: at least 5 fixtures with distinct lines, pinned to literals captured with `diff -U3 before.txt after.txt` (macOS Apple diff, FreeBSD-based; headers replaced), with the command cited (Rule #36). The fixtures are: an insert at the top, a change in the middle, merged hunks, a pure delete (`@@ -2 +1,0 @@`), and an append.
+  - `unifiedDiff`: at least 5 fixtures with distinct lines, pinned to literals captured with `diff -U3 before.txt after.txt` (macOS Apple diff, FreeBSD-based; headers replaced), with the command cited (Rule #36). The fixtures are: an insert at the top, a change in the middle, merged hunks, a pure delete (`@@ -1 +0,0 @@ (`-U3`; corrected by the lead)`), and an append.
   - `alignLines`: pairs are ascending, and applying the hunks of `unifiedDiff` to `before` yields `after` over a seeded random set of edits (a mechanical round trip).
   - The `MAX_DIFF_DISTANCE` fallback.
 - `packages/shared/src/__tests__/governance-parent.test.ts` (new) -- the engine and gate matrix with synthetic tools. -- AC-6, AC-9.
@@ -424,6 +424,44 @@ It reuses 38.2's line numbering and 38.3's Storage guard and refusal catalog unc
   - there is no diff in `bootstrap-classes.ts`, `governance-baseline.ts`, `baseline-classifications.ts` or `src/`;
   - `BOOTSTRAP_VERSION` is `3af8ca401e7c`.
 
+### Review Findings
+
+Code review 2026-10-15 (`bmad-code-review`, tier full-opus). All four layers delivered: blind-hunter, edge-case-hunter, verification-gap and acceptance-auditor. They reported 21 raw findings, which group into 12 entries: high 1, medium 4, low 7. Seven findings were rejected.
+
+Outcome: all 10 patches were applied and verified, including the high and three of the four mediums. The remaining medium is DW-552, `decision-pending` (owner `burndown`, for the decision sheet), and the low DW-553 is `wontfix-accepted`. DW-551 was re-sighted (occurrence appended).
+
+Checks after the patches, all green:
+- The dev set (349) and the shared set (289).
+- The `iris-mcp-all` suite (310) and the launcher governance tests (30).
+- The full dev suite (1,185).
+- The armed live gates: `doc-edit-live-gate` (10) and the wire gate (10).
+- Lint (0 errors) and type-check for dev and shared.
+- `gen:governance-baseline:check` exits 0.
+
+The review status is `done`, with review outcome CLEAN.
+
+- [x] [Review][Patch] (high, Rule 6 / AD-24) An edit that IRIS stores back unchanged is reported as applied. The tool returns `changed: true`, "1 edit applied" and an empty `unifiedDiff`, because `changed` came from the locally edited array, not from the re-read. Live probe 2026-10-15 (`ExecuteMCPv2.Temp.CrProbe384.cls`, since removed): deleting the blank line between two members saves, and the re-read is byte-identical to the read with `ts` unchanged. Fix: compare the re-read with the read. When they are equal, answer `changed: false`, with a text saying that IRIS stored the text the document already had [packages/iris-dev-mcp/src/tools/doc-edit.ts:633]
+- [x] [Review][Patch] (medium, Rule 19 hermeticity) The dev live gate's before and after emptiness checks list every document and global named `QaStory384`. That includes the `iris-mcp-all` wire gate's `QaStory384Wire*` fixtures. `turbo run test` runs the two packages' suites concurrently, so the wire gate's fixtures fail the dev gate's checks. Fix: the dev gate lists, kills and asserts only its own three fixture stems [packages/iris-dev-mcp/src/__tests__/doc-edit-live-gate.test.ts:111]
+- [x] [Review][Patch] (medium, Rule 2) The QA wire gate re-implements `resolveSdkEsmDir`, `isIrisReachable` and `staleDistReason` without a stated reason. These are near-copies of the helpers in `governance-file-process-gate.test.ts:102-130` and `epic37-default-outage-gate.test.ts:86-160`. Fix: move the three helpers into `process-gate-helpers.ts`, which the gate already imports, and import them from there. The older copies predate this story and are left alone [packages/iris-mcp-all/src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts:103]
+- [x] [Review][Patch] (medium, Rule 19 shared surface) The launcher's real-CLI test still pins the old `configSource` value set, without `parent`. The `GovernanceConfigSource` set is on this spec's Shared surfaces line [extensions/iris-mcp-launcher/src/__tests__/governanceEngineRealCli.test.ts:196]
+- [x] [Review][Patch] (low) "Parent and child never disagree" overstates the rule. Only a disable is inherited, so under the read-only preset an explicit `iris_doc_put: true` runs while `iris_doc_edit:apply` stays denied [README.md:529, packages/shared/src/governance.ts:926]
+- [x] [Review][Patch] (low) Several cascade formula strings omit the inherited-disable step: the `presetSeed` and `loadGovernanceFile` JSDoc, the `governanceFileConfig` field, and the README read-only bullet. The README `effective` row also does not say that the command is baseline-scoped, so no parent applies to it [packages/shared/src/governance.ts:842, README.md:211]
+- [x] [Review][Patch] (low) The dev README `iris_doc_edit` example presents itself as a re-read, but shows class source in a layout IRIS never stores (`Class MyApp.Service {` on one line). Fix: rewrite it in IRIS's layout, with the diff re-captured by `diff -U3` [packages/iris-dev-mcp/README.md:436]
+- [x] [Review][Patch] (low) "Describes every field" checks only the four top-level fields; the descriptions of the six edit-item fields are unpinned [packages/iris-dev-mcp/src/__tests__/doc-edit.test.ts:1426]
+- [x] [Review][Patch] (low) When the server dists predate parent keys, the new universe test's anti-vacuity assertion fails without saying why [packages/shared/src/__tests__/governance-cli-universe.test.ts:263]
+- [x] [Review][Patch] (low, Rule 19) AC-10 has no `mutation:` line. Closed in this pass: the line is now under Verification [spec ## Verification]
+- [x] [Review][Defer] (medium, spec-bound) A `STALE_CONTENT` retry that uses `mismatches[].current` as `expected` fails again when the addressed range ends in an empty line. `current` is `joinLines` (matrix ST), and `textToLines` drops one trailing line break, so `["}", ""]` becomes `"}\n"`, which parses as `["}"]`. An `expected` built by joining a ranged read with `\n` fails the same way [packages/iris-dev-mcp/src/tools/doc-edit.ts:336] — deferred: DW-552 `decision-pending` (a contract choice on the `current`/`expected` round trip; 38.6's edit prompt depends on it)
+- [x] [Review][Defer] (low, Rule #54) The several-edits fake re-read `S2_LINES` is a `.cls` layout IRIS cannot return: it has no blank line after `{` or between members. The PUT-body pins it carries are realistic, and the multi-edit live gate row covers the stored outcome [packages/iris-dev-mcp/src/__tests__/doc-edit.test.ts:116] — deferred: DW-553 `wontfix-accepted`
+
+Rejected:
+- `low` The spec still gives the `-U0` literal `@@ -2 +1,0 @@` in the Tasks fixture note and in probe 6. The fix is a spec edit, which the Spec Change Log leaves to the lead. The implementation and `lines.test.ts` follow `diff -U3`.
+- `low` The wire gate checks only the shared and dev dists, so a missing admin, interop, ops or data dist fails the CLI row instead of skipping it. Every `iris-mcp-all` test that imports server dists assumes they exist, and turbo builds them before this package's tests.
+- `low` `IRIS_TOOLS_DISABLE=iris_doc_get` leaves `iris_doc_edit` visible. `TOOL_PAIRS` guards the named preset rosters (an existing contract); an explicit hide is the operator's choice; and `STALE_CONTENT` still returns the current text.
+- `low` With the audit log on, a `STALE_CONTENT` refusal's text, which holds the current lines, is recorded as the entry's `error`. The audit records the first text block of every error by its existing design (AD-19, out of footprint). The text is spec-literal (ST), and the lines are the ones the agent sent as `expected`.
+- `false` `expect(stored).toHaveLength(15)` and the `withoutDisable.length` check cannot fail, but they are fixture self-checks beside the real pins and are not offered as evidence.
+- `false` AC-4, AC-5 and AC-6 sub-claims lacking their own mutation: each of those ACs already has a recorded mutation, and Rule 19 asks for one per AC, not one per sub-claim.
+- `low` An inherited denial names a parent that `IRIS_TOOLS_DISABLE` hides. AD-6 (decision #10) and the matrix row "Hidden parent" fix that shape, and the build review already adjudicated it; changing it is a spec or spine edit. AD-7's "governance surfaces omit hidden tools' keys" could state whether call-time denials are covered.
+
 ## Spec Change Log
 
 ### 2026-10-15 - Matrix example `@@ -2 +1,0 @@` is a `-U0` form (Rule 5 apply-and-report; no loopback)
@@ -494,7 +532,7 @@ It reuses 38.2's line numbering and 38.3's Storage guard and refusal catalog unc
 3. **Version-checked saves.** `If-None-Match: <GET ts>` saves with 200, and the result carries the new `ts` and `content:[]`. A stale header gives 409.
 4. **Soft errors.** An illegal header gives HTTP 200 with `{db:"", ts:"", content:"", status:"ERROR #16021: Illegal Header Line: Property Alpha As %String;"}`, `ts` unchanged and nothing stored. Empty content gives `ERROR #16022: No Class Definition or ROUTINE header found`.
 5. **Identical re-save.** A PUT of identical routine content leaves `ts` unchanged.
-6. **`diff -U3` conventions.** It is Apple diff, FreeBSD-based, with the GNU hunk conventions: `@@ -2 +1,0 @@`, and `@@ -1,10 +1,12 @@` for merged hunks.
+6. **`diff -U3` conventions.** It is Apple diff, FreeBSD-based, with the GNU hunk conventions: `@@ -1 +0,0 @@` (corrected by the lead: the `-U0` form `@@ -2 +1,0 @@` never appears under `-U3`), and `@@ -1,10 +1,12 @@` for merged hunks.
 
 **AC 38.4.1 probe (`packages/client-config/src/diff.ts`, 1536 lines).** It is not generic. It plans and renders known JSONC/TOML/YAML entry edits (`jsonc-parser` edits, a TOML line lexer, YAML CST operations) as prose ("Replace lines a-b:"). It has no LCS or Myers alignment and emits no hunks. Its only movable helpers are 4 to 7-line string helpers (`detectEol`, `lineIndentAt`), and none of them diffs. No diff library exists in any `package.json` or in the lockfile. Research [57] (`research.md:423`, "Our existing line-span edit and diff engine ... high (verified)") overstates it, and `citecheck-final.md:31` had already flagged [25]. Decision: write a small diff in `lines.ts`.
 
@@ -645,7 +683,41 @@ Review-pass additions (each applied to the source, the named tests run, the file
 - mutation: AC-6 the `allProfiles` branch of `computeServerDiscovery` drops `parentKeys` from both engine calls -> `governance-parent.test.ts` and `doc-edit-governance.test.ts` "iris_server_profiles with allProfiles reports the inherited verdict for the profile that disables the parent only" (1 each) went red.
 - mutation: AC-6 `configSource` consults the inherited disable before the key's own explicit layers -> `governance-parent.test.ts` 7 rows, including the new "an explicit child false while the parent is also disabled is reported by the child's own layer", went red.
 
-AC-10 has no mutation by nature: it is the gate commands under Commands.
+- mutation: AC-10 a frozen baseline key removed from the live surface (`iris_doc_put` renamed `iris_doc_putx` in `doc.ts`, dev dist rebuilt) -> `pnpm gen:governance-baseline:check` exited 1 naming `iris_doc_put` as a vanished frozen key; restored, dev dist rebuilt, the check exits 0 at 141 frozen / 205 live (code review, 2026-10-15).
+
+**QA additions (Rule 3, Rule 19).** The implement stage proves the tool against real Atelier routes (handler called directly) and the governance matrix through the real `McpServerBase` gate with handler spies and a stubbed fetch; no test reached the built server through the MCP protocol with the real tools against the live IRIS. Added:
+- `(QA)` `packages/iris-mcp-all/src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts` (new, 10 tests). It spawns the built `iris-dev-mcp` dist per session and drives it with the real MCP SDK `Client` over stdio against `default` (localhost:52773, HSCUSTOM). It covers:
+  - `tools/list` (schema, annotations, no guard-skipping parameter) and `iris_server_profiles` defaults;
+  - an `apply` whose edits omit the fields their op does not take (including `afterLine: 0`), followed by `iris_doc_compile` and excerpt-versus-ranged-read equality;
+  - a stale `expected` leaving `{ts, content}` byte-identical;
+  - `regenerateStorage` denied by default and `apply` refused with `STORAGE_DROPPED`, each leaving a compiled persistent class unchanged;
+  - `iris_doc_put` disabled at `IRIS_GOVERNANCE`: `inheritedFrom` denials, `parent` source, nothing written, and `iris_doc_put`'s own denial unchanged;
+  - an explicit `iris_doc_edit:apply: true` winning and writing;
+  - `IRIS_TOOLS_DISABLE=iris_doc_put` (hidden parent);
+  - `regenerateStorage: true` running;
+  - the read-only preset, with and without the inherited disable;
+  - the built `iris-mcp-governance universe --json` process agreeing key-for-key with the server's `iris_server_profiles`.
+  Fixtures: `ExecuteMCPv2.Temp.QaStory384WireEdit.cls` and `...WireStore.cls`, removed before and after; the gate asserts no document (generated included) and no global named `QaStory384Wire` remains.
+- `(QA)` `packages/iris-mcp-all/scripts/prepublish-gate.mjs`: the gate is listed in `gateTestFiles` (Rule 8; `live-gate-roster.test.ts` enforces it).
+- `(once)` `IRIS_HOST=localhost IRIS_PORT=52773 IRIS_NAMESPACE=HSCUSTOM IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_HTTPS=false IRIS_REQUIRE_LIVE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts` -- expected: 10 pass, none skipped. It also passes unarmed in the default suite.
+- Not re-proved on the wire: a concurrent writer between the tool's read and its save. It needs a writer inside that window, which `doc-edit-live-gate.test.ts` provides with a `put` spy against the real 409.
+
+QA mutations (each applied by exact-string replacement, dist rebuilt, the gate run, the file restored, the dist rebuilt; `git diff HEAD | shasum -a 256` identical before and after all of them):
+- mutation: AC-3 `expected` check skipped (`false && stale.length > 0`) -> wire gate "a stale expected text is STALE_CONTENT ..." went red.
+- mutation: AC-4 Storage guard skipped for `apply` -> wire gate "on a compiled persistent class, regenerateStorage is denied ... apply is STORAGE_DROPPED" went red.
+- mutation: AC-5 answer built from the edited array (`reread = { ...reread, lines: applied.lines }`) -> wire gate "apply saves edits whose omitted fields the SDK parses ..." went red.
+- mutation: AC-6 `inheritedParentDisable` never returns the parent -> wire gate 4 of 10 went red (both-keys-denied, explicit-child-wins, hidden-parent, read-only plus inherited).
+- mutation: AC-6 `defaultEnabled` removed from `docEditTool` -> wire gate 5 of 10 went red (defaults, apply, stale, storage, hidden-parent).
+- mutation: AC-6 `defaultEnabled: ["apply", "regenerateStorage"]` -> wire gate "tools/list ... defaults" and the Storage denial test went red.
+- mutation: AC-6 inherited disable placed above the explicit child layers (`governance.ts` `effective`) -> wire gate "an explicit iris_doc_edit:apply: true wins and writes" went red.
+- mutation: AC-6 CLI `universe` builds an empty parent map (`cli/governance.ts`) -> wire gate "iris-mcp-governance universe --json and iris_server_profiles report the same ..." went red.
+- mutation: Rule 8 the gate removed from `gateTestFiles` -> `live-gate-roster.test.ts` "iris-mcp-all: every armed test file is in scripts/prepublish-gate.mjs gateTestFiles" went red.
+
+Code-review additions, 2026-10-15. Each mutation was applied to the source, the named tests were run, and the file was restored; `doc-edit.ts` and `doc.ts` were checked to carry only the review patch afterwards, and the dev dist was rebuilt.
+- mutation: AC-5 `changed` hard-coded to `true` again in `doc-edit.ts` -> `doc-edit.test.ts` "a class edit that IRIS stores back as it was is changed: false, and says so" went red (1 of 83). The row's fake is the live probe of 2026-10-15: a class saved without the blank line between two members re-reads byte-identical to the read, with the same `ts`.
+- mutation: Tasks "Every field has a description" `expected`'s description blanked (`"" && ...`) -> `doc-edit.test.ts` "describes every field, the edit fields included" went red (`edits[].expected`).
+- mutation: Rule 19 hermeticity, with a foreign `ExecuteMCPv2.Temp.QaStory384WireEdit.cls` planted on `default`/HSCUSTOM -> the dev live gate's former `QaStory384` filter failed both `beforeAll` and `afterAll` (10 skipped). With the gate scoped to its own fixture stems, it passed 10/10 with the foreign document present, which was then removed (`QaStory384` listing empty).
+- The wire gate's helpers now come from `process-gate-helpers.ts`. The armed run passed 10/10, which exercises `staleDistReason`, `resolveSdkEsmDir` and `isIrisReachable` on the gate's own path (armed, any skip reason throws).
 
 ## Auto Run Result
 

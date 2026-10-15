@@ -406,8 +406,8 @@ function parseGovernanceRoot(
  *   ungoverned by mistake). File CONTENTS are never echoed in errors.
  *
  * The returned config occupies the TWO file layers of the cascade
- * (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ??
- * defaultSeed`); see {@link effective}.
+ * (`env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable
+ * ?? presetSeed ?? defaultSeed`); see {@link effective}.
  *
  * @param env - Environment map (defaults to `process.env`).
  * @returns The parsed file config, or `undefined` when the var is unset/empty.
@@ -838,8 +838,9 @@ export function defaultSeed(
 /**
  * Compute the preset-layer enablement for a single governance key (Story
  * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers (env, then file —
- * Story 32.0) and {@link defaultSeed} in the cascade: `env.profile ??
- * env.global ?? file.profile ?? file.global ?? presetSeed(...) ??
+ * Story 32.0) with a parent key's inherited disable (Story 38.4) and
+ * {@link defaultSeed} in the cascade: `env.profile ?? env.global ??
+ * file.profile ?? file.global ?? inheritedDisable(...) ?? presetSeed(...) ??
  * defaultSeed(...)`.
  *
  * - `preset` is `undefined` or `"full"` ⇒ pass-through (`undefined` — falls
@@ -923,7 +924,7 @@ function ownProfileLayer(
  * explicit verdict is the FIRST layer that sets it, in cascade order: env
  * profile, env global, file profile, file global. The disable is inherited only
  * when that verdict is `false`, so a lower layer's `false` does not count once a
- * higher layer enables the parent: parent and child never disagree. Explicit
+ * higher layer enables the parent. Only a disable is inherited, never an enable. Explicit
  * layers of `key` itself are NOT consulted here; callers apply them first.
  *
  * @param key        - The governance key.

@@ -665,6 +665,44 @@ describe("iris_doc_edit (Story 38.4)", () => {
       expect(sc(result).totalLines).toBe(15);
       expect(sc(result).unifiedDiff).toContain("+// stored differently");
     });
+
+    it("a class edit that IRIS stores back as it was is changed: false, and says so", async () => {
+      // Captured live on 2026-10-15 (IRIS 2026.2 build 221U, HSCUSTOM): saving a class without the
+      // blank line between two members stores the read's text again, with the read's ts.
+      const sent = [...CLASS_LINES.slice(0, 4), ...CLASS_LINES.slice(5)];
+      mockHttp.get.mockResolvedValueOnce(envelope(docResult(CLASS_NAME, CLASS_LINES, TS_READ)));
+      mockHttp.put.mockResolvedValueOnce(envelope(saveResult(CLASS_NAME, TS_READ)));
+      mockHttp.get.mockResolvedValueOnce(envelope(docResult(CLASS_NAME, CLASS_LINES, TS_READ)));
+
+      const result = await run([{ op: "delete", startLine: 5, endLine: 5, expected: "" }]);
+
+      expect(mockHttp.put.mock.calls).toEqual([
+        [CLASS_PATH, { enc: false, content: sent }, { headers: { "If-None-Match": TS_READ } }],
+      ]);
+      expect(mockHttp.get.mock.calls).toEqual([[CLASS_PATH], [CLASS_PATH]]);
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text: [
+              `Document 'Test.Edit.cls' was saved in namespace 'USER', but IRIS stored the text it already had, so nothing changed; it has 13 lines (ts ${TS_READ}). IRIS reformats class source when it saves, so the edit has no effect.`,
+              "",
+              "Edit 1 (delete lines 5-5), now lines 2-8:",
+              ...rows(CLASS_LINES.slice(1, 8), 2),
+            ].join("\n"),
+          },
+        ],
+        structuredContent: {
+          name: CLASS_NAME,
+          namespace: "USER",
+          ts: TS_READ,
+          totalLines: 13,
+          changed: false,
+          unifiedDiff: "",
+          excerpts: [{ edit: 1, op: "delete", startLine: 2, endLine: 8, lines: CLASS_LINES.slice(1, 8) }],
+        },
+      });
+    });
   });
 
   describe("no change (the matrix row 'No change')", () => {
@@ -1423,10 +1461,18 @@ describe("iris_doc_edit (Story 38.4)", () => {
       expect(parsed.edits[0]?.endLine).toBe(4);
     });
 
-    it("describes every field", () => {
-      const shape = docEditTool.inputSchema.shape as Record<string, { description?: string; unwrap?: () => unknown }>;
+    it("describes every field, the edit fields included", () => {
+      const shape = docEditTool.inputSchema.shape as Record<string, { description?: string }>;
       for (const [key, field] of Object.entries(shape)) {
         expect(field.description ?? "", key).not.toBe("");
+      }
+      const edits = docEditTool.inputSchema.shape.edits as unknown as {
+        element: { shape: Record<string, { description?: string }> };
+      };
+      const editFields = Object.entries(edits.element.shape);
+      expect(editFields.map(([key]) => key)).toEqual(["op", "afterLine", "startLine", "endLine", "text", "expected"]);
+      for (const [key, field] of editFields) {
+        expect(field.description ?? "", `edits[].${key}`).not.toBe("");
       }
     });
 

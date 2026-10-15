@@ -4,6 +4,63 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+
+/**
+ * The MCP SDK's ESM build in the pnpm store of the monorepo at `repoRoot`
+ * (this package does not depend on the SDK itself), or `undefined` when no
+ * installed SDK version has one.
+ *
+ * @param repoRoot - Absolute path of the monorepo root.
+ */
+export function resolveSdkEsmDir(repoRoot: string): string | undefined {
+  const pnpmDir = path.join(repoRoot, "node_modules", ".pnpm");
+  if (!existsSync(pnpmDir)) return undefined;
+  const candidates = readdirSync(pnpmDir)
+    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
+    .sort();
+  for (const candidate of candidates) {
+    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
+    if (existsSync(esmDir)) return esmDir;
+  }
+  return undefined;
+}
+
+/**
+ * Why a gate that runs a workspace package's built dist cannot trust it
+ * (`checkDistFresh`: missing or older than its source), or `undefined` when
+ * the dist is fresh.
+ *
+ * @param repoRoot - Absolute path of the monorepo root.
+ * @param pkgDir - The package's directory name under `packages/`.
+ */
+export function staleDistReason(repoRoot: string, pkgDir: string): string | undefined {
+  const fresh = checkDistFresh(path.join(repoRoot, "packages", pkgDir), pkgDir);
+  if (!fresh.ok) return fresh.reason;
+  if (fresh.skipped) return `${pkgDir} declares no dist/ build output, but this gate runs its built dist.`;
+  return undefined;
+}
+
+/**
+ * Whether the IRIS Web Gateway answers at `host:port`. Any HTTP response,
+ * even a 401, proves it is reachable; a network error or a 3-second timeout
+ * means it is not.
+ *
+ * @param host - The IRIS host name.
+ * @param port - The IRIS web port.
+ */
+export async function isIrisReachable(host: string, port: string): Promise<boolean> {
+  try {
+    const response = await fetch(`http://${host}:${port}/api/atelier/`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    return typeof response.status === "number";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The test runner's environment for a spawned server: everything it inherits

@@ -430,7 +430,9 @@ addressed in the numbering of that read.
   example), so the tool reads the document back and answers from that: `unifiedDiff` (3 context lines, the read against
   the re-read), one excerpt per edit (the lines the edit produced, plus 3 context lines on each side, as in a ranged
   `iris_doc_get` of the same range), the new `totalLines` and `ts`. Never the whole document. An edit whose result
-  equals the stored text saves nothing and reports `changed: false`.
+  equals the stored text saves nothing and reports `changed: false`. A class edit that IRIS stores back as it was (it
+  restores a deleted blank line between members, for example) is saved, re-read and also reported as `changed: false`,
+  with an empty `unifiedDiff` and a text saying so.
 - **No compile.** The tool does not compile: run `iris_doc_compile` next.
 
 **Input:**
@@ -440,11 +442,11 @@ addressed in the numbering of that read.
   "name": "MyApp.Service.cls",
   "namespace": "USER",
   "edits": [
-    { "op": "insert", "afterLine": 2, "text": "/// Says hello.", "expected": "" },
+    { "op": "insert", "afterLine": 3, "text": "/// Says hello.", "expected": "" },
     {
       "op": "replace",
-      "startLine": 5,
-      "endLine": 5,
+      "startLine": 6,
+      "endLine": 6,
       "text": "  Set name = $Get(^Names, \"World\")\n  Quit \"Hello \" _ name",
       "expected": "  Quit \"Hello World\""
     }
@@ -454,12 +456,13 @@ addressed in the numbering of that read.
 
 **Output (text):** the sentence, the diff, then one numbered excerpt per edit:
 ```text
-Document 'MyApp.Service.cls' edited in namespace 'USER': 2 edits applied; it has 11 lines now (ts 2026-04-07 10:31:12.000). It is not compiled: run iris_doc_compile next.
+Document 'MyApp.Service.cls' edited in namespace 'USER': 2 edits applied; it has 12 lines now (ts 2026-04-07 10:31:12.000). It is not compiled: run iris_doc_compile next.
 
 --- MyApp.Service.cls	2026-04-07 10:30:00.000
 +++ MyApp.Service.cls	2026-04-07 10:31:12.000
-@@ -1,8 +1,10 @@
- Class MyApp.Service {
+@@ -1,9 +1,11 @@
+ Class MyApp.Service Extends %RegisteredObject
+ {
  
 +/// Says hello.
  ClassMethod Hello() As %String
@@ -471,23 +474,24 @@ Document 'MyApp.Service.cls' edited in namespace 'USER': 2 edits applied; it has
  
  }
 
-Edit 1 (insert after line 2), now lines 1-6:
-     1	Class MyApp.Service {
-     2	
-     3	/// Says hello.
-     4	ClassMethod Hello() As %String
-     5	{
-     6	  Set name = $Get(^Names, "World")
+Edit 1 (insert after line 3), now lines 1-7:
+     1	Class MyApp.Service Extends %RegisteredObject
+     2	{
+     3	
+     4	/// Says hello.
+     5	ClassMethod Hello() As %String
+     6	{
+     7	  Set name = $Get(^Names, "World")
 
-Edit 2 (replace lines 5-5), now lines 3-10:
-     3	/// Says hello.
-     4	ClassMethod Hello() As %String
-     5	{
-     6	  Set name = $Get(^Names, "World")
-     7	  Quit "Hello " _ name
-     8	}
-     9	
-    10	}
+Edit 2 (replace lines 6-6), now lines 4-11:
+     4	/// Says hello.
+     5	ClassMethod Hello() As %String
+     6	{
+     7	  Set name = $Get(^Names, "World")
+     8	  Quit "Hello " _ name
+     9	}
+    10	
+    11	}
 ```
 
 **Output (`structuredContent`):**
@@ -496,23 +500,23 @@ Edit 2 (replace lines 5-5), now lines 3-10:
   "name": "MyApp.Service.cls",
   "namespace": "USER",
   "ts": "2026-04-07 10:31:12.000",
-  "totalLines": 11,
+  "totalLines": 12,
   "changed": true,
-  "unifiedDiff": "--- MyApp.Service.cls\t2026-04-07 10:30:00.000\n+++ MyApp.Service.cls\t2026-04-07 10:31:12.000\n@@ -1,8 +1,10 @@\n Class MyApp.Service {\n \n+/// Says hello.\n ClassMethod Hello() As %String\n {\n-  Quit \"Hello World\"\n+  Set name = $Get(^Names, \"World\")\n+  Quit \"Hello \" _ name\n }\n \n }",
+  "unifiedDiff": "--- MyApp.Service.cls\t2026-04-07 10:30:00.000\n+++ MyApp.Service.cls\t2026-04-07 10:31:12.000\n@@ -1,9 +1,11 @@\n Class MyApp.Service Extends %RegisteredObject\n {\n \n+/// Says hello.\n ClassMethod Hello() As %String\n {\n-  Quit \"Hello World\"\n+  Set name = $Get(^Names, \"World\")\n+  Quit \"Hello \" _ name\n }\n \n }",
   "excerpts": [
-    { "edit": 1, "op": "insert", "startLine": 1, "endLine": 6, "lines": ["Class MyApp.Service {", "", "/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")"] },
-    { "edit": 2, "op": "replace", "startLine": 3, "endLine": 10, "lines": ["/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")", "  Quit \"Hello \" _ name", "}", "", "}"] }
+    { "edit": 1, "op": "insert", "startLine": 1, "endLine": 7, "lines": ["Class MyApp.Service Extends %RegisteredObject", "{", "", "/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")"] },
+    { "edit": 2, "op": "replace", "startLine": 4, "endLine": 11, "lines": ["/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")", "  Quit \"Hello \" _ name", "}", "", "}"] }
   ]
 }
 ```
 
-**Refusal** (`isError: true`, nothing stored) when a replace of line 5 expected `  Quit "Hello"` but the line reads
+**Refusal** (`isError: true`, nothing stored) when a replace of line 6 expected `  Quit "Hello"` but the line reads
 `  Quit "Hello World"`:
 ```text
 Document 'MyApp.Service.cls' was not changed in namespace 'USER': the expected text of edit 1 does not match the document now. Nothing was stored. Retry with the current text below as expected, or read the lines again with iris_doc_get.
 
-Edit 1 (replace lines 5-5), current text:
-     5	  Quit "Hello World"
+Edit 1 (replace lines 6-6), current text:
+     6	  Quit "Hello World"
 ```
 ```json
 {
@@ -520,9 +524,9 @@ Edit 1 (replace lines 5-5), current text:
   "name": "MyApp.Service.cls",
   "namespace": "USER",
   "ts": "2026-04-07 10:30:00.000",
-  "totalLines": 9,
+  "totalLines": 10,
   "mismatches": [
-    { "edit": 1, "op": "replace", "startLine": 5, "endLine": 5, "current": "  Quit \"Hello World\"" }
+    { "edit": 1, "op": "replace", "startLine": 6, "endLine": 6, "current": "  Quit \"Hello World\"" }
   ]
 }
 ```

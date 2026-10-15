@@ -193,7 +193,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
       // at the engine level) and a configSource from the documented set.
       expect(Object.keys(universe.mutates).sort()).toEqual([...universe.keys].sort());
       for (const [key, source] of Object.entries(universe.configSource)) {
-        expect(["env", "file", "preset", "default"], `configSource[${key}]`).toContain(source);
+        expect(["env", "file", "parent", "preset", "default"], `configSource[${key}]`).toContain(source);
       }
       expect(universe.defaultEnabledWrites).toContain("iris_production_control:clean");
 

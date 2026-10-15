@@ -2931,3 +2931,20 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: .claude/rules/project-rules.md #53 text vs presets.test.ts pin (dev core 14 under L-4); agent-context file, rules are edited at retrospectives
 - 2026-10-15T21:18:38Z status=decision-pending owner=burndown by=harvest note=human=Project Lead rewords Rule #53 to 'guideline' (or keeps it, citing the clarification)
+- 2026-10-15T21:53:24Z occurrence=38-4-surgical-line-edit-tool
+
+### DW-552: iris_doc_edit STALE_CONTENT mismatches[].current does not round-trip as expected when the addressed range ends in an empty line
+- source: spec-38-4-surgical-line-edit-tool.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: doc-edit.ts:336 sets current=joinLines(lines) and textToLines drops one trailing line break, so the lines ["}",""] give "}\n", which parses as ["}"]: a retry with current is STALE_CONTENT again; an expected built by joining a ranged iris_doc_get slice with \n fails the same way (blind-hunter, verified).
+- 2026-10-15T21:53:24Z status=decision-pending owner=burndown by=cr note=contract call: recommend current=joinLines(lines)+newline (round-trips every range) + a description line; 38.6 prompt depends on it
+- 2026-10-15T22:04:03Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=lead note=decided=orchestrator(Lead-away) decision 11: append a trailing line break to mismatches[].current plus one description line; the 38.6 edit prompt depends on the round trip
+
+### DW-553: doc-edit.test.ts several-edits fake re-read S2_LINES is a .cls layout IRIS cannot return (no blank line after the class brace or between members)
+- source: spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: Plan probe 1 and the CR live probe 2026-10-15 show IRIS restoring member separators on save; S2_LINES is the re-read of Test.Edit.cls in the six shuffled-order rows. Their PUT-body pins (AC-2) are realistic; only the answer fields rest on the fake.
+- 2026-10-15T21:53:24Z status=wontfix-accepted owner=38-4-surgical-line-edit-tool by=cr note=reopen_if=a doc-edit change keeps the S2 rows green while doc-edit-live-gate multi-edit row (replace+insert+delete) goes red
+
+### DW-554: IRIS_GOVERNANCE in the intuitive flat shape {"iris_doc_put": false} is accepted silently and does nothing: the key stays enabled (configSource default), no warning, no fail-fast -- governance config fails OPEN
+- source: lead smoke Story 38.4 (2026-10-15) | severity: high | fix-risk: low | footprint: in-epic
+- evidence: built dev dist 2026-10-15: IRIS_GOVERNANCE={"iris_doc_put":false} -> iris_server_profiles iris_doc_put:true configSource default, stderr no WARN; documented shape is {"global":{...}} or {"<profile>":{...}}; a top-level key that is not a known profile, or a non-object value, should fail fast like other malformed IRIS_GOVERNANCE (M1/F-3)
+- 2026-10-15T22:05:32Z status=routed owner=burndown by=lead note=smoke-found (pre-existing, Epic 32 parser); Epic 38 burn-down story must fix: reject a non-object layer value and an unknown top-level profile name at startup, with the documented shape in the message

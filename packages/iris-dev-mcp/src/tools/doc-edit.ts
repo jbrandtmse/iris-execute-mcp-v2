@@ -640,12 +640,22 @@ export const docEditTool: ToolDefinition = {
       const [start, end] = regionInReread(pairs, region, reread.lines.length);
       return excerptAround(index + 1, edit, reread.lines, start, end);
     });
+    const sections = excerpts
+      .map((excerpt) => excerptSection(edits[excerpt.edit - 1] as LineEdit, excerpt))
+      .join("");
 
-    const text =
-      `Document '${name}' edited in namespace '${ns}': ${appliedCount(edits.length)}; ` +
-      `it has ${reread.lines.length} lines now (ts ${reread.ts}). It is not compiled: run iris_doc_compile next.` +
-      `\n\n${diff}` +
-      excerpts.map((excerpt) => excerptSection(edits[excerpt.edit - 1] as LineEdit, excerpt)).join("");
+    // Whether the document changed is read from the re-read, never from the edited lines: IRIS can
+    // store a class edit back as it was (it restores a deleted blank line between members, for example).
+    const changed = diff !== "";
+    const text = changed
+      ? `Document '${name}' edited in namespace '${ns}': ${appliedCount(edits.length)}; ` +
+        `it has ${reread.lines.length} lines now (ts ${reread.ts}). It is not compiled: run iris_doc_compile next.` +
+        `\n\n${diff}` +
+        sections
+      : `Document '${name}' was saved in namespace '${ns}', but IRIS stored the text it already had, so nothing changed; ` +
+        `it has ${reread.lines.length} lines (ts ${reread.ts}). IRIS reformats class source when it saves, so ` +
+        `${edits.length === 1 ? "the edit has" : "the edits have"} no effect.` +
+        sections;
     return {
       content: [{ type: "text", text }],
       structuredContent: {
@@ -653,7 +663,7 @@ export const docEditTool: ToolDefinition = {
         namespace: ns,
         ts: reread.ts,
         totalLines: reread.lines.length,
-        changed: true,
+        changed,
         unifiedDiff: diff,
         excerpts,
       },
