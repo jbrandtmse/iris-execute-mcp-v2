@@ -2,8 +2,8 @@
 title: 'Story 38.2: Line-Range Document Read'
 type: 'feature'
 created: '2026-10-15'
-status: 'ready-for-dev'
-baseline_revision: '7d685770ddd6590a48e671dbc3bb417bfdf0c054'
+status: 'done'
+baseline_revision: '8fae074ba9870f32d1f0555e3b977138db4f80d8'
 baseline_commit: '7d685770ddd6590a48e671dbc3bb417bfdf0c054'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -195,6 +195,35 @@ Fixture: an 11-element class `C` (`content` ends with `"}", ""`), so `totalLines
 
 ## Review Triage Log
 
+### 2026-10-15 — Review pass
+- verdicts: 25 findings — high 0, medium 0, low 20, false 5, maybe-false 0
+- findings:
+  - `[low]` `[reject]` (blind) Empty `content` array (`totalLines` 0) yields the M4 text "from 1 to 0", unpinned — a real but unobserved state (a probe of 669 live documents found no empty array); the fix adds a branch and a message outside the matrix text, so it is not worth it. reopen_if: a live document is observed returning `content: []`.
+  - `[low]` `[patch]` (blind) The M6 unit fakes spread the class result (populated `ts`, `upd`, `flags`, invented status text) and the live gate has no soft-error read — verified live with `iris_doc_get` on an invalid name (`ts:""`, `cat:"OTH"`, no `upd`/`flags`, `ERROR #16006`). Patched: the unit fake is now that captured shape, and a read-only live-gate case pins M6 against real IRIS. The M5 `enc:true` shape stays source-derived (spec Design Notes) because no binary document is available to read read-only.
+  - `[low]` `[patch]` (blind) CHANGELOG "every ranged read" overstated the fixed sample the gate performs, and the `iris_loc_count` parity was stated for any document though verified once, for a class. Patched: the CHANGELOG states the sample, and both documents say "class".
+  - `[low]` `[patch]` (blind) The README full-read example for `MyApp.Service.cls` had no trailing empty element while the ranged example counted one. Patched: the full-read example ends with `""`, and the note points at it.
+  - `[low]` `[reject]` (blind) The description, README, CHANGELOG and changeset name `iris_doc_edit`, which is not in the tree — AC 38.2.6 and Design Notes interpretation 5 require the reference (the epic ships as one branch with Story 38.4). reopen_if: 38.4 registers the tool under a different name.
+  - `[low]` `[reject]` (blind) The tool description does not say a range still fetches the whole document, and `endLine` omits the metadataOnly/xml restriction — the spec fixes the exact description and parameter text; the README states the cost, and M1/M2 carry the restriction. Spec-bound.
+  - `[low]` `[reject]` (blind) The `metadataOnly` parameter description fix is untested and the code still returns `timestamp` — documentation text only, and the dead read is already the second `deferred:` item.
+  - `[low]` `[patch]` (blind) The `lines.ts` header said nothing splits or joins elements, while `formatNumberedLines` joins its output. Patched: the header says "the elements of that array".
+  - `[low]` `[patch]` (edge) The framework's `Invalid arguments: startLine: ...` text is not what a client sees over the SDK transport (the SDK validates first: `Invalid arguments for tool iris_doc_get: ...`), so the README/CHANGELOG quote was inaccurate. Patched: both say "an `Invalid arguments` error that names the parameter".
+  - `[low]` `[reject]` (edge) Same empty-array root cause as the first blind finding — rejected with it.
+  - `[low]` `[patch]` (verification-gap) `metadataOnly: false` with a range was never tested (the M1 check is `if (metadataOnly)`). Patched: unit case added; mutation `!== undefined` turns it red.
+  - `[low]` `[patch]` (verification-gap) The M5-before-M4 order was not pinned. Patched: unit case added with `enc:true` and a `startLine` past the chunk count; mutation (M5 only when `startLine` is within range) turns it red.
+  - `[low]` `[reject]` (verification-gap) No check that the `iris_doc_edit` reference resolves — spec-bound (AC 38.2.6, interpretation 5); the registration is Story 38.4's own scope. reopen_if: as for the blind finding on the same reference.
+  - `[low]` `[patch]` (verification-gap) The `iris_loc_count` equality is documented but was observed once. Grouped with the CHANGELOG finding above: the documents now claim it for a class only, which is what the spec's one-time live confirmation covered.
+  - `[low]` `[patch]` (verification-gap) Several AC-1/AC-2/AC-4 pinning tests had no recorded mutation (live routine pins, `ts` equality, If-None-Match accepted and old-ts 409, M5, M6, schema, HEAD and 404 pins). Rule 19 is per AC and each AC already had a line; the additional mutations were run anyway and recorded under Verification.
+  - `[low]` `[reject]` (verification-gap) Rule #54 fakes: BOM elements on reads and the M6 non-array shape have no live producer — AD-24 and the matrix require both branches; the M6 soft-error fake is now the live-captured shape.
+  - `[low]` `[reject]` (verification-gap) Empty `content` array gives the M4 text and is unpinned — same root cause as the first blind finding.
+  - `[false]` `[reject]` (verification-gap) `live-doc-helpers.ts` has no test host of its own — both live gates execute every helper, and both ran armed and passed (23 tests); the reviewer filed no defect.
+  - `[low]` `[reject]` (verification-gap) Fixed fixture names would collide under two concurrent runs on one instance — the sibling gate has the same property and the live gates run with `--no-file-parallelism` on a shared instance.
+  - `[low]` `[patch]` (intent-alignment, D1) The "Bad number" row's framework text and "no handler call" were tested only through the raw `inputSchema`. Patched with `doc-get-range-framework.test.ts`, which drives the registered callback through the real `McpServerBase` (a per-file harness copy, as `loc-e2e.test.ts` and its siblings do); mutation `startLine` `.min(0)` turns it red.
+  - `[false]` `[reject]` (intent-alignment, D2) "Byte-identical" is pinned at the handler, not the advertised schema — the contract's no-range path is the handler path, and the description and parameter additions are mandated by the spec's Tasks.
+  - `[low]` `[reject]` (intent-alignment, D3) The live gate defaults its target to localhost:52773 / HSCUSTOM when the `IRIS_*` variables are unset — the Code Map prescribes the sibling's explicit target with sibling defaults; writes stay on the three named disposable documents.
+  - `[false]` `[reject]` (intent-alignment, D4) The slice oracle compares two reads of one endpoint — the pinned literals (566 and 30 lines, line 1, line 250, last lines) are the independent numbering anchor, and the `iris_loc_count` parity point is handled above.
+  - `[false]` `[reject]` (intent-alignment, D5) The version-token record uses raw `client.put` — the spec's Tasks say raw `client.put` because `iris_doc_put` cannot send `If-None-Match` (first `deferred:` item).
+  - `[false]` `[reject]` (intent-alignment, D6) `doc-put-bom-live-gate.test.ts` was refactored onto the shared helpers — the spec mandates the extraction, its 6 tests pass armed, and the CHANGELOG's "existing tests are unmodified" is about the `iris_doc_get` tests (`doc.test.ts` has no diff).
+
 ## Design Notes
 
 **Governing architecture decisions:**
@@ -302,7 +331,54 @@ Tool counts do not move. Standing criterion: every test added or changed passes 
 
 AC-7 is a roll-up of gate commands and has no mutation of its own.
 
+**Mutation results (Rule 19, run 2026-10-15 on the final tests).** Each mutation was applied, run, reverted, and the reverted files were checked byte-identical (`shasum -c`); `@iris-mcp/shared` was rebuilt after every shared-side mutation and revert.
+- mutation: `linesInRange` sliced `(startLine, endLine)` (off by one) -> `lines.test` `linesInRange` slices (5 red); `doc-get-range.test` valid-range rows (10 red); live gate pins and every class and routine oracle read (red)
+- mutation: the clamp removed (`lastLine = endLine ?? totalLines`) -> `doc-get-range.test` "an endLine past the end is clamped" (1 red); live gate class one-sided/clamped read, class 100-line windows, routine clamped read (3 red)
+- mutation: the M1 check moved after the `metadataOnly` HEAD branch -> `doc-get-range.test` "M1: a range with metadataOnly is refused before any request" and "M1 comes before M2" (2 red; the HEAD is called)
+- mutation: M4 returns `lines: []` as a success -> `doc-get-range.test` "M4: a startLine past the end ... is an error, not an empty success" (1 red); live gate "a startLine past the last line is refused with the live totalLines" (1 red)
+- mutation: `NUMBERED_LINE_WIDTH` set to 5 -> `lines.test` `formatNumberedLines` (5 red, the width pin included); `doc-get-range.test` valid-range text rows (8 red)
+- mutation: the no-range path adds `totalLines: 0` to `structuredContent` -> `doc-get-range.test` back-compat pins "default read", "format udl", "format xml", "metadataOnly false" (4 red) and the unmodified `doc.test` "should retrieve document content as text" (1 red)
+- mutation: `documentLines` drops a trailing `""` -> `lines.test` `documentLines` (2 red); live gate class pins, class oracle reads and the past-end read (6 red) while the routine pins and routine oracle reads stay green (10 passed)
+- mutation: the gate's no-header PUT sends `If-None-Match: <ts>` -> live gate "a PUT with no If-None-Match and no ignoreConflict is refused with HTTP 409" (1 red: "the PUT ... was accepted; a refusal was expected")
+- mutation: `iris_doc_edit` removed from the description -> `doc-get-range.test` description case (1 red)
+- mutation (extra): the M2 and M3 pre-request checks removed -> `doc-get-range.test` "M2: a range with format xml is refused before any request" and "M3: startLine after endLine is refused before any request" (2 red)
+- mutation (extra): `documentLines` no longer strips the BOM -> `lines.test` "removes one BOM from element 0 only ..." (1 red) and `doc-get-range.test` "removes one leading BOM from line 1" (1 red)
+
+**Review-pass mutations (Rule 19, run 2026-10-15 after the review patches).** Each applied, run, reverted and checked byte-identical (`shasum -c` of `doc.ts` and the live gate; `git status --short` unchanged).
+- mutation: the M1 check keyed on `metadataOnly !== undefined` -> `doc-get-range.test` "an explicit metadataOnly false with a range is an ordinary ranged read" (1 red)
+- mutation: M5 applied only when `startLine` is within the chunk count (M4 before M5) -> `doc-get-range.test` "M5 comes before M4" (1 red)
+- mutation: the M6 check disabled -> `doc-get-range.test` the two M6 cases and "M6 comes before M5" (3 red); live gate "a document IRIS cannot read comes back as the live soft-error shape" (1 red)
+- mutation: `structuredContent.ts` set to `""` -> `doc-get-range.test` (7 red); live gate class and routine oracle reads and "the ranged ts equals the full read's ts and the metadataOnly etag" (7 red)
+- mutation: the HEAD result gains a `totalLines` field (200 and 404) -> `doc-get-range.test` back-compat "metadataOnly true: one HEAD ..." and "the HEAD is a 404" (2 red)
+- mutation: the not-found text changed to "was not found in namespace" -> `doc-get-range.test` "the GET is a 404" and "a 404 with a range is today's not-found text" (2 red)
+- mutation: `startLine` schema `.min(0)` -> `doc-get-range-framework.test` "startLine = 0 is refused with the framework's Invalid arguments result" (1 red) and `doc-get-range.test` "rejects startLine = 0" (1 red)
+- mutation: the live routine fixture gains a trailing `""` -> live gate "a routine's element 0 is the ROUTINE header ... no trailing empty element" and "pins the routine's totalLines ..." (2 red)
+- mutation: the live PUT with `If-None-Match` sends a stale ts, and the old-ts PUT sends the current ts -> live gate "a PUT carrying If-None-Match: <ts> is accepted ..." and "a PUT carrying the old ts ... is refused with HTTP 409" (2 red)
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** `iris_doc_get` takes optional `startLine` and `endLine` (1-based, inclusive) and returns the numbered lines (the `cat -n` layout), `totalLines` and the document's `ts`; errors M1 to M6 follow the matrix; the no-range path is unchanged and pinned as literals. `@iris-mcp/shared` `lines.ts` gains `documentLines`, `linesInRange`, `formatNumberedLines` and `NUMBERED_LINE_WIDTH`. `BOOTSTRAP_VERSION` is unchanged.
+
+**Files changed.**
+- `packages/shared/src/lines.ts`, `index.ts`, `atelier.ts` -- the three line functions and the constant, the barrel export, and the widened `atelierDocStatusError` JSDoc (code unchanged).
+- `packages/iris-dev-mcp/src/tools/doc.ts` -- the range schema, description and handler.
+- `packages/shared/src/__tests__/lines.test.ts`, `packages/iris-dev-mcp/src/__tests__/doc-get-range.test.ts`, `doc-get-range-framework.test.ts` (review pass), `doc-get-range-live-gate.test.ts`, `live-doc-helpers.ts`, `doc-put-bom-live-gate.test.ts` -- unit, framework-path and live tests; the shared doc helpers.
+- `packages/iris-dev-mcp/scripts/prepublish-gate.mjs` -- the live gate joins `gateTestFiles`.
+- `packages/iris-dev-mcp/README.md`, `CHANGELOG.md`, `.changeset/story-38-2-line-range-document-read.md` -- docs (shared and dev minor).
+
+**Review.** First pass: 25 findings from four layers (high 0, medium 0, low 20, false 5, maybe-false 0), tallied mechanically from the triage log. Patches applied: 10 (all low): a live-captured M6 fake plus a read-only live soft-error case, the `metadataOnly: false` and M5-before-M4 unit cases, the framework-path test for the "Bad number" row, doc wording (the Invalid-arguments text, the loc_count claim limited to a class, the gate-sample wording, a consistent README example), the `lines.ts` header, and nine extra mutation lines. Deferred: none new (the two plan-time `deferred:` items stand). Rejected: 15, each with its reason in the triage log (empty-array M4 text, the not-yet-existing `iris_doc_edit` reference, spec-fixed description text, the sibling-default live target, and the false findings).
+
+**Follow-up review recommendation:** `false` (no high patched; no two medium patched; patched counts: high 0, medium 0, low 10).
+
+**Residual risks.** The M5 (`enc: true`) shape is source-derived, not read from a live binary document. An empty `content` array would give the M4 text "from 1 to 0" (not observed on IRIS). The `iris_doc_get` description names `iris_doc_edit`, which Story 38.4 registers.
+
+**Implementation run record (2026-10-15).** `BOOTSTRAP_VERSION` is unchanged (no `src/ExecuteMCPv2/**` or `bootstrap-classes.ts` change).
+- **AC-1 / AC-5 live run.** Target: `default` profile, localhost:52773, HSCUSTOM, IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026 09:59:12 EDT, Atelier v8. The loop command (`IRIS_REQUIRE_LIVE=1`, the six `IRIS_*` variables set explicitly, `--no-file-parallelism`) ran `doc-get-range-live-gate.test.ts` (16 passed) and `doc-put-bom-live-gate.test.ts` (6 passed), none skipped. Live facts proven: the class `content` ends with `"}", ""` and no element holds `\r`, `\n` or U+FEFF; the routine's element 0 is `ROUTINE ExecuteMCPv2.Temp.QaStory382Range` (type dropped) with no trailing `""`; the ranged `ts` equals the full read's `ts` and the `metadataOnly` `etag` (`YYYY-MM-DD HH:MM:SS.fff`); a PUT to an existing document with no `If-None-Match` and no `ignoreConflict` is HTTP 409 and the document is unchanged; `If-None-Match: <ts>` is accepted (new content, new `ts`); the old `ts` after another write is HTTP 409. Pins captured live: class `totalLines` 566, line 1 `/// Disposable fixture for the Story 38.2 live gate; never compiled.`, line 250 `/// Method 036: ...`, last line `""`; routine `totalLines` 30, line 1 the `ROUTINE` header, last line `Label29 ; routine line 29 ...`.
+- **`iris_loc_count` cross-check (interpretation 4).** With the class fixture present, `iris_loc_count` with `spec: ExecuteMCPv2.Temp.QaStory382Range.cls` returned `totalLines` 566 (`filesParsed` 1), equal to the ranged read's `totalLines` 566, so the trailing `""` is counted by both. Probed once with a temporary test that was removed afterwards.
+- **(once) sweep, per package, re-run after the review patches (build, test, lint, type-check; all exit 0).** shared 70 files / 1402 tests; dev 49 / 895; admin 35 / 498; interop 22 / 343; ops 20 / 350; data 9 / 165; client-config 21 / 514; `@iris-mcp/all` 28 / 264. The live loop command after the patches: `doc-get-range-live-gate.test.ts` 17 passed (the soft-error case added) and `doc-put-bom-live-gate.test.ts` 6 passed, none skipped; `iris_doc_list` for `ExecuteMCPv2.Temp.QaStory382` returned `{"items":[]}` after the mutation runs and again after the sweep. `live-gate-roster.test.ts` passes (the new gate is in `gateTestFiles`). Lint: 0 errors; the shared package reports one pre-existing unused-`eslint-disable` warning in a file this story does not touch.
+- **Governance and frozen files.** `pnpm gen:governance-baseline:check` exit 0 (141 frozen keys, hash `1e62c5ad5bf7`, `governance-baseline.ts` unmodified). `git diff --stat 7d685770... -- bootstrap-classes.ts governance-baseline.ts src/ doc.test.ts presets.ts` is empty. Tool, action and key counts are unchanged (no tool, action, annotation or preset edit).
+- **Cleanup.** `iris_doc_list` (`default`, HSCUSTOM, `filter: ExecuteMCPv2.Temp.QaStory382`, `generated: true`) returned `{"items":[]}` before the first write and after the last run.
+- **Notes for review.** (1) The `metadataOnly` parameter description was also corrected to say `etag` (it still said "Last-Modified timestamp"), alongside the tool description the spec names; no code changed. (2) An empty `content` array (`totalLines` 0) gets the M4 text with "from 1 to 0"; Atelier was not observed returning an empty array for a document, so the matrix text is kept exactly. (3) The AD-24 gate tests PUT with raw `client.put`, not through `iris_doc_put`, because `iris_doc_put` cannot send `If-None-Match` (recorded in `deferred:`).

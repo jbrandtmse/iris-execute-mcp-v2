@@ -25,9 +25,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  IrisApiError,
   IrisHttpClient,
-  atelierPath,
   buildToolContext,
   loadConfig,
   negotiateVersion,
@@ -36,6 +34,7 @@ import {
 } from "@iris-mcp/shared";
 import { docPutTool } from "../tools/doc.js";
 import { docLoadTool } from "../tools/load.js";
+import * as liveDocs from "./live-doc-helpers.js";
 
 const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
 const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
@@ -55,29 +54,13 @@ let ctx: ToolContext;
 let client: IrisHttpClient;
 let version: number;
 
-function docPath(className: string): string {
-  return atelierPath(version, IRIS_NAMESPACE, `doc/${encodeURIComponent(`${className}.cls`)}`);
+/** The stored class's lines, or `undefined` when IRIS has no such class. */
+function readStoredLines(className: string): Promise<string[] | undefined> {
+  return liveDocs.readStoredLines(client, version, IRIS_NAMESPACE, `${className}.cls`);
 }
 
-/** The stored document's lines, or `undefined` when IRIS has no such document. */
-async function readStoredLines(className: string): Promise<string[] | undefined> {
-  try {
-    const response = await client.get(docPath(className));
-    const result = response.result as { content?: unknown };
-    return Array.isArray(result.content) ? (result.content as string[]) : [];
-  } catch (error) {
-    if (error instanceof IrisApiError && error.statusCode === 404) return undefined;
-    throw error;
-  }
-}
-
-async function removeStored(className: string): Promise<void> {
-  try {
-    await client.delete(docPath(className));
-  } catch (error) {
-    if (error instanceof IrisApiError && error.statusCode === 404) return;
-    throw error;
-  }
+function removeStored(className: string): Promise<void> {
+  return liveDocs.removeStored(client, version, IRIS_NAMESPACE, `${className}.cls`);
 }
 
 beforeAll(async () => {

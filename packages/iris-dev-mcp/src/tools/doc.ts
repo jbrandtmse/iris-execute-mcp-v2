@@ -13,10 +13,14 @@
 import {
   atelierDocStatusError,
   atelierPath,
+  documentLines,
+  formatNumberedLines,
   IrisApiError,
+  linesInRange,
   stripLeadingBom,
   stripLeadingBomFromLines,
   type ToolDefinition,
+  type ToolResult,
 } from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
@@ -54,12 +58,82 @@ export function extractAtelierContentArray(result: unknown): unknown[] {
 
 // ── iris_doc_get ────────────────────────────────────────────────────
 
+/** An argument error from a line-range read: `isError: true`, no structured code, nothing read or changed. */
+function rangeError(text: string): ToolResult {
+  return { content: [{ type: "text", text }], isError: true };
+}
+
+/** The pieces of a `GET /doc` result that a line-range read uses. */
+interface DocGetResult {
+  ts: string;
+  enc?: boolean;
+  status?: unknown;
+  content?: unknown;
+}
+
+/**
+ * Build the ranged-read result from the `GET /doc` result: the numbered lines
+ * `startLine`..`endLine` (an omitted bound defaults to the first or last line,
+ * and `endLine` is clamped to the last line), `totalLines` and the version
+ * token `ts`. Returns an error result when the document cannot be read as text
+ * or `startLine` is past its last line.
+ */
+function readLineRange(
+  name: string,
+  ns: string,
+  result: DocGetResult | undefined,
+  startLine: number | undefined,
+  endLine: number | undefined,
+): ToolResult {
+  const unreadable = atelierDocStatusError(result);
+  if (unreadable !== undefined || !Array.isArray(result?.content)) {
+    const reason = unreadable ?? "IRIS returned no line content";
+    return rangeError(
+      `Document '${name}' could not be read in namespace '${ns}': ${reason}. Check the document name and namespace, then retry.`,
+    );
+  }
+  if (result.enc === true) {
+    return rangeError(
+      `Document '${name}' is a binary document, and line ranges apply only to text. Omit startLine and endLine to read it whole.`,
+    );
+  }
+
+  const lines = documentLines(result.content as string[]);
+  const totalLines = lines.length;
+  const firstLine = startLine ?? 1;
+  if (firstLine > totalLines) {
+    return rangeError(
+      `startLine ${firstLine} is past the end of document '${name}', which has ${totalLines} lines. Pass a startLine from 1 to ${totalLines}, or omit startLine and endLine to read the whole document.`,
+    );
+  }
+  const lastLine = Math.min(endLine ?? totalLines, totalLines);
+  const selected = linesInRange(lines, firstLine, lastLine);
+  const header = `Document '${name}' in namespace '${ns}': lines ${firstLine}-${lastLine} of ${totalLines} (ts ${result.ts})`;
+
+  return {
+    content: [{ type: "text", text: `${header}\n${formatNumberedLines(selected, firstLine)}` }],
+    structuredContent: {
+      name,
+      ts: result.ts,
+      startLine: firstLine,
+      endLine: lastLine,
+      totalLines,
+      lines: selected,
+    },
+  };
+}
+
 export const docGetTool: ToolDefinition = {
   name: "iris_doc_get",
   title: "Get Document",
   description:
     "Retrieve an ObjectScript class, routine, CSP page, or include file by name. " +
-    "Use metadataOnly to check existence and get the last-modified timestamp without downloading content. " +
+    "Pass startLine and/or endLine (1-based, inclusive) to read part of a UDL text document: " +
+    "use a range for large classes, and to read the exact lines before changing them with `iris_doc_edit`, " +
+    "which uses the same line numbers. " +
+    "A ranged read returns the lines numbered (`cat -n` layout: the number right-aligned in 6 columns, a tab, then the line exactly), " +
+    "plus totalLines and the document's version timestamp `ts`; an endLine past the end is clamped to the last line. " +
+    "Use metadataOnly to check existence and get the version timestamp (`etag`) without downloading content. " +
     "To pull many documents at once, see `iris_doc_export`. " +
     "To fetch the macro-expanded compiled intermediate of a class by its bare name, see `iris_routine_intermediate`.",
   inputSchema: z.object({
@@ -77,7 +151,26 @@ export const docGetTool: ToolDefinition = {
     metadataOnly: booleanParam
       .optional()
       .describe(
-        "Boolean (true/false). When true, only check existence and return metadata (Last-Modified timestamp) without downloading content",
+        "Boolean (true/false). When true, only check existence and return metadata (the version timestamp, as `etag`) without downloading content",
+      ),
+    startLine: z
+      .coerce.number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "First line to return, 1-based and inclusive (default: 1 when only endLine is given). " +
+          "Line 1 is the first element of the document's line array; a class's last line is often empty. " +
+          "Not allowed with metadataOnly or format xml.",
+      ),
+    endLine: z
+      .coerce.number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Last line to return, 1-based and inclusive (default: the last line when only startLine is given). " +
+          "A value past the end is clamped to the last line.",
       ),
   }),
   annotations: {
@@ -88,11 +181,13 @@ export const docGetTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { name, namespace, format, metadataOnly } = args as {
+    const { name, namespace, format, metadataOnly, startLine, endLine } = args as {
       name: string;
       namespace?: string;
       format?: "udl" | "xml";
       metadataOnly?: boolean;
+      startLine?: number;
+      endLine?: number;
     };
 
     const nameError = validateDocName(name);
@@ -104,6 +199,26 @@ export const docGetTool: ToolDefinition = {
     }
 
     const ns = ctx.resolveNamespace(namespace);
+
+    // Line range: the checks that need no document, before any request.
+    const hasRange = startLine !== undefined || endLine !== undefined;
+    if (hasRange) {
+      if (metadataOnly) {
+        return rangeError(
+          "startLine and endLine cannot be combined with metadataOnly. Omit metadataOnly to read lines, or omit startLine and endLine to read only the metadata.",
+        );
+      }
+      if (format === "xml") {
+        return rangeError(
+          'Line ranges apply only to UDL text, not to format "xml". Omit format (or pass "udl") to read a line range.',
+        );
+      }
+      if (startLine !== undefined && endLine !== undefined && startLine > endLine) {
+        return rangeError(
+          `startLine ${startLine} is after endLine ${endLine}. Pass a startLine that is less than or equal to endLine.`,
+        );
+      }
+    }
 
     // URL-encode the document name so %-prefixed system classes are handled
     const encodedName = encodeURIComponent(name);
@@ -145,6 +260,9 @@ export const docGetTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
+      if (hasRange) {
+        return readLineRange(name, ns, response.result as DocGetResult | undefined, startLine, endLine);
+      }
       return {
         content: [
           { type: "text", text: JSON.stringify(response.result, null, 2) },

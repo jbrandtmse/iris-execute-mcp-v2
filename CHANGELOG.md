@@ -2,6 +2,48 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.2: Line-range document read
+
+### Added — `iris_doc_get` reads a line range (`@iris-mcp/dev`, `@iris-mcp/shared`; G1)
+
+`iris_doc_get` takes two new optional parameters, `startLine` and `endLine` (1-based, inclusive; whole numbers of at
+least 1), so an agent can read part of a large class instead of pulling the whole document, and can read the exact
+lines before editing them with `iris_doc_edit`, which uses the same line numbers. A ranged read is still one `GET` of
+the whole document, cut in TypeScript. It applies only to UDL text (`format` omitted or `"udl"`).
+
+- **Numbering.** Line N is element N-1 of the line array that IRIS returns, after one leading byte-order mark is
+  removed. A class ends with an empty last line and it counts, so `totalLines` equals the `totalLines` that
+  `iris_loc_count` reports for the same class. A routine's line 1 is its `ROUTINE <name>` header.
+- **Defaults and clamp.** `startLine` alone reads to the last line, and `endLine` alone reads from line 1. An `endLine`
+  past the end is clamped to the last line.
+- **Result.** The text is a header (`Document '<name>' in namespace '<ns>': lines <s>-<e> of <t> (ts <ts>)`) and then
+  the lines in the `cat -n` layout: the number right-aligned in 6 columns, a tab, then the line exactly.
+  `structuredContent` is `{ name, ts, startLine, endLine, totalLines, lines }` with the effective bounds. `ts` is the
+  document's version timestamp (the same string `metadataOnly` returns as `etag`), which `iris_doc_edit` sends back to
+  IRIS so that an edit cannot overwrite a change it did not see.
+- **Errors** (`isError: true`, each with a fix): a range with `metadataOnly` or with `format: "xml"`, `startLine` after
+  `endLine`, `startLine` past the last line (the message states `totalLines`), a binary document, and a document IRIS
+  cannot read (the message carries IRIS's reason). The first three are refused before any request. A value that is not a
+  whole number of at least 1 is refused by the argument check before the tool runs (an `Invalid arguments` error that
+  names the parameter).
+- **Unchanged without the parameters.** With neither `startLine` nor `endLine`, the request and the result (text and
+  `structuredContent`) are byte-identical to before, in every mode (`format`, `metadataOnly`, a missing document); the
+  existing tests are unmodified and a new back-compat suite pins the whole result as literals.
+- **Description fix.** The `metadataOnly` description now says it returns the version timestamp as `etag`. IRIS never
+  sends a `Last-Modified` header, so no `timestamp` field has ever appeared in that result.
+
+`@iris-mcp/shared` exports three new functions and one constant from its line utility (`lines.ts`, the single home of
+document numbering and BOM handling): `documentLines`, `linesInRange`, `formatNumberedLines` and `NUMBERED_LINE_WIDTH`.
+`atelierDocStatusError` is unchanged; its documentation now covers any Atelier `/doc` result, including the `GET` soft
+error that `iris_doc_get` reports.
+
+**Recorded for Story 38.4 (AD-24).** On the live instance (IRIS 2026.2, Atelier v8) a `PUT` to an existing document with
+no `If-None-Match` header is refused with HTTP 409 and writes nothing, and `If-None-Match: <ts>` is accepted, so an edit
+must send the `ts` exactly as a ranged read returns it. A new live gate (`doc-get-range-live-gate.test.ts`, in the
+`@iris-mcp/dev` prepublish gate roster) proves both, and proves that the ranged reads it performs (the boundary lines,
+one-sided and clamped reads, and windows that cover every line) equal the matching slices of the live full read, on a
+class of more than 500 lines and on a routine.
+
 ## [Pre-release — 2026-10-15] — Story 38.1: Reject the unimplemented HTTP transport
 
 ### Changed — an MCP transport other than stdio is a startup configuration error (`@iris-mcp/shared`, all five servers; G48)

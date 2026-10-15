@@ -79,6 +79,9 @@ const gateTestFiles = [
   // `iris_doc_put` / `iris_doc_load` against the real Atelier `PUT /doc`: BOM strip and a
   // refused write reported as an error (writes only disposable ExecuteMCPv2.Temp.QaStory380* docs).
   "src/__tests__/doc-put-bom-live-gate.test.ts",
+  // `iris_doc_get` line ranges against the real Atelier `GET /doc` (AD-24 version-token record included):
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory382Range.cls/.mac and ...QaStory382Token.cls docs.
+  "src/__tests__/doc-get-range-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

@@ -142,7 +142,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_doc_get` | Retrieve a document by name (UDL or XML format) | `name`, `namespace?`, `format?`, `metadataOnly?` | readOnly, idempotent |
+| `iris_doc_get` | Retrieve a document by name (UDL or XML format), or a numbered line range of a UDL text document | `name`, `namespace?`, `format?`, `metadataOnly?`, `startLine?`, `endLine?` | readOnly, idempotent |
 | `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
@@ -275,10 +275,64 @@ Also installable as [Agent Skills](../../skills/README.md).
 ```json
 {
   "name": "MyApp.Service.cls",
-  "content": ["Class MyApp.Service {", "", "ClassMethod Hello() As %String", "{", "  Quit \"Hello World\"", "}", "", "}"],
-  "ts": "2026-04-07T10:30:00.000Z"
+  "content": ["Class MyApp.Service {", "", "ClassMethod Hello() As %String", "{", "  Quit \"Hello World\"", "}", "", "}", ""],
+  "ts": "2026-04-07 10:30:00.000"
 }
 ```
+</details>
+
+<details>
+<summary><strong>iris_doc_get with a line range</strong> -- Read part of a UDL text document</summary>
+
+Pass `startLine` and/or `endLine` (1-based, inclusive) to read part of a class, routine or include file instead of
+the whole document. Use a range for **large classes**, and to read the **exact lines before changing them with
+`iris_doc_edit`**, which uses the same line numbers. A ranged read is still one request for the whole document; the
+lines are cut from it afterwards, so it saves the agent's context, not IRIS's work.
+
+**Input:**
+```json
+{
+  "name": "MyApp.Service.cls",
+  "startLine": 3,
+  "endLine": 5
+}
+```
+
+**Output (text):** a header line, then the lines in the `cat -n` layout: the line number right-aligned in 6 columns, a
+tab, then the line exactly as IRIS holds it (leading tabs, trailing spaces and empty lines included).
+```
+Document 'MyApp.Service.cls' in namespace 'USER': lines 3-5 of 9 (ts 2026-04-07 10:30:00.000)
+     3	ClassMethod Hello() As %String
+     4	{
+     5	  Quit "Hello World"
+```
+
+**Output (`structuredContent`):**
+```json
+{
+  "name": "MyApp.Service.cls",
+  "ts": "2026-04-07 10:30:00.000",
+  "startLine": 3,
+  "endLine": 5,
+  "totalLines": 9,
+  "lines": ["ClassMethod Hello() As %String", "{", "  Quit \"Hello World\""]
+}
+```
+
+- **Numbering.** Line N is element N-1 of the line array that IRIS returns, after one leading byte-order mark is removed.
+  A class ends with an empty last line, and it counts: `totalLines` is 9 for the 9-element `content` array of the
+  full-read example above, whose last element is that empty line. `iris_loc_count` reports the same `totalLines` for a
+  class. A routine's line 1 is its `ROUTINE <name>` header.
+- **Defaults and clamp.** `startLine` alone reads to the last line; `endLine` alone reads from line 1. An `endLine`
+  past the end is clamped to the last line, and the response shows the effective `startLine` and `endLine`.
+- **`ts`.** The document's version timestamp, the same string `metadataOnly` returns as `etag`. `iris_doc_edit` sends it
+  back to IRIS so that an edit cannot overwrite a change it did not see.
+- **Without the parameters** the request and the result are unchanged: the whole document, as before.
+- **Errors** (`isError: true`, nothing is read into the result):
+  - `startLine` or `endLine` is not a whole number of at least 1: the argument check refuses it before the tool runs (an `Invalid arguments` error that names the parameter).
+  - `startLine` is after `endLine`, or past the last line (the message states the document's `totalLines`).
+  - A range with `metadataOnly`, or with `format: "xml"`: ranges apply only to UDL text.
+  - A binary document, or a document IRIS cannot read: the message names the document and IRIS's reason.
 </details>
 
 <details>

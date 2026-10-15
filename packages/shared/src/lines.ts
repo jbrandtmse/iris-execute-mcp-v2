@@ -1,10 +1,16 @@
 /**
- * Line and text utilities shared by every tool that writes document text to
- * IRIS.
+ * Line and text utilities shared by every tool that reads or writes document
+ * text on IRIS.
  *
- * `stripLeadingBom` is the seed of the single line utility that owns BOM
- * handling for document reads and writes; later stories extend this module
- * rather than adding a second one.
+ * This is the single line utility. It owns BOM handling for document reads and
+ * writes, the 1-based numbering of a document's line array, and the one
+ * numbered-text format; later stories extend this module rather than adding a
+ * second one.
+ *
+ * Line N of a document is element N-1 of the `content` array that Atelier's
+ * `GET /doc` returns, after one leading BOM is removed from element 0. A class
+ * ends with a trailing empty element, and it counts as a line. Nothing here
+ * splits or joins the elements of that array.
  */
 
 /** The UTF-8 byte-order mark as a JavaScript string (U+FEFF). */
@@ -41,4 +47,63 @@ export function stripLeadingBomFromLines(lines: string[]): string[] {
   if (first === undefined) return lines;
   const stripped = stripLeadingBom(first);
   return stripped === first ? lines : [stripped, ...lines.slice(1)];
+}
+
+/**
+ * The lines of a document as read from Atelier's `GET /doc` `content` array:
+ * line N is element N-1 of the returned array.
+ *
+ * One leading BOM is removed from element 0 and nothing else changes, so a
+ * class keeps its trailing empty element (a line) and every other element is
+ * returned exactly as IRIS sent it. The result is always a fresh array and the
+ * input is never mutated.
+ *
+ * @param content - The `content` array of a `GET /doc` result.
+ * @returns A fresh array of the document's lines.
+ */
+export function documentLines(content: readonly string[]): string[] {
+  return stripLeadingBomFromLines([...content]);
+}
+
+/**
+ * Lines `startLine` through `endLine` of `lines`, 1-based and inclusive.
+ *
+ * The caller passes a valid range: `1 <= startLine <= endLine <= lines.length`.
+ * No validation happens here, so an invalid range yields whatever
+ * `Array.prototype.slice` yields. The input is never mutated.
+ *
+ * @param lines - A document's lines (see {@link documentLines}).
+ * @param startLine - First line to return, 1-based.
+ * @param endLine - Last line to return, 1-based and inclusive.
+ * @returns A fresh array of the lines in the range.
+ */
+export function linesInRange(
+  lines: readonly string[],
+  startLine: number,
+  endLine: number,
+): string[] {
+  return lines.slice(startLine - 1, endLine);
+}
+
+/** Width of the line-number column in numbered text (the `cat -n` layout). */
+export const NUMBERED_LINE_WIDTH = 6;
+
+/**
+ * Format lines as numbered text, in the `cat -n` layout: each line is its
+ * number right-aligned in {@link NUMBERED_LINE_WIDTH} columns, a TAB, then the
+ * line exactly as given.
+ *
+ * Lines are joined with `"\n"` and there is no trailing newline, so an empty
+ * array yields `""`. A number wider than the column is not truncated. The line
+ * text is never altered, so the first TAB of an output line always separates
+ * the number from the text, even when the text itself starts with a TAB.
+ *
+ * @param lines - The lines to format.
+ * @param firstLineNumber - The 1-based number of `lines[0]`.
+ * @returns The numbered text.
+ */
+export function formatNumberedLines(lines: readonly string[], firstLineNumber: number): string {
+  return lines
+    .map((text, index) => `${String(firstLineNumber + index).padStart(NUMBERED_LINE_WIDTH)}\t${text}`)
+    .join("\n");
 }
