@@ -12,12 +12,12 @@ function fakeConfig(values: Record<string, unknown>): (section: string) => Confi
 }
 
 describe("readSettings", () => {
-  it("defaults: no config set -> all five individual packages, empty servers, HSCUSTOM namespace, combineProfiles off, developmentRepoPath empty", () => {
+  it("defaults: no config set -> all five individual packages, empty servers, USER namespace, combineProfiles off, developmentRepoPath empty", () => {
     const settings = readSettings(fakeConfig({}));
 
     expect(settings.packages).toEqual([...DEFAULT_PACKAGES]);
     expect(settings.servers).toEqual([]);
-    expect(settings.namespace).toBe("HSCUSTOM");
+    expect(settings.namespace).toBe("USER");
     expect(settings.combineProfiles).toBe(false);
     expect(settings.governance).toBe("");
     expect(settings.developmentRepoPath).toBe("");
@@ -125,9 +125,9 @@ describe("readSettings", () => {
     expect(settings.hadStaleAllPackage).toBe(true);
   });
 
-  it("falls back to HSCUSTOM when namespace is configured as an empty string", () => {
+  it("falls back to USER when namespace is configured as an empty string", () => {
     const settings = readSettings(fakeConfig({ namespace: "" }));
-    expect(settings.namespace).toBe("HSCUSTOM");
+    expect(settings.namespace).toBe("USER");
   });
 
   it("packages explicitly set to an empty array yields zero packages, not a silent fallback to the default five — 'unset' and 'explicitly empty' are different user intents", () => {
@@ -173,7 +173,7 @@ describe("readSettings — hand-edited settings.json must never throw", () => {
   });
 
   it("a whitespace-only namespace falls back to the default (both consumers only reject the empty string, so '   ' would target a nonexistent namespace)", () => {
-    expect(readSettings(fakeConfig({ namespace: "   " })).namespace).toBe("HSCUSTOM");
+    expect(readSettings(fakeConfig({ namespace: "   " })).namespace).toBe("USER");
   });
 
   it("a JSON number/boolean developmentRepoPath is coerced to its string form (same toSettingString discipline as every other string setting), never thrown", () => {

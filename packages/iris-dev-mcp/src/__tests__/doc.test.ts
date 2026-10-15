@@ -244,6 +244,111 @@ describe("iris_doc_put", () => {
     );
   });
 
+  // Result shapes below were captured live on 2026-10-15 (IRIS 2026.2, Atelier
+  // v8, HSCUSTOM) from `PUT .../doc/ExecuteMCPv2.Temp.Story380Bom.cls`: a
+  // BOM-prefixed first line is refused with HTTP 200 / empty `status.errors`
+  // and a string `result.status`; the same document without the BOM is
+  // accepted with `result.status === ""`.
+  const LIVE_REFUSED_RESULT = {
+    name: "ExecuteMCPv2.Temp.Story380Bom.cls",
+    db: "",
+    ts: "",
+    cat: "CLS",
+    enc: false,
+    content: "",
+    status:
+      "ERROR #16021: Illegal Header Line: \uFEFFClass ExecuteMCPv2.Temp.Story380Bom Extends %RegisteredObject",
+  };
+  const LIVE_ACCEPTED_RESULT = {
+    name: "ExecuteMCPv2.Temp.Story380Bom.cls",
+    db: "HSCUSTOM",
+    ts: "2026-10-15 12:25:56.148",
+    upd: false,
+    cat: "CLS",
+    status: "",
+    enc: false,
+    flags: 0,
+    content: [],
+  };
+
+  it("strips a leading BOM from string content before the PUT", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+
+    await docPutTool.handler(
+      { name: "Test.cls", content: "\uFEFFClass Test {\n}" },
+      ctx,
+    );
+
+    const body = mockHttp.put.mock.calls[0]?.[1] as { content: string[] };
+    expect(body.content).toEqual(["Class Test {", "}"]);
+    expect(body.content[0]?.charCodeAt(0)).not.toBe(0xfeff);
+  });
+
+  it("strips a leading BOM from array content without mutating the caller's array", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+    const callerLines = ["\uFEFFClass Test {", "}"];
+
+    await docPutTool.handler({ name: "Test.cls", content: callerLines }, ctx);
+
+    const body = mockHttp.put.mock.calls[0]?.[1] as { content: string[] };
+    expect(body.content).toEqual(["Class Test {", "}"]);
+    expect(callerLines).toEqual(["\uFEFFClass Test {", "}"]);
+  });
+
+  it("returns isError with the status text when IRIS refuses the document", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_REFUSED_RESULT));
+
+    const result = await docPutTool.handler(
+      { name: "ExecuteMCPv2.Temp.Story380Bom.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe(
+      `Document 'ExecuteMCPv2.Temp.Story380Bom.cls' was not saved in namespace 'USER': ${LIVE_REFUSED_RESULT.status}. Nothing was stored; correct the document text and retry.`,
+    );
+    expect(result.content[0]?.text).not.toContain("saved successfully");
+    expect(result.structuredContent).toEqual(LIVE_REFUSED_RESULT);
+  });
+
+  it("keeps the success response byte-identical when status is an empty string", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+
+    const result = await docPutTool.handler(
+      { name: "ExecuteMCPv2.Temp.Story380Bom.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: "Document 'ExecuteMCPv2.Temp.Story380Bom.cls' saved successfully in namespace 'USER'.",
+      },
+    ]);
+    expect(result.structuredContent).toEqual(LIVE_ACCEPTED_RESULT);
+  });
+
+  it("keeps the success response when the result carries no status field", async () => {
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+
+    const result = await docPutTool.handler(
+      { name: "Test.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe(
+      "Document 'Test.cls' saved successfully in namespace 'USER'.",
+    );
+  });
+
+  it("description documents the BOM strip and the error returned for a refused write", () => {
+    const desc = docPutTool.description ?? "";
+    expect(desc).toContain("A leading byte-order mark is stripped from the content before it is sent");
+    expect(desc).toContain("is returned as an error carrying IRIS's text; nothing is stored then");
+  });
+
   it("should propagate connection errors", async () => {
     mockHttp.put.mockRejectedValue(new Error("ECONNREFUSED"));
 

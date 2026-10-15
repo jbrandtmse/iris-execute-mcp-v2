@@ -170,6 +170,26 @@ export function atelierPath(
   return `/api/atelier/v${version}/${encodeURIComponent(namespace)}/${action}`;
 }
 
+/**
+ * Read the per-document failure text out of an Atelier `PUT /doc` result.
+ *
+ * A PUT can return HTTP 200 with an empty `status.errors` envelope and still
+ * fail for that document: IRIS reports the refusal (for example
+ * `ERROR #16021: Illegal Header Line: ...`) only as a string-typed
+ * `result.status`, which the shared HTTP client never throws on, and stores
+ * nothing. A successful PUT carries `result.status === ""` (or no status).
+ *
+ * @param result - The `result` member of the PUT response envelope.
+ * @returns The status text when it is a non-empty string; `undefined` when
+ *   the write was accepted (empty or absent status) or `result` has no
+ *   string status.
+ */
+export function atelierDocStatusError(result: unknown): string | undefined {
+  if (result === null || typeof result !== "object") return undefined;
+  const status = (result as { status?: unknown }).status;
+  return typeof status === "string" && status !== "" ? status : undefined;
+}
+
 // ── Internal helpers ────────────────────────────────────────────────
 
 /**

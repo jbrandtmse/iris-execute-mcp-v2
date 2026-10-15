@@ -31,7 +31,7 @@ describe("loadConfig", () => {
 
     expect(config.host).toBe("localhost");
     expect(config.port).toBe(52773);
-    expect(config.namespace).toBe("HSCUSTOM");
+    expect(config.namespace).toBe("USER");
     expect(config.https).toBe(false);
     expect(config.baseUrl).toBe("http://localhost:52773");
   });
@@ -151,7 +151,7 @@ describe("loadConfig", () => {
       port: 52773,
       username: "admin",
       password: "secret",
-      namespace: "HSCUSTOM",
+      namespace: "USER",
       https: false,
       baseUrl: "http://localhost:52773",
       timeout: 60_000,

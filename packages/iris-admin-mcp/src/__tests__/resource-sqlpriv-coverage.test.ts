@@ -208,7 +208,7 @@ describe("Story 15.5 surface gaps — listPrivileges namespace + error path, col
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      `${SQLPRIV_PATH}?grantee=AppRole&namespace=HSCUSTOM`,
+      `${SQLPRIV_PATH}?grantee=AppRole&namespace=HSCUSTOM&system=0`,
     );
   });
 

@@ -427,7 +427,7 @@ describe("iris_resource_manage SQL privileges (Story 15.5)", () => {
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      "/api/executemcp/v2/security/sqlprivilege?grantee=AppRole",
+      "/api/executemcp/v2/security/sqlprivilege?grantee=AppRole&system=0",
     );
     const structured = result.structuredContent as { count: number };
     expect(structured.count).toBe(1);
@@ -449,7 +449,7 @@ describe("iris_resource_manage SQL privileges (Story 15.5)", () => {
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      "/api/executemcp/v2/security/sqlprivilege?grantee=AppRole&target=Sample.Person",
+      "/api/executemcp/v2/security/sqlprivilege?grantee=AppRole&target=Sample.Person&system=0",
     );
   });
 

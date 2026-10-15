@@ -287,7 +287,9 @@ Also installable as [Agent Skills](../../skills/README.md).
 **Debug/scratch tool** — for production code, use `iris_doc_load` to ensure source
 control and review. This tool writes content directly to IRIS without creating a
 file on disk, and is intended for one-off inspection, quick reproductions, or
-throwaway test classes only.
+throwaway test classes only. A leading byte-order mark is stripped from the content
+before it is sent, and a write IRIS refuses (a non-empty `result.status` inside an
+HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stored then.
 
 **Input:**
 ```json

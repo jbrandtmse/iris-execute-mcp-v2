@@ -578,9 +578,14 @@ describe("server-base", () => {
       // that logs both lines, skips process.exit, then returns early before
       // the connect step would otherwise leave this test green.
       expect(infoSpy).toHaveBeenCalledWith("Connected via stdio transport");
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("IRIS health check failed"),
-      );
+      // The health failure is named EXACTLY once: one log line, one occurrence
+      // of the prefix (a network error arrives unprefixed, so the prefix is
+      // added once; it is never stacked on a message that already carries it).
+      const healthLines = errorSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.includes("IRIS health check failed"));
+      expect(healthLines).toHaveLength(1);
+      expect(healthLines[0]?.split("IRIS health check failed")).toHaveLength(2);
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining(
           'Continuing startup without the "default" profile',

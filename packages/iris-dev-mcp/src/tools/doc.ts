@@ -10,9 +10,28 @@
  * All tools use the Atelier REST API via the shared {@link IrisHttpClient}.
  */
 
-import { atelierPath, IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  atelierDocStatusError,
+  atelierPath,
+  IrisApiError,
+  stripLeadingBom,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
+
+/**
+ * Return `lines` with a leading BOM removed from its first element.
+ *
+ * The caller's array is never mutated: when a BOM is present a copy is
+ * returned, otherwise the same array.
+ */
+function withoutLeadingBom(lines: string[]): string[] {
+  const first = lines[0];
+  if (first === undefined) return lines;
+  const stripped = stripLeadingBom(first);
+  return stripped === first ? lines : [stripped, ...lines.slice(1)];
+}
 
 /**
  * Validate a document name to prevent path traversal attacks.
@@ -169,7 +188,9 @@ export const docPutTool: ToolDefinition = {
   description:
     "**Debug/scratch tool** — for production code, use iris_doc_load to ensure source control and review. " +
     "This tool writes content directly to IRIS without creating a file on disk, and is intended for one-off " +
-    "inspection, quick reproductions, or throwaway test classes only.",
+    "inspection, quick reproductions, or throwaway test classes only. A leading byte-order mark is " +
+    "stripped from the content before it is sent, and a write IRIS refuses (a non-empty result.status " +
+    "inside an HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stored then.",
   inputSchema: z.object({
     name: z
       .string()
@@ -209,7 +230,12 @@ export const docPutTool: ToolDefinition = {
     }
 
     const ns = ctx.resolveNamespace(namespace);
-    const lines = Array.isArray(content) ? content : content.split(/\r?\n/);
+    // A leading BOM makes IRIS reject the first line as an illegal header and
+    // store nothing, so it never reaches the wire. A caller-supplied array is
+    // copied, never mutated.
+    const lines = Array.isArray(content)
+      ? withoutLeadingBom(content)
+      : stripLeadingBom(content).split(/\r?\n/);
     const encodedName = encodeURIComponent(name);
     const params = new URLSearchParams();
     if (ignoreConflict) params.set("ignoreConflict", "1");
@@ -219,6 +245,23 @@ export const docPutTool: ToolDefinition = {
 
     const body = { enc: false, content: lines };
     const response = await ctx.http.put(path, body);
+
+    // IRIS can refuse a document inside an HTTP 200 envelope with an empty
+    // `status.errors`, reporting the reason only as a string `result.status`
+    // while storing nothing.
+    const refusal = atelierDocStatusError(response.result);
+    if (refusal !== undefined) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Document '${name}' was not saved in namespace '${ns}': ${refusal}. Nothing was stored; correct the document text and retry.`,
+          },
+        ],
+        structuredContent: response.result,
+        isError: true,
+      };
+    }
 
     return {
       content: [

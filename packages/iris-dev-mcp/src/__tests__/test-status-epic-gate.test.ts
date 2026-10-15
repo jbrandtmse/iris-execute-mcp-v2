@@ -57,6 +57,7 @@ import {
   ping,
   negotiateVersion,
   buildToolContext,
+  type RequestOptions,
   type ToolContext,
   type McpServerBaseOptions,
   type ToolDefinition,
@@ -92,6 +93,30 @@ const REQUIRE_LIVE =
 let skipReason: string | undefined;
 let ctx: ToolContext;
 let client: IrisHttpClient;
+
+/** The last Atelier `work/` response seen through the gate client (DW-511). */
+let lastWorkResponse: unknown;
+
+/** The last `work/` response as JSON, for the message of an expectation that fails on the running state. */
+function lastWork(): string {
+  return lastWorkResponse === undefined
+    ? "(no work/ response observed)"
+    : JSON.stringify(lastWorkResponse);
+}
+
+/**
+ * Wrap the gate client's `get` so every Atelier `work/` response is remembered. The wrapper
+ * returns the real response untouched; it only records it, so a red `running` expectation
+ * can name what Atelier actually said instead of a bare `expected "completed" to be "running"`.
+ */
+function recordWorkResponses(target: IrisHttpClient): void {
+  const originalGet = target.get.bind(target);
+  target.get = (async (path: string, options?: RequestOptions) => {
+    const response = await originalGet(path, options);
+    if (path.includes("/work/")) lastWorkResponse = response;
+    return response;
+  }) as unknown as typeof target.get;
+}
 
 /** Same discipline as `execute-classmethod-epic-gate.test.ts`'s
  * `fixtureIsDeployed`: probe the stock Atelier `/doc/` surface, never the
@@ -187,6 +212,7 @@ beforeAll(async () => {
   try {
     const config = getConfig();
     client = new IrisHttpClient(config);
+    recordWorkResponses(client);
     const available = await ping(client, 3000);
     if (!available) {
       skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
@@ -244,9 +270,12 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
       try {
         // ── Leg 1: submit, expect running (Story 36.1) ──────────────
         const running = await executeHandler({ target: FIXTURE, level: "class", timeout: 5 }, ctx);
-        expect(running.isError).toBe(false);
+        expect(running.isError, `running.isError; last Atelier work/ response: ${lastWork()}`).toBe(false);
         const runningStructured = running.structuredContent as { status: string; jobId: string; runIndex: number | null };
-        expect(runningStructured.status).toBe("running");
+        expect(
+          runningStructured.status,
+          `status !== "running"; last Atelier work/ response: ${lastWork()}`,
+        ).toBe("running");
         firstJobId = runningStructured.jobId;
         expect(firstJobId).toMatch(/^\d+$/);
 
@@ -255,7 +284,10 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
         // be a premature-completion defect, not a race to tolerate.
         const pollRunning = await testStatusTool.handler({ action: "poll", jobId: firstJobId }, ctx);
         const pollRunningStructured = pollRunning.structuredContent as { status: string; jobId: string };
-        expect(pollRunningStructured.status).toBe("running");
+        expect(
+          pollRunningStructured.status,
+          `poll status !== "running"; last Atelier work/ response: ${lastWork()}`,
+        ).toBe("running");
         expect(pollRunningStructured.jobId).toBe(firstJobId);
 
         // ── Leg 3: poll by jobId until completed ───────────────────
@@ -294,7 +326,10 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
         const submittedAt = Date.now();
         const secondRunning = await executeHandler({ target: FIXTURE, level: "class", timeout: 5 }, ctx);
         const secondStructured = secondRunning.structuredContent as { status: string; jobId: string };
-        expect(secondStructured.status).toBe("running");
+        expect(
+          secondStructured.status,
+          `status !== "running"; last Atelier work/ response: ${lastWork()}`,
+        ).toBe("running");
         secondJobId = secondStructured.jobId;
 
         const savedEnv = {
@@ -394,7 +429,10 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
           jobId: string;
           partial: { total: number; details: { class: string; method: string; status: string; duration: number; message: string }[] };
         };
-        expect(runningStructured.status).toBe("running");
+        expect(
+          runningStructured.status,
+          `status !== "running"; last Atelier work/ response: ${lastWork()}`,
+        ).toBe("running");
         jobId = runningStructured.jobId;
         // Precondition that makes this leg meaningful: the three FAST rows were
         // already drained (and so never reappear in any later drain).

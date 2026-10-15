@@ -496,6 +496,49 @@ describe("iris_doc_export", () => {
     expect(enumPath).toContain(`/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`);
   });
 
+  // `generated` maps on the /modified branch exactly as on /docnames
+  // (DW-527): default "false" -> 0, "true" -> 1, "both" -> param omitted.
+  const MODIFIED_TS = encodeURIComponent("2026-04-01T00:00:00Z");
+
+  it("modifiedSince with the default generated sends generated=0 on /modified", async () => {
+    installMockHttp(mockHttp, [{ name: "Recently.Updated.cls" }]);
+
+    await docExportTool.handler(
+      { destinationDir: tmp, modifiedSince: "2026-04-01T00:00:00Z" },
+      ctx,
+    );
+
+    expect(mockHttp.get.mock.calls[0]?.[0]).toBe(
+      `/api/atelier/v7/USER/modified/${MODIFIED_TS}?generated=0`,
+    );
+  });
+
+  it("modifiedSince with generated 'true' sends generated=1 on /modified", async () => {
+    installMockHttp(mockHttp, [{ name: "Recently.Updated.cls" }]);
+
+    await docExportTool.handler(
+      { destinationDir: tmp, modifiedSince: "2026-04-01T00:00:00Z", generated: "true" },
+      ctx,
+    );
+
+    expect(mockHttp.get.mock.calls[0]?.[0]).toBe(
+      `/api/atelier/v7/USER/modified/${MODIFIED_TS}?generated=1`,
+    );
+  });
+
+  it("modifiedSince with generated 'both' omits the generated param on /modified", async () => {
+    installMockHttp(mockHttp, [{ name: "Recently.Updated.cls" }]);
+
+    await docExportTool.handler(
+      { destinationDir: tmp, modifiedSince: "2026-04-01T00:00:00Z", generated: "both" },
+      ctx,
+    );
+
+    expect(mockHttp.get.mock.calls[0]?.[0]).toBe(
+      `/api/atelier/v7/USER/modified/${MODIFIED_TS}`,
+    );
+  });
+
   // ── 14. Empty result — no manifest ───────────────────────────────
 
   it("returns empty result with no manifest file when zero docs match", async () => {

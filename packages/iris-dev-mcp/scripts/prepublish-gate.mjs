@@ -78,7 +78,11 @@ const gateTestFiles = [
   "src/__tests__/global-injection-epic-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+// `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its
+// Atelier async work queue and the QAFixtures classes. Run in parallel (vitest's default),
+// two files' test runs overlap on that shared state and a gate fails on an interleaving
+// rather than on a defect (DW-511). Sequential file execution makes each file see only its own runs.
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

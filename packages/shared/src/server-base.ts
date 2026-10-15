@@ -2068,7 +2068,13 @@ export class McpServerBase {
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : String(error);
-      logger.error(`IRIS health check failed: ${message}`);
+      // `checkHealth` already prefixes the errors it wraps (the HTTP 401/403/404
+      // path); a connection error it rethrows unwrapped carries no prefix.
+      // Prefix only when missing so the line names the failure exactly once.
+      const healthPrefix = "IRIS health check failed:";
+      logger.error(
+        message.startsWith(healthPrefix) ? message : `${healthPrefix} ${message}`,
+      );
       // Name host:port on THIS line too (AC 37.1.4). `checkHealth` only carries
       // it on the NETWORK_ERROR/TIMEOUT variants; when the probe reached IRIS
       // and was refused (an IrisApiError for HTTP 401/403/404, which

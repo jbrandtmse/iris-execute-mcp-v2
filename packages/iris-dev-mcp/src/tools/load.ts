@@ -11,7 +11,12 @@
 
 import { readFileSync, globSync } from "node:fs";
 import * as path from "node:path";
-import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  atelierDocStatusError,
+  atelierPath,
+  stripLeadingBom,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 
@@ -80,7 +85,7 @@ export function extractDeclaredIdentity(lines: string[]): string | undefined {
     // would be silently SKIPPED. The upload loop strips the BOM once at read
     // time (so the uploaded content is BOM-free); this per-line strip keeps
     // the exported parser BOM-tolerant for any caller handed unstripped lines.
-    const text = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
+    const text = stripLeadingBom(line);
     const match = CLASS_DECL_RE.exec(text) ?? ROUTINE_DECL_RE.exec(text);
     const name = match?.[1];
     if (name !== undefined) return name;
@@ -409,8 +414,7 @@ export const docLoadTool: ToolDefinition = {
         // storing NOTHING (a silent drop; live-proven 2026-08-18). Stripping
         // here makes BOM-bearing files just work: the identity cross-check
         // below parses the stripped text, and the PUT body is BOM-free.
-        const fileContent =
-          rawContent.charCodeAt(0) === 0xfeff ? rawContent.slice(1) : rawContent;
+        const fileContent = stripLeadingBom(rawContent);
         const lines = fileContent.split(/\r?\n/);
 
         // Cross-validate the path-derived doc name against the file's own
@@ -460,12 +464,12 @@ export const docLoadTool: ToolDefinition = {
         // uploaded:1 while the class was absent server-side). A successful
         // PUT carries `result.status === ""` (live-captured same day). Treat
         // a non-empty string status as an upload failure for this file.
-        const putResult = putResponse.result as { status?: unknown } | undefined;
-        if (typeof putResult?.status === "string" && putResult.status !== "") {
+        const refusal = atelierDocStatusError(putResponse.result);
+        if (refusal !== undefined) {
           failures.push({
             file: String(filePath),
             docName,
-            error: `IRIS refused the upload: ${putResult.status}`,
+            error: `IRIS refused the upload: ${refusal}`,
           });
           continue;
         }

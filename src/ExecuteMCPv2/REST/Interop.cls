@@ -10,10 +10,37 @@
 Class ExecuteMCPv2.REST.Interop Extends ExecuteMCPv2.REST.Base
 {
 
+/// Whether deleting the production named <var>pTarget</var> must be refused: true when it is the
+/// namespace's current production (<var>pCurrentName</var>, as reported by
+/// <code>Ens.Director:GetProductionStatus</code>) and its state is anything other than Stopped.
+/// <p>Stopped is state 2, or -2 for a mirror backup member's Stopped; every other state
+/// (Running, Suspended, Troubled, NetworkStopped, Unknown, ...) blocks. A production that is not
+/// the current one is never blocked: <code>GetProductionStatus</code> says nothing about it.</p>
+ClassMethod DeleteBlockedByState(pTarget As %String, pCurrentName As %String, pState As %Integer) As %Boolean
+{
+    Quit (pCurrentName = pTarget) && ($ZAbs(pState) '= 2)
+}
+
+/// Display name for a production state code (1-5); anything else is "Unknown".
+ClassMethod StateName(pState As %Integer) As %String
+{
+    Quit $Select(pState>0&&(pState<6):$ListGet($ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped"), pState), 1:"Unknown")
+}
+
+/// Refusal text for a delete blocked by <method>DeleteBlockedByState</method>. Running (state 1)
+/// keeps its exact message; every other state is named from <method>StateName</method>.
+ClassMethod DeleteBlockedMessage(pTarget As %String, pState As %Integer) As %String
+{
+    If pState = 1 Quit "Production '"_pTarget_"' is running; stop it before deleting"
+    Quit "Production '"_pTarget_"' is in state "_..StateName(pState)_"; stop it before deleting"
+}
+
 /// Create or delete an Interoperability production.
 /// <p>Accepts a JSON body with <code>action</code> ("create" or "delete"),
 /// <code>name</code> (production class name), and optional <code>namespace</code>.
-/// Productions must be stopped before deletion.</p>
+/// The namespace's current production must be Stopped before deletion. When the production
+/// class no longer exists but its <code>Ens.Config.Production</code> row does (an orphan), delete
+/// removes that row and reports <code>orphanRemoved</code>.</p>
 ClassMethod ProductionManage() As %Status
 {
     Set tSC = $$$OK
@@ -92,8 +119,43 @@ ClassMethod ProductionManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "delete" {
-            ; Check if production exists
-            If '##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+            ; State guard - runs BEFORE either delete path (the class delete and the
+            ; orphan-row removal below). GetProductionStatus reports only this namespace's
+            ; current production, so the guard applies to that production; a status error
+            ; keeps the unguarded behavior. Anything other than Stopped is refused.
+            Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+            If $$$ISOK(tSC2) && ..DeleteBlockedByState(tName, tProdName, tState) {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, ..DeleteBlockedMessage(tName, tState))
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If ##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+                ; Delete the class definition first - Ens.Projection.Production.RemoveProjection()
+                ; fires automatically and handles the Ens.Config.Production record cleanup.
+                ; Deleting in the reverse order (config first, then class) is fragile: if the
+                ; Ens.Config.Production record is absent (orphaned class, external creation), the
+                ; first %DeleteId fails and the class definition is never removed.
+                Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
+                Set $NAMESPACE = tOrigNS
+                If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
+
+                Set tResult = {"action": "deleted", "name": (tName)}
+            }
+            ElseIf ##class(Ens.Config.Production).%ExistsId(tName) {
+                ; Orphan: the production class is gone but its Ens.Config.Production row
+                ; remains. The class XData is the source of truth and no longer exists, so
+                ; LoadFromClass has nothing to sync from; remove the row directly (its
+                ; %OnDelete also removes the row's config items).
+                Set tDeleteSC = ##class(Ens.Config.Production).%DeleteId(tName)
+                Set $NAMESPACE = tOrigNS
+                If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
+
+                Set tResult = {"action": "deleted", "name": (tName), "orphanRemoved": true}
+            }
+            Else {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Production '"_tName_"' does not exist")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -101,26 +163,6 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            ; Check if production is running — must be stopped first
-            Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
-            If $$$ISOK(tSC2) && (tProdName = tName) && (tState = 1) {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tName_"' is running; stop it before deleting")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-
-            ; Delete the class definition first — Ens.Projection.Production.RemoveProjection()
-            ; fires automatically and handles the Ens.Config.Production record cleanup.
-            ; Deleting in the reverse order (config first, then class) is fragile: if the
-            ; Ens.Config.Production record is absent (orphaned class, external creation), the
-            ; first %DeleteId fails and the class definition is never removed.
-            Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
-
-            Set tResult = {"action": "deleted", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }
@@ -310,8 +352,7 @@ ClassMethod ProductionStatus() As %Status
         If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Map state number to string
-        Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
-        Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
+        Set tStateStr = ..StateName(tState)
 
         Set tResult = {}
         Do tResult.%Set("name", tProdName)
@@ -429,13 +470,13 @@ ClassMethod ItemManage() As %Status
             ; in this namespace (#50 — a match key must carry every identity
             ; dimension a row actually has: WHERE Name = ? alone can silently
             ; return whichever production's row the extent yields first).
-            ; Omitted -> unchanged legacy query/output, so the single-production
-            ; case stays byte-identical (Rule #19). Story 35.1 AC 35.1.4 audit.
+            ; Omitted -> the unfiltered query (the first matching row); the response
+            ; always names that row's production. Story 35.1 AC 35.1.4 audit.
             ; CR 35.1-4 (code review): strip surrounding whitespace so a whitespace-only value
-            ; collapses to "" (treated as omitted -> unchanged legacy query) rather than being
+            ; collapses to "" (treated as omitted -> unfiltered query) rather than being
             ; bound into the SQL predicate and reported as "not found in production ' '".
             Set tProdFilter = $ZStrip(tBody.%Get("production"), "<>W")
-            Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
+            Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category, Production FROM Ens_Config.Item WHERE Name = ?"
             If tProdFilter '= "" {
                 Set tSQL = tSQL _ " AND Production = ?"
                 Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName, tProdFilter)
@@ -463,6 +504,9 @@ ClassMethod ItemManage() As %Status
             Set tResult = {}
             Do tResult.%Set("action", "get")
             Do tResult.%Set("itemName", tRS.Name)
+            ; The production the row was read from, so a get without 'production' still says
+            ; which production's item it returned (DW-450).
+            Do tResult.%Set("production", tRS.Production)
             Do tResult.%Set("className", tRS.ClassName)
             Do tResult.%Set("enabled", tRS.Enabled, "boolean")
             Do tResult.%Set("poolSize", +tRS.PoolSize, "number")
@@ -1547,9 +1591,8 @@ ClassMethod ProductionSummary() As %Status
             Try {
                 Set $NAMESPACE = tNS
                 Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
-                Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                 If $$$ISOK(tSC2) && (tProdName '= "") {
-                    Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
+                    Set tStateStr = ..StateName(tState)
                     Set tEntry = {}
                     Do tEntry.%Set("namespace", tNS)
                     Do tEntry.%Set("name", tProdName)

@@ -67,6 +67,7 @@ import {
   ping,
   negotiateVersion,
   buildToolContext,
+  type RequestOptions,
   type ToolContext,
 } from "@iris-mcp/shared";
 import { createExecuteTestsHandler } from "../tools/execute.js";
@@ -101,6 +102,30 @@ const REQUIRE_LIVE =
 let skipReason: string | undefined;
 let ctx: ToolContext;
 let client: IrisHttpClient;
+
+/** The last Atelier `work/` response seen through the gate client (DW-511). */
+let lastWorkResponse: unknown;
+
+/** The last `work/` response as JSON, for the message of an expectation that fails on the running contract. */
+function lastWork(): string {
+  return lastWorkResponse === undefined
+    ? "(no work/ response observed)"
+    : JSON.stringify(lastWorkResponse);
+}
+
+/**
+ * Wrap the gate client's `get` so every Atelier `work/` response is remembered. The wrapper
+ * returns the real response untouched; it only records it, so a red `running` expectation
+ * can name what Atelier actually said instead of a bare `expected true to be false`.
+ */
+function recordWorkResponses(target: IrisHttpClient): void {
+  const originalGet = target.get.bind(target);
+  target.get = (async (path: string, options?: RequestOptions) => {
+    const response = await originalGet(path, options);
+    if (path.includes("/work/")) lastWorkResponse = response;
+    return response;
+  }) as unknown as typeof target.get;
+}
 
 /**
  * Is the QA fixture deployed on this instance? Probed through the stock
@@ -151,6 +176,7 @@ beforeAll(async () => {
   try {
     const config = getConfig();
     client = new IrisHttpClient(config);
+    recordWorkResponses(client);
     const available = await ping(client, 3000);
     if (!available) {
       skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
@@ -197,14 +223,20 @@ describe("iris_execute_tests running-result contract epic-done gate (Story 36.1 
         // reads it from the FIRST still-running poll).
         const running = await handler({ target: FIXTURE, level: "class", timeout: 3 }, ctx);
 
-        expect(running.isError).toBe(false);
+        expect(
+          running.isError,
+          `running.isError; last Atelier work/ response: ${lastWork()}`,
+        ).toBe(false);
         const runningStructured = running.structuredContent as {
           status: string;
           jobId: string;
           runIndex: number | null;
           runIndexSource: string | null;
         };
-        expect(runningStructured.status).toBe("running");
+        expect(
+          runningStructured.status,
+          `status !== "running"; last Atelier work/ response: ${lastWork()}`,
+        ).toBe("running");
         expect(typeof runningStructured.jobId).toBe("string");
         expect(runningStructured.jobId.length).toBeGreaterThan(0);
         jobId = runningStructured.jobId;

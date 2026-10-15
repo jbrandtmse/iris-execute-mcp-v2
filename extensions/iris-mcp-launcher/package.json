@@ -95,7 +95,7 @@
         },
         "irisMcpLauncher.namespace": {
           "type": "string",
-          "default": "HSCUSTOM",
+          "default": "USER",
           "description": "Default IRIS namespace (IRIS_NAMESPACE) for every spawned MCP server. Matches the suite's own loadConfig() default."
         },
         "irisMcpLauncher.combineProfiles": {

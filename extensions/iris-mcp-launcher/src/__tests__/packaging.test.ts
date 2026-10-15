@@ -18,7 +18,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SERVER_MANAGER_EXTENSION_ID } from "../constants.js";
 import { PACKAGE_DIR_NAME, PACKAGE_NPM_NAME } from "../definitions.js";
-import { DEFAULT_PACKAGES } from "../settings.js";
+import { DEFAULT_PACKAGES, readSettings } from "../settings.js";
 import { stripComments } from "./sourceGrep.js";
 
 // __dirname (not import.meta.url), matching containment.test.ts, so this file
@@ -131,6 +131,26 @@ describe("package.json packaging contract", () => {
     expect(Object.keys(PACKAGE_DIR_NAME).sort()).toEqual(declaredEnum);
 
     expect(packagesProperty?.default).toEqual([...DEFAULT_PACKAGES]);
+  });
+
+  /**
+   * VS Code serves `package.json`'s contributed default when the user sets nothing;
+   * `settings.ts` only falls back on an empty or whitespace value. Every other test
+   * reads the fallback through a fake config, so only this one ties the two together.
+   */
+  it("contributes.configuration's namespace default EXACTLY matches the default readSettings falls back to (derived, not re-typed)", () => {
+    const pkg = readJson<{
+      contributes: {
+        configuration: { properties: Record<string, { default?: unknown }> };
+      };
+    }>("package.json");
+    const namespaceProperty = pkg.contributes.configuration.properties["irisMcpLauncher.namespace"];
+    const fallback = readSettings(() => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    })).namespace;
+
+    expect(namespaceProperty?.default).toBe(fallback);
+    expect(fallback).toBe("USER");
   });
 
   /**

@@ -108,6 +108,19 @@ type ToolPresetRosters = import("../tool-visibility.js").ToolPresetRosters;
 
 const OTHER_HOST = "other.example.com";
 
+/**
+ * The startup log names the health-check failure EXACTLY once: one error line
+ * carries the `IRIS health check failed:` prefix, and that line carries it
+ * once (never `IRIS health check failed: IRIS health check failed: ...`).
+ */
+function expectHealthFailureLoggedOnce(errorSpy: { mock: { calls: unknown[][] } }): void {
+  const healthLines = errorSpy.mock.calls
+    .map((call) => String(call[0]))
+    .filter((line) => line.includes("IRIS health check failed"));
+  expect(healthLines).toHaveLength(1);
+  expect(healthLines[0]?.split("IRIS health check failed")).toHaveLength(2);
+}
+
 function makeConfig(): IrisConnectionConfig {
   return {
     host: "localhost",
@@ -300,9 +313,7 @@ describe("server-base — default-profile outage, QA coverage gaps (Story 37.1)"
       // http-not-implemented throw — proving the fix is not accidentally
       // scoped to the stdio branch.
       expect(exitMock).not.toHaveBeenCalled();
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("IRIS health check failed"),
-      );
+      expectHealthFailureLoggedOnce(errorSpy);
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Continuing startup without the "default" profile'),
       );
@@ -556,6 +567,9 @@ describe("server-base — default-profile outage, QA coverage gaps (Story 37.1)"
       // The wrapped 401 message does NOT carry host:port, so the continuation
       // line must — otherwise the only startup diagnostic names no instance.
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("HTTP 401"));
+      // `checkHealth` already prefixes the wrapped 401 message, so the startup
+      // log must not stack a second prefix on top of it.
+      expectHealthFailureLoggedOnce(errorSpy);
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining(
           'Continuing startup without the "default" profile (localhost:52773)',

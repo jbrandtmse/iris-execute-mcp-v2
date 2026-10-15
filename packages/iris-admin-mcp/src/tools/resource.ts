@@ -76,7 +76,7 @@
  *     the only known cause of counts that large.
  */
 
-import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import { booleanParam, IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
@@ -93,10 +93,15 @@ export const resourceManageTool: ToolDefinition = {
     "ALSO manages fine-grained SQL object privileges (additive, Story 15.5): " +
     "'grant'/'revoke' a SQL privilege at schema, table, or column level, and " +
     "'listPrivileges' to list the current grants for a user or role. For the " +
-    "SQL-privilege actions supply 'target' (a schema, 'schema.table', or " +
-    "'schema.table(col1,col2)' for column level), 'privilege' (one or more of " +
-    "SELECT,INSERT,UPDATE,DELETE,REFERENCES — comma-delimited, or '*' for all), " +
-    "and 'grantee' (a SQL user or role). SQL privileges are namespace-scoped — " +
+    "SQL-privilege actions supply 'grantee' (a SQL user or role); grant/revoke " +
+    "also take 'target' (a schema, 'schema.table', or 'schema.table(col1,col2)' " +
+    "for column level) and 'privilege' (one or more of " +
+    "SELECT,INSERT,UPDATE,DELETE,REFERENCES - comma-delimited, or '*' for all). " +
+    "listPrivileges takes a 'target' of the form 'schema.table' (a column-level " +
+    "listing) or no target (an object-level listing); a bare schema name or a " +
+    "'schema.' / '.table' fragment is rejected with a validation message. " +
+    "listPrivileges also takes 'system' (default false): true includes " +
+    "system tables, which lists far more rows. SQL privileges are namespace-scoped - " +
     "pass 'namespace' to target a non-default namespace. The grant/revoke actions " +
     "are opt-in under tool governance and disabled by default until enabled via " +
     "IRIS_GOVERNANCE; listPrivileges is a read and enabled by default. " +
@@ -150,10 +155,10 @@ export const resourceManageTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "SQL privilege target for grant/revoke/listPrivileges: a schema, " +
-          "'schema.table', or 'schema.table(col1,col2)' for column-level. For " +
-          "listPrivileges, omit for an object-level listing or pass 'schema.table' " +
-          "for a column-level listing.",
+        "SQL privilege target. grant/revoke: a schema, 'schema.table', or " +
+          "'schema.table(col1,col2)' for column-level. listPrivileges: omit for an " +
+          "object-level listing, or pass 'schema.table' for a column-level listing " +
+          "(a bare schema is rejected).",
       ),
     privilege: z
       .string()
@@ -174,6 +179,13 @@ export const resourceManageTool: ToolDefinition = {
       .describe(
         "Target namespace for the SQL-privilege actions (privileges are " +
           "namespace-scoped). Defaults to the connection's namespace.",
+      ),
+    // -- listPrivileges (Story 38.0, DW-470) --
+    system: booleanParam
+      .optional()
+      .describe(
+        "listPrivileges only: include system tables in the listing (default false). " +
+          "Sent to IRIS explicitly as 1 or 0.",
       ),
     // ── listPrivileges bounding (Story 35.4, additive) ──
     maxRows: z
@@ -222,6 +234,7 @@ export const resourceManageTool: ToolDefinition = {
       privilege,
       grantee,
       namespace,
+      system,
       maxRows,
       cursor,
     } = args as {
@@ -233,6 +246,7 @@ export const resourceManageTool: ToolDefinition = {
       privilege?: string;
       grantee?: string;
       namespace?: string;
+      system?: boolean;
       maxRows?: number;
       cursor?: string;
     };
@@ -277,6 +291,9 @@ export const resourceManageTool: ToolDefinition = {
       if (namespace !== undefined && namespace !== "")
         qs.set("namespace", namespace);
       if (maxRows !== undefined) qs.set("maxRows", String(maxRows));
+      // The documented default (false) goes on the wire explicitly. IRIS reads
+      // `system` numerically (`+"true"` is 0), so it must be 1 or 0, never "true".
+      qs.set("system", system === true ? "1" : "0");
       const sqlPath = `${BASE_URL}/security/sqlprivilege?${qs.toString()}`;
       try {
         const response = await ctx.http.get(sqlPath);

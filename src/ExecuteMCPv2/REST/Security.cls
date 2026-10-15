@@ -3362,6 +3362,17 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+        ; A column-level target is 'schema.table': a '.', a non-empty schema before the first
+        ; '.', and a non-empty table after it (a table may itself contain '.', so 'A.B.C' stays
+        ; valid). Anything else would reach the catalog query with an empty subscript and come
+        ; back as a raw <SUBSCRIPT> 500, so it is refused here, before any namespace switch.
+        If (tTarget '= "") && ((tTarget '[ ".") || ($Piece(tTarget, ".", 1) = "") || ($Piece(tTarget, ".", 2, *) = "")) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'target' must be 'schema.table' for listPrivileges (got '"_tTarget_"'). Omit target for an object-level listing.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
         If tReqNS '= "" {
             If '##class(%SYS.Namespace).Exists(tReqNS) {
                 Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")

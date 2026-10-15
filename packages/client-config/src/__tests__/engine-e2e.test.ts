@@ -66,14 +66,50 @@ type WriteFs = import("../index.js").WriteFs;
 
 let api: Api;
 
+type CheckDistFresh = (
+  pkgDir: string,
+  pkgName: string,
+  options?: { now?: number },
+) => { ok: boolean; reason?: string; skipped?: boolean };
+
 beforeAll(async () => {
   const here = fileURLToPath(new URL(".", import.meta.url));
-  const dist = path.resolve(here, "../../dist/index.js");
+  const packageDir = path.resolve(here, "../..");
+  const dist = path.resolve(packageDir, "dist/index.js");
   if (!existsSync(dist)) {
     throw new Error("packages/client-config/dist/index.js is not built — run `pnpm turbo run build` first");
   }
+
+  // Every test below drives the BUILT dist, so a dist older than `src/` would run these
+  // tests over code that is not what the source says (DW-496). Fail with the exact
+  // remedy rather than a confusing assertion further down. The check lives in
+  // `scripts/lib` (shared with the prepublish gates); it is loaded by path at run time,
+  // so this package's own build never depends on a file outside `src/`.
+  const freshnessLib = path.resolve(packageDir, "../../scripts/lib/dist-freshness.mjs");
+  const { checkDistFresh } = (await import(pathToFileURL(freshnessLib).href)) as {
+    checkDistFresh: CheckDistFresh;
+  };
+  const fresh = checkDistFresh(packageDir, "@iris-mcp/client-config");
+  if (!fresh.ok || fresh.skipped) {
+    throw new Error(
+      `${fresh.reason ?? "@iris-mcp/client-config declares no dist/ build output."} ` +
+        'Run "pnpm --filter @iris-mcp/client-config build" and retry.',
+    );
+  }
+
   api = (await import(pathToFileURL(dist).href)) as Api;
 });
+
+/**
+ * A clock that advances one second per call. The chain tests read backups back by their
+ * timestamp (`restore` of the latest, or of a named one), so no two backups or state
+ * records in a chain may share a stamp; the real clock only guarantees that to the
+ * millisecond.
+ */
+function steppingClock(): () => Date {
+  let tick = Date.UTC(2026, 9, 15, 12, 0, 0);
+  return () => new Date((tick += 1_000));
+}
 
 const PKG: Record<CanonicalServerName, string> = {
   "iris-dev-mcp": "@iris-mcp/dev",
@@ -399,13 +435,14 @@ describe("synthesis × engine × status end-to-end", () => {
 describe("safety protocol chains (real fs)", () => {
   it("a sabotaged executor mid-flow auto-restores byte-exact, retains the backup, and records NO state", () => {
     const { ctx } = makeSandbox();
+    const clock = steppingClock();
     const cfg = seedConfig(ctx, "claude-code", "user", readFixture("claude-code/user.json"));
-    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp")).ok).toBe(true);
+    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp"), { now: clock }).ok).toBe(true);
     const afterFirst = readFileSync(cfg, "utf8");
 
     // A corrupting writer bug is a REACHABLE state (Rule #54).
     const sabotage: typeof api.executeNativeEdit = () => "{ not valid json at all";
-    const failed = api.apply(ctx, "claude-code", "user", canonicalEntry("iris-admin-mcp"), { executeFn: sabotage });
+    const failed = api.apply(ctx, "claude-code", "user", canonicalEntry("iris-admin-mcp"), { executeFn: sabotage, now: clock });
     expect(failed.ok).toBe(false);
     expect(failed.restored).toBe(true);
 
@@ -419,13 +456,14 @@ describe("safety protocol chains (real fs)", () => {
 
   it("QA-33.1-F1: restore recovers a config that was EXTERNALLY corrupted after apply (the disaster case)", () => {
     const { ctx } = makeSandbox();
+    const clock = steppingClock();
     const cfg = seedConfig(ctx, "claude-code", "user", readFixture("claude-code/user.json"));
     const initial = readFileSync(cfg, "utf8");
-    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp")).ok).toBe(true);
+    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp"), { now: clock }).ok).toBe(true);
 
     // The user (or another tool) breaks the file outside the manager.
     writeFileSync(cfg, "{ GARBAGE broken json !!!", "utf8");
-    const restored = api.restore(ctx, "claude-code", "user");
+    const restored = api.restore(ctx, "claude-code", "user", { now: clock });
     expect(restored.ok).toBe(true);
     // The latest backup is the pre-apply initial content.
     expect(readFileSync(cfg, "utf8")).toBe(initial);
@@ -441,9 +479,10 @@ describe("safety protocol chains (real fs)", () => {
 
   it("QA-33.1-F2: pre-existing garbage in the backup dir is never picked as a backup", () => {
     const { ctx } = makeSandbox();
+    const clock = steppingClock();
     const cfg = seedConfig(ctx, "claude-code", "user", readFixture("claude-code/user.json"));
     const initial = readFileSync(cfg, "utf8");
-    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp")).ok).toBe(true);
+    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp"), { now: clock }).ok).toBe(true);
 
     const dir = api.backupDir(ctx.stateDir ?? "", "claude-code", "user", "linux");
     // Same-basename junk that sorts AFTER every ISO stamp, plus unrelated files.
@@ -462,7 +501,7 @@ describe("safety protocol chains (real fs)", () => {
       platform: "linux",
     });
     expect(listed).toHaveLength(1);
-    const restored = api.restore(ctx, "claude-code", "user");
+    const restored = api.restore(ctx, "claude-code", "user", { now: clock });
     expect(restored.ok).toBe(true);
     expect(restored.note ?? "").not.toContain("zzz");
     expect(readFileSync(cfg, "utf8")).toBe(initial);
@@ -471,14 +510,15 @@ describe("safety protocol chains (real fs)", () => {
 
   it("restore by NAME across a chain: an earlier stage can be brought back after later mutations", () => {
     const { ctx } = makeSandbox();
+    const clock = steppingClock();
     const cfg = seedConfig(ctx, "claude-code", "user", readFixture("claude-code/user.json"));
     const initial = readFileSync(cfg, "utf8");
-    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp")).ok).toBe(true);
+    expect(api.apply(ctx, "claude-code", "user", canonicalEntry("iris-ops-mcp"), { now: clock }).ok).toBe(true);
     const firstBackup = backupNames(ctx, "claude-code", "user")[0];
     if (!firstBackup) throw new Error("expected a backup after apply");
 
-    expect(api.disable(ctx, "claude-code", "user", "iris-dev-mcp").ok).toBe(true);
-    const restored = api.restore(ctx, "claude-code", "user", { backup: firstBackup });
+    expect(api.disable(ctx, "claude-code", "user", "iris-dev-mcp", { now: clock }).ok).toBe(true);
+    const restored = api.restore(ctx, "claude-code", "user", { backup: firstBackup, now: clock });
     expect(restored.ok).toBe(true);
     expect(readFileSync(cfg, "utf8")).toBe(initial);
     expect(statusRow(ctx, "claude-code", "user", "iris-dev-mcp")).toBe("present-enabled");
@@ -488,13 +528,14 @@ describe("safety protocol chains (real fs)", () => {
 describe("concurrent scopes sharing a basename (codex user + project config.toml)", () => {
   it("operations and backups stay segregated per scope; nothing cross-contaminates", () => {
     const { ctx } = makeSandbox();
+    const clock = steppingClock();
     const userCfg = seedConfig(ctx, "codex", "user", readFixture("codex/config.toml"));
     const projCfg = seedConfig(ctx, "codex", "project", readFixture("codex/config.toml"));
     const userInitial = readFileSync(userCfg, "utf8");
     const projInitial = readFileSync(projCfg, "utf8");
 
-    expect(api.apply(ctx, "codex", "user", canonicalEntry("iris-admin-mcp")).ok).toBe(true);
-    expect(api.apply(ctx, "codex", "project", canonicalEntry("iris-interop-mcp")).ok).toBe(true);
+    expect(api.apply(ctx, "codex", "user", canonicalEntry("iris-admin-mcp"), { now: clock }).ok).toBe(true);
+    expect(api.apply(ctx, "codex", "project", canonicalEntry("iris-interop-mcp"), { now: clock }).ok).toBe(true);
 
     // Two independent backup buckets for two files that share a basename.
     const userBackups = backupNames(ctx, "codex", "user");
@@ -505,18 +546,18 @@ describe("concurrent scopes sharing a basename (codex user + project config.toml
     expect(projBackups[0]).toMatch(/^config\.toml\.\d{4}-/);
 
     // Disable in the user scope leaves the project file byte-identical.
-    expect(api.disable(ctx, "codex", "user", "iris-admin-mcp").ok).toBe(true);
+    expect(api.disable(ctx, "codex", "user", "iris-admin-mcp", { now: clock }).ok).toBe(true);
     const userAfterDisable = readFileSync(userCfg, "utf8");
     expect(readFileSync(projCfg, "utf8")).not.toBe(projInitial);
     const projBefore = readFileSync(projCfg, "utf8");
-    expect(api.enable(ctx, "codex", "user", "iris-admin-mcp").ok).toBe(true);
+    expect(api.enable(ctx, "codex", "user", "iris-admin-mcp", { now: clock }).ok).toBe(true);
     expect(readFileSync(projCfg, "utf8")).toBe(projBefore);
 
     // Remove in the project scope; restore(user) touches only the user file
     // and restores its LATEST backup — the pre-enable (disabled) state.
-    expect(api.remove(ctx, "codex", "project", "iris-interop-mcp").ok).toBe(true);
+    expect(api.remove(ctx, "codex", "project", "iris-interop-mcp", { now: clock }).ok).toBe(true);
     expect(readFileSync(projCfg, "utf8")).toBe(projInitial);
-    expect(api.restore(ctx, "codex", "user").ok).toBe(true);
+    expect(api.restore(ctx, "codex", "user", { now: clock }).ok).toBe(true);
     expect(readFileSync(userCfg, "utf8")).toBe(userAfterDisable);
     expect(readFileSync(projCfg, "utf8")).toBe(projInitial);
     expect(readFileSync(userCfg, "utf8")).not.toBe(userInitial);

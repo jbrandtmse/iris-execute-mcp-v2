@@ -79,7 +79,7 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_PORT         | 52773        |
  * | IRIS_USERNAME     | *(required)* |
  * | IRIS_PASSWORD     | *(required)* |
- * | IRIS_NAMESPACE    | HSCUSTOM     |
+ * | IRIS_NAMESPACE    | USER         |
  * | IRIS_HTTPS        | false        |
  * | IRIS_TIMEOUT      | 60000        |
  * | IRIS_SQL_MAX_ROWS | *(unset — no cap)*  |
@@ -128,7 +128,7 @@ export function loadConfig(
 
   const username = env.IRIS_USERNAME;
   const password = env.IRIS_PASSWORD;
-  const namespace = env.IRIS_NAMESPACE ?? "HSCUSTOM";
+  const namespace = env.IRIS_NAMESPACE ?? "USER";
   const https = env.IRIS_HTTPS === "true";
 
   if (!username) {

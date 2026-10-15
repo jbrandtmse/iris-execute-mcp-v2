@@ -22,20 +22,24 @@ export const productionItemTool: ToolDefinition = {
   title: "Manage Production Item",
   description:
     "Add, remove, enable, disable, get settings, or set settings for an individual " +
-    "Interoperability production config item. 'get' returns host and adapter settings. " +
+    "Interoperability production config item. 'get' returns host and adapter settings, and " +
+    "always names the 'production' the returned item belongs to. " +
     "'set' updates settings: the property keys poolSize, enabled, comment, category, " +
     "className map to Ens.Config.Item properties, and ANY OTHER key (e.g. " +
     "adapterClassName, or a host/adapter setting like FilePath, Charset) is routed to " +
     "an Ens.Config.Setting on the item (Target Adapter by default; pass " +
     "'<Name>@Host' / '<Name>@Adapter' to force the target). 'enable'/'disable' toggles " +
-    "the item in the running production. 'add' creates a new item (requires 'className'; " +
+    "the item in the running production; an item whose host class no longer resolves " +
+    "(deleted, renamed or uncompiled) is skipped by enable/disable, so repair it first " +
+    "with 'set' and a 'settings.className' naming a compiled Ens.Host subclass, then " +
+    "enable or disable it. 'add' creates a new item (requires 'className'; " +
     "Required Name+ClassName); 'remove' deletes it. For 'add'/'remove'/'set' the target " +
     "production defaults to the namespace's active production; pass 'production' " +
     "explicitly when there is no active production, or to disambiguate an item name " +
     "that exists in more than one production (Ens.Config.Item is keyed by the composite " +
     "(production, name) pair, not name alone). 'get' also accepts an optional " +
-    "'production' to disambiguate; when omitted, 'get' resolves the first matching row " +
-    "(unchanged legacy behavior).\n\n" +
+    "'production' to disambiguate; when omitted, 'get' resolves the first matching row, " +
+    "and the response's 'production' field tells you which production's item that was.\n\n" +
     "The mutating actions add/remove are opt-in under tool governance and are DISABLED " +
     "by default until enabled via IRIS_GOVERNANCE; enable/disable/get/set are " +
     "grandfathered (always available).\n\n" +
@@ -67,7 +71,7 @@ export const productionItemTool: ToolDefinition = {
       .string()
       .optional()
       .describe(
-        "Target production name for 'add'/'remove'/'set' (defaults to the namespace's active production; required for those actions when no production is active) and optionally for 'get' (to disambiguate an item name that exists in more than one production; when omitted, 'get' resolves the first matching row — unchanged legacy behavior). Ignored by enable/disable (those operate by itemName only against the running production).",
+        "Target production name for 'add'/'remove'/'set' (defaults to the namespace's active production; required for those actions when no production is active) and optionally for 'get' (to disambiguate an item name that exists in more than one production; when omitted, 'get' resolves the first matching row and reports its production in the response's 'production' field). Ignored by enable/disable (those operate by itemName only against the running production).",
       ),
     settings: z
       .record(z.string(), z.unknown())

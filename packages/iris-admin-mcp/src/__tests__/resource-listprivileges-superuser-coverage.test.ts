@@ -337,23 +337,24 @@ describe("iris_resource_manage listPrivileges — boundary and degenerate inputs
     expect(structured.count).toBe(0);
   });
 
-  it("a malformed target (no '.') surfaces the real sanitized IRIS SUBSCRIPT error via isError, not a hard crash (live-verified error text)", async () => {
-    // Live-captured 2026-08-18: GET .../sqlprivilege?grantee=%25Developer&
-    // target=NoDotHere -> ERROR #5001: ObjectScript error:
-    // <SUBSCRIPT>SQLUserColumnPrivsExecute — the handler does not validate
-    // `target`'s schema.table shape before calling UserColumnPrivs with an
-    // empty table piece.
+  it("a malformed target (no '.') surfaces the handler's validation message via isError, not a raw <SUBSCRIPT> 500 (live-captured shape)", async () => {
+    // Live-captured 2026-10-15 (IRIS 2026.2, HSCUSTOM) against the deployed
+    // handler: GET .../sqlprivilege?grantee=%25Developer&target=NoDotHere ->
+    // HTTP 200, envelope status.errors[0].error = "ERROR #5001: Parameter
+    // 'target' must be 'schema.table' for listPrivileges (got 'NoDotHere').
+    // Omit target for an object-level listing.", result {}. (Before the
+    // handler validated `target` this was a raw <SUBSCRIPT> 500.) The shared
+    // client turns a non-empty status.errors into an IrisApiError carrying the
+    // HTTP status it saw (200) and the envelope's result.
+    const liveError =
+      "ERROR #5001: Parameter 'target' must be 'schema.table' for listPrivileges (got 'NoDotHere'). Omit target for an object-level listing.";
     mockHttp.get.mockRejectedValue(
       new IrisApiError(
-        500,
-        [
-          {
-            error:
-              "ERROR #5001: ObjectScript error: <SUBSCRIPT>SQLUserColumnPrivsExecute ",
-          },
-        ],
-        SQLPRIV_PATH,
-        "ERROR #5001: ObjectScript error: <SUBSCRIPT>SQLUserColumnPrivsExecute ",
+        200,
+        [{ error: liveError }],
+        `${SQLPRIV_PATH}?grantee=%25Developer&target=NoDotHere&system=0`,
+        `IRIS reported errors for GET ${SQLPRIV_PATH}?grantee=%25Developer&target=NoDotHere&system=0. Review the error details and correct the request.`,
+        {},
       ),
     );
 
@@ -364,7 +365,10 @@ describe("iris_resource_manage listPrivileges — boundary and degenerate inputs
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("listing SQL privileges");
-    expect(result.content[0]?.text).toContain("SUBSCRIPT");
+    expect(result.content[0]?.text).toContain(
+      "Parameter 'target' must be 'schema.table' for listPrivileges (got 'NoDotHere')",
+    );
+    expect(result.content[0]?.text).not.toContain("SUBSCRIPT");
   });
 
   it("a target with multiple dots (schema.table.extra) is handled gracefully server-side — no error, just an (empty) result for the resolved schema/table (live-verified)", async () => {
@@ -534,7 +538,7 @@ describe("iris_resource_manage listPrivileges — column-level loop signal forwa
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      `${SQLPRIV_PATH}?grantee=Story354TestRole&target=%25Dictionary.ClassDefinition&maxRows=3`,
+      `${SQLPRIV_PATH}?grantee=Story354TestRole&target=%25Dictionary.ClassDefinition&maxRows=3&system=0`,
     );
     const structured = result.structuredContent as {
       rowsCapped?: boolean;

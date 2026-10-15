@@ -2,6 +2,97 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.0: Epic 37 deferred cleanup
+
+`BOOTSTRAP_VERSION` moves from `2159ec9e6f69` to `3af8ca401e7c` (three handlers changed: `Interop`, `Security`,
+`Analytics`). Every IRIS-side route change keeps every older request shape working and only adds response
+fields; the behavior changes (a stricter production-delete guard, a validation message in place of a raw 500) are
+listed below.
+
+### Changed — `IRIS_NAMESPACE` now defaults to `USER` instead of `HSCUSTOM` (`@iris-mcp/shared`, VS Code launcher; DW-469)
+
+When `IRIS_NAMESPACE` is unset, the suite now connects to `USER` — the namespace every IRIS instance has and the value
+every documented environment-variable table already stated. `HSCUSTOM` was a HealthShare-development default that
+had leaked into the code. The VS Code launcher's `irisMcpLauncher.namespace` setting follows (its documented contract is
+to match `loadConfig()`), and `.env.example` now carries `USER` with a one-line HealthShare note. **Action for users
+who relied on the old default** (for example on a HealthShare instance): set `IRIS_NAMESPACE=HSCUSTOM` (or your own
+namespace) explicitly, or set `irisMcpLauncher.namespace` in the extension. Scripts and test helpers that default the
+namespace already name `HSCUSTOM` explicitly, so they are unaffected.
+
+### Changed — `iris_production_manage` `delete` refuses a current production in any state other than Stopped (`@iris-mcp/interop`, DW-54)
+
+The delete guard used to refuse only a Running production. It now refuses the namespace's current production whenever it
+is not Stopped (Suspended, Troubled, NetworkStopped, Unknown and any other state), naming the state; Running keeps its
+exact message (`Production '<name>' is running; stop it before deleting`). Nothing is deleted on a refusal. A stopped
+production, or one that is not the namespace's current production, is deleted exactly as before. The tool description
+and README name the refused states.
+
+### Changed — `iris_doc_export` forwards `generated` on its `modifiedSince` enumeration (`@iris-mcp/dev`, DW-527)
+
+With `modifiedSince` set, `generated` (default `false`) is now sent on the `/modified` request the same way the
+`/docnames` branch has always sent it: `false` sends `generated=0`, `true` sends `generated=1`, `both` omits it.
+**Known limitation, tracked separately:** Atelier's `/modified` route is POST-only on current IRIS (live probe
+2026-10-15, IRIS 2026.2, Atelier v8: `GET /modified/<timestamp>` answers HTTP 405), so the `modifiedSince` enumeration
+itself does not work against such an instance, with or without this change.
+
+### Fixed — `iris_doc_put` reported success when IRIS stored nothing (`@iris-mcp/dev`, DW-485)
+
+IRIS can refuse a document inside an HTTP 200 response with an empty error list, reporting the reason only as a
+string `result.status` (for example `ERROR #16021: Illegal Header Line` for a document whose first line starts with a
+byte-order mark) and storing nothing. `iris_doc_put` now returns `isError: true` with that text
+(`Document '<name>' was not saved in namespace '<ns>': <status>. ...`) and the IRIS result as `structuredContent`; an
+accepted write answers exactly as before. A leading U+FEFF is stripped from `content` before it is sent (a caller's
+array is never mutated), as `iris_doc_load` already did; both tools now share one implementation in `@iris-mcp/shared`
+(`stripLeadingBom`, `atelierDocStatusError`).
+
+### Fixed — `iris_resource_manage` `listPrivileges`: `system` is sent, and a malformed `target` gets a clear error (`@iris-mcp/admin`, DW-470, DW-473)
+
+`listPrivileges` takes an optional `system` (default `false`) and always sends `system=1` or `system=0`; `true` lists
+system tables too. A column-level `target` must be `schema.table`: `NoDotHere`, `S.`, `.T` and `.` now return
+`Parameter 'target' must be 'schema.table' for listPrivileges (got '<target>'). Omit target for an object-level listing.`
+instead of a raw `<SUBSCRIPT>` 500; `A.B.C` still returns the graceful empty result. The tool description now limits
+"a schema" targets to grant/revoke.
+
+### Fixed — `iris_production_item` `get` names the production it read; `iris_production_manage` `delete` removes orphan rows (`@iris-mcp/interop`, DW-450, DW-55)
+
+`get` always adds a `production` field (the production the row belongs to), whether or not `production` was passed.
+`delete` of a production whose class is gone but whose `Ens.Config.Production` row remains now removes the row and
+returns `{"action":"deleted","name":...,"orphanRemoved":true}`; it used to answer "does not exist" and leave the row.
+A name with neither a class nor a row still answers "does not exist" and changes nothing.
+
+### Fixed — a failed cube build could strand the response on the null device (`iris_analytics_cubes` `build`, DW-455)
+
+The cube-build handler's output-redirect restore (success path and catch path) now goes through the same
+independently-guarded teardown the command handler uses, so a throw from one restore step cannot skip the others.
+
+### Fixed — the startup health-check failure is logged with `IRIS health check failed:` exactly once (`@iris-mcp/shared`, DW-523)
+
+A refusal wrapped by `checkHealth` already carried the prefix and the startup log added it again. The prefix is now
+added only when it is missing, so a network error and an HTTP 401/403/404 refusal each read it once.
+
+### Fixed — release tooling and test gates (internal; DW-388, DW-413 to DW-417, DW-490, DW-492, DW-495, DW-496, DW-511, DW-524)
+
+`checkDistFresh` now accepts every `files` spelling of `dist`, never throws (a missing or malformed `package.json`, an
+unreadable entry and a dangling or directory symlink under `src/` each return `{ ok: false, reason }`), follows a
+symlinked file, refuses a `dist/` file dated more than 60 s in the future, and checks that every `dist/` target of
+`main`, `module`, `bin` and `exports` exists. The epic 35 and epic 37 live gates use it instead of an existence check,
+so a stale dist fails an armed run by package name before any IRIS call. `scripts/verify-iris-reachable.mjs` names every
+IRIS variable it defaulted on stderr and, under `CI`, refuses to default any of them (exit 1 before any network call).
+The dev package's prepublish gate runs its live files sequentially (`--no-file-parallelism`) and a failing running-state
+expectation prints the last Atelier `work/` response. Host-specific test failures are fixed: the certification drift
+test uses the real temp path on macOS, the utf8 key test skips with the fixture reason when the fixture is absent, the
+two real-resend OS tests moved to `MessageResendLiveTest` and skip when the scratch production classes are absent,
+and the engine chain test is pinned to a strictly increasing clock and asserts a fresh client-config build.
+
+### Fixed — documentation that overstated or misdescribed behavior (DW-57, DW-384, DW-458, DW-514, DW-520)
+
+The README now scopes the "existing connection-error envelope" claim to an instance that is unreachable at startup (a
+mid-session outage surfaces as `Tool error: …`); the `iris_production_item` description and README say that
+`enable`/`disable` skip an item whose host class no longer resolves and that `set` with `settings.className` repairs it;
+the `iris_execute_*` truncation marker is documented as `[IRIS-MCP-TRUNCATED ceiling=<N>chars]` detected by its stable
+prefix; the `ping()` comments no longer cite a monitoring loop that does not exist; the `buildDocDbRestriction` comment
+says unsupported operators are silently skipped.
+
 ## [Pre-release — 2026-09-16] — Story 37.1: default-profile outage no longer takes down the server
 
 ### Fixed — an unreachable `default` IRIS instance made the ENTIRE server exit at startup, even when every other registered profile was healthy (`@iris-mcp/shared`, MEDIUM, second beta-feedback defect)
@@ -233,7 +324,7 @@ governance key, or action — `iris_execute_classmethod` keeps its existing `wri
 ### Added — Response payload ceiling on `iris_execute_command`/`iris_execute_classmethod` (`@iris-mcp/dev`, Story 34.6)
 
 `output` is now capped at 32768 characters on both tools — content beyond the ceiling is cut off and replaced with a
-structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`; `truncated`
+structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]` when the field had the whole budget; a field that follows another carries `ceiling=<N>chars` with `<N>` the budget that remained for it, so detect the marker by the stable `[IRIS-MCP-TRUNCATED` prefix, never the full literal), never a bare `...`; `truncated`
 folds this in alongside the pre-existing capture-overflow signal. `iris_execute_classmethod`'s `byRefValues` gains its
 own combined 1000-node / 32768-character budget shared across every marked position, surfaced via a new additive
 `byRefTruncated` boolean (separate from `truncated`, which describes only `output`). The ceiling was picked from live

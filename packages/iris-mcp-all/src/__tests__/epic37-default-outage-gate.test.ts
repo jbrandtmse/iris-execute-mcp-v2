@@ -65,6 +65,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -132,7 +133,40 @@ interface SdkClient {
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 
+/**
+ * The server packages whose BUILT dist a leg spawns as a child process. Each
+ * leg also runs `@iris-mcp/shared`'s dist (the spawned server imports it), so a
+ * stale or missing shared dist invalidates every leg.
+ */
+const SPAWNED_PACKAGES = ["iris-dev-mcp", "iris-ops-mcp"] as const;
+
+/** Per-package reason a leg may not run: that package's (or shared's) dist is missing or stale. */
+const distSkipReasons = new Map<string, string>();
+
+/** `checkDistFresh` for one workspace package; the failure reason, or undefined when its dist is fresh. */
+function staleDistReason(pkgDir: string): string | undefined {
+  const fresh = checkDistFresh(path.join(REPO_ROOT, "packages", pkgDir), pkgDir);
+  if (!fresh.ok) return fresh.reason;
+  if (fresh.skipped) {
+    return `${pkgDir} declares no dist/ build output, but this gate spawns its built dist.`;
+  }
+  return undefined;
+}
+
 beforeAll(async () => {
+  // Build freshness comes FIRST, ahead of the SDK resolution and the
+  // reachability probe (DW-524): the gate proves the code that ships, so a
+  // missing or stale dist (a `src/` file newer than its build output) is
+  // reported by name before any IRIS call - a skip on a pristine checkout, a
+  // hard failure when IRIS_REQUIRE_LIVE is armed.
+  const sharedStale = staleDistReason("shared");
+  for (const pkg of SPAWNED_PACKAGES) {
+    const reason = sharedStale ?? staleDistReason(pkg);
+    if (reason) {
+      if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set: ${reason}`);
+      distSkipReasons.set(pkg, reason);
+    }
+  }
   sdkEsmDir = resolveSdkEsmDir();
   if (!sdkEsmDir) {
     skipReason =
@@ -232,12 +266,10 @@ describe("Epic 37 default-profile-outage gate — closed-port default + reachabl
         testCtx.skip();
         return;
       }
-      const entryPoint = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
-      if (!existsSync(entryPoint)) {
-        const reason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm turbo run build" first).`;
-        if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set: ${reason}`);
+      const distReason = distSkipReasons.get("iris-dev-mcp");
+      if (distReason) {
         // eslint-disable-next-line no-console
-        console.log(`[SKIP] epic37-default-outage-gate (iris-dev-mcp): ${reason}`);
+        console.log(`[SKIP] epic37-default-outage-gate (iris-dev-mcp): ${distReason}`);
         testCtx.skip();
         return;
       }
@@ -284,12 +316,10 @@ describe("Epic 37 default-profile-outage gate — closed-port default + reachabl
         testCtx.skip();
         return;
       }
-      const entryPoint = path.join(REPO_ROOT, "packages", "iris-ops-mcp", "dist", "index.js");
-      if (!existsSync(entryPoint)) {
-        const reason = `packages/iris-ops-mcp/dist/index.js is not built (run "pnpm turbo run build" first).`;
-        if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set: ${reason}`);
+      const distReason = distSkipReasons.get("iris-ops-mcp");
+      if (distReason) {
         // eslint-disable-next-line no-console
-        console.log(`[SKIP] epic37-default-outage-gate (iris-ops-mcp): ${reason}`);
+        console.log(`[SKIP] epic37-default-outage-gate (iris-ops-mcp): ${distReason}`);
         testCtx.skip();
         return;
       }

@@ -134,7 +134,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_manage` | Create or delete a production | `action`, `name`, `namespace?` | destructive |
+| `iris_production_manage` | Create or delete a production; `delete` refuses the namespace's current production unless it is Stopped, and removes an orphan `Ens.Config.Production` row (class gone) with `orphanRemoved: true` | `action`, `name`, `namespace?` | destructive |
 | `iris_production_control` | Start, stop, restart, update, recover, or clean | `action`, `name?`, `timeout?`, `force?`, `killAppData?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
 | `iris_production_summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
@@ -143,7 +143,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
+| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings); `get` reports the item's `production`; enable/disable skip an item whose host class no longer resolves (repair it with `set` + `settings.className` first) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
 | `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
 
@@ -422,6 +422,7 @@ Six actions (`start`, `stop`, `restart`, `update`, `recover`, `clean`) are verif
 ```json
 {
   "itemName": "MyApp.Service.FileIn",
+  "production": "MyApp.Production",
   "className": "MyApp.Service.FileIn",
   "enabled": true,
   "settings": {
@@ -431,7 +432,7 @@ Six actions (`start`, `stop`, `restart`, `update`, `recover`, `clean`) are verif
 }
 ```
 
-`Ens.Config.Item` is keyed by the composite pair `(production, name)`, not `name` alone. `get` and `set` both accept an optional `production` to resolve the item unambiguously when the same `itemName` exists in more than one production; when omitted, `get` resolves the first matching row (unchanged legacy behavior) and `set` defaults to the namespace's active production (same default `add`/`remove` already use — required when no production is active).
+`Ens.Config.Item` is keyed by the composite pair `(production, name)`, not `name` alone. `get` and `set` both accept an optional `production` to resolve the item unambiguously when the same `itemName` exists in more than one production; when omitted, `get` resolves the first matching row and its `production` field tells you which production's item that was (the field is present whether or not you passed `production`), and `set` defaults to the namespace's active production (same default `add`/`remove` already use — required when no production is active).
 
 **`set` persistence and side effects.** `set` writes both the `Ens.Config.Item` SQL extent (so an immediate `get` sees the change) and the production **class** XData via `SaveToClass` (so the change survives the next `add`/`remove`/`set` resync or a class recompile). Consequences worth knowing:
 
@@ -868,8 +869,10 @@ All 22 interoperability tools operate in the context of a specific IRIS namespac
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials or insufficient privileges | Check credentials; interop operations may require `%Ens_*` resources |
 | `Production not found` | No production configured in the namespace | Use `iris_production_manage` to create one, or check the namespace |
-| `Production must be stopped` | Attempting to delete a running production | Stop the production first with `iris_production_control` |
+| `Production 'X' is running; stop it before deleting` / `Production 'X' is in state Suspended; stop it before deleting` | `iris_production_manage` `delete` of the namespace's current production while it is not Stopped (Running, Suspended, Troubled, NetworkStopped or Unknown). Nothing is deleted | Stop the production first with `iris_production_control`, then delete it |
+| `Production 'X' does not exist` | `iris_production_manage` `delete` of a name with neither a production class nor an `Ens.Config.Production` row | Check the name; nothing was changed. (A row with no class is an orphan: `delete` removes it and returns `orphanRemoved: true`) |
 | `Config item not found` | Invalid item name | Check item names with `iris_production_status` (detail=true) |
+| `enable` / `disable` does nothing for an item | The item's host class no longer resolves (deleted, renamed or uncompiled), and `enable`/`disable` skip such items | Repair the item first with `iris_production_item` `set` and a `settings.className` naming a compiled `Ens.Host` subclass, then enable or disable it |
 | `Host class 'X' does not exist or is not compiled` | `iris_production_item` `add` with a `className` that is not a compiled class (surrounding whitespace is trimmed before this check) | Compile the host class first, or correct the `className` |
 | `Config item 'X' already exists in production 'Y'` | `iris_production_item` `add` with a duplicate item name in the target production | Use a unique `itemName`, or `remove` the existing item first |
 | `at least one of sessionId or headerId is required` | Missing filter for message trace | Provide either `sessionId` or `headerId` |

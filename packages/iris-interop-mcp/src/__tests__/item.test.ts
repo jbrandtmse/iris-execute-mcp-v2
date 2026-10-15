@@ -75,6 +75,7 @@ describe("iris_production_item", () => {
     const itemData = {
       action: "get",
       itemName: "MyApp.Service.FileIn",
+      production: "MyApp.Production",
       className: "MyApp.Service.FileIn",
       enabled: true,
       businessType: 1,
@@ -101,6 +102,7 @@ describe("iris_production_item", () => {
     expect(structured.className).toBe("MyApp.Service.FileIn");
     expect(structured.enabled).toBe(true);
     expect(structured.adapter).toBe("EnsLib.File.InboundAdapter");
+    expect(structured.production).toBe("MyApp.Production");
     expect(result.isError).toBeUndefined();
   });
 
@@ -240,6 +242,27 @@ describe("iris_production_item", () => {
   it("description documents that 'set' only refreshes the RUNNING production (CR 35.1-6)", () => {
     const desc = productionItemTool.description ?? "";
     expect(desc).toContain("only when the production it wrote");
+  });
+
+  // -- Story 38.0 (DW-458): enable/disable cannot reach an item whose host class is gone --
+
+  it("description documents that enable/disable skip an item whose host class no longer resolves, and the repair (DW-458)", () => {
+    const desc = productionItemTool.description ?? "";
+    expect(desc).toContain("host class no longer resolves");
+    expect(desc).toContain("skipped by enable/disable");
+    // The repair path: `set` with settings.className, THEN enable/disable.
+    expect(desc).toContain("repair it first with 'set' and a 'settings.className'");
+    expect(desc).toContain("then enable or disable it");
+  });
+
+  // -- Story 38.0 (DW-450): 'get' echoes the production it read --
+
+  it("description documents that 'get' always reports the resolved 'production' (DW-450)", () => {
+    const desc = productionItemTool.description ?? "";
+    expect(desc).toContain("always names the 'production' the returned item belongs to");
+    expect(desc).toContain("the response's 'production' field tells you which production's item that was");
+    // The superseded wording must be gone: the omitted-production path is no longer "unchanged legacy behavior".
+    expect(desc).not.toContain("unchanged legacy behavior");
   });
 
   // ════════════════════════════════════════════════════════════════
@@ -464,11 +487,13 @@ describe("iris_production_item", () => {
     });
 
     it("get output structuredContent equals the REST result verbatim (full object, optional keys absent)", async () => {
-      // Mirrors the handler shape: {action,itemName,className,enabled,poolSize}
-      // with comment/category OMITTED when empty (per AC 17.2.4(b)).
+      // Mirrors the handler shape: {action,itemName,production,className,enabled,poolSize}
+      // with comment/category OMITTED when empty (per AC 17.2.4(b)). `production`
+      // (Story 38.0, DW-450) always names the production the row belongs to.
       const result = {
         action: "get",
         itemName: "Svc",
+        production: "MyApp.Production",
         className: "EnsLib.File.PassthroughService",
         enabled: true,
         poolSize: 1,

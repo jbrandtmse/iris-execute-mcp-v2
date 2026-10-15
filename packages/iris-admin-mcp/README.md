@@ -209,7 +209,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |--------|-------------|----------------|---------|
 | `grant` | Grant one or more SQL privileges on a schema/table/column to a user or role | `target` (schema, `schema.table`, or `schema.table(col1,col2)`), `privilege` (e.g. `SELECT`, `INSERT,UPDATE`, `%ALTER`), `grantee`, `namespace?` | write (default-disabled under governance) |
 | `revoke` | Revoke SQL privileges from a user or role | `target`, `privilege`, `grantee`, `namespace?` | write (default-disabled under governance) |
-| `listPrivileges` | List the current SQL grants held by a user or role | `grantee`, `target?` (omit for object-level listing; pass `schema.table` for a column-level listing), `namespace?`, `maxRows?` (default 100, max 1000), `cursor?` | read (enabled by default) |
+| `listPrivileges` | List the current SQL grants held by a user or role | `grantee`, `target?` (omit for object-level listing; pass `schema.table` for a column-level listing; a bare schema or a `schema.` / `.table` fragment is rejected with a validation message), `namespace?`, `system?` (default `false`; `true` includes system tables), `maxRows?` (default 100, max 1000), `cursor?` | read (enabled by default) |
 
 > **Governance:** `grant` and `revoke` are classified `write` (denied by default under an `IRIS_GOVERNANCE` policy until explicitly allowed); `listPrivileges` is a `read` (enabled by default). SQL privileges are namespace-scoped.
 

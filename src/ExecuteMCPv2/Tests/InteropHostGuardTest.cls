@@ -90,4 +90,40 @@ Method TestWhitespaceStrippedBeforeClassification() As %Status
     Quit $$$OK
 }
 
+/// DW-54: the production-delete state guard is <method>ExecuteMCPv2.REST.Interop:DeleteBlockedByState</method>.
+/// When the target IS the namespace's current production, only Stopped (state 2, or -2 for a mirror
+/// backup member's Stopped) may be deleted; every other state is refused, including Unknown (0 and
+/// out-of-range codes), Suspended, Troubled, NetworkStopped and ShardWorkerProhibited. A production
+/// that is not the current one is never blocked: GetProductionStatus says nothing about it.
+/// Also pins the state names and the refusal text (<method>DeleteBlockedMessage</method>).
+Method TestDeleteBlockedByState() As %Status
+{
+    Set tTarget = "Some.Production"
+    For tState = 0, 1, 3, 4, 5, 6 {
+        Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedByState(tTarget, tTarget, tState), 1, "state " _ tState _ " of the current production blocks the delete")
+    }
+    For tState = 2, -2 {
+        Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedByState(tTarget, tTarget, tState), 0, "Stopped (state " _ tState _ ") of the current production does not block the delete")
+    }
+    For tState = 0, 1, 2, 3, -2 {
+        Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedByState(tTarget, "Other.Production", tState), 0, "state " _ tState _ " of a DIFFERENT current production never blocks the delete")
+    }
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedByState(tTarget, "", 0), 0, "no current production (empty name) never blocks the delete")
+
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(1), "Running", "state 1 is Running")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(2), "Stopped", "state 2 is Stopped")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(3), "Suspended", "state 3 is Suspended")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(4), "Troubled", "state 4 is Troubled")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(5), "NetworkStopped", "state 5 is NetworkStopped")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(0), "Unknown", "state 0 is Unknown")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).StateName(6), "Unknown", "state 6 is Unknown")
+
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedMessage(tTarget, 1), "Production 'Some.Production' is running; stop it before deleting", "Running keeps its exact refusal text")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedMessage(tTarget, 3), "Production 'Some.Production' is in state Suspended; stop it before deleting", "Suspended names its state")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedMessage(tTarget, 4), "Production 'Some.Production' is in state Troubled; stop it before deleting", "Troubled names its state")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedMessage(tTarget, 5), "Production 'Some.Production' is in state NetworkStopped; stop it before deleting", "NetworkStopped names its state")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Interop).DeleteBlockedMessage(tTarget, 0), "Production 'Some.Production' is in state Unknown; stop it before deleting", "Unknown names its state")
+    Quit $$$OK
+}
+
 }

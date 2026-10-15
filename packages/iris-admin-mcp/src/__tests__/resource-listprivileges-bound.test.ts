@@ -181,7 +181,7 @@ describe("iris_resource_manage listPrivileges — maxRows wire forwarding", () =
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      `${SQLPRIV_PATH}?grantee=AppRole&maxRows=250`,
+      `${SQLPRIV_PATH}?grantee=AppRole&maxRows=250&system=0`,
     );
   });
 
@@ -195,7 +195,72 @@ describe("iris_resource_manage listPrivileges — maxRows wire forwarding", () =
       ctx,
     );
 
-    expect(mockHttp.get).toHaveBeenCalledWith(`${SQLPRIV_PATH}?grantee=AppRole`);
+    expect(mockHttp.get).toHaveBeenCalledWith(`${SQLPRIV_PATH}?grantee=AppRole&system=0`);
+  });
+
+  // DW-470: `system` is forwarded as 1/0 and the documented default (false) is
+  // always sent explicitly. IRIS reads it numerically (`+"true"` is 0), so the
+  // boolean must never reach the wire as the string "true".
+  it("sends system=1 when system is true", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ grantee: "AppRole", level: "object", privileges: [], count: 0 }),
+    );
+
+    await resourceManageTool.handler(
+      { action: "listPrivileges", grantee: "AppRole", system: true },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(`${SQLPRIV_PATH}?grantee=AppRole&system=1`);
+  });
+
+  it("sends system=0 when system is false", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ grantee: "AppRole", level: "object", privileges: [], count: 0 }),
+    );
+
+    await resourceManageTool.handler(
+      { action: "listPrivileges", grantee: "AppRole", system: false },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(`${SQLPRIV_PATH}?grantee=AppRole&system=0`);
+  });
+
+  it("accepts the string \"true\" for system (booleanParam coercion) and still sends system=1", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ grantee: "AppRole", level: "object", privileges: [], count: 0 }),
+    );
+
+    const parsed = resourceManageTool.inputSchema.parse({
+      action: "listPrivileges",
+      grantee: "AppRole",
+      system: "true",
+    });
+    await resourceManageTool.handler(parsed, ctx);
+
+    expect(mockHttp.get).toHaveBeenCalledWith(`${SQLPRIV_PATH}?grantee=AppRole&system=1`);
+  });
+
+  it("places system after maxRows and namespace when all are supplied", async () => {
+    mockHttp.get.mockResolvedValue(
+      envelope({ grantee: "AppRole", level: "object", privileges: [], count: 0 }),
+    );
+
+    await resourceManageTool.handler(
+      {
+        action: "listPrivileges",
+        grantee: "AppRole",
+        namespace: "HSCUSTOM",
+        maxRows: 10,
+        system: true,
+      },
+      ctx,
+    );
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      `${SQLPRIV_PATH}?grantee=AppRole&namespace=HSCUSTOM&maxRows=10&system=1`,
+    );
   });
 
   it("forwards maxRows together with target for the column-level path (second loop)", async () => {
@@ -220,7 +285,7 @@ describe("iris_resource_manage listPrivileges — maxRows wire forwarding", () =
     );
 
     expect(mockHttp.get).toHaveBeenCalledWith(
-      `${SQLPRIV_PATH}?grantee=AppRole&target=Sample.Person&maxRows=3`,
+      `${SQLPRIV_PATH}?grantee=AppRole&target=Sample.Person&maxRows=3&system=0`,
     );
   });
 });

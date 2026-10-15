@@ -67,6 +67,38 @@ describe("iris_production_manage", () => {
     expect(structured.action).toBe("deleted");
   });
 
+  it("passes an orphan delete's orphanRemoved flag through verbatim (Story 38.0, DW-55)", async () => {
+    // Shape the deployed handler returns when only the Ens.Config.Production row
+    // remained (live-captured 2026-10-15 by InteropProductionDeleteTest's route).
+    const orphanResult = {
+      action: "deleted",
+      name: "ExecuteMCPv2.Temp.Story380Orphan",
+      orphanRemoved: true,
+    };
+    mockHttp.post.mockResolvedValue(envelope(orphanResult));
+
+    const result = await productionManageTool.handler(
+      { action: "delete", name: "ExecuteMCPv2.Temp.Story380Orphan" },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual(orphanResult);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("description names the refused delete states and the orphan cleanup (Story 38.0, DW-54/DW-55)", () => {
+    const desc = productionManageTool.description ?? "";
+    expect(desc).toContain("current production must be Stopped");
+    for (const state of ["Running", "Suspended", "Troubled", "NetworkStopped"]) {
+      expect(desc).toContain(state);
+    }
+    expect(desc).toContain("nothing is deleted");
+    expect(desc).toContain("Ens.Config.Production row remains");
+    expect(desc).toContain("orphanRemoved: true");
+    // The old blanket claim ("must be stopped first") is superseded.
+    expect(desc).not.toContain("must be stopped first");
+  });
+
   it("should pass resolved namespace in body", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "created", name: "Test.Prod" }),

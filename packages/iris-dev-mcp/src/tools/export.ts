@@ -394,23 +394,21 @@ export const docExportTool: ToolDefinition = {
     };
 
     // ── Enumerate docs via Atelier ────────────────────────────────
-    let fullPath: string;
-    if (modifiedSince) {
-      fullPath = atelierPath(
-        ctx.atelierVersion,
-        ns,
-        `modified/${encodeURIComponent(modifiedSince)}`,
-      );
-    } else {
-      const base = atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
-      const params = new URLSearchParams();
-      // generated: "both" → omit param; "true"/"false" → 1/0
-      if (generated !== "both") {
-        params.set("generated", generated === "true" ? "1" : "0");
-      }
-      const queryString = params.toString();
-      fullPath = queryString ? `${base}?${queryString}` : base;
+    // `generated` maps the same way on both enumeration endpoints:
+    // "both" -> omit the param; "true"/"false" -> 1/0.
+    const params = new URLSearchParams();
+    if (generated !== "both") {
+      params.set("generated", generated === "true" ? "1" : "0");
     }
+    const queryString = params.toString();
+    const base = modifiedSince
+      ? atelierPath(
+          ctx.atelierVersion,
+          ns,
+          `modified/${encodeURIComponent(modifiedSince)}`,
+        )
+      : atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
+    const fullPath = queryString ? `${base}?${queryString}` : base;
 
     const listResponse = await ctx.http.get(fullPath);
     const enumerated = extractAtelierContentArray(listResponse.result);
