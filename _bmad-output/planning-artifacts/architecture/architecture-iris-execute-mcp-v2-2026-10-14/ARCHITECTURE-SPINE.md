@@ -387,7 +387,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - Any transport other than `stdio` is rejected in `resolveTransport` as a configuration error (AD-8), before any IRIS traffic.
   - An HTTP transport is added only together with an authentication, bind-address and session design.
-  - Until Story 38.1 lands, `transport.ts` accepts `http`, and an unknown value falls back to stdio with a warning.
+  - Story 38.1 (commit `5f8b1e0`) enforces this. Every `MCP_TRANSPORT` and `--transport` value must be exactly `stdio`, and anything else is rejected with exit 1 before any IRIS traffic. Before 38.1, `transport.ts` accepted `http`, and an unknown value fell back to stdio with a warning.
 
 ### AD-24 — Agent document writes are guarded and minimal [ADOPTED] (N2, S-3) *(lands in Stories 38.2 to 38.4)*
 
@@ -698,7 +698,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 
 ## Deferred
 
-- **Streamable HTTP transport.** It waits for a confirmed remote-access use case and an authentication, bind-address and session design (AD-23).
+- **Streamable HTTP transport.** It waits for a confirmed remote-access use case and an authentication, bind-address and session design (AD-23). Ledger: DW-538 (`decision-pending`, `note=human=`).
 - **Features of the 2026-07-28 revision beyond the stateless core and confirmation:** these wait for a client that needs them (AD-32).
   - **The Tasks extension.** Our long-running runs already work on every client through AD-16, the SDK supports the extension only partially, and Claude Code doesn't document it.
   - **MCP Apps** and **`subscriptions/listen`**.
