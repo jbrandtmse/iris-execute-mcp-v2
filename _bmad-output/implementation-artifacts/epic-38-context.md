@@ -4,7 +4,7 @@
 
 ## Goal
 
-Make agent writes to IRIS safe and minimal. An agent reads a document by line range, changes only the lines it means to under an expected-text check, and can never silently drop a class's Storage block. Operators can confine SQL to read-only statements or cap the rows a write affects, and a read-classified query tool keeps SQL usable under the `read-only` preset (today `iris_sql_execute` is a frozen-baseline write, so that preset blocks even SELECTs). The suite also stops accepting a transport it cannot run. This closes the competitor's editing-ergonomics gaps while keeping this suite's stricter conflict and governance guarantees. The architecture spine (AD-1..AD-34) binds every story; where story text disagrees with it, the spine wins and the story is amended in place.
+Make agent writes to IRIS safe and minimal. An agent reads a document by line range, changes only the lines it means to change under an expected-text check, and can never silently drop a class's Storage block. Operators can confine SQL to read-only statements or cap the rows a write affects. A new read-classified query tool keeps SQL usable under the `read-only` preset; today `iris_sql_execute` is a frozen-baseline write, so that preset blocks even SELECTs. The suite also stops accepting a transport it cannot run. This closes the competitor's editing gaps while keeping this suite's stricter conflict and governance guarantees. The architecture spine (AD-1..AD-34) binds every story. Where a story's text disagrees with the spine, the spine wins and the story is amended in place.
 
 ## Stories
 
@@ -18,39 +18,122 @@ Make agent writes to IRIS safe and minimal. An agent reads a document by line ra
 
 ## Requirements & Constraints
 
-- **Wave rules.** Probe API and reuse claims live before coding. Every new tool/action carries `mutates` plus an include/exclude in every preset. A changed bootstrapped class regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to (now `3af8ca401e7c`). `GOVERNANCE_BASELINE` stays frozen at `1e62c5ad5bf7`/141, checked with `:check` only. Endpoint-backed stories smoke the live route including one destructive refusal; every gate is proven red on the path it guards.
-- **Shared IRIS instance.** Never stopped. Writes only to disposable `ExecuteMCPv2.Temp.*` artifacts, removed before and after; fixtures synthetic. Live runs name their target explicitly (`default`: localhost:52773, `HSCUSTOM`, IRIS 2026.2, Atelier v8); the `IRIS_NAMESPACE` code default is now `USER`.
-- **Back-compat.** With a feature unused, requests and responses are byte-identical, pinned with `toEqual` against pre-feature output. The only sanctioned behavior changes are transport rejection (shipped) and the storage-drop refusal on `iris_doc_put`, each named in `CHANGELOG.md` with its story. A new output field is proven absent today, and a name keeps one meaning: `rowCount` stays "rows returned"; the new names are `rowsAffected` and `totalCount`.
-- **Storage guard.** A put to an existing `.cls` that drops an existing Storage definition is refused with a distinct code naming the dropped definitions, and writes nothing, unless `allowStorageRegeneration: true` (default documented). Changed storage content is allowed. Non-class documents and new classes pay no extra read. A Storage keyword inside a comment or string does not count.
-- **Line edits.** `insert`/`delete`/`replace`, each carrying `expected`; addressed against the document as read, applied bottom-up, all-or-nothing; overlaps rejected before any write. A mismatch is `STALE_CONTENT` with the current text of each mismatched range and no write. The response is a unified diff, renumbered excerpts and the new `totalLines`, never the whole document. Compiling is not part of the tool.
-- **SQL controls.** `readOnly` / `IRIS_SQL_READ_ONLY` and `maxRowsAffected` / `IRIS_SQL_MAX_ROWS_AFFECTED`; `rowsAffected` on DML; `countOnly` → `totalCount`. All off by default. A parameter can tighten an operator control but never loosen it, and a clamp is noted in the response. Safety controls are never inherited from the `default` profile entry (per-profile value → global variable → safe default). New variables are documented with defaults.
-- **Counts.** dev 29 → 30 (`iris_doc_edit`) → 31 (`iris_sql_query`). Dev `core` 13 → 14 → 15 runtime tools (a guideline, not a limit); each story records the size and why the tool is everyday-loop; no existing `core` tool is removed.
-- **Docs and release.** Each story ships minimal docs with the default state; 38.6 enriches. Changesets are `patch`/`minor` only; no `changeset version`, publish or CI wiring.
-- **Out of scope.** Streamable HTTP (DW-538, decision-pending), server-side source control, compile-by-wildcard, inline multi-document fetch.
+- **Wave rules.**
+  - Probe API and reuse claims live before coding, and amend the story text in place when a claim is wrong.
+  - Every new tool or action carries `mutates` and an include/exclude in every preset.
+  - A changed bootstrapped class regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to (now `3af8ca401e7c`). A new class joins both rosters.
+  - `GOVERNANCE_BASELINE` stays frozen at `1e62c5ad5bf7`/141 and is checked with `:check` only.
+  - Endpoint-backed stories smoke the live route, including one destructive refusal. Every gate is proven red on the path it guards, and the story names that path.
+- **Shared IRIS instance.**
+  - Never stopped.
+  - Writes go only to disposable `ExecuteMCPv2.Temp.*` classes and tables, removed before and after. Fixtures are synthetic.
+  - Live runs name their target with the six `IRIS_*` variables (`default`: localhost:52773, HSCUSTOM, IRIS 2026.2 build 221U, Atelier v8). The code default namespace is now `USER`.
+  - Record the earliest IRIS version each API was verified on.
+- **Back-compat.**
+  - With the feature unused, requests and responses are byte-identical, pinned with `toEqual` against pre-feature output.
+  - This epic's sanctioned behavior changes are transport rejection and the storage-drop refusal. Both have shipped. DW-540 (existing-document save) shipped under "Fixed".
+  - A new output field is proven absent today, and a name keeps one meaning. `rowCount` stays "rows returned". The new names are `rowsAffected` (DML `%ROWCOUNT`) and `totalCount` (`countOnly`).
+- **SQL controls (38.5).**
+  - Read-only mode: a `readOnly` parameter, and an operator variable `IRIS_SQL_READ_ONLY` that forces the mode and that a parameter cannot weaken. A non-query statement is refused before execution, and the refusal names its statement type.
+  - Rows-affected cap: a `maxRowsAffected` parameter and an operator ceiling `IRIS_SQL_MAX_ROWS_AFFECTED`. The refusal reports the row count and the cap.
+  - All new controls are off by default, and the defaults are sent and stated explicitly.
+  - A parameter can tighten an operator control but never loosen it. A clamp is noted in the response (the precedent is `rowsCapped`).
+  - Safety controls are never inherited from the `default` profile entry. The order is the per-profile value, then the global variable, then the safe default.
+  - New variables are documented with their defaults in the same story.
+- **`iris_sql_query` (38.5).**
+  - `mutates: "read"`, so it is enabled by default and available under `read-only` (a test proves it).
+  - Read-only is enforced server-side, with the same classification as `readOnly`.
+  - `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT` and `IRIS_SQL_READ_ONLY` apply to it exactly as to `iris_sql_execute`.
+  - `parent: "iris_sql_execute"`. It joins `developer` and `core`.
+  - The docs call the mode "statement-level read-only, not side-effect-free". The description lists the residual non-transactional effects (globals set by SQL functions, `JOB`, `$INCREMENT`).
+- **Counts.**
+  - Dev: 30 tools today (31 advertised), and the suite is 106/111. `iris_sql_query` takes dev to 31.
+  - Dev `core`: 13 package / 14 runtime today, 15 runtime after 38.5. L-4 makes this a guideline, not a limit. The story records the resulting size and why the tool is everyday-loop.
+  - No existing `core` tool is removed, and no other tool's preset row changes.
+- **Docs and release.**
+  - Each story ships minimal docs with default states: the README tool table and `tool_support.md`.
+  - It also adds a CHANGELOG top section `## [Pre-release — <date>] — Story X.Y: ...` and a `.changeset/story-38-N-*.md` (`patch`/`minor` only).
+  - Re-measure the payload table with `pnpm measure:tools-payload`.
+  - No `changeset version`, no publish and no CI wiring.
+- **Out of scope.**
+  - Streamable HTTP (DW-538), server-side source control, compile-by-wildcard and inline multi-document fetch.
+  - A Storage guard on `iris_doc_load`, the promote sync and the XML import (DW-544, DW-545 and DW-546).
 
 ## Technical Decisions
 
-- **`iris_doc_edit` keys.** An `action` enum: `apply` is `mutates: "write"` with `defaultEnabled` (S-3; holder list is closed); `regenerateStorage` is a separate default-disabled write, never a parameter of `apply`. The marker addresses only `tool:action` keys and `buildDefaultEnabledWrites` throws on a scalar `mutates`. Annotations: `destructiveHint: true`, `readOnlyHint: false`, `idempotentHint: false` (all four declared truthfully; not copied from `iris_doc_put`).
-- **Frozen-baseline tools** (`iris_doc_put`, `iris_sql_execute`) never gain an `action` enum; new operations go on companion tools. The `read-only` preset blocks every write, `defaultEnabled` included; explicit keys beat it. Cascade: env profile > env global > file profile > file global > preset seed > default seed.
-- **Parent keys** (built in 38.4, reused in 38.5): `iris_doc_edit:apply` → `iris_doc_put`, `iris_sql_query` → `iris_sql_execute`. An explicit disable of the parent at any layer seeds the child disabled; an explicit child setting wins; `iris_server_profiles` and the governance resource report the inherited verdict from the same engine.
-- **Visibility.** Both new tools in `developer` and `core`; `iris_doc_edit`↔`iris_doc_get` is a new `TOOL_PAIRS` pair. No other preset row changes.
-- **One line utility**, `@iris-mcp/shared` `lines.ts`, extended in place (never a second module). Line N is element N-1 of Atelier `GET /doc` `content` after one leading BOM is stripped. Ranges and edits apply to UDL text only. 38.4 adds splitting on `\r?\n` / joining with `\n` for `expected`/`text` there and moves the existing split sites in `iris_doc_put` and `iris_doc_load` onto it.
-- **Versions and conflicts.** The token is `ts` (equal to the HEAD `ETag`; form `YYYY-MM-DD HH:MM:SS.fff`). Atelier saves an existing document only when `If-None-Match` equals its `ts`; with no header it returns 409 (verified live); `ignoreConflict=1` skips the check. An edit's PUT sends the `ts` of the GET its `expected` check ran against; a 409 is a conflict, never retried; agent edits never send `ignoreConflict`.
-- **Live Atelier facts.** Class UDL ends with a trailing `""` that counts as a line. Atelier regenerates class UDL on write (e.g. a blank line before the final `}`), so post-write output comes from a re-read, never the locally edited array. Routine line 1 is the `ROUTINE` header (`.inc` keeps `[Type=INC]`). A soft error is `content: ""` plus a non-empty `status`: use `atelierDocStatusError`.
-- **Storage guard** is one shared function (current source, new source) → dropped definition names, covering `iris_doc_put` and `iris_doc_edit`. 38.3 lists every document-writing path (Atelier PUT, `xml/load`, bootstrap PUT), exhaustive as of a named date, each with a verdict, plus a grep test that fails on a new path without one. `iris_doc_load` and `iris_env_promote` `execute` are filed `wontfix-accepted` with `reopen_if`.
-- **Refusal catalog.** Born with the first guarded-write refusal (38.3/38.4): stable UPPER_SNAKE_CASE codes in one `@iris-mcp/shared` catalog with a uniqueness test (precedent `GOVERNANCE_DISABLED`), carrying the fields a caller needs to act. A refusal is `isError: true` and changes nothing. Range/argument errors carry no code.
-- **Diff code.** Servers never import `client-config`; reused code moves to `@iris-mcp/shared`, otherwise a small line-diff utility is written there.
-- **SQL.** Classify by the `%SQL.Statement` statement type (not a keyword blocklist) where the probe confirms it; classify and execute the same prepared statement in one IRIS call. Read paths run in an always-rolled-back transaction ("statement-level read-only, not side-effect-free"; residual effects listed in the description). Rows-affected caps are enforced inside IRIS before commit, with TypeScript passing the limit (a recorded thin-handler exception). One shared serializer/select mode, pinned against `action/query` output on dates, nulls, `%List` and streams. `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT` and `IRIS_SQL_READ_ONLY` bind both SQL tools; 38.5 records whether `iris_sql_analyze` `explain`/`indexUsage` are in scope. A custom endpoint moves the bootstrap, and routes stay additive (older request shapes accepted, superset responses).
-- **Conventions.** Handlers use only `ToolContext`, never env vars. Error text: `<what happened>. <what to do about it>.` Descriptions lead with what/when/returns, then the default state of a governed write and the operator controls; never name REST paths. Live gates carry their own `process.env.IRIS_REQUIRE_LIVE ===` comparison (roster detection) and are listed in the package's `prepublish-gate.mjs` `gateTestFiles`; reuse `live-doc-helpers.ts`.
+- **Keys and classification.**
+  - Frozen-baseline tools (`iris_doc_put`, `iris_sql_execute`) never gain an `action` enum or an annotation change. A new operation goes on a companion tool, or on a parameter that adds no new kind of side effect.
+  - The `defaultEnabled` holders are a closed list: `iris_production_control:clean` and `iris_doc_edit:apply`. `iris-mcp-all` `default-enabled-holders.test.ts` pins that list and the parent declarations; 38.5 adds `iris_sql_query: "iris_sql_execute"` there.
+  - New tools declare all four annotations truthfully and never copy grandfathered hints.
+- **Parent mechanism (shipped in 38.4; reuse unchanged).**
+  - `parent` is declared per tool. `buildParentKeys` validates it at construction: the parent is a known key, not the tool's own key, and not itself a child, and the declaring tool owns no baseline key.
+  - Only a disable is inherited. If the parent's first explicit layer (env profile, env global, file profile, file global) sets it `false`, the child seeds disabled. That seed sits below every explicit child layer and above the preset.
+  - Reporting: `configSource: "parent"`; the denial carries `inheritedFrom` and the suffix ` (inherited from '<parent>')`, with no `presetApplied`. `iris_server_profiles`, the governance resource and CLI `universe` all read the same engine.
+  - The `read-only` preset blocks every write, `defaultEnabled` included. Explicit keys beat it, and a preset-caused denial carries `presetApplied`.
+- **`IRIS_GOVERNANCE` shape.** Use `{"global":{...}}` or `{"<profile>":{...}}`. A flat `{"key":false}` is silently ignored today (DW-554, high, owned by the burn-down), so tests and smokes must use the documented shape.
+- **Refusals.**
+  - A refusal is `isError: true` and changes nothing. `structuredContent.code` comes from the one catalog in `@iris-mcp/shared` `refusals.ts` (`GOVERNANCE_DISABLED`, `STORAGE_DROPPED`, `DOCUMENT_CONFLICT`, `STALE_CONTENT`), with the fields a caller needs to act.
+  - New SQL refusal codes go in that file. A test pins the key list, and code literals appear only in `refusals.ts`.
+  - Argument and range errors carry no code.
+  - Error text has the form `<what happened>. <what to do about it>.`
+- **SQL (38.5).**
+  - Classify by the `%SQL.Statement` statement type. Compare it with a keyword blocklist on adversarial fixtures: comments, literals containing keywords, CTEs, `CALL` and multi-statement input.
+  - Classify and execute the same prepared statement, in one IRIS call.
+  - Read paths (`iris_sql_query` and `readOnly` mode) run inside a transaction that is always rolled back.
+  - Rows-affected caps are enforced transactionally inside IRIS before commit, with TypeScript passing the limit in. This is a recorded thin-handler exception; other judgment stays in TypeScript.
+  - The existing `IRIS_SQL_MAX_ROWS` and `IRIS_SQL_TIMEOUT` clamps stay.
+  - All SQL tools share one serializer and select mode, pinned against `action/query` output on dates, nulls, `%List` values and streams.
+  - Record whether `iris_sql_analyze` `explain`/`indexUsage` are in scope.
+  - If a custom endpoint is needed, the bootstrap moves (regenerate the embed and update both rosters). The handler:
+    - extends `REST.Base`;
+    - saves and restores `$NAMESPACE`, never `New $NAMESPACE`;
+    - renders one envelope;
+    - sends errors through `SanitizeError`.
+
+    Routes stay additive within the major (older request shapes accepted, superset responses), with a pin.
+- **Documents (shipped).**
+  - One line utility, `@iris-mcp/shared` `lines.ts`, owns:
+    - numbering: line N is element N-1 of the Atelier `GET /doc` `content` array, after one BOM is stripped;
+    - `splitLines`, `joinLines` and `textToLines` (which drops one trailing line break; `""` is one empty line);
+    - `formatNumberedLines` (`cat -n` layout);
+    - `unifiedDiff` (`diff -U3` conventions) and `alignLines`.
+  - The version token is `ts`. Atelier saves an existing document only when `If-None-Match` equals it; otherwise it answers 409 with the current document and its `ts`.
+  - A 409 on a version-checked save is `DOCUMENT_CONFLICT` and is never retried. Agent edits never send `ignoreConflict`.
+  - IRIS regenerates class UDL on save (blank lines between members, a trailing `""`), while routines are stored as sent. Edit output therefore comes from a re-read.
+  - One Storage guard (`storage-guard.ts`) covers `iris_doc_put` (override `allowStorageRegeneration`) and `iris_doc_edit` (override: the default-disabled `regenerateStorage` action). `document-write-paths.test.ts` pins a verdict for every write path.
+- **Conventions.**
+  - Handlers use only `ToolContext`, never environment variables.
+  - Descriptions lead with what the tool does, when to use it and what it returns, then the default state of a governed write and the operator controls. They never name REST paths. `structuredContent` goes beside `content`.
+  - Live gates:
+    - each carries its own `process.env.IRIS_REQUIRE_LIVE ===` comparison and is listed in its package's `scripts/prepublish-gate.mjs` `gateTestFiles` (`live-gate-roster.test.ts` enforces this);
+    - cross-package gates live in `iris-mcp-all` and reuse `process-gate-helpers.ts` and `live-doc-helpers.ts`;
+    - a gate's emptiness checks cover only its own fixture stems, because turbo runs package suites concurrently.
 
 ## Cross-Story Dependencies
 
-- **Delivered.**
-  - 38.0: seeded `lines.ts` (`stripLeadingBom`, `stripLeadingBomFromLines`) and `atelierDocStatusError`; `iris_doc_put` strips a BOM and reports a non-empty `result.status` as `isError`; `IRIS_NAMESPACE` default `USER`; `BOOTSTRAP_VERSION` `2159ec9e6f69` → `3af8ca401e7c`.
-  - 38.1: `resolveTransport()` returns only `"stdio"` and rejects any other configured value (exit 1, before IRIS traffic); `start()` narrowed. Its default-suite gate launches the built dists, so rebuild after any `src/` edit in shared or a server package.
-  - 38.2: `iris_doc_get` `startLine`/`endLine`; `documentLines`, `linesInRange`, `formatNumberedLines`, `NUMBERED_LINE_WIDTH` (6, `cat -n` layout); ranged `structuredContent` `{name, ts, startLine, endLine, totalLines, lines}`. The no-range path is frozen and pinned.
-- **38.3** owns the `iris_doc_put` path: DW-540 (send `If-None-Match` with the `ts` its guard reads; correct the `ignoreConflict` description) and DW-541 (drop the dead `Last-Modified` read and its fake, which turns 38.2's `timestamp: undefined` pin red: update it in the same change).
-- **38.4** reuses 38.2's numbering and token and 38.3's guard unchanged, and owns only applying edits; it adds the parent mechanism that 38.5 reuses. One classification serves `readOnly` and `iris_sql_query`.
-- **38.6** depends on all: the edit prompt (ranged read → `iris_doc_edit` → `iris_doc_compile` → `iris_execute_tests` with a total check), the `deploy-and-test-class` update and `gen:skills`/`validate:prompts`; a default-suite live capstone over all six guards, proven red by reverting one; epic-close checks (`:check`, counts, `BOOTSTRAP_VERSION`, `check-epics-sync.mjs`), and routing existing-tool annotation divergences to one owned ledger entry.
-- **Owned elsewhere; don't fix incidentally:** DW-542 (no-range soft error reported as success; needs a Lead decision), DW-530 (promote ignores `result.status`), DW-528 (`modifiedSince` 405). Epic 43's confirmation helper later binds `iris_doc_edit:regenerateStorage`.
-- **Build loop.** The dev package imports shared through `dist`: rebuild shared before dev tests. Run per-package build/test when the parallel turbo run flakes.
+- **Delivered (38.0–38.4).**
+  - 38.0: `stripLeadingBom` and `atelierDocStatusError`; `IRIS_NAMESPACE` now defaults to `USER`; bootstrap `2159ec9e6f69` → `3af8ca401e7c`.
+  - 38.1: `resolveTransport()` accepts stdio only and exits 1 before any IRIS traffic. DW-538 files the real HTTP transport.
+  - 38.2: `iris_doc_get` `startLine`/`endLine` return `{name, ts, startLine, endLine, totalLines, lines}`. The no-range path is frozen.
+  - 38.3: the put Storage guard and the existing-document flow (a 409, then one `If-None-Match` retry). `metadataOnly` returns `{exists, name, etag}`.
+  - 38.4: `iris_doc_edit` (`apply` enabled by default, `regenerateStorage` disabled, `parent: iris_doc_put`, paired with `iris_doc_get` in `TOOL_PAIRS`) and the parent mechanism.
+- **38.5** reuses the parent mechanism with no engine change. One statement classification serves both `readOnly` and `iris_sql_query`.
+- **38.6** depends on all of the above:
+  - DW-552 first: append a trailing line break to `STALE_CONTENT` `mismatches[].current` and add one description line. A retry that passes `current` back as `expected` then works when the range ends in an empty line; the edit prompt depends on this.
+  - A new edit-in-place MCP prompt: ranged read → `iris_doc_edit` with `expected` → `iris_doc_compile` → `iris_execute_tests` with a total-count check. Update `deploy-and-test-class`, then run `pnpm gen:skills`, `gen:skills:check` and `validate:prompts`.
+  - One default-suite live capstone, listed in `gateTestFiles`. It covers a ranged read, an edit, the stale refusal, the storage-drop refusal, the read-only SQL refusal and the rows-affected refusal, and is proven red by reverting one guard.
+  - Epic-close records: `:check`, the counts, `BOOTSTRAP_VERSION` and `check-epics-sync.mjs`.
+  - Route the existing-tool annotation divergences to one owned ledger entry: `destructiveHint:false` on `iris_sql_execute`, `iris_execute_command` and `iris_doc_put`, and `readOnlyHint:true` on `iris_execute_tests`.
+- **Owned elsewhere; don't fix incidentally.**
+  - DW-542: a no-range soft error is reported as success.
+  - DW-530: promote ignores `result.status`.
+  - DW-528: `modifiedSince` gets HTTP 405.
+  - DW-547 and DW-548: Storage scanner limits.
+  - DW-549: `iris_doc_load` with `ignoreConflict: false` gets a 409 for every existing document.
+  - DW-551: the Rule #53 wording.
+  - DW-554: the flat governance shape is silently ignored.
+  - Epic 43's confirmation helper later binds `iris_doc_edit:regenerateStorage`.
+- **Build loop.**
+  - Dev and `iris-mcp-all` import `@iris-mcp/shared` through `dist`, so rebuild shared before the dependent tests.
+  - Default-suite process gates fail on a stale dist. After a byte-identical revert, `touch` a dist file.
+  - Run per-package build and test when the parallel turbo run flakes.
