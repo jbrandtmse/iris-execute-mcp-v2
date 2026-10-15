@@ -2874,3 +2874,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: Atelier v1-v8 and %Atelier.REST set only ETag (=ts); live metadataOnly returns {exists,name,etag}; doc.test.ts:103-127 fakes Last-Modified; 38.2 corrected only the description
 - 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=two-way door (drop the dead read + the impossible fake); 38.3 edits doc.ts anyway
+- 2026-10-15T17:11:58Z occurrence=38-2-line-range-document-read by=cr note=the fix also turns the 38.2 AC-4 pin doc-get-range.test.ts:163-178 red (toStrictEqual pins timestamp:undefined); update it
+
+### DW-542: iris_doc_get without a range reports an Atelier GET soft error (HTTP 200, content "", non-empty status) as success with no isError; the ranged read reports the same result as an error
+- source: spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: Live 2026-10-15 default/HSCUSTOM: iris_doc_get name=ExecuteMCPv2.Utils (no extension) -> {content:"",status:"ERROR #16006 ... name is invalid"}, no isError; doc.ts:266-271 never reads result.status
+- 2026-10-15T17:11:58Z status=escalated owner=burndown by=cr note=AD-15: isError on a result that is a success today needs a Lead decision; reuse atelierDocStatusError as M6 does
+
+### DW-543: Test env harness makeEnvHarness is copied verbatim into 43 test files (doc-get-range-framework.test.ts copies loc-e2e.test.ts:140-173), so an env-isolation gap fixed in one copy stays in the others
+- source: spec-38-2-line-range-document-read.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: grep 'function makeEnvHarness' = 43 files in shared/dev/admin/ops/interop; loc-e2e's copy leaves IRIS_TOOLS_* and IRIS_GOVERNANCE_FILE/PRESET set; 38.2 cr fixed only its own copy
+- 2026-10-15T17:11:58Z status=wontfix-accepted owner=38-2-line-range-document-read by=cr note=reopen_if=a second test result is found to depend on an env var that its makeEnvHarness copy leaves set

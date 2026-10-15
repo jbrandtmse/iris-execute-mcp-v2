@@ -322,7 +322,8 @@ Document 'MyApp.Service.cls' in namespace 'USER': lines 3-5 of 9 (ts 2026-04-07 
 - **Numbering.** Line N is element N-1 of the line array that IRIS returns, after one leading byte-order mark is removed.
   A class ends with an empty last line, and it counts: `totalLines` is 9 for the 9-element `content` array of the
   full-read example above, whose last element is that empty line. `iris_loc_count` reports the same `totalLines` for a
-  class. A routine's line 1 is its `ROUTINE <name>` header.
+  class. A routine's or include file's line 1 is its `ROUTINE` header: `ROUTINE <name>` for a `.mac` routine (IRIS
+  drops the type), `ROUTINE <name> [Type=INC]` for an include file.
 - **Defaults and clamp.** `startLine` alone reads to the last line; `endLine` alone reads from line 1. An `endLine`
   past the end is clamped to the last line, and the response shows the effective `startLine` and `endLine`.
 - **`ts`.** The document's version timestamp, the same string `metadataOnly` returns as `etag`. `iris_doc_edit` sends it
@@ -332,7 +333,7 @@ Document 'MyApp.Service.cls' in namespace 'USER': lines 3-5 of 9 (ts 2026-04-07 
   - `startLine` or `endLine` is not a whole number of at least 1: the argument check refuses it before the tool runs (an `Invalid arguments` error that names the parameter).
   - `startLine` is after `endLine`, or past the last line (the message states the document's `totalLines`).
   - A range with `metadataOnly`, or with `format: "xml"`: ranges apply only to UDL text.
-  - A binary document, or a document IRIS cannot read: the message names the document and IRIS's reason.
+  - A binary document (the message names it), or a document IRIS cannot read (the message names it and carries IRIS's reason).
 </details>
 
 <details>

@@ -13,7 +13,8 @@ the whole document, cut in TypeScript. It applies only to UDL text (`format` omi
 
 - **Numbering.** Line N is element N-1 of the line array that IRIS returns, after one leading byte-order mark is
   removed. A class ends with an empty last line and it counts, so `totalLines` equals the `totalLines` that
-  `iris_loc_count` reports for the same class. A routine's line 1 is its `ROUTINE <name>` header.
+  `iris_loc_count` reports for the same class. A routine's or include file's line 1 is its `ROUTINE` header:
+  `ROUTINE <name>` for a `.mac` routine (IRIS drops the type), `ROUTINE <name> [Type=INC]` for an include file.
 - **Defaults and clamp.** `startLine` alone reads to the last line, and `endLine` alone reads from line 1. An `endLine`
   past the end is clamped to the last line.
 - **Result.** The text is a header (`Document '<name>' in namespace '<ns>': lines <s>-<e> of <t> (ts <ts>)`) and then
@@ -23,9 +24,10 @@ the whole document, cut in TypeScript. It applies only to UDL text (`format` omi
   IRIS so that an edit cannot overwrite a change it did not see.
 - **Errors** (`isError: true`, each with a fix): a range with `metadataOnly` or with `format: "xml"`, `startLine` after
   `endLine`, `startLine` past the last line (the message states `totalLines`), a binary document, and a document IRIS
-  cannot read (the message carries IRIS's reason). The first three are refused before any request. A value that is not a
-  whole number of at least 1 is refused by the argument check before the tool runs (an `Invalid arguments` error that
-  names the parameter).
+  cannot read (the message carries IRIS's reason). A range with `metadataOnly` or `format: "xml"`, and `startLine` after
+  `endLine`, are refused before any request; the others are found after the read. A value that is not a whole number of
+  at least 1 is refused by the argument check before the tool runs (an `Invalid arguments` error that names the
+  parameter).
 - **Unchanged without the parameters.** With neither `startLine` nor `endLine`, the request and the result (text and
   `structuredContent`) are byte-identical to before, in every mode (`format`, `metadataOnly`, a missing document); the
   existing tests are unmodified and a new back-compat suite pins the whole result as literals.

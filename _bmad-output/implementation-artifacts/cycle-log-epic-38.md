@@ -61,3 +61,8 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-15T16:45:04Z	Epic 38	ledger_routed_planned	story=38-3-storage-block-drop-guard entries=2 excess=0 by=harvest dw=DW-540,DW-541
 2026-10-15T16:45:04Z	Story 38.2	adr_verifications_complete	tool=none acs= result=none_required evidence= mutations=none model=claude-opus-5-5
 2026-10-15T16:45:05Z	Story 38.2	stage_spawned	stage=qa spawn_at=2026-10-15T16:45:05Z model=claude-sonnet-5-5 agent_name=38-2-line-range-document-read-qa-1 cycle_iteration=1
+2026-10-15T16:52:53Z	Story 38.2	qa_complete	spawn_at=2026-10-15T16:45:05Z model=claude-sonnet-5-5 tests_added=3 mutations_demonstrated=7 first_run_failures=0 clarifications=0 closing_sections_present=true cycle_iteration=1
+2026-10-15T16:52:53Z	Story 38.2	stage_spawned	stage=code-review spawn_at=2026-10-15T16:52:53Z model=claude-opus-5-5 agent_name=38-2-line-range-document-read-cr-1 cycle_iteration=1
+2026-10-15T17:19:06Z	Story 38.2	cr_complete	spawn_at=2026-10-15T16:52:53Z model=claude-opus-5-5 resolved=8 fixed_at_source=8 escalated=1 deferred=3 dismissed=10 high=0 med=2 low=9 rows=25 unresolved_high_med=1 review_outcome=CLEAN failed_layers=none review_tier=full-opus new_dw=DW-542,DW-543 occurrences=DW-541 status=done clarifications=0 closing_sections_present=true cycle_iteration=1
+2026-10-15T17:19:06Z	Story 38.2	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 model=claude-opus-5-5
+2026-10-15T17:19:06Z	Story 38.2	smoke_complete	method=cli_stdio_jsonrpc_built_dist result=pass iterations=1 defects_caught=0 checks=9 evidence=scratchpad/smoke-38-2.mjs target=ExecuteMCPv2.Utils.cls_1164_lines_read_only model=claude-opus-5-5

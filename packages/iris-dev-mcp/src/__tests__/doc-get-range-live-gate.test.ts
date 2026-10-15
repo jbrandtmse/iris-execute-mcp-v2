@@ -13,7 +13,10 @@
  *  - the AD-24 version-token record: a PUT to an existing document with no `If-None-Match` is refused
  *    with HTTP 409 and writes nothing, while `If-None-Match: <ts>` is accepted (AC-1);
  *  - a document IRIS cannot read (an invalid name, read-only) returns the soft-error shape, and the
- *    ranged read reports IRIS's reason (AC-2, M6).
+ *    ranged read reports IRIS's reason (AC-2, M6);
+ *  - a %-prefixed system class and a system include file (both read-only) read by range like the
+ *    fixtures, an include file's line 1 keeps its `[Type=INC]` header, and a class's `totalLines`
+ *    equals the `totalLines` that `iris_loc_count` reports for it (AC-5).
  *
  * The pinned literals below were captured from the live run of 2026-10-15 (IRIS 2026.2 build 221U,
  * Atelier v8, `default` profile, HSCUSTOM) by running this file armed and reading the values it
@@ -38,6 +41,7 @@ import {
   type ToolContext,
 } from "@iris-mcp/shared";
 import { docGetTool } from "../tools/doc.js";
+import { locCountTool } from "../tools/loc.js";
 import { docPath, readStoredLines, removeStored } from "./live-doc-helpers.js";
 
 const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
@@ -237,7 +241,7 @@ afterAll(async () => {
 }, 60000);
 
 describe("live document shape: the facts the line numbering rests on (Story 38.2, AC-1)", () => {
-  it("no element of a live content array contains a line break or a BOM", async (testCtx) => {
+  it("IRIS returns the gate's own fixtures (written without CR, LF or BOM) with no line break or BOM inside any element", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     for (const reference of [rangeClass, rangeRoutine]) {
@@ -368,6 +372,56 @@ describe("ranged reads equal the slices of the live full read (Story 38.2, AC-5)
     expect(text.startsWith(`Document '${unreadable}' could not be read in namespace '${IRIS_NAMESPACE}': `)).toBe(true);
     expect(text).toContain("#16006");
     expect(text.endsWith(". Check the document name and namespace, then retry.")).toBe(true);
+  }, 60000);
+});
+
+/** A system class that every namespace maps: read-only, never written. */
+const SYSTEM_CLASS_DOC = "%Library.RegisteredObject.cls";
+/** A system include file that every namespace maps: read-only, never written. */
+const SYSTEM_INCLUDE_DOC = "%occStatus.inc";
+
+describe("ranged reads beyond the fixtures (Story 38.2, AC-5)", () => {
+  it("a %-prefixed system class (read-only): ranged reads equal the slices of its live full read", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const reference = await fullRead(SYSTEM_CLASS_DOC);
+    const total = reference.content.length;
+    expect(total, "the system class is large enough for the windows below").toBeGreaterThan(60);
+    expect(reference.content.some((line) => /[\r\n\uFEFF]/.test(line))).toBe(false);
+
+    await expectRangeMatches(SYSTEM_CLASS_DOC, reference, 1, 1);
+    await expectRangeMatches(SYSTEM_CLASS_DOC, reference, 1, 40);
+    await expectRangeMatches(SYSTEM_CLASS_DOC, reference, 30, 60);
+    await expectRangeMatches(SYSTEM_CLASS_DOC, reference, total, total);
+    await expectRangeMatches(SYSTEM_CLASS_DOC, reference, total - 9, 100000);
+  }, 60000);
+
+  it("a %-prefixed system include file (read-only): line 1 is its ROUTINE header with the type kept, and ranged reads equal the slices of its live full read", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const reference = await fullRead(SYSTEM_INCLUDE_DOC);
+    const total = reference.content.length;
+    expect(total, "the include file is large enough for the windows below").toBeGreaterThan(20);
+    expect(reference.content[0]).toBe("ROUTINE %occStatus [Type=INC]");
+
+    await expectRangeMatches(SYSTEM_INCLUDE_DOC, reference, 1, 1);
+    await expectRangeMatches(SYSTEM_INCLUDE_DOC, reference, 1, 20);
+    await expectRangeMatches(SYSTEM_INCLUDE_DOC, reference, total, total);
+    await expectRangeMatches(SYSTEM_INCLUDE_DOC, reference, total - 4, 100000);
+  }, 60000);
+
+  it("a class's totalLines equals the totalLines iris_loc_count reports for the same class", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const loc = await locCountTool.handler({ spec: RANGE_CLASS_DOC, namespace: IRIS_NAMESPACE }, ctx);
+
+    if (loc.isError) {
+      const reason = `iris_loc_count could not run in ${IRIS_NAMESPACE} (is the ExecuteMCPv2 REST service deployed there?): ${loc.content[0]?.text}`;
+      if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set, so this case may not be skipped: ${reason}`);
+      return testCtx.skip();
+    }
+    const counted = loc.structuredContent as { filesParsed: number; totalLines: number };
+    expect(counted.filesParsed, "the scan matched exactly the fixture class").toBe(1);
+    expect(counted.totalLines).toBe(rangeClass.content.length);
+    expect((await readOneLine(RANGE_CLASS_DOC, 1)).totalLines).toBe(counted.totalLines);
   }, 60000);
 });
 

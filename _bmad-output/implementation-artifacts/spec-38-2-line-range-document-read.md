@@ -191,6 +191,59 @@ Fixture: an 11-element class `C` (`content` ends with `"}", ""`), so `totalLines
   - `bootstrap-classes.ts`, `src/`, every `presets.ts` and the baseline file have no diff;
   - no `ExecuteMCPv2.Temp.QaStory382*` document remains.
 
+### Review Findings
+
+Code review 2026-10-15 (`bmad-code-review`, tier full-opus). All four layers delivered: Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor. There were 25 raw findings. After grouping there are 11 entries (high 0, med 2, low 9), and 10 findings were rejected. Each entry gives severity / fix-risk / footprint / spec-status.
+
+- [x] [Review][Patch] K. `doc-get-range-framework.test.ts` is not hermetic. Its env harness clears only six variables. Tool visibility (`IRIS_TOOLS_PRESET`/`_ENABLE`/`_DISABLE`), `IRIS_GOVERNANCE_FILE`/`_PRESET`, `IRIS_SERVER_MANAGER` and `IRIS_AUDIT_LOG` from the shell change what starts and what registers: `IRIS_TOOLS_DISABLE=iris_doc_*` makes every case a TypeError (Rule 19). med / low (test-only env lines) / in-story / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range-framework.test.ts:42] (verification-gap+blind-hunter)
+- [x] [Review][Patch] A. The "Bad number" row is pinned only through the registered callback. That path skips the SDK's own `validateToolInput` (SDK 1.29.0 `mcp.js:166-178`). A connected client reaches `tools/call`, where the SDK refuses first with `Invalid arguments for tool iris_doc_get: ...`. Fix: add a case on the real `tools/call` request handler (Rule #59 path). low / low / in-story / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range-framework.test.ts:113] (blind-hunter+acceptance-auditor)
+- [x] [Review][Patch] E. The live gate reads only `.cls` and `.mac`, although the description advertises include files (Rule #56). Fix: add a read-only ranged read of the system include `%occStatus.inc`, with its live header `ROUTINE %occStatus [Type=INC]` pinned. CSP pages stay unexercised: HSCUSTOM has no stable read-only CSP text document. low / low / in-story / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range-live-gate.test.ts:383] (blind-hunter)
+- [x] [Review][Patch] F. "no element of a live content array contains a line break or a BOM" runs over fixtures that the gate itself wrote without those characters. So it observes only how IRIS handles canonical input, and the title claims more. Fix: narrow the title. low / low / in-story / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range-live-gate.test.ts:243] (blind-hunter+verification-gap)
+- [x] [Review][Patch] G. The README and CHANGELOG say a routine's line 1 is its `ROUTINE <name>` header. But an include file keeps `[Type=INC]` (probe record). low / low / in-story / clear [packages/iris-dev-mcp/README.md:331] (blind-hunter)
+- [x] [Review][Patch] H. The error lists misattribute properties:
+  - The CHANGELOG's "The first three are refused before any request" counts `startLine` past the last line, which needs the GET.
+  - The README says the binary message carries IRIS's reason, but M5 carries none.
+  - The changeset derives M3, M4 and M6 from "Ranges apply only to UDL text".
+
+  low / low / in-story / clear [CHANGELOG.md:53] (blind-hunter)
+- [x] [Review][Patch] I. The root README's measured `tools/list` payload table predates this story's ~1.9 KB `iris_doc_get` description and parameter growth, and its admin and interop rows had already moved. Fix: re-measure with `pnpm measure:tools-payload` (Rule #51). low / low / in-epic / clear [README.md:624] (blind-hunter)
+- [x] [Review][Patch] B. The QA test summary says `doc-get-range-framework.test.ts` had 11 tests, but a mechanical count gives 10 (Rule #51). low / low / in-story / clear [_bmad-output/implementation-artifacts/tests/38-2-test-summary.md:17] (blind-hunter+acceptance-auditor)
+- [x] [Review][Defer] D. A no-range `iris_doc_get` reports an Atelier GET soft error as a success. Live, `name: "ExecuteMCPv2.Utils"` (no extension) returns `{content:"", status:"ERROR #16006: ... name is invalid"}` with no `isError`, while the ranged read reports the same result as M6. med / med (`isError` on a result that is a success today is an AD-15 sanctioned change) / out-of-footprint (this spec freezes the no-range path) / spec-bound here [packages/iris-dev-mcp/src/tools/doc.ts:266] — deferred: pre-existing; DW-542 escalated owner=burndown (blind-hunter)
+- [x] [Review][Defer] C. DW-541's planned fix (dropping the dead `Last-Modified` read) will turn this story's AC-4 pin red. `doc-get-range.test.ts:163-178` pins `timestamp: undefined` with `toStrictEqual`, and neither the DW-541 evidence nor the 38.3 bullet names that pin. low / low / in-epic / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range.test.ts:177] — deferred: in-epic, already DW-541; an occurrence naming the pin was appended (blind-hunter+verification-gap)
+- [x] [Review][Defer] J. The framework test's env harness is a verbatim copy of `loc-e2e.test.ts:140-173` (Rule 2; the reason given, "the convention", is weak). `makeEnvHarness` is copied into 43 test files, so extracting it is out of footprint. low / med / out-of-footprint / clear [packages/iris-dev-mcp/src/__tests__/doc-get-range-framework.test.ts:37] — deferred: DW-543 wontfix-accepted (blind-hunter)
+
+Patches applied (8):
+- **K.** `CLEARED_ENV` (9 startup inputs) is saved, cleared and restored.
+- **A.** `callToolOverWire` drives `tools/call` through the SDK's request handler.
+- **E.** A `%occStatus.inc` live case was added.
+- **F.** The test title was narrowed.
+- **G, H.** The README, CHANGELOG and changeset wording was corrected.
+- **I.** The payload table was re-measured: dev 72,072 / 31,246; admin 48,234; interop 40,369 / 21,554.
+- **B.** The count was corrected to 10.
+
+After the patches:
+- `@iris-mcp/dev`: build, lint and type-check are clean; 49 files, 900 tests.
+- `@iris-mcp/all`: 29 files, 273 tests.
+- Both live gates, armed: 26 passed, none skipped.
+- Governance `:check` is OK.
+- `iris_doc_list` for `ExecuteMCPv2.Temp.QaStory382` returns `{"items":[]}`.
+
+**Review Outcome:** CLEAN. Story status is `done`: no HIGH; the one unpatched MED (D, DW-542) is `escalated` with an owner.
+
+**Rejected** (one line each):
+- `false` (BH-3, two sub-claims):
+  - "DW-541 as a routed LOW breaks Rule 15": Rule 15's LOW two-way-door row covers in-epic footprint, owned by the story that owns the file, and 38.3 rewrites `doc.ts`.
+  - "`source:` is a full path": the grammar's `source:` is a spec file or a stage, and a path names a spec file.
+- `low` (BH-11) The changeset checks are `skipIf(!present)`. This is intended: `changeset version` consumes the file at release, and Story 38.1's claims test does the same. An accidental delete before release is unlikely, and a guard would add branches.
+- `low` (ECH-1) An empty `content` array gives the M4 text "from 1 to 0". This is the unobserved state that the first review rejected (669 live documents, none empty). reopen_if: a live document returns `content: []`.
+- `low` (ECH-2, ECH-6) `z.coerce.number()` accepts `true`, `[3]` and `"0x10"`. The Always constraint mandates the `maxRows` convention, no realistic client sends these values, and the docs hold for every realistic input.
+- `low` (ECH-3) `null` or `""` for an omitted bound is refused. This is the same `.optional()` behavior as every other optional parameter of the tool (`namespace`, `format`), under the spec's convention.
+- `low` (ECH-4) Two token PUTs landing in one millisecond: each PUT is a class save with GET round-trips between them, so there is no realistic producer.
+- `low` (ECH-5) Concurrent suite runs colliding on fixed fixture names: epic runs are sequential, live gates run `--no-file-parallelism`, and the sibling gate has the same property. The first review rejected this too.
+- `low` (ECH-7) `iris_doc_edit` is not registered. This is spec-bound (AC 38.2.6, interpretation 5): Story 38.4 registers it.
+- `low` (AA-2) The gate hard-codes `IRIS_HTTPS: "false"`. Every live gate in the repo does this (8 files), and the Code Map prescribes the sibling's setup. Making it configurable is a cross-gate change.
+- `low` (AA-3) The gate reads a system class, an invalid name and `iris_loc_count` beyond the named fixtures. The fix would be a spec edit, and every extra call is read-only, which the shared-instance rules allow.
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -354,6 +407,23 @@ AC-7 is a roll-up of gate commands and has no mutation of its own.
 - mutation: `startLine` schema `.min(0)` -> `doc-get-range-framework.test` "startLine = 0 is refused with the framework's Invalid arguments result" (1 red) and `doc-get-range.test` "rejects startLine = 0" (1 red)
 - mutation: the live routine fixture gains a trailing `""` -> live gate "a routine's element 0 is the ROUTINE header ... no trailing empty element" and "pins the routine's totalLines ..." (2 red)
 - mutation: the live PUT with `If-None-Match` sends a stale ts, and the old-ts PUT sends the current ts -> live gate "a PUT carrying If-None-Match: <ts> is accepted ..." and "a PUT carrying the old ts ... is refused with HTTP 409" (2 red)
+
+**QA additions (Rule 19, run 2026-10-15; (QA) marks what the QA stage wrote).** Gap analysis found every matrix row and AC already pinned; the gaps were AC-6's README, CHANGELOG and changeset (only the description was tested), the "Range + metadataOnly" row at the wire form clients send (a boolean as the string "true" or "false"), a live read of a `%`-prefixed class, and the documented `iris_loc_count` parity (observed once). Each mutation was applied, run, reverted and checked byte-identical (`shasum -c` of the five touched sources, `git status --short` and `git diff --stat` unchanged); `@iris-mcp/shared` was rebuilt after the width mutation and again after its revert.
+- (QA) `packages/iris-mcp-all/src/__tests__/story-38-2-qa-doc-claims.test.ts` -- 9 tests, no IRIS needed, fail-closed on a stale dist: the README line-range example executed against the built `iris_doc_get`, the README tool-table row against the built schema, the CHANGELOG header form, field list and shared exports, the width claim in four documents, the changeset bumps.
+- (QA) `packages/iris-dev-mcp/src/__tests__/doc-get-range-framework.test.ts` -- one added case: `metadataOnly` sent as the string "true" or "false" through the real framework.
+- (QA) `packages/iris-dev-mcp/src/__tests__/doc-get-range-live-gate.test.ts` -- two added live cases: a ranged read of the read-only system class `%Library.RegisteredObject.cls`, and a class's `totalLines` equal to `iris_loc_count`'s (skipped unarmed, failing armed, when the ExecuteMCPv2 REST service is missing). The gate stays in `gateTestFiles`; the six `IRIS_*` variables and `IRIS_REQUIRE_LIVE=1` were set explicitly, 19 passed.
+- mutation (QA): `NUMBERED_LINE_WIDTH` 6 -> 5 in `lines.ts`, shared rebuilt -> `story-38-2-qa-doc-claims` "is what the built iris_doc_get returns for the README's own full-read example" and "appears in the description, README, CHANGELOG and changeset with the built NUMBERED_LINE_WIDTH" (2 red)
+- mutation (QA): the changeset's `@iris-mcp/dev` bump `minor` -> `patch` -> `story-38-2-qa-doc-claims` "bumps @iris-mcp/shared and @iris-mcp/dev minor, and nothing else" (1 red)
+- mutation (QA): the README tool-table row loses `endLine?` -> `story-38-2-qa-doc-claims` "lists exactly the parameters of the built iris_doc_get schema" (1 red)
+- mutation (QA): the CHANGELOG's quoted header form `lines <s>-<e> of <t>` -> `lines <s>..<e> of <t>` -> `story-38-2-qa-doc-claims` "quotes the header form the built handler produces" (1 red)
+- mutation (QA): the `metadataOnly` schema `booleanParam` -> `z.coerce.boolean()` (the string "false" becomes true) -> `doc-get-range-framework` "metadataOnly sent as a string is coerced ..." (1 red); the 46 `doc-get-range.test` cases stayed green, which is the gap the case closes
+- mutation (QA): `doc.ts` stops URL-encoding the document name -> live gate "a %-prefixed system class (read-only) ..." (1 red, HTTP 400); the other 18 live cases stayed green
+- mutation (QA): `totalLines` computed as `lines.length - 1` -> live gate "a class's totalLines equals the totalLines iris_loc_count reports for the same class" and 10 other live cases (11 red)
+
+**Code-review additions (Rule 19, run 2026-10-15; (CR) marks what the review wrote).** Each mutation was applied, run, reverted, and checked byte-identical (`shasum -c` of `doc.ts`, `git status --short` unchanged).
+- mutation (CR): `startLine` schema `.min(1)` -> `.min(0)` -> `doc-get-range-framework` "over the SDK tools/call handler a client reaches: startLine 0 is refused before the tool runs ..." and "startLine = 0 is refused with the framework's Invalid arguments result ..." (2 red) -- AC-2, "Bad number" row, on the client's path
+- mutation (CR): the `endLine` clamp removed (`lastLine = endLine ?? totalLines`) -> live gate, armed, "a %-prefixed system include file (read-only): line 1 is its ROUTINE header with the type kept ..." (1 red) -- AC-5, include files
+- hermeticity (CR): with `IRIS_TOOLS_DISABLE='iris_doc_*'` exported, `doc-get-range-framework` was 10/10 red (a TypeError, the tool not registered) before the harness clears `CLEARED_ENV`. After the change it is 11/11 green, also with `IRIS_TOOLS_PRESET=core IRIS_GOVERNANCE_PRESET=readonly` exported.
 
 ## Auto Run Result
 

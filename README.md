@@ -621,13 +621,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 30 / 70,119 / ~17,530 | 13 / 29,293 / ~7,323 | 30 / 70,119 / ~17,530 |
-| @iris-mcp/admin | 27 / 47,730 / ~11,933 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
-| @iris-mcp/interop | 23 / 39,727 / ~9,932 | 10 / 21,174 / ~5,294 | 23 / 39,727 / ~9,932 |
+| @iris-mcp/dev | 30 / 72,072 / ~18,018 | 13 / 31,246 / ~7,812 | 30 / 72,072 / ~18,018 |
+| @iris-mcp/admin | 27 / 48,234 / ~12,059 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
+| @iris-mcp/interop | 23 / 40,369 / ~10,092 | 10 / 21,554 / ~5,389 | 23 / 40,369 / ~10,092 |
 | @iris-mcp/ops | 22 / 30,677 / ~7,669 | 10 / 13,679 / ~3,420 | 10 / 14,130 / ~3,533 |
 | @iris-mcp/data | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 47,730 → 16,727; `@iris-mcp/dev`: 70,119 → 29,293, ~58%). Re-measured at the Story 36.2 code review (`pnpm measure:tools-payload` after a forced clean rebuild — mechanical, Rule #51). The previously committed figures dated from Story 30.2 (`9c57d84`): byte counts are not test-pinned (only the tool counts are), and tool descriptions/schemas in every package changed across Epics 31–36 without a re-measure (e.g. `@iris-mcp/data`'s Story 35.6/35.7 fixes, Story 36.1's `iris_execute_tests` running-result contract) — so every row moved, not only `@iris-mcp/dev`; its `full`/`developer` rows additionally include `iris_test_status`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 72,072 → 31,246, ~57%). Last re-measured at the Story 38.2 code review (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
 
 ---
 
