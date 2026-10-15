@@ -102,3 +102,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-15T22:04:03Z	Epic 38	spine_updated	ad=AD-6 reason=clarification by=lead story=38-4-surgical-line-edit-tool lint=ok note=only_a_disable_is_inherited
 2026-10-15T22:04:03Z	Story 38.4	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-15T22:05:32Z	Story 38.4	smoke_complete	method=cli_stdio_jsonrpc_built_dist_live result=pass iterations=2 defects_caught=1 defect=DW-554(pre-existing_governance_fail-open_not_this_story) checks=14 oracle_corrections=3_edits_min1+regex+governance_shape evidence=scratchpad/smoke-38-4.mjs,smoke-38-4b.mjs fixture=ExecuteMCPv2.Temp.LeadSmoke384_removed model=claude-opus-5-5
+2026-10-15T22:06:31Z	Story 38.4	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=814 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
