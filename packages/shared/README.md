@@ -26,7 +26,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ### MCP Server Base
 
-- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), transport setup (stdio/Streamable HTTP), health checking, and auto-bootstrap of custom REST classes.
+- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), stdio transport setup, health checking, and auto-bootstrap of custom REST classes.
 - **`McpServerBaseOptions`** (type) -- Options for constructing an MCP server (name, version, tool definitions).
 - **`ToolDefinition`** (type) -- Tool definition interface including name, title, description, inputSchema (Zod), annotations, scope, and handler function.
 - **`ToolContext`** (type) -- Context passed to tool handlers: HTTP client, Atelier version, namespace resolver, paginator.
@@ -36,7 +36,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`PaginateResult<T>`** (type) -- Generic result type for paginated tool responses: items array, nextCursor, and hasMore flag.
 - **`buildToolContext()`** -- Factory function to create a ToolContext from an HTTP client and Atelier version.
 - **`encodeCursor()` / `decodeCursor()`** -- Cursor encoding utilities for paginated tool responses.
-- **`resolveTransport()`** -- Determines MCP transport type (stdio vs Streamable HTTP) from environment.
+- **`resolveTransport()`** -- Returns `stdio` from `--transport` / `MCP_TRANSPORT`, and throws a configuration error for any other configured value.
 
 ### Atelier API Utilities
 
@@ -147,7 +147,7 @@ The shared package provides the HTTP communication layer, MCP protocol handling,
 
 The connection flow is:
 1. Server starts and loads configuration from environment variables
-2. `McpServerBase` initializes the MCP transport (stdio or Streamable HTTP)
+2. `McpServerBase` initializes the MCP transport (stdio)
 3. On first tool call, the HTTP client connects to IRIS and negotiates the Atelier API version
 4. Bootstrap checks for the custom REST endpoint and deploys it if missing
 5. Tools execute via the Atelier REST API or custom REST endpoint as appropriate

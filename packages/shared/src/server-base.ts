@@ -320,7 +320,7 @@ export function buildToolContext(
  * - Namespace resolution per tool scope
  * - Cursor-based pagination for `tools/list` (default 50 per page)
  * - `notifications/tools/list_changed` emission on add/remove
- * - stdio and HTTP transport setup
+ * - stdio transport setup
  * - Startup orchestration: loadConfig &rarr; connect &rarr; health check &rarr; version negotiation
  */
 export class McpServerBase {
@@ -1930,7 +1930,7 @@ export class McpServerBase {
   // ── Transport and startup ──────────────────────────────────────────
 
   /**
-   * Start the MCP server with the specified transport.
+   * Start the MCP server and connect its stdio transport.
    *
    * Startup sequence:
    * 1. Load config + build the profile registry (if not provided)
@@ -1957,9 +1957,12 @@ export class McpServerBase {
    * non-default profile already uses, recovering automatically with no
    * restart. See {@link getOrCreateClient} for that path.
    *
-   * @param transport - `"stdio"` (default) or `"http"`.
+   * @param _transport - `"stdio"`, the only supported transport
+   *   (`resolveTransport` rejects every other configured value). The
+   *   parameter fixes the call shape `start(resolveTransport())`; the
+   *   transport connected in the last startup step is always stdio.
    */
-  async start(transport: "stdio" | "http" = "stdio"): Promise<void> {
+  async start(_transport: "stdio" = "stdio"): Promise<void> {
     // 1. Load config + build the profile registry.
     //    loadConfig is preserved for the default profile's config so existing
     //    single-server behavior is byte-for-byte unchanged.
@@ -2163,21 +2166,9 @@ export class McpServerBase {
     }
 
     // 5. Connect transport
-    if (transport === "stdio") {
-      const stdioTransport = new StdioServerTransport();
-      await this.mcpServer.connect(stdioTransport);
-      logger.info("Connected via stdio transport");
-    } else {
-      // HTTP transport — StreamableHTTPServerTransport requires
-      // an HTTP server to be created externally. For now, log a
-      // clear message; HTTP support will be fully wired in a
-      // future story when server packages define their entry points.
-      logger.error(
-        "HTTP transport is not yet fully implemented. " +
-          "Use stdio transport or implement HTTP setup in the server package.",
-      );
-      throw new Error("HTTP transport not yet implemented");
-    }
+    const stdioTransport = new StdioServerTransport();
+    await this.mcpServer.connect(stdioTransport);
+    logger.info("Connected via stdio transport");
   }
 
   /**

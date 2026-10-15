@@ -2854,3 +2854,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: execute-tests-running-contract-epic-gate.test.ts and test-status-epic-gate.test.ts each define the same 22-line recorder; the only reason is that live gate files are self-contained by pattern (Rule 2: weak reason)
 - 2026-10-15T14:26:53Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=cr note=reopen_if=a third gate file needs the work/ recorder, or the two copies diverge
+
+### DW-538: Streamable HTTP transport is not offered: a real MCP HTTP transport needs an authentication, bind-address and session design first
+- source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: G48/S-2: Story 38.1 makes every non-stdio transport a startup configuration error; AD-23 and the spine Deferred list allow an HTTP transport only with an auth, bind-address and session design and a confirmed remote-access use case
+- 2026-10-15T15:01:25Z status=decision-pending owner=burndown by=implement note=human=decide the auth, bind-address and session design (and the use case) for Streamable HTTP; AD-23

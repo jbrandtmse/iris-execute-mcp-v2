@@ -80,8 +80,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync, readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -330,48 +331,6 @@ async function resourcePayload(client: SdkClient): Promise<{
   };
 }
 
-interface SpawnOutcome {
-  code: number | null;
-  stderr: string;
-  timedOut: boolean;
-}
-
-/**
- * Spawn the built server directly (no MCP handshake) and wait for it to EXIT
- * on its own — the shape of a startup fail-fast (`server.start()`'s catch
- * prints "Fatal:" + the error and exits 1). A server still alive at the
- * timeout is killed and reported `timedOut`, which the assertions treat as
- * failure — a fail-fast violation that does NOT stop startup (silently
- * permissive) is exactly the regression these cases pin.
- */
-function spawnAndWaitForExit(
-  env: Record<string, string>,
-  timeoutMs: number,
-): Promise<SpawnOutcome> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [DEV_MCP_ENTRY_POINT], {
-      env,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve({ code: null, stderr, timedOut: true });
-    }, timeoutMs);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stderr, timedOut: false });
-    });
-  });
-}
-
 function skipIf(ctx: { skip: () => void }, reason: string | undefined, label: string): boolean {
   if (!reason) return false;
   // eslint-disable-next-line no-console
@@ -519,6 +478,8 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
       // health check, so these need no live IRIS.
       const missingPath = path.join(fixtureDir!, "does-not-exist.json");
       const missing = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
         childEnv({ IRIS_GOVERNANCE_FILE: missingPath }),
         45000,
       );
@@ -528,6 +489,8 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
       expect(missing.stderr).toContain(missingPath);
 
       const malformed = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
         childEnv({ IRIS_GOVERNANCE_FILE: malformedPath }),
         45000,
       );

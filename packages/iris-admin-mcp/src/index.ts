@@ -5,7 +5,8 @@
  *
  * Entry point that creates an {@link McpServerBase} instance with
  * the registered administration tool definitions and connects the
- * configured transport (stdio by default).
+ * stdio transport, the only supported transport; any other configured
+ * transport is a fatal configuration error.
  */
 
 import { createRequire } from "node:module";
@@ -27,9 +28,9 @@ const server = new McpServerBase({
   needsCustomRest: true,
 });
 
-const transport = resolveTransport();
-
-server.start(transport).catch((err: unknown) => {
+try {
+  await server.start(resolveTransport());
+} catch (err: unknown) {
   console.error("Fatal:", err);
   process.exit(1);
-});
+}

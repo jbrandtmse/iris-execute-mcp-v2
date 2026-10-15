@@ -3,17 +3,11 @@
  *
  * `packages/shared/src/__tests__/server-base-default-outage.test.ts` (5
  * tests) proves AC 37.1.4-37.1.7's four M1 commitments on the `"stdio"`
- * transport with a single profile shape. This file adds FIVE tests for
- * scenarios that survive a read of the fix (`server-base.ts` `start()`,
+ * transport with a single profile shape. This file adds FOUR tests (Gaps 2-5)
+ * for scenarios that survive a read of the fix (`server-base.ts` `start()`,
  * `getOrCreateClient`, `establishProfile`) but that no existing test —
  * neither the dev-stage file nor the pre-existing suite — actually drives:
  *
- *  1. `start("http")` under a FAILED default health check. The pre-existing
- *     `server-base.test.ts:584` ("should throw for HTTP transport") only
- *     drives the http branch with a HEALTHY default; the dev-stage outage
- *     file only drives `"stdio"`. No test combines the two, so a future
- *     regression that special-cased the non-fatal path to `"stdio"` only
- *     would ship silently.
  *  2. A failed default composed with an Epic 30 tool-visibility preset that
  *     hides a tool. Two independent constructor-time/start-time features
  *     that no existing test exercises together.
@@ -43,20 +37,18 @@
  * the pre-story `process.exit(1)` health-check catch), `vitest run` this
  * file, then `git stash pop` to restore the fix:
  *
- *   - Gap 1 (http transport), Gap 2 (visibility preset), Gap 3
- *     (bootstrapAttempted recovery), and Gap 5 (coalesced reject) ALL go
- *     RED — each asserts `exitMock` was NOT called immediately after
- *     `server.start(...)` with the default unreachable, and the reverted
- *     code calls `process.exit(1)` (mocked to a no-op in this suite) right
- *     there, so every downstream assertion in those four tests diverges
- *     from the pre-fix behavior. 4 of 5 tests in this file are therefore
- *     genuine RED-proof coverage of the exact path
+ *   - Gap 2 (visibility preset), Gap 3 (bootstrapAttempted recovery), and
+ *     Gap 5 (coalesced reject) ALL go RED -- each asserts `exitMock` was NOT
+ *     called immediately after `server.start(...)` with the default
+ *     unreachable, and the reverted code calls `process.exit(1)` (mocked to
+ *     a no-op in this suite) right there, so every downstream assertion in
+ *     those three tests diverges from the pre-fix behavior. 3 of 4 tests in
+ *     this file are therefore genuine RED-proof coverage of the exact path
  *     `McpServerBase.start()`'s default-profile health-check catch — the
  *     same path the dev-stage file's own RED proof targets, exercised
- *     through different downstream mechanisms (http transport dispatch,
- *     tool-visibility composition, the recovery-path bootstrap flag, and
- *     the coalescing map) that the dev-stage file's own 5 tests do not
- *     drive.
+ *     through different downstream mechanisms (tool-visibility composition,
+ *     the recovery-path bootstrap flag, and the coalescing map) that the
+ *     dev-stage file's own 5 tests do not drive.
  *   - Gap 4 (re-degradation after a successful recovery) does NOT go red:
  *     it deliberately starts with the default REACHABLE (so the eager
  *     attempt succeeds on both pre-fix and fixed code) and only then
@@ -296,31 +288,6 @@ describe("server-base — default-profile outage, QA coverage gaps (Story 37.1)"
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-  });
-
-  describe('Gap 1 — start("http") after a failed default health check (existing tests only combine http+healthy or stdio+failed, never both)', () => {
-    it("logs the health failure + continuation lines, never calls process.exit, then rejects with the existing not-implemented error", async () => {
-      delete process.env.IRIS_PROFILES;
-      const fetchMock = makeRoutedFetch(() => false);
-      globalThis.fetch = fetchMock;
-      const errorSpy = vi.spyOn(logger, "error");
-
-      const server = new McpServerBase(makeServerOpts([], makeConfig()));
-
-      await expect(server.start("http")).rejects.toThrow("HTTP transport not yet implemented");
-
-      // The M1 non-fatal path ran (no exit) BEFORE the pre-existing
-      // http-not-implemented throw — proving the fix is not accidentally
-      // scoped to the stdio branch.
-      expect(exitMock).not.toHaveBeenCalled();
-      expectHealthFailureLoggedOnce(errorSpy);
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Continuing startup without the "default" profile'),
-      );
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("HTTP transport is not yet fully implemented"),
-      );
-    });
   });
 
   describe("Gap 2 — a failed default composed with an Epic 30 tool-visibility preset (two independent features, never exercised together)", () => {

@@ -119,6 +119,10 @@ describe("iris-admin-mcp", () => {
   describe("resolveTransport()", () => {
     const originalArgv = process.argv;
     const originalEnv = process.env["MCP_TRANSPORT"];
+    const ENV_HTTP_MESSAGE =
+      'Unsupported transport "http" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".';
+    const FLAG_HTTP_MESSAGE =
+      'Unsupported transport "http" from --transport: stdio is the only supported transport. Remove --transport or pass --transport stdio.';
 
     afterEach(() => {
       process.argv = originalArgv;
@@ -135,40 +139,42 @@ describe("iris-admin-mcp", () => {
       expect(resolveTransport()).toBe("stdio");
     });
 
-    it("should return http from --transport=http CLI arg", () => {
-      process.argv = ["node", "index.js", "--transport=http"];
-      delete process.env["MCP_TRANSPORT"];
-      expect(resolveTransport()).toBe("http");
-    });
-
-    it("should return http from --transport http CLI arg", () => {
-      process.argv = ["node", "index.js", "--transport", "http"];
-      delete process.env["MCP_TRANSPORT"];
-      expect(resolveTransport()).toBe("http");
-    });
-
     it("should return stdio from MCP_TRANSPORT env var", () => {
       process.argv = ["node", "index.js"];
       process.env["MCP_TRANSPORT"] = "stdio";
       expect(resolveTransport()).toBe("stdio");
     });
 
-    it("should return http from MCP_TRANSPORT env var", () => {
+    it("should reject --transport=http CLI arg as a configuration error", () => {
+      process.argv = ["node", "index.js", "--transport=http"];
+      delete process.env["MCP_TRANSPORT"];
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
+    });
+
+    it("should reject --transport http CLI arg as a configuration error", () => {
+      process.argv = ["node", "index.js", "--transport", "http"];
+      delete process.env["MCP_TRANSPORT"];
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
+    });
+
+    it("should reject MCP_TRANSPORT=http as a configuration error", () => {
       process.argv = ["node", "index.js"];
       process.env["MCP_TRANSPORT"] = "http";
-      expect(resolveTransport()).toBe("http");
+      expect(() => resolveTransport()).toThrow(ENV_HTTP_MESSAGE);
     });
 
-    it("should fall back to stdio for unrecognised MCP_TRANSPORT", () => {
+    it("should reject an unrecognised MCP_TRANSPORT instead of falling back to stdio", () => {
       process.argv = ["node", "index.js"];
       process.env["MCP_TRANSPORT"] = "invalid";
-      expect(resolveTransport()).toBe("stdio");
+      expect(() => resolveTransport()).toThrow(
+        'Unsupported transport "invalid" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".',
+      );
     });
 
-    it("should prefer CLI arg over env var", () => {
+    it("should check the CLI arg even when MCP_TRANSPORT is stdio", () => {
       process.argv = ["node", "index.js", "--transport=http"];
       process.env["MCP_TRANSPORT"] = "stdio";
-      expect(resolveTransport()).toBe("http");
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
     });
   });
 });

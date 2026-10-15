@@ -2,6 +2,29 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.1: Reject the unimplemented HTTP transport
+
+### Changed — an MCP transport other than stdio is a startup configuration error (`@iris-mcp/shared`, all five servers; G48)
+
+**Before.** `MCP_TRANSPORT=http` or `--transport http` was accepted. The server then loaded its configuration,
+health-checked IRIS, negotiated the Atelier version and bootstrapped the custom REST classes, and only afterwards threw
+`HTTP transport not yet implemented`. An unknown `MCP_TRANSPORT` value fell back to `stdio` with a warning, and an unknown
+`--transport` value was silently ignored.
+
+**After.** `stdio` is the only supported transport. `resolveTransport()` throws a configuration error for every
+configured value other than `stdio`; the match is exact and case-sensitive, a `--transport` flag with no value is
+rejected, and an empty `MCP_TRANSPORT` still means "not configured". Each server prints `Fatal: Error: <message>` and
+exits 1 before it makes any IRIS connection:
+
+- `Unsupported transport "http" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".`
+- `Unsupported transport "http" from --transport: stdio is the only supported transport. Remove --transport or pass --transport stdio.`
+
+Every configured value is checked (flags first, in argument order, then `MCP_TRANSPORT`), so one channel no longer hides
+a bad value on the other. Startup with no transport configured, or with `stdio`, is unchanged: the same IRIS calls and
+the same log lines. The type of `McpServerBase.start()`'s parameter is narrowed to `"stdio"`. **Action for users who set `MCP_TRANSPORT` or
+`--transport`:** remove it, or set it to `stdio`. Streamable HTTP is not offered, because it needs an authentication,
+bind-address and session design first; that decision is filed as DW-538.
+
 ## [Pre-release — 2026-10-15] — Story 38.0: Epic 37 deferred cleanup
 
 `BOOTSTRAP_VERSION` moves from `2159ec9e6f69` to `3af8ca401e7c` (three handlers changed: `Interop`, `Security`,

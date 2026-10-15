@@ -64,9 +64,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
+import { spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -171,48 +171,6 @@ function childEnv(extra: Record<string, string>): Record<string, string> {
     IRIS_NAMESPACE,
     ...extra,
   };
-}
-
-interface SpawnOutcome {
-  code: number | null;
-  stderr: string;
-  timedOut: boolean;
-}
-
-/**
- * Spawn the built server directly (no MCP handshake) and wait for it to EXIT
- * on its own — the shape of a `required`-mode startup failure
- * (`server.start()`'s catch prints "Fatal:" + the error and exits 1). A
- * server that is still alive at the timeout is killed and reported as
- * `timedOut`, which the assertions treat as failure (a `required` violation
- * that does NOT fail startup is exactly the regression these cases pin).
- */
-function spawnAndWaitForExit(
-  env: Record<string, string>,
-  timeoutMs: number,
-): Promise<SpawnOutcome> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [DEV_MCP_ENTRY_POINT], {
-      env,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve({ code: null, stderr, timedOut: true });
-    }, timeoutMs);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stderr, timedOut: false });
-    });
-  });
 }
 
 let distSkipReason: string | undefined;
@@ -469,6 +427,8 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         return;
       }
       const outcome = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
         childEnv({
           IRIS_SERVER_MANAGER: "required",
           IRIS_SM_SETTINGS_PATHS: fileCollide,
@@ -497,6 +457,8 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         return;
       }
       const outcome = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
         childEnv({
           IRIS_SERVER_MANAGER: "required",
           IRIS_SM_SETTINGS_PATHS: [fileBad, fileGood].join(path.delimiter),
@@ -599,6 +561,8 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         return;
       }
       const outcome = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
         childEnv({
           IRIS_SERVER_MANAGER: "required",
           IRIS_SM_SETTINGS_PATHS: [fileR1High, fileR1Low].join(path.delimiter),
