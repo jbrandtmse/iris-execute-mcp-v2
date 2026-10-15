@@ -66,6 +66,7 @@ import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+import { inheritedEnv } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -211,10 +212,7 @@ async function driveOutageRoundTrip(
     }) => unknown;
   };
 
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
-  }
+  const env = inheritedEnv();
   env.IRIS_HOST = "127.0.0.1";
   env.IRIS_PORT = "9";
   env.IRIS_USERNAME = "epic37GateProbe";

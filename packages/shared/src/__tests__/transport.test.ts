@@ -43,13 +43,25 @@ describe("resolveTransport", () => {
   const originalEnvTransport = process.env["MCP_TRANSPORT"];
   let errorSpy: MockInstance;
   let warnSpy: MockInstance;
+  let logSpy: MockInstance;
+  let infoSpy: MockInstance;
+  let debugSpy: MockInstance;
   let stdoutSpy: MockInstance;
+  let stderrSpy: MockInstance;
 
   beforeEach(() => {
+    // Every console method is spied on directly: under vitest the console does
+    // not write through process.stdout.write or process.stderr.write.
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     stdoutSpy = vi
       .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    stderrSpy = vi
+      .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
     delete process.env["MCP_TRANSPORT"];
     process.argv = ["node", "script"];
@@ -59,7 +71,11 @@ describe("resolveTransport", () => {
     const writes = {
       error: errorSpy.mock.calls.length,
       warn: warnSpy.mock.calls.length,
+      log: logSpy.mock.calls.length,
+      info: infoSpy.mock.calls.length,
+      debug: debugSpy.mock.calls.length,
       stdout: stdoutSpy.mock.calls.length,
+      stderr: stderrSpy.mock.calls.length,
     };
     // Restore first, so a failing assertion below cannot leak argv, the
     // environment or live spies into the next test.
@@ -72,7 +88,15 @@ describe("resolveTransport", () => {
     vi.restoreAllMocks();
     // Nothing is written on any path: stdout carries MCP, and the entry
     // point reports the thrown error.
-    expect(writes).toEqual({ error: 0, warn: 0, stdout: 0 });
+    expect(writes).toEqual({
+      error: 0,
+      warn: 0,
+      log: 0,
+      info: 0,
+      debug: 0,
+      stdout: 0,
+      stderr: 0,
+    });
   });
 
   describe("not configured, or explicit stdio", () => {

@@ -66,7 +66,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
-import { spawnAndWaitForExit } from "./process-gate-helpers.js";
+import { inheritedEnv, spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -148,22 +148,18 @@ interface SdkClient {
 }
 
 /**
- * Child-process env: inherit the ambient process env (PATH etc.) but scrub
- * EVERY IRIS_* variable first, so a developer shell's own suite configuration
- * can never leak into a spawned gate server, then layer the test's explicit
- * IRIS_* values on top.
+ * Child-process env: inherit the ambient process env (PATH etc.) minus EVERY
+ * IRIS_* variable and MCP_TRANSPORT (`inheritedEnv`), so a developer shell's
+ * own suite configuration can never leak into a spawned gate server, then
+ * layer the test's explicit IRIS_* values on top.
  *
- * 32-3-R9 (Story 32.4): the scrub is CASE-INSENSITIVE — Windows environment
- * variables are case-insensitive, so an ambient lowercase `iris_host` would
- * otherwise survive the scrub and still be seen by the child.
+ * The scrub is CASE-INSENSITIVE — Windows environment variables are
+ * case-insensitive, so an ambient lowercase `iris_host` would otherwise
+ * survive the scrub and still be seen by the child.
  */
 function childEnv(extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
-  }
   return {
-    ...env,
+    ...inheritedEnv(),
     IRIS_HOST,
     IRIS_PORT: String(IRIS_PORT),
     IRIS_USERNAME,

@@ -27,6 +27,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+import { inheritedEnv } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -38,15 +39,9 @@ const REQUIRE_LIVE =
 
 const SIX = ["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE", "IRIS_HTTPS"];
 
-/** The parent environment with every IRIS_* variable and CI removed, so nothing leaks into a child. */
+/** The parent environment with every IRIS_* variable, MCP_TRANSPORT and CI removed, so nothing leaks into a child. */
 function cleanEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_") && key !== "CI") {
-      env[key] = value;
-    }
-  }
-  return env;
+  return inheritedEnv(["CI"]);
 }
 
 interface Stub {

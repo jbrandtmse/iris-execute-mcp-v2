@@ -42,7 +42,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
-import { spawnAndWaitForExit } from "./process-gate-helpers.js";
+import { inheritedEnv, spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -115,18 +115,15 @@ interface SdkClient {
 }
 
 /**
- * Child-process env: inherit the ambient process env (PATH etc.) but scrub
- * EVERY IRIS_* variable first (CASE-INSENSITIVELY — 32-3-R9), then layer the
- * test's explicit IRIS_* values on top — `extra` is spread LAST, so an
- * `IRIS_HOST` entry there replaces the clean default (the userinfo case).
+ * Child-process env: inherit the ambient process env (PATH etc.) minus EVERY
+ * IRIS_* variable and MCP_TRANSPORT, matched CASE-INSENSITIVELY
+ * (`inheritedEnv`), then layer the test's explicit IRIS_* values on top —
+ * `extra` is spread LAST, so an `IRIS_HOST` entry there replaces the clean
+ * default (the userinfo case).
  */
 function childEnv(extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
-  }
   return {
-    ...env,
+    ...inheritedEnv(),
     IRIS_HOST,
     IRIS_PORT: String(IRIS_PORT),
     IRIS_USERNAME,

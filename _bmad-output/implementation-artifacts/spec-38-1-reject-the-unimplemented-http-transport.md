@@ -138,6 +138,41 @@ The message templates are exact (`<v>` is `JSON.stringify(value)`):
 - AC-6 (38.1.6): Given the Design Notes verdict table, when the docs are edited, then every row is applied and the doc-claims case passes; `CHANGELOG.md` and the changeset exist; and the ledger shows a `decision-pending owner=burndown` entry whose note starts `human=` and names the auth design.
 - AC-7 (38.1.7): Given the finished tree, when the gates run, then every per-package build, test, lint and type-check passes, governance `:check` exits 0 at `1e62c5ad5bf7`/141, tool counts are unchanged, and `bootstrap-classes.ts` has no diff.
 
+### Review Findings
+
+Code review (`/bmad-code-review`, epic-cycle stage) on 2026-10-15. Diff `e25f1e7..HEAD` plus the QA working tree, frozen at review start. Review tier `full-opus`; all four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor). 18 raw findings: 6 root-cause entries survived (3 medium, 3 low), and 9 rows were rejected. Every patch was applied in this pass.
+
+- [x] [Review][Patch] **The sibling process gates inherit an ambient `MCP_TRANSPORT`, so a non-stdio value turns them red with the wrong cause** [packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts:18] (medium; blind-hunter; fix-risk low: test-only, verified by mutation and by a hostile-environment run).
+  - Six gates spawn a built server with the parent environment minus only `IRIS_*`: host-guard, governance-file, server-manager-precedence, epic37-default-outage, server-manager-process and story-38-0-qa-process. The transport check now runs before the configuration checks, so this story made `MCP_TRANSPORT` load-bearing for every one of them.
+  - Verified live: with `MCP_TRANSPORT=http` set, host-guard was 4 of 4 red. It expected `IRIS_HOST must be a bare hostname` and got the transport error.
+  - The new gate's `childEnv` was also a seventh copy of the scrub loop (Rule 2).
+  - Fixed: `inheritedEnv(alsoDrop)` in `process-gate-helpers.ts` drops `IRIS_*` and `MCP_TRANSPORT` case-insensitively. All seven sites use it; the transport gate passes `["LOG_LEVEL"]` and story-38-0 passes `["CI"]`.
+- [x] [Review][Patch] **The writes-nothing pin cannot see `console.log`, `console.info`, `console.debug` or `process.stderr.write`** [packages/shared/src/__tests__/transport.test.ts:52] (medium; verification-gap + blind-hunter; fix-risk low: test-only spies).
+  - Under vitest the console does not write through `process.stdout.write`. A `console.log` on the stdio path left all 23 cases green, which was verified before the patch.
+  - Fixed: all five console methods, `process.stdout.write` and `process.stderr.write` are spied on, and `afterEach` asserts every count is 0.
+- [x] [Review][Defer] **The VS Code launcher passes an ambient `MCP_TRANSPORT` through to every stdio server it spawns** [extensions/iris-mcp-launcher/src/env.ts:122] — deferred: out of footprint (no Epic 38 story touches the extension). DW-539 `escalated owner=burndown` (medium, fix-risk med: the launcher suite is red on this host, DW-532).
+  - `LAUNCHER_OWNED_VARS` omits `MCP_TRANSPORT`. Since this story, any non-stdio value in the editor's environment makes every launched server exit 1.
+  - Recommendation: null it. The launcher only spawns stdio, so nothing is lost.
+- [x] [Review][Patch] **The doc-claims scan skipped `extensions/*/README.md`** [packages/iris-mcp-all/src/__tests__/transport-rejection-gate.test.ts:298] (low; blind-hunter + edge-case-hunter; Rule #56).
+  - Fixed: `readmesIn("extensions")` is part of the mechanical roster, and the launcher README is in the independent coverage list.
+- [x] [Review][Patch] **The doc-claims patterns covered only shell forms** [packages/iris-mcp-all/src/__tests__/transport-rejection-gate.test.ts:305] (low; edge-case-hunter).
+  - A client-config doc writes `"args": [..., "--transport", "http"]` or `"MCP_TRANSPORT": "http"`, and neither form was caught.
+  - Fixed: there is a `"--transport", "http"` pair pattern, and the `MCP_TRANSPORT` pattern now covers `=`, `:` and quoted forms. It is self-tested against JSON, TOML and shell positives and against the README's own wording; no current doc matches.
+- [x] [Review][Patch] **The AD-23 Rule bullet said every `MCP_TRANSPORT` value must be exactly `stdio`, but an empty value means not configured** [_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md:390] (low; edge-case-hunter + acceptance-auditor).
+  - Fixed: the bullet now reads "each `--transport` value, and `MCP_TRANSPORT` when it is non-empty". `lint_spine` reports 0 findings, and no memlog line was added because no decision changed.
+  - The lead's "Before 38.1 ..." sentence is left as written.
+
+Rejected (9):
+- `false` (blind-hunter) No process case asserts the exit status, so the top-level `await` is unobserved. `Connected via stdio transport` is the last statement of `start()` (`server-base.ts:2171`). A `start()` that never settles cannot log it, and the control and accepted-form cases assert it. An unsettled-top-level-await exit 13 is unreachable once it has been logged.
+- `false` (edge-case-hunter) A 10 s `CONTROL_TIMEOUT_MS` flakes under load. Measured: an unconfigured server starts, connects and exits on stdin EOF in about 0.1 s, which leaves about 100x headroom.
+- `false` (verification-gap) The runtime asserts in `transport-contract-types.test.ts` cannot fail. They are labelled liveness-only. The pin is the `@ts-expect-error` that `tsc` checks in both build and type-check, and QA's mutations turned it red (TS2578, TS2322).
+- `false` (verification-gap) AC-1, AC-5 and AC-7 have no `mutation:` line. The spec declares them as a reading, a live run and a gate roll-up. AC-5's observable behaviour is pinned by the AC-4 gate, which has mutation lines.
+- `low` (blind-hunter) The doc cases fail when a dist is stale. The failure message names the rebuild command, which any run of this file needs anyway, and the fix would restructure the file's hooks.
+- `low` (blind-hunter) The four leaf `index.test.ts` `resolveTransport()` blocks duplicate `transport.test.ts`. They pre-exist, the spec requires keeping and converting them, and they only cost an edit when the message contract changes.
+- `low` (edge-case-hunter) At the timeout, the helper resolves before stderr drains. That path is taken only by a process that fails to exit, long after its startup lines were read, and the fix would change the resolve flow that four gates share.
+- `low` (verification-gap) The changeset case is `skipIf(!present)`. This is deliberate, because `changeset version` consumes the file; story-38-0 uses the same convention. An accidental delete is unlikely.
+- `low` (verification-gap) The AC-3 pin depends on `LOG_LEVEL` from `packages/shared/vitest.config.ts`, and the root `vitest.config.ts` does not set it. No script uses the root config (`test` is `turbo run test`). The logger reads `LOG_LEVEL` at module load, so the package config is the right mechanism, and seven pre-existing logger tests share the dependency.
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -278,6 +313,36 @@ Mutations and perturbations run in the review pass on 2026-10-15, for the tests 
 - mutation: the gate's `markdownIn` skips `cursor.md` -> `transport-rejection-gate` red on `the scan covers the docs a reader configures a server from` only (1 failed, 29 passed); reverted. It replaces a length assertion that was true by construction.
 - perturbation (AC-3 pin hermeticity): before the patch, `LOG_LEVEL=WARN pnpm --filter @iris-mcp/shared exec vitest run` was red on the back-compat pin (`stderr lines for unset: expected [] to deeply equal [ ...(6) ]`) plus seven pre-existing logger-level tests (8 failed of 1380). After the patch (`env: { LOG_LEVEL: "DEBUG" }` in `packages/shared/vitest.config.ts`, and the case clearing and restoring every `IRIS_*` variable), the same command is 1380 of 1380 green, and the pin alone passes under `LOG_LEVEL=ERROR IRIS_PROFILES=garbage IRIS_GOVERNANCE_PRESET=bogus IRIS_AUDIT_LOG=/nonexistent/dir/x.log`.
 - no mutation line: the `close` (was `exit`) event in `process-gate-helpers.ts` is a stderr-drain race that no deterministic test can force; the four process gates are green on it.
+
+QA pass on 2026-10-15 (gap analysis against the I/O matrix and AC-2, AC-3, AC-4, AC-6; no IRIS call, only local `net` listeners). Each mutation was applied, observed red, reverted; `shasum -a 256` of every touched file, `git status --short` and `git diff --stat` matched the pre-mutation snapshot afterwards, and `cp -p` kept the src mtimes so no dist went stale. Built-dist mutations were applied to the dist file itself, the artifact the gate spawns.
+- Files (QA):
+  - `packages/iris-mcp-all/src/__tests__/transport-rejection-gate.test.ts` (extended: new describe "an explicit stdio transport starts the built servers like an unconfigured one", 5 cases, one per server; 31 -> 36)
+  - `packages/iris-mcp-all/src/__tests__/story-38-1-qa-doc-claims.test.ts` (new, 6 cases)
+  - `packages/shared/src/__tests__/transport-contract-types.test.ts` (new, 1 case, compile-time pin checked by `tsc`)
+- Gaps closed: (1) matrix rows "Explicit stdio" (and `MCP_TRANSPORT=""`) had no real-process test, only in-process; (2) the gate's negative `IRIS health check` oracle was never shown able to fail; (3) AC-2 "`start()` accepts only `"stdio"`" had no pin that could go red; (4) AC-6 CHANGELOG-quoted messages, changeset bumps and the README fail-fast bullet were unpinned.
+- mutation: built `shared/dist/transport.js` rejects every non-empty `MCP_TRANSPORT` (`if (envTransport) {`) -> `transport-rejection-gate` red on the 5 new accepted-form cases (`MCP_TRANSPORT=stdio: connections to its IRIS listener: expected 0 to be greater than or equal to 1`), the 31 existing cases stayed green; reverted, 36 of 36 green. (AC-3, process path)
+- mutation: built `shared/dist/server-base.js` health prefix reworded (`"IRIS probe failed:"`) -> the 5 new cases red (`expected ... to contain 'IRIS health check'`) while all 31 existing cases stayed green, which shows the rejection cases' `not.toContain("IRIS health check")` had gone vacuous and only the new liveness assertion sees it; reverted. (AC-4, oracle liveness)
+- mutation: `start(_transport: "stdio" | "http" = "stdio")` in `server-base.ts` -> `pnpm --filter @iris-mcp/shared type-check` red only in `transport-contract-types.test.ts` (`TS2578: Unused '@ts-expect-error' directive`); no other test noticed the widening; reverted. (AC-2, types)
+- mutation: `resolveTransport(): "stdio" | "http"` -> `type-check` red in `transport-contract-types.test.ts` (`TS2322`) and `server-base.test.ts` (`TS2345`); reverted. (AC-2, types)
+- mutation: the CHANGELOG's quoted `MCP_TRANSPORT` message edited -> `story-38-1-qa-doc-claims` red on `quotes exactly the messages the built resolveTransport throws for http` only (1 failed, 5 passed); reverted. (AC-6)
+- mutation: changeset `"@iris-mcp/shared": minor` -> `major`, README stdio-only sentence reworded, README fail-fast bullet's transport item removed, shared README `resolveTransport()` line reworded, applied together -> `story-38-1-qa-doc-claims` red on exactly those 4 cases (changeset bumps, README stdio-only, README fail-fast, shared README), the CHANGELOG cases green; reverted. (AC-6)
+- Not covered, by decision: "`start()` has no HTTP branch" has no runtime pin. The only way to reach the branch is a cast (`start("http" as never)`), an impossible state the spec's Never list and Rule #54 forbid guarding or faking; the compile-time pin above is the observable half of AC-2. The ledger entry DW-538 is checked with `ledger.sh show`, not in a test (the ledger is a tracking artifact, not a deliverable). The `debug.ts:8` comment rewrite is a source comment with no behavior and no pin.
+- Verification at the QA tree: shared `type-check` exit 0 and `lint` 0 errors (the pre-existing `cli/governance.ts:909` warning only); shared full suite 70 files / 1381 tests; `@iris-mcp/all` `transport-rejection-gate` 36, `story-38-1-qa-doc-claims` 6, run together and alone, plus `live-gate-roster` and `story-38-0-qa-doc-claims` 16; `eslint` over the two `@iris-mcp/all` files exit 0. Neither new `@iris-mcp/all` file compares `IRIS_REQUIRE_LIVE`, so neither belongs in `prepublish-gate.mjs`.
+
+Code review pass on 2026-10-15, for the tests the review patches touched.
+- **Discipline.** Each mutation was applied, observed red, then reverted with `cp -p` from a backup. The `shasum -a 256` of each touched file matched its pre-mutation value afterwards, so src mtimes were kept and no dist went stale.
+- mutation: `resolveTransport` writes `console.log("[transport] stdio")` before its `return`. Against the PRE-patch `transport.test.ts` -> 23 of 23 green: the gap. Against the patched test -> 6 of 23 red, the stdio-path cases, each on the `afterEach` writes-nothing `toEqual`. Reverted. (AC-2, "writes nothing")
+- mutation: `resolveTransport` writes `process.stderr.write("[transport] stdio\n")` before its `return` -> the patched `transport.test.ts` is 6 of 23 red; reverted. (AC-2)
+- perturbation (hermeticity of the process gates):
+  - Before the patch, `MCP_TRANSPORT=http pnpm --filter @iris-mcp/all exec vitest run src/__tests__/host-guard-process-gate.test.ts` was 4 of 4 red. It expected `IRIS_HOST must be a bare hostname` and similar, and got the transport error.
+  - After the patch (`inheritedEnv`), the same ambient `MCP_TRANSPORT=http` is green: host-guard 4, governance-file 9, server-manager-precedence 5, epic37-default-outage 2, server-manager-process 1, story-38-0-qa-process 7.
+- mutation: `inheritedEnv` stops dropping `MCP_TRANSPORT` (`new Set([...alsoDrop...])`) -> under `MCP_TRANSPORT=http` host-guard is 4 of 4 red; reverted.
+- mutation: the doc scan drops `...readmesIn("extensions")` -> `transport-rejection-gate` red on `the scan covers the docs a reader configures a server from` only; reverted. (AC-6)
+- mutation: append `"args": ["index.js", "--transport", "http"]` to `docs/client-config/cursor.md` -> red on `docs/client-config/cursor.md offers no HTTP transport` only; reverted. Then append `"MCP_TRANSPORT": "http"` -> the same single case red; reverted. (AC-6)
+- **Verification at the review tree.**
+  - Shared: `type-check` exit 0; `lint` 0 errors (only the pre-existing `cli/governance.ts:909` warning); full suite 70 files / 1381 tests.
+  - `@iris-mcp/all`: full suite 28 files / 264 tests (`transport-rejection-gate` 37); `eslint` over the 9 touched files exits 0.
+  - `lint_spine`: 0 findings.
 
 ## Auto Run Result
 

@@ -387,7 +387,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - Any transport other than `stdio` is rejected in `resolveTransport` as a configuration error (AD-8), before any IRIS traffic.
   - An HTTP transport is added only together with an authentication, bind-address and session design.
-  - Story 38.1 (commit `5f8b1e0`) enforces this. Every `MCP_TRANSPORT` and `--transport` value must be exactly `stdio`, and anything else is rejected with exit 1 before any IRIS traffic. Before 38.1, `transport.ts` accepted `http`, and an unknown value fell back to stdio with a warning.
+  - Story 38.1 (commit `5f8b1e0`) enforces this. Every configured value (each `--transport` value, and `MCP_TRANSPORT` when it is non-empty) must be exactly `stdio`, and anything else is rejected with exit 1 before any IRIS traffic. An empty `MCP_TRANSPORT` means not configured. Before 38.1, `transport.ts` accepted `http`, and an unknown value fell back to stdio with a warning.
 
 ### AD-24 — Agent document writes are guarded and minimal [ADOPTED] (N2, S-3) *(lands in Stories 38.2 to 38.4)*
 

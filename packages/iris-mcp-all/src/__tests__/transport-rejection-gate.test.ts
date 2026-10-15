@@ -15,6 +15,10 @@
  *   B. **Control.** The same process with no transport configured DOES connect
  *      to that listener and reaches `Connected via stdio transport`, which
  *      proves the oracle in A can see a connection at all.
+ *   B2. **Accepted forms.** `stdio` configured explicitly (`--transport stdio`,
+ *      `--transport=stdio`, `MCP_TRANSPORT=stdio`, `MCP_TRANSPORT=""`) starts
+ *      the same way as the control: it reaches the listener, logs the
+ *      `IRIS health check` line that A asserts absent, and connects stdio.
  *   C. **Docs.** No user-facing doc offers an HTTP transport, and the README
  *      env table carries the `MCP_TRANSPORT` row.
  *
@@ -31,7 +35,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 import { SERVER_PACKAGES as SERVER_PACKAGE_DIRS } from "../../../../scripts/lib/tool-catalog.mjs";
-import { spawnAndWaitForExit } from "./process-gate-helpers.js";
+import { inheritedEnv, spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -96,15 +100,8 @@ const CONTROL_TIMEOUT_MS = 10_000;
  * at the local listener.
  */
 function childEnv(port: number, extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== "string") continue;
-    const upper = key.toUpperCase();
-    if (upper.startsWith("IRIS_") || upper === "MCP_TRANSPORT" || upper === "LOG_LEVEL") continue;
-    env[key] = value;
-  }
   return {
-    ...env,
+    ...inheritedEnv(["LOG_LEVEL"]),
     IRIS_HOST: "127.0.0.1",
     IRIS_PORT: String(port),
     IRIS_USERNAME: "transport-gate",
@@ -225,6 +222,62 @@ describe("Story 38.1 -- a non-stdio transport is a startup configuration error (
   }
 });
 
+/** Forms of an explicitly configured `stdio` (or an empty `MCP_TRANSPORT`), each of which must start like an unconfigured server. */
+const ACCEPTED_FORMS: ReadonlyArray<{ label: string; args: string[]; env: Record<string, string> }> = [
+  { label: "--transport stdio", args: ["--transport", "stdio"], env: {} },
+  { label: "--transport=stdio", args: ["--transport=stdio"], env: {} },
+  { label: "MCP_TRANSPORT=stdio", args: [], env: { MCP_TRANSPORT: "stdio" } },
+  { label: 'MCP_TRANSPORT=""', args: [], env: { MCP_TRANSPORT: "" } },
+];
+
+describe("Story 38.1 -- an explicit stdio transport starts the built servers like an unconfigured one", () => {
+  for (const pkg of SERVERS) {
+    it(
+      `${pkg.name}: every accepted form reaches its own IRIS listener, logs the health-check line and connects stdio`,
+      async () => {
+        const entryPoint = path.join(REPO_ROOT, "packages", pkg.dir, "dist", "index.js");
+        // One listener per form, so each form's connection is attributed to that form alone.
+        const listeners: CountingListener[] = [];
+        let cwd: string | undefined;
+        try {
+          for (let count = 0; count < ACCEPTED_FORMS.length; count++) {
+            listeners.push(await startCountingListener());
+          }
+          cwd = mkdtempSync(path.join(realpathSync(tmpdir()), "transport-gate-"));
+          const workDir = cwd;
+          const outcomes = await Promise.all(
+            ACCEPTED_FORMS.map((form, index) =>
+              spawnAndWaitForExit(
+                entryPoint,
+                form.args,
+                childEnv(listeners[index]?.port ?? 0, form.env),
+                CONTROL_TIMEOUT_MS,
+                workDir,
+              ),
+            ),
+          );
+
+          ACCEPTED_FORMS.forEach((form, index) => {
+            const where = `${pkg.name} ${form.label}`;
+            const stderr = outcomes[index]?.stderr ?? "";
+            expect(listeners[index]?.connections(), `${where}: connections to its IRIS listener`).toBeGreaterThanOrEqual(1);
+            expect(stderr, `${where}: stderr`).toContain("Connected via stdio transport");
+            // The string the rejection cases assert ABSENT really is on this process's stderr when it
+            // reaches IRIS, so those negative assertions can fail.
+            expect(stderr, `${where}: stderr`).toContain("IRIS health check");
+            expect(stderr, `${where}: stderr`).not.toContain("Fatal:");
+            expect(stderr, `${where}: stderr`).not.toContain("Unsupported transport");
+          });
+        } finally {
+          await Promise.all(listeners.map((listener) => listener.close()));
+          if (cwd !== undefined) rmSync(cwd, { recursive: true, force: true });
+        }
+      },
+      90_000,
+    );
+  }
+});
+
 describe("Story 38.1 -- no user-facing doc offers an HTTP transport", () => {
   /** Repo-relative paths of the `.md` files directly inside `dir` (itself repo-relative). */
   const markdownIn = (dir: string): string[] =>
@@ -232,22 +285,28 @@ describe("Story 38.1 -- no user-facing doc offers an HTTP transport", () => {
       .filter((name) => name.endsWith(".md"))
       .sort()
       .map((name) => path.join(dir, name));
-  const PACKAGE_READMES = readdirSync(path.join(REPO_ROOT, "packages"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(path.join(REPO_ROOT, "packages", entry.name, "README.md")))
-    .map((entry) => path.join("packages", entry.name, "README.md"))
-    .sort();
+  /** Repo-relative paths of the `README.md` of each directory directly inside `dir` (itself repo-relative). */
+  const readmesIn = (dir: string): string[] =>
+    readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(path.join(REPO_ROOT, dir, entry.name, "README.md")))
+      .map((entry) => path.join(dir, entry.name, "README.md"))
+      .sort();
   const DOCS = [
     "README.md",
     "tool_support.md",
-    ...PACKAGE_READMES,
+    ...readmesIn("packages"),
+    ...readmesIn("extensions"),
     ...markdownIn("docs"),
     ...markdownIn(path.join("docs", "client-config")),
   ];
 
+  // Shell forms, plus the JSON and TOML forms a client configuration uses
+  // (`"args": ["--transport", "http"]`, `"MCP_TRANSPORT": "http"`, `MCP_TRANSPORT = "http"`).
   const FORBIDDEN: ReadonlyArray<{ label: string; pattern: RegExp }> = [
     { label: "a stdio-or-Streamable-HTTP claim", pattern: /stdio\W*(or|vs|\/)\W*(\*\*)?Streamable HTTP/i },
     { label: "the --transport http flag", pattern: /--transport[ =]http/ },
-    { label: "MCP_TRANSPORT=http", pattern: /MCP_TRANSPORT=http/ },
+    { label: 'a "--transport", "http" argument pair', pattern: /"--transport"\s*,\s*"http"/ },
+    { label: "MCP_TRANSPORT set to http", pattern: /MCP_TRANSPORT"?\s*[:=]\s*"?http/ },
   ];
 
   it("the scan covers the docs a reader configures a server from", () => {
@@ -262,6 +321,7 @@ describe("Story 38.1 -- no user-facing doc offers an HTTP transport", () => {
         ...["README.md", "claude-code.md", "claude-desktop.md", "cursor.md"].map((name) =>
           path.join("docs", "client-config", name),
         ),
+        path.join("extensions", "iris-mcp-launcher", "README.md"),
       ]),
     );
   });

@@ -5,6 +5,28 @@
 
 import { spawn } from "node:child_process";
 
+/**
+ * The test runner's environment for a spawned server: everything it inherits
+ * (PATH, and SystemRoot on Windows), minus every variable that configures the
+ * suite -- each `IRIS_*` key and `MCP_TRANSPORT` -- and minus each name in
+ * `alsoDrop`. Names match case-insensitively, as Windows treats them, so an
+ * ambient lowercase `iris_host` is dropped too. A gate layers its own explicit
+ * values on top of the result.
+ *
+ * @param alsoDrop - Further variable names to drop (case-insensitive).
+ */
+export function inheritedEnv(alsoDrop: readonly string[] = []): Record<string, string> {
+  const dropped = new Set(["MCP_TRANSPORT", ...alsoDrop.map((name) => name.toUpperCase())]);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value !== "string") continue;
+    const upper = key.toUpperCase();
+    if (upper.startsWith("IRIS_") || dropped.has(upper)) continue;
+    env[key] = value;
+  }
+  return env;
+}
+
 /** How a spawned server process ended. */
 export interface SpawnOutcome {
   /** Exit code, or `null` when the process was killed at the timeout. */

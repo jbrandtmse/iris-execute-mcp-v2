@@ -2859,3 +2859,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: G48/S-2: Story 38.1 makes every non-stdio transport a startup configuration error; AD-23 and the spine Deferred list allow an HTTP transport only with an auth, bind-address and session design and a confirmed remote-access use case
 - 2026-10-15T15:01:25Z status=decision-pending owner=burndown by=implement note=human=decide the auth, bind-address and session design (and the use case) for Streamable HTTP; AD-23
+
+### DW-539: VS Code launcher passes an ambient MCP_TRANSPORT through to the stdio servers it spawns: after Story 38.1 any non-stdio value makes every launched server exit 1
+- source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: extensions/iris-mcp-launcher/src/env.ts LAUNCHER_OWNED_VARS (ambient vars nulled because McpStdioServerDefinition.env is additive over the extension host env) omits MCP_TRANSPORT; resolveTransport now rejects every non-stdio value
+- 2026-10-15T15:52:02Z status=escalated owner=burndown by=cr note=launcher only spawns stdio, so nulling MCP_TRANSPORT loses nothing; rec: add it to LAUNCHER_OWNED_VARS (suite red here, DW-532)
