@@ -82,6 +82,10 @@ const gateTestFiles = [
   // `iris_doc_get` line ranges against the real Atelier `GET /doc` (AD-24 version-token record included):
   // writes only the disposable ExecuteMCPv2.Temp.QaStory382Range.cls/.mac and ...QaStory382Token.cls docs.
   "src/__tests__/doc-get-range-live-gate.test.ts",
+  // `iris_doc_put` Storage-drop guard and version-checked save against the real Atelier `PUT /doc`:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory383Guard (compiled, 2 rows), ...Multi, ...NoStorage,
+  // ...Shape and ...Rtn documents, and removes them, their data and their globals.
+  "src/__tests__/doc-put-storage-guard-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

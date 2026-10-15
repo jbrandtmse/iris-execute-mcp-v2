@@ -66,6 +66,7 @@ import {
 } from "./governance.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
+import { REFUSAL_CODES, refusalResult } from "./refusals.js";
 import {
   SERVER_DISCOVERY_TOOL_NAME,
   SERVER_DISCOVERY_INSTRUCTIONS,
@@ -1445,24 +1446,15 @@ export class McpServerBase {
         `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}"` +
           (presetCaused ? ` (preset "${this.preset}").` : "."),
       );
-      const structuredContent: Record<string, unknown> = {
-        code: "GOVERNANCE_DISABLED",
-        action: governanceKey,
-        server: profile.name,
-      };
-      if (presetCaused) {
-        structuredContent.presetApplied = this.preset;
-      }
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
-          },
-        ],
-        structuredContent,
-        isError: true,
-      };
+      return refusalResult(
+        REFUSAL_CODES.GOVERNANCE_DISABLED,
+        `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
+        {
+          action: governanceKey,
+          server: profile.name,
+          ...(presetCaused ? { presetApplied: this.preset } : {}),
+        },
+      );
     }
 
     // ── Discovery tool short-circuit (Epic 19, decision E1) ────────────
@@ -1737,7 +1729,7 @@ export class McpServerBase {
     const structured = result.structuredContent as
       | Record<string, unknown>
       | undefined;
-    if (structured?.code === "GOVERNANCE_DISABLED") return "denied";
+    if (structured?.code === REFUSAL_CODES.GOVERNANCE_DISABLED) return "denied";
     if (result.isError) return "error";
     return "ok";
   }

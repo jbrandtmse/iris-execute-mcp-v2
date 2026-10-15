@@ -100,11 +100,11 @@ describe("iris_doc_get", () => {
 
   // ── metadataOnly mode ───────────────────────────────────────────
 
-  it("should call HEAD and return exists/timestamp when metadataOnly=true", async () => {
+  // Atelier answers a HEAD with only `ETag` (the document's `ts`), never `Last-Modified`.
+  it("should call HEAD and return exists/etag when metadataOnly=true", async () => {
     mockHttp.head.mockResolvedValue(
       headResponse(200, {
-        "Last-Modified": "Sat, 05 Apr 2026 12:00:00 GMT",
-        "ETag": '"abc123"',
+        "ETag": "2026-04-05 12:00:00.123",
       }),
     );
 
@@ -117,11 +117,10 @@ describe("iris_doc_get", () => {
       "/api/atelier/v7/USER/doc/MyApp.Service.cls",
     );
     expect(mockHttp.get).not.toHaveBeenCalled();
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toStrictEqual({
       exists: true,
       name: "MyApp.Service.cls",
-      timestamp: "Sat, 05 Apr 2026 12:00:00 GMT",
-      etag: '"abc123"',
+      etag: "2026-04-05 12:00:00.123",
     });
     expect(result.isError).toBeUndefined();
   });
@@ -153,7 +152,7 @@ describe("iris_doc_get", () => {
     ).rejects.toThrow(IrisApiError);
   });
 
-  it("should handle missing Last-Modified and ETag headers in metadataOnly mode", async () => {
+  it("should handle a missing ETag header in metadataOnly mode, and never report a timestamp", async () => {
     mockHttp.head.mockResolvedValue(headResponse(200, {}));
 
     const result = await docGetTool.handler(
@@ -164,9 +163,8 @@ describe("iris_doc_get", () => {
     expect(result.structuredContent).toEqual({
       exists: true,
       name: "MyApp.Service.cls",
-      timestamp: undefined,
-      etag: undefined,
     });
+    expect(Object.keys(result.structuredContent as object)).not.toContain("timestamp");
   });
 
   it("should still use GET when metadataOnly is not set (regression)", async () => {
@@ -230,16 +228,18 @@ describe("iris_doc_put", () => {
     );
   });
 
+  // A routine: a class put with ignoreConflict is sent without the flag first (doc-put-storage-guard.test.ts),
+  // so the query-parameter pin needs a document type that is never guarded.
   it("should pass ignoreConflict as query parameter", async () => {
-    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.mac" }));
 
     await docPutTool.handler(
-      { name: "Test.cls", content: ["// test"], ignoreConflict: true },
+      { name: "Test.mac", content: ["// test"], ignoreConflict: true },
       ctx,
     );
 
     expect(mockHttp.put).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/doc/Test.cls?ignoreConflict=1",
+      "/api/atelier/v7/USER/doc/Test.mac?ignoreConflict=1",
       { enc: false, content: ["// test"] },
     );
   });

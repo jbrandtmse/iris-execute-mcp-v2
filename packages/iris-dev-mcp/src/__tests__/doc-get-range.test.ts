@@ -160,13 +160,16 @@ describe("iris_doc_get without a line range is unchanged (Story 38.2, AC-4)", ()
     });
   });
 
-  it("metadataOnly true: one HEAD on the bare path; a HEAD that carries only ETag yields {exists,name,timestamp:undefined,etag}", async () => {
+  it("metadataOnly true: one HEAD on the bare path; a HEAD that carries only ETag yields {exists,name,etag}", async () => {
     mockHttp.head.mockResolvedValue(headResponse(200, { ETag: TS }));
 
     const result = await docGetTool.handler({ name: "Test.Fixture.cls", metadataOnly: true }, ctx);
 
     expect(mockHttp.head.mock.calls).toEqual([[DOC_PATH]]);
     expect(mockHttp.get).not.toHaveBeenCalled();
+    // The text pin is unchanged. The structured pin lost the `timestamp: undefined` key, which Atelier
+    // never fills (it sends no Last-Modified header); JSON.stringify drops an undefined key, so the wire
+    // JSON, the text above, is unchanged.
     expect(result).toStrictEqual({
       content: [
         {
@@ -174,7 +177,7 @@ describe("iris_doc_get without a line range is unchanged (Story 38.2, AC-4)", ()
           text: ["{", '  "exists": true,', '  "name": "Test.Fixture.cls",', `  "etag": "${TS}"`, "}"].join("\n"),
         },
       ],
-      structuredContent: { exists: true, name: "Test.Fixture.cls", timestamp: undefined, etag: TS },
+      structuredContent: { exists: true, name: "Test.Fixture.cls", etag: TS },
     });
   });
 

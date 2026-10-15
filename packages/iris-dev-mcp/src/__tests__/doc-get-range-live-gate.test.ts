@@ -31,9 +31,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import {
-  IrisApiError,
   IrisHttpClient,
-  atelierDocStatusError,
   buildToolContext,
   loadConfig,
   negotiateVersion,
@@ -42,7 +40,7 @@ import {
 } from "@iris-mcp/shared";
 import { docGetTool } from "../tools/doc.js";
 import { locCountTool } from "../tools/loc.js";
-import { docPath, readStoredLines, removeStored } from "./live-doc-helpers.js";
+import { putDocLines, putStatus, readStoredLines, removeStored } from "./live-doc-helpers.js";
 
 const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
 const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
@@ -108,28 +106,6 @@ function rangeRoutineLines(): string[] {
 
 function tokenLines(extra: string[] = []): string[] {
   return [...extra, `Class ${TOKEN_NAME} Extends %RegisteredObject`, "{", "}"];
-}
-
-/** A raw Atelier PUT: IRIS refusing the document inside an HTTP 200 envelope is a gate failure. */
-async function putDoc(docName: string, lines: string[], headers?: Record<string, string>): Promise<void> {
-  const response = await client.put(
-    docPath(version, IRIS_NAMESPACE, docName),
-    { enc: false, content: lines },
-    headers ? { headers } : undefined,
-  );
-  const refusal = atelierDocStatusError(response.result);
-  if (refusal !== undefined) throw new Error(`IRIS refused ${docName}: ${refusal}`);
-}
-
-/** The status code of the IrisApiError a PUT throws; fails when the PUT is accepted. */
-async function putStatusCode(docName: string, lines: string[], headers?: Record<string, string>): Promise<number> {
-  try {
-    await putDoc(docName, lines, headers);
-  } catch (error) {
-    expect(error).toBeInstanceOf(IrisApiError);
-    return (error as IrisApiError).statusCode;
-  }
-  throw new Error(`the PUT to ${docName} was accepted; a refusal was expected`);
 }
 
 async function removeAll(): Promise<void> {
@@ -229,8 +205,8 @@ beforeAll(async () => {
   if (skipReason) return;
 
   await removeAll();
-  await putDoc(RANGE_CLASS_DOC, rangeClassLines());
-  await putDoc(RANGE_ROUTINE_DOC, rangeRoutineLines());
+  await putDocLines(client, version, IRIS_NAMESPACE, RANGE_CLASS_DOC, rangeClassLines());
+  await putDocLines(client, version, IRIS_NAMESPACE, RANGE_ROUTINE_DOC, rangeRoutineLines());
   rangeClass = await fullRead(RANGE_CLASS_DOC);
   rangeRoutine = await fullRead(RANGE_ROUTINE_DOC);
 }, 60000);
@@ -429,7 +405,7 @@ describe("AD-24 version-token record on a live document (Story 38.2, AC-1)", () 
   beforeEach(async () => {
     if (skipReason) return;
     await removeStored(client, version, IRIS_NAMESPACE, TOKEN_DOC);
-    await putDoc(TOKEN_DOC, tokenLines());
+    await putDocLines(client, version, IRIS_NAMESPACE, TOKEN_DOC, tokenLines());
   }, 60000);
 
   afterEach(async () => {
@@ -455,7 +431,13 @@ describe("AD-24 version-token record on a live document (Story 38.2, AC-1)", () 
     if (skipReason) return testCtx.skip();
     const before = await fullRead(TOKEN_DOC);
 
-    const statusCode = await putStatusCode(TOKEN_DOC, tokenLines(["/// changed without a token"]));
+    const statusCode = await putStatus(
+      client,
+      version,
+      IRIS_NAMESPACE,
+      TOKEN_DOC,
+      tokenLines(["/// changed without a token"]),
+    );
 
     expect(statusCode).toBe(409);
     expect(await fullRead(TOKEN_DOC)).toEqual(before);
@@ -466,7 +448,9 @@ describe("AD-24 version-token record on a live document (Story 38.2, AC-1)", () 
     if (skipReason) return testCtx.skip();
     const before = await fullRead(TOKEN_DOC);
 
-    await putDoc(TOKEN_DOC, tokenLines(["/// changed with the token"]), { "If-None-Match": before.ts });
+    await putDocLines(client, version, IRIS_NAMESPACE, TOKEN_DOC, tokenLines(["/// changed with the token"]), {
+      "If-None-Match": before.ts,
+    });
 
     const after = await fullRead(TOKEN_DOC);
     expect(after.content).toContain("/// changed with the token");
@@ -477,10 +461,12 @@ describe("AD-24 version-token record on a live document (Story 38.2, AC-1)", () 
   it("a PUT carrying the old ts after another write is refused with HTTP 409", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     const before = await fullRead(TOKEN_DOC);
-    await putDoc(TOKEN_DOC, tokenLines(["/// first change"]), { "If-None-Match": before.ts });
+    await putDocLines(client, version, IRIS_NAMESPACE, TOKEN_DOC, tokenLines(["/// first change"]), {
+      "If-None-Match": before.ts,
+    });
     const afterFirst = await fullRead(TOKEN_DOC);
 
-    const statusCode = await putStatusCode(TOKEN_DOC, tokenLines(["/// second change"]), {
+    const statusCode = await putStatus(client, version, IRIS_NAMESPACE, TOKEN_DOC, tokenLines(["/// second change"]), {
       "If-None-Match": before.ts,
     });
 

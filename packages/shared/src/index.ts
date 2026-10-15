@@ -37,6 +37,14 @@ export {
   formatNumberedLines,
   NUMBERED_LINE_WIDTH,
 } from "./lines.js";
+export { REFUSAL_CODES, refusalResult } from "./refusals.js";
+export type { RefusalCode, RefusalResult } from "./refusals.js";
+export {
+  isClassDocument,
+  storageDefinitionNames,
+  droppedStorageDefinitions,
+  storageDroppedRefusal,
+} from "./storage-guard.js";
 export type {
   ToolAnnotations,
   ToolDefinition,

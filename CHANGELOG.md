@@ -2,6 +2,61 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.3: Storage block drop guard
+
+### Changed — safety: `iris_doc_put` refuses a put that drops a class's Storage definition (sanctioned, AD-15)
+
+**Before.** `iris_doc_put` replaced a whole class with the text it was given. When that text had no Storage block, IRIS
+dropped the class's Storage definition, and the next compile generated a new one. On the live instance (IRIS 2026.2,
+Atelier v8) a class with two rows, put without its Storage and with its two properties in the other order, kept reading
+its rows correctly until the compile, and then read them swapped (`Alpha: 'beta-1'`): silent data corruption.
+
+**After.** A put to an existing class is refused when its content drops one of the class's Storage definitions. The
+result is `isError: true`, nothing is stored, and `structuredContent` is
+`{ code: "STORAGE_DROPPED", name, namespace, droppedStorage }`, where `droppedStorage` lists the dropped definition
+names in the order of the current source. The text says what to do:
+`Document '<name>' was not saved in namespace '<ns>': the content drops the Storage definition 'Second' that the class has now, and IRIS would generate new storage at the next compile, which can change how existing rows are read. Nothing was stored. Keep the Storage definitions in the content (read the class with iris_doc_get first), or pass allowStorageRegeneration: true to let IRIS regenerate the storage.`
+
+- **Override.** The new optional parameter `allowStorageRegeneration` (default **false**) lets the put through, with
+  today's behavior. It is a parameter of `iris_doc_put`, not a new tool or action: no governance key, `mutates`
+  classification, annotation or preset changes, and `iris_doc_put` stays a grandfathered baseline key.
+- **What counts.** Names are compared exactly (case-sensitive). A rename is a drop; changing a definition's content is
+  allowed. Only `.cls` documents are guarded, in UDL or XML form. A comment, a string, a method or XData body, or a
+  label that only says `Storage` is not a definition: the scanner follows IRIS's own parse, and a live oracle checks it
+  against IRIS for every fixture.
+- **Otherwise unchanged.** For a new class, a routine, an include file, and an existing class that keeps its Storage,
+  the result is what it was. A new document still costs one request. With `ignoreConflict: true` the request for a new
+  class no longer carries `?ignoreConflict=1` (IRIS ignores it for a new document), and an existing class is read through
+  the 409 that IRIS answers an unversioned write with, so no GET or HEAD is added to any path. With both
+  `ignoreConflict` and `allowStorageRegeneration`, and with any other document type and `ignoreConflict`, the one request
+  is today's.
+- **Not guarded, by decision (AD-24 verdicts).** `iris_doc_load` (DW-544), the `iris_env_promote` `execute` sync (DW-545)
+  and the `iris_doc_xml_export` import (DW-546) do not run the guard; each ledger entry says when to reopen it. The
+  bootstrap's own classes have no Storage definitions, and `iris_docdb_document` and `iris_global_set` do not write
+  documents. A new test lists every document-writing path with its verdict and fails on a path that has none.
+
+### Fixed
+
+- **DW-540: `iris_doc_put` could not update an existing document without `ignoreConflict`.** Atelier refuses a write to an
+  existing document that carries no version token with HTTP 409, so the tool answered `HTTP 409` for every existing
+  document of every type. It now uses that 409 (which carries the current document and its `ts`) and saves once more
+  with `If-None-Match` set to that `ts`, so an existing class, routine or include file is saved only if it has not changed
+  since the tool read it. A 409 on that second request is returned as
+  `{ code: "DOCUMENT_CONFLICT", name, namespace }` with `isError: true` and nothing stored; it is never retried. The
+  `ignoreConflict` description said "overwrite even when the server copy is newer"; it now says what the flag does
+  (skips the version check) and that it is not needed to replace an existing document.
+- **DW-541: `iris_doc_get` `metadataOnly` read a header that IRIS never sends.** `structuredContent` is now
+  `{ exists, name, etag }`; the always-absent `timestamp` key is gone. The text and the JSON on the wire are unchanged.
+
+### Added
+
+- `@iris-mcp/shared` exports `REFUSAL_CODES`, `refusalResult` and the types `RefusalCode` and `RefusalResult`: the catalog
+  of refusal codes, born with `GOVERNANCE_DISABLED` (whose results are byte-identical), `STORAGE_DROPPED` and
+  `DOCUMENT_CONFLICT`. It also exports `isClassDocument`, `storageDefinitionNames`, `droppedStorageDefinitions` and
+  `storageDroppedRefusal`, the guard that Story 38.4's `iris_doc_edit` reuses.
+- A live gate (`doc-put-storage-guard-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives the
+  guard against a real persistent class with rows.
+
 ## [Pre-release — 2026-10-15] — Story 38.2: Line-range document read
 
 ### Added — `iris_doc_get` reads a line range (`@iris-mcp/dev`, `@iris-mcp/shared`; G1)

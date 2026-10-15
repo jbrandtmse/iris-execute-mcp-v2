@@ -2885,3 +2885,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-2-line-range-document-read.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: grep 'function makeEnvHarness' = 43 files in shared/dev/admin/ops/interop; loc-e2e's copy leaves IRIS_TOOLS_* and IRIS_GOVERNANCE_FILE/PRESET set; 38.2 cr fixed only its own copy
 - 2026-10-15T17:11:58Z status=wontfix-accepted owner=38-2-line-range-document-read by=cr note=reopen_if=a second test result is found to depend on an env var that its makeEnvHarness copy leaves set
+
+### DW-544: iris_doc_load uploads each file with ignoreConflict on by default and has no Storage check, so a file whose class text has no Storage block replaces the stored class and drops its Storage definitions
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:447-456 sends PUT ?ignoreConflict=1 per file (the default) with no Storage guard; Story 38.3 AD-24 write-path verdict: excluded, because loading files from source control is the sanctioned flow and the file is the source of truth for the class text
+- 2026-10-15T18:19:47Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=a class loses its Storage after iris_doc_load uploads a file without it (user report or ledger occurrence)
+
+### DW-545: iris_env_promote execute copies each source document to the target with ignoreConflict=1 and has no Storage check, so a sync replaces the target class's Storage definitions with the source copy's
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: env-promote.ts:868-869 PUTs the source content to ...?ignoreConflict=1; a sync replaces the target's whole class, Storage included, by design. Story 38.3 AD-24 write-path verdict: excluded, because execute is plan-gated (the plan embeds the content hash of its source diff, AD-17) and default-disabled
+- 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=promote execute replaces a target class that has Storage with a source copy that has none (report)
+
+### DW-546: iris_doc_xml_export import loads an XML export through action/xml/load with no Storage check, so an import replaces the stored class, including its Storage definitions, with the export's
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: format.ts:218 POSTs the XML to action/xml/load; an XML export carries its own <Storage> elements, so an import replaces the stored definitions with the exported ones. Story 38.3 AD-24 write-path verdict: excluded (orchestrator decision 8 at the spec gate, 2026-10-15), because the export is the source of truth for the class it describes
+- 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=an XML import replaces a class that has Storage with a definition that has none (report)

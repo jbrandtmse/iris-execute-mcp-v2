@@ -143,7 +143,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_get` | Retrieve a document by name (UDL or XML format), or a numbered line range of a UDL text document | `name`, `namespace?`, `format?`, `metadataOnly?`, `startLine?`, `endLine?` | readOnly, idempotent |
-| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code) | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false** — do not overwrite a newer server copy) | idempotent |
+| `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code). An existing document is saved only if it has not changed since the tool read its current version; a put to an existing class that drops one of its Storage definitions is refused | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false**; skips the version check), `allowStorageRegeneration?` (default: **false**; lets a put that drops Storage definitions through) | idempotent |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
 | `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
@@ -346,6 +346,23 @@ throwaway test classes only. A leading byte-order mark is stripped from the cont
 before it is sent, and a write IRIS refuses (a non-empty `result.status` inside an
 HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stored then.
 
+- **Existing documents.** A document that does not exist yet is created by one request. For a document that exists,
+  IRIS refuses an unversioned write with HTTP 409 and the document's current text and version; the tool uses that
+  answer as its read, then saves once more with `If-None-Match` set to that version. A 409 on that save means the
+  document changed meanwhile: the tool returns a `DOCUMENT_CONFLICT` refusal (nothing stored) and never retries.
+  `ignoreConflict` (default **false**) skips the version check. No path sends an extra GET or HEAD.
+- **Storage guard.** A persistent class keeps its Storage definitions (the map from properties to the globals that
+  hold its rows) in its source. A put to an existing class whose content drops one of those definitions is refused
+  with `STORAGE_DROPPED` and nothing is stored, because IRIS would generate new storage at the next compile, which can
+  change how existing rows are read. Names are compared exactly: a rename is a drop, and changing a definition's
+  content is allowed. `allowStorageRegeneration: true` (default **false**) lets the put through, and then the
+  next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form.
+- **Unguarded paths.** The guard covers `iris_doc_put`. `iris_doc_load` (a file is the source of truth for its
+  class, uploaded with `ignoreConflict` on by default), the `iris_env_promote` `execute` sync (it replaces the target
+  class by design) and the `iris_doc_xml_export` import (an XML export carries its own Storage) do not run it. The
+  bootstrap's own classes have no Storage definitions. `iris_docdb_document` and `iris_global_set` write DocDB
+  records and global nodes, not documents. A test lists every document-writing path with its verdict.
+
 **Input:**
 ```json
 {
@@ -357,6 +374,20 @@ HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stor
 **Output:**
 ```json
 "Document 'MyApp.Utils.cls' saved successfully in namespace 'USER'."
+```
+
+**Refusal** (`isError: true`, nothing stored) when the class has Storage definitions `Default` and `Second` and the
+content keeps only `Default`:
+```text
+Document 'MyApp.Orders.cls' was not saved in namespace 'USER': the content drops the Storage definition 'Second' that the class has now, and IRIS would generate new storage at the next compile, which can change how existing rows are read. Nothing was stored. Keep the Storage definitions in the content (read the class with iris_doc_get first), or pass allowStorageRegeneration: true to let IRIS regenerate the storage.
+```
+```json
+{
+  "code": "STORAGE_DROPPED",
+  "name": "MyApp.Orders.cls",
+  "namespace": "USER",
+  "droppedStorage": ["Second"]
+}
 ```
 </details>
 

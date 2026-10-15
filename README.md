@@ -621,13 +621,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 30 / 72,072 / ~18,018 | 13 / 31,246 / ~7,812 | 30 / 72,072 / ~18,018 |
+| @iris-mcp/dev | 30 / 73,186 / ~18,297 | 13 / 32,360 / ~8,090 | 30 / 73,186 / ~18,297 |
 | @iris-mcp/admin | 27 / 48,234 / ~12,059 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
 | @iris-mcp/interop | 23 / 40,369 / ~10,092 | 10 / 21,554 / ~5,389 | 23 / 40,369 / ~10,092 |
 | @iris-mcp/ops | 22 / 30,677 / ~7,669 | 10 / 13,679 / ~3,420 | 10 / 14,130 / ~3,533 |
 | @iris-mcp/data | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 72,072 → 31,246, ~57%). Last re-measured at the Story 38.2 code review (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 73,186 → 32,360, ~56%). Last re-measured at Story 38.3 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
 
 ---
 

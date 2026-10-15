@@ -14,11 +14,17 @@ import {
   atelierDocStatusError,
   atelierPath,
   documentLines,
+  droppedStorageDefinitions,
   formatNumberedLines,
   IrisApiError,
+  isClassDocument,
   linesInRange,
+  REFUSAL_CODES,
+  refusalResult,
+  storageDroppedRefusal,
   stripLeadingBom,
   stripLeadingBomFromLines,
+  type AtelierEnvelope,
   type ToolDefinition,
   type ToolResult,
 } from "@iris-mcp/shared";
@@ -228,9 +234,8 @@ export const docGetTool: ToolDefinition = {
       const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`);
       try {
         const headResp = await ctx.http.head(path);
-        const lastModified = headResp.headers.get("Last-Modified") ?? undefined;
         const etag = headResp.headers.get("ETag") ?? undefined;
-        const metadata = { exists: true, name, timestamp: lastModified, etag };
+        const metadata = { exists: true, name, etag };
         return {
           content: [
             { type: "text", text: JSON.stringify(metadata, null, 2) },
@@ -288,6 +293,35 @@ export const docGetTool: ToolDefinition = {
 
 // ── iris_doc_put ────────────────────────────────────────────────────
 
+/** The closing sentence of the refusal for a put that drops Storage definitions. */
+const PUT_STORAGE_REMEDY =
+  "Keep the Storage definitions in the content (read the class with iris_doc_get first), " +
+  "or pass allowStorageRegeneration: true to let IRIS regenerate the storage.";
+
+/** What a document's current version looks like in the 409 that Atelier answers a put to an existing document with. */
+interface CurrentDocument {
+  /** The document's current lines (in the input's format: XML text for XML content). */
+  content: string[];
+  /** The version token to send as `If-None-Match`. */
+  ts: string;
+}
+
+/**
+ * The current document carried by an Atelier 409, or `undefined` when `error` is not a 409 or the
+ * document is unreadable (no line array, no string `ts`, or a non-empty `status`).
+ *
+ * Without `If-None-Match`, Atelier answers a put to an existing document with HTTP 409 and the
+ * document as it is now, and writes nothing.
+ */
+function currentDocument(error: unknown): CurrentDocument | undefined {
+  if (!(error instanceof IrisApiError) || error.statusCode !== 409) return undefined;
+  const result = error.result as { content?: unknown; ts?: unknown } | null | undefined;
+  if (result === null || typeof result !== "object") return undefined;
+  if (atelierDocStatusError(result) !== undefined) return undefined;
+  if (!Array.isArray(result.content) || typeof result.ts !== "string") return undefined;
+  return { content: result.content as string[], ts: result.ts };
+}
+
 export const docPutTool: ToolDefinition = {
   name: "iris_doc_put",
   title: "Put Document",
@@ -296,7 +330,13 @@ export const docPutTool: ToolDefinition = {
     "This tool writes content directly to IRIS without creating a file on disk, and is intended for one-off " +
     "inspection, quick reproductions, or throwaway test classes only. A leading byte-order mark is " +
     "stripped from the content before it is sent, and a write IRIS refuses (a non-empty result.status " +
-    "inside an HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stored then.",
+    "inside an HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stored then. " +
+    "An existing document is saved only if it has not changed since this tool read its current version; " +
+    "ignoreConflict skips that check. " +
+    "For an existing class, a put whose content drops one of the class's Storage definitions is refused and " +
+    "nothing is stored, because IRIS would generate new storage at the next compile, which can change how " +
+    "existing rows are read; allowStorageRegeneration (default false) lets it through, and changing a Storage " +
+    "definition's content is always allowed.",
   inputSchema: z.object({
     name: z
       .string()
@@ -310,7 +350,18 @@ export const docPutTool: ToolDefinition = {
       .describe("Target namespace (default: configured)"),
     ignoreConflict: booleanParam
       .optional()
-      .describe("If true, overwrite even when the server copy is newer"),
+      .describe(
+        "Boolean (true/false), default false. Not needed to replace an existing document: without it the tool reads the " +
+          "document's current version and saves only if it is still that version. When true, IRIS skips that version check.",
+      ),
+    allowStorageRegeneration: booleanParam
+      .optional()
+      .describe(
+        "Boolean (true/false), default false. When false, a put to an existing class whose content drops one of the class's " +
+          "Storage definitions is refused and nothing is stored; changing a Storage definition's content is allowed. " +
+          "When true, the put goes ahead and IRIS generates new storage at the next compile, which can change how existing " +
+          "rows are read. No effect on a new class or on other document types.",
+      ),
   }),
   annotations: {
     readOnlyHint: false,
@@ -320,11 +371,12 @@ export const docPutTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { name, content, namespace, ignoreConflict } = args as {
+    const { name, content, namespace, ignoreConflict, allowStorageRegeneration } = args as {
       name: string;
       content: string | string[];
       namespace?: string;
       ignoreConflict?: boolean;
+      allowStorageRegeneration?: boolean;
     };
 
     const nameError = validateDocName(name);
@@ -342,15 +394,52 @@ export const docPutTool: ToolDefinition = {
     const lines = Array.isArray(content)
       ? stripLeadingBomFromLines(content)
       : stripLeadingBom(content).split(/\r?\n/);
-    const encodedName = encodeURIComponent(name);
-    const params = new URLSearchParams();
-    if (ignoreConflict) params.set("ignoreConflict", "1");
-    const qs = params.toString();
-    const path =
-      atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`) + (qs ? `?${qs}` : "");
-
+    const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodeURIComponent(name)}`);
+    const ignoreConflictPath = `${path}?ignoreConflict=1`;
     const body = { enc: false, content: lines };
-    const response = await ctx.http.put(path, body);
+
+    // A class's Storage definitions are guarded unless the caller allows regeneration.
+    const guardsStorage = isClassDocument(name) && allowStorageRegeneration !== true;
+
+    let response: AtelierEnvelope;
+    if (ignoreConflict && !guardsStorage) {
+      response = await ctx.http.put(ignoreConflictPath, body);
+    } else {
+      // The first request carries no version token. A new document is created by it. For an existing
+      // document Atelier refuses it with HTTP 409 and writes nothing, and the refusal carries the
+      // document as it is now: the guard's read, and the version the save is checked against.
+      try {
+        response = await ctx.http.put(path, body);
+      } catch (error: unknown) {
+        const current = currentDocument(error);
+        if (current === undefined) throw error;
+
+        if (guardsStorage) {
+          const dropped = droppedStorageDefinitions(current.content, lines);
+          if (dropped.length > 0) {
+            return storageDroppedRefusal(name, ns, dropped, PUT_STORAGE_REMEDY);
+          }
+        }
+
+        if (ignoreConflict) {
+          response = await ctx.http.put(ignoreConflictPath, body);
+        } else {
+          try {
+            response = await ctx.http.put(path, body, { headers: { "If-None-Match": current.ts } });
+          } catch (saveError: unknown) {
+            if (saveError instanceof IrisApiError && saveError.statusCode === 409) {
+              return refusalResult(
+                REFUSAL_CODES.DOCUMENT_CONFLICT,
+                `Document '${name}' was not saved in namespace '${ns}': it changed on the server while this tool was saving it. ` +
+                  "Nothing was stored. Run iris_doc_put again to replace the current version.",
+                { name, namespace: ns },
+              );
+            }
+            throw saveError;
+          }
+        }
+      }
+    }
 
     // IRIS can refuse a document inside an HTTP 200 envelope with an empty
     // `status.errors`, reporting the reason only as a string `result.status`
