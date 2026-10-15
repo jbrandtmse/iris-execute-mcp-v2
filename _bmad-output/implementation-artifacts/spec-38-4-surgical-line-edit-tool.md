@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-15'
 status: 'done'
 baseline_revision: '364be6ded31a8e08f79c8c26137ce2e2f1ac2042'
+baseline_commit: '364be6ded31a8e08f79c8c26137ce2e2f1ac2042'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -111,7 +112,7 @@ It reuses 38.2's line numbering and 38.3's Storage guard and refusal catalog unc
 - It follows the `diff -U3` hunk conventions:
   - 3 context lines;
   - hunks closer than 7 unchanged lines are merged;
-  - `@@ -s,c +s,c @@`, with `,c` omitted when c is 1, and an empty range named by the line before it (`@@ -2 +1,0 @@`).
+  - `@@ -s,c +s,c @@`, with `,c` omitted when c is 1, and an empty range named by the line before it (`diff -U3` form: `@@ -1 +0,0 @@` for a 1-line file emptied, `@@ -0,0 +1 @@` for one line into an empty file; corrected by the lead at dev_complete, see Spec Change Log 2026-10-15).
 - Lines are prefixed with a space, `-` or `+`, and joined with `\n`, with no trailing newline.
 - Excerpt `i` is the re-read lines that edit `i` produced, plus 3 context lines on each side, clamped to the document. These lines are found as follows:
   1. The edit's lines are located in the locally edited array, which the bottom-up arithmetic makes exact.

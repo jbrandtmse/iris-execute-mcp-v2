@@ -2926,3 +2926,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: document-write-paths.test.ts walk() skips node_modules/dist/__tests__ and sorts; story-38-3-qa-doc-claims sources() skips the same set unsorted; story-38-0-qa-doc-claims walk() skips node_modules/dist only; Rule 2 copy with no stated reason (code review 38.3)
 - 2026-10-15T19:43:43Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a repo-scan test misses a source file another scan reads, or a fourth copy of the walker is added
+
+### DW-551: Project Rule #53 still states the core ceiling as <=13 runtime tools/server although the Lead made 13 a guideline (2026-10-14, L-4); dev core is now 14
+- source: _bmad-output/implementation-artifacts/spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: .claude/rules/project-rules.md #53 text vs presets.test.ts pin (dev core 14 under L-4); agent-context file, rules are edited at retrospectives
+- 2026-10-15T21:18:38Z status=decision-pending owner=burndown by=harvest note=human=Project Lead rewords Rule #53 to 'guideline' (or keeps it, citing the clarification)
