@@ -783,6 +783,140 @@ describe("the requests iris_doc_put sends on the real client (Story 38.3, AC-3, 
   }, 60000);
 });
 
+// -- Rows the mocked tests cannot prove on the wire ------------------
+
+describe("iris_doc_put on the real wire: a conflict, a soft error, a new class with ignoreConflict, a .CLS name (Story 38.3, AC-3, AC-4)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Create `docName` with `lines` by a raw PUT, after removing any earlier copy. */
+  async function createRaw(docName: string, lines: string[]): Promise<void> {
+    await removeStored(client, version, IRIS_NAMESPACE, docName);
+    await putDocLines(client, version, IRIS_NAMESPACE, docName, lines);
+  }
+
+  it("a change between the unversioned and the version-checked PUT is DOCUMENT_CONFLICT after exactly two PUTs, and only the other writer's text is stored", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const original = fixtureLines("A:", NOSTORAGE);
+    await createRaw(NOSTORAGE_DOC, original);
+    const otherWriter = ["/// the other writer", ...original];
+    const realPut = client.put.bind(client);
+    let calls = 0;
+    const put = vi.spyOn(client, "put").mockImplementation(async (path, body, options) => {
+      calls += 1;
+      try {
+        return await realPut(path, body, options);
+      } catch (error) {
+        if (calls === 1 && error instanceof IrisApiError && error.statusCode === 409) {
+          // The document changes between this tool's first request and its second.
+          const { ts } = error.result as AtelierDocResult;
+          await realPut(path, { enc: false, content: otherWriter }, { headers: { "If-None-Match": ts } });
+        }
+        throw error;
+      }
+    });
+
+    const result = await docPutTool.handler(
+      { name: NOSTORAGE_DOC, namespace: IRIS_NAMESPACE, content: ["/// this tool", ...original] },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            `Document '${NOSTORAGE_DOC}' was not saved in namespace '${IRIS_NAMESPACE}': it changed on the server while this tool was saving it. ` +
+            "Nothing was stored. Run iris_doc_put again to replace the current version.",
+        },
+      ],
+      structuredContent: { code: "DOCUMENT_CONFLICT", name: NOSTORAGE_DOC, namespace: IRIS_NAMESPACE },
+      isError: true,
+    });
+    expect(put, "the tool sent the unversioned PUT and the version-checked PUT, and never retried").toHaveBeenCalledTimes(2);
+    const stored = await readStoredLines(client, version, IRIS_NAMESPACE, NOSTORAGE_DOC);
+    expect(stored?.[0], "the other writer's text is the stored text").toBe("/// the other writer");
+    expect(stored?.includes("/// this tool"), "nothing of this tool's text was stored").toBe(false);
+  }, 60000);
+
+  it("IRIS's refusal of text that is not a class, on the version-checked save, is today's refusal text and shape, after two PUTs, and the class is unchanged", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    await createRaw(NOSTORAGE_DOC, fixtureLines("A:", NOSTORAGE));
+    const before = await readStoredLines(client, version, IRIS_NAMESPACE, NOSTORAGE_DOC);
+    const put = vi.spyOn(client, "put");
+
+    const result = await docPutTool.handler(
+      { name: NOSTORAGE_DOC, namespace: IRIS_NAMESPACE, content: "this is not a class header" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    const refused = result.structuredContent as { name: string; db: string; ts: string; cat: string; enc: boolean; content: string; status: string };
+    expect(refused).toEqual({ name: NOSTORAGE_DOC, db: "", ts: "", cat: "CLS", enc: false, content: "", status: refused.status });
+    expect(refused.status, "IRIS's own text, carried through").not.toBe("");
+    expect(result.content[0]?.text).toBe(
+      `Document '${NOSTORAGE_DOC}' was not saved in namespace '${IRIS_NAMESPACE}': ${refused.status}. Nothing was stored; correct the document text and retry.`,
+    );
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(await readStoredLines(client, version, IRIS_NAMESPACE, NOSTORAGE_DOC)).toEqual(before);
+  }, 60000);
+
+  it("a new class with ignoreConflict makes one PUT on the bare path, and IRIS answers it as it answers the request that carries the flag", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    // A class with a Storage block, so both answers carry the Storage echo (flags 1) that is compared below.
+    const lines = fixtureLines("F:", NOSTORAGE);
+    await removeStored(client, version, IRIS_NAMESPACE, NOSTORAGE_DOC);
+    const flagged = (
+      await client.put(`${docPath(version, IRIS_NAMESPACE, NOSTORAGE_DOC)}?ignoreConflict=1`, { enc: false, content: lines })
+    ).result as AtelierDocResult;
+    await removeStored(client, version, IRIS_NAMESPACE, NOSTORAGE_DOC);
+    const put = vi.spyOn(client, "put");
+    const get = vi.spyOn(client, "get");
+    const head = vi.spyOn(client, "head");
+
+    const result = await docPutTool.handler(
+      { name: NOSTORAGE_DOC, namespace: IRIS_NAMESPACE, content: lines, ignoreConflict: true },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0]).toHaveLength(2);
+    expect(put.mock.calls[0]?.[0], "no ?ignoreConflict=1 on a new document").toBe(docPath(version, IRIS_NAMESPACE, NOSTORAGE_DOC));
+    expect(get).not.toHaveBeenCalled();
+    expect(head).not.toHaveBeenCalled();
+    expect(flagged.flags, "the flagged create echoes the Storage lines").toBe(1);
+    expect(echoedStorageNames(flagged)).toEqual(["Default"]);
+    expect({ ...(result.structuredContent as AtelierDocResult), ts: "" }, "the same result as the flagged request, apart from the ts").toEqual({
+      ...flagged,
+      ts: "",
+    });
+  }, 60000);
+
+  it("a drop under an upper-case .CLS name is refused: IRIS treats Name.CLS and Name.cls as the same class", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    await createRaw(MULTI_DOC, fixtureLines("B: ", MULTI));
+    const before = await readStoredLines(client, version, IRIS_NAMESPACE, MULTI_DOC);
+    const upperName = `${MULTI}.CLS`;
+
+    const result = await docPutTool.handler(
+      { name: upperName, namespace: IRIS_NAMESPACE, content: fixtureLines("F:", MULTI) },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe(droppedText(upperName, "the Storage definition 'Second'"));
+    expect(result.structuredContent).toEqual({
+      code: "STORAGE_DROPPED",
+      name: upperName,
+      namespace: IRIS_NAMESPACE,
+      droppedStorage: ["Second"],
+    });
+    expect(await readStoredLines(client, version, IRIS_NAMESPACE, MULTI_DOC)).toEqual(before);
+  }, 60000);
+});
+
 // -- The oracle (AC-2) -----------------------------------------------
 
 describe("the scanner against IRIS: every scanner fixture (Story 38.3, AC-2)", () => {

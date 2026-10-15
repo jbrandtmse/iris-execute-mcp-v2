@@ -188,8 +188,9 @@ Texts:
        A `}` ends the class.
     4. **Member declarations.** A member is a keyword, then its declaration up to an unquoted `;` (no body) or `{` (body); `"..."` with `""` escapes is skipped. A `{` inside the declaration's `( )` formal list or `[ ]` keyword list is a value, not the body (`b = {1}`, `SqlComputeCode = {...}`), and its braces are counted to their match. The keyword `Storage`, in any case, with a body records the name that follows: `[%A-Za-z][A-Za-z0-9]*`, with only space, tab and line breaks between the keyword, the name and the `{`. So `Storage Default [ x ]` is not a definition (IRIS reports none), and a trailing `\r` is text.
     5. **Bodies.**
-       - An ObjectScript `Method`/`ClassMethod`/`ClientMethod`/`Trigger` (no `Language`, or `objectscript`/`cache`) counts braces outside `"` strings, `//` and `;` comments (`;` covers `#;`), and `/* */`.
-       - Any other method or trigger language, given by a `Language = <lang>` keyword (any case) in the declaration's `[ ]` list, ends at the first element that is `}` in column 0 followed only by spaces or tabs.
+       - A member's language is the `Language = <lang>` keyword (any case, quoted or not) of its declaration's `[ ]` list; a formal parameter named `Language` sets nothing. With no such keyword, a `ClientMethod` is JavaScript, a `Trigger` is ObjectScript, and a `Method`/`ClassMethod` takes the class header's `Language` keyword, else ObjectScript (amended at code review, live probes; see the Spec Change Log).
+       - An ObjectScript `Method`/`ClassMethod`/`ClientMethod`/`Trigger` (language `objectscript`/`cache`, or none) counts braces outside `"` strings, `//` and `;` comments (`;` covers `#;`), and `/* */`.
+       - Any other method or trigger language ends at the first element that is `}` in column 0 followed only by spaces or tabs.
        - Every other body (XData, Storage, Query, ...) counts braces with no string or comment awareness.
 - `packages/shared/src/index.ts` -- export the new symbols. -- AC-2, AC-9.
 - `packages/shared/src/__tests__/refusals.test.ts`, `storage-guard.test.ts` (new) -- tests for the catalog and the guard. -- AC-2, AC-6, AC-9.
@@ -304,6 +305,48 @@ Texts:
   - there is no diff in `bootstrap-classes.ts`, `src/`, `presets.ts` or the baseline;
   - `droppedStorage` is absent from every other tool's output (grep).
 
+### Review Findings
+
+Code review 2026-10-15 (bmad-code-review, `review_tier: full-opus`). Four layers ran and delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor). Diff `2e9114e..HEAD` plus QA's working tree. There were 30 raw rows, which grouped into 20 entries: 11 patch, 4 defer, 5 rejected, 0 decision-needed. No high. The live probes ran on IRIS 2026.2 build 221U, `default`/HSCUSTOM, against `ExecuteMCPv2.Temp.QaStory383Shape`, which was deleted after each probe.
+
+- [x] [Review][Patch] The scanner took "no `Language`" to mean ObjectScript, and IRIS disagrees. A `ClientMethod` is JavaScript, and a class header's `Language` keyword sets the default for `Method`/`ClassMethod`. Both were live-probed: IRIS reports `Default` where the scanner returned `[]`, so the guard failed open on both sides. A `Trigger` keeps ObjectScript, also probed. This is QA's in-story item, found by all four layers; the earlier triage's "maybe-false" Edge 3 was wrong. [packages/shared/src/storage-guard.ts:315]
+  - Severity: med. Fix-risk: low (a default-language lookup, five live-pinned fixtures, 4 mutations red). Footprint: in-story. Spec: rule 5 amended in place, with a Spec Change Log entry.
+- [x] [Review][Patch] `Language =` was read from the whole declaration, so `ClassMethod Greet(Language = "en")` was scanned as a foreign language. Live: IRIS reports `Default`, the scanner returned `[]`. It is now read from the `[ ]` keyword list only, as rule 5 says. [packages/shared/src/storage-guard.ts:335]
+  - Severity: low. Fix-risk: low. Footprint: in-story. One fixture and one mutation.
+- [x] [Review][Patch] The module comment, CHANGELOG and dev README overstated the scanner's fidelity. The comment said "fails safe" on the proposed side, but deferred item 3 shows that side can fail open, and none of the three said that a drop can go unrefused. The wording is corrected. [packages/shared/src/storage-guard.ts:15]
+  - Severity: low. Fix-risk: low (prose only). Footprint: in-story.
+- [x] [Review][Patch] The CHANGELOG's "Otherwise unchanged" bullet said an existing routine, include file or kept-Storage class gives "the result it was", which contradicts the DW-540 Fixed entry. It is reworded: the claim holds for new documents and `ignoreConflict: true`. [CHANGELOG.md:28]
+  - Severity: low. Fix-risk: low. Footprint: in-story.
+- [x] [Review][Patch] Two roster patterns had gaps: `%Library.RoutineMgr` `%New(` was not matched, and nothing caught `%Dictionary.*Definition` `%Open(`/`%OpenId(`. The forbidden pattern is widened, and a `dictionaryOpen` pattern is added (zero hits today). [packages/iris-mcp-all/src/__tests__/document-write-paths.test.ts:56]
+  - Severity: low. Fix-risk: low. Footprint: in-story. 2 mutations red.
+- [x] [Review][Patch] DW-547's `reopen_if` cited an implement-stage sweep that nothing in the repo runs. A trailer now restates it as an observable probe, a Storage loss or a red oracle fixture. [_bmad-output/implementation-artifacts/deferred-work.md]
+  - Severity: low. Fix-risk: low. Footprint: in-story.
+- [x] [Review][Patch] The `GOVERNANCE_DISABLED` byte-identical tests were not hermetic. `McpServerBase.start` also reads `IRIS_SERVER_MANAGER`, `IRIS_SM_*` and `IRIS_CREDENTIAL_HELPER`, and ambient `IRIS_SERVER_MANAGER=bogus` turned 2 of 8 red. All five are now cleared and restored. [packages/shared/src/__tests__/refusals.test.ts:131]
+  - Severity: med (Rule 19 hermeticity). Fix-risk: low. Footprint: in-story. Mutation red.
+- [x] [Review][Patch] The live check "a new class with ignoreConflict ... answers as the flagged request" compared two creates whose Storage echoes were both empty (fixture A). It now runs on fixture F and asserts the echo, and a handler mutation that blanks the echo turns it red. [packages/iris-dev-mcp/src/__tests__/doc-put-storage-guard-live-gate.test.ts:868]
+  - Severity: low. Fix-risk: low. Footprint: in-story.
+- [x] [Review][Patch] AC-1's `mutation:` line said no repo mutation applies. A fixture mutation was run on an armed live run, observed red and recorded under Verification. [_bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md]
+  - Severity: low. Fix-risk: low. Footprint: in-story (tracking).
+- [x] [Review][Patch] The README unguarded-paths test claimed to follow the roster but checked only a hand list. It now derives the roster's `excluded` and `not-a-document-write` files from the roster source and requires them to equal the list. [packages/iris-mcp-all/src/__tests__/story-38-3-qa-doc-claims.test.ts:331]
+  - Severity: low. Fix-risk: low. Footprint: in-story. Mutation red.
+- [x] [Review][Patch] The back-compat header said that only "the two call lists" changed from the baseline capture. The existing-class row's 409 fake was added too, and the header now says so (Rule #36 provenance). [packages/iris-dev-mcp/src/__tests__/doc-put-storage-guard.test.ts:13]
+  - Severity: low. Fix-risk: low. Footprint: in-story.
+- [x] [Review][Defer] `iris_doc_load` with `ignoreConflict: false` sends an unversioned PUT, so every existing document gets 409 (the DW-540 defect, unfixed for load). [packages/iris-dev-mcp/src/tools/load.ts:449]
+  - Deferred: pre-existing and out of footprint (the Never list excludes load). Filed as **DW-549**, `escalated owner=burndown`. Severity: med. Fix-risk: med (a behavior change, like decision #7).
+- [x] [Review][Defer] The scanner loses sync on an ObjectScript JSON literal holding `\"` and on `&sql` with `'{'`. Live: IRIS reports `Default`, the scanner returns `[]`. [packages/shared/src/storage-guard.ts:objectScriptBodyEnd]
+  - Deferred: the root cause is already adjudicated. Recorded as an occurrence on **DW-547**.
+- [x] [Review][Defer] A one-line foreign body (`[ Language = python ] { return 1 }`) desyncs the column-0 rule. Live: IRIS reports `Default`, the scanner returns `[]`. The 409's current text desyncs the same way, so a drop can also pass, not only be over-refused. [packages/shared/src/storage-guard.ts:foreignBodyEnd]
+  - Deferred: the root cause is already adjudicated. Recorded as an occurrence on **DW-548**, with `reopen_if` widened to cover the fail-open side.
+- [x] [Review][Defer] This is my own Rule 2 check. Three `iris-mcp-all` repo-scan tests each carry a directory walker: `story-38-0-qa-doc-claims`, and the new `document-write-paths` and `story-38-3-qa-doc-claims`. Their skip sets differ, and no reason is stated. [packages/iris-mcp-all/src/__tests__/document-write-paths.test.ts:159]
+  - Deferred: a LOW that is not a two-way door (it needs a shared helper across three files). Filed as **DW-550**, `wontfix-accepted` with `reopen_if`.
+
+**Rejected:**
+- `low`: the DW-540 default-put wording (that the version check reads as protecting the caller's copy, and that it should be Changed rather than Fixed). The two descriptions are prescribed verbatim by the Tasks section, and orchestrator decision #7 put the change under Fixed, so a fix would edit the spec (by-design).
+- `low`: the write-path roster misses `iris_execute_command`/`classmethod` arbitrary code, the IPM install and the DocDB create/property endpoints. AD-24 scopes the enumeration to Atelier PUT, `xml/load` and the bootstrap PUT. These are user-supplied code, an external installer of this project's own classes, and IRIS-generated DocDB classes that are not source replacements. Extending the scope would edit the AD (by-design).
+- `low`: `storageDroppedRefusal([])` builds a malformed text. The JSDoc requires at least one name, and the only caller (and 38.4's planned reuse) refuses only on `dropped.length > 0`, so a fix would only add a guard.
+- `false`: DW-540 and DW-541 still showing `routed owner=38-3`. Closing them is the lead's `ledger_adjudicated` gate after `cr_complete` (Rule 17 (2)), not a code defect.
+- `low`: the BOM fixture's names are not oracle-checked. IRIS refuses the raw BOM text, the stripped text is the plain one-Default layout that fixture F pins live, and the fix would add a BOM branch to the oracle loop.
+
 ## Spec Change Log
 
 Spec errors found at implement time by the live oracle and the read-only sweep (project Rule #16: the spec's own claims about IRIS's parse were not all true). The scanner rules above were amended in place; each correction is pinned by a scanner fixture that IRIS itself reports names for.
@@ -311,6 +354,7 @@ Spec errors found at implement time by the live oracle and the read-only sweep (
 - **Rule 2 (class body).** The first `{` after the `Class` line is not always the body's brace: a header keyword list can hold `{...}` values (`Owner = {%Developer}`). The literal rule found no Storage in 14 of the first 395 sampled system classes (a current-side miss is a missed drop). Amended: braces inside the header's `[ ... ]` list are skipped. Pinned by the fixture "braces in a keyword list and in a formal parameter default".
 - **Rule 4 (declarations).** A `{` inside a member's `( )` formal list or `[ ]` keyword list (`Method M(t = {$$$NULLOREF})`, `SqlComputeCode = {...}`) is a value, not the body; the literal rule desynchronized on `Ens.Config.Production` and on `HS.HC.FHIRSQL.Data.Specification`. Amended. Pinned by the same fixture and by "formal parameter defaults in braces, a quoted brace in a body, a query body and an ObjectScript trigger".
 - **Rule 4 (name terminators).** `Storage Default [ x ]` and `Storage Default [ Final ]` are not definitions in IRIS (the echo reports none), and `Storage` / `Default` / `{` on three lines is one (IRIS reads tokens, not lines). The rule "followed by space or tab, `[`, `{` or the end of the element" accepted the first two and refused the third. Amended: only space, tab and line breaks may separate the keyword, the name and the `{`.
+- **Rule 5 (default language), code review 2026-10-15.** "No `Language` means ObjectScript" is wrong in two places, and the keyword was read from the whole declaration. Live probes (IRIS 2026.2 build 221U, `ExecuteMCPv2.Temp.QaStory383Shape`, deleted after each): a `ClientMethod` with no `Language` is JavaScript in any class; a class header `[ Language = python ]` (or `"python"`) makes an untagged `Method`/`ClassMethod` Python but leaves an untagged `Trigger` ObjectScript (also under `tsql`); a header string that says `Language = python` sets nothing; `ClassMethod Greet(Language = "en")` is ObjectScript. Each case had made `storageDefinitionNames` return `[]` where IRIS reports `Default`. Amended, and pinned by six oracle fixtures.
 - **Sweep result after the amendments** (details in Auto Run Result): 2515 of 2516 `%Dictionary.StorageDefinition` parents match the dictionary; the one mismatch is the documented residual risk (`&html<` blocks), recorded in `deferred:`.
 
 ## Review Triage Log
@@ -493,7 +537,50 @@ Tool counts do not move. Standing criterion: every test added or changed passes 
 - mutation: AC-6 a `lines.SetTextFromString(x)` line appended to `scripts/gen-bootstrap.mjs` (review pass) -> red: `document-write-paths` "no construct the roster does not model"
 - mutation: AC-6 a `$SYSTEM.OBJ.Import(file)` line appended to `scripts/gen-bootstrap.mjs` (review pass) -> red: `document-write-paths` "no construct the roster does not model"
 - mutation: AC-9 hermeticity, the governance-denial harness before the review pass clears only three of the ten variables `McpServerBase` reads (ambient `IRIS_TOOLS_DISABLE=iris_new_write`) -> red: 2 `refusals.test` cases; after the pass the same run, with `IRIS_TOOLS_DISABLE`, `IRIS_GOVERNANCE_FILE`, `IRIS_TOOLS_PRESET` and `IRIS_AUDIT_LOG` set in the environment, is green (8 of 8)
-- mutation: AC-1 and AC-10 have no mutation by nature: AC-1 records what IRIS itself returns (a mutation of this repo's code cannot change it), and AC-10 is the gate commands under Commands.
+- mutation: AC-1 (code review, armed live run) `GUARD_REORDERED` made equal to `GUARD_SOURCE` (Alpha before Beta) in the live gate -> red: the AC-1 record "a PUT without a Storage block drops the class's Storage ... so the existing rows read swapped" (1 of 4 in the describe); restored byte-identical. AC-10 has no mutation by nature: it is the gate commands under Commands.
+- mutation: AC-2 (code review) `ClientMethod` default removed from `defaultLanguage` -> red: shared unit fixture "a ClientMethod with no Language is JavaScript ..." (1)
+- mutation: AC-2 (code review) the class header's `Language` ignored (`defaultLanguage` returns `undefined` for a method) -> red: the two "a class Language = python ..." fixtures, plain and quoted (2)
+- mutation: AC-2 (code review) a `Trigger` takes the class `Language` -> red: fixture "a class Language = python leaves a trigger with no Language ObjectScript ..." (1)
+- mutation: AC-2 (code review) `Language` read outside the `[ ]` keyword list (`inKeywordList` starts true) -> red: fixture "a formal parameter named Language sets no language ..." (1)
+- mutation: AC-2 (code review) header strings kept in the keyword text -> red: fixture "a header string that mentions a Language sets none ..." (1). The six fixtures also pass the armed live oracle (12 tests: names and 409 shape), so their pins are IRIS's own answers (Rule #36).
+- mutation: AC-9 hermeticity (code review) `IRIS_SERVER_MANAGER` removed from `CLEARED_ENV`, ambient `IRIS_SERVER_MANAGER=bogus` -> red: the 2 `GOVERNANCE_DISABLED` byte-identical cases (`McpServerBase.start` throws); with the list restored the same run, plus `IRIS_SM_SERVERS` and `IRIS_CREDENTIAL_HELPER` set, is 8 of 8 green
+- mutation: AC-4 (code review, armed live run) the success result of `iris_doc_put` returns `content: []`, `flags: 0` -> red: live "a new class with ignoreConflict makes one PUT on the bare path, and IRIS answers it as it answers the request that carries the flag" (now on fixture F, whose Storage echo is compared); with fixture A both echoes were empty and this mutation stayed green
+- mutation: AC-6 (code review) a temporary `src/ExecuteMCPv2/CrMutationProbe.cls` calling `##class(%Dictionary.ClassDefinition).%OpenId(` -> red: `document-write-paths` "the found write paths equal the roster"; the same file calling `##class(%Library.RoutineMgr).%New(` -> red: "no construct the roster does not model" (file deleted after)
+- mutation: AC-6 (code review) the `iris_global_set` row removed from the QA test's `NAMED` list -> red: `story-38-3-qa-doc-claims` "names each path the write-path roster records ..." (the roster's unguarded entries are now read from the roster source)
+
+**QA stage (2026-10-15, IRIS 2026.2 build 221U, `default`/HSCUSTOM, Rule 19).** Gap analysis by mutation: 46 mutants of `storage-guard.ts` and 15 of `doc.ts` were run one at a time against the implement-stage tests and then the new ones (each restored from a saved copy, `git status --short` and `git diff --stat` checked after every run). 29 of 61 were red before the QA tests, and 32 survived; the new tests close 25 of those 32, and the other 7 are equivalent or unreachable (listed last). Every survivor was either an assertion that could not fail, closed below, or an equivalent or unreachable mutant, listed last. Test files, all (QA):
+- `packages/iris-mcp-all/src/__tests__/story-38-3-qa-doc-claims.test.ts` (QA, new): the README examples executed against the built handlers, the CHANGELOG quotes, the tool-table row, the unguarded paths, the code-literal and `droppedStorage` contracts, the changeset.
+- `packages/shared/src/__tests__/storage-guard-fixtures.ts` (QA, +20 fixtures): each is a form that a spec rule names and no earlier fixture needed; `names` were pinned from live probes of the exact text before they were written (Rule #36), and the live oracle re-checks them on every armed run.
+- `packages/iris-dev-mcp/src/__tests__/doc-put-storage-guard.test.ts` (QA, +4): a Pv failure that is not a 409 propagates (423, 500, network); a `.CLS` name is guarded.
+- `packages/iris-dev-mcp/src/__tests__/doc-put-storage-guard-live-gate.test.ts` (QA, +4 real-wire tests, and 40 oracle tests through the new fixtures): the Conflict row on the real wire (another writer saves between P0 and Pv), the soft error on the version-checked save, a new class with `ignoreConflict` against the flagged request, and a drop under a `.CLS` name (IRIS answers a put to `Name.CLS` with the 409 of the same document as `Name.cls`).
+
+Mutations demonstrated by QA for the new tests (red observed, restored, tree unchanged):
+- mutation: AC-2 header string skipping off -> shared unit and live oracle "header keyword string holding a bracket"
+- mutation: AC-2 header `//` comment skipping off; header block-comment skipping off -> "header continuation line: a // comment holding a brace"; "...a block comment holding a brace" (2 red)
+- mutation: AC-2 block comment above the Class line not skipped -> "a block comment that holds a whole earlier class above the real one"
+- mutation: AC-2 ObjectScript body `//` comment skipping off; block-comment skipping off -> "ObjectScript method comments holding closing braces" (2 red)
+- mutation: AC-2 `Method` out of the ObjectScript method keywords; `ClientMethod` out of them -> "an instance Method holding a quoted closing brace"; "a javascript ClientMethod holding a quoted brace" (2 red)
+- mutation: AC-2 member-declaration strings not skipped; nested braces of a declaration not skipped -> "strings holding a semicolon and a brace ..." (and the quoted-Language fixture); "a semicolon inside the braces of a keyword value" (live oracle red too) (2 red)
+- mutation: AC-2 quoted `Language` value dropped; `Language` keyword case-sensitive; `cache` treated as foreign; `objectscript` treated as foreign; language value case-sensitive -> the five Language fixtures (5 red)
+- mutation: AC-2 a stray member-level character stops the scan -> "stray semicolons between members" (live oracle red too, 4 tests)
+- mutation: AC-2 Storage names without `%`; without digits -> "Storage names that start with a percent sign and hold a digit" (2 red)
+- mutation: AC-2 Storage body counted with string awareness -> "Storage bodies that hold an unbalanced quote"
+- mutation: AC-2 XML comment skipping off; CDATA skipping off -> the two XML fixtures with a `>` before the Storage-like text (live oracle red for the comment) (2 red)
+- mutation: AC-2 `Class` keyword needs a space after it; leading blanks before `Class` not skipped -> the two tab fixtures (2 red)
+- mutation: AC-3 any failure of Pv reported as DOCUMENT_CONFLICT -> unit "a failure of the version-checked save that is not a 409 propagates" (423 and 500 red)
+- mutation: AC-3 a 409 on Pv rethrown instead of reported -> live "a change between the unversioned and the version-checked PUT is DOCUMENT_CONFLICT after exactly two PUTs"
+- mutation: AC-3 the guard keyed on a lowercase `.cls` only -> unit "a drop under a .CLS name is refused" and live "a drop under an upper-case .CLS name is refused"
+- mutation: AC-4 `ignoreConflict` always sent as Pi -> live "a new class with ignoreConflict makes one PUT on the bare path"
+- mutation: AC-4 soft-error check off -> live "IRIS's refusal of text that is not a class, on the version-checked save"
+- mutation: AC-6 and AC-9 the refusal remedy text changed (dev dist rebuilt) -> `story-38-3-qa-doc-claims` README refusal example and CHANGELOG quote (2 red); the README refusal text edited -> the README example
+- mutation: AC-9 an inline `"DOCUMENT_CONFLICT"` literal in `doc.ts` -> "the refusal codes are quoted strings in refusals.ts only"
+- mutation: AC-10 `droppedStorage` added to another output in `doc.ts` -> "droppedStorage is built in storage-guard.ts only"; the same key on the built conflict result -> "lists the structuredContent fields of STORAGE_DROPPED and DOCUMENT_CONFLICT"
+- mutation: AC-6 the README tool row loses `allowStorageRegeneration?` -> "lists exactly the parameters of the built iris_doc_put schema" and "states the default of both flags"; the README names a tool that does not exist -> "names each path the write-path roster records"
+- mutation: AD-29 the changeset bumps `@iris-mcp/dev` major -> "bumps @iris-mcp/shared and @iris-mcp/dev minor"
+
+Survivors accepted, with the reason: skipString's doubled-quote escape (equivalent under brace counting: a doubled quote closes and reopens the string with nothing between); a `{` in a keyword list taken as a body, and a `;` counted inside brackets (equivalent for balanced text); XML tag scan not quote-aware and a leading tab before the XML declaration (IRIS refuses that text, probed; no fixture can exist); de-duplication of a repeated name in `current` (IRIS cannot hold two Storage definitions of one name, Rule #54); `currentDocument` accepting a 423 (IRIS answers a locked document with no document body, so the fake that would reach it cannot exist).
+
+Known divergence found by the live oracle and not fixed here (QA writes tests, not source): IRIS reads a `ClientMethod` with no `Language` keyword as JavaScript and keeps it that way in the exported source, and `foreignBodyEnd` is reached only when a `Language` keyword is present, so `ClientMethod Js() As %String { if (1) { return 'x'; } }` followed by `Storage Default` makes `storageDefinitionNames` return `[]` where IRIS reports `Default`. Spec rule 5 says "no `Language`" means ObjectScript; that is wrong for `ClientMethod`. Effect: a drop is not refused for such a class (the guard fails open, today's behavior), on both sides of the comparison. Fixed at code review (rule 5 amended; see Review Findings).
 
 ## Auto Run Result
 

@@ -53,6 +53,7 @@ const PATTERNS = {
   enableConfigItem: { languages: ["objectscript"], expression: /EnableConfigItem\(/g },
   createApplication: { languages: ["objectscript"], expression: /CreateApplication\(/g },
   dictionaryNew: { languages: ["objectscript"], expression: /##class\(%Dictionary\.\w+Definition\)\.%New\(/g },
+  dictionaryOpen: { languages: ["objectscript"], expression: /##class\(%Dictionary\.\w+Definition\)\.%Open(?:Id)?\(/g },
 } satisfies Record<string, Pattern>;
 
 type PatternName = keyof typeof PATTERNS;
@@ -62,7 +63,7 @@ const FORBIDDEN: Array<{ label: string; expression: RegExp }> = [
   { label: "OBJ.Load* / OBJ.Import*", expression: /\bOBJ\)?\.(?:Load|Import)\w*\(/gi },
   { label: "ImportDir", expression: /ImportDir/gi },
   { label: "SetTextFrom*", expression: /SetTextFrom\w*/g },
-  { label: "%Routine / %RoutineMgr %New", expression: /##class\(%(Routine|RoutineMgr)\)\.%New\(/g },
+  { label: "%Routine / %RoutineMgr %New", expression: /##class\(%(?:Library\.)?(?:Routine|RoutineMgr)\)\.%New\(/g },
 ];
 
 const INTEROP = "src/ExecuteMCPv2/REST/Interop.cls";

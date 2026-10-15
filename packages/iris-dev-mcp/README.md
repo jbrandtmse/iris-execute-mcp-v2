@@ -356,7 +356,9 @@ HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stor
   with `STORAGE_DROPPED` and nothing is stored, because IRIS would generate new storage at the next compile, which can
   change how existing rows are read. Names are compared exactly: a rename is a drop, and changing a definition's
   content is allowed. `allowStorageRegeneration: true` (default **false**) lets the put through, and then the
-  next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form.
+  next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form. It reads the
+  class text the way IRIS does for the forms it is tested against; in a few hand-written forms (a brace hidden in
+  embedded SQL or HTML, for example) it can miss a drop.
 - **Unguarded paths.** The guard covers `iris_doc_put`. `iris_doc_load` (a file is the source of truth for its
   class, uploaded with `ignoreConflict` on by default), the `iris_env_promote` `execute` sync (it replaces the target
   class by design) and the `iris_doc_xml_export` import (an XML export carries its own Storage) do not run it. The

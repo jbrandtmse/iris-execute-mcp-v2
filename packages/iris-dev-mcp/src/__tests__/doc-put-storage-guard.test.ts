@@ -9,7 +9,8 @@
  *     `pnpm --filter @iris-mcp/dev exec vitest run src/__tests__/doc-put-storage-guard.test.ts`
  *     with this describe only: it passed on that tree, so every literal below is what the baseline
  *     handler returned and sent for these inputs (Rule #36). They are never edited to match the new code,
- *     except the two call lists the story changes on purpose (marked in place).
+ *     except the two call lists the story changes on purpose (marked in place); for the existing class
+ *     with ignoreConflict, the 409 fake that now precedes the baseline request was added with its list.
  *  2. The matrix (AC-3, AC-7): an existing class (the guard, the version-checked save, the refusals),
  *     the other document types, and the schema and description.
  *
@@ -520,6 +521,40 @@ describe("iris_doc_put on an existing class: the Storage guard and the version-c
 
     await expect(put({ content: DEFAULT_ONLY, ignoreConflict: true })).rejects.toBe(second);
     expect(mockHttp.put.mock.calls).toHaveLength(2);
+  });
+
+  describe("a failure of the version-checked save that is not a 409 propagates as it is, never as DOCUMENT_CONFLICT", () => {
+    for (const error of [
+      new IrisApiError(423, [], CLASS_PATH),
+      new IrisApiError(500, [], CLASS_PATH),
+      new Error("ECONNRESET"),
+    ]) {
+      it(error instanceof IrisApiError ? `HTTP ${error.statusCode}` : "a network failure", async () => {
+        mockHttp.put
+          .mockRejectedValueOnce(conflict(CLASS_PATH, currentClass(DEFAULT_ONLY)))
+          .mockRejectedValueOnce(error);
+
+        await expect(put({ content: DEFAULT_ONLY })).rejects.toBe(error);
+        expect(mockHttp.put.mock.calls).toHaveLength(2);
+      });
+    }
+  });
+
+  it("a class document is recognised by its extension in any case: a drop under a .CLS name is refused", async () => {
+    const upperPath = "/api/atelier/v7/USER/doc/Test.Fixture.CLS";
+    mockHttp.put.mockRejectedValueOnce(conflict(upperPath, { ...currentClass(DEFAULT_AND_SECOND), name: "Test.Fixture.CLS" }));
+
+    const result = await docPutTool.handler({ name: "Test.Fixture.CLS", content: DEFAULT_ONLY }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Document 'Test.Fixture.CLS' was not saved in namespace 'USER': the content drops the Storage definition 'Second'");
+    expect(result.structuredContent).toEqual({
+      code: "STORAGE_DROPPED",
+      name: "Test.Fixture.CLS",
+      namespace: "USER",
+      droppedStorage: ["Second"],
+    });
+    expect(mockHttp.put.mock.calls).toEqual([[upperPath, bodyOf(DEFAULT_ONLY)]]);
   });
 
   describe("an unreadable 409 is rethrown as it is, with no second request", () => {

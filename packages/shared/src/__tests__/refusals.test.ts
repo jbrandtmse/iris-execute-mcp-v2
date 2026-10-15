@@ -122,8 +122,17 @@ async function callTool(server: any, name: string, args: unknown) {
   return (entry.callback ?? entry.handler ?? entry.cb)(args);
 }
 
-/** Every variable `McpServerBase` reads that can change whether or why a call is denied, or where it is audited. */
+/**
+ * Every variable `McpServerBase` and its profile loader read that can change whether or why a call is
+ * denied, where it is audited, or whether `start()` succeeds (the Server Manager source is off when
+ * `IRIS_SERVER_MANAGER` is unset).
+ */
 const CLEARED_ENV = [
+  "IRIS_SERVER_MANAGER",
+  "IRIS_SM_SERVERS",
+  "IRIS_SM_SETTINGS_PATHS",
+  "IRIS_SM_WORKSPACE",
+  "IRIS_CREDENTIAL_HELPER",
   "IRIS_PROFILES",
   "IRIS_GOVERNANCE",
   "IRIS_GOVERNANCE_FILE",

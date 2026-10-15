@@ -2869,12 +2869,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: Live probe 2026-10-15 IRIS 2026.2 Atelier v8: second iris_doc_put to an existing doc -> 409; %Api.Atelier.v2 PutDoc saves only when new or HTTP_IF_NONE_MATCH equals TS(); the tool never sends If-None-Match (doc.ts:193; bootstrap.ts:233-241 documents the same 409)
 - 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=38.3 owns the iris_doc_put write path (its guard reads current source first, so it has the ts to send); 38.4 must send the version header too
+- 2026-10-15T19:47:01Z status=resolved-by:38-3-storage-block-drop-guard by=adjudication note=AC-7: existing documents saved with If-None-Match from the 409 ts (doc.ts); unit + armed live gate pinned, mutation-verified; lead smoke 2026-10-15 updated an existing class without ignoreConflict
 
 ### DW-541: iris_doc_get metadataOnly reads a Last-Modified header Atelier never sends, so timestamp is always absent; the unit test fakes the header (Rule #54)
 - source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: Atelier v1-v8 and %Atelier.REST set only ETag (=ts); live metadataOnly returns {exists,name,etag}; doc.test.ts:103-127 fakes Last-Modified; 38.2 corrected only the description
 - 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=two-way door (drop the dead read + the impossible fake); 38.3 edits doc.ts anyway
 - 2026-10-15T17:11:58Z occurrence=38-2-line-range-document-read by=cr note=the fix also turns the 38.2 AC-4 pin doc-get-range.test.ts:163-178 red (toStrictEqual pins timestamp:undefined); update it
+- 2026-10-15T19:47:01Z status=resolved-by:38-3-storage-block-drop-guard by=adjudication note=AC-8: dead Last-Modified read and its fake removed; metadataOnly returns {exists,name,etag}; 38.2 pin updated deliberately
 
 ### DW-542: iris_doc_get without a range reports an Atelier GET soft error (HTTP 200, content "", non-empty status) as success with no isError; the ranged read reports the same result as an error
 - source: spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2905,8 +2907,22 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 38.3 implement + review probes vs live IRIS 2026.2: XData string braces and InitialExpression = {"}"} -> IRIS sees Default, scanner returns []; read-only sweep matches 2515/2516 %Dictionary.StorageDefinition parents (miss: %SQL.Manager.UI &html<); storage-guard.ts objectScriptBodyEnd/rawBodyEnd/headerBraceEnd
 - 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a Storage definition is lost through iris_doc_put or iris_doc_edit on a class the scanner reported as storage-free, or the guard's live oracle sweep drops below 2515/2516
+- 2026-10-15T19:43:48Z occurrence=38-3-storage-block-drop-guard by=cr note=live 2026-10-15: an ObjectScript JSON literal holding a backslash-escaped quote, and &sql with '{', each hide Storage
+- 2026-10-15T19:43:48Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a Storage loss via iris_doc_put/edit on a class the scanner read as storage-free, or a red oracle fixture
 
 ### DW-548: Storage-drop scanner ends a non-ObjectScript method body (Language=python/tsql) only at a column-0 brace, so indented members or a column-0 brace inside a Python string desync it; on the proposed side that is a spurious STORAGE_DROPPED refusal
 - source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: spec rule 5 (foreignBodyEnd); over-refusal only, the documented allowStorageRegeneration override applies; storage-guard.ts:foreignBodyEnd
 - 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a STORAGE_DROPPED refusal is reported for a put or edit that keeps every Storage definition
+- 2026-10-15T19:43:48Z occurrence=38-3-storage-block-drop-guard by=cr note=live 2026-10-15: a one-line python body desyncs too; the 409 current text desyncs alike, so a drop can pass
+- 2026-10-15T19:43:48Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a STORAGE_DROPPED refusal for a put that keeps every definition, or a Storage loss after a put
+
+### DW-549: iris_doc_load with ignoreConflict: false sends an unversioned PUT, so every file whose document already exists gets HTTP 409 and lands in failures (the DW-540 defect, unfixed for load); its description reads as if false only protects newer server copies
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:449-456 sends PUT with no If-None-Match when ignoreConflict is false; %Api.Atelier.v2 PutDoc answers an unversioned PUT to an existing doc with 409 (38.3 probe record, DW-540); load.ts:348 says 'If true (default), overwrite server copies even when newer'; load.test.ts:314-326 fakes a resolving put
+- 2026-10-15T19:43:42Z status=escalated owner=burndown by=cr note=38.3 Never list excludes load; fix mirrors DW-540 (save with the 409 ts), a behavior change like decision #7
+
+### DW-550: Three iris-mcp-all repo-scan tests carry their own directory walker (story-38-0-qa-doc-claims, and new in 38.3 document-write-paths and story-38-3-qa-doc-claims) with different skip sets and path forms
+- source: spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: document-write-paths.test.ts walk() skips node_modules/dist/__tests__ and sorts; story-38-3-qa-doc-claims sources() skips the same set unsorted; story-38-0-qa-doc-claims walk() skips node_modules/dist only; Rule 2 copy with no stated reason (code review 38.3)
+- 2026-10-15T19:43:43Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a repo-scan test misses a source file another scan reads, or a fourth copy of the walker is added

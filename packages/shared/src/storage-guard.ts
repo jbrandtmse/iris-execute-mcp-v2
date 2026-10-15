@@ -12,9 +12,9 @@
  * parse, which a live oracle pins: only a `Storage <name>` member that is a direct member of the
  * class body counts, so a comment, a string, a method or XData body, or a label that merely says
  * `Storage` does not. Only a space and a tab are whitespace: a trailing carriage return inside an
- * element is text, as it is for IRIS. The scanner approximates IRIS's parser where the two can
- * diverge (an unbalanced quote or brace inside embedded SQL or HTML); on the proposed side a
- * divergence swallows members, so it fails safe (a refusal, with an override).
+ * element is text, as it is for IRIS. The scanner approximates IRIS's parser: in a few hand-written
+ * forms (a brace hidden in embedded SQL or HTML, for example) the two diverge, and then the guard
+ * can miss a drop, or refuse a write that keeps every definition (the override still applies).
  */
 
 import { stripLeadingBomFromLines } from "./lines.js";
@@ -187,8 +187,25 @@ function skipString(text: string, open: number): number {
   return text.length;
 }
 
-/** The index just past the `{` that opens the class body, or -1 when the text has no class header. */
-function classBodyStart(text: string): number {
+/** Where the class body starts, and the class's `Language` keyword (lower case) when its header has one. */
+interface ClassBody {
+  /** The index just past the `{` that opens the class body. */
+  start: number;
+  language: string | undefined;
+}
+
+/** The language a `Language = <lang>` keyword names in keyword-list text, in lower case, or `undefined`. */
+function keywordLanguage(keywords: string): string | undefined {
+  return /\bLanguage\s*=\s*([A-Za-z0-9_]+)/i.exec(keywords)?.[1]?.toLowerCase();
+}
+
+/** What the string literal `text[open, end)` adds to keyword-list text: a quoted `Language` value, else `""`. */
+function keywordString(keywords: string, text: string, open: number, end: number): string {
+  return /Language\s*=\s*$/i.test(keywords) ? text.slice(open + 1, end - 1) : '""';
+}
+
+/** The class body's start and the class's language, or `undefined` when the text has no class header. */
+function classBodyStart(text: string): ClassBody | undefined {
   let i = 0;
   while (i < text.length) {
     let word = i;
@@ -206,24 +223,27 @@ function classBodyStart(text: string): number {
       i = lineEnd(text, word) + 1;
     }
   }
-  return -1;
+  return undefined;
 }
 
 /**
- * From inside the class header, the index just past the `{` that opens the class body, skipping
- * comments, strings and the braces of a keyword value inside the `[ ... ]` list
- * (`[ Owner = {%Developer} ]`); -1 if none.
+ * From inside the class header, the class body's start (just past its `{`) and the `Language` keyword
+ * of the header's `[ ... ]` list, skipping comments, strings and the braces of a keyword value inside
+ * that list (`[ Owner = {%Developer} ]`); `undefined` if the body never opens.
  */
-function headerBraceEnd(text: string, from: number): number {
+function headerBraceEnd(text: string, from: number): ClassBody | undefined {
   let i = from;
   let listDepth = 0;
+  let keywords = "";
   while (i < text.length) {
-    const ch = text[i];
+    const ch = text[i] as string;
     if (ch === "{") {
-      if (listDepth === 0) return i + 1;
+      if (listDepth === 0) return { start: i + 1, language: keywordLanguage(keywords) };
       i = rawBodyEnd(text, i + 1);
     } else if (ch === '"') {
-      i = skipString(text, i);
+      const end = skipString(text, i);
+      if (listDepth > 0) keywords += keywordString(keywords, text, i, end);
+      i = end;
     } else if (ch === "/" && text[i + 1] === "/") {
       i = lineEnd(text, i);
     } else if (ch === "/" && text[i + 1] === "*") {
@@ -231,10 +251,11 @@ function headerBraceEnd(text: string, from: number): number {
     } else {
       if (ch === "[") listDepth += 1;
       else if (ch === "]" && listDepth > 0) listDepth -= 1;
+      else if (listDepth > 0) keywords += ch;
       i += 1;
     }
   }
-  return -1;
+  return undefined;
 }
 
 /** The index just past the `}` that closes a body whose `{` is already consumed, counting braces only. */
@@ -287,25 +308,39 @@ function foreignBodyEnd(text: string, from: number): number {
 const METHOD_KEYWORDS = new Set(["method", "classmethod", "clientmethod", "trigger"]);
 
 /**
+ * The language of a method or trigger whose keyword list names none, as IRIS reads it: a client
+ * method is JavaScript, a trigger is ObjectScript, and any other method takes the class's `Language`
+ * keyword (ObjectScript when the class names none, `undefined` here).
+ */
+function defaultLanguage(keyword: string, classLanguage: string | undefined): string | undefined {
+  if (keyword === "clientmethod") return "javascript";
+  if (keyword === "trigger") return undefined;
+  return classLanguage;
+}
+
+/**
  * Scan one class member that starts at `start`: its keyword, its declaration up to an unquoted `;` or
  * `{`, and its body. Records the name of a `Storage` member that has a body. Returns the index after it.
  */
-function scanMember(text: string, start: number, names: string[]): number {
+function scanMember(text: string, start: number, names: string[], classLanguage: string | undefined): number {
   let i = start + 1;
   while (i < text.length && /[A-Za-z0-9]/.test(text[i] as string)) i += 1;
   const keyword = text.slice(start, i).toLowerCase();
 
-  // The declaration, with string contents dropped (a quoted Language value is kept). A `{` inside
-  // the parentheses of a formal list (`target = {$$$NULLOREF}`) or the `[ ... ]` keyword list
-  // (`SqlComputeCode = {...}`) is a value, not the member's body.
+  // The declaration, with string contents dropped, and the text of its `[ ... ]` keyword list (a quoted
+  // Language value is kept there). A `{` inside the parentheses of a formal list (`target =
+  // {$$$NULLOREF}`) or the keyword list (`SqlComputeCode = {...}`) is a value, not the member's body.
   let declaration = "";
+  let keywords = "";
+  let inKeywordList = false;
   let opensBody = false;
   let nesting = 0;
   while (i < text.length) {
     const ch = text[i] as string;
     if (ch === '"') {
       const end = skipString(text, i);
-      declaration += /Language\s*=\s*$/i.test(declaration) ? text.slice(i + 1, end - 1) : '""';
+      if (inKeywordList) keywords += keywordString(keywords, text, i, end);
+      declaration += '""';
       i = end;
     } else if (ch === ";") {
       return i + 1;
@@ -317,8 +352,13 @@ function scanMember(text: string, start: number, names: string[]): number {
       declaration += "{}";
       i = rawBodyEnd(text, i + 1);
     } else {
+      if (ch === "[" && nesting === 0) inKeywordList = true;
       if (ch === "(" || ch === "[") nesting += 1;
-      else if ((ch === ")" || ch === "]") && nesting > 0) nesting -= 1;
+      else if ((ch === ")" || ch === "]") && nesting > 0) {
+        nesting -= 1;
+        if (nesting === 0) inKeywordList = false;
+      }
+      if (inKeywordList) keywords += ch;
       declaration += ch;
       i += 1;
     }
@@ -331,7 +371,7 @@ function scanMember(text: string, start: number, names: string[]): number {
     return rawBodyEnd(text, i);
   }
   if (METHOD_KEYWORDS.has(keyword)) {
-    const language = /\bLanguage\s*=\s*([A-Za-z0-9_]+)/i.exec(declaration)?.[1]?.toLowerCase();
+    const language = keywordLanguage(keywords) ?? defaultLanguage(keyword, classLanguage);
     if (language === undefined || language === "objectscript" || language === "cache") {
       return objectScriptBodyEnd(text, i);
     }
@@ -342,15 +382,16 @@ function scanMember(text: string, start: number, names: string[]): number {
 
 function udlStorageNames(text: string): string[] {
   const names: string[] = [];
-  let i = classBodyStart(text);
-  if (i < 0) return names;
+  const body = classBodyStart(text);
+  if (body === undefined) return names;
+  let i = body.start;
   while (i < text.length) {
     const ch = text[i] as string;
     if (ch === " " || ch === "\t" || ch === "\n") i += 1;
     else if (ch === "/" && text[i + 1] === "/") i = lineEnd(text, i);
     else if (ch === "/" && text[i + 1] === "*") i = blockCommentEnd(text, i);
     else if (ch === "}") break;
-    else if (/[%A-Za-z]/.test(ch)) i = scanMember(text, i, names);
+    else if (/[%A-Za-z]/.test(ch)) i = scanMember(text, i, names, body.language);
     else i += 1;
   }
   return names;

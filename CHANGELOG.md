@@ -23,9 +23,12 @@ names in the order of the current source. The text says what to do:
 - **What counts.** Names are compared exactly (case-sensitive). A rename is a drop; changing a definition's content is
   allowed. Only `.cls` documents are guarded, in UDL or XML form. A comment, a string, a method or XData body, or a
   label that only says `Storage` is not a definition: the scanner follows IRIS's own parse, and a live oracle checks it
-  against IRIS for every fixture.
-- **Otherwise unchanged.** For a new class, a routine, an include file, and an existing class that keeps its Storage,
-  the result is what it was. A new document still costs one request. With `ignoreConflict: true` the request for a new
+  against IRIS for every fixture. In a few hand-written forms (a brace hidden in embedded SQL or HTML, for example) the
+  two differ, and there a drop can go unrefused.
+- **Otherwise unchanged.** A new document of any type gives the result it gave before, and so does a put with
+  `ignoreConflict: true` to an existing routine, include file or class that keeps its Storage. (Without
+  `ignoreConflict`, a put to an existing document used to fail with `HTTP 409` and is now saved; see Fixed.) A new
+  document still costs one request. With `ignoreConflict: true` the request for a new
   class no longer carries `?ignoreConflict=1` (IRIS ignores it for a new document), and an existing class is read through
   the 409 that IRIS answers an unversioned write with, so no GET or HEAD is added to any path. With both
   `ignoreConflict` and `allowStorageRegeneration`, and with any other document type and `ignoreConflict`, the one request
