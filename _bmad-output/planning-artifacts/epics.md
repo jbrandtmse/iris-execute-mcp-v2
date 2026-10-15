@@ -4980,6 +4980,50 @@ The epics run in order **38 → 39 → 40 → 41 → 43 → 42**. Epic 43 (MCP S
 - Inline multi-document fetch (G3).
 - A storage guard on `iris_doc_load`. 38.3 records it as a candidate with a reopen trigger.
 
+### Story 38.0: Epic 37 Deferred Cleanup
+
+The `/epic-cycle` retro-review gate story, inserted 2026-10-15 (unattended run, orchestrator-triaged). It is the Rule #37 drain inherited from Epic 37 (Lead exception L-5) and Epic 36. At this gate the 126 `burndown`-owned ledger entries were closed: 26 are fixed here, 5 move to named stories that rewrite their area, and the rest are terminal with evidence or a `reopen_if` probe. The full triage table goes in the spec's Design Notes. There is no Epic 37 retrospective and there are no open action items. Every bullet below is a ledger entry that this story fixes, verified live where it touches IRIS (Rule #48). Changed ObjectScript handlers (`Analytics.cls`, `Security.cls`, `Interop.cls`) regenerate the bootstrap embed in this story (Rule #24, `BOOTSTRAP_VERSION` from `2159ec9e6f69` → recorded).
+
+- **AC 38.0.1** — Document write fidelity:
+  - DW-485: `iris_doc_put` strips a leading BOM (as `iris_doc_load` does) and reports `isError` when the Atelier `result.status` is a non-empty string, never success unconditionally.
+  - DW-527: probe whether `iris_doc_export` drops the `generated` parameter on its `modifiedSince` branch (`export.ts:398-403`). Fix it if so; otherwise close the entry with the evidence.
+- **AC 38.0.2** — DW-469: the `IRIS_NAMESPACE` default in `config.ts` becomes `USER`, matching all seven documented env-var tables. `HSCUSTOM` exists only on HealthShare. Every test helper and script that relied on the old default sets it explicitly, and `CHANGELOG.md` records it under Changed. The maintainer's client configs already set `IRIS_NAMESPACE=HSCUSTOM`.
+- **AC 38.0.3** — Suite green on this host:
+  - DW-490: the non-ASCII JSON-key test honors `fixtureSkipReason` like its siblings;
+  - DW-492: the `MessageResendTest` real-resend methods skip with a logged reason when `SessionAgent.Sample.Production` is absent;
+  - DW-495: the certification-process drift test creates its temp directory under the realpath of `tmpdir()` (macOS `/var` → `/private/var`);
+  - DW-511: the armed Epic 36 gates run sequentially in `prepublish-gate.mjs`, and a failure includes the work response;
+  - DW-496: probe-first root cause of the intermittent engine-e2e "restore by NAME across a chain" failure (10 looped runs), then fix or contain it.
+- **AC 38.0.4** — `checkDistFresh` hardening:
+  - DW-413: accept `dist`, `dist/`, `./dist` and `dist/**`;
+  - DW-414: never throws (it returns `{ok:false, reason}` as its JSDoc promises);
+  - DW-415: follows symlinked files under `src/`, or fails closed;
+  - DW-416: fails closed on a future-mtime dist file;
+  - DW-417: verifies that the declared `main`/`module`/`exports`/`bin` targets exist inside `dist`;
+  - DW-524: the Epic 35 and Epic 37 live gates check dist FRESHNESS, not just existence.
+- **AC 38.0.5** — ObjectScript handler fixes (with the bootstrap regen):
+  - DW-455: the `Analytics.cls` redirect-restore sequences reuse `Command.cls` `TeardownRedirect`;
+  - DW-470: `iris_resource_manage:listPrivileges` forwards its optional `system` boolean;
+  - DW-473: a malformed `listPrivileges` target gets a clear validation error, not a raw `<SUBSCRIPT>` 500;
+  - DW-450: `iris_production_item` `get` echoes the resolved `production` (additive);
+  - DW-54: production delete refuses any non-Stopped state (Troubled 4, NetworkStopped 5), not only Running;
+  - DW-55: deleting a production whose class is gone removes the orphan `Ens.Config.Production` row.
+- **AC 38.0.6** — Docs and messages:
+  - DW-384: CHANGELOG and changeset state that byRef leaves carry `ceiling=<N>`; detect them by the stable `[IRIS-MCP-TRUNCATED` prefix;
+  - DW-458: the `item.ts` description and the interop README say that enable/disable skips items whose host class no longer resolves, and how to repair one;
+  - DW-514: the `health.ts` comments drop the nonexistent Story 1.4 monitoring-loop references;
+  - DW-520: README `:541` scopes the connection-error envelope claim to unreachable-at-startup;
+  - DW-523: the double `IRIS health check failed:` prefix is removed, and both test pins are updated;
+  - DW-57: the `docdb.ts:83` JSDoc says "silently skipped".
+- **AC 38.0.7** — DW-388: `scripts/verify-iris-reachable.mjs` warns loudly, naming the variables, whenever it falls back to local-dev defaults, and fails closed when `CI` is set. The local dev loop keeps working.
+- **AC 38.0.8** — Gates:
+  - `pnpm turbo run build test lint type-check` passes, per package if the parallel run flakes;
+  - governance `:check` exits 0 at `1e62c5ad5bf7`/141;
+  - tool counts are unchanged; `listPrivileges` `system` is a parameter, not a key;
+  - `BOOTSTRAP_VERSION` from → to is recorded and `gen:bootstrap` regenerates idempotently;
+  - the changesets are added;
+  - the OS suite `total` matches the `Test*` count (#35).
+
 ### Story 38.1: Reject the Unimplemented HTTP Transport
 
 G48, "fix now" (S-2). Pure TypeScript in `@iris-mcp/shared` plus the five entry points. No tool, key or bootstrap change.
@@ -5343,6 +5387,7 @@ This story ships per-routine INT-line coverage, with a complete response shape. 
     - a pre-started foreign session causes a refusal;
     - coverage oracles are captured in a disposable namespace whose routines nobody else runs.
 - **AC 40.1.5** — Output: for each routine of each selected class, the covered and executable INT lines and a percentage. The live oracle is a fixture class with hand-countable branches, with the expected values captured from the live run (Rule #36).
+- DW-453: `ExecuteMCPv2.REST.UnitTest.RunTests()` binds its I/O-redirect mnemonic on `$IO` instead of a throw-away null device (`UnitTest.cls:80-96`). If AC 40.1.2 chooses the custom `POST /tests` route, fix it there; otherwise close it with the evidence. (ledger; routed by x0 2026-10-15)
 
 ### Story 40.2: Coverage Reports and Targets
 
@@ -5603,6 +5648,7 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
   - an older deployment is upgraded.
 
   Proven red by reverting to equality comparison.
+- DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
 
 ### Story 42.3: CI Workflow
 
@@ -5706,6 +5752,8 @@ DW-441.
   Every "not yet published" or clone-and-build caveat in the docs is listed with a verdict and removed (Rule #56).
 - **AC 42.9.2** — Post-publish re-certification: each client adapter is re-certified against the published `1.0.0` packages with the existing certify scripts, and the certification table is regenerated. Rows that only a human can certify are marked as such, with the date.
 - **AC 42.9.3** — The CHANGELOG `1.0.0` release notes and the PRD's distribution section match what shipped.
+- DW-440: the Kimi Code VS Code extension half of its certification row. Re-certify it if an installed extension is available, otherwise mark the row human-only with the date (AC 42.9.2). (ledger; routed by x0 2026-10-15)
+- DW-442: the GitHub Copilot Chat certification row needs a consenting Copilot user. Mark it human-only with the date unless one is available (AC 42.9.2). (ledger; routed by x0 2026-10-15)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 
