@@ -160,6 +160,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 
     The layers never interleave: every `IRIS_GOVERNANCE` layer outranks every `IRIS_GOVERNANCE_FILE` layer. The file is read once, at startup.
   - **Parent keys** *(lands in Story 38.4)*. When a key's `parent` (AD-4) is explicitly disabled at any layer, the child seeds disabled. An explicit setting on the child still wins.
+    - "Explicitly disabled" means the first explicit layer that sets the parent, in the precedence order above, sets it false. A lower layer's `false` does not count once a higher layer enables the parent, so parent and child never disagree.
+    - An inherited verdict reports `configSource: "parent"`. The denial carries `inheritedFrom: "<parent key>"` and the text suffix ` (inherited from '<parent>')`. It does not carry `presetApplied` when the parent caused it. This is additive: no key had a parent before 38.4.
+    - `parent` is declared per tool, so every action key of the child inherits it.
+    - Orchestrator decisions #9 and #10, taken at the Story 38.4 spec gate on 2026-10-15 under the Lead's delegation.
   - **The `read-only` preset.** It blocks every write, including baseline and `defaultEnabled` writes. Explicit keys beat the preset.
     - An unknown preset fails fast.
     - A denial caused by the preset carries `presetApplied`.

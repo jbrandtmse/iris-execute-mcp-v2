@@ -5094,7 +5094,7 @@ G5. A cheap safety check on the document write path that 38.4 reuses.
 G2. New dev tool `iris_doc_edit` (S-3). This story owns applying edits; it reuses 38.2's numbering and 38.3's guard and does not redesign them (Rule #52).
 
 - **AC 38.4.1** — Probe first (Rules #47/#45): verify the research claim that `client-config/src/diff.ts` holds a reusable line-span and diff engine (research [57]). It is a JSONC/YAML/TOML pending-edit renderer, so the probe records whether any part of it is generic. A server never imports `client-config`. Reused code moves into `@iris-mcp/shared`; otherwise a small line-diff utility is written there.
-- **AC 38.4.2** — Input: `action` (an enum with the single value `apply`), `name`, an `edits` array and optional `namespace`. The governance key is therefore `iris_doc_edit:apply`. The enum is required: the `defaultEnabled` marker addresses only `tool:action` keys, and `buildDefaultEnabledWrites` throws on a scalar `mutates` (`governance.ts:570-605`). *(Amended 2026-10-14 by the spine reconcile; spine AD-4.)* Each edit is one of:
+- **AC 38.4.2** — Input: `action` (an enum of `apply | regenerateStorage`, per AC 38.4.4), `name`, an `edits` array and optional `namespace`. The governance keys are therefore `iris_doc_edit:apply` and `iris_doc_edit:regenerateStorage`. *(Aligned with AC 38.4.4 at the Story 38.4 spec gate, 2026-10-15.)* The enum is required: the `defaultEnabled` marker addresses only `tool:action` keys, and `buildDefaultEnabledWrites` throws on a scalar `mutates` (`governance.ts:570-605`). *(Amended 2026-10-14 by the spine reconcile; spine AD-4.)* Each edit is one of:
   - `insert` (`afterLine`, `text`);
   - `delete` (`startLine`, `endLine`);
   - `replace` (`startLine`, `endLine`, `text`).
