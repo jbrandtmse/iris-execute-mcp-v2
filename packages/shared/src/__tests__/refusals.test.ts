@@ -46,6 +46,7 @@ describe("the refusal-code catalog (Story 38.3, AC-9)", () => {
     expect(Object.keys(REFUSAL_CODES).sort()).toEqual([
       "DOCUMENT_CONFLICT",
       "GOVERNANCE_DISABLED",
+      "STALE_CONTENT",
       "STORAGE_DROPPED",
     ]);
   });

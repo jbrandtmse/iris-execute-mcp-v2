@@ -49,13 +49,16 @@ import type {
   PaginateResult,
   PromptDefinition,
 } from "./tool-types.js";
-import type { GovernanceConfig, GovernancePreset, MutatesLookup } from "./governance.js";
+import type { GovernanceConfig, GovernancePreset, MutatesLookup, ParentKeys } from "./governance.js";
 import {
   parseGovernanceConfig,
   parseGovernancePreset,
   loadGovernanceFile,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
+  buildParentKeys,
+  assertParentKeysKnown,
+  inheritedParentDisable,
   unwrapActionOptions,
   assertGovernanceClassification,
   effective,
@@ -471,6 +474,16 @@ export class McpServerBase {
   private defaultEnabledWrites: ReadonlySet<string> = new Set();
 
   /**
+   * Child key to parent key map (Story 38.4, AD-4/AD-6), built from each
+   * {@link ToolDefinition.parent}. A key whose parent is explicitly disabled seeds
+   * disabled. Threaded into the resource, the discovery call and the call-time
+   * gate so all three agree. Rebuilt alongside {@link mutatesLookup}; empty when no
+   * registered tool declares a parent, in which case the governance cascade is
+   * byte-for-byte the one without the inherited-disable step (Rule #19).
+   */
+  private parentKeys: ParentKeys = new Map();
+
+  /**
    * Every governance key this server's advisory resource reports on (Epic 14,
    * architecture decisions D4/D6): the union of {@link GOVERNANCE_BASELINE} and
    * this server's own registered tool/action keys, computed with the SAME logic
@@ -715,6 +728,10 @@ export class McpServerBase {
     // so a dynamically-added tool declaring `defaultEnabled` is reflected in the
     // gate/resource/discovery seed alongside its `mutates` classification.
     this.defaultEnabledWrites = buildDefaultEnabledWrites(this.tools.values());
+    // Rebuild the child-to-parent key map (AD-6) the same way. It fails fast on a
+    // malformed `parent` declaration; whether the parent exists is checked in
+    // assertGovernanceClassified, once the key universe is rebuilt.
+    this.parentKeys = buildParentKeys(this.tools.values());
   }
 
   /**
@@ -796,6 +813,8 @@ export class McpServerBase {
    */
   private assertGovernanceClassified(): void {
     assertGovernanceClassification(this.governedKeys, this.mutatesLookup);
+    // A `parent` must name a baseline key or a registered key (Story 38.4).
+    assertParentKeysKnown(this.parentKeys, this.governedKeys);
   }
 
   // ── Advisory governance resource (D6) ──────────────────────────────
@@ -851,10 +870,11 @@ export class McpServerBase {
       this.preset,
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
+      this.parentKeys,
     );
 
     // Story 32.0 (AC 32.0.3): report which channel resolved each key
-    // (`env` | `file` | `preset` | `default`) alongside the policy map —
+    // (`env` | `file` | `parent` | `preset` | `default`) alongside the policy map -
     // emitted unconditionally (with no file set, keys report
     // env/preset/default). Built over the SAME visibleGovernedKeys() filter,
     // so the source map inherits the hidden-tool key omission structurally
@@ -867,6 +887,7 @@ export class McpServerBase {
       this.preset,
       BASELINE_ACTION_CLASSIFICATIONS,
       this.governanceFileConfig,
+      this.parentKeys,
     );
 
     return {
@@ -1417,6 +1438,7 @@ export class McpServerBase {
         this.preset,
         BASELINE_ACTION_CLASSIFICATIONS,
         this.governanceFileConfig,
+        this.parentKeys,
       )
     ) {
       // Disabled action (AC 14.4.2): structured denial. Human-readable text +
@@ -1427,15 +1449,27 @@ export class McpServerBase {
       // ONLY when the `presetSeed` layer (not an explicit override at ANY of
       // the four env/file explicit layers — Story 32.0) caused the denial —
       // an explicit `false` denial must NOT carry it, so operators can tell
-      // the two apart.
+      // the two apart. Story 38.4 (AD-6): a denial inherited from the key's
+      // parent carries `inheritedFrom` instead, and never `presetApplied`.
+      const explicitOverride = hasExplicitOverride(
+        governanceKey,
+        profile.name,
+        this.governanceConfig,
+        this.governanceFileConfig,
+      );
+      const inheritedFrom = explicitOverride
+        ? undefined
+        : inheritedParentDisable(
+            governanceKey,
+            profile.name,
+            this.governanceConfig,
+            this.parentKeys,
+            this.governanceFileConfig,
+          );
       const presetCaused =
         this.preset !== undefined &&
-        !hasExplicitOverride(
-          governanceKey,
-          profile.name,
-          this.governanceConfig,
-          this.governanceFileConfig,
-        ) &&
+        !explicitOverride &&
+        inheritedFrom === undefined &&
         presetSeed(
           governanceKey,
           this.preset,
@@ -1444,14 +1478,17 @@ export class McpServerBase {
         ) === false;
       logger.warn(
         `Tool ${tool.name}: action "${governanceKey}" denied by governance policy for profile "${profile.name}"` +
-          (presetCaused ? ` (preset "${this.preset}").` : "."),
+          (presetCaused ? ` (preset "${this.preset}").` : ".") +
+          (inheritedFrom !== undefined ? ` Inherited from "${inheritedFrom}".` : ""),
       );
       return refusalResult(
         REFUSAL_CODES.GOVERNANCE_DISABLED,
-        `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'`,
+        `action '${governanceKey}' is disabled by governance policy for server '${profile.name}'` +
+          (inheritedFrom !== undefined ? ` (inherited from '${inheritedFrom}')` : ""),
         {
           action: governanceKey,
           server: profile.name,
+          ...(inheritedFrom !== undefined ? { inheritedFrom } : {}),
           ...(presetCaused ? { presetApplied: this.preset } : {}),
         },
       );
@@ -1486,6 +1523,7 @@ export class McpServerBase {
           BASELINE_ACTION_CLASSIFICATIONS,
           this.toolVisibility,
           this.governanceFileConfig,
+          this.parentKeys,
         );
         return {
           content: [

@@ -50,15 +50,21 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes (dev: core 12/17, developer 29/0 — Story 36.2 added iris_test_status, developer-include/core-exclude)", () => {
-    expect(toolPresets.core.include.length).toBe(12);
+  it("pins the exact roster sizes (dev: core 13/17, developer 30/0 - Story 36.2 added iris_test_status, developer-include/core-exclude; Story 38.4 added iris_doc_edit to both)", () => {
+    expect(toolPresets.core.include.length).toBe(13);
     expect(toolPresets.core.exclude.length).toBe(17);
-    expect(toolPresets.developer.include.length).toBe(29);
+    expect(toolPresets.developer.include.length).toBe(30);
     expect(toolPresets.developer.exclude.length).toBe(0);
   });
 
-  it("core stays within the researched ≤13-runtime-tool window (+1 for iris_server_profiles)", () => {
-    expect(toolPresets.core.include.length + 1).toBeLessThanOrEqual(13);
+  it("core holds 14 runtime tools (13 package tools + iris_server_profiles): the 13 is a guideline, not a hard limit (L-4, Project Lead decision 2026-10-14; AD-7)", () => {
+    expect(toolPresets.core.include.length + 1).toBe(14);
+  });
+
+  it("iris_doc_edit is included in both presets, because it is in the everyday authoring loop (Story 38.4)", () => {
+    expect(toolPresets.core.include).toContain("iris_doc_edit");
+    expect(toolPresets.developer.include).toContain("iris_doc_edit");
+    expect(toolPresets.core.exclude).not.toContain("iris_doc_edit");
   });
 
   describe("TOOL_PAIRS co-visibility", () => {
@@ -75,6 +81,14 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
             `"${a}" and "${b}" must be co-visible in preset "${preset}"`,
           ).toBe(bIn);
         }
+      }
+    });
+
+    it("iris_doc_get / iris_doc_edit are co-visible: both in core and both in developer (Story 38.4)", () => {
+      expect(TOOL_PAIRS).toContainEqual(["iris_doc_get", "iris_doc_edit"]);
+      for (const preset of ["core", "developer"] as const) {
+        expect(toolPresets[preset].include, preset).toContain("iris_doc_get");
+        expect(toolPresets[preset].include, preset).toContain("iris_doc_edit");
       }
     });
 

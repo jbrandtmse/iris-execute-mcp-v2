@@ -34,7 +34,14 @@
 
 import { z } from "zod";
 
-import type { GovernanceConfig, GovernanceConfigSource, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
+import type {
+  GovernanceConfig,
+  GovernanceConfigSource,
+  GovernancePreset,
+  MutatesLookup,
+  MutationClass,
+  ParentKeys,
+} from "./governance.js";
 import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -139,7 +146,8 @@ export interface ServerDiscoveryResult {
     policy?: Record<string, boolean>;
     /**
      * Per-key config channel that resolved the single profile's policy (Epic
-     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `preset` | `default`.
+     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `parent` | `preset` | `default`
+     * (`parent`, Story 38.4: the key inherits a disable from its parent key).
      * Emitted UNCONDITIONALLY alongside `policy` (absent only when
      * `allProfiles`), over the SAME visibility-filtered key set — the
      * hidden-tool key omission (Epic 30) applies identically, so no hidden
@@ -230,6 +238,10 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  *   {@link getEffectiveConfigSources} call so the reported policy + per-key
  *   `configSource` reflect the file layers exactly as the gate does. Default
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 report's policy.
+ * @param parentKeys - Child key to parent key map (Story 38.4), threaded into every
+ *   {@link getEffectivePolicy}/{@link getEffectiveConfigSources} call so an inherited
+ *   disable is reported (with source `parent`) exactly as the gate enforces it.
+ *   Default empty - byte-for-byte the report without parent keys.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -248,6 +260,7 @@ export function computeServerDiscovery(
     hiddenCount: number;
   } = { preset: "full", visibleCount: 0, hiddenCount: 0 },
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -281,6 +294,7 @@ export function computeServerDiscovery(
           preset,
           classifications,
           fileConfig,
+          parentKeys,
         ),
         enumerable: true,
         writable: true,
@@ -297,6 +311,7 @@ export function computeServerDiscovery(
           preset,
           classifications,
           fileConfig,
+          parentKeys,
         ),
         enumerable: true,
         writable: true,
@@ -320,6 +335,7 @@ export function computeServerDiscovery(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
       configSource: getEffectiveConfigSources(
         profile.name,
@@ -329,6 +345,7 @@ export function computeServerDiscovery(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
     };
   }

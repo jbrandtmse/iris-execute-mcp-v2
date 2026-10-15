@@ -93,6 +93,8 @@ import {
   defaultSeed,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
+  buildParentKeys,
+  assertParentKeysKnown,
   getEffectivePolicy,
   getEffectiveConfigSources,
   RESERVED_KEYS,
@@ -100,6 +102,7 @@ import {
   type GovernanceConfigSource,
   type GovernanceLayer,
   type MutationClass,
+  type ParentKeys,
 } from "../governance.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
@@ -553,7 +556,9 @@ Commands:
       Render the SAME cascade the servers compute — env.profile ??
       env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed —
       for the CLI's own environment plus the resolved file, with the per-key
-      configSource (env|file|preset|default). Profile defaults to "default".
+      configSource (env|file|preset|default). It is baseline-scoped and has no
+      tool list, so it never applies a parent key's inherited disable; only
+      "universe" does. Profile defaults to "default".
   diff [--file <path>] [--json]
       Compare every key the file sets against its default-seed value.
   universe [--profile <name>] [--file <path>] [--root <path>] [--json]
@@ -562,7 +567,9 @@ Commands:
       dist, the same derivation the iris-mcp-all cross-package tests and the
       baseline generator use) ∪ the framework iris_server_profiles tool —
       with the REAL mutates/default-enabled classifications, grouped per
-      package, with each key's effective value and configSource. This is the
+      package, with each key's effective value and configSource (env|file|
+      parent|preset|default; "parent" marks a key that inherits a disable from
+      its parent key). This is the
       render iris_server_profiles computes on a running server over its own
       registered subset (post-foundation write keys seed default-DISABLED
       here, unlike "effective"/"diff", which stay baseline-scoped). The
@@ -1377,9 +1384,14 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
   // correctly here: default-disabled unless F2 default-enabled).
   let mutatesLookup: Map<string, MutationClass>;
   let defaultEnabledWrites: ReadonlySet<string>;
+  let parentKeys: ParentKeys;
   try {
     mutatesLookup = new Map(buildMutatesLookup(allTools));
     defaultEnabledWrites = buildDefaultEnabledWrites(allTools);
+    // A key whose parent is explicitly disabled seeds disabled (AD-6); the
+    // parents must exist in this universe.
+    parentKeys = buildParentKeys(allTools);
+    assertParentKeysKnown(parentKeys, sortedKeys);
   } catch (e: unknown) {
     return failOperational(errorMessage(e));
   }
@@ -1396,6 +1408,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     preset,
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
+    parentKeys,
   );
   const sources = getEffectiveConfigSources(
     profile,
@@ -1405,6 +1418,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     preset,
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
+    parentKeys,
   );
 
   // Per-key mutates classification for display (baseline classifications win,

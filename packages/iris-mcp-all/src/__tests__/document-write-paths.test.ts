@@ -78,6 +78,13 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
     reason: "iris_doc_put: for a class without allowStorageRegeneration, the 409 that the unversioned PUT draws feeds the Storage-drop guard before any write (a refused drop sends no write); a non-class document, and a class with allowStorageRegeneration, are not guarded",
   },
   {
+    file: "packages/iris-dev-mcp/src/tools/doc-edit.ts",
+    pattern: "put",
+    count: 1,
+    verdict: "guarded",
+    reason: "iris_doc_edit: the edits are applied to the one read of the class, and for action apply the Storage-drop guard compares that read with the edited lines before the one version-checked PUT (a refused drop sends no write); action regenerateStorage is the default-disabled override, and a non-class document is not guarded",
+  },
+  {
     file: "packages/iris-dev-mcp/src/tools/load.ts",
     pattern: "put",
     count: 1,

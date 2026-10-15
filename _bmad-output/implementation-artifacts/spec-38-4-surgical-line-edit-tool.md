@@ -2,7 +2,8 @@
 title: 'Story 38.4: Surgical Line Edit Tool'
 type: 'feature'
 created: '2026-10-15'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '364be6ded31a8e08f79c8c26137ce2e2f1ac2042'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -10,7 +11,14 @@ context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      Project Rule #53 still states the `core` ceiling as "<=13 runtime tools/server", although Project Lead decision L-4 makes 13 a guideline and dev `core` is now 14.
+    evidence: |-
+      `.claude/rules/project-rules.md` #53 says "`core` stays the everyday loop (<=13 runtime tools/server - when in doubt, EXCLUDE from `core`)". Story 38.4 ships dev `core` at 14 runtime tools under L-4, pinned by `presets.test.ts`. The fix edits an agent-context file (rules), so it is left to the lead.
+    location: >-
+      .claude/rules/project-rules.md (#53)
+    severity: low
 ---
 
 <intent-contract>
@@ -417,7 +425,50 @@ It reuses 38.2's line numbering and 38.3's Storage guard and refusal catalog unc
 
 ## Spec Change Log
 
+### 2026-10-15 - Matrix example `@@ -2 +1,0 @@` is a `-U0` form (Rule 5 apply-and-report; no loopback)
+- Trigger: the implement pass could not reproduce the matrix's `@@ -2 +1,0 @@` under `-U3`. Re-checked by the review lead against the real `diff` (macOS Apple diff, Rule #36): for `printf 'a\nb\n'` against `printf 'a\n'`, `-U3` prints `@@ -1,2 +1 @@` and `-U0` prints `@@ -2 +1,0 @@`. With context lines an empty range occurs only when a whole side is empty: `@@ -1 +0,0 @@` (every line deleted) and `@@ -0,0 +1 @@` (lines added to an empty document).
+- Amended: nothing inside the read-only intent block. The implementation follows `diff -U3` and pins those two literals in `lines.test.ts`. The lead may correct the matrix wording (and the "a pure delete (`@@ -2 +1,0 @@`)" fixture note in Tasks) in a later pass.
+- Known-bad state avoided: pinning the `-U0` literal would make `unifiedDiff` disagree with `diff -U3` on every delete.
+- KEEP: the hand-written Myers diff, the `diff -U3` captured literals, and the round-trip test.
+
 ## Review Triage Log
+
+### 2026-10-15 - Review pass
+- verdicts: 33 findings - high 0, medium 0, low 23, false 9, maybe-false 1
+- findings:
+  - `[low]` `[patch]` Stale counts left by the docs sweep: `README.md:733` diagram `(29)` and `docs/epic-summary.md:3` "105 tools ... 110 advertised" - patched to `(30)` and 106/111, with a sentence naming `iris_doc_edit`.
+  - `[low]` `[defer]` `.claude/rules/project-rules.md` #53 still states `core` as "<=13 runtime tools/server" while L-4 makes 13 a guideline and dev `core` is 14 - the fix edits an agent-context file, so it is deferred to the lead.
+  - `[low]` `[patch]` CLI `effective` help lists `parent` as a `configSource`, but `effective` has no tool list and never applies an inherited disable - patched: the `effective` list is back to env|file|preset|default with a sentence saying only `universe` applies parent inheritance, and the `universe` help now lists `parent`.
+  - `[low]` `[patch]` The launcher's `UniverseJson.configSource` / `KeyRow.source` unions and README list omit `parent`, which `universe --json` now emits - patched in `extensions/iris-mcp-launcher/src/governanceView.ts` and its README; `governanceView.test.ts` 26 pass; the launcher `type-check` errors are the pre-existing missing `vscode`/servermanager modules, none in `governanceView.ts`.
+  - `[low]` `[reject]` `z.coerce.number()` turns `null`, `""` and `false` into 0 for `afterLine` - a null `afterLine` becomes "insert before line 1" only when `expected` equals line 1 (the other null-filled optionals, such as `text: null`, fail the schema anyway), `iris_doc_get` uses the same coerce idiom, and the fix adds a preprocess guard for a client behaviour nobody has shown.
+  - `[low]` `[patch]` The tool description's "an edit never overwrites lines it has not seen" overstates the guard when another writer shifted lines and `expected` is a non-unique line - reworded in `doc-edit.ts` and the dev README to "a line whose text differs from what you expected"; the distinctive-`expected` advice and the Design Notes residual risk already cover the remainder.
+  - `[low]` `[reject]` Response size is uncapped and the `MAX_DIFF_DISTANCE` fallback emits the whole unchanged middle as `-`/`+` - the fallback is the specified behaviour (Tasks: report the middle as one change) and needs more than 1,000 changed lines in one "surgical" call; a region-bounded diff would be a new algorithm. reopen_if an agent is observed sending edits that change more than 1,000 lines.
+  - `[low]` `[reject]` `STALE_CONTENT`'s "retry with the current text as expected" fails for a multi-line range whose non-final line ends in `\r` - `textToLines` parsing of `expected` is part of the intent contract, and no code path of ours produces a stored line ending in `\r` (`splitLines` splits on `\r?\n`). reopen_if a stored document with `\r` line ends is edited in practice.
+  - `[low]` `[patch]` Root README read-only bullet says `presetApplied` is returned for a denial "not an explicit `false`" without excluding a parent-inherited one - clause added; the "every new write is disabled" bullet's unlisted `iris_production_control:clean` exception is pre-existing and not this story's.
+  - `[low]` `[reject]` The tool description repeats rules that the `text` and `expected` field descriptions state (payload +15% for dev `core`) - the spec requires both ("Every field has a description" and the description's content list), and the growth is the new tool's own schema.
+  - `[low]` `[reject]` "never the whole document" is not enforced for a replace spanning lines 1..N - an excerpt is by spec the lines the edit produced plus 3 context lines, so replacing a whole document returns it; inherent to the operation.
+  - `[low]` `[reject]` `pairs.length === 0` makes every excerpt span the whole re-read document - `alignLines` pairs the common head and tail before the distance cap applies, so it needs more than 2,000 sent-versus-stored differences (an edit of more than 1,000 lines).
+  - `[low]` `[reject]` A writer saving between the tool's PUT and its re-read has its change attributed to this call's diff - the diff truthfully describes read-to-current, the window is milliseconds, and detecting it would need a second version compare. reopen_if a user reports a mis-attributed diff.
+  - `[false]` `[reject]` `removeTools` of a non-baseline parent tool leaves the registry half-updated - the only parent declared anywhere is the baseline key `iris_doc_put`, which stays in `governedKeys` whatever tools are registered, so the throw is unreachable with real tools (Rule #54).
+  - `[low]` `[reject]` An inherited denial's audit entry does not carry `inheritedFrom` - spec Never: "No audit-entry schema change: `inheritedFrom` is not copied into the audit log".
+  - `[low]` `[reject]` Same claim as the `afterLine` null finding above (`afterLine` null or `""` becomes 0) - same refutation.
+  - `[maybe-false]` `[reject]` An existing document with an empty `content` array cannot be edited (the range error says "lines 1 to 0") - unknown whether Atelier returns `content: []` for an existing document (a class or routine always carries a header line); if it does, the workaround is `iris_doc_put` and the grade is low. Settled by a GET of an empty `.inc`.
+  - `[false]` `[reject]` `readTextDocument` accepts a result with no string `ts`, so `If-None-Match: undefined` would be sent and reported as a conflict - every real Atelier document GET carries `ts` (the nine-key Doc in the live probes); no real input reaches it (Rule #54).
+  - `[low]` `[reject]` A denial inherited from a parent hidden by `IRIS_TOOLS_DISABLE` names a tool the agent cannot see - the same operator hid and disabled the parent, no secret is exposed, and decision #10 fixes the denial shape.
+  - `[low]` `[patch]` CLI `effective` help claim (second sighting) - same patch as the first CLI help finding.
+  - `[low]` `[patch]` The `iris_server_profiles` `allProfiles: true` branch is not verified for parent inheritance (dropping `parentKeys` at the two call sites keeps every test green) - added an `allProfiles` row in `governance-parent.test.ts` and `doc-edit-governance.test.ts`; mutation `allProfiles` branch drops `parentKeys` -> both new rows red.
+  - `[low]` `[patch]` The gate's "no inheritedFrom when the child has its own explicit setting" guard is unpinned (child `false` with parent `false`) - added gate rows in both files and an engine row; mutation gate ignores `explicitOverride` -> both gate rows red, and mutation `configSource` checks the inherited disable first -> the engine row red (7 rows).
+  - `[low]` `[patch]` `tool-types.ts` `parent` JSDoc says a key with an explicit setting reports source `parent` - reworded to the key that inherited the disable.
+  - `[low]` `[patch]` CLI `effective` help claim (third sighting, "Other findings") - same patch as the first CLI help finding.
+  - `[low]` `[reject]` The live gate's `listFixtureGlobals()` emptiness assertions cannot detect a defect (the `Store` fixture saves no rows) - Tasks mandate the cleanliness assertion and it pins no AC; the `iris_doc_list` half is real (compiling `Store` creates generated routines).
+  - `[false]` `[reject]` Intent reading: the Shape row's `is missing expected` text is unreachable through MCP because `expected` is a required schema field - `validateEdits` checks every field of `OP_FIELDS` through one loop (no separate branch), and the SDK rejecting a missing `expected` first is the expected layering.
+  - `[false]` `[reject]` Intent reading: tests drive the handler, not the MCP wire - spec Tasks prescribe mock-HTTP handler tests plus a live gate through the real `IrisHttpClient` and Atelier routes.
+  - `[false]` `[reject]` Intent reading: the governance tests call the registered callback with handler spies - spec Tasks prescribe mirroring `test-status-governance.test.ts` with the real `docPutTool`/`docEditTool` and spies.
+  - `[false]` `[reject]` Intent reading: the hidden-parent tests also set the governance disable - the matrix row says "inheritance still applies", and hiding alone changing the child is not specified.
+  - `[low]` `[reject]` Intent reading: no test sends an inherited denial through the audit path - same refusal as the audit finding above (spec Never).
+  - `[false]` `[reject]` Intent reading: CLI `effective`/`diff` and the `iris_env_promote` Gate 4 do not use the parent map - Tasks say `cmdEffective` stays unchanged, and Gate 4 treats `iris_doc_put` as a parent only.
+  - `[false]` `[reject]` Intent reading: overlap uses position semantics for inserts - Design Notes plan-time interpretation 4 states it and the Overlap rows pin it.
+  - `[false]` `[reject]` Intent reading: files outside a literal Never list (`doc.ts` extraction, `prepublish-gate.mjs`, `TOOL_PAIRS`, the 38.3 claims test, the snapshot) - each is named in Tasks & Acceptance.
 
 ## Design Notes
 
@@ -566,9 +617,65 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-9 | `splitLines` splits on `\n` only | 38.3 back-compat CRLF pin, `lines.test` |
 | AC-9 | parent map applied when the parent is explicitly `true` | back-compat `toEqual` |
 
+**Mutation results (Rule 19).** Each was applied to the source with a scripted exact-string replacement, the named tests were run, the file was restored from its saved bytes, the dist that the mutation touched was rebuilt (shared for the `lines.ts` and `governance.ts` rows that dev tests use, dev for the `defaultEnabled` row), and the tree was checked byte-identical against a checksum taken before the first mutation. Live rows ran armed against `default` (localhost:52773, HSCUSTOM).
+- mutation: AC-1 `hunkRange` always prints `,count` (never omits a count of 1) -> `lines.test.ts` "deleting every line names the empty new range" and "adding lines to an empty document" (the `diff -U3` literals `@@ -1 +0,0 @@` and `@@ -0,0 +1 @@`) went red.
+- mutation: AC-2 overlap check removed (`false && overlaps(a, b)`) -> `doc-edit.test.ts` all 8 Overlap rows went red.
+- mutation: AC-2 edits applied in read order instead of bottom-up -> `doc-edit.test.ts` "applies insert + delete + replace bottom-up", the six shuffled-order rows, "accepts an insert next to a range" and the two `applyEdits` rows (10) went red; live "saves a replace, an insert and a delete in one call" went red.
+- mutation: AC-3 `expected` check skipped (`false && stale.length > 0`) -> `doc-edit.test.ts` the three Stale rows and the carriage-return row (4) went red; live both "a stale expected text" tests went red.
+- mutation: AC-3 the save sent as `PUT <path>?ignoreConflict=1` with no `If-None-Match` -> `doc-edit.test.ts` the Replace call pin, the AC-8 path pin, the namespace/encoding row, the routine row and the Conflict row (5) went red; live "saves a replace, an insert and a delete" (the PUT path pin) and "a writer between the tool's read and its save" went red.
+- mutation: AC-3 a 409 on the save retried once -> `doc-edit.test.ts` "reports DOCUMENT_CONFLICT after exactly one save" (2 PUTs, expected 1) went red.
+- mutation: AC-4 Storage guard skipped for `apply` -> `doc-edit.test.ts` "refuses an apply that drops a Storage definition" went red; live "apply refuses an edit that removes the Storage lines" went red.
+- mutation: AC-4 `regenerateStorage` still guarded (guard on for every class) -> `doc-edit.test.ts` "regenerateStorage saves the same edits" went red; the same live test went red.
+- mutation: AC-5 answer built from the edited array (`reread.lines = applied.lines`) -> `doc-edit.test.ts` both "IRIS reformats" rows went red; live "saves a replace, an insert and a delete" (re-read 15 lines, sent 14) went red.
+- mutation: AC-5 excerpt context 2 instead of 3 -> `doc-edit.test.ts` 7 rows (Replace, Several edits, insert at top, routine, multi-line expected, reformat, No change) went red.
+- mutation: AC-6 `inheritedParentDisable` always returns `undefined` (inheritance removed) -> `governance-parent.test.ts` the four-layer, child-wins, first-verdict, read-only and map rows went red, and `doc-edit-governance.test.ts` 11 of 25 went red (shared dist rebuilt for the dev run).
+- mutation: AC-6 inherited disable checked before the key's own explicit layers -> `governance-parent.test.ts` 10 rows (child-wins engine rows, the read-only child row and the four gate child-wins rows) and `doc-edit-governance.test.ts` the four child-wins rows went red.
+- mutation: AC-6 inheritance on any explicit `false` of the parent (reading A) -> `governance-parent.test.ts` 6 rows (the first-verdict rows, "a parent enabled at a higher layer than the file's disable" and the child-keys back-compat row) and `doc-edit-governance.test.ts` "env enables iris_doc_put and the file disables it: apply runs" went red.
+- mutation: AC-6 `defaultEnabled` removed from `docEditTool` -> `doc-edit.test.ts` "is classified" (1), `doc-edit-governance.test.ts` the defaults rows (6) and `default-enabled-holders.test.ts` the holder list and the derived-keys row (2) went red (dev dist rebuilt for the `@iris-mcp/all` run).
+- mutation: AC-6 `iris_doc_edit` dropped from the `core` roster -> `presets.test.ts` 7 rows (coverage, sizes, runtime 14, both pair rows) went red.
+- mutation: AC-7 `textToLines` keeps a trailing empty line -> `lines.test.ts` 5 `textToLines` rows and `doc-edit.test.ts` 6 rows (Replace, CRLF, trailing newline, empty text, No change, `findStaleEdits`) went red.
+- mutation: AC-7 BOM not stripped from `text` -> `lines.test.ts` "removes one leading BOM, and only one" and `doc-edit.test.ts` "strips one leading BOM from text and from expected" went red.
+- mutation: AC-8 the handler also POSTs `action/compile` after the save -> `doc-edit.test.ts` "sends no compile request and nothing but the document path" went red; live "saves a replace, an insert and a delete" (`post` not called) and the Storage test went red.
+- mutation: AC-9 `splitLines` splits on `\n` only -> `lines.test.ts` 3 rows (`splitLines` against `split(/\r?\n/)`, two `textToLines` rows) and `doc-put-storage-guard.test.ts` "CRLF string content is split as today" (the 38.3 back-compat pin) went red.
+- mutation: AC-9 parent map applied when the parent is explicitly `true` (`verdict !== undefined`) -> `governance-parent.test.ts` 7 rows (the first-verdict rows, the gate "parent enabled at a higher layer" row and "the child's own keys are unchanged by the parent map") went red.
+
+Review-pass additions (each applied to the source, the named tests run, the file restored, the shared dist rebuilt, and the tree digest `git diff HEAD | shasum -a 256` checked identical before and after all three):
+- mutation: AC-6 the gate attributes a denial to the parent even when the key has its own explicit setting (`explicitOverride` ignored in `server-base.ts`) -> `governance-parent.test.ts` and `doc-edit-governance.test.ts` "an explicit false on apply while the parent is also disabled is the key's own denial, with no inheritedFrom" (1 each) went red.
+- mutation: AC-6 the `allProfiles` branch of `computeServerDiscovery` drops `parentKeys` from both engine calls -> `governance-parent.test.ts` and `doc-edit-governance.test.ts` "iris_server_profiles with allProfiles reports the inherited verdict for the profile that disables the parent only" (1 each) went red.
+- mutation: AC-6 `configSource` consults the inherited disable before the key's own explicit layers -> `governance-parent.test.ts` 7 rows, including the new "an explicit child false while the parent is also disabled is reported by the child's own layer", went red.
+
 AC-10 has no mutation by nature: it is the gate commands under Commands.
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Added the dev tool `iris_doc_edit` (`apply` enabled by default, `regenerateStorage` default-disabled; dev 29 -> 30 tools, suite 105 -> 106) and the governance `parent` mechanism. The tool reads a document once, checks every edit's `expected` text, applies the edits bottom-up and saves once with `If-None-Match`; it answers from a re-read (`unifiedDiff`, one excerpt per edit, `totalLines`, `ts`) and never compiles. `iris_doc_edit` declares the parent `iris_doc_put`: when that key's first explicit verdict is `false`, both `iris_doc_edit` keys seed disabled, reported as `configSource: "parent"` and denied with `inheritedFrom`. `BOOTSTRAP_VERSION` is unchanged (`3af8ca401e7c`); the frozen baseline check passes at `1e62c5ad5bf7`/141 (live 205, post-foundation 64).
+
+**Files changed.**
+- `packages/shared/src/lines.ts`, `index.ts`: `splitLines`, `joinLines`, `textToLines`, `alignLines`, `unifiedDiff` (hand-written Myers), `DIFF_CONTEXT_LINES`, `MAX_DIFF_DISTANCE`.
+- `packages/shared/src/governance.ts`, `tool-types.ts`, `server-base.ts`, `server-discovery.ts`, `cli/governance.ts`: the parent mechanism, the `parent` source and `inheritedFrom`.
+- `packages/shared/src/refusals.ts`, `tool-visibility.ts`: `STALE_CONTENT`; the `iris_doc_get` / `iris_doc_edit` pair.
+- `packages/iris-dev-mcp/src/tools/doc-edit.ts` (new), `doc.ts`, `load.ts`, `index.ts`, `presets.ts`: the tool, the shared read check and split call sites, registration, `core` 14 / `developer` 31 runtime.
+- New tests: `doc-edit.test.ts`, `doc-edit-governance.test.ts`, `doc-edit-live-gate.test.ts`, `governance-parent.test.ts`, `default-enabled-holders.test.ts`; updated counts, rosters, `lines.test.ts`, `refusals.test.ts`, write-paths and 38.3 claims tests, the prepublish gate roster.
+- Docs: root, dev, shared, `iris-mcp-all` and launcher READMEs, `tool_support.md`, `CHANGELOG.md`, `docs/migration-v1-v2.md`, `docs/epic-summary.md`, `.changeset/story-38-4-surgical-line-edit-tool.md`, and the re-measured payload table.
+- `extensions/iris-mcp-launcher/src/governanceView.ts`: `parent` added to two TypeScript unions (review patch).
+
+**Review.** Four layers (blind, edge-case, verification-gap, intent-alignment) reported 33 findings: high 0, medium 0, low 23, false 9, maybe-false 1 (mechanical count of the triage rows). Routes: 10 patch rows (8 patches), 1 defer, 22 reject.
+- Patches applied (all low): stale counts in `README.md:733` and `docs/epic-summary.md`; CLI `effective`/`universe` help; launcher unions and README; the description and dev README claim "never overwrites lines it has not seen"; the root README `presetApplied` clause; `allProfiles` discovery tests; explicit-child-false gate and engine tests; the `parent` JSDoc.
+- Deferred: Project Rule #53 text ("<=13") against L-4 (an agent-context file, for the lead).
+- Rejected, with reasons: `null`/`""` coerced to 0 for `afterLine` (guarded by `expected`, shared idiom); uncapped response and the `MAX_DIFF_DISTANCE` fallback (specified; needs more than 1,000 changed lines); `\r`-ended lines in multi-line `expected` (parse is in the intent contract); description duplicates field text (spec requires both); whole-document replace returns the document (inherent); `pairs.length === 0` excerpts (needs more than 2,000 differences); change between save and re-read (millisecond window); `removeTools` of a non-baseline parent (unreachable with real tools); audit log omits `inheritedFrom` (spec Never); empty-content document (maybe-false, low if real); missing `ts` (unreachable); hidden parent named in the denial (operator-set); live-gate global emptiness assertion (spec-mandated cleanliness check); eight intent-alignment observations that restate the spec's own prescriptions.
+- Follow-up review recommendation: `false` (patched entries by verdict: high 0, medium 0, low 8).
+
+**Verification.**
+- Loops (twice: after the implement pass, and after the review patches): the shared set 289 tests, the dev set 348, the `@iris-mcp/all` set 58, all pass; the armed live gates (`doc-edit`, `doc-put-storage-guard`, `doc-get-range`, `doc-put-bom`) 151 tests pass, none skipped, against `default` (localhost:52773, instance `77DD5053-...`, IRIS 2026.2 build 221U, HSCUSTOM).
+- Once, after the last patch: shared 1,589, dev 1,184, admin 498, interop 343, ops 350, data 165, client-config 514 tests, with build, lint (0 errors; one pre-existing warning at `cli/governance.ts`) and type-check clean; `@iris-mcp/all` 300 tests; `pnpm gen:governance-baseline:check` exit 0; the protected-file diff (`bootstrap-classes.ts`, `governance-baseline.ts`, `baseline-classifications.ts`, `src/`) is empty; `pnpm measure:tools-payload` re-run and the README table updated (dev full 78,033 bytes, core 37,207); `iris_doc_list` (generated included) and `iris_global_list` for `QaStory384` are empty.
+- Mutations (Rule 19): 20 from the implement pass and 3 from the review pass, each red then restored; the tree digest was identical before and after the review-pass mutations.
+- The launcher `type-check` fails on missing `vscode`/servermanager modules in this environment (pre-existing, none in the file edited); its `governanceView.test.ts` passes (26).
+
+**Residual risks and notes for the lead.**
+- The matrix example `@@ -2 +1,0 @@` is a `-U0` form (see the Spec Change Log); the implementation follows `diff -U3`.
+- A non-unique `expected` line can still match after another writer shifted lines before the tool's read (Design Notes residual risk). A stored line ending in `\r` cannot be matched by a multi-line `expected`.
+- Outside the spec's doc list: `docs/epic-summary.md` and the launcher's types and README were touched by review patches.
+- Spec follow-ups for the lead: correct the matrix wording; Rule #53 text against L-4.

@@ -2,6 +2,69 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.4: Surgical line edit tool
+
+### Added
+
+- **`iris_doc_edit` (`@iris-mcp/dev`, dev 29 → 30 tools, suite 105 → 106).** Changes a few lines of an existing class,
+  routine or include file without resending the whole document. The agent reads the exact lines with a ranged
+  `iris_doc_get` and sends `insert`, `delete` and `replace` edits in the same line numbering. Every edit carries the
+  `expected` text of the lines it changes. The tool reads the document once, checks every edit, applies them all
+  bottom-up and saves once with `If-None-Match` set to the version it read: a concurrent change is a
+  `DOCUMENT_CONFLICT`, never retried, and no `ignoreConflict` exists. It answers from a re-read, never from the edited
+  text (IRIS reformats class source on save): `unifiedDiff` (3 context lines), an excerpt per edit (3 context lines on
+  each side), `totalLines` and `ts`, and it never returns the whole document. It does not compile; the text says to run
+  `iris_doc_compile`. An edit whose result equals the stored text saves nothing (`changed: false`).
+- **Governance keys and default states.** Two new post-foundation keys (the frozen baseline `1e62c5ad5bf7`, 141 keys, is
+  unchanged):
+  - `iris_doc_edit:apply` is a `write` that ships **enabled by default** (the `defaultEnabled` marker; Project Lead
+    decision S-3: every edit is guarded by `expected`, the save is version-checked, and a class edit that would drop a
+    Storage definition is refused). It is the second holder of that closed list, after `iris_production_control:clean`.
+    Disable it with `{"global": {"iris_doc_edit:apply": false}}`, by disabling `iris_doc_put`, or with the read-only
+    preset.
+  - `iris_doc_edit:regenerateStorage` is a `write` that is **disabled by default**: the same edits without the Storage
+    guard, for an operator who accepts that IRIS generates new storage at the next compile.
+- **Parent keys (AD-4, AD-6).** `ToolDefinition` gains an optional `parent` (the existing governance key whose capability
+  a new tool re-exposes). When the parent's first explicit setting, in cascade order, is `false`, every key of the child
+  seeds disabled; an explicit setting on the child still wins, and the inherited disable sits above the preset seed.
+  `iris_doc_edit` declares the parent `iris_doc_put`. The cascade is now
+  `env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable ?? presetSeed ?? defaultSeed`, and with no
+  parent explicitly disabled every existing key's effective value, `configSource` and denial text is byte-identical to
+  before.
+  - `configSource` gains the value `parent` (in `iris_server_profiles`, the governance resource and `iris-mcp-governance
+    universe`).
+  - A denial inherited from a parent carries `inheritedFrom: "<parent key>"` after `server` and the text suffix
+    ` (inherited from '<parent>')`; `presetApplied` is not set when the parent caused it. The audit log schema is
+    unchanged (`inheritedFrom` is not copied into it).
+  - `@iris-mcp/shared` exports `buildParentKeys`, `assertParentKeysKnown`, `inheritedParentDisable` and the type
+    `ParentKeys`; `effective`, `configSource`, `getEffectivePolicy`, `getEffectiveConfigSources` and
+    `computeServerDiscovery` take a trailing optional `parentKeys` (default empty). Registration fails fast when a
+    `parent` names an unknown key, one of the tool's own keys, or a key that itself has a parent, or when a tool that
+    owns a baseline key declares one.
+- **Refusal code `STALE_CONTENT`** in the `REFUSAL_CODES` catalog: `{ code: "STALE_CONTENT", name, namespace, ts,
+  totalLines, mismatches: [{ edit, op, startLine, endLine, current }] }`, listing every edit whose `expected` text does
+  not match the document now, with the current text. `iris_doc_edit` also returns `STORAGE_DROPPED` and
+  `DOCUMENT_CONFLICT` with the texts and fields of Story 38.3 (the remedy of the first names `regenerateStorage`).
+- **`@iris-mcp/shared` line utility (`lines.ts`).** New exports `splitLines`, `joinLines`, `textToLines`, `alignLines`,
+  `unifiedDiff`, `DIFF_CONTEXT_LINES` and `MAX_DIFF_DISTANCE`. `unifiedDiff` follows the `diff -U3` conventions (a
+  hand-written Myers diff, no new dependency; a live-captured `diff` oracle pins its output); more than
+  `MAX_DIFF_DISTANCE` (2000) changed lines are reported as one change.
+- A live gate (`doc-edit-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives the tool against a real
+  IRIS, and a cross-package test (`default-enabled-holders.test.ts`) pins the closed lists of `defaultEnabled` holders
+  and `parent` declarations.
+
+### Changed
+
+- **`@iris-mcp/dev` `core` preset: 13 → 14 runtime tools (12 → 13 package tools).** `iris_doc_edit` is in the everyday
+  authoring loop (ranged read, edit, compile, test) and replaces whole-document rewrites. The target of about 13 runtime
+  tools per server is a guideline, not a hard limit (L-4, Project Lead decision 2026-10-14). `developer` also includes
+  it: 31 runtime tools.
+- **New `TOOL_PAIRS` member `iris_doc_get` / `iris_doc_edit`:** the two are always co-visible in every preset.
+- Internal, with byte-identical results: `iris_doc_put` and `iris_doc_load` split text through the shared `splitLines`, and
+  `iris_doc_get`'s ranged read shares its readable/binary check with `iris_doc_edit`. Their behavior, schemas and
+  descriptions are unchanged, and there is no ObjectScript or bootstrap change (`BOOTSTRAP_VERSION` stays
+  `3af8ca401e7c`).
+
 ## [Pre-release — 2026-10-15] — Story 38.3: Storage block drop guard
 
 ### Changed — safety: `iris_doc_put` refuses a put that drops a class's Storage definition (sanctioned, AD-15)
@@ -810,9 +873,11 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`src/tools/presets.ts`) covering every one of its tools — enforced at server construction
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
-`iris_env_promote` are a declared pair, always co-visible in every preset. Roster summary (runtime
-tool counts, as of Story 36.2): `full` 30/27/23/22/8 (dev/admin/interop/ops/data), `core`
-13/13/10/10/8, `developer` 30/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
+`iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
+`iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
+tool counts, as of Story 38.4): `full` 31/27/23/22/8 (dev/admin/interop/ops/data), `core`
+14/13/10/10/8, `developer` 31/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
+guideline and not a hard limit (L-4; dev is at 14).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under
 `core` on `@iris-mcp/dev`).

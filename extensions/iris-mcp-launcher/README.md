@@ -268,7 +268,7 @@ the policy visually and every MCP client picks it up on next server start.
 - **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
   the five server packages' built dist (the same derivation the suite's own cross-package tests use), grouped
   per package with read/write badges, baseline/post-foundation origin, and each key's effective value with its
-  `configSource` badge (`env` / `file` / `preset` / `default`) — the same render a running server's
+  `configSource` badge (`env` / `file` / `parent` / `preset` / `default`) — the same render a running server's
   `iris_server_profiles` reports.
 - **Per-key tri-state toggles** (enabled / disabled / inherit) edit the file's global layer or one profile
   layer (tabs: `global (file)` + `default` + every Server Manager server name + every profile the file names).

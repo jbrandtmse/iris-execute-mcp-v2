@@ -369,8 +369,13 @@ describe("Story 38.3 catalog contract and the droppedStorage field (AC-9, AC-10)
     );
   }
 
-  it("the refusal codes are quoted strings in refusals.ts only, never inline at a call site", () => {
-    for (const code of ["GOVERNANCE_DISABLED", "STORAGE_DROPPED", "DOCUMENT_CONFLICT"]) {
+  it("every refusal code in the built catalog is a quoted string in refusals.ts only, never inline at a call site", async () => {
+    const { shared } = await built();
+    const codes = Object.keys(shared.REFUSAL_CODES as Record<string, string>);
+    expect(codes, "the catalog holds at least the four codes shipped so far").toEqual(
+      expect.arrayContaining(["GOVERNANCE_DISABLED", "STORAGE_DROPPED", "DOCUMENT_CONFLICT", "STALE_CONTENT"]),
+    );
+    for (const code of codes) {
       expect(filesMatching(new RegExp(`["'\`]${code}["'\`]`)), code).toEqual(["packages/shared/src/refusals.ts"]);
     }
   });

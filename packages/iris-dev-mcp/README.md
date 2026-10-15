@@ -46,7 +46,7 @@ Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **13-tool runtime roster** (12 package tools + `iris_server_profiles`) — the authoring loop (get/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `IRIS_TOOLS_PRESET=developer` keeps all **30 runtime tools** (29 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **14-tool runtime roster** (13 package tools + `iris_server_profiles`; about 13 is a guideline, not a hard limit) — the authoring loop (get/edit/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `iris_doc_get` and `iris_doc_edit` are a pair and stay co-visible in every preset. `IRIS_TOOLS_PRESET=developer` keeps all **31 runtime tools** (30 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
 
 > **Prompt-pack limitation.** Two of this server's prompts call tools `core` hides: `diagnose-slow-query` calls `iris_sql_analyze` (hidden under `core`), and `promote-environment-change` calls `iris_env_diff`/`iris_env_promote` (both hidden together under `core` — they are always co-visible). Both prompts work unchanged under `full` or `developer`. Running under `core`, either switch to `full`/`developer` or set `IRIS_TOOLS_ENABLE` to re-show the specific tool(s) the prompt needs.
 
@@ -144,6 +144,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_doc_get` | Retrieve a document by name (UDL or XML format), or a numbered line range of a UDL text document | `name`, `namespace?`, `format?`, `metadataOnly?`, `startLine?`, `endLine?` | readOnly, idempotent |
 | `iris_doc_put` | **Debug/scratch** — write a document directly to IRIS without creating a file on disk (use `iris_doc_load` for production code). An existing document is saved only if it has not changed since the tool read its current version; a put to an existing class that drops one of its Storage definitions is refused | `name`, `content`, `namespace?`, `ignoreConflict?` (default: **false**; skips the version check), `allowStorageRegeneration?` (default: **false**; lets a put that drops Storage definitions through) | idempotent |
+| `iris_doc_edit` | Surgical line edits of an existing class, routine or include file: `insert`, `delete` or `replace` lines addressed by the numbers of a ranged `iris_doc_get`, each guarded by its `expected` text; all edits apply or none, in one version-checked save, and the answer (a unified diff, an excerpt per edit, `totalLines`, `ts`) comes from a re-read. Does not compile. **`apply` is a write that is enabled by default** (Project Lead decision S-3: every edit is guarded by `expected`, the save is version-checked and never retried, and a class edit that would drop a Storage definition is refused); disable it with `{"global": {"iris_doc_edit:apply": false}}`, or by disabling `iris_doc_put`. `regenerateStorage` (the Storage-guard override) is **disabled by default** | `action` (`apply` \| `regenerateStorage`), `name`, `edits` (each: `op`, `afterLine?`, `startLine?`, `endLine?`, `text?`, `expected`), `namespace?` | destructive |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?`, `cursor?` | readOnly, idempotent |
 | `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true** — overwrite server copies even when newer) | idempotent |
@@ -359,7 +360,7 @@ HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stor
   next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form. It reads the
   class text the way IRIS does for the forms it is tested against; in a few hand-written forms (a brace hidden in
   embedded SQL or HTML, for example) it can miss a drop.
-- **Unguarded paths.** The guard covers `iris_doc_put`. `iris_doc_load` (a file is the source of truth for its
+- **Unguarded paths.** The guard covers `iris_doc_put` and `iris_doc_edit` (action `apply`). `iris_doc_load` (a file is the source of truth for its
   class, uploaded with `ignoreConflict` on by default), the `iris_env_promote` `execute` sync (it replaces the target
   class by design) and the `iris_doc_xml_export` import (an XML export carries its own Storage) do not run it. The
   bootstrap's own classes have no Storage definitions. `iris_docdb_document` and `iris_global_set` write DocDB
@@ -389,6 +390,140 @@ Document 'MyApp.Orders.cls' was not saved in namespace 'USER': the content drops
   "name": "MyApp.Orders.cls",
   "namespace": "USER",
   "droppedStorage": ["Second"]
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_doc_edit</strong> -- Surgical line edits of an existing document (Story 38.4)</summary>
+
+Change a few lines of an existing class, routine or include file without resending the whole document. Read the exact
+lines first with a ranged `iris_doc_get` (the two tools use the same 1-based line numbers and are always visible
+together), then send the edits. Each edit is an `insert` (`afterLine`, `text`, `expected`; `afterLine: 0` inserts before
+line 1), a `delete` (`startLine`, `endLine`, `expected`) or a `replace` (`startLine`, `endLine`, `text`, `expected`),
+addressed in the numbering of that read.
+
+- **Default state.** `action: "apply"` is a **write that is enabled by default**, the one exception to "a new write
+  ships disabled" besides `iris_production_control:clean` (Project Lead decision S-3). Every edit is guarded by the
+  `expected` text of the lines it changes, the save is version-checked, and a class edit that would drop a Storage
+  definition is refused, so it does not overwrite a line whose text differs from what the agent expected. Disable it with
+  `{"global": {"iris_doc_edit:apply": false}}`, or by disabling `iris_doc_put` (a disabled `iris_doc_put` makes both
+  `iris_doc_edit` keys seed disabled, reported as `configSource: "parent"`; an explicit setting on `iris_doc_edit:apply`
+  still wins). The read-only preset blocks it too. `action: "regenerateStorage"` (the Storage-guard override, below) is
+  **disabled by default**. See [Parent keys](../../README.md#parent-keys-a-new-tool-that-re-exposes-an-existing-one).
+- **`expected`.** The current text of the addressed lines (of line `afterLine`, or line 1 when `afterLine` is 0, for an
+  insert). `text` and `expected` are parsed alike: one leading byte-order mark is dropped, one trailing line break is
+  dropped, and CRLF and LF both separate lines, so `"a\nb\n"` and `"a\r\nb"` are both the two lines `a`, `b`. An empty
+  `text` is one empty line; to remove lines use `delete`. Make `expected` distinctive when a line such as `}` is not
+  unique: if another writer shifted lines before this tool's read, a non-unique line can still match.
+- **All or nothing.** The tool reads the document once, checks every edit (shape, overlaps, line numbers, `expected`,
+  Storage), applies them all bottom-up against the numbering of that read, and saves once with `If-None-Match` set to
+  the version it read. Edits may come in any order. Two edits that address the same lines, or an insert inside a range
+  another edit changes, are rejected before any request. Lines no edit touches are sent byte-identical.
+- **Refusals** (`isError: true`, nothing stored): `STALE_CONTENT` lists every edit whose `expected` text differs from the
+  document now, with the current text; `DOCUMENT_CONFLICT` means the document changed after the tool read it (never
+  retried, and no `ignoreConflict` exists); `STORAGE_DROPPED` is the Storage guard of `iris_doc_put`, with this
+  remedy: keep the Storage definitions in the edited lines, or run the same edits with `action: "regenerateStorage"`.
+  Argument and range errors carry no code. IRIS refusing the text (a non-empty `result.status` inside an HTTP 200
+  response) is returned as an error carrying IRIS's text.
+- **The answer is a re-read.** IRIS reformats class source when it saves (it puts a blank line between members, for
+  example), so the tool reads the document back and answers from that: `unifiedDiff` (3 context lines, the read against
+  the re-read), one excerpt per edit (the lines the edit produced, plus 3 context lines on each side, as in a ranged
+  `iris_doc_get` of the same range), the new `totalLines` and `ts`. Never the whole document. An edit whose result
+  equals the stored text saves nothing and reports `changed: false`.
+- **No compile.** The tool does not compile: run `iris_doc_compile` next.
+
+**Input:**
+```json
+{
+  "action": "apply",
+  "name": "MyApp.Service.cls",
+  "namespace": "USER",
+  "edits": [
+    { "op": "insert", "afterLine": 2, "text": "/// Says hello.", "expected": "" },
+    {
+      "op": "replace",
+      "startLine": 5,
+      "endLine": 5,
+      "text": "  Set name = $Get(^Names, \"World\")\n  Quit \"Hello \" _ name",
+      "expected": "  Quit \"Hello World\""
+    }
+  ]
+}
+```
+
+**Output (text):** the sentence, the diff, then one numbered excerpt per edit:
+```text
+Document 'MyApp.Service.cls' edited in namespace 'USER': 2 edits applied; it has 11 lines now (ts 2026-04-07 10:31:12.000). It is not compiled: run iris_doc_compile next.
+
+--- MyApp.Service.cls	2026-04-07 10:30:00.000
++++ MyApp.Service.cls	2026-04-07 10:31:12.000
+@@ -1,8 +1,10 @@
+ Class MyApp.Service {
+ 
++/// Says hello.
+ ClassMethod Hello() As %String
+ {
+-  Quit "Hello World"
++  Set name = $Get(^Names, "World")
++  Quit "Hello " _ name
+ }
+ 
+ }
+
+Edit 1 (insert after line 2), now lines 1-6:
+     1	Class MyApp.Service {
+     2	
+     3	/// Says hello.
+     4	ClassMethod Hello() As %String
+     5	{
+     6	  Set name = $Get(^Names, "World")
+
+Edit 2 (replace lines 5-5), now lines 3-10:
+     3	/// Says hello.
+     4	ClassMethod Hello() As %String
+     5	{
+     6	  Set name = $Get(^Names, "World")
+     7	  Quit "Hello " _ name
+     8	}
+     9	
+    10	}
+```
+
+**Output (`structuredContent`):**
+```json
+{
+  "name": "MyApp.Service.cls",
+  "namespace": "USER",
+  "ts": "2026-04-07 10:31:12.000",
+  "totalLines": 11,
+  "changed": true,
+  "unifiedDiff": "--- MyApp.Service.cls\t2026-04-07 10:30:00.000\n+++ MyApp.Service.cls\t2026-04-07 10:31:12.000\n@@ -1,8 +1,10 @@\n Class MyApp.Service {\n \n+/// Says hello.\n ClassMethod Hello() As %String\n {\n-  Quit \"Hello World\"\n+  Set name = $Get(^Names, \"World\")\n+  Quit \"Hello \" _ name\n }\n \n }",
+  "excerpts": [
+    { "edit": 1, "op": "insert", "startLine": 1, "endLine": 6, "lines": ["Class MyApp.Service {", "", "/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")"] },
+    { "edit": 2, "op": "replace", "startLine": 3, "endLine": 10, "lines": ["/// Says hello.", "ClassMethod Hello() As %String", "{", "  Set name = $Get(^Names, \"World\")", "  Quit \"Hello \" _ name", "}", "", "}"] }
+  ]
+}
+```
+
+**Refusal** (`isError: true`, nothing stored) when a replace of line 5 expected `  Quit "Hello"` but the line reads
+`  Quit "Hello World"`:
+```text
+Document 'MyApp.Service.cls' was not changed in namespace 'USER': the expected text of edit 1 does not match the document now. Nothing was stored. Retry with the current text below as expected, or read the lines again with iris_doc_get.
+
+Edit 1 (replace lines 5-5), current text:
+     5	  Quit "Hello World"
+```
+```json
+{
+  "code": "STALE_CONTENT",
+  "name": "MyApp.Service.cls",
+  "namespace": "USER",
+  "ts": "2026-04-07 10:30:00.000",
+  "totalLines": 9,
+  "mismatches": [
+    { "edit": 1, "op": "replace", "startLine": 5, "endLine": 5, "current": "  Quit \"Hello World\"" }
+  ]
 }
 ```
 </details>
@@ -1566,7 +1701,7 @@ Atelier work-queue `DELETE` route operates on the job id).
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 29 tools in this package accept the `namespace` parameter** except:
+**All 30 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter. `iris_env_diff`/`iris_env_promote` are the exception in spirit rather than mechanism: their `namespace` overrides BOTH the `source` and `target` profile's namespace identically (each side otherwise falls back to its own profile's configured default), rather than targeting one connection's namespace like every other tool here.

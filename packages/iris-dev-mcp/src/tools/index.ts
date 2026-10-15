@@ -13,6 +13,7 @@ import {
   docDeleteTool,
   docListTool,
 } from "./doc.js";
+import { docEditTool } from "./doc-edit.js";
 import { docCompileTool } from "./compile.js";
 import {
   docIndexTool,
@@ -74,4 +75,5 @@ export const tools: ToolDefinition[] = [
   envDiffTool,
   envPromoteTool,
   testStatusTool,
+  docEditTool,
 ];

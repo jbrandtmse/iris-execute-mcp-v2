@@ -19,6 +19,8 @@ export const REFUSAL_CODES = {
   STORAGE_DROPPED: "STORAGE_DROPPED",
   /** A document changed on the server between a tool's read of it and its save. */
   DOCUMENT_CONFLICT: "DOCUMENT_CONFLICT",
+  /** An edit's expected text does not match the document now. */
+  STALE_CONTENT: "STALE_CONTENT",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

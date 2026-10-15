@@ -21,6 +21,7 @@ import {
   linesInRange,
   REFUSAL_CODES,
   refusalResult,
+  splitLines,
   storageDroppedRefusal,
   stripLeadingBom,
   stripLeadingBomFromLines,
@@ -70,11 +71,38 @@ function rangeError(text: string): ToolResult {
 }
 
 /** The pieces of a `GET /doc` result that a line-range read uses. */
-interface DocGetResult {
+export interface DocGetResult {
   ts: string;
   enc?: boolean;
   status?: unknown;
   content?: unknown;
+}
+
+/** A `GET /doc` result read as text: the document's lines (see {@link documentLines}) and its version token. */
+export type TextDocumentRead =
+  | { kind: "text"; lines: string[]; ts: string }
+  | { kind: "unreadable"; reason: string }
+  | { kind: "binary" };
+
+/**
+ * Read a `GET /doc` result as a text document.
+ *
+ * A document is `unreadable` when IRIS reports a soft error in `status` (HTTP 200 with a non-empty
+ * `status`) or returns no line array, and `binary` when `enc` is true. Otherwise the result is the
+ * document's lines, numbered as {@link documentLines} defines, with the `ts` IRIS returned.
+ */
+export function readTextDocument(result: DocGetResult | undefined): TextDocumentRead {
+  const unreadable = atelierDocStatusError(result);
+  if (unreadable !== undefined || !Array.isArray(result?.content)) {
+    return { kind: "unreadable", reason: unreadable ?? "IRIS returned no line content" };
+  }
+  if (result.enc === true) return { kind: "binary" };
+  return { kind: "text", lines: documentLines(result.content as string[]), ts: result.ts };
+}
+
+/** The error text for a document that cannot be read: `<name>` could not be read in `<ns>`, with IRIS's `reason`. */
+export function unreadableDocumentText(name: string, ns: string, reason: string): string {
+  return `Document '${name}' could not be read in namespace '${ns}': ${reason}. Check the document name and namespace, then retry.`;
 }
 
 /**
@@ -91,20 +119,17 @@ function readLineRange(
   startLine: number | undefined,
   endLine: number | undefined,
 ): ToolResult {
-  const unreadable = atelierDocStatusError(result);
-  if (unreadable !== undefined || !Array.isArray(result?.content)) {
-    const reason = unreadable ?? "IRIS returned no line content";
-    return rangeError(
-      `Document '${name}' could not be read in namespace '${ns}': ${reason}. Check the document name and namespace, then retry.`,
-    );
+  const document = readTextDocument(result);
+  if (document.kind === "unreadable") {
+    return rangeError(unreadableDocumentText(name, ns, document.reason));
   }
-  if (result.enc === true) {
+  if (document.kind === "binary") {
     return rangeError(
       `Document '${name}' is a binary document, and line ranges apply only to text. Omit startLine and endLine to read it whole.`,
     );
   }
 
-  const lines = documentLines(result.content as string[]);
+  const { lines } = document;
   const totalLines = lines.length;
   const firstLine = startLine ?? 1;
   if (firstLine > totalLines) {
@@ -114,13 +139,13 @@ function readLineRange(
   }
   const lastLine = Math.min(endLine ?? totalLines, totalLines);
   const selected = linesInRange(lines, firstLine, lastLine);
-  const header = `Document '${name}' in namespace '${ns}': lines ${firstLine}-${lastLine} of ${totalLines} (ts ${result.ts})`;
+  const header = `Document '${name}' in namespace '${ns}': lines ${firstLine}-${lastLine} of ${totalLines} (ts ${document.ts})`;
 
   return {
     content: [{ type: "text", text: `${header}\n${formatNumberedLines(selected, firstLine)}` }],
     structuredContent: {
       name,
-      ts: result.ts,
+      ts: document.ts,
       startLine: firstLine,
       endLine: lastLine,
       totalLines,
@@ -393,7 +418,7 @@ export const docPutTool: ToolDefinition = {
     // copied, never mutated.
     const lines = Array.isArray(content)
       ? stripLeadingBomFromLines(content)
-      : stripLeadingBom(content).split(/\r?\n/);
+      : splitLines(stripLeadingBom(content));
     const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodeURIComponent(name)}`);
     const ignoreConflictPath = `${path}?ignoreConflict=1`;
     const body = { enc: false, content: lines };

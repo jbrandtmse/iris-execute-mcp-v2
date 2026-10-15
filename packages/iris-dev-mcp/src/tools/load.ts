@@ -14,6 +14,7 @@ import * as path from "node:path";
 import {
   atelierDocStatusError,
   atelierPath,
+  splitLines,
   stripLeadingBom,
   type ToolDefinition,
 } from "@iris-mcp/shared";
@@ -415,7 +416,7 @@ export const docLoadTool: ToolDefinition = {
         // here makes BOM-bearing files just work: the identity cross-check
         // below parses the stripped text, and the PUT body is BOM-free.
         const fileContent = stripLeadingBom(rawContent);
-        const lines = fileContent.split(/\r?\n/);
+        const lines = splitLines(fileContent);
 
         // Cross-validate the path-derived doc name against the file's own
         // declared identity BEFORE the PUT (Story 35.9 — the server stores

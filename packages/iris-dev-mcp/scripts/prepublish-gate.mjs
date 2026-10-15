@@ -86,6 +86,9 @@ const gateTestFiles = [
   // writes only the disposable ExecuteMCPv2.Temp.QaStory383Guard (compiled, 2 rows), ...Multi, ...NoStorage,
   // ...Shape and ...Rtn documents, and removes them, their data and their globals.
   "src/__tests__/doc-put-storage-guard-live-gate.test.ts",
+  // `iris_doc_edit` line edits against the real Atelier `GET /doc` and `PUT /doc` (version-checked save, re-read):
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory384Edit.cls, ...Store.cls (persistent, compiled) and ...Rtn.mac documents.
+  "src/__tests__/doc-edit-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its
