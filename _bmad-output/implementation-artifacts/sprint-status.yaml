@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-15-2026 05:20'
+last_updated: '10-15-2026 05:21'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -497,8 +497,8 @@ development_status:
   37-1-medium-default-profile-outage-must-not-take-down-the-server: done
   epic-37-retrospective: optional
 
-  epic-38: backlog
-  38-0-epic-37-deferred-cleanup: ready-for-dev
+  epic-38: in-progress
+  38-0-epic-37-deferred-cleanup: in-progress
   38-1-reject-the-unimplemented-http-transport: backlog
   38-2-line-range-document-read: backlog
   38-3-storage-block-drop-guard: backlog
