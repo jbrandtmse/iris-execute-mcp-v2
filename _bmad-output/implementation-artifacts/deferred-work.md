@@ -2900,3 +2900,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: format.ts:218 POSTs the XML to action/xml/load; an XML export carries its own <Storage> elements, so an import replaces the stored definitions with the exported ones. Story 38.3 AD-24 write-path verdict: excluded (orchestrator decision 8 at the spec gate, 2026-10-15), because the export is the source of truth for the class it describes
 - 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=an XML import replaces a class that has Storage with a definition that has none (report)
+
+### DW-547: Storage-drop scanner loses brace sync without reporting it in embedded &html</&js< blocks, string-bearing [ ] keyword values and ( ) defaults, XData bodies, and some contrived headers, so a drop after such a member is not refused (fails open = pre-38.3 behavior)
+- source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 38.3 implement + review probes vs live IRIS 2026.2: XData string braces and InitialExpression = {"}"} -> IRIS sees Default, scanner returns []; read-only sweep matches 2515/2516 %Dictionary.StorageDefinition parents (miss: %SQL.Manager.UI &html<); storage-guard.ts objectScriptBodyEnd/rawBodyEnd/headerBraceEnd
+- 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a Storage definition is lost through iris_doc_put or iris_doc_edit on a class the scanner reported as storage-free, or the guard's live oracle sweep drops below 2515/2516
+
+### DW-548: Storage-drop scanner ends a non-ObjectScript method body (Language=python/tsql) only at a column-0 brace, so indented members or a column-0 brace inside a Python string desync it; on the proposed side that is a spurious STORAGE_DROPPED refusal
+- source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: spec rule 5 (foreignBodyEnd); over-refusal only, the documented allowStorageRegeneration override applies; storage-guard.ts:foreignBodyEnd
+- 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a STORAGE_DROPPED refusal is reported for a put or edit that keeps every Storage definition
