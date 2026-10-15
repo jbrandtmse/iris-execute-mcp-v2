@@ -2775,3 +2775,28 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: x0-triage-2026-10-15 (side finding while verifying DW-36) | severity: med | fix-risk: low | footprint: in-story
 - evidence: DW-36's fix (1b7b874) sent generated on the doc.ts/packages.ts /modified branches; export.ts:398-403 modified branch appears to omit it; unverified
 - 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=probe then fix or close with evidence
+
+### DW-528: iris_doc_list, iris_doc_export and iris_package_list build GET /modified/<ts>, which IRIS answers HTTP 405 (Atelier /modified is POST-only with a database-hash body): modifiedSince cannot work
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: DW-527 live probe 2026-10-15 IRIS 2026.2 Atelier v8 HSCUSTOM: GET /modified/<ts> -> 405, OPTIONS ALLOW POST,OPTIONS; %Api.Atelier.v1 route /:namespace/modified/:type is POST (type CLS, body [{dbname,dbhash}]); doc.ts:451
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=user-reachable broken filter; fix the route shape or remove modifiedSince with a clear error
+
+### DW-529: iris_doc_export modifiedSince branch also drops category and type, yet filtersApplied reports them as applied
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: export.ts:387-403 plan-time read 2026-10-15: /modified path adds no category/type filter; filtersApplied echoes all three
+- 2026-10-15T13:36:58Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=harvest note=reopen_if=the modifiedSince route fix (DW-528) lands -- apply category/type on that branch in the same change
+
+### DW-530: iris_env_promote execute writes target documents without inspecting the per-document Atelier result.status (same blind spot as DW-485)
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: env-promote.ts:869 awaits targetClient.put(putPath,{enc:false,content}) and never reads result.status; 38.0 added shared atelierDocStatusError which can be reused
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=reuse atelierDocStatusError from @iris-mcp/shared
+
+### DW-531: Production-delete state guard (DW-54) pinned only at its predicate/message, not at the ProductionManage handler wiring (no test drives a refusal of a current non-Stopped production through the route)
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-epic
+- evidence: 38.0 review (blind-hunter, verification-gap, intent-alignment); HSCUSTOM has no current non-Stopped production and starting one on the shared instance leaves Ens.Runtime pointing at a deleted production; Interop.cls:122
+- 2026-10-15T13:36:58Z status=escalated owner=burndown by=harvest note=for the decision sheet: an injectable seam (classmethod: status, predicate, message) vs an operator-approved scratch-namespace production
+
+### DW-532: VS Code launcher full test suite red on this macOS host at baseline: 5 tests in 3 files + 2 files that cannot load
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: clientsEngine/governanceEngine assert Windows C:\git paths; constants/credentials tests cannot load @intersystems-community/intersystems-servermanager (absent from extension node_modules); clientsActivationFlow 33-3-3 times out at 60s; reproduced with launcher code at HEAD
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
