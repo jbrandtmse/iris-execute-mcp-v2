@@ -124,3 +124,6 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T12:39:37Z	Epic 38	spine_updated	ad=AD-25 reason=clarification by=lead story=38-5-sql-write-safety lint=ok note=decisions_14_15
 2026-10-16T12:39:37Z	Story 38.5	rework_opened	cycle_iteration=2 iteration=1 trigger=high items=NOJOURN_cap_bypass(decision14) resolved_without_code=TRUNCATE_wording(decision15) scope_baseline=pending
 2026-10-16T12:39:43Z	Story 38.5	stage_spawned	stage=implement spawn_at=2026-10-16T12:39:43Z model=claude-sonnet-5-5 agent_name=38-5-sql-write-safety-implement-2 cycle_iteration=2
+2026-10-16T13:14:37Z	Story 38.5	protocol_violation	stage=implement depth=3 agent=38-5-sql-write-safety-implement-2/handoff violation=handoff_set_spec_status_done_without_skill_steps consequence=none detected_by=implement_agent outcome=status_reset_and_step04_run_by_implement_agent_no_commits_by_subagents
+2026-10-16T13:14:37Z	Story 38.5	dev_complete	spawn_at=2026-10-16T12:39:43Z model=claude-sonnet-5-5 build_sha=f0abe8b baseline_revision=3fc13ea review_loop_iteration=0 followup_review_recommended=false deferred=0 bootstrap=e615a96a1e70_to_d352a6a32158 rework_iteration=1 cycle_iteration=2
+2026-10-16T13:14:37Z	Story 38.5	stage_spawned	stage=code-review spawn_at=2026-10-16T13:14:37Z model=claude-opus-5-5 agent_name=38-5-sql-write-safety-cr-2 cycle_iteration=2
