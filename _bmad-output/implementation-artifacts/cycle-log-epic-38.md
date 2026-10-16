@@ -172,3 +172,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T18:57:28Z	Epic 38	spine_updated	ad=AD-8 reason=clarification by=lead story=38-7-epic-38-burn-down lint=ok note=metadata_values_widened
 2026-10-16T18:57:28Z	Story 38.7	ledger_adjudicated	owned=11 resolved=11 reowned=0 terminal=0 extra=DW-529_dropped_obsolete model=claude-opus-5-5
 2026-10-16T18:58:04Z	Story 38.7	smoke_complete	method=cli_built_dist_process+stdio_jsonrpc_live+api_rest result=pass iterations=1 defects_caught=0 checks=7 evidence=scratchpad/smoke-38-7.mjs fixture=ExecuteMCPv2.Temp.LeadSmoke387NotProd_removed model=claude-opus-5-5
+2026-10-16T19:03:03Z	Story 38.7	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=2298 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
