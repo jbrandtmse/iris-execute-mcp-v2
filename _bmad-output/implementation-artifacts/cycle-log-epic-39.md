@@ -18,3 +18,6 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T22:40:17Z	Epic 39	spine_updated	ad=AD-8 reason=clarification by=lead story=39-0-epic-38-deferred-cleanup lint=ok note=keys_inside_layer_decision20
 2026-10-16T22:40:17Z	Story 39.0	spec_validated	service_introducing=false integration_ac=present decision_dependency=none orchestrator_decisions=20 owned_ledger=DW-565,DW-543,DW-567 addressed=3 declined=0 mutates_shared_runtime=false model=claude-opus-5-5
 2026-10-16T22:40:19Z	Story 39.0	stage_spawned	stage=implement spawn_at=2026-10-16T22:40:19Z model=claude-sonnet-5-5 agent_name=39-0-epic-38-deferred-cleanup-implement-1 cycle_iteration=1
+2026-10-16T23:53:09Z	Story 39.0	dev_complete	spawn_at=2026-10-16T22:40:19Z model=claude-sonnet-5-5 build_sha=628a817 baseline_revision=bab8ba3 review_loop_iteration=0 followup_review_recommended=true deferred=1 deferred_ids=DW-506(occurrence) shortstat=_73_files_changed._2588_insertions(+)._2321_deletions(-) bootstrap=unchanged cycle_iteration=1
+2026-10-16T23:53:09Z	Story 39.0	adr_verifications_complete	tool=none acs= result=none_required mutations=none model=claude-opus-5-5
+2026-10-16T23:53:10Z	Story 39.0	stage_spawned	stage=qa spawn_at=2026-10-16T23:53:10Z model=claude-sonnet-5-5 agent_name=39-0-epic-38-deferred-cleanup-qa-1 cycle_iteration=1

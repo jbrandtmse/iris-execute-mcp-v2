@@ -2678,6 +2678,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=pre-publish fix table (decision-record-2026-10-14)
 - 2026-10-16T19:38:36Z occurrence=39-0-epic-38-deferred-cleanup
 - 2026-10-16T19:38:37Z note=39.0 plan 2026-10-16: dist/test-helpers/integration-config.* also ships in the shared tarball today (the inverse direction); Story 42.1 AC 42.1.3 should cover it
+- 2026-10-16T23:53:09Z occurrence=39-0-epic-38-deferred-cleanup
+- 2026-10-16T23:53:09Z note=39.0 implement: AC-7 pack-content gate deferred here; npm pack must list no __tests__/env-harness/startup-env path and no dist/test-helpers (Story 42.1 AC 42.1.3)
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
