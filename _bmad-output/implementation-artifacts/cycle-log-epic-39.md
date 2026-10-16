@@ -13,3 +13,7 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T19:09:55Z	Epic 39	ledger_routed_planned	story=39-0-epic-38-deferred-cleanup entries=3 excess=0 by=x0 dw=DW-565,DW-543,DW-567
 2026-10-16T19:09:55Z	Epic 39	epic_context_compiled	reason=initial+x0_inserted model=claude-opus-5-5 lines=120
 2026-10-16T19:09:55Z	Story 39.0	stage_spawned	stage=plan spawn_at=2026-10-16T19:09:55Z model=claude-opus-5-5 agent_name=39-0-epic-38-deferred-cleanup-plan-1 cycle_iteration=1
+2026-10-16T22:40:17Z	Epic 39	lead_commit	sha=6f147bf reason=commit_parallel_session_docs_edits_CLAUDE.md+project-rules.md_on_user_direction
+2026-10-16T22:40:17Z	Story 39.0	story_created	spawn_at=2026-10-16T19:09:55Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-39-0-epic-38-deferred-cleanup.md build_status=ready-for-dev epic_context=reused orchestrator_decisions=20 cycle_iteration=1
+2026-10-16T22:40:17Z	Epic 39	spine_updated	ad=AD-8 reason=clarification by=lead story=39-0-epic-38-deferred-cleanup lint=ok note=keys_inside_layer_decision20
+2026-10-16T22:40:17Z	Story 39.0	spec_validated	service_introducing=false integration_ac=present decision_dependency=none orchestrator_decisions=20 owned_ledger=DW-565,DW-543,DW-567 addressed=3 declined=0 mutates_shared_runtime=false model=claude-opus-5-5
