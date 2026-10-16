@@ -155,3 +155,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T15:58:28Z	Epic 38	ledger_routed_planned	story=42-1-pre-publish-package-fixes entries=1 excess=0 by=merge_gate dw=DW-560
 2026-10-16T15:58:28Z	Epic 38	ledger_routed_planned	story=42-7-vs-code-extension-publish entries=1 excess=0 by=burndown dw=DW-532
 2026-10-16T15:58:28Z	Epic 38	ledger_burndown_complete	open_before=14 resolved=0 terminal=1 chartered=1 chartered_size=11 overflow=2 reowned=2 to_decision_sheet=8 open_after=13 cap=8 story_max=12 filed_this_epic=38 closed_this_epic=146 drain_ratio=3.84 burndown_story=38-7-epic-38-burn-down note=chartered_despite_under_cap_because_DW-554_HIGH
+2026-10-16T16:04:50Z	Epic 38	epic_context_compiled	reason=burndown_story_chartered model=claude-opus-5-5 lines=128
+2026-10-16T16:04:50Z	Story 38.7	stage_spawned	stage=plan spawn_at=2026-10-16T16:04:50Z model=claude-opus-5-5 agent_name=38-7-epic-38-burn-down-plan-1 cycle_iteration=1
