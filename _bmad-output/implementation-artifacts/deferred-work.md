@@ -2974,3 +2974,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 38.5 re-review 2026-10-16: sql-safety-live-gate and the other armed gates read live results without checking the deployed version; today they match (d352a6a32158); Rule #59 path dimension
 - 2026-10-16T13:54:17Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=the 38.6 capstone (the epic gate) asserts deployed == shipped BOOTSTRAP_VERSION before its live legs; reuse for the other gates if cheap
+
+### DW-560: Existing-tool annotation divergences (spine AD-4 Known divergences): iris_sql_execute, iris_execute_command and iris_doc_put declare destructiveHint:false although each can delete or overwrite existing state
+- source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: spine AD-4 Known divergences + Deferred (the Epic 38 gate routes them to one ledger entry with an owner); correcting a hint is an AD-15 sanctioned change (iris_execute_tests is already DW-498)
+- 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
+
+### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
+- source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: the 38.6 spec named only the env/session/Atelier helpers for promotion; three copies now
+- 2026-10-16T15:13:57Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=reopen_if=a fourth live gate (e.g. the Epic 39 or 40 capstone) copies the fixture helpers -- then promote them into process-gate-helpers.ts in that story
