@@ -173,3 +173,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T18:57:28Z	Story 38.7	ledger_adjudicated	owned=11 resolved=11 reowned=0 terminal=0 extra=DW-529_dropped_obsolete model=claude-opus-5-5
 2026-10-16T18:58:04Z	Story 38.7	smoke_complete	method=cli_built_dist_process+stdio_jsonrpc_live+api_rest result=pass iterations=1 defects_caught=0 checks=7 evidence=scratchpad/smoke-38-7.mjs fixture=ExecuteMCPv2.Temp.LeadSmoke387NotProd_removed model=claude-opus-5-5
 2026-10-16T19:03:03Z	Story 38.7	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=2298 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
+2026-10-16T19:03:06Z	Story 38.7	committed	sha=b826904 code_sha=22fbff3 build_sha=4520fd7 submodules= ci=none run=none branch=epic38 pushed=origin/epic38 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-8,epics.md:38.7-bullets,epics.md:39.6-DW-561
+2026-10-16T19:03:06Z	Story 38.7	story_cycle	plan_to_commit_min=178 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
