@@ -4980,6 +4980,50 @@ The epics run in order **38 → 39 → 40 → 41 → 43 → 42**. Epic 43 (MCP S
 - Inline multi-document fetch (G3).
 - A storage guard on `iris_doc_load`. 38.3 records it as a candidate with a reopen trigger.
 
+### Story 38.0: Epic 37 Deferred Cleanup
+
+The `/epic-cycle` retro-review gate story, inserted 2026-10-15 (unattended run, orchestrator-triaged). It is the Rule #37 drain inherited from Epic 37 (Lead exception L-5) and Epic 36. At this gate the 126 `burndown`-owned ledger entries were closed: 26 are fixed here, 5 move to named stories that rewrite their area, and the rest are terminal with evidence or a `reopen_if` probe. The full triage table goes in the spec's Design Notes. There is no Epic 37 retrospective and there are no open action items. Every bullet below is a ledger entry that this story fixes, verified live where it touches IRIS (Rule #48). Changed ObjectScript handlers (`Analytics.cls`, `Security.cls`, `Interop.cls`) regenerate the bootstrap embed in this story (Rule #24, `BOOTSTRAP_VERSION` from `2159ec9e6f69` → recorded).
+
+- **AC 38.0.1** — Document write fidelity:
+  - DW-485: `iris_doc_put` strips a leading BOM (as `iris_doc_load` does) and reports `isError` when the Atelier `result.status` is a non-empty string, never success unconditionally.
+  - DW-527: probe whether `iris_doc_export` drops the `generated` parameter on its `modifiedSince` branch (`export.ts:398-403`). Fix it if so; otherwise close the entry with the evidence.
+- **AC 38.0.2** — DW-469: the `IRIS_NAMESPACE` default in `config.ts` becomes `USER`, matching all seven documented env-var tables. `HSCUSTOM` exists only on HealthShare. Every test helper and script that relied on the old default sets it explicitly, and `CHANGELOG.md` records it under Changed. The maintainer's client configs already set `IRIS_NAMESPACE=HSCUSTOM`.
+- **AC 38.0.3** — Suite green on this host:
+  - DW-490: the non-ASCII JSON-key test honors `fixtureSkipReason` like its siblings;
+  - DW-492: the `MessageResendTest` real-resend methods skip with a logged reason when `SessionAgent.Sample.Production` is absent;
+  - DW-495: the certification-process drift test creates its temp directory under the realpath of `tmpdir()` (macOS `/var` → `/private/var`);
+  - DW-511: the armed Epic 36 gates run sequentially in `prepublish-gate.mjs`, and a failure includes the work response;
+  - DW-496: probe-first root cause of the intermittent engine-e2e "restore by NAME across a chain" failure (10 looped runs), then fix or contain it.
+- **AC 38.0.4** — `checkDistFresh` hardening:
+  - DW-413: accept `dist`, `dist/`, `./dist` and `dist/**`;
+  - DW-414: never throws (it returns `{ok:false, reason}` as its JSDoc promises);
+  - DW-415: follows symlinked files under `src/`, or fails closed;
+  - DW-416: fails closed on a future-mtime dist file;
+  - DW-417: verifies that the declared `main`/`module`/`exports`/`bin` targets exist inside `dist`;
+  - DW-524: the Epic 35 and Epic 37 live gates check dist FRESHNESS, not just existence.
+- **AC 38.0.5** — ObjectScript handler fixes (with the bootstrap regen):
+  - DW-455: the `Analytics.cls` redirect-restore sequences reuse `Command.cls` `TeardownRedirect`;
+  - DW-470: `iris_resource_manage:listPrivileges` forwards its optional `system` boolean;
+  - DW-473: a malformed `listPrivileges` target gets a clear validation error, not a raw `<SUBSCRIPT>` 500;
+  - DW-450: `iris_production_item` `get` echoes the resolved `production` (additive);
+  - DW-54: production delete refuses any non-Stopped state (Troubled 4, NetworkStopped 5), not only Running;
+  - DW-55: deleting a production whose class is gone removes the orphan `Ens.Config.Production` row.
+- **AC 38.0.6** — Docs and messages:
+  - DW-384: CHANGELOG and changeset state that byRef leaves carry `ceiling=<N>`; detect them by the stable `[IRIS-MCP-TRUNCATED` prefix;
+  - DW-458: the `item.ts` description and the interop README say that enable/disable skips items whose host class no longer resolves, and how to repair one;
+  - DW-514: the `health.ts` comments drop the nonexistent Story 1.4 monitoring-loop references;
+  - DW-520: README `:541` scopes the connection-error envelope claim to unreachable-at-startup;
+  - DW-523: the double `IRIS health check failed:` prefix is removed, and both test pins are updated;
+  - DW-57: the `docdb.ts:83` JSDoc says "silently skipped".
+- **AC 38.0.7** — DW-388: `scripts/verify-iris-reachable.mjs` warns loudly, naming the variables, whenever it falls back to local-dev defaults, and fails closed when `CI` is set. The local dev loop keeps working.
+- **AC 38.0.8** — Gates:
+  - `pnpm turbo run build test lint type-check` passes, per package if the parallel run flakes;
+  - governance `:check` exits 0 at `1e62c5ad5bf7`/141;
+  - tool counts are unchanged; `listPrivileges` `system` is a parameter, not a key;
+  - `BOOTSTRAP_VERSION` from → to is recorded and `gen:bootstrap` regenerates idempotently;
+  - the changesets are added;
+  - the OS suite `total` matches the `Test*` count (#35).
+
 ### Story 38.1: Reject the Unimplemented HTTP Transport
 
 G48, "fix now" (S-2). Pure TypeScript in `@iris-mcp/shared` plus the five entry points. No tool, key or bootstrap change.
@@ -5042,13 +5086,15 @@ G5. A cheap safety check on the document write path that 38.4 reuses.
 
   Fixtures are varied (Rule #58): several storage definitions, CRLF content, a Storage keyword inside a comment or string (which must not count), and a class whose storage was already absent.
 - **AC 38.3.6** — `iris_doc_load` and `iris_env_promote` `execute` are out of scope. `iris_env_promote` writes target documents with `ignoreConflict=1` as part of a sync. Each is filed as a `wontfix-accepted` ledger row with `reopen_if=` naming an observable trigger (spine AD-24). *(Amended 2026-10-14 by the spine reconcile: `iris_env_promote` added.)*
+- DW-540: `iris_doc_put` without `ignoreConflict` gets HTTP 409 for every existing document. Atelier saves an existing document only when `If-None-Match` equals its `ts`, and the tool never sends that header. Send the version token this story's guard already reads, and correct the `ignoreConflict` description. (ledger; routed by harvest 2026-10-15)
+- DW-541: `iris_doc_get` `metadataOnly` reads a `Last-Modified` header that Atelier never sends, and its unit test fakes that header (Rule #54). Drop the dead read and the impossible fake. (ledger; routed by harvest 2026-10-15)
 
 ### Story 38.4: Surgical Line Edit Tool
 
 G2. New dev tool `iris_doc_edit` (S-3). This story owns applying edits; it reuses 38.2's numbering and 38.3's guard and does not redesign them (Rule #52).
 
 - **AC 38.4.1** — Probe first (Rules #47/#45): verify the research claim that `client-config/src/diff.ts` holds a reusable line-span and diff engine (research [57]). It is a JSONC/YAML/TOML pending-edit renderer, so the probe records whether any part of it is generic. A server never imports `client-config`. Reused code moves into `@iris-mcp/shared`; otherwise a small line-diff utility is written there.
-- **AC 38.4.2** — Input: `action` (an enum with the single value `apply`), `name`, an `edits` array and optional `namespace`. The governance key is therefore `iris_doc_edit:apply`. The enum is required: the `defaultEnabled` marker addresses only `tool:action` keys, and `buildDefaultEnabledWrites` throws on a scalar `mutates` (`governance.ts:570-605`). *(Amended 2026-10-14 by the spine reconcile; spine AD-4.)* Each edit is one of:
+- **AC 38.4.2** — Input: `action` (an enum of `apply | regenerateStorage`, per AC 38.4.4), `name`, an `edits` array and optional `namespace`. The governance keys are therefore `iris_doc_edit:apply` and `iris_doc_edit:regenerateStorage`. *(Aligned with AC 38.4.4 at the Story 38.4 spec gate, 2026-10-15.)* The enum is required: the `defaultEnabled` marker addresses only `tool:action` keys, and `buildDefaultEnabledWrites` throws on a scalar `mutates` (`governance.ts:570-605`). *(Amended 2026-10-14 by the spine reconcile; spine AD-4.)* Each edit is one of:
   - `insert` (`afterLine`, `text`);
   - `delete` (`startLine`, `endLine`);
   - `replace` (`startLine`, `endLine`, `text`).
@@ -5148,6 +5194,25 @@ The epic's closing story. It enriches the docs; each earlier story already shipp
   - tool counts;
   - `BOOTSTRAP_VERSION` from → to;
   - `check-epics-sync.mjs` OK.
+- DW-552: a `STALE_CONTENT` retry that passes `mismatches[].current` back as `expected` fails again when the range ends in an empty line. `current` is the lines joined with `\n`, and parsing drops one trailing line break. Fix: `current` gets a trailing line break, and the `iris_doc_edit` description gains one line on it. This story's edit prompt depends on the round trip. (ledger; routed by orchestrator decision #11, 2026-10-15)
+- DW-555: the `iris_execute_tests` hints, the `deploy-and-test-class` prompt and its generated skill still send models to `iris_sql_execute` for read-only queries, which the `read-only` preset blocks. Point them at `iris_sql_query`. (ledger; routed by harvest 2026-10-15)
+- DW-559: no prepublish live gate checks that the deployed `BOOTSTRAP_VERSION` equals the shipped embed, so a gate can pass against a stale deployment. This story's capstone asserts deployed == shipped before its live legs (Rule #59), and other gates reuse that check where it is cheap. (ledger; routed by the lead 2026-10-16)
+
+### Story 38.7: Epic 38 Burn-Down
+
+Story 38.7 is the Epic 38 burn-down story, chartered at the epic's burn-down gate on 2026-10-16 by the orchestrator during the unattended run. It holds the 11 ledger entries the epic found and the decision sheet chose to fix now. The rest of the epic's ledger went to named stories or to the Project Lead. Each bullet is fixed and proven live on the real surface or by mutation (Rule #48), with disposable `ExecuteMCPv2.Temp.*` fixtures only. Changed bootstrapped handlers regenerate the embed (Rule #24). A change to existing behavior is a sanctioned AD-15 change, recorded in the CHANGELOG (orchestrator decisions #17 and #18).
+
+- DW-554 (HIGH): `IRIS_GOVERNANCE` (and `IRIS_GOVERNANCE_FILE`) in the flat shape `{"iris_doc_put": false}` is accepted silently and changes nothing. Fail fast at startup, naming the documented shape, when a top-level key other than `global` or `profiles` looks like governance: it starts with `iris_` (any case), or its value is a boolean or an object. Plain string or number metadata such as `comment` and `version` stay valid (Story 32.4). An unknown profile name under `profiles` warns. Existing valid configurations must behave identically. *(Amended at the 38.7 spec gate, 2026-10-16, orchestrator decision #19.)*
+- DW-533: the `iris_production_manage` `delete` action removes ANY class given as `name`, because it never checks that the class extends `Ens.Production`, so it also gets around an operator who disabled `iris_doc_delete`. Refuse a non-production class with a clear error, writing nothing.
+- DW-531: pin the production-delete state guard (DW-54) at the handler's wiring through an injectable seam (a classmethod that runs status, predicate and message, called by the handler). Never start a production on the shared instance to test it.
+- DW-539: the VS Code launcher passes an ambient `MCP_TRANSPORT` through to the stdio servers it starts. Since Story 38.1, a non-stdio value makes each of them exit 1. Add it to `LAUNCHER_OWNED_VARS`.
+- DW-542: `iris_doc_get` without a range reports an Atelier soft error (HTTP 200, empty content, non-empty `status`) as success. Report it as `isError` through the shared `atelierDocStatusError`, as the ranged read already does.
+- DW-549: `iris_doc_load` with `ignoreConflict: false` sends an unversioned PUT, so every existing document gets HTTP 409. Use Story 38.3's flow: the 409 carries the `ts`, and the save is retried once with `If-None-Match`.
+- DW-528: `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list` builds `GET /modified/<ts>`, which IRIS answers with 405 (the route is POST-only, with a database-hash body). Probe first, then refuse `modifiedSince` with a clear error. The probe showed the real route works from a database hash with no time semantics, and calling it writes bookkeeping to IRIS (amended at the spec gate, 2026-10-16). Fold in DW-529: apply `category` and `type` on that branch, or stop reporting them as applied.
+- DW-530: `iris_env_promote` `execute` writes target documents without inspecting each document's Atelier `result.status`. Reuse `atelierDocStatusError`.
+- DW-556: two live gates (the 38.5 gates were fixed in their own review) end with a cleanup `it()` that removes the shared fixtures, so they pass only in file order. Move the cleanup and its assertions into `afterAll`.
+- DW-558: a capped DML statement on a table stored in IRISTEMP is not undone by the cap's rollback, yet the `overCap` text says "Its row changes were undone". Hedge the text so the claim covers only journaled storage, and add one line to the docs.
+- DW-562: the default `@iris-mcp/all` suite runs the three bootstrapping live gates (38.4, 38.5, the Epic 38 capstone) in parallel, so on a stale instance they can race a redeploy. Serialize them in the default suite as well (`fileParallelism`, or a sequence group for those files).
 
 ## Epic 39: Interop Message Forensics (added 2026-10-14)
 
@@ -5298,6 +5363,7 @@ G35. New read tool `iris_message_body`.
   5. the body read under `allow` shows the value.
 
   It is proven red by disabling redaction (Rule #59).
+- DW-561: the Epic 38 live gates (the 38.4, 38.5 and 38.7 wire gates and the Epic 38 capstone) each carry their own fixture helpers (`putDoc`, `compileDoc`, `fixtureDocuments`, `removeFixtures`, `governanceReport`, `startStub`, and others). Its reopen condition has fired. This capstone would be the fifth copy, so promote one set into `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts` and move the existing gates onto it. (ledger; routed by the lead 2026-10-16)
 
 ## Epic 40: Developer Test Depth (added 2026-10-14)
 
@@ -5343,6 +5409,7 @@ This story ships per-routine INT-line coverage, with a complete response shape. 
     - a pre-started foreign session causes a refusal;
     - coverage oracles are captured in a disposable namespace whose routines nobody else runs.
 - **AC 40.1.5** — Output: for each routine of each selected class, the covered and executable INT lines and a percentage. The live oracle is a fixture class with hand-countable branches, with the expected values captured from the live run (Rule #36).
+- DW-453: `ExecuteMCPv2.REST.UnitTest.RunTests()` binds its I/O-redirect mnemonic on `$IO` instead of a throw-away null device (`UnitTest.cls:80-96`). If AC 40.1.2 chooses the custom `POST /tests` route, fix it there; otherwise close it with the evidence. (ledger; routed by x0 2026-10-15)
 
 ### Story 40.2: Coverage Reports and Targets
 
@@ -5589,6 +5656,7 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
   - Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile. `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
+- DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
 
 ### Story 42.2: Bootstrap Downgrade Guard
 
@@ -5603,6 +5671,7 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
   - an older deployment is upgraded.
 
   Proven red by reverting to equality comparison.
+- DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
 
 ### Story 42.3: CI Workflow
 
@@ -5680,6 +5749,7 @@ DW-389, D5.
 - **AC 42.7.1** — The publisher is a project-name publisher (for example `iris-mcp`), with "intersystems" kept out of the name. `extensions/iris-mcp-launcher` gets `private: true` for npm (DW-389), after confirming that `vsce package` and `vsce publish` still work.
 - **AC 42.7.2** — The extension launches `npx -y @iris-mcp/<pkg>@1` (from 42.1). It is published to the VS Code Marketplace and to Open VSX through the release workflow, after npm `1.0.0`.
 - **AC 42.7.3** — Install from each store into a clean VS Code and into an Open VSX client (VSCodium or Cursor). The extension starts the servers, and the result is recorded.
+- DW-532: the launcher's full test suite is red on macOS at its baseline: Windows-only path assertions, an `@intersystems-community/intersystems-servermanager` import the extension's `node_modules` lack, and a 60 s timeout in `clientsActivationFlow`. Make it green on every platform before publishing the extension. (ledger; routed by merge_gate 2026-10-16)
 
 ### Story 42.8: Claude Code Plugin and Registry Listings
 
@@ -5706,6 +5776,8 @@ DW-441.
   Every "not yet published" or clone-and-build caveat in the docs is listed with a verdict and removed (Rule #56).
 - **AC 42.9.2** — Post-publish re-certification: each client adapter is re-certified against the published `1.0.0` packages with the existing certify scripts, and the certification table is regenerated. Rows that only a human can certify are marked as such, with the date.
 - **AC 42.9.3** — The CHANGELOG `1.0.0` release notes and the PRD's distribution section match what shipped.
+- DW-440: the Kimi Code VS Code extension half of its certification row. Re-certify it if an installed extension is available, otherwise mark the row human-only with the date (AC 42.9.2). (ledger; routed by x0 2026-10-15)
+- DW-442: the GitHub Copilot Chat certification row needs a consenting Copilot user. Mark it human-only with the date unless one is available (AC 42.9.2). (ledger; routed by x0 2026-10-15)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 

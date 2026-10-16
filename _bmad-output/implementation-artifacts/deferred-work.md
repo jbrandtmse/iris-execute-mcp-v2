@@ -11,6 +11,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:5.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: If tTimeout=0 Set 120 treats an intentional immediate stop as omitted; pre-existing; fix is a %IsDefined presence check.
 - 2026-10-14T10:47:48Z status=routed owner=burndown by=migration note=If tTimeout=0 Set 120 treats an intentional immediate stop as omitted; pre-existing
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=a caller reports iris_production_control stop/restart with timeout:0 waiting 120s, or requests a 0-second graceful stop; Still present Interop.cls:180-181 (If tTimeout=0 Set tTimeout=120) - the Rule #15 sanctioned coercion+default idiom; timeout:0 immediate stop is not a documented use
 
 ### DW-3: [L5.2-productionsummary-inner-catch-swallow] ProductionSummary inner catch block swallows errors silently
 - source: legacy:5.2 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -141,6 +142,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:8.0 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Both helpers produce the same config from env vars; functionally harmless; could consolidate if integration-helpers.ts is refactored.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Both helpers produce the same config from env vars; functionally harmless
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=AC 42.1.3 changes how integration tests import ./test-helpers, or a shared-package integration test needs an env var only one helper forwards; Both still exist (shared/src/__tests__/integration-helpers.ts:17, test-helpers/integration-config.ts:29); already diverged: only the latter forwards IRIS_ACCEPT_LANGUAGE; test-only
 
 ### DW-29: [L8.1-readme-dead-links-per-package] Per-package README links in root README point to files that do not yet exist
 - source: legacy:8.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -183,6 +185,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:10.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Atelier /modified/ accepts generated but tools do not pass it; pre-existing inconsistency inherited from doc.ts; fix applies to both tools together.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Atelier /modified/ accepts generated but tools do not pass it; pre-existing inconsistency inherited from doc.ts
+- 2026-10-15T11:47:31Z status=resolved-by:10-6-typescript-docs-cleanup-post-retro-polish by=x0 note=Commit 1b7b874: doc.ts:411 and packages.ts:203-205 now send generated on the /modified branch. Separate, unverified: export.ts:398-403 modified branch still omits it
 
 ### DW-37: [L10.1-digit-prefixed-package-rows] Digit-prefixed package rows (e.g. a '2' row with 13 docs on USER)
 - source: legacy:10.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -193,21 +196,25 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:10.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Temp file left behind if fsp.rename fails (e.g. AV on Windows); next successful run overwrites; finally/unlink would fix.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Temp file left behind if fsp.rename fails (e.g. AV on Windows); next successful run overwrites
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=a stray .manifest.json.tmp is found in an iris_doc_export destinationDir after a failed export; Still present export.ts:828-829 (writeFile tmp then rename, no unlink on failure); the next successful export overwrites the tmp
 
 ### DW-39: [L10.2-docnametofilepath-edge-cases] Weird doc-name edge cases in docNameToFilePath (.cls only, Foo..cls, .LeadingDot.cls)
 - source: legacy:10.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Produce unusual paths that path.resolve normalizes; Atelier not observed to emit such names.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Produce unusual paths that path.resolve normalizes; Atelier not observed to emit such names.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=load.ts:236-272 unchanged but Atelier never emits such names and export.ts:189/526 containment still blocks escape; real only if Atelier returned names like Foo..cls or .cls
 
 ### DW-40: [L11.3-resultset-close-exception-path-databaselist] %ResultSet.Close() not called on exception path in DatabaseList() loop (Config.cls)
 - source: legacy:11.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Leak is theoretical (refcount-driven cleanup); same pattern throughout file; outer-level close in catch would fix.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Leak is theoretical (refcount-driven cleanup); same pattern throughout file; outer-level close in catch would fix.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=%Library.ResultSet %OnClose = 'If i%IsOpened Quit ..Close()' (live %SYS doc_search); method-local tRS (ProcedureBlock) closes on exit/catch; real only if tRS escaped to a %/public var
 
 ### DW-41: [L11.3-resultset-close-exception-path-getconfig-locale] %ResultSet.Close() not called on exception path in SystemConfig.GetConfig locale
 - source: legacy:11.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Same pattern as DatabaseList; tRS left open if exception fires inside the loop.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Same pattern as DatabaseList; tRS left open if exception fires inside the loop.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=Same as DW-40 (SystemConfig.cls GetConfig): %ResultSet %OnClose closes the cursor when the method-local tRS is released; real only if tRS outlived the method
 
 ### DW-42: [L11.1-sanitizeerror-prefix-strip-unit-test] Missing ObjectScript unit test for SanitizeError prefix-strip (Bug #11)
 - source: legacy:11.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -223,6 +230,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:11.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: No observable bug today (redirect flag disabled); live verification AC 11.1.4 confirms current restore sufficient.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=No observable bug today (redirect flag disabled); live verification AC 11.1.4 confirms current restore sufficient.
+- 2026-10-15T11:47:31Z status=resolved-by:34-2-handler-capture-byref-markers-20-arg-ladder by=x0 note=Mnemonic now bound on a separate null device (Command.cls:101-118), never on tInitIO; TeardownRedirect closes it (:45-54). Fixed by c2b5bec (2026-04-23 >8KB fix), hardened 959ca72 (34.2)
 
 ### DW-45: [L11.retro-build-publishing-checklist] Retro action item: build publishing checklist (npm account, package.json fields)
 - source: legacy:11.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -249,11 +257,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:12.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Symmetric counterpart of the tested true->1 path; handler logic trivial and correct; one test case would close the branch.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Symmetric counterpart of the tested true->1 path; handler logic trivial and correct
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=user.ts:118-119 ternary (x ? 1 : 0) is mechanically symmetric to the pinned true->1 test (user.test.ts:794-816); real only if the ternary were rewritten
 
 ### DW-50: [L12.2-changelog-ordering-bug3-above-bug1] CHANGELOG ordering: BUG-3 entry above Story 12.1's BUG-1 in Fixed block
 - source: legacy:12.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: AC 12.2.6 said append below 12.1 entries; BUG-3 was prepended; cosmetic, same block, no functional impact.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=AC 12.2.6 said append below 12.1 entries; BUG-3 was prepended; cosmetic, same block, no functional impact.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=Still CHANGELOG.md:1167-1168 (BUG-3 above BUG-1 in the same Fixed block); cosmetic; AC 42.1.4 consolidates into one 1.0.0 section; real only if order carried meaning
 
 ### DW-51: [L12.2-test-count-delta-plus2-vs-plus3-4] Test count delta +2 vs AC-stated +3-4 (production.test.ts)
 - source: legacy:12.2 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -269,26 +279,34 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:12.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Two tests cover the same create path; only the namespace value differs.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Two tests cover the same create path; only the namespace value differs.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=production.test.ts:23 and :123 overlap but both assert the same create path; redundancy cannot mask a regression; real only if one were edited to diverge silently
 
 ### DW-54: [L12.3-delete-running-check-states-4-5] Production delete running-check guards only state=1, not Troubled (4) or NetworkStopped (5)
 - source: legacy:12.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Both are active states that may hold locks or jobs; pre-existing; extend guard to states 1, 4, 5.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Both are active states that may hold locks or jobs; pre-existing; extend guard to states 1, 4, 5.
+- 2026-10-15T11:47:31Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [PRODDEL]: Interop.cls:106 delete guard tState=1 -> any non-Stopped state (1,3,4,5); pin via a small state-predicate test
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-11: predicate + message pinned; the handler wiring residual is DW-531 (escalated); commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-55: [L12.3-orphaned-ens-config-production-record] Orphaned Ens.Config.Production record without class definition not handled on delete
 - source: legacy:12.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Requires external class deletion; delete reports does-not-exist without cleaning the orphan; add a secondary %ExistsId check.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Requires external class deletion; delete reports does-not-exist without cleaning the orphan
+- 2026-10-15T11:47:31Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [PRODDEL]: On delete with the class absent but Ens.Config.Production %ExistsId(name), remove the orphan extent row instead of returning does-not-exist
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-11: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-56: [L12.4-docdb-find-typed-property-population] iris_docdb_find typed-property queries return empty because values are not auto-extracted
 - source: legacy:12.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Filter translation fixed but typed columns stay 0/NULL after insert (SQL probe on ISC_DM.TESTMCPDocs4); index action also errors; needs investigation.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Filter translation fixed but typed columns stay 0/NULL after insert (SQL probe on ISC_DM.TESTMCPDocs4)
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=a throwaway IRIS with %Service_DocDB enabled exists (Story 42.3 scripts/ci-throwaway.sh) or a user reports an empty typed-property iris_docdb_find; cut from 38.0 by orchestrator; docdb.ts:688 sends only ?type=; %Api.DocDB.v1 httpPostProperty reads type/path/unique from %request.Data (path default ''); index POSTs an ignored {index:true} body
 
 ### DW-57: [L12.4-builddocdbrestriction-jsdoc-warn] buildDocDbRestriction JSDoc says skipped with a console warning but no console.warn exists
 - source: legacy:12.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Behavior correct; only JSDoc inaccurate; add console.warn or reword JSDoc.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Behavior correct; only JSDoc inaccurate; add console.warn or reword JSDoc.
+- 2026-10-15T11:47:31Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCFIX]: Reword docdb.ts:83 JSDoc to 'silently skipped' (matches docdb.ts:105)
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-14: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-58: [L12.4-config-create-no-rollback] Config.cls database create: no rollback if Config.Databases.Create() fails after
 - source: legacy:12.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -299,6 +317,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:12.5 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Schema design intentional per AC 12.5.1; description could say split by whitespace or comma.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Schema design intentional per AC 12.5.1; description could say split by whitespace or comma.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=oauth.ts:197-199 splits on /[s,]+/ so the described space form and an undescribed comma form both work; real only if a documented form failed
 
 ### DW-60: [L12.5-rest-manage-scope-all-dedup-empty-name] iris_rest_manage scope:all dedup collapses apps with identical/empty name (rest.ts:172)
 - source: legacy:12.5 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -309,11 +328,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:12.6 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: IRIS exposes no API to remove individual alerts.log lines (append-only file); only Clear() and ClearAlerts() exist; direct file I/O is risky.
 - 2026-10-14T10:47:49Z status=decision-pending owner=burndown by=migration note=call: IRIS exposes no API to remove individual alerts.log lines (append-only file)
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a user requests per-alert clear, or an IRIS release adds a per-alert delete API (check the alert classes on upgrade); IRIS has no per-alert removal API (alerts.log append-only; only Clear/ClearAlerts); rewriting the file is risky. Alt: app-level tracking table + REST handler
 
 ### DW-62: [L12.6-alerts-acknowledge] Alert acknowledge action for iris_alerts_manage (deferred to Epic 13 if demand)
 - source: legacy:12.6 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Not supported natively for system alerts; would need a custom ExecuteMCPv2 tracking table and REST handler.
 - 2026-10-14T10:47:49Z status=decision-pending owner=burndown by=migration note=call: build an app-level alert-ack tracking table plus REST handler, or leave unsupported
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a user requests alert acknowledge, or IRIS adds a native alert-ack API; system alerts have no native acknowledge; building one means a custom ExecuteMCPv2 table + handler for no requested use. Alt: build the ack table now
 
 ### DW-63: [L13.2-ops-tool-count-drift-16-vs-17] Pre-existing @iris-mcp/ops tool-count drift: heading and Mix line say 17
 - source: legacy:13.2 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -334,6 +355,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:14.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: timeout:true yields a 1ms timeout with no validation error; hardening only, IRIS_PROFILES is operator-authored JSON.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=timeout:true yields a 1ms timeout with no validation error; hardening only, IRIS_PROFILES is operator-authored JSON.
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=an operator reports a non-numeric IRIS_PROFILES port/timeout accepted silently (e.g. timeout:true yielding 1ms timeouts); Still present profiles.ts:271-273,333-336 (Number() of non-numbers); IRIS_PROFILES is operator-authored and a bogus value fails loudly on first call
 
 ### DW-67: [L14.1-whitespace-profile-name-typo-keys-ignored] Whitespace-only profile name registered without error
 - source: legacy:14.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -349,21 +371,25 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:14.2 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: establishing cache keyed by profile name only; a caller needing bootstrap may coalesce onto one that skips it; sole production caller passes a constant.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=establishing cache keyed by profile name only; a caller needing bootstrap may coalesce onto one that skips
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=Every getOrCreateClient caller passes the per-server constant options.needsCustomRest (server-base.ts:1528-1531,1564-1567); real only if a caller passed a differing per-call value
 
 ### DW-70: [L14.2-untrimmed-miscased-server-value] Untrimmed / mis-cased server value yields a confusing (but safe) unknown profile error
 - source: legacy:14.2 | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: resolveProfile does an exact registry.get with no trim/normalize; surfaces as a structured isError, not a crash; tested semantics.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=resolveProfile does an exact registry.get with no trim/normalize; surfaces as a structured isError, not a crash
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=resolveProfile throws ProfileResolutionError listing every valid name (profiles.ts:637-641) -> structured isError the agent self-corrects from; real if names differed only by case
 
 ### DW-71: [L14.2-addtools-readd-throws-partial-state] addTools() re-adding an already-registered name throws uncaught after extendedSchemas + tools
 - source: legacy:14.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pre-existing duplicate-registration behavior; 14.2 adds one more map so partial-state-on-throw is marginally larger.
 - 2026-10-14T10:47:49Z status=routed owner=burndown by=migration note=Pre-existing duplicate-registration behavior; 14.2 adds one more map so partial-state-on-throw is marginally larger.
+- 2026-10-15T11:47:31Z status=wontfix-theoretical by=x0 note=addTools has zero production callers (server-base.ts:1811-1814 banner; grep finds tests only); real only if a package starts adding tools dynamically
 
 ### DW-72: [L14.2-secondary-coalescing-branch-no-test] Secondary coalescing branch (established client + first concurrent bootstrap) lacks a dedicated
 - source: legacy:14.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Code correct by trace; AC 14.2.7 test covers first-touch only; optional coverage nicety, not a defect.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Code correct by trace; AC 14.2.7 test covers first-touch only; optional coverage nicety, not a defect.
+- 2026-10-15T11:47:31Z status=wontfix-accepted by=x0 note=reopen_if=getOrCreateClient's coalescing block (server-base.ts:2263-2287) is modified (e.g. an establishment deadline for DW-516 or Story 43.1); Coverage nicety; branch correct by trace (server-base.ts:2263-2287)
 
 ### DW-73: [L14.3-defaultseed-fails-open-unclassified-key] defaultSeed fails OPEN for an unclassified non-baseline key
 - source: legacy:14.3 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -424,6 +450,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:14.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Add a governance AC to Story 15.1 (iris_service_manage) exercising a real write action denied-by-default and re-enabled via IRIS_GOVERNANCE.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Add a governance AC to Story 15.1 (iris_service_manage) exercising a real write action denied-by-default
+- 2026-10-15T11:47:32Z status=resolved-by:15-1-iris_service_manage-iris-service-configuration by=x0 note=iris-admin-mcp/src/__tests__/service-governance.test.ts:1-19,161 proves via the real handleToolCall gate that iris_service_manage:enable is denied by default (commit 5d59d83)
 
 ### DW-85: [L14.retro-ai4-regenerate-baseline-per-new-tool] Epic 14 retro AI#4: regenerate governance-baseline.ts whenever Epic 15 adds a tool
 - source: legacy:14.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -434,16 +461,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:15.0 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Reachable only via a non-Zod field with numeric .options; generator hard-stops such a tool at build time before any baseline ships.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Reachable only via a non-Zod field with numeric .options; generator hard-stops such a tool at build time before any
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Only a non-Zod field with numeric .options reaches it and gen-governance-baseline hard-stops such a tool at build; real only if a non-Zod action schema shipped
 
 ### DW-87: [CR-15.0-3] unwrapActionOptions peels only unwrap()/innerType; ZodEffects/ZodPipeline fall back to the bare key
 - source: legacy:15.0 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Outside the declared wrapper set; .refine() forbidden on MCP schemas by project rule; gate and generator fail identically.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Outside the declared wrapper set; .refine() forbidden on MCP schemas by project rule
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Zod 4 .refine() keeps the schema class (no ZodEffects); only .transform/.pipe would fall back and gate+generator fail identically; real if an action enum used .transform()
 
 ### DW-88: [CR-15.0-4] unwrapActionOptions calls field.unwrap() unguarded; a throwing accessor would propagate out of the constructor
 - source: legacy:15.0 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Not reachable for real Zod types.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Not reachable for real Zod types.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=governance.ts:146-167: real Zod wrappers' .unwrap() never throws; reachable only by a hand-built schema object with a throwing accessor
 
 ### DW-89: [CR-15.0-5] Drift test governance.test.ts:540 derives keys without the shared unwrapActionOptions (lock-step gap)
 - source: legacy:15.0 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -454,11 +484,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:15.0 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Missing REAL action is still caught by the registration assertion; only a dead entry goes unflagged; cosmetic.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Missing REAL action is still caught by the registration assertion; only a dead entry goes unflagged; cosmetic.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Key universe derives from the action enum (server-base.ts:728-747) so a stale mutates key is inert; a missing real key still throws; real only if lookup keys fed the universe
 
 ### DW-91: [CR-15.1-1] ServiceList list-path does not tRS.Close() on in-loop exception path (codebase-wide result-set-Close-in-catch pattern)
 - source: legacy:15.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pre-existing pattern shared by every Security.cls list method and the REST handler tree; leaks the handle for that request only.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Pre-existing pattern shared by every Security.cls list method and the REST handler tree
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Same as DW-40 (Security.cls ServiceList): %ResultSet %OnClose closes the cursor when the method-local tRS is released; real only if tRS outlived the method
 
 ### DW-92: [CR-15.1-2] ClientSystems get->set round-trip format unverified against live IRIS (semicolon vs ListBuild)
 - source: legacy:15.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -469,16 +501,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:15.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: A host-blank Windows AD config reports valid:false from the heuristic test action; test is explicitly non-authoritative and never blocks a real bind.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=A host-blank Windows AD config reports valid:false from the heuristic test action
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=a Windows-hosted IRIS user reports valid:false from iris_ldap_manage test for a working blank-LDAPHostNames AD configuration; Still present Security.cls:2325-2326; the test action is explicitly non-authoritative (note field :2346) and never blocks a bind
 
 ### DW-94: [CR-15.2-2] LdapList does not tRS.Close() on in-loop exception path
 - source: legacy:15.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Same pre-existing pattern as CR 15.1-1 and every Security.cls list method; Security.cls:LdapList.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Same pre-existing pattern as CR 15.1-1 and every Security.cls list method; Security.cls:LdapList.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Same as DW-40 (Security.cls LdapList): %ResultSet %OnClose closes the cursor when the method-local tRS is released; real only if tRS outlived the method
 
 ### DW-95: [CR-15.2-3] LDAP test config-validity needs a separate GET round-trip; no combined redacted-config + validity call
 - source: legacy:15.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Cosmetic/ergonomic only; each call correct and cheap; defer to a future LDAP-tool refinement if a combined shape is requested.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Cosmetic/ergonomic only; each call correct and cheap; defer to a future LDAP-tool refinement if a combined shape
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=a user or prompt needs redacted config plus validity in one iris_ldap_manage call; Ergonomic only; each call correct and cheap
 
 ### DW-96: [CR-15.3-4] x509 import does not validate that the decoded certificate is a real DER X.509 cert before Save()
 - source: legacy:15.3 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -504,11 +539,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:15.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: %XML.Writer.OutputToFile truncates; confined to controlled dir; caller clobbers own prior export; fix: timestamp suffix or explicit overwrite flag.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=%XML.Writer.OutputToFile truncates; confined to controlled dir; caller clobbers own prior export
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=a user reports a prior audit export overwritten by a same-named export; Still present: audit export writes via %XML.Writer with no existence check (Security.cls ~3030-3053); confined to mgr/auditexport; caller overwrites only its own export
 
 ### DW-101: [CR-15.4-5] audit export fileName accepts Windows reserved device names (CON, NUL, LPT1) and trailing dot/space
 - source: legacy:15.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pass the separator/../: blacklist and containment check; can resolve to an OS device producing a confusing failure; traversal IS blocked.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Pass the separator/../: blacklist and containment check; can resolve to an OS device producing a confusing failure
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=audit.ts:356 blocks separators and ..; Security.cls containment check holds; real only if a caller names the file CON/NUL/LPTn on a Windows-hosted IRIS
 
 ### DW-102: [CR-15.4-6] audit view paginates client-side over a server result capped at maxRows; count is page length, cursor never reaches IRIS
 - source: legacy:15.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -519,11 +556,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:15.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Very low likelihood (BooleanYN 1/0 not coerced); fix: re-read AuditEnabled into the response.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Very low likelihood (BooleanYN 1/0 not coerced); fix: re-read AuditEnabled into the response.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Security.cls:2901 sets AuditEnabled 1/0 (BooleanYN, no coercion) and the Modify status is checked; real only if Modify returned OK without applying the value
 
 ### DW-104: [CR-15.4-8] AuditStatus reuses tRS for two sequential result sets; catch closes only the most recent
 - source: legacy:15.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Same pre-existing list-Close-in-catch pattern tracked under CR 15.1-1 / 15.2-2 / 15.3-3; Security.cls:AuditStatus.
 - 2026-10-14T10:47:50Z status=routed owner=burndown by=migration note=Same pre-existing list-Close-in-catch pattern tracked under CR 15.1-1 / 15.2-2 / 15.3-3; Security.cls:AuditStatus.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Reassigning tRS releases the first %ResultSet, whose %OnClose closes it; second closed on method exit; real only if tRS outlived the method
 
 ### DW-105: [CR-15.6-3] docs/tool-annotation-audit.md is a dated point-in-time snapshot with stale counts and dotted v1 names
 - source: legacy:15.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -644,6 +683,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:17.2 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: Tool-description NOTE added to iris_production_item with a pinning TS test; underlying split NOT re-architected (pre-existing IRIS limitation).
 - 2026-10-14T10:47:51Z status=decision-pending owner=burndown by=migration note=call: accept the extent/XData persistence split (documented) or re-architect add/remove/set onto one path
+- 2026-10-15T11:47:32Z status=resolved-by:35-1-high-iris_production_item-set-composite-key-resolution by=x0 note=decided=orchestrator(Lead-away) re-architected: set now uses LoadFromClass->SaveToClass like add/remove (Interop.cls:520-523,649-664, 3c7adec); only get's extent read remains, documented item.ts:42-48
 
 ### DW-129: [CR-17.2-5] LoadFromClass return %Status ignored in ItemManage add/remove
 - source: legacy:17.2 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -809,6 +849,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:24.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Denial carries presetApplied:read-only although defaultSeed would deny the same key with no preset; attribution accuracy only.
 - 2026-10-14T10:47:51Z status=routed owner=burndown by=migration note=Denial carries presetApplied:read-only although defaultSeed would deny the same key with no preset
+- 2026-10-15T11:47:32Z status=by-design by=x0 note=Under read-only the presetSeed layer precedes defaultSeed in the cascade (governance.ts:845-846) so the preset genuinely resolved the key; attribution per AC 24.1.4c
 
 ### DW-162: [CR-24.2-1] IRIS_SQL_MAX_ROWS is a post-fetch display slice, not a wire/memory resource cap
 - source: legacy:24.2 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -999,6 +1040,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:27.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Unreachable for plan over the JSON MCP transport; relevant if execute re-derives the hash from an in-process object.
 - 2026-10-14T10:47:52Z status=routed owner=burndown by=migration note=Unreachable for plan over the JSON MCP transport; relevant if execute re-derives the hash from an in-process object.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=computePlanHash input arrives as JSON-RPC args (env-promote.ts:1031,1479), which cannot carry BigInt or cycles; real only if execute re-derived the hash from an in-process object
 
 ### DW-200: [CR-27.2-2] source/target params advisory for plan: a mismatch vs the diff's own profile refs is silently resolved in favor of the diff
 - source: legacy:27.2 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1926,6 +1968,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: Tool description and README now state the ceiling suffix varies; what remains: CHANGELOG and the changeset advertise only the fixed literal and no site names the stable [IRIS-MCP-TRUNCATED prefix.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Tool description and README now state the ceiling suffix varies; what remains: CHANGELOG and the changeset advertise
+- 2026-10-15T11:47:32Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCFIX]: CHANGELOG.md:236 + .changeset/execute-response-ceiling-and-gate-hardening.md:14: state byRef leaves carry ceiling=<N>; detect via the stable [IRIS-MCP-TRUNCATED prefix
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-13: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-385: [34-6-CR-10] A truncation cut through a surrogate pair emits invalid UTF-8 on the wire
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -1947,6 +1991,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: On a maintainer machine the gate passes regardless of the intended release target; fail-closed direction preserved; require IRIS_HOST/USERNAME/PASSWORD explicitly at the publish boundary.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=On a maintainer machine the gate passes regardless of the intended release target; fail-closed direction preserved
+- 2026-10-15T11:47:32Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [VERIFYSCRIPT]: verify-iris-reachable.mjs:115-121: drop the ?? local-dev defaults; fail closed naming IRIS_HOST/IRIS_USERNAME/IRIS_PASSWORD when unset
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-7: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-389: [34-6-CR-14] Rule #56 enumeration gap: extensions/iris-mcp-launcher is npm-publishable and ungated (unscoped global name, publisher TBD)
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -1958,21 +2004,25 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Command.cls sets it on both error envelopes (confirmed live); extend the error-path extraction and update the README failure-path paragraph.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Command.cls sets it on both error envelopes (confirmed live); extend the error-path extraction and update the README
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=TS error path returns only the error text (execute.ts:1487-1497), never byRefValues, so byRefTruncated would describe absent data; README:1150-1153 truthful; real if failures returned byRefValues
 
 ### DW-391: [34-6-CR-16] verify-iris-reachable.mjs aborts with a Windows crash code instead of exiting 1 on the credential-fault path
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: process.exit(1) with a live socket triggers UV_HANDLE_CLOSING assertion exit -1073740791; abort() could hang the publish on a WER/AeDebug modal; destroy the agent first.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=process.exit(1) with a live socket triggers UV_HANDLE_CLOSING assertion exit -1073740791
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=the publish/prepublish gate runs on a Windows host (CI matrix or maintainer) and exits -1073740791; UV_HANDLE_CLOSING abort is Windows-only; maintainer env is macOS and Epic 42 CI targets GitHub-hosted runners
 
 ### DW-392: [34-6-CR-17] The byRef budget's central design property has no test; the node-budget test assertion is too loose
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: TestByRefValueNodeBudgetTruncatesManySubscripts asserts only <=1000 and >0 though the exact value (999) was known; add a multi-position case.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=TestByRefValueNodeBudgetTruncatesManySubscripts asserts only <=1000 and >0 though the exact value (999) was known
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Shared multi-position byRef budget pinned live by gate leg e-4 (execute-classmethod-epic-gate.test.ts:677-730); loose <=1000 bound (ClassMethodArgsTest.cls:832) still fails over-budget
 
 ### DW-393: [34-6-CR-18] ApplyOutputCeiling's pCeiling sentinel accepts the whole negative range, not the documented single -1
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Not currently reachable; use If pCeiling = -1 so an arithmetic slip fails loudly instead of silently disabling the ceiling.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Not currently reachable; use If pCeiling = -1 so an arithmetic slip fails loudly instead of silently disabling
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Every computed budget is clamped >=0 before reaching pCeiling (Utils.cls:502,513,828); only the -1 default is negative; real if a new caller passed unclamped arithmetic
 
 ### DW-394: [34-6-CR-19] The changeset marks feat-shaped changes as patch across seven packages
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2019,81 +2069,102 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: A pre-34.6 fixture copy on an instance would fail closed (the safe direction); add a FixtureVersion() classmethod and treat a mismatch as not deployed.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=A pre-34.6 fixture copy on an instance would fail closed (the safe direction)
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=a gate run goes red because a stale pre-34.6 ExecuteMCPv2.Tests fixture is deployed and is misdiagnosed as a regression; A pre-34.6 fixture copy fails closed (tests go RED, not skip), the safe direction; Tests.* fixtures are hand-loaded (Rule #39)
 
 ### DW-403: [34-6-CR2-8] returnValueTruncated is discarded by the TS error path though the CHANGELOG/changeset advertise it on error envelopes
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Same error-path structuredContent shape change as 34-6-CR-15; README already truthful; fold into CR-15.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Same error-path structuredContent shape change as 34-6-CR-15; README already truthful; fold into CR-15.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Same shape as DW-390: returnValue is never returned on the TS error path (execute.ts:1487-1497); CHANGELOG:252 describes the REST envelope, which does carry it
 
 ### DW-404: [34-6-CR2-9] ApplyOutputCeiling leaves pTruncated UNDEFINED when nothing is truncated
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Every current caller pre-initializes; the banner invites the unsafe pattern; Set:'$Data(pTruncated) pTruncated=0 at entry; costs a BOOTSTRAP_VERSION regen.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Every current caller pre-initializes; the banner invites the unsafe pattern
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=All callers pre-initialize the flag (Command.cls:154,358; Utils.cls:679-680,825) before ApplyOutputCeiling (Utils.cls:297-318); real only if a new caller skipped the init
 
 ### DW-405: [34-6-CR2-10] BuildByRefNode gained three REQUIRED positional parameters; a pre-34.6 one-argument call dies with <UNDEFINED>
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: No known external caller; internal serialization helper not documented as an API; give the three parameters defaults.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=No known external caller; internal serialization helper not documented as an API; give the three parameters defaults.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=BuildByRefNode's only callers are Utils.cls:553,586 (same class, deployed together by bootstrap); real only for an external caller of this undocumented helper
 
 ### DW-406: [34-6-CR2-11] Gate leg (e-4) is arithmetically hard-pinned to OUTPUTCEILING = 32768
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Any ceiling change turns the leg red for the wrong reason; derive the 20-char remainder from the ceiling in-test.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Any ceiling change turns the leg red for the wrong reason; derive the 20-char remainder from the ceiling in-test.
+- 2026-10-15T11:47:32Z status=wontfix-accepted by=x0 note=reopen_if=ExecuteMCPv2.Utils OUTPUTCEILING (Utils.cls) changes from 32768; Leg e-4 hard-codes CEILING=32768 (execute-classmethod-epic-gate.test.ts:686); a ceiling change turns it RED (fail-closed), never vacuously green
 
 ### DW-407: [34-6-CR2-12] expect(structuredContent).toEqual(parsed) is tautological at every new zero-result-guard call site
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Both sides originate from the same literal in zeroResultGuardResponse; sibling assertions carry the weight; assert total === 0 and error directly.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Both sides originate from the same literal in zeroResultGuardResponse; sibling assertions carry the weight
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=9 toEqual(parsed) sites in execute.test.ts are tautological but sibling total/error assertions carry the weight; real only if those siblings were removed
 
 ### DW-408: [34-6-CR2-13] Two shipped %UnitTest doc comments still encode the pre-fix mental model
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Comment-only; assertions are correct and green; rewrite or delete the stale sentence.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Comment-only; assertions are correct and green; rewrite or delete the stale sentence.
+- 2026-10-15T11:47:32Z status=wontfix-theoretical by=x0 note=Comment-only in ExecuteMCPv2.Tests (assertions correct, green); the two sites were never recorded in ledger or story file; real only if a dev acted on the stale sentence
 
 ### DW-409: [34-6-CR2-14] The 'identical existing convention' reuse claim behind fixtureIsDeployed's 404 discriminator does not hold
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Behavior is correct and arguably better; only the justifying comment is wrong (Rules #47/#16); name the one real precedent and the deliberate 403 divergence.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Behavior is correct and arguably better; only the justifying comment is wrong (Rules #47/#16)
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=Comment-only (execute-classmethod-epic-gate.test.ts:105-108); behavior correct and red-proven; real only if someone aligned the code to the false precedent
 
 ### DW-410: [34-6-CR2-15] QA Results' Rule #38 doc-surface tally overcounts (root README documents the ceiling nowhere)
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: AC 34.6.1's 'and in the README' is satisfied by the package README; claim defect only; correct the 'x2' in the story's QA Results.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=AC 34.6.1's 'and in the README' is satisfied by the package README; claim defect
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=Closed Story 34.6 QA record tally only; AC 34.6.1 satisfied by the package README; no code or doc consumer; real only if a later gate re-read the tally
 
 ### DW-411: [34-7-QA-1] The shared budget reduces but does not restore the 50,031-character safety margin for metacharacter-heavy content
 - source: legacy:34.7 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: 98,410 raw chars confirmed accurate but not the true ceiling; closing it needs measuring/truncating against SERIALIZED size (re-serialize pass or a 6x escape-cost multiplier).
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: bound by serialized size (6x escape cost) or document the raw-char budget; pre-publish contract change
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a client reports a diverted or failed iris_execute_* response for metacharacter-heavy output (serialized body >50,031 chars); raw-char budget documented everywhere (README:1028-1051, execute.ts:54-61,1364-1368, CHANGELOG:340-347). Alt: serialized-size bound (6x escape multiplier), high fix-risk
 
 ### DW-412: [34-7-CR-1] SurrogateSafeCutLength backs off exactly ONE code unit with no re-check (adjacent malformed high surrogates)
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: The lone surrogate pre-exists in the source data; well-formed input is fully correct; convert the If to a While and add an adjacent-high-surrogate fixture.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=The lone surrogate pre-exists in the source data; well-formed input is fully correct
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=Adjacent unpaired high surrogates mean the SOURCE is already invalid UTF-16 (WTF-8 regardless of the cut); well-formed input fully handled (Utils.cls:337-347)
 
 ### DW-413: [34-7-CR-2] checkDistFresh skips unless files contains the EXACT string 'dist' (dist/, dist/**, ./dist, absent files silently skip)
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Fail-open where the gate matters; mechanically verified not present today (all 7 dist-declaring packages use the exact string).
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Fail-open where the gate matters; mechanically verified not present today
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: dist-freshness.mjs: accept dist, dist/, ./dist, dist/** (normalized) instead of files.includes('dist')
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-5: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-414: [34-7-CR-3] checkDistFresh JSDoc promises it never throws but JSON.parse/readdirSync throw on malformed package.json or a dist file
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Exit code is still non-zero so publish aborts; only the promised message shape is false; wrap in try/catch or correct the JSDoc.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Exit code is still non-zero so publish aborts; only the promised message shape is false
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: Wrap JSON.parse/readdirSync/statSync in try/catch returning {ok:false,reason} as the JSDoc promises
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-5: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-415: [34-7-CR-4] newestMtimeMs handles only isDirectory()/isFile() so a symlinked file under src/ is skipped (stale dist can pass)
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: No symlinks in the repo today; add an else branch that stats symlinks or fail closed on an unexpected entry type.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=No symlinks in the repo today; add an else branch that stats symlinks or fail closed on an unexpected entry type.
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: newestMtimeMs: add an else branch that statSync()s (follows) symlinks, or fail closed on an unexpected entry type
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-5: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-416: [34-7-CR-5] No clock-skew guard in checkDistFresh: a future-mtime dist file makes every src edit compare older
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Requires an unusual filesystem/clock state; add a distNewest > Date.now()+tolerance check failing closed.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Requires an unusual filesystem/clock state; add a distNewest > Date.now()+tolerance check failing closed.
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: Fail closed when distNewest > Date.now() + tolerance (clock skew)
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-5: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-417: [34-7-CR-6] The dist-freshness gate never verifies the declared entry points (main/module/exports/bin) exist inside dist
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: The fully-empty-dist case IS caught (verified live); one stray recent file satisfies the other checks; existsSync each declared entry point.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=The fully-empty-dist case IS caught (verified live); one stray recent file satisfies the other checks
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: existsSync each declared main/module/exports/bin target inside dist
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-5: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-418: [34-7-CR-7] Freshness is per-package src vs own dist only, so cross-package staleness (rebuilt shared, stale dev) is invisible
 - source: legacy:34.7 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2104,46 +2175,55 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Currently effective (reviewer mutation run reproduced the defect through this leg); assert the cut lands on a high surrogate or drive both parities; correct the false comment.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Currently effective (reviewer mutation run reproduced the defect through this leg)
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=OUTPUTCEILING or the [IRIS-MCP-TRUNCATED ceiling=Nchars] marker length changes (re-derive legs e-4/e-5 then); Leg e-5's cut parity (32768-41 odd) exercises the backoff today (reviewer mutation reproduced the defect); its 'regardless of arithmetic' comment overclaims
 
 ### DW-420: [34-7-CR-9] The ONE 32768-char shared budget is not a hard bound on total RAW response: BuildByRefNode does not charge ~30 KB of per-node
 - source: legacy:34.7 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pre-existing 34.6 behavior documented at the method banner; the 1000-node ceiling bounds it deterministically; charge scaffolding or state the +30 KB residue in docs.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Pre-existing 34.6 behavior documented at the method banner; the 1000-node ceiling bounds it deterministically
+- 2026-10-15T11:47:33Z status=by-design by=x0 note=Story 34.7 decision: per-node scaffolding bounded by the 1000-node ceiling, documented at every site (README:1112, CHANGELOG:277-279, Utils.cls:452)
 
 ### DW-421: [34-8-CR-1] The UTF-8 request-body decode is unconditional and never consults %request.CharSet
 - source: legacy:34.8 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: No client in this suite sends a charset parameter (CharSet empty for every real call); adding negotiation hours before first publish adds an untested path; translate when CharSet names a non-UTF-8 charset.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: honor non-UTF-8 %request.CharSet now, or wait for beta evidence (retro trigger)
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a caller other than IrisHttpClient is supported for /api/executemcp/v2, or a request with a non-UTF-8 %request.CharSet is observed; sole client of /api/executemcp/v2 is IrisHttpClient: JSON.stringify body, application/json, fetch encodes UTF-8 (http-client.ts:330); beta users still use it. Alt: honor CharSet
 
 ### DW-422: [34-8-CR-2] No end-to-end test crosses the production 1,000,000-char decode chunk boundary
 - source: legacy:34.8 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Largest HTTP test body is ~5,400 raw bytes (0.5% of UTF8CHUNKSIZE); reviewer exercised 4.5 MB and 11.25 MB and found exact; add a >1 MB non-ASCII round-trip test.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Largest HTTP test body is ~5,400 raw bytes (0.5% of UTF8CHUNKSIZE)
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=DecodeUtf8Stream is chunk-size-parameterized and swept at small sizes + large body (Utf8DecodeTest.cls:167-226,397); 4.5/11.25MB live exact; real if HTTP framing depended on chunk size
 
 ### DW-423: [34-8-CR-3] GetMimeData('BODY') branch is decoded unconditionally though the story's own probe proves it is never reached
 - source: legacy:34.8 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Unreachable for this project's application/json POSTs (mimeIsObject=0 on every call); a multipart part carries its own CharSet; Rule #54 shape; drop the decode or consult the part CharSet.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Unreachable for this project's application/json POSTs (mimeIsObject=0 on every call)
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=GetMimeData('BODY') unreachable for application/json POSTs (probe 2026-08-16, Utils.cls:1118-1120); IrisHttpClient never sends multipart; real if multipart bodies were supported
 
 ### DW-424: [34-8-CR-4] A CESU-8/WTF-8 surrogate PAIR decodes differently depending on chunk alignment
 - source: legacy:34.8 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Malformed input only; both outcomes are valid UTF-8 on the wire; decide and document one disposition and pin at two chunk alignments.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Malformed input only; both outcomes are valid UTF-8 on the wire; decide and document one disposition and pin at two
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=Malformed CESU-8/WTF-8 input only; IrisHttpClient emits well-formed UTF-8; both outcomes are valid UTF-8; real if a non-IrisHttpClient caller were supported
 
 ### DW-425: [34-8-CR-5] The request body is materialized a SECOND time in IRISTEMP with no size guard (peak temp usage roughly doubles)
 - source: legacy:34.8 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Inherent to the decode design; measured modest (11.25 MB in 0.785s); a ceiling is a product decision; check tStream.Size against a documented maximum if wanted.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: set a documented max body size for the IRISTEMP decode copy, or accept the doubling
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=an IRISTEMP growth or <STORE> incident, or a request body >50MB, is reported against /api/executemcp/v2; doubling measured modest (11.25MB in 0.785s); a ceiling is a new limit on doc_put/load bodies. Alt: documented max body size checked via tStream.Size
 
 ### DW-426: [34-8-CR-6] The malformed-byte candidate set is closed by example, not stated exhaustive (Rule #56)
 - source: legacy:34.8 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Reviewer probed F5/F8/FF/above-U+10FFFF/ED BF BF live and found CLEAN; state the set exhaustive as of the probe date and pin F5-FF and above-U+10FFFF fixtures.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Reviewer probed F5/F8/FF/above-U+10FFFF/ED BF BF live and found CLEAN
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=DecodeUtf8Stream or SanitizeUnpairedSurrogates (Utils.cls) is modified - add the F5-FF and above-U+10FFFF pins in that change; Reviewer probed F5/F8/FF/above-U+10FFFF/ED BF BF live and found clean
 
 ### DW-427: [34-8-CR-7] cycle-log-epic-34.md line 90 carries an impossible timestamp 2026-08-16T25:00:00Z in a machine-parsed TSV
 - source: legacy:34.8 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pure metadata owned by the Project Lead; suggested correction 2026-08-17T01:00:00Z plus a timestamp format check.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=Pure metadata owned by the Project Lead; suggested correction 2026-08-17T01:00:00Z plus a timestamp format check.
+- 2026-10-15T11:47:33Z status=wontfix-theoretical by=x0 note=Still cycle-log-epic-34.md:90 (and :91 spawn_at T25:05); Epic 34 closed so never resume-parsed; telemetry gate reads only model_tier_checkpoint rows; true times unknowable
 
 ### DW-428: [35-SWEEP-1] iris_production_item:set can never succeed
 - source: legacy:unknown | severity: high | fix-risk: med | footprint: out-of-footprint
@@ -2210,6 +2290,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Requires the Kimi Code extension installed; unchanged since the Epic 33 retro.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=verify the Kimi Code VS Code extension half with the extension installed
+- 2026-10-15T11:47:33Z status=routed owner=42-9-install-docs-and-client-re-certification by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): AC 42.9.2 re-certifies every adapter on published 1.0.0 and marks human-only rows with the date - this row. Alt: wontfix-accepted until someone installs the extension
 
 ### DW-441: [L33.retro4-4-post-publish-recertification] Epic 33 retro section 4 #4: post-publish re-certification
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2221,6 +2302,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Needs a consenting GitHub Copilot user; same class of blocker as section 4 #3; recorded for Rule #56 enumeration completeness.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=find a consenting GitHub Copilot user to verify the launcher in Copilot Chat
+- 2026-10-15T11:47:33Z status=routed owner=42-9-install-docs-and-client-re-certification by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): AC 42.9.2 marks the Copilot Chat row human-only with a date during post-publish re-certification. Alt: wontfix-accepted until a consenting Copilot user exists
 
 ### DW-443: [35-0-CR-1] Publish-time gates are wired to prepublishOnly only - nothing on prepack/prepare
 - source: legacy:35.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2232,6 +2314,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: A/B git stash isolation proves the failures exist at the pre-story baseline; consistent with env-var/port contention among concurrently spawned real-server test processes.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=A/B git stash isolation proves the failures exist at the pre-story baseline
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=a clean-tree pnpm turbo run build test lint fails twice in a row locally, or the Story 42.3 CI gates job fails on a rerun of an unchanged commit; Env/port contention among concurrently spawned real-server tests; A/B stash shows it pre-existing; not reproducible read-only here
+- 2026-10-16T17:57:29Z occurrence=38-7-epic-38-burn-down
+- 2026-10-16T17:57:29Z note=38.7: the repo-root turbo run test still runs the dev and all vitest suites concurrently, so their live gates can overlap on the shared instance even though @iris-mcp/all is now serial; same reopen_if
 
 ### DW-445: [35-1-CR-1] A config item whose host ClassName no longer resolves to a business type is UNREACHABLE through set and remove
 - source: legacy:35.1 | severity: high | fix-risk: med | footprint: out-of-footprint
@@ -2242,91 +2327,112 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Rule #9 violation, but the library also returns an error status for ordinary absence so naive propagation would replace the pinned AC 35.1.3 text; inspect error codes and AppendStatus for others.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Rule #9 violation, but the library also returns an error status for ordinary absence so naive propagation would
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=a user reports a misleading 'not found' from set/remove for a '|'/'||'-qualified itemName or during an SQL fault; Still unread by design (Interop.cls:546-585 in-code note); only the SQL-fault and '|'/'||'-qualified-name cases get a generic not-found; still an error, no wrong write
 
 ### DW-447: [35-1-CR-3] set is governance-grandfathered/always-enabled but Story 35.1 escalated it to a durable rewrite of the production CLASS source
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: add/remove do the same class of write and are mutates:write default-disabled; re-classifying a grandfathered action is a product decision above a review's authority.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: ratify set as an always-enabled XData write, or add a separate opt-in gate for that half
+- 2026-10-15T11:47:33Z status=by-design by=x0 note=decided=orchestrator(Lead-away) set stays grandfathered (Rule #23) but is classified write (baseline-classifications.ts:172) so read-only blocks it; 35.1 made it durable as advertised. Alt: separate opt-in gate
 
 ### DW-448: [35-1-CR-4] Whole-production read-modify-write with no lock: concurrent set/add/remove silently lose updates
 - source: legacy:35.1 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: LoadFromClass -> OpenId -> mutate -> SaveToClass with no LOCK; pre-existing shape inherited from add/remove, window wider now that ungated set shares it; add a bounded LOCK around the span.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=LoadFromClass -> OpenId -> mutate -> SaveToClass with no LOCK; pre-existing shape inherited from add/remove
+- 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=a lost update under concurrent iris_production_item set/add/remove on one production is observed or reported; cut from 38.0 by orchestrator; No LOCK (Interop.cls:523-649,749-822,855-895); parallel agent tool calls on one production silently lose an update; lock leak in a reused CSP job is the risk
 
 ### DW-449: [35-1-CR-5] Intra-production duplicate item names resolve silently to a preference-ranked first match
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: AC 35.1.3 closed only the cross-production dimension; needs a product decision (reject as ambiguous vs expose a comment qualifier) plus schema/doc change.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: reject duplicate item names as ambiguous, or expose a comment qualifier parameter
+- 2026-10-15T11:47:33Z status=by-design by=x0 note=decided=orchestrator(Lead-away) preference-ranked first match is FindItemByConfigName's own platform resolution (Interop.cls:547); add blocks new dups. Alt: reject as ambiguous or accept an Item|Class qualifier
 
 ### DW-450: [35-1-CR-6] get with production omitted still returns an arbitrary row and never echoes the resolved production
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Omitted-production path left byte-identical under Rule #19 and disclosed in docs; preferred fix: add production to the get response envelope (additive).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Omitted-production path left byte-identical under Rule #19 and disclosed in docs
+- 2026-10-15T11:47:33Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [PRODITEM]: Add Production to the get SELECT and echo production in the get response (Interop.cls:438,463-474); additive; TS + live test
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-10: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-451: [35-1-CR-7] No gate asserts the fixture production classes are byte-identical to their checked-in .cls after a suite run (Rule #58)
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: RestoreFixtureBaseline restores values then SaveToClass re-serializes the XData; verified byte-identical now; add a post-suite comparison against iris_doc_get.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=RestoreFixtureBaseline restores values then SaveToClass re-serializes the XData; verified byte-identical now
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=git diff shows a change after exporting the InteropCompositeKeyFixtureProd*/InteropUnresolvableHostFixtureProd classes from the server post-suite; Fixture XData verified byte-identical after a suite run at Story 35.1
 
 ### DW-452: [35-1-CR-8] get and set may disagree on production-name matching semantics for a non-exact-case name (SQL collation vs dictionary ID lookup)
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Same get/set disagreement family as 35-1-CR-6; set matches the add/remove idiom; pin with a differently-cased test then normalize across set/get/add/remove together.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Same get/set disagreement family as 35-1-CR-6; set matches the add/remove idiom
+- 2026-10-15T11:47:34Z status=wontfix-theoretical by=x0 note=Production names are case-sensitive class names: a mis-cased set gets a clear not-found while get's SQL collation is lenient; no wrong-target write; real if two productions differed only by case
 
 ### DW-453: [35-2-DEV-1] ExecuteMCPv2.REST.UnitTest.RunTests() binds its I/O-redirect mnemonic on $IO itself instead of a throw-away null device
 - source: legacy:35.2 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: The exact pattern Command.cls's historical >8KB bug documents; out of Story 35.2's Analytics-only scope; apply the null-device discipline and live-reproduce the RED oracle first (Rule #59).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=The exact pattern Command.cls's historical >8KB bug documents; out of Story 35.2's Analytics-only scope
+- 2026-10-15T11:47:34Z status=routed owner=40-1-line-coverage-probe-and-engine by=x0 note=owned by named story (orchestrator decision 2): UnitTest.cls:80-96 still binds the mnemonic on tInitIO, but POST /tests has no tool caller today; AC 40.1.2 + 40.1.4 choose and own that route for coverage
 
 ### DW-454: [35-2-CR-4] %BuildCube's narration is captured in full into %ExecuteMCPOutput (O(n^2) wstr) and then discarded; the obvious fix is forbidden
 - source: legacy:35.2 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Cost real but bounded and negligible on observed builds; pVerbose=0 would destroy the gate's oracle; bound the capture at the sink while keeping pVerbose=1.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: bound the %BuildCube capture at the sink without losing the gate oracle, or accept O(n^2) narration
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=an iris_analytics_cubes:build is reported slow vs a terminal %BuildCube, or hits <MAXSTRING>/<STORE> in %ExecuteMCPOutput; cost bounded and negligible on observed builds; pVerbose=0 would destroy the gate oracle. Alt: bound the capture at the sink while keeping pVerbose=1
 
 ### DW-455: [35-2-CR-5] Redirect-restore sequence has two failure shapes in BOTH Command.cls and Analytics.cls
 - source: legacy:35.2 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Inherited verbatim from Command.cls per AC 35.2.2 ('do not invent a mechanism'); fix in ONE cross-cutting story touching Command, Analytics and UnitTest (see 35-2-DEV-1).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Inherited verbatim from Command.cls per AC 35.2.2 ('do not invent a mechanism')
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [REDIRECT]: Replace Analytics.cls:272-274 and :323-325 restore sequences with Command.cls TeardownRedirect(tInitIO,tNull)
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-8: Analytics.cls restores through Command.cls TeardownRedirect; BOOTSTRAP_VERSION 2159ec9e6f69 -> 3af8ca401e7c; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-456: [35-2-CR-6] AC 35.2.4's device-write audit is incomplete (Rule #56): grepping ReDirectIO cannot find APIs that write to the current device
 - source: legacy:35.2 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Assessing ExternalThaw needs a real backup thaw on the shared dev instance; re-run by enumerating every external API call in the 17 REST classes and checking FormalSpec for verbosity/quiet parameters.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Assessing ExternalThaw needs a real backup thaw on the shared dev instance
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=any REST handler returns a non-JSON or corrupted envelope traceable to an external API writing to the current device; Completing the audit needs a real backup thaw on the shared instance (forbidden); no stray device write observed
 
 ### DW-457: [35-2-CR-7] The SUCCESS path of iris_analytics_cubes:build has no permanent automated coverage (proven live twice, never re-proven)
 - source: legacy:35.2 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Documented trade-off: a real DeepSee cube per default-suite run is a heavy dependency; add a success leg behind the availability probe if a DeepSee fixture is ever created.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Documented trade-off: a real DeepSee cube per default-suite run is a heavy dependency
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=a DeepSee fixture cube is added to the repo, or a cube-build regression is reported; Success path proven live twice; a real DeepSee cube per default-suite run is a heavy dependency
 
 ### DW-458: [35-1-CR-21] enable/disable cannot reach an item whose host ClassName no longer resolves (Ens.Director.EnableConfigItem skips it)
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Arguably correct (enabling a nonexistent class is meaningless) and the repair path now exists (set a valid className first); decide to document 'repair className first' or add a production parameter and a targeted error.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: document 'repair className first, then enable', or add a production param plus a targeted error
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=decided=orchestrator(Lead-away) fix in 38.0 [DOCFIX]: Document in item.ts description + interop README: enable/disable skip items whose host class no longer resolves; repair with set settings.className first
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-13: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-459: [35-1-CR-22] remove has no extent/XData re-sync when SaveToClass() fails
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Pre-existing in remove; needs SaveToClass itself to fail (locked class, concurrent compile, read-only DB); on error call LoadFromClass to restore agreement; fault-injection test.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Pre-existing in remove; needs SaveToClass itself to fail (locked class, concurrent compile, read-only DB)
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=a remove returns a SaveToClass error (locked class, concurrent compile, read-only DB) - then mirror set's LoadFromClass-on-error; remove (Interop.cls:894-897) returns SaveToClass's error without the LoadFromClass re-sync set does (:664); needs a locked class or read-only DB to fail
 
 ### DW-460: [35-1-CR-23] Composite-key fallback resolves only ONE of N same-named items (arbitrary $order-first)
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Less reachable now that 35-1-CR-14 closed the add path that manufactured duplicates; remaining routes are direct Ens.Config.Item writes or a Management Portal edit.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Less reachable now that 35-1-CR-14 closed the add path that manufactured duplicates
+- 2026-10-15T11:47:34Z status=wontfix-theoretical by=x0 note=Fallback runs only when FindItemByConfigName skips an unresolvable-class item; needs 2+ same-named items whose host classes BOTH no longer resolve
 
 ### DW-461: [35-1-CR-24] On the fallback path tFindStatus still holds ErrConfigItemNotFound though tItem was resolved
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Coupled to 35-1-CR-2; close together by clearing tFindStatus to OK on fallback success.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Coupled to 35-1-CR-2; close together by clearing tFindStatus to OK on fallback success.
+- 2026-10-15T11:47:34Z status=wontfix-theoretical by=x0 note=tFindStatus is never read after the fallback (Interop.cls:546-585), so its stale value is inert; becomes real only if DW-446 starts reading it (fix together then)
 
 ### DW-462: [35-1-CR-25] The 8-line composite-key fallback block is duplicated verbatim into set and remove
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Both copies byte-identical and correct; extract ResolveItemWithFallback(pProd,pProdName,pItemName) helper; extraction touches finished Tasks 1-6 code for no behavioral gain.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Both copies byte-identical and correct; extract ResolveItemWithFallback(pProd,pProdName,pItemName) helper
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=a third copy of the composite-key fallback is needed, or the two copies diverge; Two byte-identical, correct copies (Interop.cls:565-573, 877-885)
 
 ### DW-463: [35-1-CR-26] is listed in the File List but not updated and carries three false statements
 - source: legacy:35.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: QA agent's artifact, out of the reviewer's remit; add a superseded-section entry recording 401/401, the two review HIGHs and 35-1-CR-1 terminal.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=QA agent's artifact, out of the reviewer's remit; add a superseded-section entry recording 401/401
+- 2026-10-15T11:47:34Z status=wontfix-theoretical by=x0 note=Closed Story 35.1 QA artifact; record-only with no code or doc consumer; Epic 35 retro already done; real only if a later gate re-read it
 
 ### DW-464: [35-1-CR-27] Every 'ledger state after this pass' figure is chained delta arithmetic mislabeled mechanical
 - source: legacy:35.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2337,6 +2443,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.1 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Leftover disposable-probe residue from Story 17.2; deleting another story's live-server residue is a lead call; add an extent-level check to the probe cleanup convention.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=lead deletes the orphan Ens.Config.Production row on the live HSCUSTOM instance
+- 2026-10-15T11:47:34Z status=dropped by=x0 note=decided=orchestrator(Lead-away) obsolete: orphan already gone: live read-only SELECT on HSCUSTOM Ens_Config.Production (2026-10-15) returns only the 3 Tests fixture rows, no ExecuteMCPv2.Temp.* row
 
 ### DW-466: [35-3-CR-1] No per-profile acceptLanguage override; an unrecognized IRIS_PROFILES key is dropped in silence
 - source: legacy:35.3 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2347,6 +2454,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: A roster field would move a documented response shape (Constraint E-1 forbids); a logger.debug at IrisHttpClient construction is safe but a product call.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=A roster field would move a documented response shape (Constraint E-1 forbids)
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=reopen_if=a user reports locale-mismatched %Status text and cannot tell which Accept-Language was sent; Constraint E-1 forbids a roster field; a logger.debug is safe but nobody has needed it
 
 ### DW-468: [35-3-CR-3] The default literal en-US,en;q=0.9 is hand-duplicated across 7 doc surfaces with no doc-rot guard
 - source: legacy:35.3 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2357,26 +2465,34 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.3 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Pre-existing and outside Story 35.3's ACs; lead decides the direction: correct 7 docs to HSCUSTOM or change the code default to USER (HSCUSTOM is a local dev artifact).
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: documented IRIS_NAMESPACE default (USER) vs code default (HSCUSTOM) - fix the docs or the code
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=decided=orchestrator(Lead-away) fix in 38.0 [NSDEFAULT]: config.ts:131 default -> USER (matches all 7 env tables; HSCUSTOM is HealthShare-only); update config.test.ts:34 + JSDoc :82; maintainer sets IRIS_NAMESPACE=HSCUSTOM
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-3: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-470: [35-4-DEV-1] iris_resource_manage:listPrivileges' system parameter is read server-side but never sent by the tool
 - source: legacy:35.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: SqlPrivilegeList reads system but resource.ts declares no zod field and never sets qs system (Rule #10 gap); fix: optional system boolean forwarded when true plus a wire-forwarding test.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=SqlPrivilegeList reads system but resource.ts declares no zod field and never sets qs system (Rule #10 gap)
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [LISTPRIV]: Add optional system boolean to resource.ts listPrivileges and forward system=1 when true (Security.cls:3356 reads it) + wire test
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-9: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-471: [35-4-CR-2] tRS is not closed when an exception escapes either fetch loop of SqlPrivilegeList (or the Execute()-error exits)
 - source: legacy:35.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Pre-existing pattern across Security.cls %ResultSet handlers; sweep the file's handlers together closing the cursor on every exit path.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Pre-existing pattern across Security.cls %ResultSet handlers; sweep the file's handlers together closing the cursor
+- 2026-10-15T11:47:34Z status=wontfix-theoretical by=x0 note=Same as DW-40 (Security.cls SqlPrivilegeList): %ResultSet %OnClose closes the cursor when the method-local tRS is released; real only if tRS outlived the method
 
 ### DW-472: [35-4-CR-3] On the raw REST path degenerate maxRows values are silently coerced
 - source: legacy:35.4 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Deliberately mirrors the in-file AuditStatus clamp idiom the Dev Notes instructed; reject-with-400 vs clamp-and-echo is a cross-handler policy decision.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: reject degenerate maxRows with a 400, or clamp and echo (cross-handler policy)
+- 2026-10-15T11:47:34Z status=by-design by=x0 note=decided=orchestrator(Lead-away) TS rejects non-int/<=0 (resource.ts:179-183) and documents the >1000 clamp; coercion affects only raw-REST callers, matching AuditStatus's clamp. Alt: 400 on degenerate values
 
 ### DW-473: [35-4-CR-4] A malformed target reaches UserColumnPrivs unvalidated and surfaces a raw <SUBSCRIPT> 500
 - source: legacy:35.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: $Piece(tTarget,'.',1)/(2,*) with no shape check: target=NoDotHere gives ERROR #5001 <SUBSCRIPT>SQLUserColumnPrivsExecute (live-captured); validate exactly one dot with non-empty pieces; a QA test currently pins the 500.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=$Piece(tTarget,'.',1)/(2,*) with no shape check: target=NoDotHere gives ERROR #5001
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [LISTPRIV]: Validate listPrivileges target has exactly one '.' with non-empty pieces before $Piece (Security.cls ~3388) -> clear error; update the QA test pinning the 500
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-9: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-474: [35-4-CR-5] Whether the underlying stored procedure resolves GRANTEE names case-insensitively is unverified
 - source: legacy:35.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2387,11 +2503,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.4 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Direct consequence of the signal-preserving spread chosen over audit.ts's field-dropping rebuild; page-scoped vs response-scoped fields is a pagination-contract question across sibling list tools.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: emit %All/cap signal fields on the first page only (or under summary) across list tools
+- 2026-10-15T11:47:34Z status=by-design by=x0 note=decided=orchestrator(Lead-away) the signal fields describe the query, not the page; repeating them lets a caller reading any page see the %All omission (35.4 spread choice). Alt: first page only across list tools
 
 ### DW-476: [35-4-CR-7] Rule #34 second-namespace smoke neither performed nor recorded as a residual risk for listPrivileges
 - source: legacy:35.4 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: All live proof ran in one namespace; risk genuinely low (maxRows cap and %All short-circuit are namespace-independent); on the next touch run the three probes against a second namespace.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=run the three listPrivileges probes against a second namespace with a different SQL object population
+- 2026-10-15T11:47:34Z status=resolved-by:38-0-epic-37-deferred-cleanup by=x0 note=decided=orchestrator(Lead-away) done live read-only 2026-10-15: _SYSTEM USER count 4/omitted 3112 vs HSCUSTOM count 5 rowsCapped/omitted 15222; USER column-level ok: namespace differs, guards hold
 
 ### DW-477: [35-5-DEV-1] iris_oauth_manage delete with entity client can never succeed (OAuth2.Client.Delete(name) does not exist; only DeleteId)
 - source: legacy:35.5 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2417,6 +2535,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.7 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Live list payload is plain JSON with a content key so toStructured never wraps it; no protocol violation; decide the canonical DocDB list shape and align tests to live captures.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=call: canonical DocDB list shape - {content} passthrough or {items,count} wrap
+- 2026-10-15T11:47:34Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a throwaway IRIS with %Service_DocDB enabled exists (Story 42.3 scripts/ci-throwaway.sh) or a user reports an empty typed-property iris_docdb_find; cut from 38.0 by orchestrator; keep passthrough (no client-visible change). Alt: unwrap content arrays to {items,count}. Capture needs %Service_DocDB enabled (lead write) or the 35.7 QA capture
 
 ### DW-482: [35-7-QA-2] Older IRIS versions reportedly fail disabled-DocDB with ERROR #800 / HTTP 403 rather than 200+822
 - source: legacy:35.7 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2437,11 +2556,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:35.9 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: A BOM-bearing doc_put is the same live silent-drop class as 35-9-DEV-1 (server stores nothing; status carries ERROR #16021); decide whether doc_put should set isError on a non-empty string status.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=A BOM-bearing doc_put is the same live silent-drop class as 35-9-DEV-1
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCPUT]: doc.ts:211-229: strip leading U+FEFF (as load.ts:404-410) and set isError when response.result.status is a non-empty string; BOM + status tests
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-1: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-486: [L34.retro7-5-reevaluate-34-8-cr-1-charset-and-ceiling-against-beta] Epic 34/35 retro: re-evaluate 34-8-CR-1 (%request.CharSet)
 - source: legacy:34.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Both were deferred on the reasoning that every client is ours, which beta invalidates; the trigger evidence does not exist until beta runs; 34-8-CR-1/-2 join the Epic 37 forward obligation.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=review beta feedback for non-UTF-8 charset clients and oversized responses, then decide on 34-8-CR-1
+- 2026-10-15T11:47:34Z status=dropped by=x0 note=decided=orchestrator(Lead-away) duplicate of DW-421 (charset) and DW-411 (ceiling); both halves are dispositioned terminally; the beta premise fails for charset because every request still comes from IrisHttpClient. Alt: keep open as a beta-review item
 
 ### DW-487: [L34.retro7-6-define-epic-35] Epic 34 retro: define Epic 35 (epics.md topped out at 34)
 - source: legacy:34.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2462,6 +2584,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.0 | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: With the Rule #39 hand-load-only fixture undeployed it surfaces isError:true instead of skipping (695 passed/16 skipped/1 failed); one-line test-file fix at L305: if (skipReason || fixtureSkipReason).
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=With the Rule #39 hand-load-only fixture undeployed it surfaces isError:true instead of skipping
+- 2026-10-15T11:47:34Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [SUITE-GREEN]: request-body-utf8-decode.test.ts:305: if (skipReason || fixtureSkipReason)
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-4: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-491: [36-0-QA-2] OS AdvisorDataTest.TestRunExplainProducesPlanText pins an IDKEY plan on Ens_Config.Item
 - source: legacy:36.0 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2472,6 +2596,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.0 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Deterministic always-reproducing false-FAIL on a standard instance (2 of the OS suite's 3 failures); add a class-existence probe and skip with a stated reason when absent.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Deterministic always-reproducing false-FAIL on a standard instance (2 of the OS suite's 3 failures)
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [SUITE-GREEN]: MessageResendTest.cls:420,483: %Dictionary.CompiledClass %ExistsId('SessionAgent.Sample.Production') guard -> $$$LogMessage skip reason, Quit
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-4: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-493: [36-1-QA-1] The runIndexSource counter fallback can misattribute a completely unrelated concurrent run's index to the caller's
 - source: legacy:36.1 | severity: high | fix-risk: med | footprint: out-of-footprint
@@ -2487,21 +2613,27 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: macOS-only path-assertion mismatch, not a product defect; resolve the expected path through fs.realpathSync(tmpdir()) or assert on a suffix/basename.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=macOS-only path-assertion mismatch, not a product defect; resolve the expected path through fs.realpathSync(tmpdir())
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [SUITE-GREEN]: certification-process.test.ts:76: mkdtemp under fs.realpathSync(tmpdir()) (macOS /var -> /private/var)
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-4: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-496: [36-1-QA-4] client-config engine-e2e.test.ts 'restore by NAME across a chain' fails intermittently (2 of 5 standalone runs)
 - source: legacy:36.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Test-suite reliability defect masking real regressions with a flake; suspect module-level mutable state in write.ts/the engine; containment: pin vitest pool to forks.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Test-suite reliability defect masking real regressions with a flake
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [FLAKE]: Probe-first: loop engine-e2e 'restore by NAME across a chain' x10, root-cause module state in write.ts; containment: vitest pool forks
+- 2026-10-15T14:29:56Z status=wontfix-accepted by=adjudication note=reopen_if=engine-e2e 'restore by NAME across a chain' fails again in a standalone run on a clean tree; never reproduced (10-run probe + ~1230 plan-time runs); containment shipped in 05b26d9 (strictly increasing injected clock, checkDistFresh beforeAll) without a proven effect, so not claimed resolved
 
 ### DW-497: [36-1-QA-5] gen-skills-stray-file.test.ts may leave a disposable skills/audit-security-posture/NOTES.md behind if interrupted or timed out
 - source: legacy:36.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Low-likelihood race gated on process interruption/timeout, self-limiting; move rmSync cleanup into afterEach and give execFileSync an explicit timeout.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Low-likelihood race gated on process interruption/timeout, self-limiting
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=reopen_if=skills/audit-security-posture/NOTES.md appears in git status after a test run; Needs interruption or timeout mid-test; self-limiting
 
 ### DW-498: [36-1-CR-1] iris_execute_tests still declares idempotentHint:true (and readOnlyHint:true) though its documented contract is do NOT re-submit
 - source: legacy:36.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: A client trusting annotations may retry freely, the damage vector the running contract removes; set idempotentHint:false, re-evaluate readOnlyHint with the BASELINE_ACTION_CLASSIFICATIONS cross-check (#44) and update the annotation pins.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=A client trusting annotations may retry freely, the damage vector the running contract removes
+- 2026-10-15T11:47:35Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=x0 note=owned by named story (orchestrator decision 2): AC 40.4.3 names DW-498 explicitly (readOnlyHint/idempotentHint vs the write classification and the do-not-resubmit contract)
 
 ### DW-499: [36-1-CR-2] The iris_execute_tests wait budget bounds only the poll loop's START condition
 - source: legacy:36.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2527,6 +2659,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.3 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Reproduced live during 33-5-L10 mutation-testing; make the merge target injectable or gate the real-file merge behind an explicit --commit-results flag.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Reproduced live during 33-5-L10 mutation-testing; make the merge target injectable or gate the real-file merge behind
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=reopen_if=an unintended certification-results.json change is committed, or certify.mjs is run from a test or mutation harness again; scripts/certification-results.json is checked in, so an unintended merge shows in git diff and is revertible
 
 ### DW-504: [36-3-QA-1] tsconfig.base.json __tests__ exclude removed test files from every tsc type-check and build gate across 7 packages
 - source: legacy:36.3 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2559,61 +2692,76 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Such a string subscript cannot be addressed through iris_global_get/set/kill; not a safety issue; guard the numeric test in Try/Catch and pin 1E999 as a literal string subscript.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Such a string subscript cannot be addressed through iris_global_get/set/kill; not a safety issue
+- 2026-10-15T11:47:35Z status=wontfix-theoretical by=x0 note=Needs a string subscript whose numeric prefix overflows (e.g. '1E999'); fails with an error and never touches the wrong node; real if such keys appeared in user data
 
 ### DW-510: [36-4-CR-3] Empty or whitespace-only subscript pieces leave positional gaps (1,,2 / ,1 / ' ' / ',') and surface an opaque <SYNTAX>
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: No data is touched (kill-widening concern disproven); the Story 36.4 Traps forbid changing empty-piece semantics (Rule #19); reject with a clear 'empty subscript piece' error; every such input fails today.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=No data is touched (kill-widening concern disproven); the Story 36.4 Traps forbid changing empty-piece semantics
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=reopen_if=an agent loops on or reports an opaque <SYNTAX> from iris_global_get/set/kill caused by an empty subscript piece; Every such input already fails (opaque <SYNTAX>) and touches no data; Story 36.4 Traps freeze empty-piece semantics
 
 ### DW-511: [36-4-CR-4] The armed Epic 36 gates flake when run in parallel
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Both gates predate 36.4 and run in parallel in prepublish-gate.mjs since 36.2; 4 of 5 prepublish-gate runs pass; run the two %UnitTest-driving gates sequentially and surface the Atelier work response in the error text.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Both gates predate 36.4 and run in parallel in prepublish-gate.mjs since 36.2; 4 of 5 prepublish-gate runs pass
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [SUITE-GREEN]: prepublish-gate.mjs:81: add --no-file-parallelism so the two %UnitTest-driving gates run sequentially; include the Atelier work response in the failure text
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-4: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-512: [37-1-DEV-1] No opt-in strictness knob to restore fail-fast on an unreachable default profile (IRIS_STARTUP_STRICTNESS lenient/strict)
 - source: legacy:37.1 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: Speculative - no beta user has asked for fail-fast-on-unreachable; precedent exists (IRIS_SERVER_MANAGER off/auto/required); trigger: a beta user explicitly asks.
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: add an IRIS_STARTUP_STRICTNESS lenient/strict knob when a beta user asks (trigger L-3)
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a user requests fail-fast startup on an unreachable default profile; speculative, no user asked (trigger L-3); precedent IRIS_SERVER_MANAGER off/auto/required. Alt: add IRIS_STARTUP_STRICTNESS now
 
 ### DW-513: [37-1-DEV-2] iris_server_profiles reports no per-profile reachability (cannot answer 'is default currently reachable?')
 - source: legacy:37.1 | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: The discovery tool is deliberately connection-agnostic; a reachability field needs its own design (lastKnownReachable boolean|null from establishment attempts already made); trigger: a beta user asks.
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: add a lastKnownReachable roster field when a beta user asks (trigger L-4)
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=a user asks iris_server_profiles to report per-profile reachability; the discovery tool is deliberately connection-agnostic (trigger L-4). Alt: add a lastKnownReachable roster field now
 
 ### DW-514: [37-1-DEV-3] health.ts ping() has no caller (comment refers to a nonexistent Story 1.4 monitoring loop)
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Exported and used only by epic35-defect-gate.test.ts's availability probe; either wire a real periodic health-refresh (needs a design) or remove the stale comment and reclassify as a general-purpose utility.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Exported and used only by epic35-defect-gate.test.ts's availability probe
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCFIX]: health.ts:5,53: remove the nonexistent Story 1.4 monitoring-loop references; describe ping() as a general availability probe
+- 2026-10-15T14:29:56Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-13: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-515: [37-1-CR-1] The startup health-check catch does not distinguish a CONFIGURATION refusal
 - source: legacy:37.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Follows Lead decision L-2 (non-fatal everywhere); spec-wording-vs-code seam; decide whether M1 clause (1) says 'unreachable-or-refusing never exits' or HEALTH_CHECK_FAILED should fail fast via error.code.
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: amend M1 clause (1) to 'unreachable-or-refusing never exits', or fail fast on HEALTH_CHECK_FAILED
+- 2026-10-15T11:47:35Z status=by-design by=x0 note=decided=orchestrator(Lead-away) Lead decision L-2 (non-fatal everywhere); README:541 documents 401/403/404 refusals as non-fatal; amend spine M1 clause (1) wording. Alt: fail fast on HEALTH_CHECK_FAILED
 
 ### DW-516: [37-1-CR-2] After a degraded start the first default call runs the full custom-REST bootstrap INSIDE the request
 - source: legacy:37.1 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: Only checkHealth is bounded (5 s); negotiateVersion uses the 60 s timeout and bootstrap() has no deadline; reintroduces the Epic 36 client-ceiling problem; give establishProfile an overall deadline and clear a timed-out establishing entry.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Only checkHealth is bounded (5 s); negotiateVersion uses the 60 s timeout and bootstrap() has no deadline
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=reopen_if=a first default-profile tool call after a degraded start exceeds the client's request timeout; Same lazy first-touch cost every non-default profile has had since D8; bootstrap short-circuits when deployed hash equals embedded (common case)
 
 ### DW-517: [37-1-CR-3] No negative cache or backoff while default is down: every call re-runs the health check
 - source: legacy:37.1 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: Extends the retry-on-every-touch semantics of AC 14.2.8 to default; a cooldown changes retry semantics for every profile and needs a design; cache {lastFailureAt,error} per profile with a documented window.
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: add a per-profile failure cooldown/negative cache (window, scope) to stop ~5 s stalls per call
+- 2026-10-15T11:47:35Z status=by-design by=x0 note=decided=orchestrator(Lead-away) AC 14.2.8 retry-on-every-touch (a failed first touch is retryable next call); a cooldown delays recovery for every profile. Alt: per-profile negative cache with a window
 
 ### DW-518: [37-1-CR-4] The new default-suite live gate epic37-default-outage-gate MUTATES the target instance on first touch
 - source: legacy:37.1 | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: Unavoidable inside AC 37.1.8; harmless at the embedded BOOTSTRAP_VERSION; interacts with open HIGH 36-4-CR-1 (running from an older branch could reinstall a pre-36.4 Global.cls)
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: may a default-suite test deploy? else gate the 'other' leg on IRIS_REQUIRE_LIVE
+- 2026-10-15T11:47:35Z status=routed owner=42-2-bootstrap-downgrade-guard by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): first-touch deploy = every server's normal bootstrap, idempotent at equal version; the harmful half (older branch reinstalling pre-36.4 Global.cls) is DW-508, closed by AC 42.2.2
 
 ### DW-519: [37-1-CR-5] The headline 'recovers automatically, no restart' promise has no LIVE proof
 - source: legacy:37.1 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Proving it live needs default pointed at something initially closed that later serves real IRIS and would run a real bootstrap() write on the shared instance, which the epic forbids; needs a disposable IRIS instance.
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=human=provide a disposable/throwaway IRIS instance (container or CI service) to prove the default-profile recovery
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=decided=orchestrator(Lead-away) reopen_if=scripts/ci-throwaway.sh (Story 42.3) exists - then add a live default-recovery leg against the throwaway; needs a disposable IRIS and the shared instance forbids the bootstrap write; Story 42.3 adds scripts/ci-throwaway.sh. Alt: provide a container now
 
 ### DW-520: [37-1-CR-6] A MID-SESSION outage returns different error text than the docs tell agents to expect
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Correct as designed (re-checking health per call would undo the D1/D8 caching contract); only the doc wording overreaches; narrow the docs to 'unreachable at startup' or normalize the two paths.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Correct as designed (re-checking health per call would undo the D1/D8 caching contract)
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCFIX]: README.md:541: scope the 'existing connection-error envelope' claim to unreachable-at-startup; mid-session outages surface the raw request error
+- 2026-10-15T14:29:57Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-13: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-521: [37-1-CR-7] A negotiation failure pins default to Atelier v1 for the life of the process with no recovery path
 - source: legacy:37.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2629,18 +2777,281 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: health.ts is outside this story's scope; more visible now that the startup log is the only diagnostic on a path that no longer exits; drop the redundant prefix (Rule #8 discipline).
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=health.ts is outside this story's scope; more visible now that the startup log is the only diagnostic on a path
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DOCFIX]: server-base.ts:2071: log the message as-is (checkHealth already prefixes, health.ts:42); update the 2 test pins
+- 2026-10-15T14:29:57Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-12: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-524: [37-1-CR-10] The Epic 37 live gate checks dist EXISTENCE not dist FRESHNESS (a dist built from pre-fix source passes)
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Covered on turbo run test (builds dists first) and the packaging path (checkDistFresh); residual is the bare-runner path; have all process-gates call checkDistFresh in beforeAll.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Covered on turbo run test (builds dists first) and the packaging path (checkDistFresh)
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=fix in 38.0 [DISTFRESH]: epic37-default-outage-gate.test.ts:236,288 (and epic35-defect-gate.test.ts:168,179): call checkDistFresh(pkgDir) instead of existsSync(entryPoint)
+- 2026-10-15T14:29:57Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-6: fixed; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
 
 ### DW-525: [37-1-CR-11] A gate child process can outlive a timed-out test (spawned dist terminated only by client.close() in finally)
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: Narrow (needs a wedged instance mid-call); identical to sibling process-gates' teardown; kill the child from an afterEach/onTestFinished hook.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Narrow (needs a wedged instance mid-call); identical to sibling process-gates' teardown
+- 2026-10-15T11:47:35Z status=wontfix-accepted by=x0 note=reopen_if=an orphaned node .../dist/index.js child is observed after a timed-out gate run; Needs a wedged instance mid-call; same teardown as sibling process-gates (client.close in finally, :219)
 
 ### DW-526: [37-1-CR-12] M1 clause (2)'s 'ONE path' is not literally met: the default's success path still runs the inline start() warm-up sequence
 - source: legacy:37.1 | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: AC 37.1.3 and constraint F-2 require the eager success path byte-for-byte; amend M1 clause (2) to name the mirrored seam or refactor start() to delegate once F-2 no longer binds.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=AC 37.1.3 and constraint F-2 require the eager success path byte-for-byte
+- 2026-10-15T11:47:35Z status=by-design by=x0 note=AC 37.1.3 + constraint F-2 require the eager success path byte-for-byte; amend spine M1 clause (2) to name the mirrored seam (doc-only)
+
+### DW-527: [38-0-x0] iris_doc_export may drop the generated parameter on its modifiedSince branch (export.ts:398-403)
+- source: x0-triage-2026-10-15 (side finding while verifying DW-36) | severity: med | fix-risk: low | footprint: in-story
+- evidence: DW-36's fix (1b7b874) sent generated on the doc.ts/packages.ts /modified branches; export.ts:398-403 modified branch appears to omit it; unverified
+- 2026-10-15T11:47:35Z status=routed owner=38-0-epic-37-deferred-cleanup by=x0 note=probe then fix or close with evidence
+- 2026-10-15T14:29:57Z status=resolved-by:38-0-epic-37-deferred-cleanup by=adjudication note=AC-2: generated now forwarded on the modifiedSince branch (pinned against the Atelier request shape); the route itself answers 405 on IRIS 2026.2, tracked as DW-528; commits 05b26d9 (build) + lead story commit; pinning test mutation-verified, recorded in spec-38-0 ## Verification
+
+### DW-528: iris_doc_list, iris_doc_export and iris_package_list build GET /modified/<ts>, which IRIS answers HTTP 405 (Atelier /modified is POST-only with a database-hash body): modifiedSince cannot work
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: DW-527 live probe 2026-10-15 IRIS 2026.2 Atelier v8 HSCUSTOM: GET /modified/<ts> -> 405, OPTIONS ALLOW POST,OPTIONS; %Api.Atelier.v1 route /:namespace/modified/:type is POST (type CLS, body [{dbname,dbhash}]); doc.ts:451
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=user-reachable broken filter; fix the route shape or remove modifiedSince with a clear error
+- 2026-10-15T14:26:42Z occurrence=38-0-epic-37-deferred-cleanup
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-7: modifiedSince refused with a clear error before any request on iris_doc_list/export/package_list (DW-529 folded in); live wire gate; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-529: iris_doc_export modifiedSince branch also drops category and type, yet filtersApplied reports them as applied
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: export.ts:387-403 plan-time read 2026-10-15: /modified path adds no category/type filter; filtersApplied echoes all three
+- 2026-10-15T13:36:58Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=harvest note=reopen_if=the modifiedSince route fix (DW-528) lands -- apply category/type on that branch in the same change
+- 2026-10-16T18:57:28Z status=dropped by=adjudication note=obsolete: modifiedSince is now refused before any request (DW-528, Story 38.7), so the category/type misreport cannot occur
+
+### DW-530: iris_env_promote execute writes target documents without inspecting the per-document Atelier result.status (same blind spot as DW-485)
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: env-promote.ts:869 awaits targetClient.put(putPath,{enc:false,content}) and never reads result.status; 38.0 added shared atelierDocStatusError which can be reused
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=reuse atelierDocStatusError from @iris-mcp/shared
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-8: iris_env_promote execute halts on a target PUT soft status; live handler gate; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-531: Production-delete state guard (DW-54) pinned only at its predicate/message, not at the ProductionManage handler wiring (no test drives a refusal of a current non-Stopped production through the route)
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-epic
+- evidence: 38.0 review (blind-hunter, verification-gap, intent-alignment); HSCUSTOM has no current non-Stopped production and starting one on the shared instance leaves Ens.Runtime pointing at a deleted production; Interop.cls:122
+- 2026-10-15T13:36:58Z status=escalated owner=burndown by=harvest note=for the decision sheet: an injectable seam (classmethod: status, predicate, message) vs an operator-approved scratch-namespace production
+- 2026-10-15T14:26:42Z occurrence=38-0-epic-37-deferred-cleanup
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:27Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-3: delete state guard wired through an injectable seam, pinned by TestProductionManageWiring (handler ignoring the seam and swapped arguments both red); residual: no live Running-production refusal (decision 17); build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-532: VS Code launcher full test suite red on this macOS host at baseline: 5 tests in 3 files + 2 files that cannot load
+- source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: clientsEngine/governanceEngine assert Windows C:\git paths; constants/credentials tests cannot load @intersystems-community/intersystems-servermanager (absent from extension node_modules); clientsActivationFlow 33-3-3 times out at 60s; reproduced with launcher code at HEAD
+- 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
+- 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
+
+### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
+- source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
+- evidence: Interop.cls ProductionManage delete: %Dictionary.ClassDefinition %ExistsId(tName) then %DeleteId(tName), no Ens.Production check; iris_production_manage:delete is a frozen-baseline default-enabled write, so it also bypasses an operator who disabled iris_doc_delete
+- 2026-10-15T14:26:53Z status=escalated owner=burndown by=cr note=new refusal on an existing destructive route needs an AD-15/AD-33 Lead decision plus bootstrap regen; pre-existing, re-touched here
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:27Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-2: production delete refuses a non-production class; live wire gate deletes a production draft and keeps a non-production class; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-534: dev, data and all prepublish-gate.mjs never apply the DW-388 target resolution: an unset IRIS variable still defaults silently in their armed gate runs
+- source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: the three gate scripts spawn vitest with process.env and never call resolveIrisTarget; their gate files default IRIS_PASSWORD to SYS and the namespace to HSCUSTOM; only verify-iris-reachable.mjs warns and refuses under CI
+- 2026-10-15T14:26:53Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=cr note=reopen_if=a CI job (Story 42.3) or the release script (42.5) runs a package prepublish-gate.mjs with an IRIS variable unset
+
+### DW-535: iris_doc_put refusal text says nothing was stored for every non-empty result.status, but a post-save source-control hook error is reported there too
+- source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: %Api.Atelier.v2 PutDoc saves through SetTextFromArray (line 185), then runs Extension UserActionExecute for actions 1 and 7 (lines 224-225); an error there reaches ServeDoc as the per-document status after the document was stored
+- 2026-10-15T14:26:53Z status=by-design owner=38-0-epic-37-deferred-cleanup by=cr note=the spec I/O matrix fixes the refusal wording (was not saved) for any non-empty status; reopens only via spec amendment
+
+### DW-536: The StateName call site in Interop.cls ProductionSummary has no IRIS-side test; only mocked TypeScript tests cover iris_production_summary
+- source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: the refactor replaced the inline state map with ..StateName(tState) in the per-namespace loop; ExecuteMCPv2.REST.Interop.1.int shows a same-routine call with the same argument; a route test would read every namespace, which the shared-instance rule forbids
+- 2026-10-15T14:26:53Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=cr note=reopen_if=iris_production_summary reports a state that differs from iris_production_status for the same namespace
+
+### DW-537: The live-gate work/ response recorder (recordWorkResponses, lastWork) is copied verbatim into two iris-dev-mcp gate files
+- source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: execute-tests-running-contract-epic-gate.test.ts and test-status-epic-gate.test.ts each define the same 22-line recorder; the only reason is that live gate files are self-contained by pattern (Rule 2: weak reason)
+- 2026-10-15T14:26:53Z status=wontfix-accepted owner=38-0-epic-37-deferred-cleanup by=cr note=reopen_if=a third gate file needs the work/ recorder, or the two copies diverge
+
+### DW-538: Streamable HTTP transport is not offered: a real MCP HTTP transport needs an authentication, bind-address and session design first
+- source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: G48/S-2: Story 38.1 makes every non-stdio transport a startup configuration error; AD-23 and the spine Deferred list allow an HTTP transport only with an auth, bind-address and session design and a confirmed remote-access use case
+- 2026-10-15T15:01:25Z status=decision-pending owner=burndown by=implement note=human=decide the auth, bind-address and session design (and the use case) for Streamable HTTP; AD-23
+- 2026-10-16T15:58:09Z status=dropped by=merge_gate note=action_item:epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt (human=Project Lead decides the remote-access use case and auth design)
+
+### DW-539: VS Code launcher passes an ambient MCP_TRANSPORT through to the stdio servers it spawns: after Story 38.1 any non-stdio value makes every launched server exit 1
+- source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: extensions/iris-mcp-launcher/src/env.ts LAUNCHER_OWNED_VARS (ambient vars nulled because McpStdioServerDefinition.env is additive over the extension host env) omits MCP_TRANSPORT; resolveTransport now rejects every non-stdio value
+- 2026-10-15T15:52:02Z status=escalated owner=burndown by=cr note=launcher only spawns stdio, so nulling MCP_TRANSPORT loses nothing; rec: add it to LAUNCHER_OWNED_VARS (suite red here, DW-532)
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:27Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-4: launcher LAUNCHER_OWNED_VARS clears MCP_TRANSPORT; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-540: iris_doc_put without ignoreConflict gets HTTP 409 for every EXISTING document (it can only create); its ignoreConflict description is wrong
+- source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: Live probe 2026-10-15 IRIS 2026.2 Atelier v8: second iris_doc_put to an existing doc -> 409; %Api.Atelier.v2 PutDoc saves only when new or HTTP_IF_NONE_MATCH equals TS(); the tool never sends If-None-Match (doc.ts:193; bootstrap.ts:233-241 documents the same 409)
+- 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=38.3 owns the iris_doc_put write path (its guard reads current source first, so it has the ts to send); 38.4 must send the version header too
+- 2026-10-15T19:47:01Z status=resolved-by:38-3-storage-block-drop-guard by=adjudication note=AC-7: existing documents saved with If-None-Match from the 409 ts (doc.ts); unit + armed live gate pinned, mutation-verified; lead smoke 2026-10-15 updated an existing class without ignoreConflict
+
+### DW-541: iris_doc_get metadataOnly reads a Last-Modified header Atelier never sends, so timestamp is always absent; the unit test fakes the header (Rule #54)
+- source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: Atelier v1-v8 and %Atelier.REST set only ETag (=ts); live metadataOnly returns {exists,name,etag}; doc.test.ts:103-127 fakes Last-Modified; 38.2 corrected only the description
+- 2026-10-15T16:44:50Z status=routed owner=38-3-storage-block-drop-guard by=harvest note=two-way door (drop the dead read + the impossible fake); 38.3 edits doc.ts anyway
+- 2026-10-15T17:11:58Z occurrence=38-2-line-range-document-read by=cr note=the fix also turns the 38.2 AC-4 pin doc-get-range.test.ts:163-178 red (toStrictEqual pins timestamp:undefined); update it
+- 2026-10-15T19:47:01Z status=resolved-by:38-3-storage-block-drop-guard by=adjudication note=AC-8: dead Last-Modified read and its fake removed; metadataOnly returns {exists,name,etag}; 38.2 pin updated deliberately
+
+### DW-542: iris_doc_get without a range reports an Atelier GET soft error (HTTP 200, content "", non-empty status) as success with no isError; the ranged read reports the same result as an error
+- source: spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: Live 2026-10-15 default/HSCUSTOM: iris_doc_get name=ExecuteMCPv2.Utils (no extension) -> {content:"",status:"ERROR #16006 ... name is invalid"}, no isError; doc.ts:266-271 never reads result.status
+- 2026-10-15T17:11:58Z status=escalated owner=burndown by=cr note=AD-15: isError on a result that is a success today needs a Lead decision; reuse atelierDocStatusError as M6 does
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:27Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-5: no-range iris_doc_get soft error is isError via atelierDocStatusError; live wire gate; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-543: Test env harness makeEnvHarness is copied verbatim into 43 test files (doc-get-range-framework.test.ts copies loc-e2e.test.ts:140-173), so an env-isolation gap fixed in one copy stays in the others
+- source: spec-38-2-line-range-document-read.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: grep 'function makeEnvHarness' = 43 files in shared/dev/admin/ops/interop; loc-e2e's copy leaves IRIS_TOOLS_* and IRIS_GOVERNANCE_FILE/PRESET set; 38.2 cr fixed only its own copy
+- 2026-10-15T17:11:58Z status=wontfix-accepted owner=38-2-line-range-document-read by=cr note=reopen_if=a second test result is found to depend on an env var that its makeEnvHarness copy leaves set
+- 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
+- 2026-10-16T18:57:09Z status=routed owner=burndown by=lead note=reopen_if fired at the 38.7 review (governance-enforcement env harness read ambient IRIS_GOVERNANCE_FILE/PRESET/SERVER_MANAGER); for the Epic 39 X.0 gate: one shared startup-env scrub for test harnesses
+
+### DW-544: iris_doc_load uploads each file with ignoreConflict on by default and has no Storage check, so a file whose class text has no Storage block replaces the stored class and drops its Storage definitions
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:447-456 sends PUT ?ignoreConflict=1 per file (the default) with no Storage guard; Story 38.3 AD-24 write-path verdict: excluded, because loading files from source control is the sanctioned flow and the file is the source of truth for the class text
+- 2026-10-15T18:19:47Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=a class loses its Storage after iris_doc_load uploads a file without it (user report or ledger occurrence)
+
+### DW-545: iris_env_promote execute copies each source document to the target with ignoreConflict=1 and has no Storage check, so a sync replaces the target class's Storage definitions with the source copy's
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: env-promote.ts:868-869 PUTs the source content to ...?ignoreConflict=1; a sync replaces the target's whole class, Storage included, by design. Story 38.3 AD-24 write-path verdict: excluded, because execute is plan-gated (the plan embeds the content hash of its source diff, AD-17) and default-disabled
+- 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=promote execute replaces a target class that has Storage with a source copy that has none (report)
+
+### DW-546: iris_doc_xml_export import loads an XML export through action/xml/load with no Storage check, so an import replaces the stored class, including its Storage definitions, with the export's
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: format.ts:218 POSTs the XML to action/xml/load; an XML export carries its own <Storage> elements, so an import replaces the stored definitions with the exported ones. Story 38.3 AD-24 write-path verdict: excluded (orchestrator decision 8 at the spec gate, 2026-10-15), because the export is the source of truth for the class it describes
+- 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=an XML import replaces a class that has Storage with a definition that has none (report)
+
+### DW-547: Storage-drop scanner loses brace sync without reporting it in embedded &html</&js< blocks, string-bearing [ ] keyword values and ( ) defaults, XData bodies, and some contrived headers, so a drop after such a member is not refused (fails open = pre-38.3 behavior)
+- source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 38.3 implement + review probes vs live IRIS 2026.2: XData string braces and InitialExpression = {"}"} -> IRIS sees Default, scanner returns []; read-only sweep matches 2515/2516 %Dictionary.StorageDefinition parents (miss: %SQL.Manager.UI &html<); storage-guard.ts objectScriptBodyEnd/rawBodyEnd/headerBraceEnd
+- 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a Storage definition is lost through iris_doc_put or iris_doc_edit on a class the scanner reported as storage-free, or the guard's live oracle sweep drops below 2515/2516
+- 2026-10-15T19:43:48Z occurrence=38-3-storage-block-drop-guard by=cr note=live 2026-10-15: an ObjectScript JSON literal holding a backslash-escaped quote, and &sql with '{', each hide Storage
+- 2026-10-15T19:43:48Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a Storage loss via iris_doc_put/edit on a class the scanner read as storage-free, or a red oracle fixture
+
+### DW-548: Storage-drop scanner ends a non-ObjectScript method body (Language=python/tsql) only at a column-0 brace, so indented members or a column-0 brace inside a Python string desync it; on the proposed side that is a spurious STORAGE_DROPPED refusal
+- source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: spec rule 5 (foreignBodyEnd); over-refusal only, the documented allowStorageRegeneration override applies; storage-guard.ts:foreignBodyEnd
+- 2026-10-15T18:54:44Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=harvest note=reopen_if=a STORAGE_DROPPED refusal is reported for a put or edit that keeps every Storage definition
+- 2026-10-15T19:43:48Z occurrence=38-3-storage-block-drop-guard by=cr note=live 2026-10-15: a one-line python body desyncs too; the 409 current text desyncs alike, so a drop can pass
+- 2026-10-15T19:43:48Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a STORAGE_DROPPED refusal for a put that keeps every definition, or a Storage loss after a put
+
+### DW-549: iris_doc_load with ignoreConflict: false sends an unversioned PUT, so every file whose document already exists gets HTTP 409 and lands in failures (the DW-540 defect, unfixed for load); its description reads as if false only protects newer server copies
+- source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:449-456 sends PUT with no If-None-Match when ignoreConflict is false; %Api.Atelier.v2 PutDoc answers an unversioned PUT to an existing doc with 409 (38.3 probe record, DW-540); load.ts:348 says 'If true (default), overwrite server copies even when newer'; load.test.ts:314-326 fakes a resolving put
+- 2026-10-15T19:43:42Z status=escalated owner=burndown by=cr note=38.3 Never list excludes load; fix mirrors DW-540 (save with the 409 ts), a behavior change like decision #7
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-6: iris_doc_load ignoreConflict:false uses the 409-ts If-None-Match save; live conflict case gives a per-file DOCUMENT_CONFLICT; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-550: Three iris-mcp-all repo-scan tests carry their own directory walker (story-38-0-qa-doc-claims, and new in 38.3 document-write-paths and story-38-3-qa-doc-claims) with different skip sets and path forms
+- source: spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: document-write-paths.test.ts walk() skips node_modules/dist/__tests__ and sorts; story-38-3-qa-doc-claims sources() skips the same set unsorted; story-38-0-qa-doc-claims walk() skips node_modules/dist only; Rule 2 copy with no stated reason (code review 38.3)
+- 2026-10-15T19:43:43Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=cr note=reopen_if=a repo-scan test misses a source file another scan reads, or a fourth copy of the walker is added
+
+### DW-551: Project Rule #53 still states the core ceiling as <=13 runtime tools/server although the Lead made 13 a guideline (2026-10-14, L-4); dev core is now 14
+- source: _bmad-output/implementation-artifacts/spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: .claude/rules/project-rules.md #53 text vs presets.test.ts pin (dev core 14 under L-4); agent-context file, rules are edited at retrospectives
+- 2026-10-15T21:18:38Z status=decision-pending owner=burndown by=harvest note=human=Project Lead rewords Rule #53 to 'guideline' (or keeps it, citing the clarification)
+- 2026-10-15T21:53:24Z occurrence=38-4-surgical-line-edit-tool
+- 2026-10-16T11:37:48Z status=resolved-by:38-4-surgical-line-edit-tool by=lead note=Project Lead directed 2026-10-16: Rule #53 reworded in .claude/rules/project-rules.md -- ~13 runtime tools/server is a guideline, not a cap; everyday-loop exception recorded with the dev core 15 example
+
+### DW-552: iris_doc_edit STALE_CONTENT mismatches[].current does not round-trip as expected when the addressed range ends in an empty line
+- source: spec-38-4-surgical-line-edit-tool.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: doc-edit.ts:336 sets current=joinLines(lines) and textToLines drops one trailing line break, so the lines ["}",""] give "}\n", which parses as ["}"]: a retry with current is STALE_CONTENT again; an expected built by joining a ranged iris_doc_get slice with \n fails the same way (blind-hunter, verified).
+- 2026-10-15T21:53:24Z status=decision-pending owner=burndown by=cr note=contract call: recommend current=joinLines(lines)+newline (round-trips every range) + a description line; 38.6 prompt depends on it
+- 2026-10-15T22:04:03Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=lead note=decided=orchestrator(Lead-away) decision 11: append a trailing line break to mismatches[].current plus one description line; the 38.6 edit prompt depends on the round trip
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-4: mismatches[].current carries a trailing line break; capstone leg 3 passes current back as expected on a range ending in an empty line (live, armed); description sentence added
+
+### DW-553: doc-edit.test.ts several-edits fake re-read S2_LINES is a .cls layout IRIS cannot return (no blank line after the class brace or between members)
+- source: spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: Plan probe 1 and the CR live probe 2026-10-15 show IRIS restoring member separators on save; S2_LINES is the re-read of Test.Edit.cls in the six shuffled-order rows. Their PUT-body pins (AC-2) are realistic; only the answer fields rest on the fake.
+- 2026-10-15T21:53:24Z status=wontfix-accepted owner=38-4-surgical-line-edit-tool by=cr note=reopen_if=a doc-edit change keeps the S2 rows green while doc-edit-live-gate multi-edit row (replace+insert+delete) goes red
+
+### DW-554: IRIS_GOVERNANCE in the intuitive flat shape {"iris_doc_put": false} is accepted silently and does nothing: the key stays enabled (configSource default), no warning, no fail-fast -- governance config fails OPEN
+- source: lead smoke Story 38.4 (2026-10-15) | severity: high | fix-risk: low | footprint: in-epic
+- evidence: built dev dist 2026-10-15: IRIS_GOVERNANCE={"iris_doc_put":false} -> iris_server_profiles iris_doc_put:true configSource default, stderr no WARN; documented shape is {"global":{...}} or {"<profile>":{...}}; a top-level key that is not a known profile, or a non-object value, should fail fast like other malformed IRIS_GOVERNANCE (M1/F-3)
+- 2026-10-15T22:05:32Z status=routed owner=burndown by=lead note=smoke-found (pre-existing, Epic 32 parser); Epic 38 burn-down story must fix: reject a non-object layer value and an unknown top-level profile name at startup, with the documented shape in the message
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
+- 2026-10-16T18:57:27Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-1: governance-shaped top-level keys fail fast at startup naming the shape; valid documents and metadata start identically; built-process gate story-38-7-qa-governance-process (30 tests, zero IRIS requests on rejection); build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-555: iris_execute_tests hints, the deploy-and-test-class prompt and its generated skill still point models at iris_sql_execute for read-only queries, which the read-only preset blocks; they should name iris_sql_query
+- source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 38.5 implement review (2026-10-15): iris_sql_query (read-classified) now exists; prompt/skill text predates it
+- 2026-10-16T00:13:57Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=38.6 already updates deploy-and-test-class (AC 38.6.2) and regenerates skills
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-5: running hint, iris_execute_tests description, deploy-and-test-class prompt + regenerated skill name iris_sql_query; pinned by the SDK prompt wire test and doc-claims
+
+### DW-556: Three live gates (doc-edit-live-gate, doc-put-storage-guard-live-gate, and before this review the 38.5 gates) end with a cleanup it() that removes the shared fixtures, so they pass only while that test runs last
+- source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: doc-edit-live-gate.test.ts and doc-put-storage-guard-live-gate.test.ts each keep a final describe(cleanup) whose it() calls removeFixtures(); under --sequence.shuffle or a test added after it every later test loses its fixture class. Story 38.5 review moved its own gates' assertions into afterAll.
+- 2026-10-16T12:35:29Z status=routed owner=burndown by=cr note=fix: move the nothing-left assertions into afterAll and delete the it(), as Story 38.5 did; re-run each armed gate
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-10: dev live-gate cleanup moved into afterAll; order-independent; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-557: The 38.5 live gates copy the kill-every-ExecuteMCPv-global-containing-the-stem cleanup loop from the 38.3 and 38.4 gates instead of a shared helper in live-doc-helpers.ts
+- source: spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: sql-safety-live-gate.test.ts:243-257 repeats doc-put-storage-guard-live-gate.test.ts:156-163 and doc-edit-live-gate.test.ts:135; the spec named the sibling to follow (a weak reason, Rule 2); the iris-mcp-all wire gate cannot import dev test helpers.
+- 2026-10-16T12:35:29Z status=wontfix-accepted owner=38-5-sql-write-safety by=cr note=reopen_if=a fourth live gate copies the loop, or the loop's behavior must change in more than one file
+
+### DW-558: A capped INSERT, UPDATE or DELETE on a table stored in IRISTEMP is not undone by the cap's rollback, yet the overCap text says 'Its row changes were undone'
+- source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: Live 2026-10-16 default/HSCUSTOM: a persistent class with DEFAULTGLOBAL ^CacheTemp.Cr385R2 (dest mgr/iristemp), 3 rows; DELETE with maxRowsAffected 0 gave overCap 'Its row changes were undone', then COUNT(*) was 0. A GTT is unobservable: its data is ^|| and the webapp clears process-private globals between requests (same job, ^|| gone).
+- 2026-10-16T13:51:09Z status=routed owner=burndown by=cr note=lead item (c): amend the CAP rolled-back text to hedge IRISTEMP storage (Rule 5) plus a docs line; storage detection is high-risk
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-9: overCap text hedged to journaled storage plus a docs line; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-559: Prepublish live gates never assert that the deployed ExecuteMCPv2 BOOTSTRAP_VERSION equals the shipped embed, so a gate can pass against a stale (older or newer) deployment of the handlers it exercises
+- source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 38.5 re-review 2026-10-16: sql-safety-live-gate and the other armed gates read live results without checking the deployed version; today they match (d352a6a32158); Rule #59 path dimension
+- 2026-10-16T13:54:17Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=the 38.6 capstone (the epic gate) asserts deployed == shipped BOOTSTRAP_VERSION before its live legs; reuse for the other gates if cheap
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-6: assertDeployedBootstrapVersion in the capstone + 38.4/38.5 wire gates, red-proven (decision 16, deployed restored to d352a6a32158); residual: non-bootstrapping dev gates still test whatever is deployed (accepted at the spec gate)
+
+### DW-560: Existing-tool annotation divergences (spine AD-4 Known divergences): iris_sql_execute, iris_execute_command and iris_doc_put declare destructiveHint:false although each can delete or overwrite existing state
+- source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: spine AD-4 Known divergences + Deferred (the Epic 38 gate routes them to one ledger entry with an owner); correcting a hint is an AD-15 sanctioned change (iris_execute_tests is already DW-498)
+- 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
+- 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
+
+### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
+- source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: the 38.6 spec named only the env/session/Atelier helpers for promotion; three copies now
+- 2026-10-16T15:13:57Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=reopen_if=a fourth live gate (e.g. the Epic 39 or 40 capstone) copies the fixture helpers -- then promote them into process-gate-helpers.ts in that story
+- 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
+- 2026-10-16T18:57:09Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=lead note=reopen_if fired at the 38.7 review (fourth gate with its own fixture helpers); the Epic 39 capstone would be the fifth copy -- promote one set there; DW bullet in 39.6
+
+### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: vitest.config.ts sets no fileParallelism (untouched since Epic 25); only prepublish-gate.mjs runs --no-file-parallelism; bootstrap.ts has no lock; QA's serial full run was green (428)
+- 2026-10-16T15:51:29Z status=escalated owner=burndown by=cr note=decide: fileParallelism false (or a serial group for the gate files) in iris-mcp-all vitest.config.ts; 1st stale run flakes
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
+- 2026-10-16T18:57:28Z status=resolved-by:38-7-epic-38-burn-down by=adjudication note=AC-11: @iris-mcp/all default suite serial (fileParallelism false) with a guard test; build 4520fd7; mutation-verified (spec-38-7 Verification)
+
+### DW-563: iris_doc_edit description says STALE_CONTENT mismatches[].current can be passed back as expected unchanged without the README/prompt condition that the change must still apply to that text
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: doc-edit.ts description sentence is dictated verbatim by the 38.6 intent; the frozen refusal text already said Retry with the current text below as expected
+- 2026-10-16T15:51:30Z status=by-design owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=spec-bound: intent fixes the sentence; condition carried by the edit-and-test-class prompt step 3 and the root README
+
+### DW-564: Generated skills/*/SKILL.md frontmatter carries the gen-skills DO-NOT-EDIT banner naming repository paths (scripts/gen-skills.mjs, packages/iris-dev-mcp/src/prompts/*.ts), which AD-28 keeps out of agent content
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: all 12 generated skills, from scripts/gen-skills.mjs (pre-existing); YAML comment in frontmatter; AD-28's mechanical check lands in Epic 41
+- 2026-10-16T15:51:30Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41's AD-28 internal-reference check scans skills/ frontmatter, or a client shows SKILL.md frontmatter comments to the model
+- 2026-10-16T15:51:48Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41 AD-28 internal-reference check flags the skills/ frontmatter banner
+
+### DW-565: An unknown governance key inside a layer (a typo such as {"global":{"iris_doc_putt":false}}) is accepted silently and does nothing: the DW-554 fail-open class one level down
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 38.7 plan probe 2026-10-16; one governance document is shared by all five servers, so each server alone cannot tell another server's key from a typo -- a fix needs the cross-server key universe (iris-mcp-governance universe / deriveKeysForTool)
+- 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=overflow from the Epic 38 burn-down story: for the Epic 39 X.0 gate (warn on a key matching no tool in the suite universe)
+
+### DW-566: IRIS_GOVERNANCE / IRIS_GOVERNANCE_FILE JSON-parse errors embed V8's message, which can quote a snippet of the input, although governance.ts:106 and :406 say contents are never echoed
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 38.7 plan read 2026-10-16
+- 2026-10-16T17:57:29Z status=wontfix-accepted owner=38-7-epic-38-burn-down by=harvest note=reopen_if=a governance document carries a secret, or a parse-error message is reported to echo sensitive content -- then drop V8's message and report only the position
+
+### DW-567: iris_doc_list type description offers 'cls' as an example for category CLS, but Atelier answers GET docnames/CLS/cls with HTTP 400 (CLS accepts only *)
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 38.7 plan probe 2026-10-16, IRIS 2026.2 Atelier v8
+- 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=two-way-door doc fix (<=5 lines + a pin); overflow for the Epic 39 X.0 gate
+
+### DW-568: iris_production_manage delete passes its production-class check for a library production class (IsProductionClass of Ens.Production answers 1), so only a read-only ENSLIB stops a delete of a built-in base class
+- source: spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 38.7 QA observation; cr probe 2026-10-16: HSCUSTOM %Dictionary.CompiledClass holds Ens.Production and Ens.Enterprise.Production; iris_database_check ENSLIB readOnly true; the same delete was possible before 38.7 (DW-533 narrowed it to production classes)
+- 2026-10-16T18:53:39Z status=wontfix-theoretical owner=38-7-epic-38-burn-down by=cr note=real if ENSLIB is mounted read-write and a delete names a library production class; then refuse a class whose source db is not the namespace routine db

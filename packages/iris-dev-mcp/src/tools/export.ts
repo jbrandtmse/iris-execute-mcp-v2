@@ -3,7 +3,7 @@
  *
  * Provides {@link docExportTool} — the inverse of {@link docLoadTool}.
  * Enumerates documents in an IRIS namespace via Atelier
- * `GET /docnames/{cat}/{type}` (or `/modified/{ts}`), fetches each
+ * `GET /docnames/{cat}/{type}`, fetches each
  * matching document's content, and writes it to a local directory
  * tree where dotted package segments become subdirectories.
  *
@@ -41,7 +41,7 @@ import {
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 import { docNameToFilePath } from "./load.js";
-import { extractAtelierContentArray } from "./doc.js";
+import { extractAtelierContentArray, MODIFIED_SINCE_DESCRIPTION, modifiedSinceUnsupported } from "./doc.js";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -140,7 +140,7 @@ function contentToBuffer(result: unknown): Buffer {
   return Buffer.from("", "utf-8");
 }
 
-/** Pull a doc name (string) out of an Atelier /docnames or /modified entry. */
+/** Pull a doc name (string) out of an Atelier /docnames entry. */
 function extractDocName(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;
   const name = (entry as { name?: unknown })?.name;
@@ -224,7 +224,7 @@ export const docExportTool: ToolDefinition = {
     "('EnsLib.HTTP.GenericService.cls' → '<destinationDir>/EnsLib/HTTP/GenericService.cls'). " +
     "CSP paths keep their forward slashes. Writes a manifest.json recording every file " +
     "and every skipped item with a reason. Supports prefix/category/type filters, " +
-    "system/generated tri-states, modifiedSince incremental exports, overwrite policies " +
+    "system/generated tri-states, overwrite policies " +
     "(never/ifDifferent/always), Windows long-path workaround via useShortPaths, " +
     "bounded concurrency, and cancellation tolerance. Inverse of iris_doc_load. " +
     "Note: some namespaces include CSP static assets (e.g., /csp/.../*.css) in docnames " +
@@ -282,14 +282,7 @@ export const docExportTool: ToolDefinition = {
         "System-package tri-state: 'false' (default) excludes '%*'; " +
         "'true' includes both user and system; 'only' returns only '%*'.",
       ),
-    modifiedSince: z
-      .string()
-      .optional()
-      .describe(
-        "ISO 8601 timestamp (e.g., '2026-04-05T00:00:00Z'). When provided, only " +
-        "documents modified since this time are exported (uses Atelier /modified/ " +
-        "endpoint).",
-      ),
+    modifiedSince: z.string().optional().describe(MODIFIED_SINCE_DESCRIPTION),
     namespace: z
       .string()
       .optional()
@@ -381,6 +374,9 @@ export const docExportTool: ToolDefinition = {
       };
     }
 
+    // modifiedSince is refused before any request.
+    if (modifiedSince) return modifiedSinceUnsupported("exported");
+
     const rootAbs = path.resolve(destinationDir);
     const useShort = useShortPaths && process.platform === "win32";
 
@@ -394,23 +390,14 @@ export const docExportTool: ToolDefinition = {
     };
 
     // ── Enumerate docs via Atelier ────────────────────────────────
-    let fullPath: string;
-    if (modifiedSince) {
-      fullPath = atelierPath(
-        ctx.atelierVersion,
-        ns,
-        `modified/${encodeURIComponent(modifiedSince)}`,
-      );
-    } else {
-      const base = atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
-      const params = new URLSearchParams();
-      // generated: "both" → omit param; "true"/"false" → 1/0
-      if (generated !== "both") {
-        params.set("generated", generated === "true" ? "1" : "0");
-      }
-      const queryString = params.toString();
-      fullPath = queryString ? `${base}?${queryString}` : base;
+    // `generated`: "both" -> omit the param; "true"/"false" -> 1/0.
+    const params = new URLSearchParams();
+    if (generated !== "both") {
+      params.set("generated", generated === "true" ? "1" : "0");
     }
+    const queryString = params.toString();
+    const base = atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
+    const fullPath = queryString ? `${base}?${queryString}` : base;
 
     const listResponse = await ctx.http.get(fullPath);
     const enumerated = extractAtelierContentArray(listResponse.result);

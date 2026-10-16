@@ -93,6 +93,8 @@ import {
   defaultSeed,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
+  buildParentKeys,
+  assertParentKeysKnown,
   getEffectivePolicy,
   getEffectiveConfigSources,
   RESERVED_KEYS,
@@ -100,6 +102,7 @@ import {
   type GovernanceConfigSource,
   type GovernanceLayer,
   type MutationClass,
+  type ParentKeys,
 } from "../governance.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
@@ -416,8 +419,8 @@ function serializeConfig(config: GovernanceConfig): string {
  * unknown top-level keys. `parseGovernanceRoot` reads only `global` and
  * `profiles`, so re-serializing the parsed config alone VANISHED any other
  * top-level key on the first write — a `"comment"`/`"version"` annotation
- * (silent data loss by re-serialization) or a typo'd layer name like
- * `"globals"` (which also never took effect). `rawRoot` is the raw JSON
+ * (silent data loss by re-serialization) or a scalar near-miss of a layer
+ * name like `"globals"` (which has no effect). `rawRoot` is the raw JSON
  * root parsed from the SAME pre-image bytes the config was validated from;
  * every key it carries is preserved verbatim at its original position, with
  * the mutated `global`/`profiles` layers written back at THEIR original
@@ -459,7 +462,9 @@ function serializeConfigPreservingUnknown(
  * (`"globals"`, `"profile"`, `"Global"`, …). Unknown keys that are NOT
  * layer-shaped (annotations like `"comment"`/`"version"`) are preserved
  * silently; a layer-shaped one additionally earns a stderr warning because
- * it LOOKS like policy that has no effect.
+ * it LOOKS like policy that has no effect. A layer-shaped key whose value is
+ * an object or a boolean never gets here: the shared validator rejects the
+ * file first, so only a scalar near-miss is warned about.
  */
 const LAYER_SHAPED_KEY = /^(globals?|profiles?)$/i;
 
@@ -553,7 +558,9 @@ Commands:
       Render the SAME cascade the servers compute — env.profile ??
       env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed —
       for the CLI's own environment plus the resolved file, with the per-key
-      configSource (env|file|preset|default). Profile defaults to "default".
+      configSource (env|file|preset|default). It is baseline-scoped and has no
+      tool list, so it never applies a parent key's inherited disable; only
+      "universe" does. Profile defaults to "default".
   diff [--file <path>] [--json]
       Compare every key the file sets against its default-seed value.
   universe [--profile <name>] [--file <path>] [--root <path>] [--json]
@@ -562,7 +569,9 @@ Commands:
       dist, the same derivation the iris-mcp-all cross-package tests and the
       baseline generator use) ∪ the framework iris_server_profiles tool —
       with the REAL mutates/default-enabled classifications, grouped per
-      package, with each key's effective value and configSource. This is the
+      package, with each key's effective value and configSource (env|file|
+      parent|preset|default; "parent" marks a key that inherits a disable from
+      its parent key). This is the
       render iris_server_profiles computes on a running server over its own
       registered subset (post-foundation write keys seed default-DISABLED
       here, unlike "effective"/"diff", which stay baseline-scoped). The
@@ -1377,9 +1386,14 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
   // correctly here: default-disabled unless F2 default-enabled).
   let mutatesLookup: Map<string, MutationClass>;
   let defaultEnabledWrites: ReadonlySet<string>;
+  let parentKeys: ParentKeys;
   try {
     mutatesLookup = new Map(buildMutatesLookup(allTools));
     defaultEnabledWrites = buildDefaultEnabledWrites(allTools);
+    // A key whose parent is explicitly disabled seeds disabled (AD-6); the
+    // parents must exist in this universe.
+    parentKeys = buildParentKeys(allTools);
+    assertParentKeysKnown(parentKeys, sortedKeys);
   } catch (e: unknown) {
     return failOperational(errorMessage(e));
   }
@@ -1396,6 +1410,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     preset,
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
+    parentKeys,
   );
   const sources = getEffectiveConfigSources(
     profile,
@@ -1405,6 +1420,7 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
     preset,
     BASELINE_ACTION_CLASSIFICATIONS,
     fileConfig,
+    parentKeys,
   );
 
   // Per-key mutates classification for display (baseline classifications win,

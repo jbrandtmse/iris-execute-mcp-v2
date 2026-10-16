@@ -11,8 +11,18 @@
 
 import { readFileSync, globSync } from "node:fs";
 import * as path from "node:path";
-import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  atelierDocStatusError,
+  atelierPath,
+  IrisApiError,
+  REFUSAL_CODES,
+  splitLines,
+  stripLeadingBom,
+  type AtelierEnvelope,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
+import { currentDocument } from "./doc.js";
 import { booleanParam } from "./zod-helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -80,7 +90,7 @@ export function extractDeclaredIdentity(lines: string[]): string | undefined {
     // would be silently SKIPPED. The upload loop strips the BOM once at read
     // time (so the uploaded content is BOM-free); this per-line strip keeps
     // the exported parser BOM-tolerant for any caller handed unstripped lines.
-    const text = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
+    const text = stripLeadingBom(line);
     const match = CLASS_DECL_RE.exec(text) ?? ROUTINE_DECL_RE.exec(text);
     const name = match?.[1];
     if (name !== undefined) return name;
@@ -277,6 +287,8 @@ interface UploadFailure {
   file: string;
   docName: string;
   error: string;
+  /** Present on a version-checked save that lost to a concurrent change (see {@link REFUSAL_CODES}). */
+  code?: string;
 }
 
 interface CompilationResult {
@@ -290,6 +302,11 @@ interface CompilationResult {
   }>;
   console?: string[];
 }
+
+/** The per-file failure text of a version-checked save that lost to a concurrent change on the server. */
+const CONFLICT_ERROR =
+  "The document changed on the server while this tool was saving it, so nothing was stored. " +
+  "Run iris_doc_load again to replace the current version.";
 
 // ── iris_doc_load ─────────────────────────────────────────────────────
 
@@ -340,7 +357,12 @@ export const docLoadTool: ToolDefinition = {
       .describe("Target namespace (default: configured)"),
     ignoreConflict: booleanParam
       .optional()
-      .describe("If true (default), overwrite server copies even when newer"),
+      .describe(
+        "If true (default), each file overwrites its server copy unconditionally. " +
+          "If false, a file whose document already exists is saved under a version check: it is overwritten " +
+          "unless the document changes on the server while it is being saved, in which case that file fails " +
+          "with DOCUMENT_CONFLICT and the others continue.",
+      ),
   }),
   annotations: {
     readOnlyHint: false,
@@ -409,9 +431,8 @@ export const docLoadTool: ToolDefinition = {
         // storing NOTHING (a silent drop; live-proven 2026-08-18). Stripping
         // here makes BOM-bearing files just work: the identity cross-check
         // below parses the stripped text, and the PUT body is BOM-free.
-        const fileContent =
-          rawContent.charCodeAt(0) === 0xfeff ? rawContent.slice(1) : rawContent;
-        const lines = fileContent.split(/\r?\n/);
+        const fileContent = stripLeadingBom(rawContent);
+        const lines = splitLines(fileContent);
 
         // Cross-validate the path-derived doc name against the file's own
         // declared identity BEFORE the PUT (Story 35.9 — the server stores
@@ -449,7 +470,30 @@ export const docLoadTool: ToolDefinition = {
           (qs ? `?${qs}` : "");
 
         const body = { enc: false, content: lines };
-        const putResponse = await ctx.http.put(apiPath, body);
+        let putResponse: AtelierEnvelope;
+        try {
+          putResponse = await ctx.http.put(apiPath, body);
+        } catch (putError: unknown) {
+          // With ignoreConflict false, Atelier answers a put to an existing document with a 409 that
+          // carries its current version and writes nothing; the save is then repeated once, checked
+          // against that version. Any other failure, and a 409 with no readable document, is thrown.
+          const current = ignoreConflictFlag ? undefined : currentDocument(putError);
+          if (current === undefined) throw putError;
+          try {
+            putResponse = await ctx.http.put(apiPath, body, { headers: { "If-None-Match": current.ts } });
+          } catch (saveError: unknown) {
+            if (saveError instanceof IrisApiError && saveError.statusCode === 409) {
+              failures.push({
+                file: String(filePath),
+                docName,
+                error: CONFLICT_ERROR,
+                code: REFUSAL_CODES.DOCUMENT_CONFLICT,
+              });
+              continue;
+            }
+            throw saveError;
+          }
+        }
 
         // A PUT can return HTTP 200 with an empty `status.errors` envelope yet
         // still FAIL per-document: the Atelier PUT result carries the per-doc
@@ -460,12 +504,12 @@ export const docLoadTool: ToolDefinition = {
         // uploaded:1 while the class was absent server-side). A successful
         // PUT carries `result.status === ""` (live-captured same day). Treat
         // a non-empty string status as an upload failure for this file.
-        const putResult = putResponse.result as { status?: unknown } | undefined;
-        if (typeof putResult?.status === "string" && putResult.status !== "") {
+        const refusal = atelierDocStatusError(putResponse.result);
+        if (refusal !== undefined) {
           failures.push({
             file: String(filePath),
             docName,
-            error: `IRIS refused the upload: ${putResult.status}`,
+            error: `IRIS refused the upload: ${refusal}`,
           });
           continue;
         }

@@ -76,9 +76,33 @@ const gateTestFiles = [
   "src/__tests__/execute-tests-running-contract-epic-gate.test.ts",
   "src/__tests__/test-status-epic-gate.test.ts",
   "src/__tests__/global-injection-epic-gate.test.ts",
+  // `iris_doc_put` / `iris_doc_load` against the real Atelier `PUT /doc`: BOM strip and a
+  // refused write reported as an error (writes only disposable ExecuteMCPv2.Temp.QaStory380* docs).
+  "src/__tests__/doc-put-bom-live-gate.test.ts",
+  // `iris_doc_get` line ranges against the real Atelier `GET /doc` (AD-24 version-token record included):
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory382Range.cls/.mac and ...QaStory382Token.cls docs.
+  "src/__tests__/doc-get-range-live-gate.test.ts",
+  // `iris_doc_put` Storage-drop guard and version-checked save against the real Atelier `PUT /doc`:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory383Guard (compiled, 2 rows), ...Multi, ...NoStorage,
+  // ...Shape and ...Rtn documents, and removes them, their data and their globals.
+  "src/__tests__/doc-put-storage-guard-live-gate.test.ts",
+  // `iris_doc_edit` line edits against the real Atelier `GET /doc` and `PUT /doc` (version-checked save, re-read):
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory384Edit.cls, ...Store.cls (persistent, compiled) and ...Rtn.mac documents.
+  "src/__tests__/doc-edit-live-gate.test.ts",
+  // `iris_sql_execute` / `iris_sql_query` safety against the real /dev/sql/execute route: writes only the disposable
+  // ExecuteMCPv2.Temp.QaStory385Gate.cls and ...QaStory385GateAudit.cls (persistent, compiled) documents, their data and globals.
+  "src/__tests__/sql-safety-live-gate.test.ts",
+  // Story 38.7 QA: `modifiedSince` refused with no request on the wire, `iris_doc_load` ignoreConflict:false against IRIS's own 409,
+  // and `iris_env_promote` execute on a target PUT IRIS answers with HTTP 200 and a status: writes only the disposable
+  // ExecuteMCPv2.Temp.QaStory387Mod, ...LoadA/B/C and ...PromA/B (the last two compiled) documents.
+  "src/__tests__/story-38-7-qa-live-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+// `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its
+// Atelier async work queue and the QAFixtures classes. Run in parallel (vitest's default),
+// two files' test runs overlap on that shared state and a gate fails on an interleaving
+// rather than on a defect (DW-511). Sequential file execution makes each file see only its own runs.
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

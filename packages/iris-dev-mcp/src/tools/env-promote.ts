@@ -60,6 +60,7 @@ import type {
 import {
   IrisApiError,
   ProfileResolutionError,
+  atelierDocStatusError,
   atelierPath,
   negotiateVersion,
   parseGovernanceConfig,
@@ -866,7 +867,16 @@ async function runDocumentsBatch(
       }
       const content = getResp.result.content as string[];
       const putPath = `${atelierPath(targetAtelierVersion, targetNs, `doc/${encodedName}`)}?ignoreConflict=1`;
-      await targetClient.put(putPath, { enc: false, content });
+      const putResp = await targetClient.put(putPath, { enc: false, content });
+      // IRIS can refuse a document inside an HTTP 200 envelope, reporting the reason only as a string
+      // `result.status`; whether anything was stored is then unknown, so the step fails like a thrown PUT.
+      const refusal = atelierDocStatusError(putResp.result);
+      if (refusal !== undefined) {
+        throw new Error(
+          `IRIS reported an error after the write of '${step.subject}' to the target: ${refusal}. ` +
+            "The document may have been saved on the target; check it with iris_doc_get before running iris_env_promote again.",
+        );
+      }
       putOk.push(step);
     } catch (error: unknown) {
       putFailedAt = idx;

@@ -147,17 +147,96 @@ async function isIrisReachable(): Promise<boolean> {
  * so a `null` value would reach `cross-spawn` and get coerced to the literal
  * string `"null"`. Deleting the null-valued keys (never stringifying them)
  * is the correct real-process equivalent (story Dev Notes).
+ *
+ * `ambient` stands for the extension host's own environment, which VS Code layers the definition's
+ * `env` over: a `null` entry removes the ambient variable, any other entry overwrites it.
  */
-function toSpawnEnv(env: Record<string, string | null>): Record<string, string> {
-  const spawnEnv: Record<string, string> = {};
+function toSpawnEnv(
+  env: Record<string, string | null>,
+  ambient: Record<string, string> = {},
+): Record<string, string> {
+  const spawnEnv: Record<string, string> = { ...ambient };
   for (const [key, value] of Object.entries(env)) {
-    if (value !== null) spawnEnv[key] = value;
+    if (value === null) delete spawnEnv[key];
+    else spawnEnv[key] = value;
   }
   return spawnEnv;
 }
 
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
+
+/** The slice of the SDK `Client` this suite uses. */
+interface SdkClient {
+  connect: (transport: unknown) => Promise<void>;
+  close: () => Promise<void>;
+  listTools: () => Promise<{ tools: { name: string }[] }>;
+  callTool: (params: {
+    name: string;
+    arguments: Record<string, unknown>;
+  }) => Promise<{ isError?: boolean; content: unknown[]; structuredContent?: unknown }>;
+}
+
+/** The REAL `LauncherProvider` for a local-path dev definition against the live IRIS (no credential prompt). */
+function newProvider(providerWarnings: string[]): LauncherProvider {
+  const api: ServerManagerApi = {
+    getServerNames: () => [{ name: "local-iris", description: "", detail: "" }],
+    getServerSpec: async () => ({
+      name: "local-iris",
+      webServer: { host: IRIS_HOST, port: IRIS_PORT, scheme: "http" },
+      username: IRIS_USERNAME,
+      password: IRIS_PASSWORD, // pre-supplied, so no credential prompt is exercised here
+    }),
+    getAccount: () => ({ id: "acct-1", label: "Account One" }),
+  };
+  const authApi: AuthApi = {
+    getSession: async () => {
+      throw new Error("must not be called: the spec already carries a password");
+    },
+  };
+
+  return new LauncherProvider({
+    getServerManagerApi: async () => api,
+    authApi,
+    getSettings: () =>
+      settings({
+        packages: ["dev"],
+        servers: ["local-iris"],
+        developmentRepoPath: REPO_ROOT,
+      }),
+    showWarning: (message) => providerWarnings.push(message),
+  });
+}
+
+/** Spawn `planned` with `spawnEnv` through the real SDK stdio transport and complete the `initialize` handshake. */
+async function connectClient(
+  planned: { command: string; args: string[] },
+  spawnEnv: Record<string, string>,
+): Promise<SdkClient> {
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const { Client } = (await import(sdkClientIndex)) as {
+    Client: new (info: { name: string; version: string }) => SdkClient;
+  };
+  const { StdioClientTransport } = (await import(sdkClientStdio)) as {
+    StdioClientTransport: new (params: {
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      stderr: string;
+    }) => unknown;
+  };
+
+  const transport = new StdioClientTransport({
+    command: planned.command,
+    args: planned.args,
+    env: spawnEnv,
+    stderr: "ignore",
+  });
+  const client = new Client({ name: "iris-mcp-launcher-integration-test", version: "0.0.0" });
+  await client.connect(transport);
+  return client;
+}
 
 beforeAll(async () => {
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
@@ -200,34 +279,8 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
       }
 
       // ── 1. REAL planned command/args, via the REAL LauncherProvider ──
-      const api: ServerManagerApi = {
-        getServerNames: () => [{ name: "local-iris", description: "", detail: "" }],
-        getServerSpec: async () => ({
-          name: "local-iris",
-          webServer: { host: IRIS_HOST, port: IRIS_PORT, scheme: "http" },
-          username: IRIS_USERNAME,
-          password: IRIS_PASSWORD, // pre-supplied, so no credential prompt is exercised here
-        }),
-        getAccount: () => ({ id: "acct-1", label: "Account One" }),
-      };
-      const authApi: AuthApi = {
-        getSession: async () => {
-          throw new Error("must not be called — the spec already carries a password");
-        },
-      };
-
       const providerWarnings: string[] = [];
-      const provider = new LauncherProvider({
-        getServerManagerApi: async () => api,
-        authApi,
-        getSettings: () =>
-          settings({
-            packages: ["dev"],
-            servers: ["local-iris"],
-            developmentRepoPath: REPO_ROOT,
-          }),
-        showWarning: (message) => providerWarnings.push(message),
-      });
+      const provider = newProvider(providerWarnings);
 
       const planned = await provider.providePlannedDefinitions();
       expect(providerWarnings).toEqual([]); // the real dev-mcp package IS built (guarded by skipReason above)
@@ -253,39 +306,8 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
       const spawnEnv = toSpawnEnv(env!);
 
       // ── 3. Genuine child process + real MCP handshake ──
-      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
-      const { Client } = (await import(sdkClientIndex)) as {
-        Client: new (info: { name: string; version: string }) => {
-          connect: (transport: unknown) => Promise<void>;
-          close: () => Promise<void>;
-          listTools: () => Promise<{ tools: { name: string }[] }>;
-          callTool: (params: {
-            name: string;
-            arguments: Record<string, unknown>;
-          }) => Promise<{ isError?: boolean; content: unknown[]; structuredContent?: unknown }>;
-        };
-      };
-      const { StdioClientTransport } = (await import(sdkClientStdio)) as {
-        StdioClientTransport: new (params: {
-          command: string;
-          args: string[];
-          env: Record<string, string>;
-          stderr: string;
-        }) => unknown;
-      };
-
-      const transport = new StdioClientTransport({
-        command: planned[0]!.command,
-        args: planned[0]!.args,
-        env: spawnEnv,
-        stderr: "ignore",
-      });
-
-      const client = new Client({ name: "iris-mcp-launcher-integration-test", version: "0.0.0" });
+      const client = await connectClient(planned[0]!, spawnEnv);
       activeClient = client;
-
-      await client.connect(transport);
 
       const { tools } = await client.listTools();
       // Deliberately NOT an exact count. `iris_dev` advertised 29 tools when
@@ -305,6 +327,34 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
       expect(result.isError).not.toBe(true);
       expect(result.content.length).toBeGreaterThan(0);
       expect(result.structuredContent).toBeDefined();
+    },
+    { timeout: 30000 },
+  );
+
+  it(
+    "with MCP_TRANSPORT=http in the extension host's own environment, the definition env removes it, and the spawned server still completes initialize (DW-539)",
+    async (ctx) => {
+      if (skipReason) {
+        // eslint-disable-next-line no-console
+        console.log(`[SKIP] DW-539 ambient MCP_TRANSPORT: ${skipReason}`);
+        ctx.skip();
+        return;
+      }
+
+      const provider = newProvider([]);
+      const planned = await provider.providePlannedDefinitions();
+      const env = await provider.resolveEnvForLabel(planned[0]!.label);
+
+      // VS Code layers the definition's env over the extension host's own: a null removes the variable.
+      // The SDK's own default environment carries no MCP_TRANSPORT, so the ambient one is layered in here.
+      // A server started with MCP_TRANSPORT=http exits 1 before initialize, so connecting is the assertion.
+      const spawnEnv = toSpawnEnv(env!, { MCP_TRANSPORT: "http" });
+
+      const client = await connectClient(planned[0]!, spawnEnv);
+      activeClient = client;
+
+      const { tools } = await client.listTools();
+      expect(tools.some((tool) => tool.name === "iris_server_info")).toBe(true);
     },
     { timeout: 30000 },
   );

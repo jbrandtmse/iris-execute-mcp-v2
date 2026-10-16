@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 29 production classes as string literals, keyed by their
+ * Contains all 30 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "2159ec9e6f69";
+export const BOOTSTRAP_VERSION = "089f8f0a62b2";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "2159ec9e6f69";
+Parameter BOOTSTRAPVERSION = "089f8f0a62b2";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -8936,6 +8936,17 @@ ClassMethod SqlPrivilegeList() As %Status
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tGrantee, "grantee")
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+        ; A column-level target is 'schema.table': a '.', a non-empty schema before the first
+        ; '.', and a non-empty table after it (a table may itself contain '.', so 'A.B.C' stays
+        ; valid). Anything else would reach the catalog query with an empty subscript and come
+        ; back as a raw <SUBSCRIPT> 500, so it is refused here, before any namespace switch.
+        If (tTarget '= "") && ((tTarget '[ ".") || ($Piece(tTarget, ".", 1) = "") || ($Piece(tTarget, ".", 2, *) = "")) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'target' must be 'schema.table' for listPrivileges (got '"_tTarget_"'). Omit target for an object-level listing.")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
         If tReqNS '= "" {
             If '##class(%SYS.Namespace).Exists(tReqNS) {
                 Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tReqNS_"' does not exist")
@@ -9081,10 +9092,93 @@ ClassMethod SqlPrivilegeList() As %Status
 Class ExecuteMCPv2.REST.Interop Extends ExecuteMCPv2.REST.Base
 {
 
+/// Whether deleting the production named <var>pTarget</var> must be refused: true when it is the
+/// namespace's current production (<var>pCurrentName</var>, as reported by
+/// <code>Ens.Director:GetProductionStatus</code>) and its state is anything other than Stopped.
+/// <p>Stopped is state 2, or -2 for a mirror backup member's Stopped; every other state
+/// (Running, Suspended, Troubled, NetworkStopped, Unknown, ...) blocks. A production that is not
+/// the current one is never blocked: <code>GetProductionStatus</code> says nothing about it.</p>
+ClassMethod DeleteBlockedByState(pTarget As %String, pCurrentName As %String, pState As %Integer) As %Boolean
+{
+    Quit (pCurrentName = pTarget) && ($ZAbs(pState) '= 2)
+}
+
+/// Display name for a production state code (1-5); anything else is "Unknown".
+ClassMethod StateName(pState As %Integer) As %String
+{
+    Quit $Select(pState>0&&(pState<6):$ListGet($ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped"), pState), 1:"Unknown")
+}
+
+/// Refusal text for a delete blocked by <method>DeleteBlockedByState</method>. Running (state 1)
+/// keeps its exact message; every other state is named from <method>StateName</method>.
+ClassMethod DeleteBlockedMessage(pTarget As %String, pState As %Integer) As %String
+{
+    If pState = 1 Quit "Production '"_pTarget_"' is running; stop it before deleting"
+    Quit "Production '"_pTarget_"' is in state "_..StateName(pState)_"; stop it before deleting"
+}
+
+/// The refusal text for deleting the production named <var>pTarget</var> when the namespace's current
+/// production state forbids it, or "" when the delete may go ahead. This is the one place that asks the
+/// state question for a delete: <method>ProductionManage</method> calls it before either delete path.
+/// <p>When <var>pInject</var> is 0 the state comes from <code>Ens.Director:GetProductionStatus</code>,
+/// and an error status gives "" (the unguarded behavior). When <var>pInject</var> is 1 the caller supplies
+/// the status (<var>pStatus</var>), the current production's name (<var>pCurrentName</var>) and its state
+/// (<var>pState</var>), so a test can exercise every state without starting a production.</p>
+ClassMethod DeleteStateRefusal(pTarget As %String, pInject As %Boolean = 0, pStatus As %Status = 1, pCurrentName As %String = "", pState As %Integer = 0) As %String
+{
+    Set tSC = pStatus
+    Set tCurrentName = pCurrentName
+    Set tState = pState
+    If 'pInject {
+        Set tSC = ##class(Ens.Director).GetProductionStatus(.tCurrentName, .tState)
+    }
+    If $$$ISERR(tSC) Quit ""
+    If ..DeleteBlockedByState(pTarget, tCurrentName, tState) Quit ..DeleteBlockedMessage(pTarget, tState)
+    Quit ""
+}
+
+/// Whether the class named <var>pName</var> is a production class, so a production delete may remove it.
+/// <p>A compiled class is a production when it extends <class>Ens.Production</class>. A class that is
+/// defined but not compiled is a production when <code>Ens.Production</code> is one of the comma-separated
+/// pieces of its <code>Super</code>. A class that does not exist, or whose check throws, is not one.</p>
+ClassMethod IsProductionClass(pName As %String) As %Boolean
+{
+    Set tIsProduction = 0
+    Try {
+        If ##class(%Dictionary.CompiledClass).%ExistsId(pName) {
+            ; $classmethod throws for a class that is not usable; the inner Try keeps that a plain "no"
+            ; (the Loc.Scanner BuildClassMetadata note explains why it is wrapped).
+            Try {
+                Set tIsProduction = +$classmethod(pName, "%Extends", "Ens.Production")
+            } Catch exExtends {
+                Set tIsProduction = 0
+            }
+        }
+        ElseIf ##class(%Dictionary.ClassDefinition).%ExistsId(pName) {
+            ; Read the definition's Super from the class dictionary: nothing is opened, so nothing can be saved.
+            Set tSuper = $$$defClassKeyGet(pName, $$$cCLASSsuper)
+            For tPiece = 1:1:$Length(tSuper, ",") {
+                If $ZStrip($Piece(tSuper, ",", tPiece), "<>W") = "Ens.Production" {
+                    Set tIsProduction = 1
+                    Quit
+                }
+            }
+        }
+    }
+    Catch ex {
+        Set tIsProduction = 0
+    }
+    Quit tIsProduction
+}
+
 /// Create or delete an Interoperability production.
 /// <p>Accepts a JSON body with <code>action</code> ("create" or "delete"),
 /// <code>name</code> (production class name), and optional <code>namespace</code>.
-/// Productions must be stopped before deletion.</p>
+/// The namespace's current production must be Stopped before deletion. Only a production class
+/// (one that extends <class>Ens.Production</class>) is deleted: any other class is refused and
+/// nothing is deleted. When the production class no longer exists but its
+/// <code>Ens.Config.Production</code> row does (an orphan), delete removes that row and reports
+/// <code>orphanRemoved</code>.</p>
 ClassMethod ProductionManage() As %Status
 {
     Set tSC = $$$OK
@@ -9163,8 +9257,53 @@ ClassMethod ProductionManage() As %Status
             Do ..RenderResponseBody($$$OK, , tResult)
         }
         ElseIf tAction = "delete" {
-            ; Check if production exists
-            If '##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+            ; State guard - runs BEFORE either delete path (the class delete and the
+            ; orphan-row removal below). The seam asks the state question for this namespace's
+            ; current production only; a status error keeps the unguarded behavior, and
+            ; anything other than Stopped is refused.
+            Set tStateRefusal = ..DeleteStateRefusal(tName)
+            If tStateRefusal '= "" {
+                Set $NAMESPACE = tOrigNS
+                Set tSC = $$$ERROR($$$GeneralError, tStateRefusal)
+                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                Set tSC = $$$OK
+                Quit
+            }
+
+            If ##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+                ; Only a production class may be deleted here: any other class is refused, and
+                ; nothing is deleted (a same-named Ens.Config.Production row is left alone too).
+                If '..IsProductionClass(tName) {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Class '"_tName_"' is not a production class (it does not extend Ens.Production), so nothing was deleted. Name a production class.")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+
+                ; Delete the class definition first - Ens.Projection.Production.RemoveProjection()
+                ; fires automatically and handles the Ens.Config.Production record cleanup.
+                ; Deleting in the reverse order (config first, then class) is fragile: if the
+                ; Ens.Config.Production record is absent (orphaned class, external creation), the
+                ; first %DeleteId fails and the class definition is never removed.
+                Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
+                Set $NAMESPACE = tOrigNS
+                If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
+
+                Set tResult = {"action": "deleted", "name": (tName)}
+            }
+            ElseIf ##class(Ens.Config.Production).%ExistsId(tName) {
+                ; Orphan: the production class is gone but its Ens.Config.Production row
+                ; remains. The class XData is the source of truth and no longer exists, so
+                ; LoadFromClass has nothing to sync from; remove the row directly (its
+                ; %OnDelete also removes the row's config items).
+                Set tDeleteSC = ##class(Ens.Config.Production).%DeleteId(tName)
+                Set $NAMESPACE = tOrigNS
+                If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
+
+                Set tResult = {"action": "deleted", "name": (tName), "orphanRemoved": true}
+            }
+            Else {
                 Set $NAMESPACE = tOrigNS
                 Set tSC = $$$ERROR($$$GeneralError, "Production '"_tName_"' does not exist")
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
@@ -9172,26 +9311,6 @@ ClassMethod ProductionManage() As %Status
                 Quit
             }
 
-            ; Check if production is running — must be stopped first
-            Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
-            If $$$ISOK(tSC2) && (tProdName = tName) && (tState = 1) {
-                Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, "Production '"_tName_"' is running; stop it before deleting")
-                Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
-                Set tSC = $$$OK
-                Quit
-            }
-
-            ; Delete the class definition first — Ens.Projection.Production.RemoveProjection()
-            ; fires automatically and handles the Ens.Config.Production record cleanup.
-            ; Deleting in the reverse order (config first, then class) is fragile: if the
-            ; Ens.Config.Production record is absent (orphaned class, external creation), the
-            ; first %DeleteId fails and the class definition is never removed.
-            Set tDeleteSC = ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tDeleteSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tDeleteSC)) Set tSC = $$$OK Quit }
-
-            Set tResult = {"action": "deleted", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
     }
@@ -9381,8 +9500,7 @@ ClassMethod ProductionStatus() As %Status
         If $$$ISERR(tSC) { Set $NAMESPACE = tOrigNS Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
         ; Map state number to string
-        Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
-        Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
+        Set tStateStr = ..StateName(tState)
 
         Set tResult = {}
         Do tResult.%Set("name", tProdName)
@@ -9500,13 +9618,13 @@ ClassMethod ItemManage() As %Status
             ; in this namespace (#50 — a match key must carry every identity
             ; dimension a row actually has: WHERE Name = ? alone can silently
             ; return whichever production's row the extent yields first).
-            ; Omitted -> unchanged legacy query/output, so the single-production
-            ; case stays byte-identical (Rule #19). Story 35.1 AC 35.1.4 audit.
+            ; Omitted -> the unfiltered query (the first matching row); the response
+            ; always names that row's production. Story 35.1 AC 35.1.4 audit.
             ; CR 35.1-4 (code review): strip surrounding whitespace so a whitespace-only value
-            ; collapses to "" (treated as omitted -> unchanged legacy query) rather than being
+            ; collapses to "" (treated as omitted -> unfiltered query) rather than being
             ; bound into the SQL predicate and reported as "not found in production ' '".
             Set tProdFilter = $ZStrip(tBody.%Get("production"), "<>W")
-            Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category FROM Ens_Config.Item WHERE Name = ?"
+            Set tSQL = "SELECT Name, ClassName, Enabled, PoolSize, Comment, Category, Production FROM Ens_Config.Item WHERE Name = ?"
             If tProdFilter '= "" {
                 Set tSQL = tSQL _ " AND Production = ?"
                 Set tRS = ##class(%SQL.Statement).%ExecDirect(, tSQL, tItemName, tProdFilter)
@@ -9534,6 +9652,9 @@ ClassMethod ItemManage() As %Status
             Set tResult = {}
             Do tResult.%Set("action", "get")
             Do tResult.%Set("itemName", tRS.Name)
+            ; The production the row was read from, so a get without 'production' still says
+            ; which production's item it returned (DW-450).
+            Do tResult.%Set("production", tRS.Production)
             Do tResult.%Set("className", tRS.ClassName)
             Do tResult.%Set("enabled", tRS.Enabled, "boolean")
             Do tResult.%Set("poolSize", +tRS.PoolSize, "number")
@@ -10618,9 +10739,8 @@ ClassMethod ProductionSummary() As %Status
             Try {
                 Set $NAMESPACE = tNS
                 Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
-                Set tStateMap = $ListBuild("Running","Stopped","Suspended","Troubled","NetworkStopped")
                 If $$$ISOK(tSC2) && (tProdName '= "") {
-                    Set tStateStr = $Select(tState>0&&(tState<6):$ListGet(tStateMap, tState), 1:"Unknown")
+                    Set tStateStr = ..StateName(tState)
                     Set tEntry = {}
                     Do tEntry.%Set("namespace", tNS)
                     Do tEntry.%Set("name", tProdName)
@@ -15649,14 +15769,16 @@ ClassMethod CubeAction() As %Status
                 Set tSC2 = exBuild.AsStatus()
             }
 
-            ; Restore I/O unconditionally, before any render. Bare \`Use
-            ; tInitIO\` (never \`Use tInitIO::("")\`, a NO-OP) is required to
-            ; actually clear the mnemonic bound above.
-            Do ##class(%Library.Device).ReDirectIO(0)
-            Use tInitIO
-            Close tNull
-            Set tRedirected = 0
+            ; Restore I/O unconditionally, before any render, through the same
+            ; helper Command.cls uses: each teardown step (ReDirectIO(0), the
+            ; bare \`Use tInitIO\` that actually clears the mnemonic bound above,
+            ; Close tNull) is attempted independently, so a throw from one
+            ; cannot skip the others and strand the render on the null device.
+            ; The namespace is restored first so the helper class is visible
+            ; whichever namespace the build ran in.
             Set $NAMESPACE = tOrigNS
+            Do ##class(ExecuteMCPv2.REST.Command).TeardownRedirect(tInitIO, tNull)
+            Set tRedirected = 0
 
             ; AC 35.2.3 disposition: the captured text is DISCARDED, not
             ; surfaced. %BuildCube's progress narration is diagnostic noise
@@ -15701,16 +15823,14 @@ ClassMethod CubeAction() As %Status
         ; (Story 35.2, mirrors Command.cls's own outer-catch belt-and-braces
         ; restore at Command.cls:132-138). Any errors during cleanup are
         ; swallowed so the real exception is still what gets rendered below.
+        Set $NAMESPACE = tOrigNS
         Try {
             If tRedirected {
-                Do ##class(%Library.Device).ReDirectIO(0)
-                If $Get(tInitIO) '= "" { Use tInitIO }
-                If $Get(tNull) '= "" { Close tNull }
+                Do ##class(ExecuteMCPv2.REST.Command).TeardownRedirect($Get(tInitIO), $Get(tNull))
             }
         } Catch {}
         Kill %ExecuteMCPOutput
         Kill %ExecuteMCPTruncated
-        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }
@@ -16073,6 +16193,412 @@ ClassMethod IndexRowsForClass(pClassName As %String, Output pRows) As %Status
 }`,
   ],
   [
+    "ExecuteMCPv2.REST.Sql.cls",
+    `/// REST handler for the SQL execution endpoint behind <code>iris_sql_execute</code> and
+/// <code>iris_sql_query</code>.
+/// <p>Backs <code>/api/executemcp/v2/dev/sql/execute</code> (<method>Execute</method>, POST
+/// JSON body <code>{query, parameters?, namespace?, readOnly?, countOnly?,
+/// maxRowsAffected?}</code>). The statement is prepared once, classified by the
+/// <code>%SQL.Statement</code> statement type (by keyword only for the refuse-only
+/// <code>%NOJOURN</code> check below), checked against the
+/// read-only and rows-affected controls, and executed in the same request.</p>
+/// <ul>
+/// <li><b>Read-only.</b> Only statement type 1 (SELECT) runs. It runs inside a transaction
+/// this handler opens and always rolls back. Every other type is declined before execution,
+/// <code>CALL</code> included.</li>
+/// <li><b>Rows-affected cap.</b> Under a cap, types 2, 3 and 4 (INSERT, UPDATE, DELETE) run
+/// inside a transaction this handler opens. <code>%ROWCOUNT</code> above the cap, or negative
+/// (unknown), rolls the statement back. Otherwise the transaction commits. A SELECT runs as it
+/// would without a cap, and every other type is declined before execution. A type 2 to 4
+/// statement whose text contains the <code>%NOJOURN</code> token is declined before execution
+/// (outcome <code>noJournal</code>): it turns journaling off, so a rollback could not undo it.
+/// This is the one keyword check in the safety path, and it can only refuse.</li>
+/// <li><b>Neither.</b> The statement runs as the Atelier <code>action/query</code> route runs
+/// it, with no transaction from this handler.</li>
+/// <li><b>Transactions.</b> When this handler opened a transaction, it requires
+/// <code>$TLEVEL</code> to be the level it opened after execution (a function, procedure or
+/// trigger that started, committed or rolled back a transaction is outcome
+/// <code>transactionEnded</code>, also when the statement then failed), and it rolls back to the
+/// level it found on every exit.</li>
+/// </ul>
+/// <p>The response result is <code>{outcome, statementType, statementTypeName, ...}</code>.
+/// <code>outcome</code> is <code>ok</code> (with <code>content</code>, the rows as
+/// <code>action/query</code> serializes them, and <code>rowsAffected</code> for types 2 to 4 or
+/// <code>totalCount</code> for <code>countOnly</code>), <code>readOnly</code>,
+/// <code>countOnly</code>, <code>capNotCountable</code>, <code>noJournal</code>, <code>overCap</code> (with
+/// <code>rowsAffected</code>) or <code>transactionEnded</code>. A prepare or execution error is
+/// an error envelope carrying the SQLCODE and the IRIS message.</p>
+/// <p>Rows are keyed by column name and typed by the result set's own <code>clientType</code>:
+/// integer, double, numeric, currency and bigint columns are numbers, boolean columns are
+/// booleans, and every other column (and every column of a CALL result set, whose metadata
+/// carries no client type) is a string. A string that begins with <code>{</code> or
+/// <code>[</code> and parses as JSON is embedded as JSON. Values are read with the process
+/// default select mode.</p>
+Class ExecuteMCPv2.REST.Sql Extends ExecuteMCPv2.REST.Base
+{
+
+/// HTTP entry point: reads the body, runs the statement, renders exactly one envelope.
+ClassMethod Execute() As %Status
+{
+    Set tSC = $$$OK
+    Set tResult = ""
+    Set tErrored = 0
+    Try {
+        Set tSC1 = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC1) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC1
+            Quit
+        }
+        Set tSC2 = ..Run(tBody, .tResult)
+        If $$$ISERR(tSC2) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC2
+            Quit
+        }
+        Quit
+    } Catch ex {
+        Set tErrored = 1
+        Set tCmdStatus = ex.AsStatus()
+    }
+
+    If tErrored {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+    } Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit tSC
+}
+
+/// The request-independent core of <method>Execute</method>. Validates the controls before any
+/// namespace switch, then runs <method>Perform</method> in the requested namespace with device
+/// output captured and discarded. The namespace, the I/O redirect and any transaction this
+/// method opened are restored on every exit path, before the caller renders.
+ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Set tOrigNS = $NAMESPACE
+    Set tInitIO = $IO
+    Set tNull = ""
+    Set tRedirected = 0
+    Try {
+        Set tSC = ..ReadControls(pBody, .tQuery, .tNamespace, .tReadOnly, .tCountOnly, .tCap, .tArgs)
+        If $$$ISERR(tSC) Quit
+
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) Quit
+        }
+
+        Set tNull = ##class(%Library.Device).GetNullDevice()
+        Open tNull:::1
+        Set tRedirected = 1
+        Use tNull::("^"_$ZNAME)
+        Do ##class(%Library.Device).ReDirectIO(1)
+
+        Set tSC = ..Perform(tQuery, .tArgs, tReadOnly, tCountOnly, tCap, .pResult)
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+
+    Set $NAMESPACE = tOrigNS
+    If tRedirected Do ##class(ExecuteMCPv2.REST.Command).TeardownRedirect(tInitIO, tNull)
+    Quit tSC
+}
+
+/// Reads and validates the request controls. <var>pArgs</var> is a local array: <code>pArgs</code>
+/// holds the argument count and <code>pArgs(n)</code> the n-th parameter value, as
+/// <code>%Execute(pArgs...)</code> takes them. <var>pCap</var> is empty (no cap) or a
+/// non-negative integer.
+ClassMethod ReadControls(pBody As %DynamicObject, Output pQuery As %String, Output pNamespace As %String, Output pReadOnly As %Boolean, Output pCountOnly As %Boolean, Output pCap As %String, Output pArgs) As %Status
+{
+    Set tSC = $$$OK
+    Set pQuery = "", pNamespace = "", pReadOnly = 0, pCountOnly = 0, pCap = ""
+    Kill pArgs
+    Set pArgs = 0
+    Try {
+        If $IsObject(pBody) {
+            If pBody.%IsDefined("query") Set pQuery = pBody.%Get("query")
+            If pBody.%IsDefined("namespace") Set pNamespace = pBody.%Get("namespace")
+        }
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired($ZStrip(pQuery, "<>W"), "query")
+        If $$$ISERR(tSC) Quit
+
+        Set tSC = ..ReadFlag(pBody, "readOnly", .pReadOnly)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadFlag(pBody, "countOnly", .pCountOnly)
+        If $$$ISERR(tSC) Quit
+
+        If pBody.%IsDefined("maxRowsAffected") {
+            Set pCap = pBody.%Get("maxRowsAffected")
+            If (pCap '= "") && (pCap '? 1.N) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'maxRowsAffected' must be a non-negative integer")
+                Quit
+            }
+        }
+
+        If pBody.%IsDefined("parameters") {
+            Set tType = pBody.%GetTypeOf("parameters")
+            If tType = "array" {
+                Set tParams = pBody.%Get("parameters")
+                Set pArgs = tParams.%Size()
+                For tI = 1:1:pArgs Set pArgs(tI) = tParams.%Get(tI - 1)
+            } ElseIf tType '= "null" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'parameters' must be an array")
+                Quit
+            }
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Reads an optional boolean control. An absent or null value is false; a value that is not
+/// 0, 1, true or false is an error, so a malformed control never runs as false.
+ClassMethod ReadFlag(pBody As %DynamicObject, pName As %String, Output pValue As %Boolean) As %Status
+{
+    Set pValue = 0
+    If '$IsObject(pBody) Quit $$$OK
+    If 'pBody.%IsDefined(pName) Quit $$$OK
+    Set tRaw = pBody.%Get(pName)
+    If tRaw = "" Quit $$$OK
+    Set tSC = ##class(ExecuteMCPv2.Utils).ValidateBoolean(tRaw, pName)
+    If $$$ISERR(tSC) Quit tSC
+    Set tLower = $ZConvert(tRaw, "L")
+    Set pValue = ((tLower = "1") || (tLower = "true"))
+    Quit $$$OK
+}
+
+/// Prepares, classifies, checks and executes the statement in the current namespace. A
+/// declined statement is not an error: <var>pResult</var> carries its outcome. A transaction
+/// opened here is rolled back to the level found on entry unless the cap check committed it.
+/// When <code>$TLEVEL</code> is no longer the level opened here, the outcome is
+/// <code>transactionEnded</code>, also when the statement then failed.
+ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Set tEntryLevel = $TLevel
+    Set tOpened = 0
+    Try {
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tSC = tStmt.%Prepare(.pQuery, 0)
+        If $$$ISERR(tSC) Quit
+
+        Set tType = +tStmt.%Metadata.statementType
+        Set tTypeName = ..TypeName(tType)
+
+        Set tDecline = ..Decline(tType, pReadOnly, pCountOnly, pCap, pQuery)
+        If tDecline '= "" {
+            Set pResult = ..NewResult(tDecline, tType, tTypeName)
+            Quit
+        }
+
+        Set tCapped = ('pReadOnly) && (pCap '= "") && (tType >= 2) && (tType <= 4)
+        If pReadOnly || tCapped {
+            TSTART
+            Set tOpened = 1
+            Set tOpenLevel = $TLevel
+        }
+
+        Set tRS = tStmt.%Execute(pArgs...)
+        If tRS.%SQLCODE < 0 {
+            Set tSC = ..SqlStatus(tRS.%SQLCODE, tRS.%Message)
+            Quit
+        }
+
+        Set tRowsAffected = ""
+        If (tType >= 2) && (tType <= 4) Set tRowsAffected = tRS.%ROWCOUNT
+
+        Set tContent = []
+        Set tTotal = ""
+        If pCountOnly {
+            Set tSC = ..CountRows(tRS, .tTotal)
+        } Else {
+            Set tSC = ..Serialize(tRS, tContent)
+        }
+        If $$$ISERR(tSC) Quit
+
+        If tOpened && ($TLevel '= tOpenLevel) Quit
+
+        If tCapped {
+            If (tRowsAffected < 0) || (tRowsAffected > pCap) {
+                Set pResult = ..NewResult("overCap", tType, tTypeName)
+                Do pResult.%Set("rowsAffected", +tRowsAffected, "number")
+                Quit
+            }
+            TCOMMIT
+            Set tOpened = 0
+        }
+
+        Set pResult = ..NewResult("ok", tType, tTypeName)
+        Do pResult.%Set("content", tContent)
+        If tRowsAffected '= "" Do pResult.%Set("rowsAffected", +tRowsAffected, "number")
+        If tTotal '= "" Do pResult.%Set("totalCount", +tTotal, "number")
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+
+    If tOpened && ($TLevel '= tOpenLevel) {
+        Set pResult = ..NewResult("transactionEnded", tType, tTypeName)
+        Set tSC = $$$OK
+    }
+    If tOpened Do ..RollBackTo(tEntryLevel)
+    Quit tSC
+}
+
+/// The decline outcome for a statement of type <var>pType</var>, or empty when it may run.
+/// Read-only mode governs first, then <code>countOnly</code>, then the rows-affected cap: a type
+/// the cap cannot count, then an INSERT, UPDATE or DELETE that asks IRIS not to journal its writes.
+ClassMethod Decline(pType As %Integer, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, pQuery As %String) As %String
+{
+    If pReadOnly && (pType '= 1) Quit "readOnly"
+    If pCountOnly && (pType '= 1) Quit "countOnly"
+    If (pCap '= "") && ((pType < 1) || (pType > 4)) Quit "capNotCountable"
+    If (pCap '= "") && (pType >= 2) && (pType <= 4) && ..HasNoJournal(pQuery) Quit "noJournal"
+    Quit ""
+}
+
+/// 1 when <var>pQuery</var> contains the <code>%NOJOURN</code> token, matched without regard to
+/// case and not as the start of a longer name (<code>%NOJOURNX</code> is another token). A
+/// statement with the token turns journaling off, so a rollback cannot undo its writes and IRIS
+/// gives no parse-level signal for it. The match is over the raw text, so a comment or a string
+/// that contains the token also matches: the check can refuse a statement, never admit one.
+ClassMethod HasNoJournal(pQuery As %String) As %Boolean
+{
+    Quit ''$Locate(pQuery, "(?i)%NOJOURN(?![\\p{L}\\p{N}_])")
+}
+
+/// A result object carrying the outcome and the statement type.
+ClassMethod NewResult(pOutcome As %String, pType As %Integer, pTypeName As %String) As %DynamicObject
+{
+    Set tResult = {}
+    Do tResult.%Set("outcome", pOutcome)
+    Do tResult.%Set("statementType", pType, "number")
+    Do tResult.%Set("statementTypeName", pTypeName)
+    Quit tResult
+}
+
+/// IRIS's name for a statement type number (the routine behind
+/// <code>%SQL.StatementResult.%StatementTypeName</code>).
+ClassMethod TypeName(pType As %Integer) As %String
+{
+    Set tName = $$GetTypen^%SYS.SQLSRV(pType)
+    If tName = "" Set tName = "type "_pType
+    Quit tName
+}
+
+/// The error status for a negative SQLCODE: its text carries the SQLCODE and the IRIS message.
+ClassMethod SqlStatus(pSQLCODE As %Integer, pMessage As %String) As %Status
+{
+    Quit ##class(%Exception.SQL).CreateFromSQLCODE(pSQLCODE, pMessage).AsStatus()
+}
+
+/// Rolls back to <var>pLevel</var>, one level at a time, so every level above it is undone
+/// whatever the statement opened.
+ClassMethod RollBackTo(pLevel As %Integer)
+{
+    For {
+        If $TLevel '> pLevel Quit
+        TROLLBACK 1
+    }
+}
+
+/// Counts the rows of a query result without serializing them.
+ClassMethod CountRows(pRS As %SQL.StatementResult, Output pCount As %Integer) As %Status
+{
+    Set tSC = $$$OK
+    Set pCount = 0
+    While pRS.%Next(.tSC) {
+        Set pCount = pCount + 1
+    }
+    Quit tSC
+}
+
+/// Appends the rows of <var>pRS</var>, and of every following result set of a CALL, to
+/// <var>pContent</var> as row objects keyed by column name. A result set with no columns (a
+/// DML or DDL result) contributes no rows.
+ClassMethod Serialize(pRS As %SQL.StatementResult, pContent As %DynamicArray) As %Status
+{
+    Set tSC = $$$OK
+    Set tRS = pRS
+    While $IsObject(tRS) && $$$ISOK(tSC) {
+        Set tMeta = tRS.%GetMetadata()
+        Set tCount = 0
+        If $IsObject(tMeta) {
+            Set tCols = tMeta.columns
+            Set tCount = tCols.Count()
+        }
+        If tCount > 0 {
+            Kill tNames, tTypes
+            For tI = 1:1:tCount {
+                Set tCol = tCols.GetAt(tI)
+                Set tNames(tI) = tCol.colName
+                Set tTypes(tI) = tCol.clientType
+            }
+            While tRS.%Next(.tSC) {
+                Set tRow = {}
+                For tI = 1:1:tCount {
+                    Do ..SetValue(tRow, tNames(tI), tTypes(tI), tRS.%GetData(tI))
+                }
+                Do pContent.%Push(tRow)
+            }
+        }
+        If $$$ISOK(tSC) Set tRS = tRS.%NextResult()
+    }
+    Quit tSC
+}
+
+/// Sets one column value on a row object by the column's <code>clientType</code>: 3 (double),
+/// 5 (integer), 14 (numeric), 15 (currency) and 18 (bigint) are numbers, with a NULL as 0; 16
+/// (boolean) is a boolean, with a NULL as false; anything else is a string, with a NULL as an
+/// empty string. A string beginning with <code>{</code> or <code>[</code> that parses as JSON
+/// is embedded as the parsed value.
+ClassMethod SetValue(pRow As %DynamicObject, pName As %String, pClientType As %String, pValue As %String)
+{
+    If $Case(pClientType, 3:1, 5:1, 14:1, 15:1, 18:1, :0) {
+        Do pRow.%Set(pName, +pValue, "number")
+        Quit
+    }
+    If pClientType = 16 {
+        Do pRow.%Set(pName, +pValue, "boolean")
+        Quit
+    }
+    Set tEmbedded = 0
+    Set tFirst = $Extract(pValue, 1)
+    If (tFirst = "{") || (tFirst = "[") {
+        Try {
+            Set tParsed = ##class(%Library.DynamicAbstractObject).%FromJSON(pValue)
+            Do pRow.%Set(pName, tParsed)
+            Set tEmbedded = 1
+        } Catch {
+            Set tEmbedded = 0
+        }
+    }
+    If 'tEmbedded Do pRow.%Set(pName, pValue, "string")
+}
+
+/// Device-output entry points for the null device bound in <method>Run</method> by
+/// <code>Use tNull::("^"_$ZNAME)</code>. <code>$ZNAME</code> names the routine that is executing,
+/// so the entry points must be compiled into the same routine as <method>Run</method>; they
+/// discard everything a statement writes to the device.
+ClassMethod Redirects() [ Internal, Private, ProcedureBlock = 0 ]
+{
+    Quit
+wstr(s) Quit
+wchr(a) Quit
+wnl Quit
+wff Quit
+wtab(n) Quit
+rstr(len,time) Quit ""
+rchr(time) Quit ""
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Dispatch.cls",
     `/// Main REST dispatch class for the ExecuteMCPv2 custom REST service.
 /// <p>Extends <class>%Atelier.REST</class> to inherit the three-part response envelope
@@ -16253,6 +16779,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 28 (Story 28.1): SQL Performance Advisor - Data Endpoint -->
   <Route Url="/dev/sql/advise-data" Method="POST" Call="ExecuteMCPv2.REST.SqlAdvisor:AdviseData" />
+
+  <!-- Epic 38 (Story 38.5): SQL write safety - classified, transactional SQL execution -->
+  <Route Url="/dev/sql/execute" Method="POST" Call="ExecuteMCPv2.REST.Sql:Execute" />
 </Routes>
 }
 

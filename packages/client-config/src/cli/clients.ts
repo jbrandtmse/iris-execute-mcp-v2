@@ -779,7 +779,7 @@ async function acquirePassword(parsed: ParsedArgs, deps: ResolvedDeps): Promise<
 /** The env var names doctor verifies for no-expansion clients. Restricted to
  * the two the runtime genuinely REQUIRES (`loadConfig` throws without them):
  * IRIS_HOST/IRIS_PORT/IRIS_NAMESPACE/IRIS_HTTPS all have runtime defaults
- * (localhost/52773/HSCUSTOM/false), so flagging their absence was a false
+ * (localhost/52773/USER/false), so flagging their absence was a false
  * finding on a healthy config — and contradicted the engine's own
  * doctorNote, which names only IRIS_PASSWORD after a profile-literal apply
  * (33.2 review, probe-verified on cursor). */

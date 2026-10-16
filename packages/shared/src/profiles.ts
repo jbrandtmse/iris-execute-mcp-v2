@@ -366,6 +366,11 @@ export function mergeProfile(
     // spread preserves the "unset -> field absent" shape (Rule #19).
     ...(base.sqlMaxRows !== undefined ? { sqlMaxRows: base.sqlMaxRows } : {}),
     ...(base.sqlTimeoutMs !== undefined ? { sqlTimeoutMs: base.sqlTimeoutMs } : {}),
+    // IRIS_SQL_READ_ONLY and IRIS_SQL_MAX_ROWS_AFFECTED are global operator
+    // variables: every profile inherits them from `base`, and no per-profile
+    // key exists to loosen them.
+    ...(base.sqlReadOnly !== undefined ? { sqlReadOnly: base.sqlReadOnly } : {}),
+    ...(base.sqlMaxRowsAffected !== undefined ? { sqlMaxRowsAffected: base.sqlMaxRowsAffected } : {}),
     // Story 36.1 code review: inherit the operator's IRIS_TEST_TIMEOUT
     // (`iris_execute_tests`' default wait budget) the same way — without this
     // spread the knob was silently INERT on every call resolving to a named

@@ -21,6 +21,10 @@
     "./test-helpers/integration-config": {
       "types": "./src/test-helpers/integration-config.ts",
       "import": "./src/test-helpers/integration-config.ts"
+    },
+    "./test-helpers/storage-guard-fixtures": {
+      "types": "./src/__tests__/storage-guard-fixtures.ts",
+      "import": "./src/__tests__/storage-guard-fixtures.ts"
     }
   },
   "files": [

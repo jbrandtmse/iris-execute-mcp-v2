@@ -112,9 +112,34 @@ const gateTestFiles = [
   // disqualifier). It drives the BUILT iris-dev-mcp / iris-ops-mcp dists over
   // real stdio JSON-RPC, hence the ops entry in DRIVEN_PACKAGES above.
   "src/__tests__/epic37-default-outage-gate.test.ts",
+  // Armed by the membership rule above: each refuses to skip under IRIS_REQUIRE_LIVE when the
+  // built dists it reads are missing or stale (neither contacts IRIS; they use local stubs).
+  "src/__tests__/story-38-0-qa-doc-claims.test.ts",
+  "src/__tests__/story-38-0-qa-process.test.ts",
+  // `iris_doc_edit` and the governance parent keys over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory384WireEdit.cls and ...WireStore.cls (persistent, compiled) documents.
+  "src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts",
+  // `iris_sql_query`, `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory385Wire.cls (persistent, compiled, six rows) and its data/marker globals.
+  "src/__tests__/story-38-5-qa-sql-wire-gate.test.ts",
+  // The Epic 38 capstone: ranged reads, guarded edits, the Storage guard and SQL safety over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory386CapEdit.cls and ...QaStory386CapRows.cls (persistent, compiled, six rows) and its table and globals.
+  "src/__tests__/epic38-capstone-gate.test.ts",
+  // Story 38.7 QA, DW-554: the governance document shape on the BUILT iris-dev-mcp dist against a local listener that records requests
+  // (a rejected key stops startup before any request, valid documents and an unknown profile name still start); no IRIS instance is contacted.
+  "src/__tests__/story-38-7-qa-governance-process.test.ts",
+  // Story 38.7 QA, DW-533 and DW-528: `iris_production_manage` delete of a non-production class, the `modifiedSince` refusal, a no-range
+  // `iris_doc_get` soft error and `ignoreConflict: false` over real stdio JSON-RPC against the BUILT iris-interop-mcp and iris-dev-mcp dists:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory387WirePlain.cls (compiled), ...Draft.cls (never compiled) and ...Loaded.cls documents.
+  "src/__tests__/story-38-7-qa-wire-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+// `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
+// bootstrap redeploys and compiles the ExecuteMCPv2 classes on ONE shared IRIS instance whenever the
+// deployed version differs from the shipped one. Run in parallel (vitest's default), one gate's version
+// check or legs can overlap another gate's redeploy, and the gate fails on that interleaving rather than on
+// a defect. Sequential file execution lets each file's bootstrap finish before the next file starts.
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

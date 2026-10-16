@@ -24,13 +24,19 @@
  *   capability opt-in while guaranteeing no pre-existing action is disabled by
  *   default (the back-compat gate).
  *
- * **Cascade (D4, extended by Epic 32 / AC 32.0.2).** `effective(key, profile) =
- *   env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key)
- *   ?? presetSeed(key) ?? defaultSeed(key)` — ALL env layers sit above ALL file
+ * **Cascade (D4, extended by Epic 32 / AC 32.0.2 and by Story 38.4 / AD-6).**
+ *   `effective(key, profile) = env.profile(key) ?? env.global(key) ??
+ *   file.profile(key) ?? file.global(key) ?? inheritedDisable(key) ??
+ *   presetSeed(key) ?? defaultSeed(key)` - ALL env layers sit above ALL file
  *   layers (no interleaving; Project Lead decision 2026-07-26: no pre-existing
  *   `IRIS_GOVERNANCE` setting may be overridden by a governance file introduced
  *   later). The nullish-coalescing is load-bearing: an explicit `false` override
  *   at any layer is honored (it disables), never mistaken for "unset".
+ *   `inheritedDisable` is `false` when the key has a PARENT key
+ *   ({@link ToolDefinition.parent}) whose first explicit verdict, in the same
+ *   layer order, is `false`; otherwise it is "unset". It sits below every
+ *   explicit layer of the key itself and above the preset, and with no parent
+ *   keys it is always "unset".
  *
  * **File channel (Epic 32, Story 32.0, architecture decision J1).**
  * {@link loadGovernanceFile} reads a JSON file at the explicit operator-supplied
@@ -292,8 +298,9 @@ function validateLayer(
  *
  * Shape: `{ "global": { "<key>": true|false }, "profiles": { "<name>": { ... } } }`.
  * Both `global` and `profiles` are optional. Absent/empty `IRIS_GOVERNANCE` ⇒
- * `{}`. Malformed JSON, a non-object root, or a non-boolean value fails fast
- * with an error naming `IRIS_GOVERNANCE`.
+ * `{}`. Malformed JSON, a non-object root, a non-boolean value, or a governance-shaped
+ * top-level key other than `global` and `profiles` fails fast with an error naming
+ * `IRIS_GOVERNANCE`.
  *
  * @param env - Environment map (defaults to `process.env`).
  * @returns The parsed config (`{}` when `IRIS_GOVERNANCE` is unset/empty).
@@ -318,6 +325,21 @@ export function parseGovernanceConfig(
   return parseGovernanceRoot(parsed, governanceError);
 }
 
+/** The documented governance document shape, as the unrecognized-key error names it. */
+const GOVERNANCE_SHAPE = '{"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}';
+
+/**
+ * Whether a top-level key beside `global` and `profiles` looks like governance that
+ * would be silently ignored: a name starting with `iris_` (any case), or a boolean or
+ * object value. Metadata (a string, number, null or array value, such as `comment` or
+ * `version`) is not governance-shaped and stays accepted (Story 32.4).
+ */
+function looksLikeGovernance(key: string, value: unknown): boolean {
+  if (/^iris_/i.test(key)) return true;
+  if (typeof value === "boolean") return true;
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
  * Validate an already-parsed JSON value as a {@link GovernanceConfig} root
  * object — the SHARED shape validation consumed by both the env channel
@@ -325,7 +347,9 @@ export function parseGovernanceConfig(
  * loadGovernanceFile}), so the two can never drift (AC 32.0.1: the file is
  * parsed by the SAME validation, reserved-key rejection included). `fail`
  * builds the thrown error, so each channel's messages name ITS OWN variable
- * (and, for the file, the path).
+ * (and, for the file, the path). A top-level key other than `global` and
+ * `profiles` fails when it looks like governance (see {@link looksLikeGovernance});
+ * the key is named, its value never echoed.
  */
 function parseGovernanceRoot(
   parsed: unknown,
@@ -339,6 +363,15 @@ function parseGovernanceRoot(
 
   const root = parsed as Record<string, unknown>;
   const config: GovernanceConfig = {};
+
+  for (const [key, value] of Object.entries(root)) {
+    if (key === "global" || key === "profiles") continue;
+    if (looksLikeGovernance(key, value)) {
+      throw fail(
+        `"${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape ${GOVERNANCE_SHAPE}: put the key under "global" to apply it to every profile, or under "profiles" for one profile.`,
+      );
+    }
+  }
 
   if (root.global !== undefined) {
     config.global = validateLayer('"global"', root.global, fail);
@@ -377,6 +410,28 @@ function parseGovernanceRoot(
 }
 
 /**
+ * The warnings for profile names under `profiles` that no configured profile carries,
+ * so their overrides apply to no connection (Story 38.7, DW-554). An unknown name only
+ * warns, never fails startup: one governance file may serve clients with different
+ * `IRIS_PROFILES`, and Server Manager `auto` can drop a profile whose credentials do
+ * not resolve. `source` names the channel: `IRIS_GOVERNANCE`, or
+ * `IRIS_GOVERNANCE_FILE (path: <path>)`.
+ */
+export function unknownProfileWarnings(
+  config: GovernanceConfig | undefined,
+  source: string,
+  configuredProfiles: readonly string[],
+): string[] {
+  if (config?.profiles === undefined) return [];
+  return Object.keys(config.profiles)
+    .filter((name) => !configuredProfiles.includes(name))
+    .map(
+      (name) =>
+        `${source}: profile "${name}" under "profiles" is not a configured profile, so its overrides apply to no connection. Check the name against the configured profiles: ${configuredProfiles.join(", ")}.`,
+    );
+}
+
+/**
  * Load the optional governance policy FILE referenced by
  * `IRIS_GOVERNANCE_FILE` (Epic 32, Story 32.0, AC 32.0.1; architecture
  * decision J1).
@@ -400,8 +455,8 @@ function parseGovernanceRoot(
  *   ungoverned by mistake). File CONTENTS are never echoed in errors.
  *
  * The returned config occupies the TWO file layers of the cascade
- * (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ??
- * defaultSeed`); see {@link effective}.
+ * (`env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable
+ * ?? presetSeed ?? defaultSeed`); see {@link effective}.
  *
  * @param env - Environment map (defaults to `process.env`).
  * @returns The parsed file config, or `undefined` when the var is unset/empty.
@@ -607,6 +662,117 @@ export function buildDefaultEnabledWrites(
 }
 
 /**
+ * A child-key to parent-key map (Story 38.4, AD-4/AD-6): each governance key of a
+ * tool that declares a {@link ToolDefinition.parent} maps to that parent key.
+ */
+export type ParentKeys = ReadonlyMap<string, string>;
+
+/** The governance keys of one tool: `tool:action` per `action` enum value, else the bare tool name. */
+function governanceKeysOfTool(tool: ToolDefinition): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const options = unwrapActionOptions((tool.inputSchema as any)?.shape?.action);
+  if (Array.isArray(options) && options.length > 0) {
+    return options.map((value) => `${tool.name}:${String(value)}`);
+  }
+  return [tool.name];
+}
+
+/**
+ * Build the {@link ParentKeys} map from each tool's {@link ToolDefinition.parent}
+ * (Story 38.4, AD-4/AD-6), covering every governance key of a declaring tool.
+ *
+ * A tool omitting `parent` (every tool but the ones that re-expose an existing
+ * capability) contributes nothing, so with no declaration the map is empty and
+ * the cascade is byte-for-byte unchanged (Rule #19).
+ *
+ * Fail-fast, naming the tool and the parent, when:
+ * - the parent is not a non-empty string, or is a reserved key;
+ * - the parent is one of the declaring tool's own keys;
+ * - the declaring tool owns a baseline key (a baseline tool's capability is
+ *   governed by its own frozen key, and declaring a parent would change it);
+ * - the parent is itself a child (a parent never has a parent).
+ *
+ * Whether the parent EXISTS is checked separately by {@link assertParentKeysKnown}
+ * against the server's key universe.
+ *
+ * @param tools - Tool definitions to introspect (any iterable).
+ * @param baseline - The frozen baseline set (defaults to {@link GOVERNANCE_BASELINE}).
+ * @returns A read-only child key to parent key map.
+ * @throws {Error} On any of the conditions above.
+ */
+export function buildParentKeys(
+  tools: Iterable<ToolDefinition>,
+  baseline: ReadonlySet<string> = GOVERNANCE_BASELINE,
+): ParentKeys {
+  const parents = new Map<string, string>();
+  const declaredBy = new Map<string, string>();
+  for (const tool of tools) {
+    const parent = tool.parent;
+    if (parent === undefined) continue;
+    if (typeof parent !== "string" || parent === "") {
+      throw new Error(
+        `Tool "${tool.name}" declares an invalid \`parent\` (${JSON.stringify(parent)}). ` +
+          `A parent is the non-empty governance key of an existing tool or action.`,
+      );
+    }
+    if (RESERVED_KEYS.has(parent)) {
+      throw new Error(
+        `Tool "${tool.name}" declares a reserved \`parent\` key "${parent}". ` +
+          `Reserved keys (${[...RESERVED_KEYS].join(", ")}) cannot be used as governance keys.`,
+      );
+    }
+    const ownKeys = governanceKeysOfTool(tool);
+    if (ownKeys.includes(parent)) {
+      throw new Error(
+        `Tool "${tool.name}" declares its own key "${parent}" as its \`parent\`. ` +
+          `A parent is the governance key of another, existing tool or action.`,
+      );
+    }
+    const baselineKey = ownKeys.find((key) => baseline.has(key));
+    if (baselineKey !== undefined) {
+      throw new Error(
+        `Tool "${tool.name}" declares \`parent\` "${parent}" but owns the baseline key "${baselineKey}". ` +
+          `Only a new (non-baseline) tool may declare a parent; a baseline key is governed by itself.`,
+      );
+    }
+    for (const key of ownKeys) {
+      parents.set(key, parent);
+      declaredBy.set(key, tool.name);
+    }
+  }
+  for (const [key, parent] of parents) {
+    const grandparent = parents.get(parent);
+    if (grandparent !== undefined) {
+      throw new Error(
+        `Tool "${declaredBy.get(key)}" declares \`parent\` "${parent}", which is itself a child of ` +
+          `"${grandparent}" (declared by tool "${declaredBy.get(parent)}"). A parent cannot have a parent.`,
+      );
+    }
+  }
+  return parents;
+}
+
+/**
+ * Fail fast when a parent key is not a known governance key (Story 38.4).
+ *
+ * @param parentKeys - The map from {@link buildParentKeys}.
+ * @param allKeys - Every governance key the server knows (baseline plus registered keys).
+ * @throws {Error} Naming the child key and the unknown parent.
+ */
+export function assertParentKeysKnown(parentKeys: ParentKeys, allKeys: Iterable<string>): void {
+  const known = allKeys instanceof Set ? allKeys : new Set(allKeys);
+  for (const [key, parent] of parentKeys) {
+    if (!known.has(parent)) {
+      const tool = key.split(":")[0];
+      throw new Error(
+        `Tool "${tool}" declares \`parent\` "${parent}" (for key "${key}"), which is neither a baseline key ` +
+          `nor a registered tool or action key.`,
+      );
+    }
+  }
+}
+
+/**
  * Throw a clear error if `value` is not exactly `"read"` or `"write"` (Story
  * 15.0 AC 15.0.4). Because the {@link ToolDefinition.mutates} type is erased at
  * runtime, an authoring typo would otherwise flow through unvalidated and be
@@ -721,8 +887,9 @@ export function defaultSeed(
 /**
  * Compute the preset-layer enablement for a single governance key (Story
  * 24.1, spec 02 §2.2). Sits BETWEEN the explicit layers (env, then file —
- * Story 32.0) and {@link defaultSeed} in the cascade: `env.profile ??
- * env.global ?? file.profile ?? file.global ?? presetSeed(...) ??
+ * Story 32.0) with a parent key's inherited disable (Story 38.4) and
+ * {@link defaultSeed} in the cascade: `env.profile ?? env.global ??
+ * file.profile ?? file.global ?? inheritedDisable(...) ?? presetSeed(...) ??
  * defaultSeed(...)`.
  *
  * - `preset` is `undefined` or `"full"` ⇒ pass-through (`undefined` — falls
@@ -799,12 +966,48 @@ function ownProfileLayer(
 }
 
 /**
+ * The parent key that makes `key` seed disabled (Story 38.4, AD-6), or
+ * `undefined` when `key` inherits no disable.
+ *
+ * `key` has a parent when {@link ParentKeys} maps it to one. The parent's
+ * explicit verdict is the FIRST layer that sets it, in cascade order: env
+ * profile, env global, file profile, file global. The disable is inherited only
+ * when that verdict is `false`, so a lower layer's `false` does not count once a
+ * higher layer enables the parent. Only a disable is inherited, never an enable. Explicit
+ * layers of `key` itself are NOT consulted here; callers apply them first.
+ *
+ * @param key        - The governance key.
+ * @param profile    - The profile name whose overrides take top priority.
+ * @param config     - Parsed {@link GovernanceConfig} (the ENV channel).
+ * @param parentKeys - The child key to parent key map ({@link buildParentKeys}).
+ * @param fileConfig - Parsed FILE channel; default `undefined` (no file).
+ * @returns The parent key when its first explicit verdict is `false`, else `undefined`.
+ */
+export function inheritedParentDisable(
+  key: string,
+  profile: string,
+  config: GovernanceConfig,
+  parentKeys: ParentKeys,
+  fileConfig?: GovernanceConfig,
+): string | undefined {
+  const parent = parentKeys.get(key);
+  if (parent === undefined) return undefined;
+  const verdict =
+    ownBool(ownProfileLayer(config, profile), parent) ??
+    ownBool(config.global, parent) ??
+    ownBool(ownProfileLayer(fileConfig, profile), parent) ??
+    ownBool(fileConfig?.global, parent);
+  return verdict === false ? parent : undefined;
+}
+
+/**
  * Resolve the effective enablement of one governance key for one profile
  * (architecture decision D4 cascade; Story 24.1 extends it with the
  * `presetSeed` layer; Story 32.0 extends it with the two file layers).
  *
  * `effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ??
- * file.global(key) ?? presetSeed(key) ?? defaultSeed(key)` — ALL env layers
+ * file.global(key) ?? inheritedDisable(key) ?? presetSeed(key) ??
+ * defaultSeed(key)` (see {@link inheritedParentDisable}) - ALL env layers
  * above ALL file layers (AC 32.0.2; NOT interleaved per scope — Project Lead
  * decision 2026-07-26: no pre-existing `IRIS_GOVERNANCE` setting may be
  * overridden by a governance file introduced later). Nullish-coalescing
@@ -822,6 +1025,8 @@ function ownProfileLayer(
  * @param classifications    - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
  * @param fileConfig         - Parsed FILE channel ({@link loadGovernanceFile}); default
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 cascade (AC 32.0.1).
+ * @param parentKeys         - Child key to parent key map (Story 38.4); default empty - with no
+ *   parent keys the cascade is byte-for-byte the one without the inherited-disable step.
  * @returns `true` if the action is enabled for the profile, else `false`.
  */
 export function effective(
@@ -834,14 +1039,22 @@ export function effective(
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): boolean {
   // Read each layer via ownBool so the `??` cascade only ever sees
   // `boolean | undefined`, never a leaked non-boolean prototype value.
-  return (
+  const explicit =
     ownBool(ownProfileLayer(config, profile), key) ??
     ownBool(config.global, key) ??
     ownBool(ownProfileLayer(fileConfig, profile), key) ??
-    ownBool(fileConfig?.global, key) ??
+    ownBool(fileConfig?.global, key);
+  if (explicit !== undefined) return explicit;
+  // A parent key explicitly disabled (AD-6) seeds the child disabled, below its own
+  // explicit layers and above the preset.
+  if (inheritedParentDisable(key, profile, config, parentKeys, fileConfig) !== undefined) {
+    return false;
+  }
+  return (
     presetSeed(key, preset, mutatesLookup, classifications) ??
     defaultSeed(key, mutatesLookup, baseline, defaultEnabledWrites)
   );
@@ -887,11 +1100,13 @@ export function hasExplicitOverride(
  * Which configuration channel resolved a key's effective value (Epic 32,
  * Story 32.0, AC 32.0.3): the first cascade layer that carries the key —
  * `"env"` (either `IRIS_GOVERNANCE` layer), `"file"` (either
- * `IRIS_GOVERNANCE_FILE` layer), `"preset"` (the `presetSeed` layer — a
- * `read-only` preset resolves every key), or `"default"` (the seed). Emitted
- * unconditionally: with no file set, keys simply never report `"file"`.
+ * `IRIS_GOVERNANCE_FILE` layer), `"parent"` (Story 38.4: the key inherits a
+ * disable from its parent key, see {@link inheritedParentDisable}), `"preset"`
+ * (the `presetSeed` layer - a `read-only` preset resolves every key), or
+ * `"default"` (the seed). Emitted unconditionally: with no file set, keys simply
+ * never report `"file"`, and with no parent keys they never report `"parent"`.
  */
-export type GovernanceConfigSource = "env" | "file" | "preset" | "default";
+export type GovernanceConfigSource = "env" | "file" | "parent" | "preset" | "default";
 
 /**
  * Resolve the {@link GovernanceConfigSource} for one key — walks the SAME
@@ -907,6 +1122,7 @@ export type GovernanceConfigSource = "env" | "file" | "preset" | "default";
  * @param preset          - Active {@link GovernancePreset}; default `undefined` (none).
  * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
  * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
+ * @param parentKeys      - Child key to parent key map (Story 38.4); default empty.
  */
 export function configSource(
   key: string,
@@ -916,6 +1132,7 @@ export function configSource(
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): GovernanceConfigSource {
   if (
     ownBool(ownProfileLayer(config, profile), key) !== undefined ||
@@ -929,6 +1146,9 @@ export function configSource(
       ownBool(fileConfig.global, key) !== undefined)
   ) {
     return "file";
+  }
+  if (inheritedParentDisable(key, profile, config, parentKeys, fileConfig) !== undefined) {
+    return "parent";
   }
   if (presetSeed(key, preset, mutatesLookup, classifications) !== undefined) {
     return "preset";
@@ -952,6 +1172,7 @@ export function configSource(
  * @param preset          - Active {@link GovernancePreset}; default `undefined` (none).
  * @param classifications - Key → mutation class for frozen-baseline actions; default empty.
  * @param fileConfig      - Parsed FILE channel; default `undefined` (no file).
+ * @param parentKeys      - Child key to parent key map (Story 38.4); default empty.
  * @returns A `Record<key, GovernanceConfigSource>` for the profile.
  */
 export function getEffectiveConfigSources(
@@ -962,6 +1183,7 @@ export function getEffectiveConfigSources(
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): Record<string, GovernanceConfigSource> {
   const sources: Record<string, GovernanceConfigSource> = {};
   for (const key of allKeys) {
@@ -977,6 +1199,7 @@ export function getEffectiveConfigSources(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
       enumerable: true,
       writable: true,
@@ -1005,6 +1228,7 @@ export function getEffectiveConfigSources(
  * @param classifications - Key → mutation class for frozen-baseline actions (Story 24.1); default empty.
  * @param fileConfig     - Parsed FILE channel ({@link loadGovernanceFile}); default
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 policy map (AC 32.0.1).
+ * @param parentKeys     - Child key to parent key map (Story 38.4); default empty.
  * @returns A `Record<key, boolean>` of effective enablement for the profile.
  */
 export function getEffectivePolicy(
@@ -1017,6 +1241,7 @@ export function getEffectivePolicy(
   preset?: GovernancePreset,
   classifications: Readonly<Record<string, MutationClass>> = {},
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): Record<string, boolean> {
   const policy: Record<string, boolean> = {};
   for (const key of allKeys) {
@@ -1035,6 +1260,7 @@ export function getEffectivePolicy(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
       enumerable: true,
       writable: true,

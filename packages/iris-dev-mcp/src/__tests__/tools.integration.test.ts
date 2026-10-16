@@ -180,25 +180,13 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
       expect(text).toContain("Test.MCPIntegration.Temp");
     });
 
-    it("iris_doc_list with modifiedSince returns recently modified docs", async () => {
+    it("iris_doc_list with modifiedSince is refused before any request (Story 38.7, DW-528)", async () => {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-      // The modified endpoint may not be available on all IRIS versions/API levels.
-      // If it fails with a transport error, we verify the error is a known limitation.
-      try {
-        const result = await docListTool.handler(
-          { modifiedSince: oneHourAgo },
-          ctx,
-        );
-        expect(result.isError).toBeUndefined();
-        const text = result.content[0]?.text ?? "";
-        expect(text.length).toBeGreaterThan(0);
-      } catch (error: unknown) {
-        // 405 Method Not Allowed or 404 means the endpoint is not available
-        expect(error).toBeInstanceOf(IrisApiError);
-        const apiErr = error as IrisApiError;
-        expect([404, 405]).toContain(apiErr.statusCode);
-      }
+      const result = await docListTool.handler({ modifiedSince: oneHourAgo }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("modifiedSince is not supported, so nothing was listed");
     });
 
     it("iris_doc_delete removes the test class", async () => {
@@ -404,6 +392,8 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain("SQL error");
+      // The SQLCODE proves IRIS ran the prepare; a missing /dev/sql/execute route would also say "SQL error".
+      expect(result.content[0]?.text).toContain("SQLCODE: -30");
     });
 
     it("iris_server_info returns valid server information", async () => {

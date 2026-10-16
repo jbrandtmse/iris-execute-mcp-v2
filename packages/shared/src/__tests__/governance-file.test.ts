@@ -234,6 +234,39 @@ describe("loadGovernanceFile (AC 32.0.1)", () => {
     expect(message).toContain(p);
   });
 
+  // Story 38.7, DW-554: the file channel rejects a governance-shaped top-level key through the SAME validator.
+  it.each([
+    ["a flat tool key", { iris_doc_put: false }, "iris_doc_put"],
+    ["a top-level profile layer", { prod: { iris_doc_put: false } }, "prod"],
+    ["an object-valued `globals` typo beside a valid `global`", { globals: { iris_doc_put: false }, global: { iris_a: true } }, "globals"],
+    ["an upper-case flat tool key", { IRIS_DOC_PUT: false }, "IRIS_DOC_PUT"],
+    ["an iris_-prefixed key with a string value", { iris_doc_put: "SECRET-VALUE-123" }, "iris_doc_put"],
+    ["an upper-case iris_ key with a string value", { IRIS_DOC_PUT: "SECRET-VALUE-123" }, "IRIS_DOC_PUT"],
+  ])("a file with %s fails fast naming the variable, the path and the documented shape, never echoing a value", (_label, document, key) => {
+    const p = writeGovernanceFile("unrecognized-key.json", JSON.stringify(document));
+    const message = thrownMessage(() => loadGovernanceFile({ IRIS_GOVERNANCE_FILE: p }));
+    expect(message).toBe(
+      `IRIS_GOVERNANCE_FILE is invalid: "${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape {"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}: put the key under "global" to apply it to every profile, or under "profiles" for one profile. (path: ${p})`,
+    );
+    expect(message).not.toContain("SECRET-VALUE-123");
+  });
+
+  it("a file carrying scalar metadata (comment, version) beside its layers parses to the layers alone", () => {
+    const p = writeGovernanceFile(
+      "metadata.json",
+      JSON.stringify({
+        comment: "team policy",
+        version: 1,
+        global: { iris_a: true },
+        profiles: { prod: { iris_b: false } },
+      }),
+    );
+    expect(loadGovernanceFile({ IRIS_GOVERNANCE_FILE: p })).toEqual({
+      global: { iris_a: true },
+      profiles: { prod: { iris_b: false } },
+    });
+  });
+
   it("a valid file parses through the same shape validation (global + profiles layers)", () => {
     const p = writeGovernanceFile(
       "valid.json",

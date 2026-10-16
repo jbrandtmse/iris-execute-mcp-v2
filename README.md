@@ -12,13 +12,13 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 29 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`), long-running test-run re-attach/read/cancel (`iris_test_status`) |
+| [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 31 | ObjectScript document CRUD, guarded surgical line edits of existing documents (`iris_doc_edit`), compilation, SQL (with read-only mode, a rows-affected cap and a query-only tool, `iris_sql_query`), globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`), long-running test-run re-attach/read/cancel (`iris_test_status`) |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay (duplication hazard — preview before executing) |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **105 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **107 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -75,6 +75,7 @@ All servers use the same environment variables:
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
 | `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header value sent on every HTTP request, pinning IRIS's request-locale negotiation so `%Status` error text renders in a predictable language instead of whatever locale an unspecified header resolves to. This addresses ONE of two independent localization mechanisms — IRIS also selects a message table per worker process (unaffected by this header), so both English (`ERROR #`) and localized (e.g. `خطأ #`) prefixes can still appear; existing prefix-stripping is unaffected. |
+| `MCP_TRANSPORT` | `stdio` | **Optional.** Only `stdio` is supported (`--transport` is equivalent); any other value fails startup naming it. |
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |
@@ -82,10 +83,12 @@ All servers use the same environment variables:
 | `IRIS_AUDIT_LOG` | *(unset — OFF)* | **Optional.** Absolute path to a JSONL audit file recording every MCP tool call (who-ish/session, what, outcome, denials). Omit for today's behavior — a mechanical no-op, zero filesystem writes. See [Compliance & Auditability](#compliance--auditability). |
 | `IRIS_AUDIT_LOG_MAX_MB` | `50` | **Optional.** Rotates the audit file at this size — the current file is renamed to `<path>.1` (single generation, overwriting a prior one) and a fresh file is started. Only relevant when `IRIS_AUDIT_LOG` is set. |
 | `IRIS_AUDIT_LOG_PARAMS` | `false` | **Optional.** When `true`, audit entries also include each call's (redacted) parameter *values*; the default logs parameter *key names* only. Only relevant when `IRIS_AUDIT_LOG` is set. |
-| `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer ceiling on the number of rows `iris_sql_execute` **returns** — a post-fetch cap on the response (it bounds the returned row count, not the server-side result set or transfer). Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
-| `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for `iris_sql_execute`'s HTTP call. Omit to use the connection's default `IRIS_TIMEOUT`. |
+| `IRIS_SQL_MAX_ROWS` | *(unset — no cap)* | **Optional.** Positive integer ceiling on the number of rows `iris_sql_execute` and `iris_sql_query` **return** — a post-fetch cap on the response (it bounds the returned row count, not the server-side result set or transfer). Omit for today's behavior (only the per-call `maxRows`/1000-row default apply). |
+| `IRIS_SQL_TIMEOUT` | *(unset — no override)* | **Optional.** Positive number of **seconds** — a per-request timeout override for the HTTP call of `iris_sql_execute` and `iris_sql_query`. Omit to use the connection's default `IRIS_TIMEOUT`. |
+| `IRIS_SQL_READ_ONLY` | *(unset — SQL tools are not forced read-only)* | **Optional.** `true` or `false` (case-insensitive). `true` makes every `iris_sql_execute` call read-only: only queries (SELECT) run, any other statement is refused with `SQL_READ_ONLY`, and a call's `readOnly: false` cannot weaken it. Global: every profile inherits it; no per-profile key. A malformed value fails startup. |
+| `IRIS_SQL_MAX_ROWS_AFFECTED` | *(unset — no ceiling)* | **Optional.** Non-negative integer ceiling (`0` is valid) on the rows one INSERT, UPDATE or DELETE may change through `iris_sql_execute`. A statement that changes more is rolled back and refused with `SQL_ROWS_AFFECTED_CAP`; a call's `maxRowsAffected` can only tighten it. Under a ceiling only SELECT, INSERT, UPDATE and DELETE run, and an INSERT, UPDATE or DELETE whose text contains the `%NOJOURN` token is refused before it runs. Global: every profile inherits it; no per-profile key. A malformed value fails startup. |
 | `IRIS_TEST_TIMEOUT` | *(unset — 120s default)* | **Optional.** Positive number of **seconds** — the DEFAULT wait budget `iris_execute_tests` waits before returning a "running" result (with the run's `jobId`/`runIndex` handles) instead of blocking further. A per-call `timeout` argument takes precedence over this. Hard-capped at 3600s regardless of source. Omit for today's 120-second default. |
-| `IRIS_TOOLS_PRESET` | `full` | **Optional.** `"full"` (today's behavior) \| `"core"` (~10-tool small-model subset) \| `"developer"` (persona filter, security/enterprise admin hidden). Unknown value fails fast at startup naming the valid values. Omit for today's `tools/list`, byte-for-byte. See [Tool Visibility Presets](#tool-visibility-presets). |
+| `IRIS_TOOLS_PRESET` | `full` | **Optional.** `"full"` (today's behavior) \| `"core"` (8- to 15-tool small-model subset, depending on the server) \| `"developer"` (persona filter, security/enterprise admin hidden). Unknown value fails fast at startup naming the valid values. Omit for today's `tools/list`, byte-for-byte. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_DISABLE` | *(unset)* | **Optional.** Comma-separated tool names to hide from `tools/list`. Trailing-`*` wildcard supported (`iris_doc_*`); a bare `*` alone is rejected. Omit to hide nothing beyond the active preset. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_TOOLS_ENABLE` | *(unset)* | **Optional.** Comma-separated tool names to force-show, overriding both the preset and `IRIS_TOOLS_DISABLE` (punches a hole in a hidden family). Omit for no overrides. See [Tool Visibility Presets](#tool-visibility-presets). |
 | `IRIS_SERVER_MANAGER` | `off` | **Optional.** `off` (default — today's behavior, no settings file is ever read) \| `auto` (import connection definitions from the InterSystems Server Manager VS Code extension) \| `required` (as `auto`, but fail startup if no definition is found). Unknown value fails fast at startup naming the valid values. See [Server Manager connections](#server-manager-connections-optional). |
@@ -94,7 +97,7 @@ All servers use the same environment variables:
 | `IRIS_SM_WORKSPACE` | *(unset — the process CWD)* | **Optional.** Directory whose `.vscode/settings.json` is used as the highest-precedence source. Set it explicitly when the MCP client's working directory is not the workspace you mean. Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required`. |
 | `IRIS_CREDENTIAL_HELPER` | *(unset)* | **Optional.** A command run with the Server-Manager profile name appended as its **final argument**; the command's trimmed stdout is the password. Because the name is always appended, point this at a small wrapper script that uses it (e.g. a script running `op read "op://vault/$1/password"` or `pass show "iris/$1"`) rather than at a bare `op read …`/`pass show …`, which would reject the extra argument. Run without a shell, so on Windows point it at a real `.exe` (a `.cmd`/`.bat` shim needs `cmd /c <your-helper.cmd>`). Runs synchronously per password-less profile with a 10s timeout, so keep `IRIS_SM_SERVERS` tight if the helper can hang. Link 3 of the credential chain — see [Server Manager connections](#server-manager-connections-optional). Only relevant when `IRIS_SERVER_MANAGER` is `auto`/`required` and a profile still lacks a password after the OS-keychain link. |
 
-> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_GOVERNANCE_FILE`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_TEST_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, `IRIS_TOOLS_ENABLE`, `IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_SM_WORKSPACE`, and `IRIS_CREDENTIAL_HELPER` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need. (The one behavior that *did* change for single-server installs is startup against an unreachable instance: it no longer exits. See [Backward Compatibility](#backward-compatibility).)
+> **Single-server installs need no changes.** `IRIS_PROFILES`, `IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_PRESET`, `IRIS_GOVERNANCE_FILE`, `IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_MAX_MB`, `IRIS_AUDIT_LOG_PARAMS`, `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY` (unset: nothing forced read-only), `IRIS_SQL_MAX_ROWS_AFFECTED` (unset: no ceiling), `IRIS_TEST_TIMEOUT`, `IRIS_TOOLS_PRESET`, `IRIS_TOOLS_DISABLE`, `IRIS_TOOLS_ENABLE`, `IRIS_SERVER_MANAGER`, `IRIS_SM_SERVERS`, `IRIS_SM_SETTINGS_PATHS`, `IRIS_SM_WORKSPACE`, and `IRIS_CREDENTIAL_HELPER` are all optional and additive. With none set, the suite behaves exactly as it always has — the six `IRIS_*` variables above are all you need. (The one behavior that *did* change for single-server installs is startup against an unreachable instance: it no longer exits. See [Backward Compatibility](#backward-compatibility).)
 
 #### Server Manager connections (optional)
 
@@ -207,7 +210,7 @@ node packages/shared/dist/cli/governance-cli.js validate --file C:\governance\ir
 | `set <key> true\|false [--profile <name>]` | Write the key into the file (creating the file when missing). Atomic write (temp + rename in the same directory), existing key order preserved, the written file automatically re-validated with rollback on failure. Reserved keys (`__proto__` etc.) are rejected; a key outside the frozen baseline warns on stderr but is still written (post-foundation keys like `iris_env_promote:execute` are legitimate). |
 | `unset <key> [--profile <name>]` | Remove the key from the file. Exit 1 when the key is not set (the `iris-mcp-credentials delete` not-found convention). |
 | `preset read-only\|full` | Print the env-level wiring for `IRIS_GOVERNANCE_PRESET` — **writes nothing**: the servers source the preset from their process environment only, never from a governance file. |
-| `effective [--profile <name>] [--json]` | Render the SAME cascade the servers compute (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`) for the CLI's own environment plus the resolved file, with the per-key `configSource` (`env`\|`file`\|`preset`\|`default`). |
+| `effective [--profile <name>] [--json]` | Render the SAME cascade the servers compute (`env.profile ?? env.global ?? file.profile ?? file.global ?? presetSeed ?? defaultSeed`) for the CLI's own environment plus the resolved file, with the per-key `configSource` (`env`\|`file`\|`preset`\|`default`). It renders the frozen baseline's keys only, and no baseline key has a [parent](#parent-keys-a-new-tool-that-re-exposes-an-existing-one), so an inherited disable (source `parent`) shows only in `universe`. |
 | `diff [--json]` | Compare every key the file sets against its default-seed value. |
 | `universe [--profile <name>] [--root <path>] [--json]` | Render the **full** governed-key universe — the frozen baseline ∪ the five server packages' registered tool keys (derived from their built dist, the same derivation the suite's cross-package tests use) ∪ the framework `iris_server_profiles` tool — with the real `mutates`/default-enabled classifications, per-key effective value, and `configSource`. This is the render a running server's `iris_server_profiles` computes over its own registered subset; post-foundation write keys seed default-DISABLED here (unlike `effective`/`diff`). Needs the packages' built dist locatable: `--root` names a monorepo root (or package container dir); otherwise auto-detected from the CLI's own install location. |
 
@@ -373,13 +376,15 @@ Each profile may carry `host`, `port`, `username`, `password`, `namespace`, and 
 
 A governance **key** is the tool name for single-operation tools (e.g. `iris_metrics_system`) or `tool:action` for multi-action tools (e.g. `iris_database_manage:delete`). The value is a boolean: `true` = allowed, `false` = blocked.
 
+**Only `global` and `profiles` carry policy.** A top-level key that looks like governance but would be silently ignored fails startup, naming the variable, the key and the documented shape, and never echoing the value: a name that starts with `iris_` (in any letter case), or a key with a boolean or object value. Examples are a flat `{"iris_doc_put": false}`, a top-level profile such as `{"prod": {...}}`, and a misspelled layer such as `"globals": {...}`; put the key under `global` to apply it to every profile, or under `profiles` for one profile. Plain metadata keys with a string, number, null or array value, such as `comment` and `version`, are ignored. A profile name under `profiles` that is not a configured profile does not fail startup: it logs one `[WARN]` naming the profile and the configured profiles, and its overrides apply to no connection.
+
 **Effective policy** for a given action on a given profile resolves in this order:
 
 ```
-effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key) ?? presetSeed(key) ?? defaultSeed(key)
+effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key) ?? inheritedDisable(key) ?? presetSeed(key) ?? defaultSeed(key)
 ```
 
-That is: a per-profile `IRIS_GOVERNANCE` setting wins; otherwise the global `IRIS_GOVERNANCE` setting; otherwise the governance *file's* per-profile setting; otherwise the file's global setting (see [Governance file](#governance-file-iris_governance_file) — with no file configured, both file layers are simply absent); otherwise the [preset](#read-only-mode-point-it-at-production-with-one-environment-variable); otherwise the **default seed**. **All env layers sit above all file layers** — a pre-existing `IRIS_GOVERNANCE` setting can never be overridden by a governance file introduced later.
+That is: a per-profile `IRIS_GOVERNANCE` setting wins; otherwise the global `IRIS_GOVERNANCE` setting; otherwise the governance *file's* per-profile setting; otherwise the file's global setting (see [Governance file](#governance-file-iris_governance_file) — with no file configured, both file layers are simply absent); otherwise a disable **inherited from the key's parent key** (only a key that declares a parent has one — see [Parent keys](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)); otherwise the [preset](#read-only-mode-point-it-at-production-with-one-environment-variable); otherwise the **default seed**. **All env layers sit above all file layers** — a pre-existing `IRIS_GOVERNANCE` setting can never be overridden by a governance file introduced later.
 
 **The default seed** (what happens when neither `global` nor `profiles` mentions a key):
 
@@ -416,8 +421,8 @@ The "existing action" baseline is generated mechanically from the shipped tool c
 - **Env always wins.** The file contributes two cascade layers strictly *below* both `IRIS_GOVERNANCE` env layers (`env.profile ?? env.global ?? file.profile ?? file.global ?? preset ?? default seed`): a file introduced later can never silently override a policy you already set inline.
 - **Explicit path only — never discovered.** The value is used literally; nothing is searched for in the working directory. A *relative* path resolves against the server process's current working directory, which the MCP *client* chooses — prefer an **absolute path**.
 - **Restart semantics (no hot-reload in v1).** The file is read once at startup; edits take effect on the next server restart.
-- **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file aborts startup with an error naming `IRIS_GOVERNANCE_FILE`, the path, and the underlying reason — an operator who pointed at a policy file never runs ungoverned by mistake.
-- **Attribution.** `iris_server_profiles` and the `iris-governance://<profile>` resource report a `configSource` per key (`env` | `file` | `preset` | `default`), so you can see which channel resolved each setting.
+- **Fail-fast, never silently permissive.** A missing, unreadable, malformed, or invalid-shape file, or one with a governance key or layer outside `global` and `profiles`, aborts startup with an error naming `IRIS_GOVERNANCE_FILE`, the path, and the underlying reason — an operator who pointed at a policy file never runs ungoverned by mistake.
+- **Attribution.** `iris_server_profiles` and the `iris-governance://<profile>` resource report a `configSource` per key (`env` | `file` | `parent` | `preset` | `default`), so you can see which channel resolved each setting (`parent`: the key inherited a disable from its [parent key](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)).
 
 Manage the file without hand-editing JSON: the [`iris-mcp-governance` CLI](#iris-mcp-governance-cli) (`validate` / `get` / `set` / `unset` / `effective` / `diff`) uses the same loader and cascade the servers enforce with, so what you write is what the servers will compute.
 
@@ -433,17 +438,46 @@ What it does:
 
 - **Blocks every write.** Any action a tool's `mutates` classification marks `"write"` (deletes, creates, sets, starts/stops, purges, `defaultEnabled` writes like `iris_production_control:clean` included — read-only means read-only, there is no "but this one's safe" exception) is denied.
 - **Allows every read.** Queries, lists, gets, status/health checks, diagnostics — anything classified `"read"` — run exactly as they do today.
-- **Sits UNDER your explicit `IRIS_GOVERNANCE` overrides, never over them.** The cascade is `profile.explicit ?? global.explicit ?? preset ?? defaultSeed`: an explicit `true` in `IRIS_GOVERNANCE` still wins over `read-only` if you deliberately want one specific write enabled even in a read-only deployment (and an explicit `false` still wins too — it just doesn't need to, since the preset already denies it).
-- **Explains itself.** A call blocked *because of* the preset (not an explicit `false`) returns `structuredContent.presetApplied: "read-only"` alongside the standard `GOVERNANCE_DISABLED` denial, so an operator or AI client can tell "blocked by the preset" apart from "blocked by an explicit override" at a glance.
+- **Sits UNDER your explicit `IRIS_GOVERNANCE` overrides, never over them.** The cascade is `profile.explicit ?? global.explicit ?? inheritedDisable ?? preset ?? defaultSeed`: an explicit `true` in `IRIS_GOVERNANCE` still wins over `read-only` if you deliberately want one specific write enabled even in a read-only deployment (and an explicit `false` still wins too — it just doesn't need to, since the preset already denies it).
+- **Explains itself.** A call blocked *because of* the preset (not an explicit `false`, and not a disable inherited from a [parent key](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)) returns `structuredContent.presetApplied: "read-only"` alongside the standard `GOVERNANCE_DISABLED` denial, so an operator or AI client can tell "blocked by the preset" apart from "blocked by an explicit override" at a glance.
 - **Is opt-in and additive.** `IRIS_GOVERNANCE_PRESET` unset (or set to `"full"`, an explicit alias for today's behavior) is byte-for-byte the pre-preset suite — nothing changes until you set it.
 
-Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_execute` against a large production table: `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows a call **returns** — the response carries `rowsCapped: true` when it clamps a caller's request; note this bounds the returned row count post-fetch, not the server-side result set or transfer) and `IRIS_SQL_TIMEOUT` (a per-request timeout in seconds). Both are independent of the preset — they apply to `iris_sql_execute` regardless of `IRIS_GOVERNANCE_PRESET` — and both are opt-in (unset = no cap, today's behavior):
+**Queries under the read-only preset.** `iris_sql_execute` can run any statement, so it is a write and the preset blocks it. Queries go through **`iris_sql_query`**, a read tool whose parent key is `iris_sql_execute` (see [Parent keys](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)): it runs only SELECT, is enabled by default, and stays enabled under the preset. Besides an explicit setting of its own key, it is disabled when an operator explicitly disables `iris_sql_execute` (unless `iris_sql_query` is set explicitly). A weakened `iris_sql_execute` key is never the route to a query. It is statement-level read-only, not side-effect-free: the query runs inside a transaction that is always rolled back, which undoes SQL changes and journaled global sets but not every effect of a function the query calls (for example a `$INCREMENT` counter; the full list is under *SQL write safety* below).
+
+Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_execute` and `iris_sql_query` against a large production table: `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows a call **returns** — the response carries `rowsCapped: true` when it clamps a caller's request; note this bounds the returned row count post-fetch, not the server-side result set or transfer) and `IRIS_SQL_TIMEOUT` (a per-request timeout in seconds). Both are independent of the preset — they apply regardless of `IRIS_GOVERNANCE_PRESET` — and both are opt-in (unset = no cap, today's behavior):
 
 ```json
 { "env": { "IRIS_GOVERNANCE_PRESET": "read-only", "IRIS_SQL_MAX_ROWS": "1000", "IRIS_SQL_TIMEOUT": "30" } }
 ```
 
+**SQL write safety (Story 38.5).** Two more operator variables bound what `iris_sql_execute` may change, and the same controls are call parameters (`readOnly`, `maxRowsAffected`, `countOnly`). A parameter can only tighten an operator setting, never loosen it, and a clamp is noted in the result (`readOnlyForced`, `maxRowsAffectedCapped`):
+
+| Control | Parameter | Operator variable (default) | What it does |
+|---|---|---|---|
+| Read-only | `readOnly` (default `false`) | `IRIS_SQL_READ_ONLY` (unset) | Only queries (SELECT) run; any other statement, `CALL` included, is refused before it runs with `SQL_READ_ONLY`. The statement runs inside a transaction that is always rolled back. |
+| Rows-affected cap | `maxRowsAffected` (default: no cap; `0` is a dry count) | `IRIS_SQL_MAX_ROWS_AFFECTED` (unset) | An INSERT, UPDATE or DELETE that changes more rows than the cap is rolled back and refused with `SQL_ROWS_AFFECTED_CAP`, which reports `rowsAffected`. The smaller of the parameter and the variable applies. Under a cap only SELECT, INSERT, UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (`TRUNCATE TABLE` reports `-1` and is rolled back). An INSERT, UPDATE or DELETE whose text contains the `%NOJOURN` token is refused with `SQL_ROWS_AFFECTED_CAP` before it runs, because it turns journaling off and the rollback could not undo it (a `%NOJOURN` in a comment or a string also refuses; a value passed in `parameters` is not checked). The count is the statement's own row count: rows that triggers, cascades or functions change are not counted, and a SELECT is not bounded by the cap. |
+| Count only | `countOnly` (default `false`) | — | Returns `totalCount`, the number of rows a SELECT returns, and transfers no rows. |
+
+An INSERT, UPDATE or DELETE result carries `rowsAffected`. The read-only mode is **statement-level read-only, not side-effect-free**: a rollback does not undo `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, changes made with `%NOJOURN` by a function, procedure or trigger the statement runs, work that parallel query worker processes do (`%PARALLEL`), `JOB` or device output, other external effects, or a function, procedure or trigger that starts, commits or rolls back a transaction (reported as an error when the transaction level the tool opened has changed, which a commit followed by a new `TSTART` does not show; some changes may be saved). A capped statement that is rolled back leaves the same effects. A capped INSERT, UPDATE or DELETE on a table stored in IRISTEMP (not journaled) keeps its row changes even when the cap rolls it back. Both variables are global operator variables: every profile inherits them, and no per-profile key can loosen them.
+
 See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
+
+### Agent code editing (Epic 38)
+
+An agent changes a class in IRIS in four steps: read the lines, edit them, compile, run the tests (the dev server's `edit-and-test-class` prompt walks the loop; see [Workflow Prompts & Agent Skills](#workflow-prompts--agent-skills)). Every write step is guarded, and a refusal changes nothing.
+
+- **Ranged reads.** `iris_doc_get` takes optional `startLine` and `endLine` (1-based, inclusive). Omit both for the whole document, as before. A ranged read returns the numbered lines, `totalLines` and the version `ts`; an `endLine` past the end is clamped. Ranges apply to UDL text documents.
+- **`iris_doc_put` on an existing document.** The save is version-checked: it is refused with `DOCUMENT_CONFLICT` if the document changed after the tool read it, and `ignoreConflict` (default **`false`**) is the only way past that check. A put to an existing class that drops one of its Storage definitions is refused with `STORAGE_DROPPED` unless `allowStorageRegeneration` is `true` (default **`false`**).
+- **`iris_doc_edit`.** Insert, delete or replace the lines a ranged read numbered, each edit guarded by its `expected` text, all edits applied or none, in one version-checked save. `action: "apply"` is a write that is **enabled by default** (Project Lead decision S-3); disable it with `{"global":{"iris_doc_edit:apply":false}}`. It also inherits an explicit disable of `iris_doc_put`, and the `read-only` preset blocks it. `action: "regenerateStorage"` runs the same edits without the Storage guard and is **disabled by default**, because it changes how a class's data is laid out.
+- **`current`.** A `STALE_CONTENT` refusal lists each mismatched edit's current text as `mismatches[].current`, with one trailing line break. Pass it back as that edit's `expected`, unchanged, once the change still applies to it. An `expected` built from a ranged read ends every line, the last included, with a line break.
+
+| Refusal code | What happened | What to do |
+|---|---|---|
+| `STALE_CONTENT` | An edit's `expected` text no longer matches the lines it addresses. Nothing was stored. | Pass `mismatches[].current` back as `expected` if the change still applies to it; otherwise read the lines again with a ranged `iris_doc_get`. |
+| `DOCUMENT_CONFLICT` | The document changed after the tool read it, so the version-checked save was refused. Nothing was stored, and the tool never retries. | Read the document again and redo the change. |
+| `STORAGE_DROPPED` | The save would drop a Storage definition of a class. Nothing was stored. | Keep the Storage lines in the content or the edit. Only for a deliberate change of the data layout: `allowStorageRegeneration: true` on `iris_doc_put`, or `iris_doc_edit` action `regenerateStorage` (disabled by default). |
+| `SQL_READ_ONLY` | A statement other than a query reached a read-only path: `iris_sql_query`, `iris_sql_execute` with `readOnly: true`, or any `iris_sql_execute` call while the operator's `IRIS_SQL_READ_ONLY` is `true`. Nothing was changed. | From `iris_sql_query`, run the statement with `iris_sql_execute` (the `read-only` preset blocks it). With `readOnly: true`, run it without `readOnly`. Under `IRIS_SQL_READ_ONLY`, run a SELECT, or ask the operator to lift it. |
+| `SQL_ROWS_AFFECTED_CAP` | Under a cap (`maxRowsAffected` or the operator's `IRIS_SQL_MAX_ROWS_AFFECTED`), either an INSERT, UPDATE or DELETE changed more rows than the cap and was rolled back, or the statement was not run at all: only SELECT, INSERT, UPDATE and DELETE run under a cap, and an INSERT, UPDATE or DELETE whose text contains `%NOJOURN` is refused before it runs. | Over the cap: narrow the statement to fewer rows, or raise `maxRowsAffected` when the cap is the call's own. Not run: remove `%NOJOURN` from the text, or run the statement without `maxRowsAffected`. A call cannot raise or bypass the operator's ceiling. |
 
 ### Worked example — enable a write action globally, block it on `prod`
 
@@ -506,6 +540,8 @@ Per the default-seed rule above, the **new write actions** added after governanc
 | dev | `iris_loc_count` | — (flat read tool, no actions) | whole tool (namespace lines-of-code metrics, Epic 22) |
 | dev | `iris_env_diff` | — (flat read tool, no actions) | whole tool (cross-profile environment drift detection, Epic 27) |
 | dev | `iris_env_promote` | `execute` | `plan` |
+| dev | `iris_doc_edit` | `regenerateStorage` (the Storage-guard override; Story 38.4) | `apply` is a write that ships **enabled** (see the next subsection) |
+| dev | `iris_sql_query` | — (flat read tool, no actions; Story 38.5) | whole tool (queries only; enabled by default, and still enabled under the read-only preset) |
 
 Every **pre-governance** tool action (everything shipped before the governance layer) stays enabled by default. The authoritative per-tool catalog with endpoints and governance notes is [`tool_support.md`](tool_support.md).
 
@@ -516,8 +552,31 @@ A small number of **new write actions ship enabled by default** even though they
 | Server | Tool | Write action, but **enabled by default** | Why |
 |---|---|---|---|
 | interop | `iris_production_control` | `clean` | Recovery operation (unwedge a stopped production); parity with the grandfathered lifecycle actions. Its destructive `killAppData` persistent-wipe is separately double-gated behind `confirm:true`. |
+| dev | `iris_doc_edit` | `apply` | A narrow, guarded write that replaces whole-document `iris_doc_put` rewrites (Story 38.4, S-3): every edit carries the `expected` text of the lines it changes, the save is version-checked (a concurrent change is a `DOCUMENT_CONFLICT`, never overwritten), and a class edit that would drop a Storage definition is refused. Its guard override, `iris_doc_edit:regenerateStorage`, is a separate action and stays **disabled by default**. Disable it with `{"global": {"iris_doc_edit:apply": false}}`, or by disabling `iris_doc_put` (see [Parent keys](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)); the read-only preset also blocks it. |
 
-Absent any tool opting in, this mechanism is inert (the governance seed is byte-for-byte its pre-F2 behavior — every other new write still default-disabled).
+This list is closed: adding a holder takes a recorded Project Lead decision (a cross-package test pins the two holders above). Absent any tool opting in, this mechanism is inert (the governance seed is byte-for-byte its pre-F2 behavior — every other new write still default-disabled).
+
+#### Parent keys: a new tool that re-exposes an existing one
+
+A new key that re-exposes the capability of an existing key declares that key as its **parent**. When the parent is **explicitly disabled**, every key of the new tool **seeds disabled** too, so turning off an existing capability never leaves it open through its newer, narrower sibling. Today `iris_doc_edit` declares the parent `iris_doc_put` (both of its keys, `iris_doc_edit:apply` and `iris_doc_edit:regenerateStorage`), and `iris_sql_query` declares the parent `iris_sql_execute` (Story 38.5), so disabling `iris_sql_execute` also disables the query tool unless `iris_sql_query` is set explicitly.
+
+- **Which setting counts.** "Explicitly disabled" means the **first explicit setting of the parent**, in cascade order (env profile, env global, file profile, file global), is `false`. A lower layer's `false` does not count once a higher layer enables the parent. Only a disable is inherited, never an enable: under the read-only preset, an explicit `iris_doc_put: true` lets `iris_doc_put` run, but `iris_doc_edit:apply` stays blocked by the preset until you set it explicitly too.
+- **Your setting on the child still wins.** `{"global": {"iris_doc_put": false, "iris_doc_edit:apply": true}}` blocks `iris_doc_put` and keeps `iris_doc_edit:apply` running. An explicit setting at any layer beats the inherited disable, and the inherited disable beats the preset seed.
+- **It is reported.** `iris_server_profiles` and the governance resource show such a key as `false` with `configSource: "parent"`. A blocked call returns the usual `GOVERNANCE_DISABLED` refusal with one extra field, `inheritedFrom`, and the text gains the suffix `(inherited from 'iris_doc_put')`; `presetApplied` is not set when the parent caused the denial:
+
+```json
+{
+  "isError": true,
+  "structuredContent": {
+    "code": "GOVERNANCE_DISABLED",
+    "action": "iris_doc_edit:apply",
+    "server": "prod",
+    "inheritedFrom": "iris_doc_put"
+  }
+}
+```
+
+- **Profile-scoped, and additive.** A disable at a profile layer reaches only that profile. With no parent explicitly disabled, every existing key's effective value, `configSource` and denial are byte-for-byte what they were before parent keys existed.
 
 #### `iris_env_promote:execute` safety model (Epic 27)
 
@@ -534,20 +593,20 @@ Absent any tool opting in, this mechanism is inert (the governance seed is byte-
 
 - With **neither** `IRIS_PROFILES` nor `IRIS_GOVERNANCE` set, behavior is byte-for-byte identical to before — one instance from your `IRIS_*` vars, every tool enabled. (One deliberate exception, added by Story 37.1: what happens when that instance is *unreachable at startup* — see the last bullet in this list.)
 - With `IRIS_GOVERNANCE_PRESET` **unset** (the default), the governance cascade's preset layer is a pure pass-through — behavior is unchanged whether or not `IRIS_GOVERNANCE`/`IRIS_PROFILES` are set.
-- With `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` **unset** (the default), `iris_sql_execute` is byte-for-byte today's behavior — no `rowsCapped` field, no per-request timeout override.
+- With `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT`/`IRIS_SQL_READ_ONLY`/`IRIS_SQL_MAX_ROWS_AFFECTED` **unset** (the default) and none of the `readOnly`/`maxRowsAffected`/`countOnly` parameters used, every field `iris_sql_execute` returned before is unchanged — no `rowsCapped`, `readOnlyForced` or `maxRowsAffectedCapped` field, no per-request timeout override; an INSERT, UPDATE or DELETE result only gains `rowsAffected`. (The request now goes to the ExecuteMCPv2 `/dev/sql/execute` route instead of the Atelier `action/query` route, so a SQL error names that route.)
 - With `IRIS_AUDIT_LOG` **unset** (the default), the tool-call audit log is a mechanical no-op — no audit file is created, no `fs` write is attempted, and every tool call's result is byte-for-byte identical to before the audit interceptor existed.
 - The `server` parameter is an *optional* addition to each tool's input schema. Calls that omit it are unchanged; existing prompts and automations keep working.
-- No `BOOTSTRAP_VERSION` change is involved — these are TypeScript-layer capabilities; nothing on the IRIS side changes.
-- **Startup no longer exits when the `default` instance is unreachable.** Before Story 37.1, an unreachable `default` profile made the server call `process.exit(1)` before ever connecting its transport — one down instance took the whole server (and every other, reachable profile) with it. Now an unreachable `default` is treated the same as any other profile's outage: startup continues, calls that target `default` return the existing connection-error `isError` envelope, and it recovers automatically the moment it becomes reachable again — no restart needed. **Invalid configuration still fails startup fast** (a missing `IRIS_USERNAME`/`IRIS_PASSWORD`, a malformed `IRIS_GOVERNANCE`/`IRIS_PROFILES`, an unwritable `IRIS_AUDIT_LOG` directory). What became non-fatal is the startup *health check* against `default` — an outage, a timeout, and also a refusal (HTTP 401/403 from a wrong-but-present password, or 404 from a disabled `/api/atelier` web application). The last two do **not** clear on their own, so the startup log says so explicitly and names the host:port; fix the setting and restart.
+- No `BOOTSTRAP_VERSION` change is involved in the governance and profile capabilities above — they are TypeScript-layer. The IRIS-side changes deploy through the bootstrap like any other ExecuteMCPv2 class; they include Story 38.5's `ExecuteMCPv2.REST.Sql` handler (the `/dev/sql/execute` route behind `iris_sql_execute` and `iris_sql_query`) and Story 38.7's production-delete check in `ExecuteMCPv2.REST.Interop` (`iris_production_manage` `delete` deletes only a class that extends `Ens.Production`). Like `iris_execute_command`, a SQL call to a namespace other than the ExecuteMCPv2 web application's relies on the bootstrap's `%All` package mapping; the Atelier `action/query` route `iris_sql_execute` used before did not.
+- **Startup no longer exits when the `default` instance is unreachable.** Before Story 37.1, an unreachable `default` profile made the server call `process.exit(1)` before ever connecting its transport — one down instance took the whole server (and every other, reachable profile) with it. Now an unreachable `default` is treated the same as any other profile's outage: startup continues, calls that target `default` return the existing connection-error `isError` envelope (this is the behavior for an instance that is **unreachable at startup**; an outage that begins **mid-session**, after `default` has been established, surfaces instead as `Tool error: …` carrying the connection message), and it recovers automatically the moment it becomes reachable again — no restart needed. **Invalid configuration still fails startup fast** (a missing `IRIS_USERNAME`/`IRIS_PASSWORD`, a malformed `IRIS_GOVERNANCE`/`IRIS_PROFILES`, a governance key or layer outside `global` and `profiles`, an unwritable `IRIS_AUDIT_LOG` directory, a malformed `IRIS_SQL_READ_ONLY` or `IRIS_SQL_MAX_ROWS_AFFECTED`, an unsupported `MCP_TRANSPORT`/`--transport` value). What became non-fatal is the startup *health check* against `default` — an outage, a timeout, and also a refusal (HTTP 401/403 from a wrong-but-present password, or 404 from a disabled `/api/atelier` web application). The last two do **not** clear on their own, so the startup log says so explicitly and names the host:port; fix the setting and restart.
 
 ---
 
 ## Tool Visibility Presets
 
-Trim any server to a **~10-tool core** for small models with one environment variable:
+Trim any server to an **8- to 15-tool core** for small models with one environment variable:
 
 ```bash
-IRIS_TOOLS_PRESET=core                    # ~10-tool everyday subset per server (small-model sweet spot)
+IRIS_TOOLS_PRESET=core                    # 8- to 15-tool everyday subset per server (small-model sweet spot)
 IRIS_TOOLS_PRESET=developer               # persona filter: dev-relevant tools, security/enterprise admin hidden
 IRIS_TOOLS_PRESET=full                    # explicit alias for today's behavior (default when unset)
 IRIS_TOOLS_DISABLE=iris_doc_export,iris_env_*   # hide individual tools / families
@@ -595,20 +654,20 @@ Edge-case semantics (all deterministic):
 ### The rosters
 
 Design intents differ per preset:
-- **`core`** attacks the **tool-count cliff** (research: LLM tool-selection accuracy degrades sharply past ~20 tools per server) — the everyday ~80% loop, **≤13 runtime tools per server**, tuned for small/cheap models. Destructive-and-rare and bulk/specialist tools are hidden.
+- **`core`** attacks the **tool-count cliff** (research: LLM tool-selection accuracy degrades sharply past ~20 tools per server) — the everyday ~80% loop, **about 13 runtime tools per server** (a guideline, not a hard limit: Project Lead decision L-4, 2026-10-14), tuned for small/cheap models. Destructive-and-rare and bulk/specialist tools are hidden.
 - **`developer`** attacks **persona relevance** — everything a developer touches (full dev server, production lifecycle + monitoring, namespace/database/webapp self-service config, runtime/task tools, all data tools) while hiding **security & enterprise administration** (users/roles/resources/SSL/OAuth/LDAP/X509/audit, backup/mirror/ECP). Counts stay above the cliff on `dev`/`interop` under `developer` — that's accepted; `core` is the count answer.
 
-`iris_server_profiles` is additionally visible on every server under every preset (the `+1` in every "runtime" count below). Two tools designed as a unit — `iris_env_diff` / `iris_env_promote` — are always co-visible in every preset (never one without the other, so an agent is never stranded mid-workflow). `iris_test_status` (Story 36.2) is NOT one of those pairs: it is `developer`-include / `core`-exclude on its own (`core` is already at its 13-runtime-tool ceiling, and the manual re-attach route named in `iris_execute_tests`' `hint` still works there).
+`iris_server_profiles` is additionally visible on every server under every preset (the `+1` in every "runtime" count below). Two pairs of tools designed as a unit — `iris_env_diff` / `iris_env_promote`, and `iris_doc_get` / `iris_doc_edit` (Story 38.4: read the exact lines with their version, then change them) — are always co-visible in every preset (never one without the other, so an agent is never stranded mid-workflow). `iris_test_status` (Story 36.2) is NOT one of those pairs: it is `developer`-include / `core`-exclude on its own (the manual re-attach route named in `iris_execute_tests`' `hint` still works in `core`).
 
 | Preset | dev | admin | interop | ops | data | Package total | Runtime total |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **full** (default) | 29 | 26 | 22 | 21 | 7 | 105 | 110 |
-| **developer** | 29 | 10 | 22 | 9 | 7 | 77 | 82 |
-| **core** | 12 | 12 | 9 | 9 | 7 | 49 | 54 |
+| **full** (default) | 31 | 26 | 22 | 21 | 7 | 107 | 112 |
+| **developer** | 31 | 10 | 22 | 9 | 7 | 79 | 84 |
+| **core** | 14 | 12 | 9 | 9 | 7 | 51 | 56 |
 
-Every `core` server lands at ≤13 runtime tools — inside the researched 5-15-tool window. The exact per-tool `include`/`exclude` disposition for each server is declared explicitly in that package's `src/tools/presets.ts` (transcribed from and kept in lockstep with [`research/feature-specs/11-tool-visibility-presets.md#2.5`](_bmad-output/planning-artifacts/research/feature-specs/11-tool-visibility-presets.md) — the authoritative per-tool table; a mismatch fails a per-package unit test AND a construction-time assert, so it cannot drift silently). In short:
+Every `core` server lands at 8 to 15 runtime tools — inside the researched 5-15-tool window (`dev` is at 15 because `iris_doc_edit` and `iris_sql_query` joined the everyday loop; the target of about 13 is a guideline). The exact per-tool `include`/`exclude` disposition for each server is declared explicitly in that package's `src/tools/presets.ts` (transcribed from and kept in lockstep with [`research/feature-specs/11-tool-visibility-presets.md#2.5`](_bmad-output/planning-artifacts/research/feature-specs/11-tool-visibility-presets.md) — the authoritative per-tool table; a mismatch fails a per-package unit test AND a construction-time assert, so it cannot drift silently). In short:
 
-- **`@iris-mcp/dev`** `core` = the authoring loop (get/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute. `developer` = the full 29-tool server (every dev tool is dev-relevant).
+- **`@iris-mcp/dev`** `core` = the authoring loop (get/edit/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute and SQL query. `developer` = the full 31-tool server (every dev tool is dev-relevant).
 - **`@iris-mcp/admin`** `core` = the everyday admin loop (namespaces, databases, users, webapps, permission checks). `developer` = only what developers self-serve (namespace/db/mapping/webapp config) — no user/security administration.
 - **`@iris-mcp/interop`** `core` = the troubleshoot-a-production loop (status/summary/control, item config, logs/queues/messages, trace diagram, resend) — `iris_production_control` stays visible so the `recover`-first MCP guidance holds under every preset. `developer` = the full 22-tool server.
 - **`@iris-mcp/ops`** `core` = monitoring-persona basics (health, system metrics, alert metrics, jobs/locks/processes, tasks, license). `developer` = the runtime debugging slice (interop metrics + task history) — no backup/mirror/ECP/config surface.
@@ -620,13 +679,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 30 / 70,119 / ~17,530 | 13 / 29,293 / ~7,323 | 30 / 70,119 / ~17,530 |
-| @iris-mcp/admin | 27 / 47,730 / ~11,933 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
-| @iris-mcp/interop | 23 / 39,727 / ~9,932 | 10 / 21,174 / ~5,294 | 23 / 39,727 / ~9,932 |
+| @iris-mcp/dev | 32 / 84,427 / ~21,107 | 15 / 43,611 / ~10,903 | 32 / 84,427 / ~21,107 |
+| @iris-mcp/admin | 27 / 48,234 / ~12,059 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
+| @iris-mcp/interop | 23 / 40,496 / ~10,124 | 10 / 21,554 / ~5,389 | 23 / 40,496 / ~10,124 |
 | @iris-mcp/ops | 22 / 30,677 / ~7,669 | 10 / 13,679 / ~3,420 | 10 / 14,130 / ~3,533 |
 | @iris-mcp/data | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 47,730 → 16,727; `@iris-mcp/dev`: 70,119 → 29,293, ~58%). Re-measured at the Story 36.2 code review (`pnpm measure:tools-payload` after a forced clean rebuild — mechanical, Rule #51). The previously committed figures dated from Story 30.2 (`9c57d84`): byte counts are not test-pinned (only the tool counts are), and tool descriptions/schemas in every package changed across Epics 31–36 without a re-measure (e.g. `@iris-mcp/data`'s Story 35.6/35.7 fixes, Story 36.1's `iris_execute_tests` running-result contract) — so every row moved, not only `@iris-mcp/dev`; its `full`/`developer` rows additionally include `iris_test_status`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 84,427 → 43,611, ~48%). Last re-measured at Story 38.7 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
 
 ---
 
@@ -658,9 +717,9 @@ See the [client configuration index](docs/client-config/README.md) — covering 
 
 Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) — parameterized, workflow-shaped instructions that teach an MCP client the *sequence* of tool calls an expert would use for a task, not just the tools themselves. This is a separate MCP protocol capability from tools: prompts are discoverable via `prompts/list` and rendered via `prompts/get`, on any client that supports the [MCP `prompts` capability](https://modelcontextprotocol.io/). A server only advertises `prompts` when it has at least one registered — servers with none behave exactly as before (Rule #19 back-compat).
 
-**Prompts do not change the 105-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
+**Prompts do not change the 107-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
 
-### The v1 pack — 11 prompts, grouped by owning server
+### The v1 pack — 12 prompts, grouped by owning server
 
 | Server | Prompt | What it does |
 |---|---|---|
@@ -670,6 +729,7 @@ Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) —
 | `@iris-mcp/dev` | `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
 | `@iris-mcp/dev` | `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. |
 | `@iris-mcp/dev` | `promote-environment-change` | Reviews and promotes configuration/code drift from a source IRIS environment to a target using the review-before-write `iris_env_diff` → `iris_env_promote` workflow — scoped diff, review with the user, plan, an explicit user-selected step allowlist, confirmed execute, then re-diff to verify. Never acts on `onlyInTarget` warnings; states the no-deletions guarantee and that `execute` is default-disabled. |
+| `@iris-mcp/dev` | `edit-and-test-class` | Changes a few lines of an ObjectScript class in place: a ranged `iris_doc_get`, a guarded `iris_doc_edit` (`apply`, with `expected` built from the read; a `STALE_CONTENT` retry with `mismatches[].current`), `iris_doc_compile`, then `iris_execute_tests` with a check of `total` against the number of `Test*` methods. Every tool on the main path is in the dev `core` preset. `iris_doc_edit:apply` is enabled by default. |
 | `@iris-mcp/interop` | `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
 | `@iris-mcp/interop` | `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
 | `@iris-mcp/interop` | `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
@@ -695,7 +755,7 @@ All five servers share a common connection layer (`@iris-mcp/shared`) that handl
 - **Custom REST dispatch** (`ExecuteMCPv2.REST.Dispatch`) for execution, globals, security, interoperability, and analytics — auto-bootstrapped, and self-healing, on connection (see [Known Limitations](#migrated-or-sys-reset-instances-self-healing))
 - **Built-in IRIS REST APIs** for DocDB (`/api/docdb/v1/`) and REST management (`/api/mgmnt/v2/`)
 
-Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **stdio** or **Streamable HTTP** transport. Every tool returns both `structuredContent` (machine-readable) and `text` content (human-readable), and includes tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can make informed decisions about tool usage.
+Servers communicate over the **MCP protocol** (spec v2025-11-25) using the **stdio** transport, the only supported transport: any other `MCP_TRANSPORT` or `--transport` value, `http` included, is a startup configuration error. Streamable HTTP is not offered, because it needs an authentication, bind-address and session design first. Every tool returns both `structuredContent` (machine-readable) and `text` content (human-readable), and includes tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can make informed decisions about tool usage.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -705,7 +765,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using either **
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(29)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
+     │(31)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘

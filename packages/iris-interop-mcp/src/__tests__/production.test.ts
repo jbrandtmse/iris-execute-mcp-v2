@@ -67,6 +67,70 @@ describe("iris_production_manage", () => {
     expect(structured.action).toBe("deleted");
   });
 
+  it("passes an orphan delete's orphanRemoved flag through verbatim (Story 38.0, DW-55)", async () => {
+    // Shape the deployed handler returns when only the Ens.Config.Production row
+    // remained (live-captured 2026-10-15 by InteropProductionDeleteTest's route).
+    const orphanResult = {
+      action: "deleted",
+      name: "ExecuteMCPv2.Temp.Story380Orphan",
+      orphanRemoved: true,
+    };
+    mockHttp.post.mockResolvedValue(envelope(orphanResult));
+
+    const result = await productionManageTool.handler(
+      { action: "delete", name: "ExecuteMCPv2.Temp.Story380Orphan" },
+      ctx,
+    );
+
+    expect(result.structuredContent).toEqual(orphanResult);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("description names the refused delete states and the orphan cleanup (Story 38.0, DW-54/DW-55)", () => {
+    const desc = productionManageTool.description ?? "";
+    expect(desc).toContain("current production must be Stopped");
+    for (const state of ["Running", "Suspended", "Troubled", "NetworkStopped"]) {
+      expect(desc).toContain(state);
+    }
+    expect(desc).toContain("nothing is deleted");
+    expect(desc).toContain("Ens.Config.Production row remains");
+    expect(desc).toContain("orphanRemoved: true");
+    // The old blanket claim ("must be stopped first") is superseded.
+    expect(desc).not.toContain("must be stopped first");
+  });
+
+  it("description says delete accepts only a production class and refuses any other (Story 38.7, DW-533)", () => {
+    const desc = productionManageTool.description ?? "";
+    expect(desc).toContain(
+      "'delete' accepts only a production class (one that extends Ens.Production): any other class is refused and nothing is deleted.",
+    );
+  });
+
+  it("maps the delete refusal for a class that is not a production to isError with IRIS's text (Story 38.7, DW-533)", async () => {
+    const text =
+      "Class 'MyApp.Plain' is not a production class (it does not extend Ens.Production), so nothing was deleted. Name a production class.";
+    // The shape the shared client throws for an Atelier-level error in an HTTP 200 envelope (http-client.ts),
+    // with the error entry as the route answered it live on 2026-10-16 (IRIS 2026.2 build 221U).
+    mockHttp.post.mockRejectedValue(
+      new IrisApiError(
+        200,
+        [{ error: `ERROR #5001: ${text}` }],
+        "/api/executemcp/v2/interop/production",
+        "IRIS reported errors for POST /api/executemcp/v2/interop/production. Review the error details and correct the request.",
+        {},
+      ),
+    );
+
+    const result = await productionManageTool.handler({ action: "delete", name: "MyApp.Plain" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.content[0]?.text).toBe(
+      "Error managing production 'MyApp.Plain': IRIS reported errors for POST /api/executemcp/v2/interop/production. " +
+        `Review the error details and correct the request. Details: ERROR #5001: ${text}`,
+    );
+  });
+
   it("should pass resolved namespace in body", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "created", name: "Test.Prod" }),

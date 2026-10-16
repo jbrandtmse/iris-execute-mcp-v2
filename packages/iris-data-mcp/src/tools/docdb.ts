@@ -80,7 +80,7 @@ const MONGO_OP_MAP: Record<string, string> = {
  * A single predicate is returned as a flat `[field, value, operator]` array
  * (not nested) per the DocDB API contract.
  *
- * Unsupported operators are skipped with a console warning.
+ * Unsupported operators are silently skipped.
  *
  * @param filter - The MongoDB-style filter object.
  * @returns The DocDB restriction value, or `null` if no predicates could be built.

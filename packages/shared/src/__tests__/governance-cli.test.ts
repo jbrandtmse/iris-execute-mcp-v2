@@ -444,19 +444,47 @@ describe("32-1-R3 — unknown top-level keys are preserved on write; layer-shape
     });
   });
 
-  it("a layer-SHAPED unknown key (\"globals\") warns that it has no effect, and is still preserved", async () => {
-    writeGovernance({ globals: { iris_doc_put: false }, global: { iris_sql_execute: true } });
+  it("a layer-SHAPED unknown key with a SCALAR value (\"globals\") warns that it has no effect, and is still preserved", async () => {
+    writeGovernance({ globals: "see global", global: { iris_sql_execute: true } });
     const { deps, stderr } = baseDeps();
     const code = await runCli(["set", "iris_doc_put", "true", "--file", file], deps);
     expect(code).toBe(0);
     expect(stderr.text).toContain('"globals"');
     expect(stderr.text).toContain("NO effect");
     expect(stderr.text).toContain("preserved as-is");
-    // The typo'd layer is preserved (never silently dropped), and the real
+    // The typo'd key is preserved (never silently dropped), and the real
     // layer got the write.
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      globals: { iris_doc_put: false },
+      globals: "see global",
       global: { iris_sql_execute: true, iris_doc_put: true },
+    });
+  });
+
+  // Story 38.7, DW-554: an OBJECT-valued layer typo is governance that would be silently ignored, so the
+  // server's own validator rejects the file, and set / unset / validate fail the same way, writing nothing.
+  describe.each([
+    ["an object-valued \"globals\" typo", { globals: { iris_doc_put: false }, global: { iris_sql_execute: true } }, "globals"],
+    ["a flat tool key", { iris_doc_put: false }, "iris_doc_put"],
+    ["a top-level profile layer", { prod: { iris_doc_put: false }, global: { iris_sql_execute: true } }, "prod"],
+  ])("a file with %s", (_label, document, key) => {
+    const expectedError = (): string =>
+      `Error: IRIS_GOVERNANCE_FILE is invalid: "${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape {"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}: put the key under "global" to apply it to every profile, or under "profiles" for one profile. (path: ${file})\n`;
+
+    it.each([
+      ["validate", ["validate", "--file"]],
+      ["set", ["set", "iris_doc_put", "true", "--file"]],
+      ["unset", ["unset", "iris_sql_execute", "--file"]],
+    ])("%s exits 1 with the validator's message and leaves the file byte-identical", async (_command, argv) => {
+      writeGovernance(document);
+      const before = readFileSync(file);
+      const { deps, stdout, stderr } = baseDeps();
+
+      const code = await runCli([...argv, file], deps);
+
+      expect(code).toBe(1);
+      expect(stderr.text).toBe(expectedError());
+      expect(stdout.text).not.toContain("is a valid governance file");
+      expect(readFileSync(file).equals(before)).toBe(true);
     });
   });
 

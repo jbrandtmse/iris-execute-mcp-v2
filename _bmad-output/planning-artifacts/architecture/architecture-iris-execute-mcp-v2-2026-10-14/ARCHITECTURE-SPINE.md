@@ -160,6 +160,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 
     The layers never interleave: every `IRIS_GOVERNANCE` layer outranks every `IRIS_GOVERNANCE_FILE` layer. The file is read once, at startup.
   - **Parent keys** *(lands in Story 38.4)*. When a key's `parent` (AD-4) is explicitly disabled at any layer, the child seeds disabled. An explicit setting on the child still wins.
+    - "Explicitly disabled" means the first explicit layer that sets the parent, in the precedence order above, sets it false. A lower layer's `false` does not count once a higher layer enables the parent. Only a disable is inherited: under the `read-only` preset an explicit `iris_doc_put: true` runs while `iris_doc_edit:apply` stays blocked by the preset.
+    - An inherited verdict reports `configSource: "parent"`. The denial carries `inheritedFrom: "<parent key>"` and the text suffix ` (inherited from '<parent>')`. It does not carry `presetApplied` when the parent caused it. This is additive: no key had a parent before 38.4.
+    - `parent` is declared per tool, so every action key of the child inherits it.
+    - Orchestrator decisions #9 and #10, taken at the Story 38.4 spec gate on 2026-10-15 under the Lead's delegation.
   - **The `read-only` preset.** It blocks every write, including baseline and `defaultEnabled` writes. Explicit keys beat the preset.
     - An unknown preset fails fast.
     - A denial caused by the preset carries `presetApplied`.
@@ -189,6 +193,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **One client per profile.** Each profile has one `IrisHttpClient` (cookie jar, CSRF token, negotiated Atelier version), never shared.
   - **One establishment path.** Every profile, `default` included, is established through `getOrCreateClient` → `establishProfile`, and a failed first touch can be retried. The startup attempt on `default` is a warm-up, never a gate.
   - **Failure semantics.** Invalid configuration fails fast at startup, naming the variable. An unreachable instance never exits the process: it surfaces per call as the structured connection error.
+    - **Governance documents** (`IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_FILE`; Story 38.7, DW-554). Some top-level keys look like governance but would be silently ignored. A key other than `global` or `profiles` fails fast, naming the documented shape, when it starts with `iris_` (any case) or its value is a boolean or an object. Metadata keys whose values are neither objects nor booleans (string, number, null or array), such as `comment` and `version`, stay valid (Story 32.4). An unknown profile name under `profiles` only warns (the AD-7 precedent). Orchestrator decision #19, 2026-10-16.
   - **Discovery.** Discovery is connection-agnostic. Reachability is learned per call.
 
 ### AD-9 — Configuration channels and operator controls [ADOPTED] (D7, E1, J1, FR139, FR141)
@@ -297,7 +302,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - the `iris_execute_tests` annotation correction;
     - the possible retirement of the `objectscript-review` prompt;
     - the `@1` pin (D3) and the Node 22 floor (D4);
-    - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3).
+    - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3);
+    - the `IRIS_NAMESPACE` default moving from `HSCUSTOM` to `USER` (the documented value, which exists on every IRIS instance), in `config.ts` and the VS Code launcher, recorded under CHANGELOG "Changed" (DW-469, Story 38.0). The orchestrator decided this under the Lead's delegation for the unattended run of 2026-10-15; see `orchestrator-decisions-wave-6.md` #5.
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -386,7 +392,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - Any transport other than `stdio` is rejected in `resolveTransport` as a configuration error (AD-8), before any IRIS traffic.
   - An HTTP transport is added only together with an authentication, bind-address and session design.
-  - Until Story 38.1 lands, `transport.ts` accepts `http`, and an unknown value falls back to stdio with a warning.
+  - Story 38.1 (commit `5f8b1e0`) enforces this. Every configured value (each `--transport` value, and `MCP_TRANSPORT` when it is non-empty) must be exactly `stdio`, and anything else is rejected with exit 1 before any IRIS traffic. An empty `MCP_TRANSPORT` means not configured. Before 38.1, `transport.ts` accepted `http`, and an unknown value fell back to stdio with a warning.
 
 ### AD-24 — Agent document writes are guarded and minimal [ADOPTED] (N2, S-3) *(lands in Stories 38.2 to 38.4)*
 
@@ -409,7 +415,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - The response is computed from a re-read after the PUT, never from the locally applied array.
   - **Storage guard.** One shared Storage-drop guard covers `iris_doc_put` and `iris_doc_edit`.
     - Story 38.3 enumerates every document-writing path (Atelier PUT, `xml/load`, bootstrap PUT), exhaustive as of a named date, and gives each a verdict.
-    - Recorded exclusions so far: `iris_doc_load` and the `iris_env_promote` `execute` sync, each with a ledger reopen trigger.
+    - Recorded exclusions so far: `iris_doc_load`, the `iris_env_promote` `execute` sync, and the `iris_doc_xml_export` import (`xml/load`), each with a ledger reopen trigger. The xml import was added at the Story 38.3 spec gate, 2026-10-15, as orchestrator decision #8 under the Lead's delegation.
+    - **Existing documents (Story 38.3, DW-540).** Without `If-None-Match`, Atelier refuses a PUT to an existing document with a 409 that carries the current document and its `ts`, and writes nothing. `iris_doc_put` uses that 409 as the guard's read and as the version token: it retries the save once with `If-None-Match: <ts>`. A 409 on that version-checked save is a conflict, and it is never retried.
     - A grep test fails on any new path that has no verdict.
   - **`iris_doc_edit`.** It exposes `apply`, a `defaultEnabled` write, and `regenerateStorage`, a default-disabled override action (AD-4).
 
@@ -423,6 +430,11 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - The remaining non-transactional effects are listed in the tool description.
     - The docs call the mode "statement-level read-only".
   - **Caps.** Rows-affected caps are enforced transactionally, inside IRIS, before commit. The existing `IRIS_SQL_MAX_ROWS` and `IRIS_SQL_TIMEOUT` clamps stay.
+    - Under a cap, only SELECT, INSERT, UPDATE and DELETE (statement types 1–4) run. Every other type, including DDL and `CALL`, is refused before execution, because its row count is not trustworthy (`CALL` reports 0), so it would get past the ceiling unseen. This is orchestrator decision #13 at the Story 38.5 spec gate, 2026-10-15.
+    - `TRUNCATE TABLE` is type 4, the same type as DELETE. It runs inside the capped transaction, and its -1 ("unknown") count rolls it back. This fails safe: live, every row was intact. Amended 2026-10-16 as orchestrator decision #15; the earlier wording said TRUNCATE was refused before execution.
+    - **`%NOJOURN`.** A type 2–4 statement with the `%NOJOURN` token turns journaling off, so a rollback cannot undo its writes. Under a cap it is refused before execution by a refuse-only token check, the one keyword check in the safety path; a false positive can only refuse. This is orchestrator decision #14, 2026-10-16, from Story 38.5 code review round 1.
+    - All `iris_sql_execute` calls run on the custom SQL endpoint, so there is one serializer. SQL error text keeps the SQLCODE and the IRIS message. This is orchestrator decision #12.
+    - The 38.5 probe found that a rollback does not undo `$INCREMENT`/`$SEQUENCE` counters, row-ID counters, process-private and IRISTEMP globals, `JOB` or device output, or a function, procedure or trigger that ends or opens a transaction (`TCOMMIT` inside a function persists its writes).
   - **One serializer.** All SQL tools share one result serializer and select mode, pinned against `action/query` output on a fixture with dates, nulls, `%List` values and streams.
   - **The `read-only` preset.** Queries under it go through the read-classified `iris_sql_query`, whose parent key is `iris_sql_execute`. A weakened write key is never the route.
   - **Which tools the operator SQL controls bind.** Every tool that executes caller-supplied SQL text (`iris_sql_execute`, `iris_sql_query`).
@@ -697,7 +709,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 
 ## Deferred
 
-- **Streamable HTTP transport.** It waits for a confirmed remote-access use case and an authentication, bind-address and session design (AD-23).
+- **Streamable HTTP transport.** It waits for a confirmed remote-access use case and an authentication, bind-address and session design (AD-23). Ledger: DW-538 (`decision-pending`, `note=human=`).
 - **Features of the 2026-07-28 revision beyond the stateless core and confirmation:** these wait for a client that needs them (AD-32).
   - **The Tasks extension.** Our long-running runs already work on every client through AD-16, the SDK supports the extension only partially, and Claude Code doesn't document it.
   - **MCP Apps** and **`subscriptions/listen`**.

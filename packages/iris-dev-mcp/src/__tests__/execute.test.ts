@@ -6,6 +6,7 @@ import {
   executeClassMethodTool,
   executeTestsTool,
   createExecuteTestsHandler,
+  buildRunningHint,
   type TestClock,
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
@@ -1977,6 +1978,26 @@ describe("iris_execute_tests", () => {
       expect(hint).toContain("EMPTY FinishedAt means the run is STILL executing");
       expect(hint).toContain("Never MAX(InstanceIndex)");
       expect(hint).toContain("iris_test_status");
+    });
+
+    it("the manual %UnitTest_Result query goes through iris_sql_query, which the read-only preset runs, and never iris_sql_execute (DW-555)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-hint-query" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }], {
+        'IRIS.TempAtelierAsyncQueue|job-hint-query,"unittest","id"': { value: "42", defined: true },
+      });
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      const hint = (result.structuredContent as { hint: string }).hint;
+      expect(hint).toContain('iris_sql_query "SELECT ti.DateTime AS FinishedAt');
+      expect(hint).toContain("with parameters [runIndex]");
+      expect(hint).not.toContain("iris_sql_execute");
+      expect(buildRunningHint("lead", "job-x", null)).toContain("iris_sql_query");
+      expect(buildRunningHint("lead", "job-x", null)).not.toContain("iris_sql_execute");
+
+      expect(executeTestsTool.description).toContain("`iris_sql_query` over `%UnitTest_Result`");
+      expect(executeTestsTool.description).not.toContain("iris_sql_execute");
     });
 
     // ── timeout precedence + cap clamp (AC 36.1.4, Rule #59) ──

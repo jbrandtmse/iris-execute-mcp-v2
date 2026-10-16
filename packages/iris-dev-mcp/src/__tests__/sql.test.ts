@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { sqlExecuteTool } from "../tools/sql.js";
-import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
+import { createMockHttp, createMockCtx } from "./test-helpers.js";
+import { LEGACY_CASES } from "./sql-legacy-cases.js";
+import { SQL_PATH, endpointBody, executed } from "./sql-test-support.js";
 
 // ── iris_sql_execute ──────────────────────────────────────────────
 
@@ -16,21 +18,19 @@ describe("iris_sql_execute", () => {
   });
 
   it("should return columns and rows from SQL query", async () => {
-    // New Atelier format: content is an array of row objects
+    // The endpoint returns result.content as an array of row objects
     mockHttp.post.mockResolvedValue(
-      envelope({
-        content: [
-          { ID: 1, Name: "Smith", DOB: "1990-01-01" },
-          { ID: 2, Name: "Jones", DOB: "1985-06-15" },
-        ],
-      }),
+      executed([
+        { ID: 1, Name: "Smith", DOB: "1990-01-01" },
+        { ID: 2, Name: "Jones", DOB: "1985-06-15" },
+      ]),
     );
 
     const result = await sqlExecuteTool.handler({ query: "SELECT ID, Name, DOB FROM Sample.Person" }, ctx);
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT ID, Name, DOB FROM Sample.Person" },
+      SQL_PATH,
+      endpointBody("SELECT ID, Name, DOB FROM Sample.Person"),
     );
 
     const structured = result.structuredContent as {
@@ -47,11 +47,7 @@ describe("iris_sql_execute", () => {
 
   it("should pass parameters correctly for parameterized queries", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({
-        content: [
-          { ID: 1, Name: "Smith" },
-        ],
-      }),
+      executed([{ ID: 1, Name: "Smith" }]),
     );
 
     await sqlExecuteTool.handler(
@@ -60,18 +56,14 @@ describe("iris_sql_execute", () => {
     );
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT ID, Name FROM Sample.Person WHERE ID = ?", parameters: [1] },
+      SQL_PATH,
+      endpointBody("SELECT ID, Name FROM Sample.Person WHERE ID = ?", { parameters: [1] }),
     );
   });
 
   it("should limit results when maxRows is specified", async () => {
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i, Name: `Name${i}` }));
-    mockHttp.post.mockResolvedValue(
-      envelope({
-        content: manyRows,
-      }),
-    );
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID, Name FROM Sample.Person", maxRows: 10 },
@@ -92,11 +84,7 @@ describe("iris_sql_execute", () => {
 
   it("should apply default maxRows limit of 1000", async () => {
     const manyRows = Array.from({ length: 1500 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(
-      envelope({
-        content: manyRows,
-      }),
-    );
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID FROM Sample.Person" },
@@ -117,7 +105,7 @@ describe("iris_sql_execute", () => {
       new IrisApiError(
         400,
         [{ error: "SQLCODE: -30 - Table 'NONEXISTENT' not found" }],
-        "/api/atelier/v7/USER/action/query",
+        SQL_PATH,
         "SQLCODE: -30 - Table 'NONEXISTENT' not found",
       ),
     );
@@ -132,9 +120,29 @@ describe("iris_sql_execute", () => {
     expect(result.content[0]?.text).toContain("NONEXISTENT");
   });
 
+  it("keeps the SQLCODE and the IRIS message in the error text of the SQL endpoint (decision #12)", async () => {
+    // What IrisHttpClient throws for the endpoint's error envelope for `SELEC 1` (captured live, 2026-10-15):
+    // a negative-SQLCODE statement error, sanitized on the IRIS side to ERROR #5001.
+    const error = new IrisApiError(
+      200,
+      [{ error: "ERROR #5001: SQLCODE: -51 Message:  An SQL statement expected, IDENTIFIER found" }],
+      SQL_PATH,
+      `IRIS reported errors for POST ${SQL_PATH}. Review the error details and correct the request.`,
+    );
+    mockHttp.post.mockRejectedValue(error);
+
+    const result = await sqlExecuteTool.handler({ query: "SELEC 1" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe(`SQL error: ${error.message}`);
+    expect(result.content[0]?.text).toContain("SQLCODE: -51");
+    expect(result.content[0]?.text).toContain("An SQL statement expected, IDENTIFIER found");
+    expect(result.content[0]?.text).toContain("/api/executemcp/v2/dev/sql/execute");
+  });
+
   it("should use namespace override when provided", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ ID: 1 }] }),
+      executed([{ ID: 1 }]),
     );
 
     await sqlExecuteTool.handler(
@@ -143,8 +151,8 @@ describe("iris_sql_execute", () => {
     );
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/HSCUSTOM/action/query",
-      { query: "SELECT 1" },
+      SQL_PATH,
+      endpointBody("SELECT 1", {}, "HSCUSTOM"),
     );
   });
 
@@ -171,25 +179,25 @@ describe("iris_sql_execute", () => {
 
   it("should not include parameters in body when parameters is empty array", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ ID: 1 }] }),
+      executed([{ ID: 1 }]),
     );
 
     await sqlExecuteTool.handler({ query: "SELECT 1", parameters: [] }, ctx);
 
     const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(calledBody).toEqual({ query: "SELECT 1" });
+    expect(calledBody).toEqual(endpointBody("SELECT 1"));
     expect(calledBody).not.toHaveProperty("parameters");
   });
 
   it("should not include parameters in body when not provided", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ ID: 1 }] }),
+      executed([{ ID: 1 }]),
     );
 
     await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
 
     const calledBody = mockHttp.post.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(calledBody).toEqual({ query: "SELECT 1" });
+    expect(calledBody).toEqual(endpointBody("SELECT 1"));
     expect(calledBody).not.toHaveProperty("parameters");
   });
 
@@ -199,7 +207,7 @@ describe("iris_sql_execute", () => {
     // createMockCtx's default config carries neither sqlMaxRows nor
     // sqlTimeoutMs, mirroring loadConfig's output when the env vars are unset.
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID FROM Sample.Person", maxRows: 10 },
@@ -208,8 +216,8 @@ describe("iris_sql_execute", () => {
 
     // Exactly 2 args — no timeout options object passed at all.
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT ID FROM Sample.Person" },
+      SQL_PATH,
+      endpointBody("SELECT ID FROM Sample.Person"),
     );
     expect(mockHttp.post.mock.calls[0]).toHaveLength(2);
 
@@ -220,7 +228,7 @@ describe("iris_sql_execute", () => {
 
   it("should set rowsCapped: true and clamp rows when IRIS_SQL_MAX_ROWS is below the caller's requested maxRows", async () => {
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 5 } };
 
     const result = await sqlExecuteTool.handler(
@@ -245,7 +253,7 @@ describe("iris_sql_execute", () => {
 
   it("should NOT set rowsCapped when IRIS_SQL_MAX_ROWS is above the caller's requested maxRows", async () => {
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 1000 } };
 
     const result = await sqlExecuteTool.handler(
@@ -261,7 +269,7 @@ describe("iris_sql_execute", () => {
   it("should NOT set rowsCapped when IRIS_SQL_MAX_ROWS clamps only the DEFAULT_MAX_ROWS (no explicit maxRows) but does not reduce it below what's requested", async () => {
     // cap === requested (not < requested) -> rowsCapped must be false per spec.
     const manyRows = Array.from({ length: 2000 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 1000 } };
 
     const result = await sqlExecuteTool.handler(
@@ -275,23 +283,21 @@ describe("iris_sql_execute", () => {
   });
 
   it("should forward IRIS_SQL_TIMEOUT as the http.post timeout option (ms)", async () => {
-    mockHttp.post.mockResolvedValue(envelope({ content: [{ ID: 1 }] }));
+    mockHttp.post.mockResolvedValue(executed([{ ID: 1 }]));
     ctx = { ...ctx, config: { ...ctx.config, sqlTimeoutMs: 15_000 } };
 
     await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT 1" },
+      SQL_PATH,
+      endpointBody("SELECT 1"),
       { timeout: 15_000 },
     );
   });
 
   it("should handle empty result set gracefully", async () => {
     mockHttp.post.mockResolvedValue(
-      envelope({
-        content: [],
-      }),
+      executed([]),
     );
 
     const result = await sqlExecuteTool.handler(
@@ -310,4 +316,24 @@ describe("iris_sql_execute", () => {
     expect(structured.rowCount).toBe(0);
     expect(result.isError).toBeUndefined();
   });
+});
+
+// -- AD-15: a call that uses no Story 38.5 control returns today's result --
+
+describe("iris_sql_execute with no Story 38.5 control returns the pre-feature result (AD-15, AC-5)", () => {
+  for (const legacy of LEGACY_CASES) {
+    it(`${legacy.id}: structuredContent and text equal the pre-feature literal`, async () => {
+      const mockHttp = createMockHttp();
+      const base = createMockCtx(mockHttp);
+      const ctx: ToolContext = { ...base, config: { ...base.config, ...legacy.config } };
+      mockHttp.post.mockResolvedValue(executed(legacy.rows));
+
+      const result = await sqlExecuteTool.handler(legacy.args, ctx);
+
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toEqual(legacy.expected);
+      expect(result.content).toEqual([{ type: "text", text: JSON.stringify(legacy.expected, null, 2) }]);
+      expect(Object.keys(result.structuredContent as object)).toEqual(Object.keys(legacy.expected));
+    });
+  }
 });

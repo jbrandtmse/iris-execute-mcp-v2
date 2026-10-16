@@ -272,14 +272,14 @@ Method TestPreflightFailureSubstitutesMinimalErrorEnvelope() As %Status
 /// Pins that EVERY ExecuteMCPv2.REST.* handler extends the new base class.
 /// <p>The ENUMERATION is mechanical, not hand-maintained (Rules #51/#56): the class
 /// list is read from <class>%Dictionary.ClassDefinition</class> at run time, so a
-/// 16th handler shipped tomorrow extending <class>%Atelier.REST</class> directly
+/// 17th handler shipped tomorrow extending <class>%Atelier.REST</class> directly
 /// FAILS this test. An earlier revision asserted <method>%Extends</method> over a
 /// literal <code>$ListBuild</code> of 15 names closed by
 /// <code>$$$AssertEquals($ListLength(tHandlers), 15)</code> — a live hierarchy read
 /// over a dead enumeration, which cannot see a class nobody added to the literal and
 /// whose closing assertion compared a literal against its own length. The two
 /// deliberate exclusions are named explicitly and asserted below.</p>
-Method TestAllFifteenHandlersExtendBase() As %Status
+Method TestAllSixteenHandlersExtendBase() As %Status
 {
     Set tCount = 0
     Set tStmt = ##class(%SQL.Statement).%New()
@@ -296,7 +296,7 @@ Method TestAllFifteenHandlersExtendBase() As %Status
     }
     ; The count is a cross-check on the mechanical enumeration itself: if the query
     ; silently returned nothing, the loop above would vacuously pass.
-    Do $$$AssertEquals(tCount, 15, "exactly 15 ExecuteMCPv2.REST.* handlers (excluding Base and Dispatch) are expected")
+    Do $$$AssertEquals(tCount, 16, "exactly 16 ExecuteMCPv2.REST.* handlers (excluding Base and Dispatch) are expected")
     Quit $$$OK
 }
 

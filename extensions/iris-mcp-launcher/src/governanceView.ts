@@ -52,7 +52,7 @@ export interface UniverseJson {
   mutates: Record<string, "read" | "write">;
   defaultEnabledWrites: string[];
   policy: Record<string, boolean>;
-  configSource: Record<string, "env" | "file" | "preset" | "default">;
+  configSource: Record<string, "env" | "file" | "parent" | "preset" | "default">;
   note: string;
   error?: string;
 }
@@ -280,7 +280,7 @@ export interface KeyRow {
   /** true for a frozen-baseline (grandfathered) key; false for post-foundation. */
   baseline: boolean;
   effective: boolean;
-  source: "env" | "file" | "preset" | "default" | "unknown";
+  source: "env" | "file" | "parent" | "preset" | "default" | "unknown";
   toggle: ToggleValue;
   staged: boolean;
 }
@@ -347,7 +347,7 @@ export function buildGroups(state: GovernanceViewState): PackageGroup[] {
 
 // ── Badges ─────────────────────────────────────────────────────────────
 
-/** The configSource badge text — the cascade channel that resolved the key (`env`/`file`/`preset`/`default`). */
+/** The configSource badge text — the cascade channel that resolved the key (`env`/`file`/`parent`/`preset`/`default`). */
 export function configSourceBadge(source: KeyRow["source"]): string {
   return source;
 }

@@ -14,13 +14,11 @@
 /// <method>MessageResendPreview</method>/<method>MessageResend</method> entry points and
 /// this is the only way to prove the Rule #7 envelope contract AND the "no write occurs on
 /// refusal" invariant (AC 26.1.2) end-to-end.</p>
-/// <p><b>Section D</b> — a REAL single resend + new-header linkage against the scratch
-/// production <code>SessionAgent.Sample.Production</code> (started only if not already
-/// running, stopped again afterward; scratch header rows deleted). Uses
-/// <method>ResendOne</method>/<method>PreviewOne</method> directly (pure classmethods, no
-/// <code>%request</code> dependency) — the identical code path the guarded entry points
-/// call, exercised against the real pinned <code>Ens.MessageHeader:ResendDuplicatedMessage</code>
-/// API (Story 26.0).</p>
+/// <p><b>Section D</b> - the REAL single resend + new-header linkage and batch-continuation
+/// tests against the scratch production <code>SessionAgent.Sample.Production</code> live in
+/// <class>ExecuteMCPv2.Tests.MessageResendLiveTest</class>: they need classes this project does
+/// not ship, so they skip themselves where those classes are absent. The one hermetic batch test
+/// (<method>TestResendBatchReportsEveryNonexistentHeader</method>) stays here.</p>
 Class ExecuteMCPv2.Tests.MessageResendTest Extends %UnitTest.TestCase
 {
 
@@ -410,136 +408,44 @@ Method TestHttpResendFilteredMatchCountExceedsMaxMessagesGuard()
     Do $$$AssertTrue(..IsResultEmpty(tEnv), "result is empty — no resend occurred (guard fires before enumeration/fetch)")
 }
 
-/// ==================== Section D: real resend against the scratch production ====================
-
-/// A REAL single resend + new-header linkage, driven against
-/// SessionAgent.Sample.Production (started only if not already running; scratch
-/// header rows deleted and the production stopped again afterward). Exercises
-/// ResendOne/PreviewOne directly — the exact code path the guarded HTTP entry points
-/// call — against the pinned Ens.MessageHeader:ResendDuplicatedMessage API.
-Method TestRealResendAgainstScratchProduction() As %Status
+/// <method>ResendBatch</method> keeps going past a header that fails: every entry of a batch whose
+/// headers all do not exist still yields its own failed result (in order, with the original id
+/// echoed and a non-empty error), and the summary counts them all. Needs no production and writes
+/// nothing, so it runs on any instance; the success half of the continuation property is
+/// <class>ExecuteMCPv2.Tests.MessageResendLiveTest</class>.
+Method TestResendBatchReportsEveryNonexistentHeader()
 {
-    Set tWasRunning = ##class(Ens.Director).IsProductionRunning()
-    If 'tWasRunning {
-        Set tSC = ##class(Ens.Director).StartProduction("SessionAgent.Sample.Production")
-        Do $$$AssertStatusOK(tSC, "Scratch production starts")
+    ; The headers must not exist: ResendBatch really resends one that does. The ids are taken
+    ; above the namespace's highest Ens.MessageHeader id (with headroom for rows a running
+    ; production adds meanwhile), never assumed free.
+    Set tMax = 0
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT MAX(ID) FROM Ens.MessageHeader")
+    If $IsObject(tRS) && (tRS.%SQLCODE >= 0) && tRS.%Next() Set tMax = +tRS.%GetData(1)
+    Set tBase = $Select(tMax < 999999990: 999999990, 1: tMax + 1000000)
+    Set tIds(0) = 3
+    Set tTaken = 0
+    For tI = 0:1:2 {
+        Set tIds(tI + 1) = tBase + tI
+        If ##class(Ens.MessageHeader).%ExistsId(tBase + tI) Set tTaken = 1
     }
+    Do $$$AssertTrue('tTaken, "precondition: headers " _ tBase _ " to " _ (tBase + 2) _ " do not exist (an existing one would really be resent)")
+    If tTaken Quit
+    Set tResult = {}
+    Do ##class(ExecuteMCPv2.REST.MessageResend).ResendBatch(.tIds, 0, tResult)
 
-    Set tMaxBefore = 0
-    Try {
-        Set tRS0 = ##class(%SQL.Statement).%ExecDirect(, "SELECT MAX(ID) AS mx FROM Ens.MessageHeader")
-        If $IsObject(tRS0) && tRS0.%Next() { Set tMaxBefore = +tRS0.mx }
-
-        Do ##class(SessionAgent.Sample.BS.OrderIngest).RunScenario("none")
-        Hang 2
-
-        Set tOriginalId = 0
-        Set tRS1 = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 ID FROM Ens.MessageHeader WHERE ID > ? AND Type = 1 ORDER BY ID", tMaxBefore)
-        If $IsObject(tRS1) && tRS1.%Next() { Set tOriginalId = +tRS1.ID }
-        Do $$$AssertTrue(tOriginalId > 0, "A new Request header was created by the scenario run")
-
-        If tOriginalId > 0 {
-            Set tRow = ##class(ExecuteMCPv2.REST.MessageResend).ResendOne(tOriginalId, 0)
-            Do $$$AssertEquals(tRow.%Get("ok"), 1, "Real resend reports ok")
-            Do $$$AssertEquals(tRow.%Get("originalId"), tOriginalId, "originalId echoed")
-            Do $$$AssertTrue(tRow.%IsDefined("newHeaderId"), "newHeaderId present on success")
-            Set tNewId = tRow.%Get("newHeaderId")
-            Do $$$AssertTrue(tNewId '= tOriginalId, "New header id differs from the original")
-
-            If tRow.%Get("ok") {
-                Set tRS2 = ##class(%SQL.Statement).%ExecDirect(, "SELECT Description, SessionId FROM Ens.MessageHeader WHERE ID = ?", tNewId)
-                Do $$$AssertTrue($IsObject(tRS2) && tRS2.%Next(), "New header row exists")
-                If $IsObject(tRS2) {
-                    Do $$$AssertTrue(tRS2.Description [ ("Resent " _ tOriginalId), "New header Description carries the resend linkage")
-                }
-
-                Set tPreview = ##class(ExecuteMCPv2.REST.MessageResend).PreviewOne(tOriginalId)
-                Do $$$AssertEquals(tPreview.%Get("found"), 1, "Original header previews as found")
-                Do $$$AssertEquals(tPreview.%Get("type"), "Request", "Original header previews as Request type")
-                Do $$$AssertTrue(tPreview.%IsDefined("verdict"), "Preview carries a verdict")
-                Do $$$AssertTrue(tPreview.%IsDefined("reason"), "Preview carries a reason")
-            }
-        }
-
-        Hang 1
-        Set tDelRS = ##class(%SQL.Statement).%ExecDirect(, "DELETE FROM Ens.MessageHeader WHERE ID > ?", tMaxBefore)
-        Do $$$AssertTrue($IsObject(tDelRS) && (tDelRS.%SQLCODE >= 0), "Scratch header cleanup sweep succeeded")
-    } Catch ex {
-        Do $$$AssertTrue(0, "Unexpected exception during real-resend test: " _ ex.DisplayString())
+    Set tResults = tResult.%Get("results")
+    Do $$$AssertEquals(tResults.%Size(), 3, "one result entry per header: the batch did not stop at the first failure")
+    If tResults.%Size() '= 3 Quit
+    For tI = 0:1:2 {
+        Set tRow = tResults.%Get(tI)
+        Do $$$AssertEquals(tRow.%Get("originalId"), tBase + tI, "result " _ tI _ " echoes its header id, in order")
+        Do $$$AssertEquals(tRow.%Get("ok"), 0, "result " _ tI _ " reports the nonexistent header as failed")
+        Do $$$AssertTrue(tRow.%Get("error") '= "", "result " _ tI _ " carries a non-empty error")
     }
-
-    If 'tWasRunning {
-        Set tSC = ##class(Ens.Director).StopProduction(60, 1)
-        Do $$$AssertStatusOK(tSC, "Scratch production stopped back to its pre-test state")
-    }
-    Quit $$$OK
-}
-
-/// A <method>ResendBatch</method> call with a mix of one VALID header (resends
-/// successfully against the scratch production) and one bad/nonexistent header ID
-/// must return a per-header {ok} result for EACH entry and must NOT abort the batch
-/// (spec §3 / AC 26.1.1 per-message Try/Catch continuation). Exercises the exact
-/// classmethod the guarded <method>MessageResend</method> HTTP entry point calls.
-Method TestResendBatchContinuesPastBadHeader() As %Status
-{
-    Set tWasRunning = ##class(Ens.Director).IsProductionRunning()
-    If 'tWasRunning {
-        Set tSC = ##class(Ens.Director).StartProduction("SessionAgent.Sample.Production")
-        Do $$$AssertStatusOK(tSC, "Scratch production starts")
-    }
-
-    Set tMaxBefore = 0
-    Try {
-        Set tRS0 = ##class(%SQL.Statement).%ExecDirect(, "SELECT MAX(ID) AS mx FROM Ens.MessageHeader")
-        If $IsObject(tRS0) && tRS0.%Next() { Set tMaxBefore = +tRS0.mx }
-
-        Do ##class(SessionAgent.Sample.BS.OrderIngest).RunScenario("none")
-        Hang 2
-
-        Set tValidId = 0
-        Set tRS1 = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 ID FROM Ens.MessageHeader WHERE ID > ? AND Type = 1 ORDER BY ID", tMaxBefore)
-        If $IsObject(tRS1) && tRS1.%Next() { Set tValidId = +tRS1.ID }
-        Do $$$AssertTrue(tValidId > 0, "A new Request header was created for the batch-continuation test")
-
-        If tValidId > 0 {
-            Set tBadId = 999999999
-            Set tIds(0) = 2
-            Set tIds(1) = tValidId
-            Set tIds(2) = tBadId
-            Set tResult = {}
-            Do ##class(ExecuteMCPv2.REST.MessageResend).ResendBatch(.tIds, 0, tResult)
-
-            Set tResults = tResult.%Get("results")
-            Do $$$AssertEquals(tResults.%Size(), 2, "Batch returns one result entry per header, even after a bad one")
-
-            Set tRow1 = tResults.%Get(0)
-            Do $$$AssertEquals(tRow1.%Get("originalId"), tValidId, "First result echoes the valid header id")
-            Do $$$AssertEquals(tRow1.%Get("ok"), 1, "Valid header resends ok")
-            Do $$$AssertTrue(tRow1.%IsDefined("newHeaderId"), "Valid header result carries a newHeaderId")
-
-            Set tRow2 = tResults.%Get(1)
-            Do $$$AssertEquals(tRow2.%Get("originalId"), tBadId, "Second result echoes the bad header id — batch did not abort after the first entry")
-            Do $$$AssertEquals(tRow2.%Get("ok"), 0, "Nonexistent header fails")
-            Do $$$AssertTrue(tRow2.%Get("error") '= "", "Failure carries a non-empty error message")
-
-            Set tSummary = tResult.%Get("summary")
-            Do $$$AssertEquals(tSummary.%Get("total"), 2, "Summary total counts both headers")
-            Do $$$AssertEquals(tSummary.%Get("succeeded"), 1, "Summary succeeded=1")
-            Do $$$AssertEquals(tSummary.%Get("failed"), 1, "Summary failed=1")
-        }
-
-        Hang 1
-        Set tDelRS = ##class(%SQL.Statement).%ExecDirect(, "DELETE FROM Ens.MessageHeader WHERE ID > ?", tMaxBefore)
-        Do $$$AssertTrue($IsObject(tDelRS) && (tDelRS.%SQLCODE >= 0), "Scratch header cleanup sweep succeeded")
-    } Catch ex {
-        Do $$$AssertTrue(0, "Unexpected exception during batch-continuation test: " _ ex.DisplayString())
-    }
-
-    If 'tWasRunning {
-        Set tSC = ##class(Ens.Director).StopProduction(60, 1)
-        Do $$$AssertStatusOK(tSC, "Scratch production stopped back to its pre-test state")
-    }
-    Quit $$$OK
+    Set tSummary = tResult.%Get("summary")
+    Do $$$AssertEquals(tSummary.%Get("total"), 3, "summary total counts all three headers")
+    Do $$$AssertEquals(tSummary.%Get("succeeded"), 0, "summary succeeded=0")
+    Do $$$AssertEquals(tSummary.%Get("failed"), 3, "summary failed=3")
 }
 
 }

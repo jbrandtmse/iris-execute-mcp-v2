@@ -39,9 +39,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -160,28 +160,31 @@ function skip(testCtx: { skip: () => void }, leg: string, reason: string) {
 
 beforeAll(async () => {
   try {
+    // 0. Build freshness, BEFORE any dist is imported and before any IRIS call
+    //    (DW-524). The gate exercises the code that ships, so a missing OR
+    //    stale dist (a `src/` file newer than its build output) must not be
+    //    driven: it skips with the named reason, or fails under
+    //    IRIS_REQUIRE_LIVE via the throw at the end of this hook.
+    for (const pkg of ["shared", ...LEAF_PACKAGES]) {
+      const fresh = checkDistFresh(path.join(REPO_ROOT, "packages", pkg), pkg);
+      if (!fresh.ok || fresh.skipped) {
+        skipReason =
+          fresh.reason ??
+          `${pkg} declares no dist/ build output, but this gate drives its built dist.`;
+        throw new Error("__handled__");
+      }
+    }
+
     // 1. The shared dist — the gate drives IrisHttpClient/buildToolContext from
     //    the code that ships. iris-mcp-all has no direct @iris-mcp/shared
     //    dependency (pnpm strict resolution), so import by relative file URL,
     //    the same pattern scripts/lib/tool-catalog.mjs established.
     const sharedDist = path.join(REPO_ROOT, "packages", "shared", "dist", "index.js");
-    if (!existsSync(sharedDist)) {
-      skipReason =
-        "@iris-mcp/shared is not built (packages/shared/dist/index.js absent). " +
-        "Run `pnpm turbo run build` first.";
-      throw new Error("__handled__");
-    }
     shared = await import(pathToFileURL(sharedDist).href);
 
     // 2. The four leaf dists carrying the tools under test.
     for (const pkg of LEAF_PACKAGES) {
       const toolsDist = path.join(REPO_ROOT, "packages", pkg, "dist", "tools", "index.js");
-      if (!existsSync(toolsDist)) {
-        skipReason =
-          `${pkg} is not built (${path.relative(REPO_ROOT, toolsDist)} absent). ` +
-          "Run `pnpm turbo run build` first.";
-        throw new Error("__handled__");
-      }
       const mod = await import(pathToFileURL(toolsDist).href);
       for (const t of mod.tools ?? []) toolsByName.set(t.name, t);
     }

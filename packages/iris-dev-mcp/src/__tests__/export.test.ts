@@ -482,18 +482,55 @@ describe("iris_doc_export", () => {
     expect(enumPath).not.toContain("generated=");
   });
 
-  // ── 13. modifiedSince uses /modified/{ts} endpoint ───────────────
+  // 13. modifiedSince is refused (Story 38.7, DW-528)
 
-  it("modifiedSince uses the /modified/{ts} endpoint", async () => {
-    installMockHttp(mockHttp, [{ name: "Recently.Updated.cls" }]);
+  it.each(["never", "ifDifferent", "always"] as const)(
+    "a non-empty modifiedSince (overwrite %s) is refused with the unsupported text, no code, no HTTP request and nothing written",
+    async (overwrite) => {
+      installMockHttp(mockHttp, [{ name: "Recently.Updated.cls" }]);
 
-    await docExportTool.handler(
-      { destinationDir: tmp, modifiedSince: "2026-04-01T00:00:00Z" },
-      ctx,
+      const result = await docExportTool.handler(
+        { destinationDir: tmp, modifiedSince: "2026-04-01T00:00:00Z", generated: "true", overwrite },
+        ctx,
+      );
+
+      expect(mockHttp.get).not.toHaveBeenCalled();
+      expect(result).toStrictEqual({
+        content: [
+          {
+            type: "text",
+            text:
+              "modifiedSince is not supported, so nothing was exported: IRIS has no way to list documents changed since a timestamp " +
+              "(its change list works from a database hash). " +
+              "Omit modifiedSince; to find recent changes, list the documents with iris_doc_list and compare each one's ts.",
+          },
+        ],
+        isError: true,
+      });
+      expect(await fsp.readdir(tmp)).toEqual([]);
+    },
+  );
+
+  it("an empty modifiedSince is the unchanged docnames request, byte for byte as without it", async () => {
+    installMockHttp(mockHttp, []);
+
+    await docExportTool.handler({ destinationDir: tmp, modifiedSince: "" }, ctx);
+    await docExportTool.handler({ destinationDir: tmp }, ctx);
+
+    expect(mockHttp.get.mock.calls.map((call) => call[0])).toEqual([
+      "/api/atelier/v7/USER/docnames/*/*?generated=0",
+      "/api/atelier/v7/USER/docnames/*/*?generated=0",
+    ]);
+  });
+
+  it("the modifiedSince description says the parameter is not supported, and the tool description no longer promises the filter", () => {
+    const shape = docExportTool.inputSchema.shape as Record<string, { description?: string }>;
+
+    expect(shape.modifiedSince?.description).toBe(
+      "Not supported: IRIS cannot filter documents by modification time, so a call that sets it is refused " +
+        "and changes nothing; compare the ts of the documents iris_doc_list returns instead.",
     );
-
-    const enumPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(enumPath).toContain(`/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`);
+    expect(docExportTool.description).not.toContain("modifiedSince");
   });
 
   // ── 14. Empty result — no manifest ───────────────────────────────

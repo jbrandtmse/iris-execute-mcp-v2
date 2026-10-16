@@ -1,8 +1,9 @@
 /**
  * Connection health check and ping utilities for IRIS.
  *
- * Provides startup health verification and lightweight connection
- * probing for use by the server-base monitoring loop.
+ * Provides startup health verification ({@link checkHealth}) and a
+ * lightweight yes/no availability probe ({@link ping}). Nothing here runs
+ * on a timer: both functions act only when a caller invokes them.
  */
 
 import { IrisHttpClient } from "./http-client.js";
@@ -49,8 +50,8 @@ export async function checkHealth(client: IrisHttpClient): Promise<void> {
  * Lightweight connectivity probe using `HEAD /api/atelier/`.
  *
  * Returns `true` when IRIS responds within the given timeout,
- * `false` otherwise. Never throws — intended for periodic
- * monitoring by the server-base layer (Story 1.4).
+ * `false` otherwise. Never throws - a general availability probe for any
+ * caller that needs a reachability answer without handling an error.
  *
  * @param client  - An already-constructed {@link IrisHttpClient}.
  * @param timeout - Maximum wait in milliseconds (default 2 000, per NFR17).

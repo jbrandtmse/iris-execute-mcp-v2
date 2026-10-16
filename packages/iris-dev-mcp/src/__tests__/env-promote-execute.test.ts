@@ -1006,6 +1006,57 @@ describe("iris_env_promote:execute", () => {
       expect(compileCalls).toHaveLength(0);
     });
 
+    it("a target PUT that answers HTTP 200 with a non-empty result.status halts like a thrown PUT: that doc is 'failed' with the hedged text, the earlier doc is 'skipped', and NO compile call is made (Story 38.7, DW-530)", async () => {
+      const diff = documentsDiff();
+      const plan = await buildPlan(diff);
+      expect(plan.steps.map((s) => s.subject)).toEqual(["Changed.cls", "New.cls"]);
+
+      sourceHttp.get.mockImplementation(async (path: string) => {
+        if (path === "/api/atelier/") return versionResponse();
+        if (path.includes("doc/Changed.cls")) return envelope({ name: "Changed.cls", content: ["Class Changed {}"] });
+        if (path.includes("doc/New.cls")) return envelope({ name: "New.cls", content: ["Class New {}"] });
+        throw new Error(`unexpected sourceHttp.get ${path}`);
+      });
+      targetHttp.get.mockImplementation(async (path: string) => {
+        if (path === "/api/atelier/") return versionResponse();
+        throw new Error(`unexpected targetHttp.get ${path}`);
+      });
+      // The live shape of a document IRIS refuses inside an HTTP 200 envelope (doc-put-bom-live-gate.test.ts,
+      // captured 2026-10-15, IRIS 2026.2 build 221U): empty status.errors, ts "" and content "", the reason only in
+      // result.status.
+      const softStatus = "ERROR #16021: Illegal Header Line: Class New {}";
+      targetHttp.put
+        .mockResolvedValueOnce(envelope({}))
+        .mockResolvedValueOnce(
+          envelope({ name: "New.cls", db: "", ts: "", cat: "CLS", enc: false, content: "", status: softStatus }),
+        );
+
+      const result = await envPromoteTool.handler(
+        {
+          action: "execute",
+          source: "source",
+          target: "target",
+          diff,
+          plan,
+          steps: plan.steps.map((s) => s.index),
+          confirm: true,
+        },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      const sc = result.structuredContent as unknown as ExecuteResultSC;
+      const bySubject = new Map(sc.executed.map((e) => [e.subject, e]));
+      expect(bySubject.get("Changed.cls")?.status).toBe("skipped");
+      expect(bySubject.get("New.cls")?.status).toBe("failed");
+      expect(bySubject.get("New.cls")?.error).toBe(
+        `IRIS reported an error after the write of 'New.cls' to the target: ${softStatus}. ` +
+          "The document may have been saved on the target; check it with iris_doc_get before running iris_env_promote again.",
+      );
+      expect(sc.summary).toEqual({ completed: 0, failed: 1, skipped: 1 });
+      expect(targetHttp.post.mock.calls.filter((c) => (c[0] as string).includes("/action/compile"))).toHaveLength(0);
+    });
+
     it("a compile-time error on one doc: that doc is 'failed' with the compile error; a later doc in the same batch is reported 'skipped' (batch reporting halts at the first compile failure)", async () => {
       const diff = documentsDiff();
       const plan = await buildPlan(diff);

@@ -358,7 +358,7 @@ function resolveTestTimeout(
  * shipped `iris_test_status` companion tool (Story 36.2) and the manual route
  * that works in EVERY preset today (`core` included, Lead decision L-2):
  * `iris_global_get` on the jobId's queue node for the run index, then
- * `iris_sql_execute` joined down from `%UnitTest_Result.TestInstance` — the
+ * `iris_sql_query` joined down from `%UnitTest_Result.TestInstance` — the
  * ONLY `%UnitTest_Result` table carrying the `InstanceIndex` column
  * (`TestSuite.TestInstance` → `TestCase.TestSuite` → `TestMethod.TestCase` →
  * `TestAssert.TestMethod`; live-verified via INFORMATION_SCHEMA.COLUMNS at
@@ -393,7 +393,7 @@ export function buildRunningHint(
     `via IRIS_GOVERNANCE). Today, in every preset, the manual route also still works: ` +
     `(1) the runIndex (${capturedPart}re-readable while the job is ` +
     `queued or running via iris_global_get with global "IRIS.TempAtelierAsyncQueue" and subscripts ` +
-    `'${jobId},"unittest","id"'); (2) iris_sql_execute "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
+    `'${jobId},"unittest","id"'); (2) iris_sql_query "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
     `tm.Name AS MethodName, tm.Status, tm.Duration, tm.ErrorDescription FROM %UnitTest_Result.TestMethod tm ` +
     `JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID JOIN %UnitTest_Result.TestSuite ts ON ` +
     `tc.TestSuite = ts.ID JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID WHERE ` +
@@ -1223,7 +1223,7 @@ export const executeTestsTool: ToolDefinition = {
     "a failure and NOT a final result. Do NOT re-submit the same target on a running result — that " +
     "starts a SECOND concurrent run against shared fixtures. Re-attach instead (the response's `hint` " +
     "carries the exact calls): today, `iris_global_get` on `IRIS.TempAtelierAsyncQueue(<jobId>,\"unittest\",\"id\")` " +
-    "for the runIndex, then `iris_sql_execute` over `%UnitTest_Result` — only `TestInstance` carries the " +
+    "for the runIndex, then `iris_sql_query` over `%UnitTest_Result` — only `TestInstance` carries the " +
     "`InstanceIndex` column, so join `TestMethod` → `TestCase` → `TestSuite` → `TestInstance` and filter " +
     "`ti.InstanceIndex = <runIndex>` (never MAX(InstanceIndex) — a concurrent run can allocate a higher " +
     "index first); the rows exist while the run is still executing, so treat them as final only once " +

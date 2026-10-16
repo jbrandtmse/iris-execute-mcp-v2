@@ -125,10 +125,11 @@ Method ResolvePort() As %Integer
     Quit tPort
 }
 
-/// GET the deployed sqlprivilege route; returns the envelope's <code>result</code> object.
-Method GetPrivileges(pQuery As %String, Output pHttpStatus As %Integer) As %DynamicObject
+/// GET the deployed sqlprivilege route; returns the whole response envelope
+/// (<code>status.errors</code> plus <code>result</code>), or "" when the call fails.
+Method GetEnvelope(pQuery As %String, Output pHttpStatus As %Integer) As %DynamicObject
 {
-    Set tResult = ""
+    Set tEnvelope = ""
     Set pHttpStatus = 0
     Try {
         Set tRequest = ##class(%Net.HttpRequest).%New()
@@ -141,13 +142,20 @@ Method GetPrivileges(pQuery As %String, Output pHttpStatus As %Integer) As %Dyna
         If $$$ISERR(tSC) Quit
         Set pHttpStatus = tRequest.HttpResponse.StatusCode
         Set tEnvelope = ##class(%DynamicObject).%FromJSON(tRequest.HttpResponse.Data)
-        Set tResult = tEnvelope.%Get("result")
         Quit
     }
     Catch ex {
-        Set tResult = ""
+        Set tEnvelope = ""
     }
-    Quit tResult
+    Quit tEnvelope
+}
+
+/// GET the deployed sqlprivilege route; returns the envelope's <code>result</code> object.
+Method GetPrivileges(pQuery As %String, Output pHttpStatus As %Integer) As %DynamicObject
+{
+    Set tEnvelope = ..GetEnvelope(pQuery, .pHttpStatus)
+    If '$IsObject(tEnvelope) Quit ""
+    Quit tEnvelope.%Get("result")
 }
 
 /// Count rows in a privileges array whose grantedVia equals pVia.
@@ -248,6 +256,56 @@ Method TestCapFiresAndDegenerateMaxRowsClamps()
     If '$IsObject(tZero) Quit
     Do $$$AssertTrue(+tZero.%Get("count") > 2, "maxRows=0 clamps to the 100-row default rather than returning an empty list")
     Do $$$AssertTrue('tZero.%IsDefined("rowsCapped"), "the clamped default is not a cap for this grantee")
+}
+
+/// DW-473 - a malformed column-level <code>target</code> (no '.', or an empty schema or table piece)
+/// is refused with the validation message instead of reaching the catalog query, which used to fail
+/// with a raw &lt;SUBSCRIPT&gt; 500. The message is the one captured live on 2026-10-15; a target with
+/// more than one '.' stays valid and returns the graceful empty result (live-verified: a table name
+/// may itself contain '.').
+Method TestMalformedTargetsReturnValidationError()
+{
+    Set tTargets = $ListBuild("NoDotHere", "S.", ".T", ".")
+    For tI = 1:1:$ListLength(tTargets) {
+        Set tTarget = $List(tTargets, tI)
+        Set tEnv = ..GetEnvelope("grantee=_SYSTEM&target="_tTarget, .tHttp)
+        Do $$$AssertEquals(tHttp, 200, "target '" _ tTarget _ "' is refused inside an HTTP 200 envelope, not a 500")
+        If '$IsObject(tEnv) {
+            Do $$$AssertTrue(0, "target '" _ tTarget _ "' returned a parseable envelope")
+            Continue
+        }
+        Do $$$AssertEquals(tEnv.status.errors.%Size(), 1, "target '" _ tTarget _ "' carries exactly one error")
+        Set tErr = tEnv.status.errors.%Get(0).%Get("error")
+        Do $$$AssertTrue(tErr [ ("Parameter 'target' must be 'schema.table' for listPrivileges (got '" _ tTarget _ "'). Omit target for an object-level listing."), "target '" _ tTarget _ "' gets the validation message (got: " _ tErr _ ")")
+        Do $$$AssertTrue(tErr '[ "SUBSCRIPT", "no raw <SUBSCRIPT> text leaks for target '" _ tTarget _ "'")
+    }
+
+    Set tEnv = ..GetEnvelope("grantee=_SYSTEM&target=A.B.C", .tHttp)
+    Do $$$AssertEquals(tHttp, 200, "a multi-dot target returns HTTP 200")
+    If '$IsObject(tEnv) Quit
+    Do $$$AssertEquals(tEnv.status.errors.%Size(), 0, "a multi-dot target is still valid: no error")
+    Do $$$AssertEquals(tEnv.result.level, "column", "a multi-dot target is a column-level listing")
+    Do $$$AssertEquals(+tEnv.result.count, 0, "a multi-dot target that names no table returns the graceful empty result")
+}
+
+/// DW-470 - the route honors <code>system</code> as <code>1</code>/<code>0</code>. Expectations pinned
+/// from a live capture (2026-10-15, IRIS 2026.2, grantee %Developer, maxRows=1000): system=0 returned 11
+/// rows and system=1 returned 576 (system tables included); omitting system matches system=0. The
+/// absolute counts depend on the instance, so the test pins the relations.
+Method TestSystemOneIsAccepted()
+{
+    Set tBase = ..GetPrivileges("grantee=%25Developer&maxRows=1000", .tHttpBase)
+    Set tOff = ..GetPrivileges("grantee=%25Developer&system=0&maxRows=1000", .tHttpOff)
+    Set tOn = ..GetPrivileges("grantee=%25Developer&system=1&maxRows=1000", .tHttpOn)
+    Do $$$AssertEquals(tHttpBase, 200, "listing without system returns HTTP 200")
+    Do $$$AssertEquals(tHttpOff, 200, "system=0 returns HTTP 200")
+    Do $$$AssertEquals(tHttpOn, 200, "system=1 is accepted with HTTP 200")
+    If '$IsObject(tBase) || '$IsObject(tOff) || '$IsObject(tOn) {
+        Do $$$AssertTrue(0, "all three listings returned a result object")
+        Quit
+    }
+    Do $$$AssertEquals(+tOff.%Get("count"), +tBase.%Get("count"), "system=0 is the documented default: it matches omitting system")
+    Do $$$AssertTrue(+tOn.%Get("count") > +tOff.%Get("count"), "system=1 includes system tables, so it lists more rows than system=0 (got " _ +tOn.%Get("count") _ " vs " _ +tOff.%Get("count") _ ")")
 }
 
 }

@@ -2,6 +2,450 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 38.7: Epic 38 burn-down
+
+No tool, action, key or preset row is added or removed, and no tool, prompt or governance-baseline count moves. Each
+change below that alters an existing behavior is a sanctioned one (orchestrator decisions #17 to #19; see AD-8 and AD-15
+of the architecture spine); every other existing input keeps its result byte for byte.
+
+### Changed
+
+- **A governance key or layer outside `global` and `profiles` now fails startup (DW-554; orchestrator decision #19).** In
+  `IRIS_GOVERNANCE`, or in the file `IRIS_GOVERNANCE_FILE` names, a flat tool key such as `{"iris_doc_put": false}`, a
+  top-level profile such as `{"prod": {...}}` and a misspelled layer such as `"globals": {...}` used to be accepted and
+  silently ignored, so the policy the operator wrote did not apply. The server now exits 1 before any IRIS traffic, with
+  an error that names the variable (and the file path), the key and the documented shape, and never echoes the value. A
+  key is rejected when its name starts with `iris_` (in any letter case) or its value is a boolean or an object. Plain
+  metadata keys with a string, number, null or array value, such as `comment` and `version`, stay valid and are ignored.
+  The `iris-mcp-governance` commands `set`, `unset` and `validate` fail with the same message and leave the file as it was.
+  A profile name under `profiles` that is not a configured profile does not fail startup: it logs one `[WARN]` per name,
+  and its overrides apply to no connection.
+- **`iris_production_manage` `delete` refuses a class that is not a production (DW-533).** It used to delete any class
+  whose name it was given. It now deletes only a production class (a compiled class that extends `Ens.Production`, or a
+  class saved but not compiled that has `Ens.Production` among the comma-separated pieces of its `Super`), and answers
+  any other class with `Class 'X' is not a production class (it does not extend Ens.Production), so nothing was deleted.
+  Name a production class.` as an error; the class and any same-named `Ens.Config.Production` row stay. The IRIS-side
+  handler `ExecuteMCPv2.REST.Interop` changes, so `BOOTSTRAP_VERSION` moves from `d352a6a32158` to `089f8f0a62b2` and the
+  first server start after the upgrade redeploys the classes.
+- **`iris_doc_get` without a line range returns an error when IRIS answers a soft error (DW-542).** A document IRIS
+  cannot read (for example a name with no document type, such as `ExecuteMCPv2.Utils`) comes back as HTTP 200 with
+  empty content and a `status` text. The tool used to return that as data; it now returns `isError: true` with the text
+  `Document 'X' could not be read in namespace 'N': <status>. Check the document name and namespace, then retry.`, as the
+  ranged read already did. A result with an empty `status` is unchanged.
+- **A non-empty `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list` is refused (DW-528, and
+  DW-529 with it).** IRIS cannot filter documents by modification time: the change list that the old code called works
+  from a database hash and writes journal bookkeeping. The call now returns `isError: true`, no code and no request
+  (`modifiedSince is not supported, so nothing was listed|exported|counted: ...`), with the advice to compare the `ts` of
+  the documents `iris_doc_list` returns. An absent or empty `modifiedSince` is unchanged, and the parameter stays in the
+  schemas. The tool descriptions and READMEs no longer promise the filter.
+- **The VS Code launcher clears `MCP_TRANSPORT` in the servers it starts (DW-539).** It spawns only stdio servers, and a
+  server refuses any other configured transport at startup, so an `MCP_TRANSPORT=http` in the editor's own environment
+  stopped every server it started. The definition environment now carries `MCP_TRANSPORT: null`, which removes it.
+
+### Fixed
+
+- **`iris_doc_load` with `ignoreConflict: false` replaces an existing document (DW-549; the Story 38.3 `iris_doc_put`
+  precedent, orchestrator decision #7).** Atelier answers a put to an existing document that carries no version token with
+  a 409, so every existing file failed. The tool now repeats the save once with `If-None-Match: <ts>` from the 409, so a
+  file whose document already exists is overwritten unless the document changes while it is being saved; then that file
+  fails with `DOCUMENT_CONFLICT` (nothing stored, no third request) and the other files continue. A new document, the
+  default `ignoreConflict: true` and a 409 with no readable document behave as before.
+- **`iris_env_promote` `execute` reads the status of a document write (DW-530).** A target write that IRIS refuses inside
+  an HTTP 200 answer (a non-empty `result.status`) used to count as written and went on to compile. The step now fails
+  with `IRIS reported an error after the write of 'X' to the target: <status>. The document may have been saved on the
+  target; check it with iris_doc_get before running iris_env_promote again.`, and execution halts like it does for a
+  failed write.
+- **The text of a rows-affected cap refusal no longer overclaims (DW-558).** It said `Its row changes were undone.`; it now
+  says `Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP.` The
+  rest of the text and the structured result are unchanged.
+- **Internal:** the production-delete state guard is one tested seam (DW-531); the two dev live gates that ended with a
+  cleanup test case assert that nothing is left in `beforeAll` and `afterAll` instead, and pass in any test order
+  (DW-556); and the `@iris-mcp/all` default suite runs its files one at a time, with a guard that observes it (DW-562).
+
+## [Pre-release — 2026-10-16] — Story 38.6: Editing and SQL safety docs, prompt and capstone
+
+### Added
+
+- **Prompt and skill `edit-and-test-class` (`@iris-mcp/dev`, dev 4 → 5 prompts, suite 11 → 12; no tool, key or preset
+  row is added).** It walks the in-place edit loop for a class already in IRIS: a ranged `iris_doc_get`, a guarded
+  `iris_doc_edit` (`apply`, with `expected` built from the read, one line break after every line), a retry of a
+  `STALE_CONTENT` refusal with `mismatches[].current`, `iris_doc_compile`, then `iris_execute_tests` with a check of
+  `total` against the number of `Test*` methods. Arguments: `className` and `change` (required), `testClass` (optional;
+  when omitted the model finds the test class that covers the class, or asks). Every tool on its main path is in the
+  dev `core` preset. The skill is generated into `skills/edit-and-test-class/SKILL.md`.
+- **The Epic 38 capstone gate** (`epic38-capstone-gate.test.ts`, `@iris-mcp/all`, in the default suite and in the
+  prepublish gate roster): it drives the built dev server over stdio and checks ranged reads, a guarded edit, the
+  `STALE_CONTENT` retry, `STORAGE_DROPPED`, the read-only preset and `SQL_ROWS_AFFECTED_CAP` against the live IRIS,
+  with the raw Atelier API as the oracle. It, and the Story 38.4 and 38.5 wire gates, first assert that the deployed
+  `ExecuteMCPv2` classes carry the `BOOTSTRAP_VERSION` of the built shared dist (DW-559).
+
+### Changed
+
+- **`iris_doc_edit` `STALE_CONTENT`: `mismatches[].current` gains one trailing line break (DW-552; orchestrator
+  decision #11).** It was the addressed lines joined with `\n`; it is now that text plus one `\n`, so it parses back to
+  exactly the addressed lines for every range, including a range that ends in an empty line, and can be passed back as
+  `expected` unchanged. The field shipped in Story 38.4 of this unreleased epic; the refusal's text block and every
+  other field are unchanged.
+- **The running hint of `iris_execute_tests` and its description name `iris_sql_query`, not `iris_sql_execute`, for the
+  manual `%UnitTest_Result` query (DW-555).** The read-only preset blocks `iris_sql_execute` and runs `iris_sql_query`.
+  The `deploy-and-test-class` prompt and skill say the same.
+- **`deploy-and-test-class` prompt and skill:** a class with no local source file is fixed in place (ranged
+  `iris_doc_get`, `iris_doc_edit`, `iris_doc_compile`); a class with a local source keeps the edit-on-disk route. The
+  two internal rule citations are gone from the text.
+- **The `@iris-mcp/all` prepublish gate runs its files one at a time (`--no-file-parallelism`)**, because three gates
+  now spawn dev servers that bootstrap the same shared instance.
+
+### Documentation
+
+- A new "Agent code editing" section of the root README covers ranged reads, the `iris_doc_put` existing-document save
+  and Storage guard (`allowStorageRegeneration`, default `false`), `iris_doc_edit` (`apply` enabled by default,
+  `regenerateStorage` disabled by default) and a table of the refusal codes (`STALE_CONTENT`, `DOCUMENT_CONFLICT`,
+  `STORAGE_DROPPED`, `SQL_READ_ONLY`, `SQL_ROWS_AFFECTED_CAP`: what happened, what to do).
+- The default state of every Epic 38 item is now stated on each surface that lists it: the root and dev READMEs and
+  `tool_support.md` (the `iris_doc_get` range, the `iris_doc_put` guard, the `iris_doc_edit` `current` retry, the three
+  `iris_sql_execute` defaults, and `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` as global variables with no
+  per-profile key whose malformed value fails startup).
+- The Claude Code, Claude Desktop and Cursor guides list `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED`, cover
+  both SQL tools, and say queries under the read-only preset go through `iris_sql_query`. The VS Code launcher README
+  lists both variables and `IRIS_TEST_TIMEOUT` among the variables it passes through untouched.
+- The prompt pack is 12 prompts (dev 5), and the `tools/list` payload table is re-measured.
+
+## [Pre-release — 2026-10-15] — Story 38.5: SQL write safety
+
+### Added
+
+- **`iris_sql_query` (`@iris-mcp/dev`, dev 30 → 31 tools, suite 106 → 107).** Runs a SQL query (SELECT) and returns
+  `{columns, rows, rowCount}`; with `countOnly` it returns `totalCount` and transfers no rows. It always runs read-only:
+  any other statement, `CALL` included, is refused before it runs, and the query runs inside a transaction that is always
+  rolled back. Its governance key `iris_sql_query` is a `read`, **enabled by default**, and stays enabled under the
+  read-only preset, which blocks the frozen-baseline write `iris_sql_execute`. It declares the parent key
+  `iris_sql_execute`: when an operator explicitly disables `iris_sql_execute`, `iris_sql_query` is disabled too
+  (`inheritedFrom`), unless `iris_sql_query` is set explicitly. The frozen baseline (`1e62c5ad5bf7`, 141 keys) is
+  unchanged. Both tools state that read-only is statement-level read-only, not side-effect-free: a rollback does not undo
+  `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, changes made with
+  `%NOJOURN` by a function, procedure or trigger the statement runs, work that parallel query worker processes do
+  (`%PARALLEL`), `JOB` or device output, other external effects, or a function, procedure or trigger that starts, commits or rolls back a transaction; a capped statement that
+  is rolled back leaves the same effects.
+- **`iris_sql_execute` parameters (defaults in brackets).** `readOnly` (`false`): only queries run. `maxRowsAffected` (no
+  cap; `0` is a dry count): an INSERT, UPDATE or DELETE that changes more rows is rolled back; under a cap only SELECT,
+  INSERT, UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (the count is the
+  statement's own row count: rows that triggers, cascades or functions change are not counted). Under a cap, an INSERT,
+  UPDATE or DELETE whose text contains the `%NOJOURN` keyword (journaling off, so the rollback could not undo it) is
+  refused with `SQL_ROWS_AFFECTED_CAP` before it runs and writes nothing; the match is on the text, so `%NOJOURN` in a
+  comment or a string also refuses, and it never admits a statement. `countOnly` (`false`).
+- **Operator variables.** `IRIS_SQL_READ_ONLY` (`true` or `false`; unset by default) forces every `iris_sql_execute` call
+  read-only. `IRIS_SQL_MAX_ROWS_AFFECTED` (a non-negative integer; unset by default) is a ceiling no call can raise. A
+  call parameter can only tighten either one. Both are global: every profile inherits them. A malformed value fails
+  startup naming the variable.
+- **Result fields.** `rowsAffected` on an INSERT, UPDATE or DELETE result (`-1` for `TRUNCATE TABLE`); `totalCount` for
+  `countOnly`; `readOnlyForced: true` when `IRIS_SQL_READ_ONLY` forced a call; `maxRowsAffectedCapped: true` when the
+  operator ceiling was the effective cap on an INSERT, UPDATE or DELETE. Every pre-existing field is unchanged.
+- **Refusal codes `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`** in the `REFUSAL_CODES` catalog. `SQL_READ_ONLY`:
+  `{code, namespace, statementType, readOnlySource}` (`readOnlySource` is `parameter`, `operator` or `tool`).
+  `SQL_ROWS_AFFECTED_CAP`: `{code, namespace, statementType, maxRowsAffected, capSource}` when the statement was not run,
+  and the same plus `rowsAffected` (after `statementType`) when it was rolled back (`capSource` is `parameter` or
+  `operator`).
+- **Route `POST /dev/sql/execute` (`ExecuteMCPv2.REST.Sql`).** It prepares the statement once, classifies it by its
+  statement type (by keyword only for the refuse-only `%NOJOURN` check above), applies the controls inside IRIS and
+  executes the same statement in the same request. A transaction it opens is rolled back to the level it found on every
+  exit path, and a statement that changes that transaction is reported as an error, also when the statement then fails.
+  An outcome the tool does not know (a newer deployed `ExecuteMCPv2.REST.Sql`) is reported as an error, never as an
+  empty result. Bootstrap: 29 → 30 classes; `BOOTSTRAP_VERSION` `3af8ca401e7c` → `d352a6a32158` (the value moves with every change to
+  an ExecuteMCPv2 class).
+- A live gate (`sql-safety-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives both tools against a
+  real IRIS, including a serializer pin against the Atelier `action/query` rows.
+
+### Changed
+
+- **`iris_sql_execute` runs through the ExecuteMCPv2 SQL route instead of the Atelier `action/query` route** (every
+  call, one serializer; orchestrator decision #12). Its rows are unchanged. A SQL error still carries the SQLCODE and
+  the IRIS message, but its text now names `/api/executemcp/v2/dev/sql/execute` and reads `ERROR #5001: SQLCODE: -51
+  Message: ...`. The tool now needs the bootstrapped ExecuteMCPv2 service, like `iris_execute_command`.
+- **`@iris-mcp/dev` `core` preset: 14 → 15 runtime tools (13 → 14 package tools).** Querying is part of the everyday
+  debug loop, and under the read-only preset `core` would otherwise have no way to query. `developer` also includes
+  `iris_sql_query`: 32 runtime tools. The target of about 13 runtime tools per server is a guideline (L-4).
+
+## [Pre-release — 2026-10-15] — Story 38.4: Surgical line edit tool
+
+### Added
+
+- **`iris_doc_edit` (`@iris-mcp/dev`, dev 29 → 30 tools, suite 105 → 106).** Changes a few lines of an existing class,
+  routine or include file without resending the whole document. The agent reads the exact lines with a ranged
+  `iris_doc_get` and sends `insert`, `delete` and `replace` edits in the same line numbering. Every edit carries the
+  `expected` text of the lines it changes. The tool reads the document once, checks every edit, applies them all
+  bottom-up and saves once with `If-None-Match` set to the version it read: a concurrent change is a
+  `DOCUMENT_CONFLICT`, never retried, and no `ignoreConflict` exists. It answers from a re-read, never from the edited
+  text (IRIS reformats class source on save): `unifiedDiff` (3 context lines), an excerpt per edit (3 context lines on
+  each side), `totalLines` and `ts`, and it never returns the whole document. It does not compile; the text says to run
+  `iris_doc_compile`. An edit whose result equals the stored text saves nothing (`changed: false`).
+- **Governance keys and default states.** Two new post-foundation keys (the frozen baseline `1e62c5ad5bf7`, 141 keys, is
+  unchanged):
+  - `iris_doc_edit:apply` is a `write` that ships **enabled by default** (the `defaultEnabled` marker; Project Lead
+    decision S-3: every edit is guarded by `expected`, the save is version-checked, and a class edit that would drop a
+    Storage definition is refused). It is the second holder of that closed list, after `iris_production_control:clean`.
+    Disable it with `{"global": {"iris_doc_edit:apply": false}}`, by disabling `iris_doc_put`, or with the read-only
+    preset.
+  - `iris_doc_edit:regenerateStorage` is a `write` that is **disabled by default**: the same edits without the Storage
+    guard, for an operator who accepts that IRIS generates new storage at the next compile.
+- **Parent keys (AD-4, AD-6).** `ToolDefinition` gains an optional `parent` (the existing governance key whose capability
+  a new tool re-exposes). When the parent's first explicit setting, in cascade order, is `false`, every key of the child
+  seeds disabled; an explicit setting on the child still wins, and the inherited disable sits above the preset seed.
+  `iris_doc_edit` declares the parent `iris_doc_put`. The cascade is now
+  `env.profile ?? env.global ?? file.profile ?? file.global ?? inheritedDisable ?? presetSeed ?? defaultSeed`, and with no
+  parent explicitly disabled every existing key's effective value, `configSource` and denial text is byte-identical to
+  before.
+  - `configSource` gains the value `parent` (in `iris_server_profiles`, the governance resource and `iris-mcp-governance
+    universe`).
+  - A denial inherited from a parent carries `inheritedFrom: "<parent key>"` after `server` and the text suffix
+    ` (inherited from '<parent>')`; `presetApplied` is not set when the parent caused it. The audit log schema is
+    unchanged (`inheritedFrom` is not copied into it).
+  - `@iris-mcp/shared` exports `buildParentKeys`, `assertParentKeysKnown`, `inheritedParentDisable` and the type
+    `ParentKeys`; `effective`, `configSource`, `getEffectivePolicy`, `getEffectiveConfigSources` and
+    `computeServerDiscovery` take a trailing optional `parentKeys` (default empty). Registration fails fast when a
+    `parent` names an unknown key, one of the tool's own keys, or a key that itself has a parent, or when a tool that
+    owns a baseline key declares one.
+- **Refusal code `STALE_CONTENT`** in the `REFUSAL_CODES` catalog: `{ code: "STALE_CONTENT", name, namespace, ts,
+  totalLines, mismatches: [{ edit, op, startLine, endLine, current }] }`, listing every edit whose `expected` text does
+  not match the document now, with the current text. `iris_doc_edit` also returns `STORAGE_DROPPED` and
+  `DOCUMENT_CONFLICT` with the texts and fields of Story 38.3 (the remedy of the first names `regenerateStorage`).
+- **`@iris-mcp/shared` line utility (`lines.ts`).** New exports `splitLines`, `joinLines`, `textToLines`, `alignLines`,
+  `unifiedDiff`, `DIFF_CONTEXT_LINES` and `MAX_DIFF_DISTANCE`. `unifiedDiff` follows the `diff -U3` conventions (a
+  hand-written Myers diff, no new dependency; a live-captured `diff` oracle pins its output); more than
+  `MAX_DIFF_DISTANCE` (2000) changed lines are reported as one change.
+- A live gate (`doc-edit-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives the tool against a real
+  IRIS, and a cross-package test (`default-enabled-holders.test.ts`) pins the closed lists of `defaultEnabled` holders
+  and `parent` declarations.
+
+### Changed
+
+- **`@iris-mcp/dev` `core` preset: 13 → 14 runtime tools (12 → 13 package tools).** `iris_doc_edit` is in the everyday
+  authoring loop (ranged read, edit, compile, test) and replaces whole-document rewrites. The target of about 13 runtime
+  tools per server is a guideline, not a hard limit (L-4, Project Lead decision 2026-10-14). `developer` also includes
+  it: 31 runtime tools.
+- **New `TOOL_PAIRS` member `iris_doc_get` / `iris_doc_edit`:** the two are always co-visible in every preset.
+- Internal, with byte-identical results: `iris_doc_put` and `iris_doc_load` split text through the shared `splitLines`, and
+  `iris_doc_get`'s ranged read shares its readable/binary check with `iris_doc_edit`. Their behavior, schemas and
+  descriptions are unchanged, and there is no ObjectScript or bootstrap change (`BOOTSTRAP_VERSION` stays
+  `3af8ca401e7c`).
+
+## [Pre-release — 2026-10-15] — Story 38.3: Storage block drop guard
+
+### Changed — safety: `iris_doc_put` refuses a put that drops a class's Storage definition (sanctioned, AD-15)
+
+**Before.** `iris_doc_put` replaced a whole class with the text it was given. When that text had no Storage block, IRIS
+dropped the class's Storage definition, and the next compile generated a new one. On the live instance (IRIS 2026.2,
+Atelier v8) a class with two rows, put without its Storage and with its two properties in the other order, kept reading
+its rows correctly until the compile, and then read them swapped (`Alpha: 'beta-1'`): silent data corruption.
+
+**After.** A put to an existing class is refused when its content drops one of the class's Storage definitions. The
+result is `isError: true`, nothing is stored, and `structuredContent` is
+`{ code: "STORAGE_DROPPED", name, namespace, droppedStorage }`, where `droppedStorage` lists the dropped definition
+names in the order of the current source. The text says what to do:
+`Document '<name>' was not saved in namespace '<ns>': the content drops the Storage definition 'Second' that the class has now, and IRIS would generate new storage at the next compile, which can change how existing rows are read. Nothing was stored. Keep the Storage definitions in the content (read the class with iris_doc_get first), or pass allowStorageRegeneration: true to let IRIS regenerate the storage.`
+
+- **Override.** The new optional parameter `allowStorageRegeneration` (default **false**) lets the put through, with
+  today's behavior. It is a parameter of `iris_doc_put`, not a new tool or action: no governance key, `mutates`
+  classification, annotation or preset changes, and `iris_doc_put` stays a grandfathered baseline key.
+- **What counts.** Names are compared exactly (case-sensitive). A rename is a drop; changing a definition's content is
+  allowed. Only `.cls` documents are guarded, in UDL or XML form. A comment, a string, a method or XData body, or a
+  label that only says `Storage` is not a definition: the scanner follows IRIS's own parse, and a live oracle checks it
+  against IRIS for every fixture. In a few hand-written forms (a brace hidden in embedded SQL or HTML, for example) the
+  two differ, and there a drop can go unrefused.
+- **Otherwise unchanged.** A new document of any type gives the result it gave before, and so does a put with
+  `ignoreConflict: true` to an existing routine, include file or class that keeps its Storage. (Without
+  `ignoreConflict`, a put to an existing document used to fail with `HTTP 409` and is now saved; see Fixed.) A new
+  document still costs one request. With `ignoreConflict: true` the request for a new
+  class no longer carries `?ignoreConflict=1` (IRIS ignores it for a new document), and an existing class is read through
+  the 409 that IRIS answers an unversioned write with, so no GET or HEAD is added to any path. With both
+  `ignoreConflict` and `allowStorageRegeneration`, and with any other document type and `ignoreConflict`, the one request
+  is today's.
+- **Not guarded, by decision (AD-24 verdicts).** `iris_doc_load` (DW-544), the `iris_env_promote` `execute` sync (DW-545)
+  and the `iris_doc_xml_export` import (DW-546) do not run the guard; each ledger entry says when to reopen it. The
+  bootstrap's own classes have no Storage definitions, and `iris_docdb_document` and `iris_global_set` do not write
+  documents. A new test lists every document-writing path with its verdict and fails on a path that has none.
+
+### Fixed
+
+- **DW-540: `iris_doc_put` could not update an existing document without `ignoreConflict`.** Atelier refuses a write to an
+  existing document that carries no version token with HTTP 409, so the tool answered `HTTP 409` for every existing
+  document of every type. It now uses that 409 (which carries the current document and its `ts`) and saves once more
+  with `If-None-Match` set to that `ts`, so an existing class, routine or include file is saved only if it has not changed
+  since the tool read it. A 409 on that second request is returned as
+  `{ code: "DOCUMENT_CONFLICT", name, namespace }` with `isError: true` and nothing stored; it is never retried. The
+  `ignoreConflict` description said "overwrite even when the server copy is newer"; it now says what the flag does
+  (skips the version check) and that it is not needed to replace an existing document.
+- **DW-541: `iris_doc_get` `metadataOnly` read a header that IRIS never sends.** `structuredContent` is now
+  `{ exists, name, etag }`; the always-absent `timestamp` key is gone. The text and the JSON on the wire are unchanged.
+
+### Added
+
+- `@iris-mcp/shared` exports `REFUSAL_CODES`, `refusalResult` and the types `RefusalCode` and `RefusalResult`: the catalog
+  of refusal codes, born with `GOVERNANCE_DISABLED` (whose results are byte-identical), `STORAGE_DROPPED` and
+  `DOCUMENT_CONFLICT`. It also exports `isClassDocument`, `storageDefinitionNames`, `droppedStorageDefinitions` and
+  `storageDroppedRefusal`, the guard that Story 38.4's `iris_doc_edit` reuses.
+- A live gate (`doc-put-storage-guard-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives the
+  guard against a real persistent class with rows.
+
+## [Pre-release — 2026-10-15] — Story 38.2: Line-range document read
+
+### Added — `iris_doc_get` reads a line range (`@iris-mcp/dev`, `@iris-mcp/shared`; G1)
+
+`iris_doc_get` takes two new optional parameters, `startLine` and `endLine` (1-based, inclusive; whole numbers of at
+least 1), so an agent can read part of a large class instead of pulling the whole document, and can read the exact
+lines before editing them with `iris_doc_edit`, which uses the same line numbers. A ranged read is still one `GET` of
+the whole document, cut in TypeScript. It applies only to UDL text (`format` omitted or `"udl"`).
+
+- **Numbering.** Line N is element N-1 of the line array that IRIS returns, after one leading byte-order mark is
+  removed. A class ends with an empty last line and it counts, so `totalLines` equals the `totalLines` that
+  `iris_loc_count` reports for the same class. A routine's or include file's line 1 is its `ROUTINE` header:
+  `ROUTINE <name>` for a `.mac` routine (IRIS drops the type), `ROUTINE <name> [Type=INC]` for an include file.
+- **Defaults and clamp.** `startLine` alone reads to the last line, and `endLine` alone reads from line 1. An `endLine`
+  past the end is clamped to the last line.
+- **Result.** The text is a header (`Document '<name>' in namespace '<ns>': lines <s>-<e> of <t> (ts <ts>)`) and then
+  the lines in the `cat -n` layout: the number right-aligned in 6 columns, a tab, then the line exactly.
+  `structuredContent` is `{ name, ts, startLine, endLine, totalLines, lines }` with the effective bounds. `ts` is the
+  document's version timestamp (the same string `metadataOnly` returns as `etag`), which `iris_doc_edit` sends back to
+  IRIS so that an edit cannot overwrite a change it did not see.
+- **Errors** (`isError: true`, each with a fix): a range with `metadataOnly` or with `format: "xml"`, `startLine` after
+  `endLine`, `startLine` past the last line (the message states `totalLines`), a binary document, and a document IRIS
+  cannot read (the message carries IRIS's reason). A range with `metadataOnly` or `format: "xml"`, and `startLine` after
+  `endLine`, are refused before any request; the others are found after the read. A value that is not a whole number of
+  at least 1 is refused by the argument check before the tool runs (an `Invalid arguments` error that names the
+  parameter).
+- **Unchanged without the parameters.** With neither `startLine` nor `endLine`, the request and the result (text and
+  `structuredContent`) are byte-identical to before, in every mode (`format`, `metadataOnly`, a missing document); the
+  existing tests are unmodified and a new back-compat suite pins the whole result as literals.
+- **Description fix.** The `metadataOnly` description now says it returns the version timestamp as `etag`. IRIS never
+  sends a `Last-Modified` header, so no `timestamp` field has ever appeared in that result.
+
+`@iris-mcp/shared` exports three new functions and one constant from its line utility (`lines.ts`, the single home of
+document numbering and BOM handling): `documentLines`, `linesInRange`, `formatNumberedLines` and `NUMBERED_LINE_WIDTH`.
+`atelierDocStatusError` is unchanged; its documentation now covers any Atelier `/doc` result, including the `GET` soft
+error that `iris_doc_get` reports.
+
+**Recorded for Story 38.4 (AD-24).** On the live instance (IRIS 2026.2, Atelier v8) a `PUT` to an existing document with
+no `If-None-Match` header is refused with HTTP 409 and writes nothing, and `If-None-Match: <ts>` is accepted, so an edit
+must send the `ts` exactly as a ranged read returns it. A new live gate (`doc-get-range-live-gate.test.ts`, in the
+`@iris-mcp/dev` prepublish gate roster) proves both, and proves that the ranged reads it performs (the boundary lines,
+one-sided and clamped reads, and windows that cover every line) equal the matching slices of the live full read, on a
+class of more than 500 lines and on a routine.
+
+## [Pre-release — 2026-10-15] — Story 38.1: Reject the unimplemented HTTP transport
+
+### Changed — an MCP transport other than stdio is a startup configuration error (`@iris-mcp/shared`, all five servers; G48)
+
+**Before.** `MCP_TRANSPORT=http` or `--transport http` was accepted. The server then loaded its configuration,
+health-checked IRIS, negotiated the Atelier version and bootstrapped the custom REST classes, and only afterwards threw
+`HTTP transport not yet implemented`. An unknown `MCP_TRANSPORT` value fell back to `stdio` with a warning, and an unknown
+`--transport` value was silently ignored.
+
+**After.** `stdio` is the only supported transport. `resolveTransport()` throws a configuration error for every
+configured value other than `stdio`; the match is exact and case-sensitive, a `--transport` flag with no value is
+rejected, and an empty `MCP_TRANSPORT` still means "not configured". Each server prints `Fatal: Error: <message>` and
+exits 1 before it makes any IRIS connection:
+
+- `Unsupported transport "http" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".`
+- `Unsupported transport "http" from --transport: stdio is the only supported transport. Remove --transport or pass --transport stdio.`
+
+Every configured value is checked (flags first, in argument order, then `MCP_TRANSPORT`), so one channel no longer hides
+a bad value on the other. Startup with no transport configured, or with `stdio`, is unchanged: the same IRIS calls and
+the same log lines. The type of `McpServerBase.start()`'s parameter is narrowed to `"stdio"`. **Action for users who set `MCP_TRANSPORT` or
+`--transport`:** remove it, or set it to `stdio`. Streamable HTTP is not offered, because it needs an authentication,
+bind-address and session design first; that decision is filed as DW-538.
+
+## [Pre-release — 2026-10-15] — Story 38.0: Epic 37 deferred cleanup
+
+`BOOTSTRAP_VERSION` moves from `2159ec9e6f69` to `3af8ca401e7c` (three handlers changed: `Interop`, `Security`,
+`Analytics`). Every IRIS-side route change keeps every older request shape working and only adds response
+fields; the behavior changes (a stricter production-delete guard, a validation message in place of a raw 500) are
+listed below.
+
+### Changed — `IRIS_NAMESPACE` now defaults to `USER` instead of `HSCUSTOM` (`@iris-mcp/shared`, VS Code launcher; DW-469)
+
+When `IRIS_NAMESPACE` is unset, the suite now connects to `USER` — the namespace every IRIS instance has and the value
+every documented environment-variable table already stated. `HSCUSTOM` was a HealthShare-development default that
+had leaked into the code. The VS Code launcher's `irisMcpLauncher.namespace` setting follows (its documented contract is
+to match `loadConfig()`), and `.env.example` now carries `USER` with a one-line HealthShare note. **Action for users
+who relied on the old default** (for example on a HealthShare instance): set `IRIS_NAMESPACE=HSCUSTOM` (or your own
+namespace) explicitly, or set `irisMcpLauncher.namespace` in the extension. Scripts and test helpers that default the
+namespace already name `HSCUSTOM` explicitly, so they are unaffected.
+
+### Changed — `iris_production_manage` `delete` refuses a current production in any state other than Stopped (`@iris-mcp/interop`, DW-54)
+
+The delete guard used to refuse only a Running production. It now refuses the namespace's current production whenever it
+is not Stopped (Suspended, Troubled, NetworkStopped, Unknown and any other state), naming the state; Running keeps its
+exact message (`Production '<name>' is running; stop it before deleting`). Nothing is deleted on a refusal. A stopped
+production, or one that is not the namespace's current production, is deleted exactly as before. The tool description
+and README name the refused states.
+
+### Changed — `iris_doc_export` forwards `generated` on its `modifiedSince` enumeration (`@iris-mcp/dev`, DW-527)
+
+With `modifiedSince` set, `generated` (default `false`) is now sent on the `/modified` request the same way the
+`/docnames` branch has always sent it: `false` sends `generated=0`, `true` sends `generated=1`, `both` omits it.
+**Known limitation, tracked separately:** Atelier's `/modified` route is POST-only on current IRIS (live probe
+2026-10-15, IRIS 2026.2, Atelier v8: `GET /modified/<timestamp>` answers HTTP 405), so the `modifiedSince` enumeration
+itself does not work against such an instance, with or without this change.
+
+### Fixed — `iris_doc_put` reported success when IRIS stored nothing (`@iris-mcp/dev`, DW-485)
+
+IRIS can refuse a document inside an HTTP 200 response with an empty error list, reporting the reason only as a
+string `result.status` (for example `ERROR #16021: Illegal Header Line` for a document whose first line starts with a
+byte-order mark) and storing nothing. `iris_doc_put` now returns `isError: true` with that text
+(`Document '<name>' was not saved in namespace '<ns>': <status>. ...`) and the IRIS result as `structuredContent`; an
+accepted write answers exactly as before. A leading U+FEFF is stripped from `content` before it is sent (a caller's
+array is never mutated), as `iris_doc_load` already did; both tools now share one implementation in `@iris-mcp/shared`
+(`stripLeadingBom`, `atelierDocStatusError`).
+
+### Fixed — `iris_resource_manage` `listPrivileges`: `system` is sent, and a malformed `target` gets a clear error (`@iris-mcp/admin`, DW-470, DW-473)
+
+`listPrivileges` takes an optional `system` (default `false`) and always sends `system=1` or `system=0`; `true` lists
+system tables too. A column-level `target` must be `schema.table`: `NoDotHere`, `S.`, `.T` and `.` now return
+`Parameter 'target' must be 'schema.table' for listPrivileges (got '<target>'). Omit target for an object-level listing.`
+instead of a raw `<SUBSCRIPT>` 500; `A.B.C` still returns the graceful empty result. The tool description now limits
+"a schema" targets to grant/revoke.
+
+### Fixed — `iris_production_item` `get` names the production it read; `iris_production_manage` `delete` removes orphan rows (`@iris-mcp/interop`, DW-450, DW-55)
+
+`get` always adds a `production` field (the production the row belongs to), whether or not `production` was passed.
+`delete` of a production whose class is gone but whose `Ens.Config.Production` row remains now removes the row and
+returns `{"action":"deleted","name":...,"orphanRemoved":true}`; it used to answer "does not exist" and leave the row.
+A name with neither a class nor a row still answers "does not exist" and changes nothing.
+
+### Fixed — a failed cube build could strand the response on the null device (`iris_analytics_cubes` `build`, DW-455)
+
+The cube-build handler's output-redirect restore (success path and catch path) now goes through the same
+independently-guarded teardown the command handler uses, so a throw from one restore step cannot skip the others.
+
+### Fixed — the startup health-check failure is logged with `IRIS health check failed:` exactly once (`@iris-mcp/shared`, DW-523)
+
+A refusal wrapped by `checkHealth` already carried the prefix and the startup log added it again. The prefix is now
+added only when it is missing, so a network error and an HTTP 401/403/404 refusal each read it once.
+
+### Fixed — release tooling and test gates (internal; DW-388, DW-413 to DW-417, DW-490, DW-492, DW-495, DW-496, DW-511, DW-524)
+
+`checkDistFresh` now checks any package whose `files` has an entry naming `dist` or a path under it (`dist`, `./dist`,
+`dist/`, `dist/**`, `dist/*.js`, ...; a manifest with no `files` entry for `dist` is still skipped), never throws (a
+missing or malformed `package.json`, an unreadable entry and a dangling or directory symlink under `src/` each return
+`{ ok: false, reason }`), follows a symlinked file, refuses a `dist/` file dated more than 60 s in the future, checks
+that every `dist/` target of `main`, `module`, `bin` and `exports` exists, and no longer counts files under a `src/`
+`__tests__` directory (they never ship, and a fixture edit could never be cleared by a rebuild). The epic 35 and epic 37 live gates use it instead of an existence check,
+so a stale dist fails an armed run by package name before any IRIS call. `scripts/verify-iris-reachable.mjs` names every
+IRIS variable it defaulted on stderr and, under `CI`, refuses to default any of them (exit 1 before any network call).
+The dev package's prepublish gate runs its live files sequentially (`--no-file-parallelism`) and a failing running-state
+expectation prints the last Atelier `work/` response. Host-specific test failures are fixed: the certification drift
+test uses the real temp path on macOS, the utf8 key test skips with the fixture reason when the fixture is absent, the
+two real-resend OS tests moved to `MessageResendLiveTest` and skip when the scratch production classes are absent,
+and the engine chain test is pinned to a strictly increasing clock and asserts a fresh client-config build.
+
+### Fixed — documentation that overstated or misdescribed behavior (DW-57, DW-384, DW-458, DW-514, DW-520)
+
+The README now scopes the "existing connection-error envelope" claim to an instance that is unreachable at startup (a
+mid-session outage surfaces as `Tool error: …`); the `iris_production_item` description and README say that
+`enable`/`disable` skip an item whose host class no longer resolves and that `set` with `settings.className` repairs it;
+the `iris_execute_*` truncation marker is documented as `[IRIS-MCP-TRUNCATED ceiling=<N>chars]` detected by its stable
+prefix; the `ping()` comments no longer cite a monitoring loop that does not exist; the `buildDocDbRestriction` comment
+says unsupported operators are silently skipped.
+
 ## [Pre-release — 2026-09-16] — Story 37.1: default-profile outage no longer takes down the server
 
 ### Fixed — an unreachable `default` IRIS instance made the ENTIRE server exit at startup, even when every other registered profile was healthy (`@iris-mcp/shared`, MEDIUM, second beta-feedback defect)
@@ -233,7 +677,7 @@ governance key, or action — `iris_execute_classmethod` keeps its existing `wri
 ### Added — Response payload ceiling on `iris_execute_command`/`iris_execute_classmethod` (`@iris-mcp/dev`, Story 34.6)
 
 `output` is now capped at 32768 characters on both tools — content beyond the ceiling is cut off and replaced with a
-structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]`), never a bare `...`; `truncated`
+structured, machine-detectable marker (`[IRIS-MCP-TRUNCATED ceiling=32768chars]` when the field had the whole budget; a field that follows another carries `ceiling=<N>chars` with `<N>` the budget that remained for it, so detect the marker by the stable `[IRIS-MCP-TRUNCATED` prefix, never the full literal), never a bare `...`; `truncated`
 folds this in alongside the pre-existing capture-overflow signal. `iris_execute_classmethod`'s `byRefValues` gains its
 own combined 1000-node / 32768-character budget shared across every marked position, surfaced via a new additive
 `byRefTruncated` boolean (separate from `truncated`, which describes only `output`). The ceiling was picked from live
@@ -592,9 +1036,11 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`src/tools/presets.ts`) covering every one of its tools — enforced at server construction
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
-`iris_env_promote` are a declared pair, always co-visible in every preset. Roster summary (runtime
-tool counts, as of Story 36.2): `full` 30/27/23/22/8 (dev/admin/interop/ops/data), `core`
-13/13/10/10/8, `developer` 30/11/23/10/8 — every `core` server lands at ≤13 runtime tools.
+`iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
+`iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
+tool counts, as of Story 38.5): `full` 32/27/23/22/8 (dev/admin/interop/ops/data), `core`
+15/13/10/10/8, `developer` 32/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
+guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under
 `core` on `@iris-mcp/dev`).

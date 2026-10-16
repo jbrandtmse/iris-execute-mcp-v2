@@ -268,7 +268,7 @@ the policy visually and every MCP client picks it up on next server start.
 - **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
   the five server packages' built dist (the same derivation the suite's own cross-package tests use), grouped
   per package with read/write badges, baseline/post-foundation origin, and each key's effective value with its
-  `configSource` badge (`env` / `file` / `preset` / `default`) — the same render a running server's
+  `configSource` badge (`env` / `file` / `parent` / `preset` / `default`) — the same render a running server's
   `iris_server_profiles` reports.
 - **Per-key tri-state toggles** (enabled / disabled / inherit) edit the file's global layer or one profile
   layer (tabs: `global (file)` + `default` + every Server Manager server name + every profile the file names).
@@ -298,7 +298,7 @@ All settings live under `irisMcpLauncher.*` (Settings UI: search "IRIS MCP Launc
 | ---------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `irisMcpLauncher.servers`          | `[]` (all)                               | Server Manager server names to expose. Empty means every server Server Manager currently reports.                                                                                                                                                                                 |
 | `irisMcpLauncher.packages`         | `["admin","data","dev","interop","ops"]` | Which `@iris-mcp` suite packages to register. (The `"all"` meta-package key was removed in Story 31.6 — `@iris-mcp/all` ships no `dist`/`bin` and could never be started; select the individual packages you need.)                                                              |
-| `irisMcpLauncher.namespace`        | `"HSCUSTOM"`                             | Default `IRIS_NAMESPACE` for every spawned server (matches the suite's own `loadConfig()` default). Server Manager has no per-server namespace concept, so this is the one connection field this extension cannot read from Server Manager.                                       |
+| `irisMcpLauncher.namespace`        | `"USER"`                                 | Default `IRIS_NAMESPACE` for every spawned server (matches the suite's own `loadConfig()` default). Server Manager has no per-server namespace concept, so this is the one connection field this extension cannot read from Server Manager.                                       |
 | `irisMcpLauncher.combineProfiles`  | `false`                                  | `false` (default): one definition per (package, server) pair, each single-profile. `true`: one definition **per package**, covering **every selected server** via the suite's multi-profile `IRIS_PROFILES` env var — address a specific server with the `server` tool parameter. |
 | `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `<path>/packages/<dir>/dist/index.js` with the editor's own interpreter (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) instead of `npx -y @iris-mcp/<pkg>`.                                    |
 | `irisMcpLauncher.governance`       | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE`.                                                                                                                                                                                                                                    |
@@ -352,8 +352,10 @@ path instead, which does support it.
   own environment, so every connection/governance variable this extension manages is emitted explicitly —
   including as `null` (VS Code's "remove this variable" signal) when a setting is unset. Without that, an
   ambient `IRIS_PROFILES` / `IRIS_GOVERNANCE` / `IRIS_SERVER_MANAGER` exported in your shell would silently
-  leak into every spawned server. Variables the extension exposes no setting for (`IRIS_TIMEOUT`,
-  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit.
+  leak into every spawned server. `MCP_TRANSPORT` is cleared the same way: the launcher spawns only stdio servers, and
+  a server refuses any other configured transport at startup, so an ambient `MCP_TRANSPORT` that names another
+  transport would otherwise stop every spawned server. Variables the extension exposes no setting for (`IRIS_TIMEOUT`,
+  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED`, `IRIS_TEST_TIMEOUT`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit. `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED` and `IRIS_TEST_TIMEOUT` are unset by default, and the two SQL safety variables are global: every profile the launcher writes inherits them.
 - User cancellation of the credential prompt is a first-class, expected outcome: the server is reported as not
   started with one clear message. It is never retried automatically and never produces a toast storm. (The real
   `vscode.authentication.getSession({createIfNone:true})` signals cancellation by **rejecting**, not by

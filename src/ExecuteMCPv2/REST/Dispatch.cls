@@ -177,6 +177,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 28 (Story 28.1): SQL Performance Advisor - Data Endpoint -->
   <Route Url="/dev/sql/advise-data" Method="POST" Call="ExecuteMCPv2.REST.SqlAdvisor:AdviseData" />
+
+  <!-- Epic 38 (Story 38.5): SQL write safety - classified, transactional SQL execution -->
+  <Route Url="/dev/sql/execute" Method="POST" Call="ExecuteMCPv2.REST.Sql:Execute" />
 </Routes>
 }
 
