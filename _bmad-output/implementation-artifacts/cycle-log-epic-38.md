@@ -175,3 +175,8 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T19:03:03Z	Story 38.7	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=2298 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-16T19:03:06Z	Story 38.7	committed	sha=b826904 code_sha=22fbff3 build_sha=4520fd7 submodules= ci=none run=none branch=epic38 pushed=origin/epic38 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-8,epics.md:38.7-bullets,epics.md:39.6-DW-561
 2026-10-16T19:03:06Z	Story 38.7	story_cycle	plan_to_commit_min=178 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-16T19:03:33Z	Epic 38	epic_status_done	stories=8
+2026-10-16T19:03:33Z	Epic 38	model_tier_checkpoint	armed=false stack_risk=none review_tier=full-opus implement_model=claude-sonnet-5-5 high_med_avg=4.13 unresolved_high_med_avg=1.13 metric=unresolved rework_stories=1 review_loop_thrash=0 rework_lang_defects=1 review_high=4 review_med=31 result=hold applied=false
+2026-10-16T19:03:33Z	Epic 38	epic_retro_skipped	reason=user_directed_skip_unattended_run
+2026-10-16T19:03:33Z	Epic 38	decision_sheet_skipped	reason=sheet_taken_before_burndown_charter_decisions_17_18_no_new_escalated_or_pending
+2026-10-16T19:03:33Z	Epic 38	ci_green_verified	run=none head=87df87a ci=none note=no_github_workflows_local_gates_per_story
