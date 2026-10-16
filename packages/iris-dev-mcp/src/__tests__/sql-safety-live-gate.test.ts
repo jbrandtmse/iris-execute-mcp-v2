@@ -14,7 +14,9 @@
  *  - the rows-affected cap, by parameter and by `ctx.config.sqlMaxRowsAffected`: a DELETE over the cap is
  *    rolled back with the rows and the trigger's audit rows intact (the trigger's `$INCREMENT` moved: the
  *    recorded residual), a DELETE within it commits, TRUNCATE TABLE reports -1 and is rolled back, and a
- *    CALL is refused before it runs;
+ *    CALL is refused before it runs; an INSERT, UPDATE or DELETE that carries `%NOJOURN` is refused before it
+ *    runs, by parameter and by ceiling, because a rollback could not undo it (the same statement with no cap
+ *    runs);
  *  - read-only mode, by parameter, by `ctx.config.sqlReadOnly` and by `iris_sql_query`: an UPDATE is
  *    refused with the values unchanged, and a SELECT that calls a function has its SQL write and its
  *    journaled global set undone while its `$INCREMENT` counter is not;
@@ -765,6 +767,167 @@ describe("the rows-affected cap (Story 38.5, AC-3, AC-7)", () => {
     expect(result.content[0]?.text).toContain(`Statement changed the transaction this tool opened in namespace '${IRIS_NAMESPACE}'`);
     const after = await run(sqlExecuteTool, { query: `SELECT ${FN("Level")} AS lvl` });
     expect(after.structuredContent).toMatchObject({ rows: [[0]] });
+  }, 60000);
+});
+
+// -- %NOJOURN under a cap (AC-3, AC-7) -------------------------------
+
+describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused under a cap (Story 38.5, AC-3, AC-7)", () => {
+  reseedBeforeEach();
+
+  /** The cap the statements below would pass if it were only the row count that mattered. */
+  const ROOMY_CAP = 1000;
+
+  async function expectUntouched(): Promise<void> {
+    expect(await gateRows()).toBe(SEEDED_ROWS);
+    expect(await auditRows()).toBe(0);
+    expect(await scalar(`SELECT COUNT(*) FROM ${T} WHERE Qty = 99`)).toBe(0);
+    // No statement ran, so the DELETE trigger never fired.
+    expect(await callClassMethod(GATE, "Counters")).toBe("0|");
+  }
+
+  const NOT_RUN = (statementType: string, source: string, remedy: string): string =>
+    `Statement was not run in namespace '${IRIS_NAMESPACE}': it is a ${statementType} statement whose text contains %NOJOURN, which turns ` +
+    `journaling off, so a rows-affected cap (${ROOMY_CAP}, from ${source}) cannot undo it. Nothing was changed. ${remedy}`;
+
+  const REFUSED: Array<[string, string, string]> = [
+    ["DELETE", `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, "DELETE"],
+    ["lower case", `delete %nojourn from ${T} where ${DEL_WHERE}`, "DELETE"],
+    ["mixed case", `DELETE %NoJourn FROM ${T} WHERE ${DEL_WHERE}`, "DELETE"],
+    ["no space before the token", `DELETE%NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, "DELETE"],
+    ["a comment before the token and a line break after it", `DELETE /* x */ %NOJOURN\nFROM ${T} WHERE ${DEL_WHERE}`, "DELETE"],
+    ["UPDATE", `UPDATE %NOJOURN ${T} SET Qty = 99 WHERE ${DEL_WHERE}`, "UPDATE"],
+    ["INSERT", `INSERT %NOJOURN INTO ${TA} (Note) VALUES ('x')`, "INSERT"],
+    ["INSERT OR UPDATE", `INSERT OR UPDATE %NOJOURN INTO ${TA} (Note) VALUES ('x')`, "INSERT"],
+  ];
+
+  it("under maxRowsAffected, every form of the statement is refused before it runs, and nothing is written", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    for (const [label, query, statementType] of REFUSED) {
+      const result = await run(sqlExecuteTool, { query, maxRowsAffected: ROOMY_CAP });
+
+      expect(result.isError, label).toBe(true);
+      expect(result.structuredContent, label).toEqual({
+        code: "SQL_ROWS_AFFECTED_CAP",
+        namespace: IRIS_NAMESPACE,
+        statementType,
+        maxRowsAffected: ROOMY_CAP,
+        capSource: "parameter",
+      });
+      expect(result.content[0]?.text, label).toBe(
+        NOT_RUN(
+          statementType,
+          "maxRowsAffected",
+          "Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected.",
+        ),
+      );
+    }
+    await expectUntouched();
+  }, 60000);
+
+  it("under maxRowsAffected 0 the row count is not what refuses it: the rows are intact, with no rowsAffected reported", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, { query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, maxRowsAffected: 0 });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).not.toHaveProperty("rowsAffected");
+    await expectUntouched();
+  }, 60000);
+
+  it("under the operator ceiling (ctx.config.sqlMaxRowsAffected) it is refused with capSource operator, whatever the caller asks", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const operator = ctxWith({ sqlMaxRowsAffected: ROOMY_CAP });
+
+    for (const args of [{}, { maxRowsAffected: ROOMY_CAP * 10 }]) {
+      const result = await run(sqlExecuteTool, { query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, ...args }, operator);
+
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(result.structuredContent, JSON.stringify(args)).toEqual({
+        code: "SQL_ROWS_AFFECTED_CAP",
+        namespace: IRIS_NAMESPACE,
+        statementType: "DELETE",
+        maxRowsAffected: ROOMY_CAP,
+        capSource: "operator",
+      });
+      expect(result.content[0]?.text, JSON.stringify(args)).toBe(
+        NOT_RUN(
+          "DELETE",
+          "IRIS_SQL_MAX_ROWS_AFFECTED",
+          "Remove %NOJOURN from the statement text, a comment or a string included; the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.",
+        ),
+      );
+    }
+    await expectUntouched();
+  }, 60000);
+
+  it("the same statement with no cap runs and commits, as it does today", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, { query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}` });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, rowsAffected: DEL_ROWS });
+    expect(await gateRows()).toBe(SEEDED_ROWS - DEL_ROWS);
+  }, 60000);
+
+  it("a name that only begins with the token is not the keyword: the capped DELETE runs and commits", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, {
+      query:
+        `DELETE FROM ${T} WHERE ${DEL_WHERE} AND Name <> '%NOJOURNAL' AND Name <> '%NOJOURN_X' ` +
+        `AND Name <> '%NOJOURN1' AND Name <> '%NOJOURNé'`,
+      maxRowsAffected: ROOMY_CAP,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, rowsAffected: DEL_ROWS });
+    expect(await gateRows()).toBe(SEEDED_ROWS - DEL_ROWS);
+  }, 60000);
+
+  it("the check can only refuse: the token in a comment or a string also refuses, and nothing is written", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    for (const query of [
+      `DELETE FROM ${T} WHERE ${DEL_WHERE} /* %NOJOURN */`,
+      `DELETE FROM ${T} WHERE Name = '%NOJOURN'`,
+    ]) {
+      const result = await run(sqlExecuteTool, { query, maxRowsAffected: ROOMY_CAP });
+
+      expect(result.isError, query).toBe(true);
+      expect(result.structuredContent, query).toMatchObject({ code: "SQL_ROWS_AFFECTED_CAP", statementType: "DELETE" });
+    }
+    await expectUntouched();
+  }, 60000);
+
+  it("only an INSERT, UPDATE or DELETE is refused: a capped SELECT that names the token runs", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, { query: `SELECT '%NOJOURN' AS s FROM ${T} WHERE ID = 1`, maxRowsAffected: 0 });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ columns: ["s"], rows: [["%NOJOURN"]], rowCount: 1 });
+  }, 60000);
+
+  it("read-only and a cap together: read-only governs, so the statement is refused as read-only", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, {
+      query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`,
+      readOnly: true,
+      maxRowsAffected: ROOMY_CAP,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      code: "SQL_READ_ONLY",
+      namespace: IRIS_NAMESPACE,
+      statementType: "DELETE",
+      readOnlySource: "parameter",
+    });
+    await expectUntouched();
   }, 60000);
 });
 

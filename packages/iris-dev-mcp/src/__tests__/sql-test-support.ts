@@ -40,7 +40,7 @@ export function executedOther(
 
 /** The result of a statement the endpoint declined or rolled back. */
 export function declined(
-  outcome: "readOnly" | "countOnly" | "capNotCountable" | "overCap" | "transactionEnded",
+  outcome: "readOnly" | "countOnly" | "capNotCountable" | "noJournal" | "overCap" | "transactionEnded",
   statementType: number,
   statementTypeName: string,
   extra: Record<string, unknown> = {},

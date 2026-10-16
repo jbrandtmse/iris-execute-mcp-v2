@@ -41,7 +41,8 @@ const SQL_EXECUTE_PATH = "/api/executemcp/v2/dev/sql/execute";
 const RESIDUAL_EFFECTS =
   "The transaction undoes SQL changes and journaled global sets made by functions and triggers, but not " +
   "$INCREMENT/$SEQUENCE counters (row ID counters included), process-private or IRISTEMP globals, changes made with " +
-  "%NOJOURN, work that parallel query worker processes do (%PARALLEL), JOB or device output, other external effects, " +
+  "%NOJOURN by a function, procedure or trigger the statement runs, work that parallel query worker processes do (%PARALLEL), " +
+  "JOB or device output, other external effects, " +
   "or a function, procedure or trigger that starts, commits or rolls back a transaction (reported as an error when the " +
   "transaction level the tool opened has changed, which a commit followed by a new TSTART does not show; some changes " +
   "may be saved).";
@@ -69,7 +70,7 @@ interface SqlArgs {
 
 /** `result` of the `/dev/sql/execute` response, for each of its outcomes. */
 interface SqlEndpointResult {
-  outcome: "ok" | "readOnly" | "countOnly" | "capNotCountable" | "overCap" | "transactionEnded";
+  outcome: "ok" | "readOnly" | "countOnly" | "capNotCountable" | "noJournal" | "overCap" | "transactionEnded";
   statementType: number;
   statementTypeName: string;
   content?: RowObject[];
@@ -173,6 +174,18 @@ async function runSql(args: SqlArgs, ctx: ToolContext, tool: "iris_sql_execute" 
           { namespace: ns, statementType: typeName, maxRowsAffected: cap, capSource },
         );
       }
+      case "noJournal": {
+        const remedy =
+          ceiling === undefined
+            ? "Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected."
+            : "Remove %NOJOURN from the statement text, a comment or a string included; the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.";
+        return refusalResult(
+          REFUSAL_CODES.SQL_ROWS_AFFECTED_CAP,
+          `Statement was not run in namespace '${ns}': it is a ${typeName} statement whose text contains %NOJOURN, which turns ` +
+            `journaling off, so a rows-affected cap (${cap}, from ${capName}) cannot undo it. Nothing was changed. ${remedy}`,
+          { namespace: ns, statementType: typeName, maxRowsAffected: cap, capSource },
+        );
+      }
       case "overCap": {
         const affected = result.rowsAffected as number;
         const count =
@@ -258,7 +271,9 @@ export const sqlExecuteTool: ToolDefinition = {
     "with SQL_READ_ONLY; maxRowsAffected (default: no cap) is a ceiling on the rows an INSERT, UPDATE or DELETE may change; " +
     "a statement that changes more is rolled back and refused with SQL_ROWS_AFFECTED_CAP, and under a cap only SELECT, INSERT, " +
     "UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (the count is the statement's own " +
-    "row count: rows that triggers, cascades or functions change are not counted, and a SELECT is not bounded by it); countOnly (default: false) " +
+    "row count: rows that triggers, cascades or functions change are not counted, and a SELECT is not bounded by it), and an INSERT, " +
+    "UPDATE or DELETE whose text contains %NOJOURN (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs " +
+    "under a cap, because it turns journaling off and the rollback could not undo it; countOnly (default: false) " +
     "returns only totalCount, the number of rows a SELECT returns, and transfers no rows. " +
     "An operator may set IRIS_SQL_READ_ONLY=true (every call is read-only; unset by default) and IRIS_SQL_MAX_ROWS_AFFECTED " +
     "(a non-negative integer ceiling no call can raise; unset by default); a call can only tighten them, and the result carries " +
@@ -292,7 +307,8 @@ export const sqlExecuteTool: ToolDefinition = {
       .optional()
       .describe(
         "Roll back and refuse an INSERT, UPDATE or DELETE that changes more than this many rows; 0 is a dry count " +
-          "(default: no cap; IRIS_SQL_MAX_ROWS_AFFECTED sets a ceiling this cannot raise). Under a cap only SELECT, INSERT, UPDATE and DELETE run.",
+          "(default: no cap; IRIS_SQL_MAX_ROWS_AFFECTED sets a ceiling this cannot raise). Under a cap only SELECT, INSERT, UPDATE and DELETE run, " +
+          "and one whose text contains %NOJOURN is refused.",
       ),
     countOnly: z
       .boolean()

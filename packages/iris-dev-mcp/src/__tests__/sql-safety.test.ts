@@ -410,6 +410,40 @@ describe("SQL write safety (Story 38.5)", () => {
       });
     });
 
+    it("a statement whose text contains %NOJOURN is refused before it runs, with the parameter remedy and no rowsAffected", async () => {
+      mockHttp.post.mockResolvedValue(declined("noJournal", 4, "DELETE"));
+
+      const result = await call(sqlExecuteTool, { query: "DELETE %NOJOURN FROM Sample.Person", maxRowsAffected: 10 });
+
+      expect(sentBody()).toEqual(endpointBody("DELETE %NOJOURN FROM Sample.Person", { maxRowsAffected: 10 }));
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text:
+              "Statement was not run in namespace 'USER': it is a DELETE statement whose text contains %NOJOURN, which turns journaling off, " +
+              "so a rows-affected cap (10, from maxRowsAffected) cannot undo it. " +
+              "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected.",
+          },
+        ],
+        structuredContent: {
+          code: "SQL_ROWS_AFFECTED_CAP",
+          namespace: "USER",
+          statementType: "DELETE",
+          maxRowsAffected: 10,
+          capSource: "parameter",
+        },
+        isError: true,
+      });
+      expect(Object.keys(result.structuredContent as object)).toEqual([
+        "code",
+        "namespace",
+        "statementType",
+        "maxRowsAffected",
+        "capSource",
+      ]);
+    });
+
     it("a SELECT under any cap runs as it would without one, with no cap flag", async () => {
       withConfig({ sqlMaxRowsAffected: 0 });
       mockHttp.post.mockResolvedValue(executed([{ N: 1 }]));
@@ -480,6 +514,40 @@ describe("SQL write safety (Story 38.5)", () => {
           "Nothing was changed. The operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call, so this statement cannot run through iris_sql_execute here.",
       );
       expect((result.structuredContent as { capSource: string }).capSource).toBe("operator");
+    });
+
+    it("a statement whose text contains %NOJOURN is refused with the operator remedy, whatever the caller passes", async () => {
+      withConfig({ sqlMaxRowsAffected: 5 });
+      mockHttp.post.mockResolvedValue(declined("noJournal", 3, "UPDATE"));
+
+      const result = await call(sqlExecuteTool, { query: "UPDATE %NOJOURN Sample.Person SET Age = 0", maxRowsAffected: 50 });
+
+      expect(sentBody().maxRowsAffected).toBe(5);
+      expect(result.content[0]?.text).toBe(
+        "Statement was not run in namespace 'USER': it is a UPDATE statement whose text contains %NOJOURN, which turns journaling off, " +
+          "so a rows-affected cap (5, from IRIS_SQL_MAX_ROWS_AFFECTED) cannot undo it. " +
+          "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included; " +
+          "the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.",
+      );
+      expect(result.structuredContent).toEqual({
+        code: "SQL_ROWS_AFFECTED_CAP",
+        namespace: "USER",
+        statementType: "UPDATE",
+        maxRowsAffected: 5,
+        capSource: "operator",
+      });
+    });
+
+    it("a refused %NOJOURN statement under a caller cap tighter than the ceiling still gets the operator remedy: dropping maxRowsAffected would not lift the cap", async () => {
+      withConfig({ sqlMaxRowsAffected: 10 });
+      mockHttp.post.mockResolvedValue(declined("noJournal", 2, "INSERT"));
+
+      const result = await call(sqlExecuteTool, { query: "INSERT %NOJOURN INTO Sample.Person (Name) VALUES ('A')", maxRowsAffected: 2 });
+
+      expect((result.structuredContent as { capSource: string }).capSource).toBe("parameter");
+      expect(result.content[0]?.text).toContain("(2, from maxRowsAffected)");
+      expect(result.content[0]?.text).toContain("the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.");
+      expect(result.content[0]?.text).not.toContain("run it without maxRowsAffected");
     });
 
     it("a tighter caller value wins: capSource parameter and no flag", async () => {
@@ -700,7 +768,7 @@ describe("SQL write safety (Story 38.5)", () => {
         expect(tool.description, tool.name).toContain("statement-level read-only, not side-effect-free");
         expect(tool.description, tool.name).toContain("$INCREMENT/$SEQUENCE counters (row ID counters included)");
         expect(tool.description, tool.name).toContain("process-private or IRISTEMP globals");
-        expect(tool.description, tool.name).toContain("changes made with %NOJOURN");
+        expect(tool.description, tool.name).toContain("changes made with %NOJOURN by a function, procedure or trigger the statement runs");
         expect(tool.description, tool.name).toContain("work that parallel query worker processes do (%PARALLEL)");
         expect(tool.description, tool.name).toContain("JOB or device output, other external effects");
         expect(tool.description, tool.name).toContain("a function, procedure or trigger that starts, commits or rolls back a transaction");
@@ -720,6 +788,9 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(description).toContain("only SELECT, INSERT, UPDATE and DELETE run");
       expect(description).toContain("SQL_ROWS_AFFECTED_CAP");
       expect(description).toContain("A capped statement that is rolled back leaves the same effects.");
+      expect(description).toContain(
+        "an INSERT, UPDATE or DELETE whose text contains %NOJOURN (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs under a cap, because it turns journaling off and the rollback could not undo it",
+      );
       expect(description).toContain("rowsAffected");
       expect(description).toContain("readOnlyForced or maxRowsAffectedCapped");
       expect(description).toContain("use iris_sql_query to run queries");
@@ -747,6 +818,7 @@ describe("SQL write safety (Story 38.5)", () => {
       const shape = (schema as unknown as { shape: Record<string, { description?: string }> }).shape;
       expect(shape.readOnly?.description).toContain("default: false");
       expect(shape.maxRowsAffected?.description).toContain("default: no cap");
+      expect(shape.maxRowsAffected?.description).toContain("one whose text contains %NOJOURN is refused");
       expect(shape.countOnly?.description).toContain("default: false");
     });
 

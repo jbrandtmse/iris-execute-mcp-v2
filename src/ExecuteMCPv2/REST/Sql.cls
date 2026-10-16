@@ -3,7 +3,8 @@
 /// <p>Backs <code>/api/executemcp/v2/dev/sql/execute</code> (<method>Execute</method>, POST
 /// JSON body <code>{query, parameters?, namespace?, readOnly?, countOnly?,
 /// maxRowsAffected?}</code>). The statement is prepared once, classified by the
-/// <code>%SQL.Statement</code> statement type (never by keyword), checked against the
+/// <code>%SQL.Statement</code> statement type (by keyword only for the refuse-only
+/// <code>%NOJOURN</code> check below), checked against the
 /// read-only and rows-affected controls, and executed in the same request.</p>
 /// <ul>
 /// <li><b>Read-only.</b> Only statement type 1 (SELECT) runs. It runs inside a transaction
@@ -12,7 +13,10 @@
 /// <li><b>Rows-affected cap.</b> Under a cap, types 2, 3 and 4 (INSERT, UPDATE, DELETE) run
 /// inside a transaction this handler opens. <code>%ROWCOUNT</code> above the cap, or negative
 /// (unknown), rolls the statement back. Otherwise the transaction commits. A SELECT runs as it
-/// would without a cap, and every other type is declined before execution.</li>
+/// would without a cap, and every other type is declined before execution. A type 2 to 4
+/// statement whose text contains the <code>%NOJOURN</code> token is declined before execution
+/// (outcome <code>noJournal</code>): it turns journaling off, so a rollback could not undo it.
+/// This is the one keyword check in the safety path, and it can only refuse.</li>
 /// <li><b>Neither.</b> The statement runs as the Atelier <code>action/query</code> route runs
 /// it, with no transaction from this handler.</li>
 /// <li><b>Transactions.</b> When this handler opened a transaction, it requires
@@ -25,7 +29,7 @@
 /// <code>outcome</code> is <code>ok</code> (with <code>content</code>, the rows as
 /// <code>action/query</code> serializes them, and <code>rowsAffected</code> for types 2 to 4 or
 /// <code>totalCount</code> for <code>countOnly</code>), <code>readOnly</code>,
-/// <code>countOnly</code>, <code>capNotCountable</code>, <code>overCap</code> (with
+/// <code>countOnly</code>, <code>capNotCountable</code>, <code>noJournal</code>, <code>overCap</code> (with
 /// <code>rowsAffected</code>) or <code>transactionEnded</code>. A prepare or execution error is
 /// an error envelope carrying the SQLCODE and the IRIS message.</p>
 /// <p>Rows are keyed by column name and typed by the result set's own <code>clientType</code>:
@@ -190,7 +194,7 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
         Set tType = +tStmt.%Metadata.statementType
         Set tTypeName = ..TypeName(tType)
 
-        Set tDecline = ..Decline(tType, pReadOnly, pCountOnly, pCap)
+        Set tDecline = ..Decline(tType, pReadOnly, pCountOnly, pCap, pQuery)
         If tDecline '= "" {
             Set pResult = ..NewResult(tDecline, tType, tTypeName)
             Quit
@@ -250,13 +254,25 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
 }
 
 /// The decline outcome for a statement of type <var>pType</var>, or empty when it may run.
-/// Read-only mode governs first, then <code>countOnly</code>, then the rows-affected cap.
-ClassMethod Decline(pType As %Integer, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String) As %String
+/// Read-only mode governs first, then <code>countOnly</code>, then the rows-affected cap: a type
+/// the cap cannot count, then an INSERT, UPDATE or DELETE that asks IRIS not to journal its writes.
+ClassMethod Decline(pType As %Integer, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, pQuery As %String) As %String
 {
     If pReadOnly && (pType '= 1) Quit "readOnly"
     If pCountOnly && (pType '= 1) Quit "countOnly"
     If (pCap '= "") && ((pType < 1) || (pType > 4)) Quit "capNotCountable"
+    If (pCap '= "") && (pType >= 2) && (pType <= 4) && ..HasNoJournal(pQuery) Quit "noJournal"
     Quit ""
+}
+
+/// 1 when <var>pQuery</var> contains the <code>%NOJOURN</code> token, matched without regard to
+/// case and not as the start of a longer name (<code>%NOJOURNX</code> is another token). A
+/// statement with the token turns journaling off, so a rollback cannot undo its writes and IRIS
+/// gives no parse-level signal for it. The match is over the raw text, so a comment or a string
+/// that contains the token also matches: the check can refuse a statement, never admit one.
+ClassMethod HasNoJournal(pQuery As %String) As %Boolean
+{
+    Quit ''$Locate(pQuery, "(?i)%NOJOURN(?![\p{L}\p{N}_])")
 }
 
 /// A result object carrying the outcome and the statement type.

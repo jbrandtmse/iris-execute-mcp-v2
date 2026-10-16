@@ -15,13 +15,16 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
   (`inheritedFrom`), unless `iris_sql_query` is set explicitly. The frozen baseline (`1e62c5ad5bf7`, 141 keys) is
   unchanged. Both tools state that read-only is statement-level read-only, not side-effect-free: a rollback does not undo
   `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, changes made with
-  `%NOJOURN`, work that parallel query worker processes do (`%PARALLEL`), `JOB` or device output, other external
-  effects, or a function, procedure or trigger that starts, commits or rolls back a transaction; a capped statement that
+  `%NOJOURN` by a function, procedure or trigger the statement runs, work that parallel query worker processes do
+  (`%PARALLEL`), `JOB` or device output, other external effects, or a function, procedure or trigger that starts, commits or rolls back a transaction; a capped statement that
   is rolled back leaves the same effects.
 - **`iris_sql_execute` parameters (defaults in brackets).** `readOnly` (`false`): only queries run. `maxRowsAffected` (no
   cap; `0` is a dry count): an INSERT, UPDATE or DELETE that changes more rows is rolled back; under a cap only SELECT,
   INSERT, UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (the count is the
-  statement's own row count: rows that triggers, cascades or functions change are not counted). `countOnly` (`false`).
+  statement's own row count: rows that triggers, cascades or functions change are not counted). Under a cap, an INSERT,
+  UPDATE or DELETE whose text contains the `%NOJOURN` keyword (journaling off, so the rollback could not undo it) is
+  refused with `SQL_ROWS_AFFECTED_CAP` before it runs and writes nothing; the match is on the text, so `%NOJOURN` in a
+  comment or a string also refuses, and it never admits a statement. `countOnly` (`false`).
 - **Operator variables.** `IRIS_SQL_READ_ONLY` (`true` or `false`; unset by default) forces every `iris_sql_execute` call
   read-only. `IRIS_SQL_MAX_ROWS_AFFECTED` (a non-negative integer; unset by default) is a ceiling no call can raise. A
   call parameter can only tighten either one. Both are global: every profile inherits them. A malformed value fails
@@ -35,10 +38,11 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
   and the same plus `rowsAffected` (after `statementType`) when it was rolled back (`capSource` is `parameter` or
   `operator`).
 - **Route `POST /dev/sql/execute` (`ExecuteMCPv2.REST.Sql`).** It prepares the statement once, classifies it by its
-  statement type (never by keyword), applies the controls inside IRIS and executes the same statement in the same
-  request. A transaction it opens is rolled back to the level it found on every exit path, and a statement that changes
-  that transaction is reported as an error, also when the statement then fails. Bootstrap: 29 → 30 classes;
-  `BOOTSTRAP_VERSION` `3af8ca401e7c` → `e615a96a1e70` (the value moves with every change to an ExecuteMCPv2 class).
+  statement type (by keyword only for the refuse-only `%NOJOURN` check above), applies the controls inside IRIS and
+  executes the same statement in the same request. A transaction it opens is rolled back to the level it found on every
+  exit path, and a statement that changes that transaction is reported as an error, also when the statement then fails.
+  Bootstrap: 29 → 30 classes; `BOOTSTRAP_VERSION` `3af8ca401e7c` → `d352a6a32158` (the value moves with every change to
+  an ExecuteMCPv2 class).
 - A live gate (`sql-safety-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives both tools against a
   real IRIS, including a serializer pin against the Atelier `action/query` rows.
 
