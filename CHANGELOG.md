@@ -2,6 +2,54 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-15] — Story 38.5: SQL write safety
+
+### Added
+
+- **`iris_sql_query` (`@iris-mcp/dev`, dev 30 → 31 tools, suite 106 → 107).** Runs a SQL query (SELECT) and returns
+  `{columns, rows, rowCount}`; with `countOnly` it returns `totalCount` and transfers no rows. It always runs read-only:
+  any other statement, `CALL` included, is refused before it runs, and the query runs inside a transaction that is always
+  rolled back. Its governance key `iris_sql_query` is a `read`, **enabled by default**, and stays enabled under the
+  read-only preset, which blocks the frozen-baseline write `iris_sql_execute`. It declares the parent key
+  `iris_sql_execute`: when an operator explicitly disables `iris_sql_execute`, `iris_sql_query` is disabled too
+  (`inheritedFrom`), unless `iris_sql_query` is set explicitly. The frozen baseline (`1e62c5ad5bf7`, 141 keys) is
+  unchanged. Both tools state that read-only is statement-level read-only, not side-effect-free: a rollback does not undo
+  `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, `JOB` or device
+  output, or a function, procedure or trigger that starts, commits or rolls back a transaction.
+- **`iris_sql_execute` parameters (defaults in brackets).** `readOnly` (`false`): only queries run. `maxRowsAffected` (no
+  cap; `0` is a dry count): an INSERT, UPDATE or DELETE that changes more rows is rolled back; under a cap only SELECT,
+  INSERT, UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (the count is the
+  statement's own row count: rows that triggers, cascades or functions change are not counted). `countOnly` (`false`).
+- **Operator variables.** `IRIS_SQL_READ_ONLY` (`true` or `false`; unset by default) forces every `iris_sql_execute` call
+  read-only. `IRIS_SQL_MAX_ROWS_AFFECTED` (a non-negative integer; unset by default) is a ceiling no call can raise. A
+  call parameter can only tighten either one. Both are global: every profile inherits them. A malformed value fails
+  startup naming the variable.
+- **Result fields.** `rowsAffected` on an INSERT, UPDATE or DELETE result (`-1` for `TRUNCATE TABLE`); `totalCount` for
+  `countOnly`; `readOnlyForced: true` when `IRIS_SQL_READ_ONLY` forced a call; `maxRowsAffectedCapped: true` when the
+  operator ceiling was the effective cap on an INSERT, UPDATE or DELETE. Every pre-existing field is unchanged.
+- **Refusal codes `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`** in the `REFUSAL_CODES` catalog. `SQL_READ_ONLY`:
+  `{code, namespace, statementType, readOnlySource}` (`readOnlySource` is `parameter`, `operator` or `tool`).
+  `SQL_ROWS_AFFECTED_CAP`: `{code, namespace, statementType, maxRowsAffected, capSource}` when the statement was not run,
+  and the same plus `rowsAffected` (after `statementType`) when it was rolled back (`capSource` is `parameter` or
+  `operator`).
+- **Route `POST /dev/sql/execute` (`ExecuteMCPv2.REST.Sql`).** It prepares the statement once, classifies it by its
+  statement type (never by keyword), applies the controls inside IRIS and executes the same statement in the same
+  request. A transaction it opens is rolled back to the level it found on every exit path, and a statement that changes
+  that transaction is reported as an error. Bootstrap: 29 → 30 classes; `BOOTSTRAP_VERSION` `3af8ca401e7c` →
+  `f757473a71d8` (the value moves with every change to an ExecuteMCPv2 class).
+- A live gate (`sql-safety-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives both tools against a
+  real IRIS, including a serializer pin against the Atelier `action/query` rows.
+
+### Changed
+
+- **`iris_sql_execute` runs through the ExecuteMCPv2 SQL route instead of the Atelier `action/query` route** (every
+  call, one serializer; orchestrator decision #12). Its rows are unchanged. A SQL error still carries the SQLCODE and
+  the IRIS message, but its text now names `/api/executemcp/v2/dev/sql/execute` and reads `ERROR #5001: SQLCODE: -51
+  Message: ...`. The tool now needs the bootstrapped ExecuteMCPv2 service, like `iris_execute_command`.
+- **`@iris-mcp/dev` `core` preset: 14 → 15 runtime tools (13 → 14 package tools).** Querying is part of the everyday
+  debug loop, and under the read-only preset `core` would otherwise have no way to query. `developer` also includes
+  `iris_sql_query`: 32 runtime tools. The target of about 13 runtime tools per server is a guideline (L-4).
+
 ## [Pre-release — 2026-10-15] — Story 38.4: Surgical line edit tool
 
 ### Added
@@ -875,9 +923,9 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
 `iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
-tool counts, as of Story 38.4): `full` 31/27/23/22/8 (dev/admin/interop/ops/data), `core`
-14/13/10/10/8, `developer` 31/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
-guideline and not a hard limit (L-4; dev is at 14).
+tool counts, as of Story 38.5): `full` 32/27/23/22/8 (dev/admin/interop/ops/data), `core`
+15/13/10/10/8, `developer` 32/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
+guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under
 `core` on `@iris-mcp/dev`).

@@ -2,16 +2,24 @@
 title: 'Story 38.5: SQL Write Safety'
 type: 'feature'
 created: '2026-10-15'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '4eb8ad43e65d95a8670357920af533a473a7d89b'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/.claude/rules/iris-objectscript-basics.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      Other tools still send a model to iris_sql_execute for read-only queries, which the read-only preset blocks; iris_sql_query is the working route.
+    evidence: |-
+      The iris_execute_tests description and hint (packages/iris-dev-mcp/src/tools/execute.ts, near lines 396 and 1226), the deploy-and-test-class prompt (src/prompts/deployAndTestClass.ts) and skills/deploy-and-test-class/SKILL.md give a %UnitTest_Result join through iris_sql_execute. Under IRIS_GOVERNANCE_PRESET=read-only that tool is denied. The files predate this story and the intent leaves other tools unchanged.
+    location: >-
+      packages/iris-dev-mcp/src/tools/execute.ts; packages/iris-dev-mcp/src/prompts/deployAndTestClass.ts; skills/deploy-and-test-class/SKILL.md
+    severity: low
 ---
 
 <intent-contract>
@@ -365,6 +373,48 @@ A new read-classified dev tool, `iris_sql_query`, always runs read-only. It decl
 
 ## Review Triage Log
 
+### 2026-10-15 — Review pass
+- verdicts: 38 findings — high 0, medium 8, low 23, false 7, maybe-false 0
+- findings:
+  - `[low]` `[reject]` BH1: the `overCap` remedy for `rowsAffected -1` (TRUNCATE) offers "raise maxRowsAffected", which cannot help — real, but the remedy text is fixed in the intent contract's CAP texts (the fix edits the spec); the same message already says "an unknown number of rows (IRIS reports -1, as it does for TRUNCATE TABLE)".
+  - `[low]` `[reject]` BH2: `TCOMMIT` then `TSTART` inside one function returns to the same `$TLEVEL`, so the equality check cannot see it — real but rare; the check and the TE text are spec-fixed (Always: "requires `$TLEVEL` to equal the level it opened"), and the Design Notes residual list already names functions that start or commit a transaction.
+  - `[medium]` `[patch]` BH3: the cap counts only the statement's own `%ROWCOUNT` (trigger and cascade rows are not counted, a SELECT is not bounded), and no description says so — patched: one sentence in the `iris_sql_execute` description, root README cap row, dev README paragraph and CHANGELOG; the README payload rows were re-measured (dev 83,131 / 42,305).
+  - `[low]` `[patch]` BH4: `iris_sql_query` carries `readOnlyHint` while its README read-only-preset paragraph omitted the residual effects (the live gate shows a `$INCREMENT` moving) — patched: the paragraph now says "statement-level read-only, not side-effect-free" and points at the list; the annotations are fixed by the spec and stay.
+  - `[medium]` `[patch]` BH5 (same root cause as VG2, IA5): no test passed a namespace other than the web app's, so dropping the `SwitchNamespace` could not turn anything red — patched: live tests run both tools in `%SYS` (oracle: `Security.Users` exists only there, asserted to differ), an error in `%SYS` followed by a call back in the home namespace, and refusals naming `%SYS`; `bootstrap.ts` comments now name SQL among the calls that depend on the `%All` package mapping.
+  - `[low]` `[reject]` BH6: `z.coerce.number()` turns `null`/`""`/`false` into a cap of 0 — the schema is spec-fixed, and the result fails safe (a refusal naming "cap of 0 (from maxRowsAffected)", nothing changed); a non-safe integer such as 1e30 reaches the IRIS-side check and is refused.
+  - `[medium]` `[patch]` BH7 (same root cause as IA7): `loadConfig`, `mergeProfile` and `runSql` were each tested, but nothing followed an environment variable to the request body — patched: `sql-query-governance.test.ts` drives `IRIS_SQL_READ_ONLY=true` and `IRIS_SQL_MAX_ROWS_AFFECTED=2` through the real `McpServerBase`, the real tools and a mocked `fetch`, and asserts the POST body (and the explicit defaults with neither set).
+  - `[low]` `[patch]` BH8 (with EC6): stale text left by the route move — patched the root README `IRIS_SQL_MAX_ROWS` and `IRIS_SQL_TIMEOUT` rows (both tools) and the `test-status.ts` comment; the `sqlAnalyze.ts` comments stay (the intent excludes `iris_sql_analyze`), and the three client-config guides are Story 38.6's per the Seam.
+  - `[low]` `[defer]` BH9: `iris_execute_tests` hints, the `deploy-and-test-class` prompt and its skill send a model to `iris_sql_execute` for a `%UnitTest_Result` query, which the read-only preset blocks — pre-existing, outside this change's files (recorded under `deferred:`).
+  - `[low]` `[reject]` BH10: `RESIDUAL_EFFECTS` and the row-cap sentence are in both descriptions and `core` grows ~14% — the spec requires both descriptions to carry them, and the payload table was re-measured.
+  - `[false]` `[reject]` EC1: an outcome outside the endpoint's six values reaches `default: break` — the route is ours and its outcome set is closed (Rule #54); a stale or missing route is a 404, which the `SQL error:` catch reports.
+  - `[false]` `[reject]` EC2: an empty `%ROWCOUNT` would pass every cap — live, `%ROWCOUNT` is numeric for every capped type (INSERT, INSERT ... SELECT, UPDATE, DELETE and TRUNCATE -1 are all in the gate), so the state is not shown to be reachable.
+  - `[false]` `[reject]` EC3: a transaction already open on entry would make `TCOMMIT` commit only the inner level — probed live: a function that leaves `TSTART` open (job 1114) is back at `$TLEVEL` 0 on the next request, and every request ran in the same job, so IRIS ends an open transaction with the request and no call enters at a level above 0.
+  - `[low]` `[reject]` EC4: a client timeout can leave a capped DML to commit server-side — recorded in the spec's Residual risks ("Client timeout") as the same behavior `action/query` has today.
+  - `[low]` `[patch]` EC5: the `tools.integration.test.ts` invalid-SQL case passed on any `SQL error`, a missing route included — patched: it also requires `SQLCODE: -30`.
+  - `[low]` `[patch]` EC6 (with BH8): stale `iris_sql_execute` route comments — see BH8.
+  - `[low]` `[reject]` EC7: the client-config guides omit the two variables — Story 38.6 owns client-config docs (Seam); the READMEs state both with defaults (AC-5).
+  - `[medium]` `[patch]` VG1 (same root cause as IA4): no live case for a statement that prepares and then fails to run, on any path — patched: a type-mismatch UPDATE (SQLCODE -105) on the default and capped paths and `SELECT 1/0` (-400) through `iris_sql_query` each give an error with the SQLCODE and message from the new route, and the rows are unchanged.
+  - `[medium]` `[patch]` VG2: see BH5.
+  - `[low]` `[patch]` VG3 (same root cause as IA2): the TE tests only covered a function that commits — patched: a new `OpenTx` fixture function (`TSTART`, leaves it open) is reported on the capped and the read-only path. The unwinding loop in `RollBackTo` is not observable across requests (probe in EC3: IRIS ends the open transaction itself), so no mutation of it is claimed.
+  - `[low]` `[patch]` VG4: a refusal with `readOnly:true` and `IRIS_SQL_READ_ONLY` both in force was not asserted — patched: a mock test pins `readOnlySource: "operator"` and the operator remedy.
+  - `[low]` `[patch]` VG5: the `sql-safety.test.ts` row titled for DML under a caller cap only exercised a SELECT — patched: it now also asserts a DELETE under a caller cap carries no `maxRowsAffectedCapped`.
+  - `[false]` `[reject]` VG6: the serializer pins have no non-empty guard of their own — the "oracle is not vacuous" live test asserts the fixture rows carry values of every kind, and the endpoint-vs-Atelier test asserts `SEEDED_ROWS` rows.
+  - `[low]` `[reject]` VG7: `ExecuteMCPv2.REST.Sql` has no `ExecuteMCPv2.Tests.*` host — the spec's test strategy is the armed live gate in the prepublish roster plus the `BaseTest` count; `SqlAdvisor`'s `AdvisorDataTest` is a precedent, not a requirement.
+  - `[false]` `[reject]` VG8: sub-claims (config/profile inheritance, cap-within commits, device output, AC-6 counts, AC-8 count) lack their own `mutation:` line — Rule 19 asks one demonstrated mutation per AC, and AC-2 to AC-8 each carry one; a `config.ts` mutation was added anyway for the new env-to-wire test.
+  - `[low]` `[reject]` VG9: the live gate does not check that the deployed `Sql.cls` is the embedded one — a missing route fails every case loudly (404 `SQL error`), and a stale-but-compatible class would pass; the sibling gates have no version probe either.
+  - `[low]` `[reject]` VG10: the `cleanup` test runs last and calls `removeFixtures()` itself — it follows the 38.3 gate the spec names; `afterAll` and the opening `removeFixtures()` run regardless.
+  - `[false]` `[reject]` VG11: the serializer `describe`'s `beforeAll` reseed is correct only while every test in it is read-only — the reviewer states it is correct as written.
+  - `[low]` `[reject]` VG12: every call now needs `$$GetTypen^%SYS.SQLSRV` and `%Metadata.statementType`, verified only on 2026.2 build 221U — AC 38.5.1 records that as the earliest version verified.
+  - `[low]` `[patch]` IA1: the endpoint's own input checks (empty query, non-integer or negative `maxRowsAffected`, non-boolean flags, non-array `parameters`) were driven by no test — patched: live raw POSTs assert each rejection, plus a nonexistent namespace followed by a clean call.
+  - `[low]` `[patch]` IA2: see VG3.
+  - `[low]` `[reject]` IA3: INSERT and COMMIT under read-only are covered only with mocked responses — the live gate refuses UPDATE, DELETE, CALL, DDL and a CTE-wrapped DELETE, and the new namespace test refuses COMMIT live; the mock rows pin the mapping.
+  - `[medium]` `[patch]` IA4: see VG1.
+  - `[medium]` `[patch]` IA5: see BH5.
+  - `[low]` `[reject]` IA6: the live gate is not tied to the source file — see VG9.
+  - `[medium]` `[patch]` IA7: see BH7.
+  - `[false]` `[reject]` IA8: the governance suite never reaches the endpoint and bootstrap tests pin roster and content only — no divergence: governance is proven through the real gate with handler spies by design, and the endpoint is proven by the live gate.
+  - `[low]` `[patch]` IA9: `tools.integration.test.ts` keeps two live `iris_sql_execute` cases outside the default suite, and `execute.ts` prose still names the tool — the integration case is tightened (EC5); the prose is BH9.
+
 ## Design Notes
 
 **Governing ADs.**
@@ -504,9 +554,11 @@ The planning text follows.
 Every command runs in the foreground with `timeout: 600000` from `/Users/jbrandt/git/iris-execute-mcp-v2`. IRIS is reached only through `default` (localhost:52773, HSCUSTOM).
 - **Deploying the classes.** Load `Sql.cls`, `Dispatch.cls` and `BaseTest.cls` with `iris_doc_load` using a glob path (`/Users/jbrandt/git/iris-execute-mcp-v2/src/**/Sql.cls` and so on, Rule #17), then compile.
 - **Live writes.** They go only to:
-  - `ExecuteMCPv2.Temp.QaStory385Gate.cls`: persistent and compiled, with the probe-6 column kinds, a DELETE trigger, side-effect and transaction-ending `SqlProc` functions, and a `SqlProc` class query.
-  - `ExecuteMCPv2.Temp.QaStory385GateAudit.cls`;
-  - their storage globals and `^ExecuteMCPv2.Temp.QaStory385GateC`.
+  - `ExecuteMCPv2.Temp.QaStory385Gate.cls`: persistent and compiled, with the probe-6 column kinds, a DELETE trigger, side-effect, transaction-ending, device-output, `$TLEVEL` and writing `SqlProc` functions, a `SqlProc` class query and a two-result-set procedure.
+  - `ExecuteMCPv2.Temp.QaStory385GateAudit.cls`, with `Parameter DEFAULTGLOBAL = "^ExecuteMCPv2.QaStory385GateAud"`;
+  - their storage globals and the counter and marker globals `^ExecuteMCPv2.QaStory385GateC` and `^ExecuteMCPv2.QaStory385GateG`.
+
+  [Amended during implementation, Rule #16: a global name is unique only to its first 31 characters, so the planned `^ExecuteMCPv2.Temp.QaStory385GateC` (33 characters) is stored as `^ExecuteMCPv2.Temp.QaStory385Gat`, collides with any sibling, and no longer contains the stem. The audit class's default storage global is hashed to `^ExecuteMCPvE4F.QaStory385GF692D`, which does not contain `QaStory385Gate` either. The names above all start `ExecuteMCPv` and contain the stem.]
 
   All are removed before and after: `%KillExtent`, then a kill of every `ExecuteMCPv*` global containing `QaStory385Gate` (the stream global survives `%KillExtent`), then `removeStored`.
 - **OS %UnitTest.** `ExecuteMCPv2.Tests.BaseTest` runs alone, in one `iris_execute_tests` call, and `total` must be 7 (Rule #35). Poll `iris_test_status` on a client timeout; never re-submit.
@@ -562,10 +614,51 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-7 | TE detection removed | live transaction-ending row |
 | AC-8 | `Sql.cls` left out of `classes[]` | `bootstrap.test.ts` roster and drift rows |
 
+**Mutations demonstrated (Rule 19).** Each was applied, observed red, and reverted; the tree was byte-identical afterwards (`git status --short` and a hash of the diff and the untracked files unchanged, `Sql.cls` re-checked against a pristine copy and reloaded). IRIS-side mutations were loaded into `default`/HSCUSTOM and driven through `sql-safety-live-gate.test.ts`.
+- AC-2: mutation: `Decline`'s read-only line removed from `Sql.cls` -> live `readOnly refuses an UPDATE and the values are unchanged` red (the UPDATE ran in the rolled-back transaction, so values held, but the refusal was missing).
+- AC-2: mutation: `runSql` lets `readOnly:false` override `sqlReadOnly` (`args.readOnly ?? operatorReadOnly`) -> `sql-safety.test.ts` `IRIS_SQL_READ_ONLY forces read-only when readOnly is omitted or false...` and `a refusal under IRIS_SQL_READ_ONLY has readOnlySource operator...` red; live `ctx.config.sqlReadOnly refuses an UPDATE and a DELETE even when readOnly:false is passed` red.
+- AC-2: mutation: `Perform` commits (`TCOMMIT`) instead of rolling back at exit -> live `a SELECT that calls a function has its SQL write and its journaled global set undone, and its counter not` red (the audit row stayed: 1, expected 0).
+- AC-2: mutation: `iris_sql_query` not forced read-only (`args.readOnly === true || operatorReadOnly`) -> `sql-safety.test.ts` `iris_sql_query ... is always read-only` red.
+- AC-3: mutation: the `%ROWCOUNT` check skipped (`If 0 {`) -> live `a DELETE over the cap, by parameter...`, `a DELETE over the operator ceiling...`, `maxRowsAffected 0 is a dry count...` and `TRUNCATE TABLE under a cap...` red (the rows were committed).
+- AC-3: mutation: a negative count treated as within the cap (`If tRowsAffected > pCap {`) -> live `TRUNCATE TABLE under a cap reports -1 and is rolled back...` red.
+- AC-3: mutation: the cap allowlist removed (`capNotCountable` line deleted from `Decline`) -> live `a CALL under a cap is refused before it runs...` and `DDL under a cap is refused before it runs` red. The `sql-safety.test.ts` not-countable rows pin the TypeScript mapping of the endpoint's outcome and cannot see an IRIS-side change.
+- AC-3: mutation: the cap is `Math.max` instead of `Math.min` -> `sql-safety.test.ts` ceiling rows (5 tests, among them `a larger maxRowsAffected cannot raise it...`) red.
+- AC-4: mutation: the `rowsAffected` spread removed from `runSql` -> `sql-safety.test.ts` DML rows (6 tests) red; live `a default-path UPDATE reports the rowsAffected...`, `...INSERT ... SELECT...` and `...DELETE commits...` red.
+- AC-4: mutation: `countOnly` returns the serialized rows (`Serialize` in the `pCountOnly` branch) -> live `iris_sql_execute: totalCount equals the COUNT(*)...` and the `iris_sql_query` twin red (rows transferred).
+- AC-5: mutation: the serializer maps a NULL number to `""` (a `pValue = ""` string branch in `SetValue`) -> live serializer pins (`the fixture SELECT of every column kind`, `SELECT *`, `a qualified star after a column`, ...) red.
+- AC-5: mutation: an explicit default omitted from E (`body.countOnly` removed) -> `sql.test.ts` request pins (7) and `sql-caps.test.ts` (4) red.
+- AC-5: mutation: a spurious `totalCount` on every result -> every `sql.test.ts` pre-feature literal row (AD-15) red.
+- AC-6: mutation: `parent` removed from `sqlQueryTool` -> `sql-query-governance.test.ts` (10 tests) and `default-enabled-holders.test.ts` `the parent declarations are exactly...` red.
+- AC-6: mutation: `mutates: "write"` on `sqlQueryTool` -> `sql-query-governance.test.ts` (6 tests: defaults, read-only preset, profile-scoped, first-explicit-verdict) red.
+- AC-6: mutation: `iris_sql_query` moved from `core.include` to `core.exclude` -> `presets.test.ts` (3 tests) red.
+- AC-7: mutation: the transaction-level (TE) check removed from `Perform` -> live `a function that ends the transaction of a capped UPDATE is reported...` and `a SELECT whose function ends the transaction is reported...` red.
+- AC-8: mutation: `Sql.cls` left out of `scripts/gen-bootstrap.mjs` `classes[]` (then `pnpm gen:bootstrap`) -> `bootstrap.test.ts` (7 tests: count, names, order, Sql entry, drift rows) red.
+
+**Mutations demonstrated in the review pass (Rule 19).** Same discipline: `Sql.cls` and `sql.ts` / `config.ts` restored from pristine copies (`shasum` equal), `Sql.cls` reloaded.
+- AC-2/AC-3: mutation: the `If tRS.%SQLCODE < 0 {...}` block removed from `Perform` -> live `a statement that prepares and then fails to run...` red in all 3 tests (default path and capped path report a clean result; the read-only `SELECT 1/0` loses its SQLCODE).
+- AC-2/AC-3: mutation: the `SwitchNamespace` block removed from `Run` -> live `both tools answer for the namespace they name...` red (`%SYS` query answered for the home namespace).
+- AC-7: mutation: the transaction-level check changed to `$TLevel < tOpenLevel` (a commit is seen, an opened transaction is not) -> live `a function that opens a transaction inside a capped UPDATE...` and `a SELECT whose function opens a transaction...` red.
+- AC-2/AC-3: mutation: the `maxRowsAffected` integer check removed from `ReadControls` -> live `the endpoint rejects a malformed body...` red for a non-integer and a negative cap.
+- AC-2: mutation: `readOnlySource` derived from `readOnlyForced` -> `sql-safety.test.ts` `a refusal with readOnly:true and IRIS_SQL_READ_ONLY both in force names the operator as the source` red.
+- AC-3: mutation: `maxRowsAffectedCapped` set whenever a cap applies (`capSource === "operator"` dropped) -> `sql-safety.test.ts` (3 tests, among them the retitled `an INSERT, UPDATE or DELETE under a caller cap has no maxRowsAffectedCapped...`) red.
+- AC-2/AC-3: mutation: the `sqlReadOnly` spread removed from `loadConfig` (shared dist rebuilt) -> `sql-query-governance.test.ts` `IRIS_SQL_READ_ONLY=true and IRIS_SQL_MAX_ROWS_AFFECTED=2 decide readOnly and maxRowsAffected on the wire...` red.
+- Not claimed: the one-level-at-a-time loop in `RollBackTo`. IRIS ends an open transaction with the request (probe: a function that left `TSTART` open was back at `$TLEVEL` 0 on the next request, same job), so no test can observe it.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Implement and review pass (2026-10-15).**
+- **Change.** New IRIS handler `ExecuteMCPv2.REST.Sql` (route `POST /dev/sql/execute`): it prepares once, classifies by statement type, runs read paths in an always-rolled-back transaction, runs capped INSERT/UPDATE/DELETE in a transaction that commits only within the cap, and reports a changed transaction level. `iris_sql_execute` moves onto it through one shared `runSql` and gains `readOnly`, `maxRowsAffected`, `countOnly`, `rowsAffected`, `totalCount`; new read tool `iris_sql_query` (parent `iris_sql_execute`, `core` and `developer`, dev 30 -> 31, `core` 14 -> 15 runtime, suite 106 -> 107); operator variables `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` (global, inherited by every profile); refusal codes `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`.
+- **BOOTSTRAP_VERSION** `3af8ca401e7c` -> `f757473a71d8` (`gen:bootstrap` run twice, byte-identical); classes 29 -> 30; `BaseTest` 7/7 with the handler count at 16.
+- **Files.** `src/ExecuteMCPv2/REST/Sql.cls` (new), `Dispatch.cls`, `Tests/BaseTest.cls`; `packages/shared/src/{config,profiles,refusals,bootstrap}.ts` and `bootstrap-classes.ts` (generated); `packages/iris-dev-mcp/src/tools/{sql,index,presets,test-status}.ts`; new tests `sql-safety`, `sql-query-governance`, `sql-safety-live-gate` (78 live tests, added to the prepublish roster) plus helpers `sql-test-support.ts` and `sql-legacy-cases.ts`; updated count, roster and request pins in dev, shared and `iris-mcp-all` tests; READMEs, `tool_support.md`, `docs/`, `CHANGELOG.md`, the changeset and the re-measured payload table (dev 83,131 / 42,305).
+- **Review.** Four layers, 38 findings: high 0, medium 8, low 23, false 7, maybe-false 0 (counted mechanically from the triage log). Routes: 18 patched, 19 rejected with a recorded reason, 1 deferred. Patches: the cap's own-row-count semantics documented; the read-only preset paragraph names the residual effects; live tests for a second namespace (`%SYS`), for statements that fail at execution (SQLCODE -105 and -400), for a function that opens a transaction, and for the endpoint's own input checks; a mock test for `readOnlySource` with both controls set; one wire test that carries `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` from the environment through the real `McpServerBase` to the POST body; stale README, comment and integration-test text. The 18 Rule 19 mutations of the build pass and the 7 of the review pass are recorded under Verification.
+- **Deferred (1).** Other tools' hints and the `deploy-and-test-class` prompt and skill still point at `iris_sql_execute` for read-only queries (low, pre-existing).
+- **Follow-up review recommended: true.** Eight medium findings in four entries were patched. The unverified risk: the new `%SYS` live test is the first run of the endpoint's device-output redirect (`Use tNull::("^"_$ZNAME)`) in a namespace other than the web app's, and it ran only where the bootstrap's `%All` package mapping exists. On an instance where that mapping step failed, cross-namespace calls of both SQL tools would fail where `action/query` worked before; nothing here exercises that.
+- **Verification performed.** Per-package build, test, lint and type-check: shared 1601, dev 1357, admin 498, interop 343, ops 350, data 165, client-config 514, `iris-mcp-all` 310, all green (one existing lint warning in `shared/src/cli/governance.ts`). The `(loop)` commands pass; the armed live gate passes 78/78 and the armed `governance-file-process-gate` passes 9/9 against `default`/HSCUSTOM; `BaseTest` 7/7; `gen:governance-baseline:check` exits 0 at 141 frozen keys; `governance-baseline.ts`, `baseline-classifications.ts` and `ipm/module.xml` have no diff against `61cdb551`; `iris_doc_list` (generated) and `iris_global_list` for `QaStory385` are empty.
+- **Residual risks.** The cap counts the statement's own `%ROWCOUNT`; a client timeout leaves a capped DML to commit server-side; `$$GetTypen^%SYS.SQLSRV` and `%Metadata.statementType` are verified only on 2026.2 build 221U. All three are documented.
+- **For the retro (spec corrections).** (1) The Verification names `^ExecuteMCPv2.Temp.QaStory385GateC`: that 33-character name collides with its sibling and loses the stem, so the gate uses `^ExecuteMCPv2.QaStory385GateC`/`G` and `DEFAULTGLOBAL` on the audit class. (2) The planned `sql-safety` "not-countable" mutation row is not IRIS-side observable; the live rows are the pinning tests. (3) The spec did not list `governance-cli-universe.test.ts` and `doc-edit-governance.test.ts`, whose parent-map pins moved. (4) The `overCap` remedy for an unknown count (TRUNCATE) says "raise maxRowsAffected", which cannot help; the text is fixed in the intent contract (BH1 in the triage log).
 
 **Planning pass (2026-10-15).** The plan was halted after planning, as the invocation directed. The spec meets the READY FOR DEVELOPMENT standard.
 - **Probes.** The AC 38.5.1 probes ran at plan time on `default`/HSCUSTOM (IRIS 2026.2 build 221U), using disposable `ExecuteMCPv2.Temp.QaStory385*` classes and globals. All were removed, and the listings for `QaStory385` (documents with `generated`, and globals) are empty.

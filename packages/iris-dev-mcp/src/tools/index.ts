@@ -28,7 +28,7 @@ import { envDiffTool } from "./env-diff.js";
 import { envPromoteTool } from "./env-promote.js";
 import { packageListTool } from "./packages.js";
 import { routineIntermediateTool } from "./routine.js";
-import { sqlExecuteTool } from "./sql.js";
+import { sqlExecuteTool, sqlQueryTool } from "./sql.js";
 import { sqlAnalyzeTool } from "./sqlAnalyze.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
 import {
@@ -76,4 +76,5 @@ export const tools: ToolDefinition[] = [
   envPromoteTool,
   testStatusTool,
   docEditTool,
+  sqlQueryTool,
 ];

@@ -50,15 +50,22 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes (dev: core 13/17, developer 30/0 - Story 36.2 added iris_test_status, developer-include/core-exclude; Story 38.4 added iris_doc_edit to both)", () => {
-    expect(toolPresets.core.include.length).toBe(13);
+  it("pins the exact roster sizes (dev: core 14/17, developer 31/0 - Story 36.2 added iris_test_status, developer-include/core-exclude; Story 38.4 added iris_doc_edit and Story 38.5 added iris_sql_query to both)", () => {
+    expect(toolPresets.core.include.length).toBe(14);
     expect(toolPresets.core.exclude.length).toBe(17);
-    expect(toolPresets.developer.include.length).toBe(30);
+    expect(toolPresets.developer.include.length).toBe(31);
     expect(toolPresets.developer.exclude.length).toBe(0);
   });
 
-  it("core holds 14 runtime tools (13 package tools + iris_server_profiles): the 13 is a guideline, not a hard limit (L-4, Project Lead decision 2026-10-14; AD-7)", () => {
-    expect(toolPresets.core.include.length + 1).toBe(14);
+  it("core holds 15 runtime tools (14 package tools + iris_server_profiles): the 13 is a guideline, not a hard limit (L-4, Project Lead decision 2026-10-14; AD-7)", () => {
+    expect(toolPresets.core.include.length + 1).toBe(15);
+  });
+
+  it("iris_sql_query is included in both presets: querying is part of the everyday loop, and iris_sql_execute is blocked under the read-only preset (Story 38.5)", () => {
+    expect(toolPresets.core.include).toContain("iris_sql_query");
+    expect(toolPresets.developer.include).toContain("iris_sql_query");
+    expect(toolPresets.core.exclude).not.toContain("iris_sql_query");
+    expect(toolPresets.core.include).toContain("iris_sql_execute");
   });
 
   it("iris_doc_edit is included in both presets, because it is in the everyday authoring loop (Story 38.4)", () => {

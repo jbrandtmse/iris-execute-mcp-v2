@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 29 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(29);
+    it("should contain exactly 30 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(30);
     });
 
     it("should contain all required class names", () => {
@@ -1057,6 +1057,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.SystemConfig.cls",
         "ExecuteMCPv2.REST.Analytics.cls",
         "ExecuteMCPv2.REST.SqlAdvisor.cls",
+        "ExecuteMCPv2.REST.Sql.cls",
         "ExecuteMCPv2.REST.Dispatch.cls",
       ];
       for (const name of expected) {
@@ -1086,7 +1087,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(29);
+      expect(classes.length).toBe(30);
     });
 
     it("should return classes in compilation order", () => {
@@ -1137,6 +1138,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.MessageResend.cls",
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Security.cls",
+        "ExecuteMCPv2.REST.Sql.cls",
         "ExecuteMCPv2.REST.SqlAdvisor.cls",
         "ExecuteMCPv2.REST.SystemConfig.cls",
         "ExecuteMCPv2.REST.Task.cls",
@@ -1203,6 +1205,13 @@ describe("bootstrap", () => {
       const sqlAdvisor = classes.find(c => c.name === "ExecuteMCPv2.REST.SqlAdvisor.cls");
       expect(sqlAdvisor).toBeDefined();
       expect(sqlAdvisor!.content).toContain("ExecuteMCPv2.REST.SqlAdvisor");
+    });
+
+    it("should include Sql.cls (Story 38.5)", () => {
+      const classes = getBootstrapClasses();
+      const sql = classes.find(c => c.name === "ExecuteMCPv2.REST.Sql.cls");
+      expect(sql).toBeDefined();
+      expect(sql!.content).toContain("Class ExecuteMCPv2.REST.Sql Extends ExecuteMCPv2.REST.Base");
     });
   });
 
@@ -1277,6 +1286,7 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.SystemConfig.cls", "src/ExecuteMCPv2/REST/SystemConfig.cls"],
       ["ExecuteMCPv2.REST.Analytics.cls", "src/ExecuteMCPv2/REST/Analytics.cls"],
       ["ExecuteMCPv2.REST.SqlAdvisor.cls", "src/ExecuteMCPv2/REST/SqlAdvisor.cls"],
+      ["ExecuteMCPv2.REST.Sql.cls", "src/ExecuteMCPv2/REST/Sql.cls"],
       ["ExecuteMCPv2.REST.Dispatch.cls", "src/ExecuteMCPv2/REST/Dispatch.cls"],
     ];
 

@@ -22,7 +22,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 
 ---
 
-## `@iris-mcp/dev` — Development Tools (30)
+## `@iris-mcp/dev` — Development Tools (31)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -39,7 +39,7 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 11 | `iris_doc_convert` | 🟦 Atelier | `GET /doc/{name}?format=...` (UDL ↔ XML) |
 | 12 | `iris_doc_xml_export` | 🟦 Atelier | `POST /action/xml/{export\|load\|list}` (load takes `?flags=` when `compile: true`) |
 | 13 | `iris_macro_info` | 🟦 Atelier | `POST /action/getmacrodefinition` + `POST /action/getmacrolocation` |
-| 14 | `iris_sql_execute` | 🟦 Atelier | `POST /action/query` |
+| 14 | `iris_sql_execute` | 🟥 ExecuteMCPv2 | `POST /dev/sql/execute` (Story 38.5: prepares once, classifies by statement type, and executes in the same request; optional `readOnly`, `maxRowsAffected`, `countOnly`; the Atelier `POST /action/query` route is no longer used) |
 | 15 | `iris_execute_tests` | 🟦 Atelier | `POST /work` + `GET /work/{id}` (async unittest); a run outliving its wait budget returns a non-error "running" result (`jobId`/`runIndex` handles) instead of a timeout error (Story 36.1) — the run-index handle is captured via `GET /global` (🟥 ExecuteMCPv2, the pre-existing `iris_global_get` route), reading `IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")` and, as a completed-runs-only fallback, `^UnitTest.Result`'s counter (read before queueing and after completion); no new governance key (bare `iris_execute_tests`, unchanged) |
 | 16 | `iris_execute_command` | 🟥 ExecuteMCPv2 | `POST /command` |
 | 17 | `iris_execute_classmethod` | 🟥 ExecuteMCPv2 | `POST /classmethod` |
@@ -56,8 +56,9 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 28 | `iris_env_promote` | 🟥 ExecuteMCPv2 | `plan`: pure transform, no IRIS connection; `execute`: the same per-domain endpoints as `iris_env_diff` (writes) — `POST /config/mapping/{type}` (create/delete), `PUT /doc/{name}` + `POST /action/compile` (🟦 Atelier), `POST /interop/defaultsettings`, `POST /security/webapp`, `POST /system/config` |
 | 29 | `iris_test_status` | 🟦 Atelier | `poll`: `GET /work/{jobId}` (re-attach) + `POST /action/query` (SQL read of `%UnitTest_Result.*` by exact `InstanceIndex`); `cancel`: `DELETE /work/{jobId}`. Both actions also read the job's queue node (run index, request type) via `GET /global` (🟥 ExecuteMCPv2, the same route `iris_global_get`/`iris_execute_tests` use; best-effort) — companion to `iris_execute_tests` (Story 36.2); `poll` is `read` and **enabled by default**, `cancel` is `write` and **DEFAULT-DISABLED** by governance |
 | 30 | `iris_doc_edit` | 🟦 Atelier | `GET /doc/{name}` (the one read, and the re-read the answer is built from) + `PUT /doc/{name}` (one save carrying `If-None-Match: <ts>`); never compiles — surgical line edits of an existing class, routine or include file (Story 38.4); `apply` is `write` and **enabled by default**, `regenerateStorage` (the Storage-guard override) is `write` and **DEFAULT-DISABLED**; both inherit a disable of `iris_doc_put` (parent key) |
+| 31 | `iris_sql_query` | 🟥 ExecuteMCPv2 | `POST /dev/sql/execute` (Story 38.5; the same route as `iris_sql_execute`, always read-only: only SELECT runs, inside a transaction that is always rolled back); `read` and **enabled by default**, including under the read-only preset; it inherits a disable of `iris_sql_execute` (parent key) |
 
-**Mix:** 21 Atelier · 9 ExecuteMCPv2 · 0 other
+**Mix:** 20 Atelier · 11 ExecuteMCPv2 · 0 other
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_sql_analyze` (`explain`/`stats`/`indexUsage`/`running`). All four actions are governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled). The tool is Atelier/SQL-only (no ObjectScript handler, no bootstrap contribution).
 
@@ -68,6 +69,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 > **Epic 28 (2026-07-11) — SQL Performance Advisor, governance defaults:** added the `advise` action to `iris_sql_analyze` — evidence-cited SQL performance findings (`full-scan`, `missing-index`, `stale-stats`, `unused-index`, `plan-anomaly`) for a `query` or the recent statement `workload`. **Strictly advisory**: recommends and cites a plan excerpt for every finding; never applies anything (no `applyIndex` write ships in v1). `advise` is governance-classified `read` and is **enabled by default** (a `read` classification is still required for every new key). **Tool count is UNCHANGED** — `advise` is a new action on the existing `iris_sql_analyze` tool, not a new tool (Rule #31); the suite governance-key count moves **200 live / 59 post-foundation → 201 live / 60 post-foundation**. The frozen Epic-14 governance baseline (`1e62c5ad5bf7`, 141 keys) is **unchanged**. `workload` mode's `topN` (default 5, max 20) caps real analysis work, not just output size — each statement analyzed is a full endpoint round-trip (Rule #38). Backed by the new ObjectScript endpoint `ExecuteMCPv2.REST.SqlAdvisor:AdviseData` (`POST /dev/sql/advise-data`, Story 28.1; `BOOTSTRAP_VERSION` `1e2008753853` → `6422caf6ec31`) plus a pure-TypeScript heuristic engine (Story 28.2, no bootstrap contribution).
 
 > **Story 38.4 (2026-10-15) — governance defaults:** added `iris_doc_edit` (dev 29 → 30) with two post-foundation keys. `iris_doc_edit:apply` is truthfully classified `write` and ships **ENABLED** through the `defaultEnabled` marker (Project Lead decision S-3: every edit is guarded by the `expected` text of the lines it changes, the save is version-checked and never retried, and a class edit that would drop a Storage definition is refused); it is one of two holders of that marker (with `iris_production_control:clean`) and the list is closed. `iris_doc_edit:regenerateStorage` is the guard override as a separate action, `write` and **DEFAULT-DISABLED**. The tool declares the parent key `iris_doc_put`: when `iris_doc_put` is explicitly disabled both keys seed disabled, reported as `configSource: "parent"` and denied with `inheritedFrom` (an explicit setting on the child still wins). The frozen Epic-14 baseline (`1e62c5ad5bf7`, 141 keys) is **unchanged**; the suite governance-key counts move by the two new keys. No ObjectScript or bootstrap change (`BOOTSTRAP_VERSION` unchanged); the tool is Atelier-only.
+
+> **Story 38.5 (2026-10-15) — governance defaults, SQL write safety:** added `iris_sql_query` (dev 30 → 31), one post-foundation key, truthfully classified `read` and therefore **ENABLED by default**, including under the read-only preset (which blocks the frozen-baseline write `iris_sql_execute`). It declares the parent key `iris_sql_execute`: when `iris_sql_execute` is explicitly disabled, `iris_sql_query` seeds disabled, reported as `configSource: "parent"` and denied with `inheritedFrom` (an explicit setting on `iris_sql_query` still wins). `iris_sql_execute` itself gains no `action` enum and no annotation change; it gains the optional parameters `readOnly`, `maxRowsAffected` and `countOnly`, the operator variables `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` (both unset by default), the additive result fields `rowsAffected` and `totalCount`, and the refusal codes `SQL_READ_ONLY` and `SQL_ROWS_AFFECTED_CAP`. Both tools now run through the new ExecuteMCPv2 route `POST /dev/sql/execute` (the `ExecuteMCPv2.REST.Sql` handler, a bootstrap contribution: `BOOTSTRAP_VERSION` moves), so `iris_sql_execute` depends on the bootstrapped service like `iris_execute_command` does. The frozen Epic-14 baseline (`1e62c5ad5bf7`, 141 keys) is **unchanged**; the suite governance-key counts move by the one new key.
 
 > **Epic 34 (2026-08-17) — `iris_execute_command` / `iris_execute_classmethod` response fidelity:** both tools keep their rows, their endpoints (`POST /command`, `POST /classmethod`), their existing `write` classification and their default state — **no new tool, action, or governance key** (Rule #31 not triggered; the frozen baseline `1e62c5ad5bf7` and the 201-live/60-post-foundation key counts are unchanged). What changed is the ObjectScript handler `ExecuteMCPv2.REST.Command` and the two tools' **response shape**, strictly additively (Rule #19 — existing plain-scalar calls return the same `returnValue`/`argCount`): `/classmethod` now captures device output the same way `/command` always has (returned in `output`, so narrating methods and stock `%UnitTest.Manager.RunTest` no longer need a `%SYS.Capture` wrapper), accepts `{byRef: true, value?}` marker args and returns their post-call values in `byRefValues`, and raises the positional-arg ceiling from 10 to 20. `returnValue`, `byRefValues` and `output` share **ONE 32768-raw-character response budget** (spent in that order) with a machine-detectable `[IRIS-MCP-TRUNCATED ceiling=<N>chars]` marker and three flags (`returnValueTruncated`/`byRefTruncated`/`truncated`); per Rule #38 that ceiling bounds the **response payload only** — the target has already executed — and it is not Web-Gateway-timeout protection. Story 34.8 additionally fixed request-body decoding across **all 14 `ExecuteMCPv2.REST.*` handler classes** (46 call sites, every server in this catalog): `ExecuteMCPv2.Utils.ReadRequestBody` now decodes raw UTF-8 explicitly, so non-ASCII input is no longer silently corrupted on the way in (see [Known Limitations](README.md#known-limitations)). `BOOTSTRAP_VERSION` moved several times across the epic and ships at `01dc15bb27df`; per-tool detail lives in [`packages/iris-dev-mcp/README.md`](packages/iris-dev-mcp/README.md).
 
@@ -348,7 +351,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 106-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 107-tool total.
 
 ---
 
@@ -378,12 +381,12 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 | Server | Atelier | ExecuteMCPv2 | Other | Package total | Advertised (+1 framework) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 21 | 9 | 0 | **30** | **31** |
+| `@iris-mcp/dev` | 20 | 11 | 0 | **31** | **32** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
 | `@iris-mcp/interop` | 0 | 22 | 0 | **22** | **23** |
 | `@iris-mcp/ops` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **21** | **80** | **5** | **106** | **111** |
+| **Total** | **20** | **82** | **5** | **107** | **112** |
 
 ---
 
@@ -391,11 +394,11 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Only `@iris-mcp/dev` is partially portable without the custom REST
 
-21 of the 30 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, line edits, compile, search, macros, SQL, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup — and `iris_test_status:poll`/`:cancel` (re-attach by `jobId`, or a fallback to `runIndex` alone, both via pure Atelier/SQL calls; only its BEST-EFFORT queue-node reads — run index, request type — depend on `/global`, so without it pass `runIndex` for an authoritative `poll` result). The 9 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`, `iris_loc_count`, `iris_env_diff`, `iris_env_promote`) would fail but the rest would work.
+20 of the 31 dev tools hit Atelier directly. Even if the `ExecuteMCPv2.*` handler classes were missing or not compiled, a developer could still use doc CRUD, line edits, compile, search, macros, SQL analysis, unit tests, server info, package browsing, bulk export, and macro-expanded routine lookup — and `iris_test_status:poll`/`:cancel` (re-attach by `jobId`, or a fallback to `runIndex` alone, both via pure Atelier/SQL calls; only its BEST-EFFORT queue-node reads — run index, request type — depend on `/global`, so without it pass `runIndex` for an authoritative `poll` result). The 11 ExecuteMCPv2-backed tools (`iris_execute_*`, `iris_global_*`, `iris_sql_execute`, `iris_sql_query`, `iris_loc_count`, `iris_env_diff`, `iris_env_promote`) would fail but the rest would work.
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 80 of the 106 tools (75% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 82 of the 107 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -409,7 +412,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 d
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 80 of 106 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 82 of 107 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

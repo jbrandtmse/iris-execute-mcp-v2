@@ -21,6 +21,10 @@ export const REFUSAL_CODES = {
   DOCUMENT_CONFLICT: "DOCUMENT_CONFLICT",
   /** An edit's expected text does not match the document now. */
   STALE_CONTENT: "STALE_CONTENT",
+  /** Read-only mode refused a statement that is not a query. */
+  SQL_READ_ONLY: "SQL_READ_ONLY",
+  /** A rows-affected cap refused a statement, before it ran or by rolling it back. */
+  SQL_ROWS_AFFECTED_CAP: "SQL_ROWS_AFFECTED_CAP",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

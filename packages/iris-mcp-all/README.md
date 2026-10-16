@@ -22,13 +22,13 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 30 | ObjectScript document CRUD, guarded surgical line edits of existing documents, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion, long-running test-run re-attach/read/cancel |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 31 | ObjectScript document CRUD, guarded surgical line edits of existing documents, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion, long-running test-run re-attach/read/cancel |
 | [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
 | [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay |
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check`), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **106 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
+> **107 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
 
 ### Discover profiles & policy first
 
@@ -40,7 +40,7 @@ Every server in this suite supports `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IR
 
 | Server | full (runtime) | core (runtime) | developer (runtime) |
 |---|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 31 | 14 | 31 |
+| `@iris-mcp/dev` | 32 | 15 | 32 |
 | `@iris-mcp/admin` | 27 | 13 | 11 |
 | `@iris-mcp/interop` | 23 | 10 | 23 |
 | `@iris-mcp/ops` | 22 | 10 | 10 |

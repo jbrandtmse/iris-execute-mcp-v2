@@ -20,7 +20,7 @@ describe("iris-dev-mcp", () => {
     });
 
     it("should export the document CRUD, line-edit, compilation, intelligence, format, SQL, server, global, execute, LOC, env-diff, env-promote, and test-status tools", () => {
-      expect(tools).toHaveLength(30);
+      expect(tools).toHaveLength(31);
       const names = tools.map((t) => t.name);
       expect(names).toContain("iris_doc_get");
       expect(names).toContain("iris_doc_put");
@@ -52,11 +52,13 @@ describe("iris-dev-mcp", () => {
       expect(names).toContain("iris_env_promote");
       expect(names).toContain("iris_test_status");
       expect(names).toContain("iris_doc_edit");
+      expect(names).toContain("iris_sql_query");
     });
 
-    it("registers iris_doc_edit last, after iris_test_status (Story 38.4)", () => {
-      expect(tools.at(-1)?.name).toBe("iris_doc_edit");
-      expect(tools.at(-2)?.name).toBe("iris_test_status");
+    it("registers iris_sql_query last, after iris_doc_edit (Story 38.5; iris_doc_edit was last, after iris_test_status, in Story 38.4)", () => {
+      expect(tools.at(-1)?.name).toBe("iris_sql_query");
+      expect(tools.at(-2)?.name).toBe("iris_doc_edit");
+      expect(tools.at(-3)?.name).toBe("iris_test_status");
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -70,16 +72,16 @@ describe("iris-dev-mcp", () => {
   });
 
   describe("McpServerBase instantiation with doc tools", () => {
-    it("should create a server instance with 30 package tools (+1 framework tool)", () => {
+    it("should create a server instance with 31 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/dev",
         version: "0.0.0",
         tools,
       });
       expect(server).toBeDefined();
-      // 30 package tools + the framework `iris_server_profiles` discovery tool
+      // 31 package tools + the framework `iris_server_profiles` discovery tool
       // (Epic 19, decision E1 — registered on every server by the shared base).
-      expect(server.toolCount).toBe(31);
+      expect(server.toolCount).toBe(32);
     });
 
     it("should report all tool names", () => {
@@ -119,6 +121,7 @@ describe("iris-dev-mcp", () => {
         "iris_env_promote",
         "iris_test_status",
         "iris_doc_edit",
+        "iris_sql_query",
         // The framework discovery tool is registered last by the shared base
         // (Epic 19, decision E1), after the package's own tools.
         "iris_server_profiles",

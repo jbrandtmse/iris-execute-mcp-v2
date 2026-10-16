@@ -1,6 +1,6 @@
 # IRIS MCP Server Suite — Epic History (Epics 1–34)
 
-What each of the 34 development epics built, grouped into the four phases the project moved through. The suite today is **106 tools across 5 servers** (111 advertised with the framework `iris_server_profiles` tool) — Epics 31–35 added no tools; Epic 36 (after this history's cut-off) added one, `iris_test_status`, the companion to `iris_execute_tests`; Epic 38 added one, `iris_doc_edit`, guarded surgical line edits of an existing document.
+What each of the 34 development epics built, grouped into the four phases the project moved through. The suite today is **107 tools across 5 servers** (112 advertised with the framework `iris_server_profiles` tool) — Epics 31–35 added no tools; Epic 36 (after this history's cut-off) added one, `iris_test_status`, the companion to `iris_execute_tests`; Epic 38 added two, `iris_doc_edit`, guarded surgical line edits of an existing document, and `iris_sql_query`, the read-only query tool that stays available under the read-only preset.
 
 Authoritative per-epic detail lives in [`_bmad-output/planning-artifacts/epics.md`](../_bmad-output/planning-artifacts/epics.md); release notes are in [`CHANGELOG.md`](../CHANGELOG.md).
 

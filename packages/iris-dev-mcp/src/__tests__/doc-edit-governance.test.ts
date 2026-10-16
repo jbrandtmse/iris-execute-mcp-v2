@@ -212,10 +212,11 @@ describe("iris_doc_edit governance (Story 38.4)", () => {
       expect(enabled.has("iris_doc_edit:regenerateStorage")).toBe(false);
     });
 
-    it("buildParentKeys over the real dev tools maps both keys to iris_doc_put and nothing else", () => {
+    it("buildParentKeys over the real dev tools maps both iris_doc_edit keys to iris_doc_put, iris_sql_query to iris_sql_execute (Story 38.5), and nothing else", () => {
       expect([...buildParentKeys(tools)]).toEqual([
         ["iris_doc_edit:apply", "iris_doc_put"],
         ["iris_doc_edit:regenerateStorage", "iris_doc_put"],
+        ["iris_sql_query", "iris_sql_execute"],
       ]);
     });
   });

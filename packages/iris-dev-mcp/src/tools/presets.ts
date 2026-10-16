@@ -6,14 +6,19 @@
  * `core` = the authoring loop (get/edit/put/list/compile/load) + execution &
  * debug loop (command/classmethod/tests, global get/set/kill — kill stays
  * because the documented `^ClineDebug` debug pattern ends with a cleanup
- * kill) + SQL execute. 13 package tools = 14 runtime (+ `iris_server_profiles`).
+ * kill) + SQL execute and SQL query. 14 package tools = 15 runtime (+ `iris_server_profiles`).
  * The target of about 13 runtime tools is a guideline, not a hard limit (L-4,
  * Project Lead decision 2026-10-14; AD-7).
- * `developer` = the full 30-tool dev server (all dev tools are dev-relevant).
+ * `developer` = the full 31-tool dev server (all dev tools are dev-relevant).
  *
- * `include union exclude` MUST equal the package's full 30-tool set for both
+ * `include union exclude` MUST equal the package's full 31-tool set for both
  * presets — enforced at `McpServerBase` construction by `assertPresetCoverage`
  * (see `index.ts`) and at test time by `presets.test.ts`.
+ *
+ * `iris_sql_query` (Story 38.5): `core` and `developer` include. Querying is part
+ * of the everyday debug loop, and under the `read-only` governance preset
+ * `iris_sql_execute` is blocked, so a `core` setup would otherwise have no way to
+ * query at all. It has no `TOOL_PAIRS` entry.
  *
  * `iris_doc_edit` (Story 38.4): `core` and `developer` include. It is in the
  * everyday authoring loop (a ranged `iris_doc_get`, then an edit, then
@@ -48,6 +53,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_execute_tests",
       "iris_doc_load",
       "iris_doc_edit",
+      "iris_sql_query",
     ],
     exclude: [
       "iris_doc_delete",
@@ -101,6 +107,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_env_promote",
       "iris_test_status",
       "iris_doc_edit",
+      "iris_sql_query",
     ],
     exclude: [],
   },

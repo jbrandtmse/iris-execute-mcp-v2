@@ -89,6 +89,9 @@ const gateTestFiles = [
   // `iris_doc_edit` line edits against the real Atelier `GET /doc` and `PUT /doc` (version-checked save, re-read):
   // writes only the disposable ExecuteMCPv2.Temp.QaStory384Edit.cls, ...Store.cls (persistent, compiled) and ...Rtn.mac documents.
   "src/__tests__/doc-edit-live-gate.test.ts",
+  // `iris_sql_execute` / `iris_sql_query` safety against the real /dev/sql/execute route: writes only the disposable
+  // ExecuteMCPv2.Temp.QaStory385Gate.cls and ...QaStory385GateAudit.cls (persistent, compiled) documents, their data and globals.
+  "src/__tests__/sql-safety-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

@@ -374,8 +374,8 @@ async function runPrivilegedSteps(
     );
   }
 
-  // Package mapping to %All (non-fatal — only cross-namespace command exec
-  // depends on it).
+  // Package mapping to %All (non-fatal: only calls that name a namespace other
+  // than the web app's depend on it: command exec and SQL).
   try {
     await configurePackageMapping(http, config, version);
     result.mapped = true;
@@ -385,7 +385,7 @@ async function runPrivilegedSteps(
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     result.errors.push(`Package mapping failed: ${msg}`);
-    // Non-fatal: cross-namespace iris_execute_command won't work but everything else will
+    // Non-fatal: calls that name another namespace (iris_execute_command, iris_sql_execute, iris_sql_query) won't work but everything else will
   }
 }
 

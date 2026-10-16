@@ -46,7 +46,7 @@ Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **14-tool runtime roster** (13 package tools + `iris_server_profiles`; about 13 is a guideline, not a hard limit) — the authoring loop (get/edit/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and `iris_sql_execute`. `iris_doc_get` and `iris_doc_edit` are a pair and stay co-visible in every preset. `IRIS_TOOLS_PRESET=developer` keeps all **31 runtime tools** (30 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **15-tool runtime roster** (14 package tools + `iris_server_profiles`; about 13 is a guideline, not a hard limit) — the authoring loop (get/edit/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and the SQL tools `iris_sql_execute` and `iris_sql_query`. `iris_doc_get` and `iris_doc_edit` are a pair and stay co-visible in every preset. `IRIS_TOOLS_PRESET=developer` keeps all **32 runtime tools** (31 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
 
 > **Prompt-pack limitation.** Two of this server's prompts call tools `core` hides: `diagnose-slow-query` calls `iris_sql_analyze` (hidden under `core`), and `promote-environment-change` calls `iris_env_diff`/`iris_env_promote` (both hidden together under `core` — they are always co-visible). Both prompts work unchanged under `full` or `developer`. Running under `core`, either switch to `full`/`developer` or set `IRIS_TOOLS_ENABLE` to re-show the specific tool(s) the prompt needs.
 
@@ -182,14 +182,19 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_sql_execute` | Execute a SQL query with parameterized values | `query`, `parameters?`, `maxRows?`, `namespace?` | -- |
+| `iris_sql_execute` | Execute a SQL statement with parameterized values; optionally read-only, capped by rows affected, or count-only | `query`, `parameters?`, `maxRows?`, `readOnly?`, `maxRowsAffected?`, `countOnly?`, `namespace?` | -- |
+| `iris_sql_query` | Run a SQL query (SELECT only) with parameterized values; read, enabled by default, available under the read-only preset | `query`, `parameters?`, `maxRows?`, `countOnly?`, `namespace?` | readOnly, idempotent |
 | `iris_sql_analyze` | Analyze SQL: show query plan (`explain`), parse maps/indexes from the plan (`indexUsage`), cached-statement stats (`stats`), currently-running statements (`running`), or get SQL Performance Advisor findings (`advise`) | `action`, `query?`, `filter?`, `maxRows?`, `workload?`, `topN?`, `namespace?` | readOnly, idempotent |
 
 > **Governance defaults:** all five `iris_sql_analyze` actions (`explain`/`stats`/`indexUsage`/`running`/`advise`) are classified `read` and are therefore **enabled by default** — none is gated behind `IRIS_GOVERNANCE`. (A `read` classification is still required for every new tool key, but reads resolve enabled under the default seed.)
 >
 > **`advise` — SQL Performance Advisor (Epic 28):** given `query` (or `workload: true` to advise the top-`topN` recent statements instead, mutually exclusive with `query`), returns evidence-cited findings — `full-scan`, `missing-index` (with a suggested `CREATE INDEX` DDL), `stale-stats`, `unused-index`, `plan-anomaly` — each carrying a plan excerpt and a confidence level. **Strictly advisory: recommendations are heuristic; verify with `explain` before applying any change** — `advise` never applies anything itself (no write/`applyIndex` action ships in v1). `topN` (default 5, max 20) bounds real analysis work in `workload` mode, not just output size — each statement analyzed is a full endpoint round-trip (EXPLAIN + dictionary reads), so a larger `topN` is proportionally more work. If the recent-statement workload source is unavailable on your IRIS edition/version, `workload` mode returns a clear capability message rather than a raw SQL error.
 >
-> **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` **returns** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
+> **Governance defaults (SQL):** `iris_sql_execute` keeps its pre-governance classification (a write that is **enabled by default**, so it is blocked by the read-only preset). `iris_sql_query` (Story 38.5) is classified `read` and is therefore **enabled by default**, and it stays enabled under the read-only preset. Its parent key is `iris_sql_execute`: when an operator explicitly disables `iris_sql_execute`, `iris_sql_query` is disabled too (a `GOVERNANCE_DISABLED` refusal with `inheritedFrom: "iris_sql_execute"`), unless `iris_sql_query` is set explicitly, e.g. `{"global":{"iris_sql_execute":false,"iris_sql_query":true}}`. See [Parent keys](../../README.md#parent-keys-a-new-tool-that-re-exposes-an-existing-one).
+>
+> **SQL write safety (optional, opt-in — Story 38.5):** `iris_sql_execute` takes `readOnly` (default `false`: only queries run; any other statement is refused with `SQL_READ_ONLY` before it runs), `maxRowsAffected` (default: no cap; `0` is a dry count: an INSERT, UPDATE or DELETE that changes more rows is rolled back and refused with `SQL_ROWS_AFFECTED_CAP`; under a cap only SELECT, INSERT, UPDATE and DELETE run; the count is the statement's own row count, so rows that triggers, cascades or functions change are not counted and a SELECT is not bounded by it) and `countOnly` (default `false`: returns `totalCount` and no rows). An operator may set `IRIS_SQL_READ_ONLY=true` (every call read-only; unset by default) and `IRIS_SQL_MAX_ROWS_AFFECTED` (a non-negative integer ceiling; unset by default); a call can only tighten them, and the result carries `readOnlyForced` or `maxRowsAffectedCapped` when one applied. Both variables are global: every profile inherits them. An INSERT, UPDATE or DELETE result carries `rowsAffected` (`-1` for `TRUNCATE TABLE`). Read-only is **statement-level read-only, not side-effect-free**: the statement runs inside a transaction that is always rolled back, which does not undo `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, `JOB` or device output, or a function, procedure or trigger that starts, commits or rolls back a transaction (reported as an error; some changes may be saved). Both tools run through the ExecuteMCPv2 `/dev/sql/execute` endpoint, which the bootstrap deploys; `iris_sql_query` always runs read-only.
+>
+> **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` and `iris_sql_query` **return** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 >
 > **`iris_execute_tests` wait budget (optional, opt-in — Story 36.1):** an operator may set `IRIS_TEST_TIMEOUT` (the tool's DEFAULT wait budget, in **seconds**, before it returns a "running" result instead of blocking further) as an environment variable. Unset by default — the tool keeps its 120-second default. It applies to every server profile (named `IRIS_PROFILES` entries inherit it, like `IRIS_SQL_TIMEOUT`). A per-call `timeout` argument, when given, takes precedence over `IRIS_TEST_TIMEOUT`. See the `iris_execute_tests` detail section below for the full running-result contract.
 
@@ -992,6 +997,45 @@ An import **loads definitions without compiling them** by default — the respon
 ```
 
 If the operator has set `IRIS_SQL_MAX_ROWS` lower than the effective request, the output additionally carries `"rowsCapped": true` (e.g. `IRIS_SQL_MAX_ROWS=5` with `maxRows: 10` above would clamp `rowCount` to 5 and add `rowsCapped: true`). Unset, this field never appears.
+
+**Safety controls** (all optional; defaults: `readOnly` false, `maxRowsAffected` no cap, `countOnly` false). A DELETE capped at 2 rows that would change 3 is rolled back and refused:
+
+```json
+{ "query": "DELETE FROM Sample.Person WHERE Age > 90", "maxRowsAffected": 2 }
+```
+
+```json
+{
+  "isError": true,
+  "structuredContent": {
+    "code": "SQL_ROWS_AFFECTED_CAP",
+    "namespace": "USER",
+    "statementType": "DELETE",
+    "rowsAffected": 3,
+    "maxRowsAffected": 2,
+    "capSource": "parameter"
+  }
+}
+```
+
+Within the cap the statement commits and the result is `{"columns": [], "rows": [], "rowCount": 0, "rowsAffected": 3}`. With `readOnly: true` (or `IRIS_SQL_READ_ONLY=true`) any statement that is not a SELECT is refused with `SQL_READ_ONLY` (`structuredContent` carries `statementType` and `readOnlySource`: `parameter`, `operator` or `tool`), and a SELECT forced by the operator variable carries `"readOnlyForced": true`. With `countOnly: true` a SELECT returns `{"columns": [], "rows": [], "rowCount": 0, "totalCount": 42}` and transfers no rows; `rowCount` keeps its meaning (rows returned). A function, procedure or trigger that starts, commits or rolls back the transaction this tool opened is reported as an error (no `code`), because the tool could not check or undo it reliably.
+</details>
+
+<details>
+<summary><strong>iris_sql_query</strong> -- Query SQL (read-only)</summary>
+
+Runs a SQL query (SELECT) in a transaction that is always rolled back. Use it for queries, including under the read-only governance preset, where `iris_sql_execute` is blocked. Any other statement, `CALL` included, is refused with `SQL_READ_ONLY` and `readOnlySource: "tool"`.
+
+**Input:**
+```json
+{
+  "query": "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ?",
+  "parameters": ["MyApp."],
+  "maxRows": 10
+}
+```
+
+**Output:** `{"columns": ["Name"], "rows": [["MyApp.Service"], ["MyApp.Utils"]], "rowCount": 2}`; with `countOnly: true`, `{"columns": [], "rows": [], "rowCount": 0, "totalCount": 2}`. `IRIS_SQL_MAX_ROWS` (`rowsCapped`) and `IRIS_SQL_TIMEOUT` apply exactly as they do to `iris_sql_execute`; `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` have nothing to bound here.
 </details>
 
 <details>
@@ -1705,10 +1749,10 @@ Atelier work-queue `DELETE` route operates on the job id).
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 30 tools in this package accept the `namespace` parameter** except:
+**All 31 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
-Tools that use the Atelier REST API (doc, compile, intelligence, sql, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute tools) pass namespace as a request parameter. `iris_env_diff`/`iris_env_promote` are the exception in spirit rather than mechanism: their `namespace` overrides BOTH the `source` and `target` profile's namespace identically (each side otherwise falls back to its own profile's configured default), rather than targeting one connection's namespace like every other tool here.
+Tools that use the Atelier REST API (doc, compile, intelligence, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute, SQL execute/query tools) pass namespace as a request parameter. `iris_env_diff`/`iris_env_promote` are the exception in spirit rather than mechanism: their `namespace` overrides BOTH the `source` and `target` profile's namespace identically (each side otherwise falls back to its own profile's configured default), rather than targeting one connection's namespace like every other tool here.
 
 ---
 

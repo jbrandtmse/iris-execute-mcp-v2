@@ -95,8 +95,8 @@ function invalidJobIdError(jobId: string): ToolResult {
 
 // ── SQL helpers ──────────────────────────────────────────────────
 
-/** Run one SQL query via the Atelier `action/query` route (same route
- * `execute.ts`'s `discoverPackageTests` and `iris_sql_execute` use). */
+/** Run one SQL query via the Atelier `action/query` route (the same route
+ * `execute.ts`'s `discoverPackageTests` uses). */
 async function runSqlQuery(
   ctx: SqlCtx,
   ns: string,

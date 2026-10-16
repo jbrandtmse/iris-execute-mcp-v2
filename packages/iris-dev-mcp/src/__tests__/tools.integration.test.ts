@@ -404,6 +404,8 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain("SQL error");
+      // The SQLCODE proves IRIS ran the prepare; a missing /dev/sql/execute route would also say "SQL error".
+      expect(result.content[0]?.text).toContain("SQLCODE: -30");
     });
 
     it("iris_server_info returns valid server information", async () => {

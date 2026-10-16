@@ -15,7 +15,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { loadConfig } from "@iris-mcp/shared";
 import { sqlExecuteTool } from "../tools/sql.js";
-import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
+import { createMockHttp, createMockCtx } from "./test-helpers.js";
+import { SQL_PATH, endpointBody, executed } from "./sql-test-support.js";
 
 describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.2)", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
@@ -40,7 +41,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     ctx = { ...ctx, config: realConfig };
 
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID FROM Sample.Person", maxRows: 10 },
@@ -50,8 +51,8 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     // Exactly 2 args — no timeout options object, matching pre-caps behavior.
     expect(mockHttp.post.mock.calls[0]).toHaveLength(2);
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT ID FROM Sample.Person" },
+      SQL_PATH,
+      endpointBody("SELECT ID FROM Sample.Person"),
     );
 
     // Check the full serialized text output too, not just structuredContent —
@@ -72,7 +73,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     // request and confirm the SAME assertions used above WOULD catch it.
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 3 } };
     const manyRows = Array.from({ length: 50 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID FROM Sample.Person", maxRows: 10 },
@@ -92,7 +93,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     // no rows are dropped by the cap itself, but rowsCapped is still true
     // because the cap DID reduce the requested ceiling from 20 to 5.
     const actualRows = Array.from({ length: 3 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: actualRows }));
+    mockHttp.post.mockResolvedValue(executed(actualRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 5 } };
 
     const result = await sqlExecuteTool.handler(
@@ -117,7 +118,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     // values) — proves the coexistence holds generally, not for one magic
     // numeric combination.
     const actualRows = Array.from({ length: 200 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: actualRows }));
+    mockHttp.post.mockResolvedValue(executed(actualRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 7 } };
 
     const result = await sqlExecuteTool.handler(
@@ -142,7 +143,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     // implicit DEFAULT_MAX_ROWS (1000) case. This covers an explicit,
     // non-default maxRows equal to the cap.
     const manyRows = Array.from({ length: 100 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 50 } };
 
     const result = await sqlExecuteTool.handler(
@@ -160,7 +161,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
 
   it("clamps against the implicit DEFAULT_MAX_ROWS (1000) when the caller omits maxRows and the cap is below 1000", async () => {
     const manyRows = Array.from({ length: 500 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
     ctx = { ...ctx, config: { ...ctx.config, sqlMaxRows: 200 } };
 
     const result = await sqlExecuteTool.handler(
@@ -191,13 +192,13 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     expect(realConfig.sqlTimeoutMs).toBe(7 * 1000);
 
     ctx = { ...ctx, config: realConfig };
-    mockHttp.post.mockResolvedValue(envelope({ content: [{ ID: 1 }] }));
+    mockHttp.post.mockResolvedValue(executed([{ ID: 1 }]));
 
     await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT 1" },
+      SQL_PATH,
+      endpointBody("SELECT 1"),
       { timeout: 7000 },
     );
   });
@@ -211,13 +212,13 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     expect(realConfig.sqlTimeoutMs).toBe(2500);
 
     ctx = { ...ctx, config: realConfig };
-    mockHttp.post.mockResolvedValue(envelope({ content: [{ ID: 1 }] }));
+    mockHttp.post.mockResolvedValue(executed([{ ID: 1 }]));
 
     await sqlExecuteTool.handler({ query: "SELECT 1" }, ctx);
 
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT 1" },
+      SQL_PATH,
+      endpointBody("SELECT 1"),
       { timeout: 2500 },
     );
   });
@@ -234,7 +235,7 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
     ctx = { ...ctx, config: realConfig };
 
     const manyRows = Array.from({ length: 30 }, (_, i) => ({ ID: i }));
-    mockHttp.post.mockResolvedValue(envelope({ content: manyRows }));
+    mockHttp.post.mockResolvedValue(executed(manyRows));
 
     const result = await sqlExecuteTool.handler(
       { query: "SELECT ID FROM Sample.Person", maxRows: 15 },
@@ -255,8 +256,8 @@ describe("iris_sql_execute — SQL resource caps QA boundary coverage (Story 24.
 
     // Timeout forwarded in the SAME call.
     expect(mockHttp.post).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/action/query",
-      { query: "SELECT ID FROM Sample.Person" },
+      SQL_PATH,
+      endpointBody("SELECT ID FROM Sample.Person"),
       { timeout: 10_000 },
     );
   });

@@ -250,6 +250,64 @@ describe("loadConfig", () => {
     expect(() => loadConfig(env)).toThrow("IRIS_SQL_TIMEOUT");
   });
 
+  // -- IRIS_SQL_READ_ONLY / IRIS_SQL_MAX_ROWS_AFFECTED (Story 38.5) -----
+
+  it("should leave sqlReadOnly/sqlMaxRowsAffected absent when unset or empty", () => {
+    for (const env of [
+      { IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret" },
+      {
+        IRIS_USERNAME: "admin",
+        IRIS_PASSWORD: "secret",
+        IRIS_SQL_READ_ONLY: "",
+        IRIS_SQL_MAX_ROWS_AFFECTED: "",
+      },
+    ]) {
+      const config = loadConfig(env);
+      expect(config).not.toHaveProperty("sqlReadOnly");
+      expect(config).not.toHaveProperty("sqlMaxRowsAffected");
+      expect(Object.keys(config).sort()).toEqual(
+        ["acceptLanguage", "baseUrl", "host", "https", "namespace", "password", "port", "timeout", "username"],
+      );
+    }
+  });
+
+  it("should parse IRIS_SQL_READ_ONLY case-insensitively; false is set, not absent", () => {
+    const parse = (value: string) =>
+      loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_SQL_READ_ONLY: value });
+    for (const value of ["true", "TRUE", "True"]) expect(parse(value).sqlReadOnly, value).toBe(true);
+    for (const value of ["false", "FALSE", "False"]) {
+      expect(parse(value).sqlReadOnly, value).toBe(false);
+      expect(parse(value), value).toHaveProperty("sqlReadOnly", false);
+    }
+  });
+
+  it("should throw naming IRIS_SQL_READ_ONLY and the value when it is not true or false", () => {
+    for (const value of ["yes", "1", "0", " true", "true ", "on"]) {
+      expect(
+        () => loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_SQL_READ_ONLY: value }),
+        value,
+      ).toThrow(`IRIS_SQL_READ_ONLY must be "true" or "false". Received: "${value}".`);
+    }
+  });
+
+  it("should parse IRIS_SQL_MAX_ROWS_AFFECTED as a non-negative integer; 0 is a valid ceiling", () => {
+    const parse = (value: string) =>
+      loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_SQL_MAX_ROWS_AFFECTED: value });
+    expect(parse("0").sqlMaxRowsAffected).toBe(0);
+    expect(parse("0")).toHaveProperty("sqlMaxRowsAffected", 0);
+    expect(parse("25").sqlMaxRowsAffected).toBe(25);
+    expect(parse("007").sqlMaxRowsAffected).toBe(7);
+  });
+
+  it("should throw naming IRIS_SQL_MAX_ROWS_AFFECTED and the value when it is not a non-negative integer", () => {
+    for (const value of ["-1", "1.5", "abc", " ", "1e3", "0x10", "5 ", "99999999999999999999"]) {
+      expect(
+        () => loadConfig({ IRIS_USERNAME: "admin", IRIS_PASSWORD: "secret", IRIS_SQL_MAX_ROWS_AFFECTED: value }),
+        value,
+      ).toThrow(`IRIS_SQL_MAX_ROWS_AFFECTED must be a non-negative integer. Received: "${value}".`);
+    }
+  });
+
   // ── IRIS_TEST_TIMEOUT (Story 36.1, AC 36.1.4) ───────────────────────
 
   it("should leave testTimeoutMs undefined (and absent) when unset — Rule #19 byte-for-byte no-op", () => {

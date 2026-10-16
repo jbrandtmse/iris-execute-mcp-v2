@@ -279,14 +279,22 @@ describe("universe — full-universe render over the real built dist", { timeout
     );
     expect(json.policy).toEqual(expectedPolicy);
 
-    // Derived from the real dist, never hand-picked: every key of a tool with a parent reports `parent`,
-    // and no other key does.
+    // Derived from the real dist, never hand-picked: every key of a tool whose parent is the disabled
+    // `iris_doc_put` reports `parent`, and no other key does (a child of another parent stays enabled).
     const inherited = Object.entries(json.configSource)
       .filter(([, source]) => source === "parent")
       .map(([key]) => key)
       .sort();
-    expect(inherited).toEqual([...parentKeys.keys()].sort());
+    const childrenOfDocPut = [...parentKeys.entries()]
+      .filter(([, parent]) => parent === "iris_doc_put")
+      .map(([key]) => key)
+      .sort();
+    expect(childrenOfDocPut.length).toBeGreaterThan(0);
+    expect(inherited).toEqual(childrenOfDocPut);
     for (const key of inherited) expect(json.policy[key], key).toBe(false);
+    for (const [key, parent] of parentKeys) {
+      if (parent !== "iris_doc_put") expect(json.policy[key], key).toBe(true);
+    }
   });
 });
 

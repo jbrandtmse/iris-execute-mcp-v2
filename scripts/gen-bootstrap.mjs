@@ -40,6 +40,7 @@ const classes = [
   { name: 'ExecuteMCPv2.REST.SystemConfig.cls', path: 'src/ExecuteMCPv2/REST/SystemConfig.cls' },
   { name: 'ExecuteMCPv2.REST.Analytics.cls', path: 'src/ExecuteMCPv2/REST/Analytics.cls' },
   { name: 'ExecuteMCPv2.REST.SqlAdvisor.cls', path: 'src/ExecuteMCPv2/REST/SqlAdvisor.cls' },
+  { name: 'ExecuteMCPv2.REST.Sql.cls', path: 'src/ExecuteMCPv2/REST/Sql.cls' },
   { name: 'ExecuteMCPv2.REST.Dispatch.cls', path: 'src/ExecuteMCPv2/REST/Dispatch.cls' },
 ];
 

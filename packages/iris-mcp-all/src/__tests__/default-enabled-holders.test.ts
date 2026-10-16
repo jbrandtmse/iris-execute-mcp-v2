@@ -56,12 +56,12 @@ describe("the closed lists of governance exceptions (Story 38.4, AD-4)", () => {
     }
   });
 
-  it("the parent declarations are exactly iris_doc_edit -> iris_doc_put", async () => {
+  it("the parent declarations are exactly iris_doc_edit -> iris_doc_put and iris_sql_query -> iris_sql_execute (Story 38.5)", async () => {
     const declared = Object.fromEntries(
       (await loadSurface()).flatMap(({ tool }) => (tool.parent === undefined ? [] : [[tool.name, tool.parent]])),
     );
 
-    expect(declared).toEqual({ iris_doc_edit: "iris_doc_put" });
+    expect(declared).toEqual({ iris_doc_edit: "iris_doc_put", iris_sql_query: "iris_sql_execute" });
   });
 
   it("every parent is a key of the frozen baseline, and no child key is", async () => {
