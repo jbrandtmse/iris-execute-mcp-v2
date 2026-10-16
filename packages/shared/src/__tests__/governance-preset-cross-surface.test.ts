@@ -33,6 +33,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
@@ -160,57 +161,11 @@ function discoveryOf(result: any): ServerDiscoveryResult {
   return result.structuredContent as ServerDiscoveryResult;
 }
 
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-    IRIS_GOVERNANCE_PRESET: process.env.IRIS_GOVERNANCE_PRESET,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-    delete process.env.IRIS_GOVERNANCE_PRESET;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-    get exitMock() {
-      return exitMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 })); // HEAD health check
@@ -231,7 +186,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Cross-surface agreement (default profile) — resource, discovery, gate", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -312,7 +267,7 @@ describe("Cross-surface agreement (default profile) — resource, discovery, gat
 // ════════════════════════════════════════════════════════════════════
 
 describe("Cross-surface agreement (non-default profile, explicit override) — resource template, discovery, gate", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -376,7 +331,7 @@ describe("Cross-surface agreement (non-default profile, explicit override) — r
 // ════════════════════════════════════════════════════════════════════
 
 describe("Startup fail-fast via the real McpServerBase.start() path (AC 24.1.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -425,7 +380,7 @@ describe("Startup fail-fast via the real McpServerBase.start() path (AC 24.1.3)"
 // ════════════════════════════════════════════════════════════════════
 
 describe("'full' preset is a byte-for-byte pass-through at the call-time gate (AC 24.1.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

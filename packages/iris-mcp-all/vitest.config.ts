@@ -6,6 +6,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/__tests__/**/*.test.ts"],
     exclude: ["src/**/*.integration.test.ts"],
+    // Clears the operator's startup variables before each test file is imported.
+    setupFiles: ["../shared/src/__tests__/startup-env.setup.ts"],
     // This package's tests dynamically `import()` built dist output across
     // ALL FIVE server packages (tool-catalog.mjs / prompt-catalog.mjs) —
     // disk-I/O-bound work that is measurably marginal against vitest's

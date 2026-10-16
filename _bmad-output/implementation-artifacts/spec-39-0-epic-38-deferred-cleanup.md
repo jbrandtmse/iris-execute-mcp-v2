@@ -2,16 +2,24 @@
 title: 'Story 39.0: Epic 38 Deferred Cleanup'
 type: 'bugfix'
 created: '2026-10-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'bab8ba38301636cf5d8bd814d50d8a6d662f2073'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - multiple-goals
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      AC-7 (no __tests__, env-harness or startup-env path in the shared tarball) is verified only by the one-time npm pack command, with no default-suite test, so a later move of the harness into src/test-helpers/ would ship it unnoticed.
+    evidence: |-
+      The AC-7 mutation (a copy of env-harness.ts under packages/shared/src/test-helpers/) was caught only by running npm pack --dry-run by hand; a search of packages/*/src finds no test that runs it. Verification-gap review of Story 39.0 filed it; the packaging gate is DW-506 (Story 42.1), so this is an occurrence of DW-506.
+    location: >-
+      packages/shared/package.json (files), packages/shared/src/__tests__/env-harness.ts
+    severity: low
 ---
 
 <intent-contract>
@@ -238,6 +246,36 @@ The tool is the part of the key before its first `:`. Keys are listed in derivat
 
 ## Review Triage Log
 
+### 2026-10-16 — Review pass
+- verdicts: 26 findings — high 0, medium 6, low 18, false 2, maybe-false 0 (tallied from the rows below by grep; 8 rows repeat an earlier row's root cause and are marked `carried`, so the rows group into 4 medium root causes)
+- findings:
+  - `[medium]` `[patch]` BH1 — `story-39-0-doc-claims` asserts the Story 39.0 CHANGELOG section is first in the file — Story 39.1 adds its own top section and turns it red with no regression; patched: the assertion is dropped, the section is found by title as the 38.x tests do.
+  - `[medium]` `[patch]` BH2 — changeset, CHANGELOG and README list "a typo such as `iris_doc_putt`" among the keys a server warns about at startup, but `deadKeyReason` in server scope is silent for a tool no server registers (only `check` reports it) — the spec's own lead example would be misread; patched: all three texts now say a misspelled tool name logs nothing at startup and only `check` reports it.
+  - `[medium]` `[patch]` BH3 — nothing in the default suite pins that a package's `vitest.config.ts` lists the scrub (only shared had mutation evidence) — a config can lose it unnoticed on a clean machine; patched: `startup-env-roster.test.ts` loads each of the 7 configs and asserts the shared setup file is listed; mutation recorded (AC-5).
+  - `[low]` `[reject]` BH4 — a bare key on a per-action tool whose `action` is `.optional()`/`.nullable()`/`.default()` is live in the gate (falls back to the bare key) but reported dead — verified by introspection of the five built dists: all 41 `action` fields are bare `ZodEnum`, so no tool reaches it; `wontfix-theoretical`, real only when a tool declares a wrapped `action` enum.
+  - `[low]` `[patch]` BH5 — the shared config's `env: { LOG_LEVEL: "DEBUG" }` pin is dead (the setup scrub deletes `LOG_LEVEL` after vitest applies `env`) under a comment that says it pins the default — the logger default is DEBUG, so behavior is unchanged; patched: the pin and the false comment are replaced by a comment that says what the scrub does (a deletion; CLEAN and HOSTILE shared runs re-verified).
+  - `[low]` `[patch]` BH6 — CHANGELOG Tests bullet says "every package's `vitest.config.ts` runs the scrub" but client-config's config is unchanged (its HOSTILE run was green, so the spec made the change conditional) — patched: the bullet names the seven packages and says why client-config is unchanged.
+  - `[low]` `[reject]` BH7 — the second row of `doc-type-description.test.ts` checks example types in isolation, so `'cls'` always passes although it is valid only with category `*` — the exact-text row (`toBe(EXPECTED_TEXT)`) is the real guard, its mutation (old text restored) is red in both rows; a category-aware example check is more than a direct fix for a row that cannot let the DW-567 text change through.
+  - `[low]` `[reject]` EH1 — same root as BH4 (false "has no effect" for a wrapped-enum tool's bare key); `carried` reject, `wontfix-theoretical`.
+  - `[medium]` `[patch]` EH2 — same root as BH2 (typo wording at changeset:8, CHANGELOG, README); `carried`: patched with BH2.
+  - `[low]` `[reject]` EH3 — `it.skipIf(!changesetPresent)` skips the bump pin once `changeset version` consumes the file — the same pattern as the 38.1, 38.2, 38.3 and 38.7 doc-claims tests; the pin runs while the file exists, which is when AC-9 is judged, and its mutation went red.
+  - `[low]` `[reject]` EH4 — the roster scan matches only `env.NAME` and `env["NAME"]`, and `stripComments` does not skip regex literals — a grep of the scanned sources finds no `env?.NAME`, destructured or dynamic read, and the spec fixes the scan forms; the two-way equality check also fails for a listed variable a swallowed region hides; `wontfix-theoretical`, real when a source reads the environment through one of those forms.
+  - `[low]` `[patch]` EH5 — same root as BH6 (CHANGELOG "every package"); carried: patched with BH6.
+  - `[false]` `[reject]` EH6 — `validate` exits 0 for a loader-valid document that holds a dead key, which `start()` now warns about — the intent contract defines a valid document as one whose keys are all in the suite universe, forbids any change to `validate`, and makes the warning the feature; `false`, by design.
+  - `[medium]` `[patch]` VG1 — the roster guard compares the source against shared's built `dist/__tests__/startup-env.js`, but `checkDistFresh` skips `src/__tests__/` (`SRC_DIRS_NOT_SHIPPED`, verified in `scripts/lib/dist-freshness.mjs:65,267`), so a source-only list edit leaves the guard green against an old list — patched: `loadRoster` compares the mtimes of the source list and its built copy and fails with the rebuild instruction; mutation recorded (AC-6).
+  - `[medium]` `[patch]` VG2 — same root as BH3 (the six non-shared `setupFiles` entries have no mutation evidence and no default-suite pin); carried: patched with BH3.
+  - `[low]` `[defer]` VG3 — AC-7 (no `__tests__`, `env-harness` or `startup-env` path in the shared tarball) is checked only by the `(once)` `npm pack` command, with no default-suite test — the packaging gate belongs to DW-506 / Story 42.1 (Boundaries); deferred as an occurrence of DW-506.
+  - `[low]` `[reject]` VG4 — the README `@iris-mcp/dev` payload rows are checked only by the `(once)` `pnpm measure:tools-payload` run — the README states that byte counts are not test-pinned and the drift is accepted until the next re-measure; `by-design`.
+  - `[low]` `[reject]` VG5 (Other) — `env-harness.test.ts:75` asserts `toHaveLength(24)` on a test-local array — redundant, harmless; the roster equality assertions above it are the pin.
+  - `[low]` `[reject]` VG6 (Other) — `doc-type-description.test.ts:37,87` checks types without their category; carried from BH7: `carried` reject.
+  - `[low]` `[reject]` VG7 (Other) — `story-39-0-doc-claims.test.ts:92` `skipIf`; carried from EH3: `carried` reject.
+  - `[low]` `[patch]` VG8 (Other) — the baseline-only-key filter in `cmdCheck` (`governance.ts`) is pinned by `governance-cli-check.test.ts` "a frozen-baseline key whose tool no package carries is in the universe" but has no recorded mutation — LOW closed in this pass: the filter removed, the row went red, reverted; the line is in `## Verification` (AC-2).
+  - `[low]` `[reject]` VG9 (Other) — hermeticity: the real-dist rows depend on sibling packages' built dists, which `turbo` does not order before `shared:test` — they fail loudly ("could not locate built tools"), `governance-cli-universe.test.ts` already used the pattern, and the project runs per-package standalone builds and tests (env rules); `by-design`.
+  - `[low]` `[reject]` IA1 — the built-process surface has no row for form (c) through the interop server or for the hidden-tool row; they live in the in-process fixture tier — Tasks 10 and 11 place exactly those rows there, and the built-process tier carries forms (a) and (b), the silent rows and the valid documents; `by-design`.
+  - `[low]` `[patch]` IA2 — no committed test asserts a config carries the scrub (the `HOSTILE` run is manual); carried from BH3: patched with BH3.
+  - `[false]` `[reject]` IA3 — the harness snapshots the environment at construction, so under vitest "restored exactly" means restored to the scrubbed state — `false`: the matrix row's "each value is restored exactly" is what `env-harness.test.ts` pins (it builds the harness after setting hostile values), and restoring the scrubbed state in real suites is the intended behavior.
+  - `[low]` `[patch]` IA4 — the baseline-only filter is exercised only through the injected loader; carried from VG8: patched with VG8.
+
 ## Design Notes
 
 **Orchestrator decision #20: DECIDED at the spec gate, 2026-10-16, as recommended (a startup WARN for keys a server can prove dead, plus `iris-mcp-governance check` for keys unknown to the whole suite; never fail-fast). The lead wrote the AD-8 line (Rule 20). The planning text follows.** what should catch a governance key that names nothing (DW-565)?
@@ -381,7 +419,75 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-8 | The old `'cls' for CLS` text restored | `doc-type-description` |
 | AC-9 | The changeset bump changed | `story-39-0-doc-claims` |
 
+**Mutation evidence (Rule 19; applied, red observed, reverted with `cmp` byte-identical, dists rebuilt).**
+
+- AC-1: mutation: `logger.warn(warning)` -> `void warning` in `packages/shared/src/server-base.ts` (shared dist rebuilt) -> red: 6 start() rows of `governance-unmatched-keys.test.ts` (forms a, b, c, framework key, hidden tool, both channels) and 8 rows of `story-38-7-qa-governance-process.test.ts` (4 new form (a)/(b) rows on both channels, plus the 4 pre-existing unknown-profile WARN rows, which share the loop).
+- AC-1: mutation: `governanceKeysByTool([...this.options.tools, ...this.tools.values()])` -> `[...this.tools.values()]` in `packages/shared/src/server-base.ts` -> red: `governance-unmatched-keys.test.ts` "a hidden tool counts as registered" (1 of 21).
+- AC-2: mutation: the final `return 1` of `cmdCheck` -> `return 0` in `packages/shared/src/cli/governance.ts` (shared dist rebuilt) -> red: 7 rows (5 in `governance-cli-check.test.ts`, 2 built-bin rows in `governance-cli-e2e.test.ts`).
+- AC-2: mutation: `cmdCheck` calls `unmatchedGovernanceKeys(..., "server")` instead of `"suite"` in `packages/shared/src/cli/governance.ts` (shared dist rebuilt) -> red: the same 7 rows, including the `iris_doc_putt` form (d) row.
+- AC-3: mutation: `keys.includes(key)` -> `keysByTool.has(key)` in `deadKeyReason`, `packages/shared/src/governance.ts` (shared dist rebuilt) -> red: 11 rows in shared (the all-universe-keys row, the start() rows, the `check` exit-1 rows) and 5 rows of the process gate, among them the all-universe-keys row and the new `STARTING` per-action row. The two pre-existing `STARTING` documents hold only single-operation keys, so they cannot catch this mutation; a `STARTING` document with per-action keys was added for that reason.
+- AC-3: mutation: `const frameworkKeys = deriveKeysForTool(serverDiscoveryTool, "framework")` -> `const frameworkKeys: string[] = []` in `loadUniverseCatalog`, `packages/shared/src/cli/governance.ts` (shared dist rebuilt) -> red: 3 `governance-cli-universe.test.ts` rows and the `check` framework-key row; the `universe --json` capture differs from the pre-change capture.
+- AC-4: mutation: `IRIS_GOVERNANCE_PRESET` removed from `STARTUP_ENV_VARS` in `packages/shared/src/__tests__/startup-env.ts` (shared dist rebuilt) -> red: 4 rows of `env-harness.test.ts` (roster, default setup, unset setup, `scrubStartupEnv`) and `startup-env-roster.test.ts` naming `IRIS_GOVERNANCE_PRESET (read in packages/shared/src/governance.ts)`. The first draft of `env-harness.test.ts` iterated the module's own list and only the count row went red; its behavior rows now run over a hand-copied roster.
+- AC-5: mutation: `setupFiles` removed from `packages/shared/vitest.config.ts` -> red: `HOSTILE` shared, 17 files and 86 tests (`server-param.test.ts`, `server-base.test.ts`, the `audit-*` files and others; the 15 harness files stay green because the harness scrubs for itself). Re-run after the review pass dropped the dead `env: { LOG_LEVEL }` pin from that config; the first run, with the pin, was 11 files and 68 tests.
+- AC-5: mutation: the `setupFiles` line removed from `packages/iris-data-mcp/vitest.config.ts` (a default-suite pin, no `HOSTILE` run needed) -> red: `startup-env-roster.test.ts` "iris-data-mcp: the vitest config the runner loads lists the shared scrub as a setup file" (1 of 10; `expected [] to include` the shared setup file). The test loads each of the 7 configs, so the one mutation stands for the six non-shared entries.
+- AC-6: mutation: `void process.env.IRIS_PROBE_X;` appended to `packages/shared/src/logger.ts` (shared dist rebuilt) -> red: `startup-env-roster.test.ts` naming `IRIS_PROBE_X (read in packages/shared/src/logger.ts)`; and `"IRIS_UNREAD_PROBE"` added to `PLATFORM_ENV_VARS` (dist rebuilt) -> red, naming it. Without the rebuild the test fails on `staleDistReason`, not on the read.
+- AC-6: mutation: `"LOG_LEVEL"` removed from `STARTUP_ENV_VARS` in `packages/shared/src/__tests__/startup-env.ts` and shared NOT rebuilt (the freshness gate skips `src/__tests__/`) -> red: `startup-env-roster.test.ts` fails in `loadRoster` with "startup-env.ts is newer than the built dist/__tests__/startup-env.js" (3 of 10 skipped behind it). Reverted with `cmp` byte-identical; `packages/shared/dist` and `tsconfig.tsbuildinfo` deleted and rebuilt, because the compiler emits nothing for a content-identical file.
+- AC-2: mutation: the `.filter((finding) => !universeKeys.has(finding.key))` removed from `cmdCheck` in `packages/shared/src/cli/governance.ts` (in-process rows run on source, no rebuild) -> red: `governance-cli-check.test.ts` "a frozen-baseline key whose tool no package carries is in the universe, so it is not reported" (1 of 24). Reverted with `cmp` byte-identical.
+- AC-7: mutation: a copy of the harness at `packages/shared/src/test-helpers/env-harness.ts` (built) -> red: `npm pack --dry-run --json --ignore-scripts` lists `dist/test-helpers/env-harness.{js,js.map,d.ts,d.ts.map}`; after removing the copy and its four dist files the check shows 0 matching paths.
+- AC-8: mutation: `"CLS takes no type filter (leave it unset). "` -> `"e.g., 'cls' for CLS. "` in `DOC_TYPE_DESCRIPTION`, `packages/iris-dev-mcp/src/tools/doc.ts` -> red: both rows of `doc-type-description.test.ts`.
+- AC-9: mutation: `"@iris-mcp/dev": patch` -> `minor` in `.changeset/story-39-0-epic-38-deferred-cleanup.md` -> red: `story-39-0-doc-claims.test.ts` "the changeset bumps exactly shared minor and dev patch".
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Story 39.0 closes the three Epic 38 ledger entries.
+- DW-565: every server warns once per dead governance key it can prove (forms a, b, c) and never fails; the new `iris-mcp-governance check` reports every key that matches nothing in the suite universe (form d included) and exits 1.
+- DW-543: one env harness (`makeEnvHarness`) and one `setupFiles` scrub live under `packages/shared/src/__tests__/` (never published); all 43 copies use the harness; the default suites of the eight packages are green under `HOSTILE` with counts equal to `CLEAN`.
+- DW-567: one probe-verified `DOC_TYPE_DESCRIPTION` serves `iris_doc_list`, `iris_package_list` and `iris_doc_export`.
+
+No tool, action, key, preset row or prompt moved; `GOVERNANCE_BASELINE` stays `1e62c5ad5bf7`/141 (`:check` OK), `BOOTSTRAP_VERSION` stays `089f8f0a62b2` (no ObjectScript change).
+
+**Files changed.**
+- `packages/shared/src/governance.ts`: `governanceKeysByTool`, `unmatchedGovernanceKeys` (forms a to d, server and suite scope).
+- `packages/shared/src/server-base.ts`: `start()` logs the server-scope findings of both channels.
+- `packages/shared/src/cli/governance.ts`: `check` subcommand, `loadUniverseCatalog` extracted from `universe` (output byte-identical), help, dispatch and unknown-command list.
+- `packages/iris-dev-mcp/src/tools/{doc,packages,export}.ts`: shared `DOC_TYPE_DESCRIPTION`.
+- `packages/shared/src/__tests__/{startup-env,startup-env.setup,env-harness}.ts` (new) and `test-helpers.ts` (re-exports the harness); seven `vitest.config.ts` files gain `setupFiles`.
+- 43 test files: local `makeEnvHarness` removed, promoted harness imported (shared 15, dev 8, admin 9, interop 6, ops 5).
+- New tests: `env-harness`, `governance-unmatched-keys`, `governance-cli-check` (shared); `doc-type-description` (dev); `startup-env-roster`, `story-39-0-doc-claims` (all); extended `governance-cli-e2e` and `story-38-7-qa-governance-process`.
+- Docs: root `README.md`, `packages/shared/README.md`, `CHANGELOG.md`, `.changeset/story-39-0-epic-38-deferred-cleanup.md` (shared minor, dev patch).
+
+**Review (4 layers, 26 findings; tallied by grep in the triage log).** Patches applied: 4 medium root causes and 3 low.
+- Medium: the doc-claims test pinned the CHANGELOG section as first in the file; the startup-warning wording named a misspelled tool name although only `check` reports it; no default-suite pin that each package's config lists the scrub; the roster guard's freshness check could not see `src/__tests__/startup-env.ts`.
+- Low: a dead `LOG_LEVEL` env pin in the shared config; the CHANGELOG "every package" wording; the baseline-only-key filter had no mutation line.
+
+Deferred: 1 (AC-7 packaging gate, an occurrence of DW-506 / Story 42.1).
+
+Rejected, with the recorded reason (full rows in the triage log):
+- wrapped `action` enum reported dead (BH4, EH1): all 41 real `action` fields are bare enums;
+- `doc-type-description` example check is category-blind (BH7, VG6): the exact-text row is the guard;
+- `skipIf` on the changeset pin (EH3, VG7): the 38.x precedent;
+- roster scan forms (EH4): no source uses another form;
+- `validate` versus the startup warning (EH6): the contract defines a valid document as every key in the universe;
+- README payload rows not test-pinned (VG4): documented convention;
+- `toHaveLength(24)` self-check (VG5): harmless;
+- dist-order hermeticity (VG9): fails loudly, accepted pattern;
+- form (c) and hidden-tool rows in-process only (IA1): the spec's tiering;
+- harness construction-time snapshot (IA3): intended.
+
+**Follow-up review recommendation: true.** Two or more medium entries were patched (4 root causes). Unverified risk, named: the patch pass added the roster guard's mtime comparison and the config-wiring test (a dynamic `import()` of each `vitest.config.ts` inside vitest), plus doc wording edits; no review layer has seen them (mutation evidence for the first two is recorded).
+
+**Verification performed (all foreground, one package per call).**
+- Baseline before any source change: dists rebuilt clean; shared `HOSTILE` was 26 files / 203 tests red (plan-time 19 / 66), the other packages red as listed in the subagent record; `CLEAN` shared had one red (`server-discovery.test.ts`, ambient `IRIS_PORT=1`) that the harness removes.
+- `(loop)` lines green after the last patch: shared governance files (7 files, 180 tests); `HOSTILE` shared 76 files / 1693 tests; `HOSTILE` migrated files in dev (39), admin (48), interop (23), ops (22); dev DW-567 files (103); `@iris-mcp/all` roster, 38.7 process gate, 39.0 doc-claims, recipes (65).
+- `(once)` after the last patch: `build`, `test`, `lint`, `type-check` per package (shared 1693; dev 1413; admin 498; interop 345; ops 350; data 165; client-config 514), with 0 errors; the one lint warning (`cli/governance.ts:935`, unused disable directive) is in `git show bab8ba3` unchanged. Armed: `ENV` dev 59 files / 1413 tests and `ENV` `@iris-mcp/all` 47 files / 525 tests, green.
+- `HOSTILE` equals `CLEAN` in every suite: shared 1693; dev 1112 passed / 301 skipped; admin 490 / 8; interop 345; ops 350; data 163 / 2; client-config 514; `@iris-mcp/all` 466 / 59.
+- `universe` JSON and text captures: byte-identical to the pre-change captures. `gen:governance-baseline:check`, `check-epics-sync`, `gen:skills:check`: OK. `measure:tools-payload` equals the README dev rows (84,852 / 43,743).
+- `npm pack --dry-run`: 130 files, 0 paths match `__tests__`, `env-harness` or `startup-env`; frozen-file `git diff --stat` against `da9b9d5` empty; `function makeEnvHarness` only in `env-harness.ts`.
+- Leftover scan on `server:"default"`, `namespace:"HSCUSTOM"`: `iris_doc_list` (`generated:true`) on `QaStory38` and `ExecuteMCPv2.Temp` empty, `iris_global_list` `QaStory38` empty, `Ens_Config.Production` Temp count 0.
+- Live read-only probe by the lead: `GET docnames/CLS/cls` and `RTN/cls` answer 400; `RTN/mac`, `*/cls`, `CLS/*` answer 200.
+- Mutation evidence: every AC has a recorded `mutation:` line in `## Verification`, plus three lines added in the review pass (AC-5 per-package wiring, AC-6 source-only list edit, AC-2 baseline-only filter).
+
+**Residual risks.** The guard in `startup-env-roster.test.ts` compares file mtimes and, like the existing dist-freshness gate, needs a dist delete after a content-identical touch. `dist/test-helpers/integration-config.*` still ships in the shared tarball (the inverse of DW-506, as the spec noted). Review rounds also relocated two `universe` error strings that now carry `—` instead of a literal em dash; the runtime text is identical.

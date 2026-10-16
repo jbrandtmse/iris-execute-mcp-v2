@@ -9,6 +9,12 @@
 import { vi } from "vitest";
 import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, PaginateResult } from "../index.js";
 
+// The one env harness, re-exported because `@iris-mcp/shared/test-helpers` is the
+// subpath the other packages import. The harness lives in `./env-harness.ts`, which
+// never imports this file.
+export { makeEnvHarness } from "./env-harness.js";
+export type { EnvHarnessOptions } from "./env-harness.js";
+
 /**
  * Create a fully mocked {@link IrisHttpClient} with vi.fn() stubs
  * for every HTTP method (get, put, delete, post, head).

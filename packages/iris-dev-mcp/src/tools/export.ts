@@ -41,7 +41,12 @@ import {
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 import { docNameToFilePath } from "./load.js";
-import { extractAtelierContentArray, MODIFIED_SINCE_DESCRIPTION, modifiedSinceUnsupported } from "./doc.js";
+import {
+  DOC_TYPE_DESCRIPTION,
+  extractAtelierContentArray,
+  MODIFIED_SINCE_DESCRIPTION,
+  modifiedSinceUnsupported,
+} from "./doc.js";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -261,13 +266,7 @@ export const docExportTool: ToolDefinition = {
         "(.mac/.int/.inc/.bas/.mvi/.mvb). CSP = CSP/ZEN pages. " +
         "OTH = other Studio document types. * = all (default).",
       ),
-    type: z
-      .string()
-      .optional()
-      .describe(
-        "Document type within category — the file extension without the dot " +
-        "(e.g., 'cls', 'mac', 'inc'). Default: all types in the chosen category.",
-      ),
+    type: z.string().optional().describe(DOC_TYPE_DESCRIPTION),
     generated: z
       .enum(["true", "false", "both"])
       .optional()

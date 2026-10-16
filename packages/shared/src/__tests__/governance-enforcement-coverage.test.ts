@@ -40,6 +40,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 
 // A successful, no-op bootstrap result (REST service already current).
@@ -197,57 +198,11 @@ function makeMultiActionTool(
   };
 }
 
-/**
- * Shared environment save/restore so each describe block runs hermetically and
- * never leaks IRIS_* / IRIS_PROFILES / IRIS_GOVERNANCE into sibling suites.
- */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Clear inherited governance/profiles; each test sets what it needs.
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 /** Stage the default profile's startup HEAD (health) + GET (version) responses. */
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
@@ -277,7 +232,7 @@ function setTwoProfileEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — governance × server × namespace interaction", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -355,7 +310,7 @@ describe("Story 14.4 (coverage) — governance × server × namespace interactio
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — three-layer cascade resolved by the real gate", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -432,7 +387,7 @@ describe("Story 14.4 (coverage) — three-layer cascade resolved by the real gat
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — per-action enforcement via the profile layer", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -496,7 +451,7 @@ describe("Story 14.4 (coverage) — per-action enforcement via the profile layer
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — denial envelope is exactly {code,action,server} + isError + non-empty text", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -556,7 +511,7 @@ describe("Story 14.4 (coverage) — denial envelope is exactly {code,action,serv
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — near-miss action values are rejected by validation, not the gate", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -602,7 +557,7 @@ describe("Story 14.4 (coverage) — near-miss action values are rejected by vali
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — concurrent denied + allowed calls are independent", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -660,7 +615,7 @@ describe("Story 14.4 (coverage) — concurrent denied + allowed calls are indepe
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — denial establishes nothing (no client, no in-flight promise)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -718,7 +673,7 @@ describe("Story 14.4 (coverage) — denial establishes nothing (no client, no in
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 (coverage) — back-compat: a NEW read action is enabled by the seed under empty config", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

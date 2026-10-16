@@ -34,12 +34,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   connectionEnv,
   inheritedEnv,
@@ -244,6 +245,7 @@ const STARTING: Array<[label: string, document: Record<string, unknown>]> = [
   ["a `profiles` layer", { profiles: LAYERS.profiles }],
   ["both layers", LAYERS],
   ["both layers beside scalar metadata (comment, version, $schema)", { ...METADATA, ...LAYERS }],
+  ["per-action keys of a multi-action tool in both layers", { global: { "iris_doc_edit:apply": false }, profiles: { default: { "iris_doc_edit:regenerateStorage": true } } }],
 ];
 
 describe("every valid document still starts the built server, and the listener sees it reach IRIS (Story 38.7, DW-554, AC-1 back-compat)", () => {
@@ -259,6 +261,7 @@ describe("every valid document still starts the built server, and the listener s
           expect(outcome.code, outcome.stderr).toBe(0);
           expect(outcome.stderr).not.toContain("is invalid:");
           expect(outcome.stderr).not.toContain("Fatal:");
+          expect(outcome.stderr, "a valid key is never reported as dead (Story 39.0)").not.toContain("has no effect");
           expect(stub.requests.length, "the oracle can see traffic: the server reached the listener").toBeGreaterThan(0);
         });
       }, 60000);
@@ -377,4 +380,120 @@ describe("an unknown profile name under profiles only warns on the built server 
       expect(profileWarnings(report.stderr).map((line) => /profile "([^"]+)"/.exec(line)?.[1])).toEqual(["prdo", "stagng"]);
     });
   }, 90000);
+});
+
+// -- A key that names nothing only warns (Story 39.0, DW-565) -------------
+
+describe("a governance key that names nothing only warns on the built server (Story 39.0, DW-565, AC-1 and AC-3)", () => {
+  /** The `[WARN]` lines about a key that has no effect. */
+  function deadKeyWarnings(stderr: string): string[] {
+    return stderr.split("\n").filter((line) => line.includes("has no effect"));
+  }
+
+  const BARE = { global: { iris_doc_edit: false } };
+  const ACTION_ON_SINGLE = { global: { "iris_doc_put:apply": false } };
+  const NOT_THIS_SERVER = { global: { iris_production_control: false, iris_doc_putt: false } };
+
+  /** The channel's value and the `[WARN]` prefix it logs under. */
+  function channel(name: "IRIS_GOVERNANCE" | "IRIS_GOVERNANCE_FILE", document: Record<string, unknown>): { value: string; source: string } {
+    if (name === "IRIS_GOVERNANCE") return { value: JSON.stringify(document), source: "IRIS_GOVERNANCE" };
+    const file = writeGovernanceFile(document);
+    return { value: file, source: `IRIS_GOVERNANCE_FILE (path: ${file})` };
+  }
+
+  for (const name of ["IRIS_GOVERNANCE", "IRIS_GOVERNANCE_FILE"] as const) {
+    it(`${name}: a bare per-action tool name logs one form (a) WARN, and the reported policy equals the one with no governance`, async (testCtx) => {
+      if (skipReason) return testCtx.skip();
+      const { value, source } = channel(name, BARE);
+      await withStub(async (stub) => {
+        const none = await governanceReport(stub, {});
+        const bare = await governanceReport(stub, { [name]: value });
+
+        expect({ policy: bare.policy, configSource: bare.configSource }).toEqual({ policy: none.policy, configSource: none.configSource });
+        expect(deadKeyWarnings(bare.stderr)).toEqual([
+          `[WARN] ${source}: "iris_doc_edit" under "global" has no effect, because iris_doc_edit is governed per action. ` +
+            "Set the actions you mean instead: iris_doc_edit:apply, iris_doc_edit:regenerateStorage.",
+        ]);
+        expect(deadKeyWarnings(none.stderr), "a server with no governance logs none").toEqual([]);
+        expect(bare.policy["iris_doc_edit:apply"], "the default-enabled write stays enabled: the bare key governed nothing").toBe(true);
+      });
+    }, 90000);
+
+    it(`${name}: an action on a single-operation tool logs one form (b) WARN`, async (testCtx) => {
+      if (skipReason) return testCtx.skip();
+      const { value, source } = channel(name, ACTION_ON_SINGLE);
+      await withStub(async (stub) => {
+        const none = await governanceReport(stub, {});
+        const report = await governanceReport(stub, { [name]: value });
+
+        expect({ policy: report.policy, configSource: report.configSource }).toEqual({ policy: none.policy, configSource: none.configSource });
+        expect(deadKeyWarnings(report.stderr)).toEqual([
+          `[WARN] ${source}: "iris_doc_put:apply" under "global" has no effect, because iris_doc_put takes no action. Use "iris_doc_put" instead.`,
+        ]);
+      });
+    }, 90000);
+
+    it(`${name}: a key of a tool this server does not register, and a key no tool of the suite has, log nothing`, async (testCtx) => {
+      if (skipReason) return testCtx.skip();
+      const { value } = channel(name, NOT_THIS_SERVER);
+      await withStub(async (stub) => {
+        const none = await governanceReport(stub, {});
+        const report = await governanceReport(stub, { [name]: value });
+
+        expect({ policy: report.policy, configSource: report.configSource }).toEqual({ policy: none.policy, configSource: none.configSource });
+        expect(deadKeyWarnings(report.stderr)).toEqual([]);
+      });
+    }, 90000);
+  }
+
+  it("a document holding every key of the universe logs no such line, on both channels, and the reported policy is the engine's own render", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const cliOutput = execFileSync(
+      process.execPath,
+      [path.join(REPO_ROOT, "packages", "shared", "dist", "cli", "governance-cli.js"), "universe", "--root", REPO_ROOT, "--json"],
+      { encoding: "utf8", env: inheritedEnv(), maxBuffer: 16 * 1024 * 1024 },
+    );
+    const universeKeys = (JSON.parse(cliOutput) as { keys: string[] }).keys;
+    // Two thirds enabled, the rest disabled, so the render has both verdicts; the discovery tool stays enabled.
+    const everything: Record<string, boolean> = Object.fromEntries(
+      universeKeys.map((key, index) => [key, key === "iris_server_profiles" || index % 3 !== 0]),
+    );
+    const document = { global: everything, profiles: { default: everything } };
+
+    // The oracle: the engine's functions from the BUILT shared dist, over the dev package's built tools.
+    const sharedDist = async (file: string): Promise<Record<string, unknown>> =>
+      (await import(pathToFileURL(path.join(REPO_ROOT, "packages", "shared", "dist", file)).href)) as Record<string, unknown>;
+    const engine = await sharedDist("governance.js");
+    const call = <T>(fn: string, ...args: unknown[]): T => (engine[fn] as (...a: unknown[]) => T)(...args);
+    const { GOVERNANCE_BASELINE } = await sharedDist("governance-baseline.js");
+    const { BASELINE_ACTION_CLASSIFICATIONS } = await sharedDist("baseline-classifications.js");
+    const { serverDiscoveryTool } = await sharedDist("server-discovery.js");
+    const devEntry = pathToFileURL(path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "tools", "index.js")).href;
+    const tools = [...((await import(devEntry)) as { tools: unknown[] }).tools, serverDiscoveryTool];
+
+    for (const name of ["IRIS_GOVERNANCE", "IRIS_GOVERNANCE_FILE"] as const) {
+      const { value } = channel(name, document);
+      await withStub(async (stub) => {
+        const report = await governanceReport(stub, { [name]: value });
+        expect(deadKeyWarnings(report.stderr), `${name}: every key of the universe is a key of some tool`).toEqual([]);
+
+        const reported = Object.keys(report.policy);
+        expect(reported.length, "the dev server reports its own keys").toBeGreaterThan(20);
+        const mutatesLookup = new Map(call<Iterable<[string, string]>>("buildMutatesLookup", tools));
+        const envConfig = name === "IRIS_GOVERNANCE" ? document : {};
+        const fileConfig = name === "IRIS_GOVERNANCE_FILE" ? document : undefined;
+        const parentKeys = call("buildParentKeys", tools);
+        const policy = call<Record<string, boolean>>(
+          "getEffectivePolicy",
+          "default", envConfig, reported, mutatesLookup, GOVERNANCE_BASELINE, call("buildDefaultEnabledWrites", tools),
+          undefined, BASELINE_ACTION_CLASSIFICATIONS, fileConfig, parentKeys,
+        );
+        const configSource = call<Record<string, string>>(
+          "getEffectiveConfigSources",
+          "default", envConfig, reported, mutatesLookup, undefined, BASELINE_ACTION_CLASSIFICATIONS, fileConfig, parentKeys,
+        );
+        expect({ policy: report.policy, configSource: report.configSource }, name).toEqual({ policy, configSource });
+      });
+    }
+  }, 120000);
 });

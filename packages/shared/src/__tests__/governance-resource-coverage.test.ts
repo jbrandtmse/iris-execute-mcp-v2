@@ -39,6 +39,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 // Import governance ENGINE values from their direct modules (not the `../index.js`
 // barrel): the barrel transitively re-exports `server-base.js` → `bootstrap.js`,
 // which would be evaluated during the hoisted `vi.mock` factory below — before
@@ -198,54 +199,11 @@ function readPolicy(result: any): Record<string, boolean> {
   return (JSON.parse(firstContentText(result)) as { policy: Record<string, boolean> }).policy;
 }
 
-/** Shared environment save/restore for hermetic runs. */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
@@ -264,7 +222,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — per-profile read reflects the global+profile cascade (AC 14.5.3, full map)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -327,7 +285,7 @@ describe("Story 14.5 — per-profile read reflects the global+profile cascade (A
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — a write-disabled config shows that key false while reads stay true (AC 14.5.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -365,7 +323,7 @@ describe("Story 14.5 — a write-disabled config shows that key false while read
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — resources/list and templates/list exact shapes (AC 14.5.2)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -422,7 +380,7 @@ describe("Story 14.5 — resources/list and templates/list exact shapes (AC 14.5
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — unknown-profile read surfaces McpError(InvalidParams) (AC 14.5.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -457,7 +415,7 @@ describe("Story 14.5 — unknown-profile read surfaces McpError(InvalidParams) (
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — a malformed iris-governance:// URI (no profile) is a clean error (AC 14.5.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -497,7 +455,7 @@ describe("Story 14.5 — a malformed iris-governance:// URI (no profile) is a cl
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — governedKeys union includes a registered single-op tool key + the full baseline (D4/D6)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -544,7 +502,7 @@ describe("Story 14.5 — governedKeys union includes a registered single-op tool
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — the resource map tracks dynamic tool changes (governedKeys rebuilt) (D6)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

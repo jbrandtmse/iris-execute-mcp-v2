@@ -67,6 +67,8 @@ import {
   presetSeed,
   hasExplicitOverride,
   unknownProfileWarnings,
+  governanceKeysByTool,
+  unmatchedGovernanceKeys,
 } from "./governance.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
@@ -2033,13 +2035,24 @@ export class McpServerBase {
     // A profile name under "profiles" that no configured profile carries only
     // warns (Story 38.7, DW-554): the parsers have no profile registry, and one
     // policy document may serve clients with different IRIS_PROFILES.
+    //
+    // A key inside a layer that names a tool this server registers (hidden tools
+    // included: `this.options.tools` holds every package tool, `this.tools` the
+    // visible ones plus the framework tool) but is none of that tool's keys also only
+    // warns (Story 39.0, DW-565). A key whose tool this server does not register stays
+    // silent: the same document serves the other servers, and a newer server may add
+    // keys. `iris-mcp-governance check` reports keys no server of the suite has.
     const configuredProfiles = [...this.profiles.keys()];
+    const governanceFileSource = `IRIS_GOVERNANCE_FILE (path: ${process.env.IRIS_GOVERNANCE_FILE})`;
+    const registeredKeys = governanceKeysByTool([...this.options.tools, ...this.tools.values()]);
     for (const warning of [
       ...unknownProfileWarnings(this.governanceConfig, "IRIS_GOVERNANCE", configuredProfiles),
-      ...unknownProfileWarnings(
-        this.governanceFileConfig,
-        `IRIS_GOVERNANCE_FILE (path: ${process.env.IRIS_GOVERNANCE_FILE})`,
-        configuredProfiles,
+      ...unknownProfileWarnings(this.governanceFileConfig, governanceFileSource, configuredProfiles),
+      ...unmatchedGovernanceKeys(this.governanceConfig, "IRIS_GOVERNANCE", registeredKeys, "server").map(
+        (finding) => finding.message,
+      ),
+      ...unmatchedGovernanceKeys(this.governanceFileConfig, governanceFileSource, registeredKeys, "server").map(
+        (finding) => finding.message,
       ),
     ]) {
       logger.warn(warning);

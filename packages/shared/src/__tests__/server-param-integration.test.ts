@@ -33,6 +33,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 
 // A successful, no-op bootstrap result (REST service already current). Mirrors
 // the shape used by server-param.test.ts / profiles-bootstrap.test.ts.
@@ -152,58 +153,16 @@ async function callTool(server: any, name: string, args: unknown) {
   return callback(args);
 }
 
-/**
- * Shared environment save/restore so each describe block runs hermetically and
- * never leaks IRIS_* / IRIS_PROFILES into sibling suites.
- */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 // ── (1) server × namespace across all four tool scopes ──────────────
 
 describe("Story 14.2 (complementary) — `server` × `namespace` across all tool scopes", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -321,7 +280,7 @@ describe("Story 14.2 (complementary) — `server` × `namespace` across all tool
 // ── (2) `server` value edge cases: empty / undefined / whitespace ───
 
 describe("Story 14.2 (complementary) — `server` value edge cases", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -388,7 +347,7 @@ describe("Story 14.2 (complementary) — `server` value edge cases", () => {
 // ── (3) three distinct non-default profiles concurrently (N-way) ────
 
 describe("Story 14.2 (complementary) — N-way concurrent profile isolation", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -504,7 +463,7 @@ describe("Story 14.2 (complementary) — N-way concurrent profile isolation", ()
 // ── (4) establishment-Promise cache clears on rejection → retryable ─
 
 describe("Story 14.2 (complementary) — in-flight establishment cache clears on rejection", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -567,7 +526,7 @@ describe("Story 14.2 (complementary) — in-flight establishment cache clears on
 // ── (5) additive-schema back-compat for a REQUIRED-field tool ───────
 
 describe("Story 14.2 (complementary) — additive `server` on a tool with required fields", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -660,7 +619,7 @@ describe("Story 14.2 (complementary) — additive `server` on a tool with requir
 // ── (6) unknown-profile isError shape — handler never invoked ───────
 
 describe("Story 14.2 (complementary) — unknown-profile structured error never reaches the handler", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import type { McpServerBaseOptions, ToolDefinition } from "@iris-mcp/shared";
+import { makeEnvHarness } from "@iris-mcp/shared/test-helpers";
 import { defaultSettingsManageTool } from "../tools/defaultSettings.js";
 
 // ── Harness ─────────────────────────────────────────────────────────
@@ -66,57 +67,6 @@ function makeServerOpts(tools: ToolDefinition[]): McpServerBaseOptions {
  */
 function spiedTool(spy: ReturnType<typeof vi.fn>): ToolDefinition {
   return { ...defaultSettingsManageTool, handler: spy };
-}
-
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-    process.env.IRIS_USERNAME = "u";
-    process.env.IRIS_PASSWORD = "p";
-    process.env.IRIS_HOST = "default.example.com";
-    process.env.IRIS_NAMESPACE = "DEFAULTNS";
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
 }
 
 /** Stage the default profile's startup HEAD (health) + GET (version). */

@@ -20,6 +20,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
+import { makeEnvHarness } from "@iris-mcp/shared/test-helpers";
 import { docGetTool } from "../tools/doc.js";
 
 function jsonResponse(body: unknown): Response {
@@ -46,68 +47,6 @@ async function callToolOverWire(server: any, name: string, args: unknown) {
   const handler = (server.server.server as any)._requestHandlers.get("tools/call");
   const extra = { signal: new AbortController().signal, sendNotification: async () => {}, sendRequest: async () => ({}) };
   return handler({ method: "tools/call", params: { name, arguments: args } }, extra);
-}
-
-/** Startup inputs that change which tools register or what startup does; cleared before every test. */
-const CLEARED_ENV = [
-  "IRIS_PROFILES",
-  "IRIS_GOVERNANCE",
-  "IRIS_GOVERNANCE_FILE",
-  "IRIS_GOVERNANCE_PRESET",
-  "IRIS_TOOLS_PRESET",
-  "IRIS_TOOLS_ENABLE",
-  "IRIS_TOOLS_DISABLE",
-  "IRIS_SERVER_MANAGER",
-  "IRIS_AUDIT_LOG",
-] as const;
-
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv: Record<string, string | undefined> = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    ...Object.fromEntries(CLEARED_ENV.map((key) => [key, process.env[key]])),
-  };
-
-  function setup(): void {
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    for (const key of CLEARED_ENV) delete process.env[key];
-    process.env.IRIS_USERNAME = "u";
-    process.env.IRIS_PASSWORD = "p";
-    process.env.IRIS_HOST = "default.example.com";
-    process.env.IRIS_NAMESPACE = "DEFAULTNS";
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
 }
 
 /** Stage the default profile's startup HEAD (health) and GET (Atelier version 8). */

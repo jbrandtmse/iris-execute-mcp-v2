@@ -432,6 +432,95 @@ export function unknownProfileWarnings(
 }
 
 /**
+ * The governance keys of each tool, by tool name: `tool:action` per `action` enum
+ * value (in enum order), else the bare tool name. The same derivation the enforcement
+ * gate uses, so a key this map lists is a key a server can enforce.
+ */
+export function governanceKeysByTool(tools: Iterable<ToolDefinition>): Map<string, string[]> {
+  const byTool = new Map<string, string[]>();
+  for (const tool of tools) byTool.set(tool.name, governanceKeysOfTool(tool));
+  return byTool;
+}
+
+/** A governance key inside a layer that no server enforces, with the message that says why. */
+export interface UnmatchedGovernanceKey {
+  /** The channel: `IRIS_GOVERNANCE`, or `IRIS_GOVERNANCE_FILE (path: <path>)`. */
+  source: string;
+  /** The layer, labelled as the layer validation labels it: `"global"` or `profile "<name>"`. */
+  layer: string;
+  /** The key as written in the document. */
+  key: string;
+  /** The full warning or error line; it names the key and never a value. */
+  message: string;
+}
+
+/** Why `key` has no effect, or `undefined` when it names a key the tools in `keysByTool` enforce (or is out of `scope`). */
+function deadKeyReason(
+  key: string,
+  keysByTool: ReadonlyMap<string, readonly string[]>,
+  scope: "server" | "suite",
+): string | undefined {
+  const colon = key.indexOf(":");
+  const tool = colon === -1 ? key : key.slice(0, colon);
+  const keys = keysByTool.get(tool);
+  if (keys === undefined) {
+    return scope === "suite"
+      ? "no tool of the suite has this key. Check it for a typo; iris-mcp-governance universe lists every key."
+      : undefined;
+  }
+  if (keys.includes(key)) return undefined;
+  if (keys.length === 1 && keys[0] === tool) {
+    return `${tool} takes no action. Use "${tool}" instead.`;
+  }
+  if (colon === -1) {
+    return `${key} is governed per action. Set the actions you mean instead: ${keys.join(", ")}.`;
+  }
+  return `${tool} has no action "${key.slice(colon + 1)}". Use one of: ${keys.join(", ")}.`;
+}
+
+/**
+ * The keys in a governance document's layers that no server enforces, so they do nothing
+ * (Story 39.0, DW-565). A key is dead when it names a tool in `keysByTool` but is none of
+ * that tool's keys (a bare name for a per-action tool, an action on a single-operation
+ * tool, an action the tool lacks), or, in `"suite"` scope, when no tool in `keysByTool`
+ * has the name at all. In `"server"` scope a key whose tool is absent from `keysByTool`
+ * is skipped: another server of the suite may enforce it. Layers are walked `global`
+ * first, then each profile in document order; no value is ever read.
+ *
+ * @param config - The parsed document (`undefined` yields no findings).
+ * @param source - The channel label: `IRIS_GOVERNANCE`, or `IRIS_GOVERNANCE_FILE (path: <path>)`.
+ * @param keysByTool - Tool name to its governance keys (see {@link governanceKeysByTool}).
+ * @param scope - `"server"` for the tools one server registers, `"suite"` for the whole suite.
+ */
+export function unmatchedGovernanceKeys(
+  config: GovernanceConfig | undefined,
+  source: string,
+  keysByTool: ReadonlyMap<string, readonly string[]>,
+  scope: "server" | "suite",
+): UnmatchedGovernanceKey[] {
+  if (config === undefined) return [];
+  const layers: Array<[label: string, layer: GovernanceLayer | undefined]> = [['"global"', config.global]];
+  for (const [name, layer] of Object.entries(config.profiles ?? {})) {
+    layers.push([`profile "${name}"`, layer]);
+  }
+  const findings: UnmatchedGovernanceKey[] = [];
+  for (const [label, layer] of layers) {
+    if (layer === undefined) continue;
+    for (const key of Object.keys(layer)) {
+      const reason = deadKeyReason(key, keysByTool, scope);
+      if (reason === undefined) continue;
+      findings.push({
+        source,
+        layer: label,
+        key,
+        message: `${source}: "${key}" under ${label} has no effect, because ${reason}`,
+      });
+    }
+  }
+  return findings;
+}
+
+/**
  * Load the optional governance policy FILE referenced by
  * `IRIS_GOVERNANCE_FILE` (Epic 32, Story 32.0, AC 32.0.1; architecture
  * decision J1).

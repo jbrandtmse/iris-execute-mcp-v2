@@ -28,6 +28,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 // Import engine values from their direct modules (not the `../index.js` barrel):
 // the barrel transitively re-exports server-base.js → bootstrap.js, which would
 // be evaluated during the hoisted vi.mock factory before bootstrapSpy exists.
@@ -144,52 +145,11 @@ function discoveryOf(result: any): ServerDiscoveryResult {
   return result.structuredContent as ServerDiscoveryResult;
 }
 
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
@@ -208,7 +168,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — discovery tool is framework-provided (AC 19.0.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -237,7 +197,7 @@ describe("Story 19.0 — discovery tool is framework-provided (AC 19.0.1)", () =
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -331,7 +291,7 @@ describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () =>
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — effective governance policy (AC 19.0.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -543,7 +503,7 @@ describe("Story 19.0 — effective governance policy (AC 19.0.3)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — governance classification (AC 19.0.4)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -583,7 +543,7 @@ describe("Story 19.0 — governance classification (AC 19.0.4)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — MCP instructions field (AC 19.0.5)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -602,7 +562,7 @@ describe("Story 19.0 — MCP instructions field (AC 19.0.5)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — back-compat off-state (AC 19.0.6)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -652,7 +612,7 @@ describe("Story 19.0 — back-compat off-state (AC 19.0.6)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 19.0 — governance resource list enumerates profiles (AC 19.0.7)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

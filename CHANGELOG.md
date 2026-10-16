@@ -2,6 +2,48 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 39.0: Epic 38 deferred cleanup
+
+No tool, action, governance key, preset row or prompt is added or removed, and no count moves: the dev server stays at
+31 package tools (32 advertised), the suite at 107 package tools (112 advertised), and there are 12 prompts. The frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays `089f8f0a62b2` (no IRIS-side
+class changes). A valid governance document starts a server, and runs every `iris-mcp-governance` command, exactly as
+before.
+
+### Added
+
+- **A governance key that names nothing is reported (DW-565).** A key inside `global` or a profile that is none of a
+  tool's keys used to be accepted silently and did nothing: a typo such as `iris_doc_putt`, a bare name for a per-action
+  tool (`{"global": {"iris_doc_edit": false}}` leaves the default-enabled `iris_doc_edit:apply` enabled), an action on a
+  single-operation tool (`iris_doc_put:apply`) or an action the tool does not have. Each server now logs one `[WARN]` per
+  such key for a tool it registers (a tool hidden by a visibility preset counts as registered), in `IRIS_GOVERNANCE` and
+  in the file `IRIS_GOVERNANCE_FILE` names. The message names the key, the layer and the keys to use instead, and never
+  the value. The server still starts, and the effective policy is unchanged. A key whose tool the server does not
+  register logs nothing, because one document serves all five servers: that includes a misspelled tool name such as
+  `iris_doc_putt`, which only `check` reports. The new `iris-mcp-governance check [--file <path>]
+  [--root <path>] [--json]` command checks every key in `IRIS_GOVERNANCE` and in the resolved file against the whole
+  suite's key universe (the keys `universe` lists) and exits 1, with one message per key, when a key matches nothing.
+  `check` is a command of the `iris-mcp-governance` bin, not an MCP tool.
+
+### Fixed
+
+- **The `type` description of `iris_doc_list`, `iris_package_list` and `iris_doc_export` no longer offers `'cls'` for
+  category CLS (DW-567).** Atelier answers category CLS with any type but `*` with HTTP 400. The three tools now share
+  one description: RTN takes `mac`, `int`, `inc`, `bas`, `mvi` or `mvb`, or a comma list such as `mac,inc`; CLS takes no
+  type filter; with category `*`, `cls` lists only classes. This is a description change only: no tool refuses a
+  category-and-type pair on the client side. The README's `tools/list` payload rows for `@iris-mcp/dev` are re-measured.
+
+### Tests
+
+- **One environment harness for the default test runs (DW-543).** The `makeEnvHarness` test helper had been copied into 43
+  test files, and the copies cleared different subsets of the variables a server reads at startup, so a developer shell
+  with `IRIS_GOVERNANCE`, `IRIS_TOOLS_PRESET` or `LOG_LEVEL` set turned dozens of test files red across six packages.
+  There is now one harness and one setup scrub under `packages/shared/src/__tests__/` (never published), the
+  `vitest.config.ts` of shared, dev, admin, interop, ops, data and `@iris-mcp/all` runs the scrub before each test file
+  (client-config's default run was already green under a hostile shell, so its config is unchanged), all 43 copies use
+  the harness, and a roster test in `@iris-mcp/all` fails, naming the variable, when source reads a variable the roster
+  does not list.
+
 ## [Pre-release — 2026-10-16] — Story 38.7: Epic 38 burn-down
 
 No tool, action, key or preset row is added or removed, and no tool, prompt or governance-baseline count moves. Each
