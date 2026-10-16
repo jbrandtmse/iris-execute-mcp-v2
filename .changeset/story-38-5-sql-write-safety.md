@@ -16,5 +16,5 @@ preset gains `iris_sql_query` (14 to 15 runtime tools).
 `sqlReadOnly` and `sqlMaxRowsAffected`, inherited by every profile), and the refusal codes `SQL_READ_ONLY` and
 `SQL_ROWS_AFFECTED_CAP`.
 
-`BOOTSTRAP_VERSION` moves from `3af8ca401e7c` to `f757473a71d8`. With no new parameter or variable in use, every
+`BOOTSTRAP_VERSION` moves from `3af8ca401e7c` to `e615a96a1e70`. With no new parameter or variable in use, every
 pre-existing field of every `iris_sql_execute` result is unchanged.

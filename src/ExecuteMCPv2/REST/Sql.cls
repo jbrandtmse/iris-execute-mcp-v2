@@ -18,7 +18,8 @@
 /// <li><b>Transactions.</b> When this handler opened a transaction, it requires
 /// <code>$TLEVEL</code> to be the level it opened after execution (a function, procedure or
 /// trigger that started, committed or rolled back a transaction is outcome
-/// <code>transactionEnded</code>), and it rolls back to the level it found on every exit.</li>
+/// <code>transactionEnded</code>, also when the statement then failed), and it rolls back to the
+/// level it found on every exit.</li>
 /// </ul>
 /// <p>The response result is <code>{outcome, statementType, statementTypeName, ...}</code>.
 /// <code>outcome</code> is <code>ok</code> (with <code>content</code>, the rows as
@@ -173,6 +174,8 @@ ClassMethod ReadFlag(pBody As %DynamicObject, pName As %String, Output pValue As
 /// Prepares, classifies, checks and executes the statement in the current namespace. A
 /// declined statement is not an error: <var>pResult</var> carries its outcome. A transaction
 /// opened here is rolled back to the level found on entry unless the cap check committed it.
+/// When <code>$TLEVEL</code> is no longer the level opened here, the outcome is
+/// <code>transactionEnded</code>, also when the statement then failed.
 ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, Output pResult As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
@@ -218,10 +221,7 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
         }
         If $$$ISERR(tSC) Quit
 
-        If tOpened && ($TLevel '= tOpenLevel) {
-            Set pResult = ..NewResult("transactionEnded", tType, tTypeName)
-            Quit
-        }
+        If tOpened && ($TLevel '= tOpenLevel) Quit
 
         If tCapped {
             If (tRowsAffected < 0) || (tRowsAffected > pCap) {
@@ -241,6 +241,10 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
         Set tSC = ex.AsStatus()
     }
 
+    If tOpened && ($TLevel '= tOpenLevel) {
+        Set pResult = ..NewResult("transactionEnded", tType, tTypeName)
+        Set tSC = $$$OK
+    }
     If tOpened Do ..RollBackTo(tEntryLevel)
     Quit tSC
 }

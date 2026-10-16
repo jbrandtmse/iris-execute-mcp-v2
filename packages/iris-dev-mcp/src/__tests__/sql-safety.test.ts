@@ -99,14 +99,14 @@ describe("SQL write safety (Story 38.5)", () => {
 
     it("a CALL returns the rows of every result set in order, with columns from the first row, and no rowsAffected", async () => {
       mockHttp.post.mockResolvedValue(
-        executedOther(45, "CALL", [{ ID: 1, Name: "A" }, { ID: 2, Name: "B" }, { N: 2 }]),
+        executedOther(45, "CALL", [{ ID: "1", Name: "A" }, { ID: "2", Name: "B" }, { N: "2" }]),
       );
 
       const result = await call(sqlExecuteTool, { query: "CALL Sample.TwoSets()" });
 
       expect(result.structuredContent).toEqual({
         columns: ["ID", "Name"],
-        rows: [[1, "A"], [2, "B"], [undefined, undefined]],
+        rows: [["1", "A"], ["2", "B"], [undefined, undefined]],
         rowCount: 3,
       });
       expect(result.structuredContent).not.toHaveProperty("rowsAffected");
@@ -700,8 +700,11 @@ describe("SQL write safety (Story 38.5)", () => {
         expect(tool.description, tool.name).toContain("statement-level read-only, not side-effect-free");
         expect(tool.description, tool.name).toContain("$INCREMENT/$SEQUENCE counters (row ID counters included)");
         expect(tool.description, tool.name).toContain("process-private or IRISTEMP globals");
-        expect(tool.description, tool.name).toContain("JOB or device output");
+        expect(tool.description, tool.name).toContain("changes made with %NOJOURN");
+        expect(tool.description, tool.name).toContain("work that parallel query worker processes do (%PARALLEL)");
+        expect(tool.description, tool.name).toContain("JOB or device output, other external effects");
         expect(tool.description, tool.name).toContain("a function, procedure or trigger that starts, commits or rolls back a transaction");
+        expect(tool.description, tool.name).toContain("which a commit followed by a new TSTART does not show");
         expect(tool.description, tool.name).toContain("SQL_READ_ONLY");
       }
     });
@@ -716,6 +719,7 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(description).toContain("unset by default");
       expect(description).toContain("only SELECT, INSERT, UPDATE and DELETE run");
       expect(description).toContain("SQL_ROWS_AFFECTED_CAP");
+      expect(description).toContain("A capped statement that is rolled back leaves the same effects.");
       expect(description).toContain("rowsAffected");
       expect(description).toContain("readOnlyForced or maxRowsAffectedCapped");
       expect(description).toContain("use iris_sql_query to run queries");

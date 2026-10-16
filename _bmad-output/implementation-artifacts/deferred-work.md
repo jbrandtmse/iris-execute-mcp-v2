@@ -2954,3 +2954,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 38.5 implement review (2026-10-15): iris_sql_query (read-classified) now exists; prompt/skill text predates it
 - 2026-10-16T00:13:57Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=38.6 already updates deploy-and-test-class (AC 38.6.2) and regenerates skills
+
+### DW-556: Three live gates (doc-edit-live-gate, doc-put-storage-guard-live-gate, and before this review the 38.5 gates) end with a cleanup it() that removes the shared fixtures, so they pass only while that test runs last
+- source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: doc-edit-live-gate.test.ts and doc-put-storage-guard-live-gate.test.ts each keep a final describe(cleanup) whose it() calls removeFixtures(); under --sequence.shuffle or a test added after it every later test loses its fixture class. Story 38.5 review moved its own gates' assertions into afterAll.
+- 2026-10-16T12:35:29Z status=routed owner=burndown by=cr note=fix: move the nothing-left assertions into afterAll and delete the it(), as Story 38.5 did; re-run each armed gate
+
+### DW-557: The 38.5 live gates copy the kill-every-ExecuteMCPv-global-containing-the-stem cleanup loop from the 38.3 and 38.4 gates instead of a shared helper in live-doc-helpers.ts
+- source: spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: sql-safety-live-gate.test.ts:243-257 repeats doc-put-storage-guard-live-gate.test.ts:156-163 and doc-edit-live-gate.test.ts:135; the spec named the sibling to follow (a weak reason, Rule 2); the iris-mcp-all wire gate cannot import dev test helpers.
+- 2026-10-16T12:35:29Z status=wontfix-accepted owner=38-5-sql-write-safety by=cr note=reopen_if=a fourth live gate copies the loop, or the loop's behavior must change in more than one file

@@ -7,7 +7,8 @@
  *
  *  - the serializer: the rows of the fixture SELECT and CALL, of expressions of every column kind, of
  *    parameterized statements and of JSON-looking strings equal the rows the Atelier `action/query` route
- *    returns for the same statement, through the tool's mapping, for both tools;
+ *    returns for the same statement, through the tool's mapping, for both tools; the fixture SELECT and the
+ *    two-result-set CALL are also compared with no mapping, key for key;
  *  - the default path: no transaction from the tool, `rowsAffected` equal to the change `action/query`
  *    sees, and a function's device output discarded;
  *  - the rows-affected cap, by parameter and by `ctx.config.sqlMaxRowsAffected`: a DELETE over the cap is
@@ -17,9 +18,10 @@
  *  - read-only mode, by parameter, by `ctx.config.sqlReadOnly` and by `iris_sql_query`: an UPDATE is
  *    refused with the values unchanged, and a SELECT that calls a function has its SQL write and its
  *    journaled global set undone while its `$INCREMENT` counter is not;
- *  - a function that ends or opens a transaction inside the tool's is reported as such;
+ *  - a function that ends or opens a transaction inside the tool's is reported as such, also when the
+ *    statement then fails;
  *  - a statement that prepares and then fails to run is an error carrying the SQLCODE, on every path;
- *  - the namespace a call names decides where the statement runs, and the next call is unaffected;
+ *  - the namespace a call names decides where the statement runs;
  *  - the endpoint's own input checks reject a malformed body;
  *  - `countOnly` equals the `COUNT(*)` that `action/query` returns, and transfers no rows.
  *
@@ -32,7 +34,8 @@
  * globals, and the counter and marker globals `^ExecuteMCPv2.QaStory385GateC` and `...G`. Before and after
  * the run, and before every test, the gate removes the data (`%KillExtent()` is not enough: a stream global
  * survives it) by killing every global whose name starts `ExecuteMCPv` and contains `QaStory385Gate`; before
- * and after the run it also removes the documents, then asserts that nothing named `QaStory385Gate` is left.
+ * and after the run it also removes the documents, and in `afterAll` it asserts that nothing named
+ * `QaStory385Gate` is left.
  * Skips when IRIS is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed (same arming convention as
  * the other live gates in this directory).
  */
@@ -354,9 +357,12 @@ beforeAll(async () => {
   await compileDocs(client, version, IRIS_NAMESPACE, [AUDIT_DOC, GATE_DOC]);
 }, 120000);
 
+/** AC-7: after the gate removes its fixtures, no document, generated routine or global named QaStory385Gate remains. */
 afterAll(async () => {
   if (skipReason) return;
   await removeFixtures();
+  expect(await listFixtureDocuments(), "no QaStory385Gate document after the run").toEqual([]);
+  expect(await listFixtureGlobals(), "no QaStory385Gate global after the run").toEqual([]);
 }, 60000);
 
 /** Registers a beforeEach that restores the seeded rows, for a describe whose tests change data or counters. */
@@ -444,6 +450,18 @@ describe("the serializer: rows equal the Atelier action/query rows through today
     expect((result.content as Row[]).map((row) => Object.keys(row))).toEqual(oracle.map((row) => Object.keys(row)));
     expect(result).toMatchObject({ outcome: "ok", statementType: 1, statementTypeName: "SELECT" });
   }, 60000);
+
+  it("a CALL with two result sets: the endpoint's rows equal the Atelier rows key for key, the second set's values included", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const query = `CALL ${T}_TwoSets()`;
+
+    const oracle = await atelierRows(query);
+    const result = await endpointResult({ query });
+
+    expect(oracle.map((row) => Object.keys(row)), "the oracle carries the second set's own column").toContainEqual(["N"]);
+    expect(result.content).toEqual(oracle);
+    expect((result.content as Row[]).map((row) => Object.keys(row))).toEqual(oracle.map((row) => Object.keys(row)));
+  }, 60000);
 });
 
 // -- The default path (AC-4, AC-5) -----------------------------------
@@ -514,7 +532,7 @@ describe("the default path: no transaction from the tool, rowsAffected, device o
     expect(capped.structuredContent).toMatchObject({ rows: [[0]] });
   }, 60000);
 
-  it("read-only runs inside a transaction: the function sees $TLEVEL 1, and the level is back to 0 for the next call", async (testCtx) => {
+  it("read-only runs inside a transaction: the function sees $TLEVEL 1, and a default-path call that follows sees 0", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     const readOnly = await run(sqlQueryTool, { query: `SELECT ${FN("Level")} AS lvl` });
@@ -709,7 +727,7 @@ describe("the rows-affected cap (Story 38.5, AC-3, AC-7)", () => {
     expect(result.structuredContent).toEqual(todayMapping(await atelierRows(query)));
   }, 60000);
 
-  it("a function that ends the transaction of a capped UPDATE is reported, and the tool's level is restored", async (testCtx) => {
+  it("a function that ends the transaction of a capped UPDATE is reported", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     const result = await run(sqlExecuteTool, { query: `UPDATE ${T} SET Qty = ${FN("EndTx")} WHERE Name = 'del1'`, maxRowsAffected: 5 });
@@ -723,6 +741,18 @@ describe("the rows-affected cap (Story 38.5, AC-3, AC-7)", () => {
     );
     const after = await run(sqlExecuteTool, { query: `SELECT ${FN("Level")} AS lvl` });
     expect(after.structuredContent).toMatchObject({ rows: [[0]] });
+  }, 60000);
+
+  it("a function that ends the transaction of a capped UPDATE that then fails is reported as the changed transaction, not as a SQL error", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, {
+      query: `UPDATE ${T} SET Qty = 1 / (${FN("EndTx")} - 1) WHERE Name = 'del1'`,
+      maxRowsAffected: 5,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(`Statement changed the transaction this tool opened in namespace '${IRIS_NAMESPACE}'`);
   }, 60000);
 
   it("a function that opens a transaction inside a capped UPDATE is reported the same way", async (testCtx) => {
@@ -822,7 +852,7 @@ describe("read-only mode (Story 38.5, AC-2, AC-7)", () => {
     expect(await callClassMethod(GATE, "Counters")).toBe("1|set");
   }, 60000);
 
-  it("a SELECT whose function ends the transaction is reported, the level is restored, and what the function committed stays", async (testCtx) => {
+  it("a SELECT whose function ends the transaction is reported, and what the function committed stays", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     const result = await run(sqlQueryTool, { query: `SELECT ${FN("EndTx")} AS v` });
@@ -833,6 +863,17 @@ describe("read-only mode (Story 38.5, AC-2, AC-7)", () => {
     expect(await auditRows()).toBe(1);
     const after = await run(sqlQueryTool, { query: `SELECT ${FN("Level")} AS lvl` });
     expect(after.structuredContent).toMatchObject({ rows: [[1]] });
+  }, 60000);
+
+  it("a SELECT whose function ends the transaction and that then fails is reported as the changed transaction, not as a SQL error, and what the function committed stays", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlQueryTool, { query: `SELECT 1 / (${FN("EndTx")} - 1) AS v` });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.content[0]?.text).toContain(`Statement changed the transaction this tool opened in namespace '${IRIS_NAMESPACE}'`);
+    expect(await auditRows()).toBe(1);
   }, 60000);
 
   it("a SELECT whose function opens a transaction is reported the same way", async (testCtx) => {
@@ -938,7 +979,7 @@ describe("a statement that prepares and then fails to run is an error, never a r
     expect(await scalar(`SELECT COUNT(*) FROM ${T} WHERE Qty = 1`)).toBe(DEL_ROWS);
   }, 60000);
 
-  it("under read-only: a query that fails while running is the same kind of error, and the next call is clean", async (testCtx) => {
+  it("under read-only: a query that fails while running is the same kind of error, and a call that follows still runs", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     const result = await run(sqlQueryTool, { query: "SELECT 1/0 AS x" });
@@ -958,7 +999,7 @@ describe("the namespace the call names (Story 38.5, Rules #34 and #59)", () => {
 
   const countIn = async (namespace: string): Promise<unknown> => (await runQuery(client, version, namespace, PROBE))[0]?.n;
 
-  it("both tools answer for the namespace they name, and the next call answers for its own, errors included", async (testCtx) => {
+  it("both tools answer for the namespace they name, errors included, and a call that names the home namespace answers for it", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     const here = await countIn(IRIS_NAMESPACE);
     const there = await countIn(OTHER_NAMESPACE);
@@ -1009,24 +1050,11 @@ describe("the endpoint rejects a malformed body before it runs anything (Story 3
     }, 60000);
   }
 
-  it("a body that names a namespace that does not exist runs nothing and the next call is unaffected", async (testCtx) => {
+  it("a body that names a namespace that does not exist runs nothing, and a call that follows still runs", async (testCtx) => {
     if (skipReason) return testCtx.skip();
 
     await expect(client.post(SQL_PATH, { query: "SELECT 1", namespace: "NoSuchNamespaceQa385" })).rejects.toThrow();
     const after = await run(sqlExecuteTool, { query: "SELECT 1 AS a" });
     expect(after.structuredContent).toEqual({ columns: ["a"], rows: [[1]], rowCount: 1 });
-  }, 60000);
-});
-
-// -- Nothing left behind ---------------------------------------------
-
-describe("cleanup (Story 38.5, AC-7)", () => {
-  it("after the gate removes its fixtures, no document, generated routine or global named QaStory385Gate remains", async (testCtx) => {
-    if (skipReason) return testCtx.skip();
-
-    await removeFixtures();
-
-    expect(await listFixtureDocuments()).toEqual([]);
-    expect(await listFixtureGlobals()).toEqual([]);
   }, 60000);
 });

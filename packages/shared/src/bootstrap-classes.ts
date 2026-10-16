@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "f757473a71d8";
+export const BOOTSTRAP_VERSION = "e615a96a1e70";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "f757473a71d8";
+Parameter BOOTSTRAPVERSION = "e615a96a1e70";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -16148,7 +16148,8 @@ ClassMethod IndexRowsForClass(pClassName As %String, Output pRows) As %Status
 /// <li><b>Transactions.</b> When this handler opened a transaction, it requires
 /// <code>$TLEVEL</code> to be the level it opened after execution (a function, procedure or
 /// trigger that started, committed or rolled back a transaction is outcome
-/// <code>transactionEnded</code>), and it rolls back to the level it found on every exit.</li>
+/// <code>transactionEnded</code>, also when the statement then failed), and it rolls back to the
+/// level it found on every exit.</li>
 /// </ul>
 /// <p>The response result is <code>{outcome, statementType, statementTypeName, ...}</code>.
 /// <code>outcome</code> is <code>ok</code> (with <code>content</code>, the rows as
@@ -16303,6 +16304,8 @@ ClassMethod ReadFlag(pBody As %DynamicObject, pName As %String, Output pValue As
 /// Prepares, classifies, checks and executes the statement in the current namespace. A
 /// declined statement is not an error: <var>pResult</var> carries its outcome. A transaction
 /// opened here is rolled back to the level found on entry unless the cap check committed it.
+/// When <code>$TLEVEL</code> is no longer the level opened here, the outcome is
+/// <code>transactionEnded</code>, also when the statement then failed.
 ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCountOnly As %Boolean, pCap As %String, Output pResult As %DynamicObject) As %Status
 {
     Set tSC = $$$OK
@@ -16348,10 +16351,7 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
         }
         If $$$ISERR(tSC) Quit
 
-        If tOpened && ($TLevel '= tOpenLevel) {
-            Set pResult = ..NewResult("transactionEnded", tType, tTypeName)
-            Quit
-        }
+        If tOpened && ($TLevel '= tOpenLevel) Quit
 
         If tCapped {
             If (tRowsAffected < 0) || (tRowsAffected > pCap) {
@@ -16371,6 +16371,10 @@ ClassMethod Perform(pQuery As %String, ByRef pArgs, pReadOnly As %Boolean, pCoun
         Set tSC = ex.AsStatus()
     }
 
+    If tOpened && ($TLevel '= tOpenLevel) {
+        Set pResult = ..NewResult("transactionEnded", tType, tTypeName)
+        Set tSC = $$$OK
+    }
     If tOpened Do ..RollBackTo(tEntryLevel)
     Quit tSC
 }

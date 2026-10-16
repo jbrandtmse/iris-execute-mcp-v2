@@ -40,9 +40,11 @@ const SQL_EXECUTE_PATH = "/api/executemcp/v2/dev/sql/execute";
 /** The effects of a statement that a rolled-back transaction does not undo. */
 const RESIDUAL_EFFECTS =
   "The transaction undoes SQL changes and journaled global sets made by functions and triggers, but not " +
-  "$INCREMENT/$SEQUENCE counters (row ID counters included), process-private or IRISTEMP globals, JOB or device output, " +
-  "or a function, procedure or trigger that starts, commits or rolls back a transaction (that is reported as an error, " +
-  "and some changes may be saved).";
+  "$INCREMENT/$SEQUENCE counters (row ID counters included), process-private or IRISTEMP globals, changes made with " +
+  "%NOJOURN, work that parallel query worker processes do (%PARALLEL), JOB or device output, other external effects, " +
+  "or a function, procedure or trigger that starts, commits or rolls back a transaction (reported as an error when the " +
+  "transaction level the tool opened has changed, which a commit followed by a new TSTART does not show; some changes " +
+  "may be saved).";
 
 /** The IRIS_SQL_MAX_ROWS / IRIS_SQL_TIMEOUT sentence shared by both descriptions. */
 const MAX_ROWS_AND_TIMEOUT =
@@ -263,7 +265,7 @@ export const sqlExecuteTool: ToolDefinition = {
     "readOnlyForced or maxRowsAffectedCapped when one of them applied. " +
     "An INSERT, UPDATE or DELETE result carries rowsAffected (IRIS reports -1 for TRUNCATE TABLE). " +
     "Read-only mode is statement-level read-only, not side-effect-free: the statement runs inside a transaction that is always " +
-    `rolled back. ${RESIDUAL_EFFECTS} ` +
+    `rolled back. ${RESIDUAL_EFFECTS} A capped statement that is rolled back leaves the same effects. ` +
     "Under the read-only governance preset this tool is blocked: use iris_sql_query to run queries.",
   inputSchema: z.object({
     query: z

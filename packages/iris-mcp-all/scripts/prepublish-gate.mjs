@@ -119,6 +119,9 @@ const gateTestFiles = [
   // `iris_doc_edit` and the governance parent keys over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory384WireEdit.cls and ...WireStore.cls (persistent, compiled) documents.
   "src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts",
+  // `iris_sql_query`, `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory385Wire.cls (persistent, compiled, six rows) and its data/marker globals.
+  "src/__tests__/story-38-5-qa-sql-wire-gate.test.ts",
 ];
 
 const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];

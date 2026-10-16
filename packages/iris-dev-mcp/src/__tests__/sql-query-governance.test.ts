@@ -79,6 +79,8 @@ const CLEARED_ENV = [
   "IRIS_AUDIT_LOG_PARAMS",
   "IRIS_SQL_READ_ONLY",
   "IRIS_SQL_MAX_ROWS_AFFECTED",
+  "IRIS_SQL_MAX_ROWS",
+  "IRIS_SQL_TIMEOUT",
 ] as const;
 
 const QUERY_CALL = { query: "SELECT 1" };
