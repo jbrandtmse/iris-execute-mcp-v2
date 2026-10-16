@@ -180,3 +180,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T19:03:33Z	Epic 38	epic_retro_skipped	reason=user_directed_skip_unattended_run
 2026-10-16T19:03:33Z	Epic 38	decision_sheet_skipped	reason=sheet_taken_before_burndown_charter_decisions_17_18_no_new_escalated_or_pending
 2026-10-16T19:03:33Z	Epic 38	ci_green_verified	run=none head=87df87a ci=none note=no_github_workflows_local_gates_per_story
+2026-10-16T19:04:00Z	Epic 38	epic_merged_to_feature	repos=. feature=feature/feature-wave-6-competitive-gaps feature_sha=735dc14 merge_sha=735dc14 submodules= epic_branch_deleted=local_and_remote deleted_with=-d_fully_merged_check verified=merge-base_origin
+2026-10-16T19:04:00Z	Epic 38	epic_summary	stories=8 total_high=4 total_med=31 total_smoke_defects=1 rework_events=1 bootstrap=2159ec9e6f69_to_089f8f0a62b2 tools_dev=29_to_31 core_dev=13_to_15_runtime orchestrator_decisions=1-19 ledger_total=568 ledger_open_routed=23 review_degraded=0
