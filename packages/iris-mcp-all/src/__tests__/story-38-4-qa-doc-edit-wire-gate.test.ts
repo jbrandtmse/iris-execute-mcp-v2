@@ -5,7 +5,9 @@
  * `doc-edit-governance.test.ts` drives the real governance gate with handler spies and a stubbed
  * fetch. Neither reaches the deliverable as a client does. This gate spawns the BUILT iris-dev-mcp
  * dist as a child process, connects the real MCP SDK `Client` over stdio, and calls the tools
- * against the live IRIS, so these properties are proven where they happen:
+ * against the live IRIS, so these properties are proven where they happen. Before any test it asserts
+ * that the deployed `ExecuteMCPv2` classes carry the `BOOTSTRAP_VERSION` of the built shared dist (the
+ * version check of `process-gate-helpers.ts`):
  *
  *  - `tools/list` shows the `iris_doc_edit` schema (`action` enum, flat edit objects, no parameter
  *    that skips a guard or a version check) and its four annotations, and `iris_server_profiles`
@@ -37,21 +39,30 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import path from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import type { Readable } from "node:stream";
-import { inheritedEnv, isIrisReachable, resolveSdkEsmDir, staleDistReason } from "./process-gate-helpers.js";
+import {
+  assertDeployedBootstrapVersion,
+  inheritedEnv,
+  irisTargetFromEnv,
+  isIrisReachable,
+  openWireSession,
+  resolveSdkEsmDir,
+  staleDistReason,
+  withWireSession,
+  type WireSession as Session,
+  type WireSessionOptions,
+} from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_ENTRY = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 const GOVERNANCE_CLI_BIN = path.join(REPO_ROOT, "packages", "shared", "dist", "cli", "governance-cli.js");
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const NS = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = TARGET.port;
+const NS = TARGET.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -64,95 +75,24 @@ const STORE_DOC = `${STORE_CLASS}.cls`;
 
 // -- The wire --------------------------------------------------------
 
-interface WireToolResult {
-  isError?: boolean;
-  content?: Array<{ type?: string; text?: string }>;
-  structuredContent?: Record<string, unknown>;
-}
-
-interface WireTool {
-  name: string;
-  inputSchema: { properties?: Record<string, unknown>; required?: string[] };
-  annotations?: Record<string, unknown>;
-}
-
-interface SdkClient {
-  connect: (transport: unknown) => Promise<void>;
-  close: () => Promise<void>;
-  callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<WireToolResult>;
-  listTools: () => Promise<{ tools: WireTool[] }>;
-}
-
-/** A connected client of one spawned dev server. */
-interface Session {
-  /** Call a tool, naming the `default` profile and the target namespace. */
-  call: (name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
-  /** Call a tool exactly as given (the discovery tool takes no profile argument here). */
-  raw: (name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
-  listTools: () => Promise<WireTool[]>;
-  close: () => Promise<void>;
-}
-
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let admin: Session;
+
+/** The built dev server and the target, for the shared wire helpers. */
+function wireOptions(): WireSessionOptions {
+  return { sdkEsmDir: sdkEsmDir as string, entry: DEV_ENTRY, target: TARGET, clientName: "story-38-4-qa-wire-gate" };
+}
 
 /**
  * Spawn the built dev server with `extraEnv` (governance and visibility settings) on top of the
  * explicit connection settings, and connect an SDK client to it over stdio.
  */
-async function openSession(extraEnv: Record<string, string> = {}): Promise<Session> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir as string, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir as string, "client", "stdio.js")).href;
-  const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }) => SdkClient;
-  };
-  const { StdioClientTransport } = (await import(sdkClientStdio)) as {
-    StdioClientTransport: new (params: {
-      command: string;
-      args: string[];
-      env: Record<string, string>;
-      stderr: string;
-    }) => unknown;
-  };
-
-  const transport = new StdioClientTransport({
-    command: "node",
-    args: [DEV_ENTRY],
-    env: {
-      ...inheritedEnv(),
-      IRIS_HOST,
-      IRIS_PORT,
-      IRIS_USERNAME,
-      IRIS_PASSWORD,
-      IRIS_NAMESPACE: NS,
-      IRIS_HTTPS: "false",
-      ...extraEnv,
-    },
-    stderr: "pipe",
-  });
-  // The pipe must be drained, or a chatty server blocks on a full stderr buffer.
-  (transport as { stderr?: Readable | null }).stderr?.on("data", () => {});
-
-  const client = new Client({ name: "story-38-4-qa-wire-gate", version: "0.0.0" });
-  await client.connect(transport);
-  return {
-    call: (name, args) => client.callTool({ name, arguments: { server: "default", namespace: NS, ...args } }),
-    raw: (name, args) => client.callTool({ name, arguments: args }),
-    listTools: async () => (await client.listTools()).tools,
-    close: () => client.close().catch(() => {}),
-  };
-}
+const openSession = (extraEnv: Record<string, string> = {}): Promise<Session> => openWireSession(wireOptions(), extraEnv);
 
 /** Run `body` with a session whose server was started with `extraEnv`, and always close it. */
-async function withSession<T>(extraEnv: Record<string, string>, body: (session: Session) => Promise<T>): Promise<T> {
-  const session = await openSession(extraEnv);
-  try {
-    return await body(session);
-  } finally {
-    await session.close();
-  }
-}
+const withSession = <T>(extraEnv: Record<string, string>, body: (session: Session) => Promise<T>): Promise<T> =>
+  withWireSession(wireOptions(), extraEnv, body);
 
 // -- Fixtures --------------------------------------------------------
 
@@ -303,6 +243,7 @@ beforeAll(async () => {
   if (skipReason) return;
 
   admin = await openSession();
+  await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
   await removeFixtures();
   expect(await fixtureDocuments(), "no QaStory384Wire document before the run").toEqual([]);
   expect(await fixtureGlobals(), "no QaStory384Wire global before the run").toEqual([]);
@@ -439,7 +380,7 @@ describe("iris_doc_edit on the wire, default governance (Story 38.4, AC-4, AC-6)
       namespace: NS,
       ts: before.ts,
       totalLines: before.content.length,
-      mismatches: [{ edit: 1, op: "replace", startLine: setLine, endLine: setLine, current: "\tSet tSC = $$$OK" }],
+      mismatches: [{ edit: 1, op: "replace", startLine: setLine, endLine: setLine, current: "\tSet tSC = $$$OK\n" }],
     });
     expect(await readDoc(EDIT_DOC)).toEqual(before);
   }, 120000);

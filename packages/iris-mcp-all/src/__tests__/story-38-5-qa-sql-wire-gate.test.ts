@@ -8,7 +8,8 @@
  * by a profile, applied by the real governance gate, checked by the SDK's argument parsing, and
  * enforced by IRIS. This gate spawns the BUILT iris-dev-mcp dist as a child process, connects the
  * real MCP SDK `Client` over stdio, and calls the tools against the live IRIS, so these properties
- * are proven where they happen:
+ * are proven where they happen. Before any test it asserts that the deployed `ExecuteMCPv2` classes
+ * carry the `BOOTSTRAP_VERSION` of the built shared dist (the version check of `process-gate-helpers.ts`):
  *
  *  - `tools/list` shows both tools' schemas and annotations (no `readOnly`/`maxRowsAffected` on
  *    `iris_sql_query`, the frozen annotations on `iris_sql_execute`), and `iris_server_profiles`
@@ -55,21 +56,37 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import path from "node:path";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import type { Readable } from "node:stream";
-import { inheritedEnv, isIrisReachable, resolveSdkEsmDir, spawnAndWaitForExit, staleDistReason } from "./process-gate-helpers.js";
+import {
+  assertDeployedBootstrapVersion,
+  atelierQuery,
+  connectionEnv,
+  inheritedEnv,
+  irisTargetFromEnv,
+  isIrisReachable,
+  openWireSession,
+  resolveSdkEsmDir,
+  spawnAndWaitForExit,
+  staleDistReason,
+  withWireSession,
+  type AtelierRow,
+  type WireSession as Session,
+  type WireSessionOptions,
+  type WireToolResult,
+} from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_ENTRY = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 const GOVERNANCE_CLI_BIN = path.join(REPO_ROOT, "packages", "shared", "dist", "cli", "governance-cli.js");
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const NS = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = TARGET.port;
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const NS = TARGET.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -88,121 +105,29 @@ const SEEDED_ROWS = 6;
 
 // -- The wire --------------------------------------------------------
 
-interface WireToolResult {
-  isError?: boolean;
-  content?: Array<{ type?: string; text?: string }>;
-  structuredContent?: Record<string, unknown>;
-}
-
-interface WireTool {
-  name: string;
-  description?: string;
-  inputSchema: { properties?: Record<string, unknown>; required?: string[] };
-  annotations?: Record<string, unknown>;
-}
-
-interface SdkClient {
-  connect: (transport: unknown) => Promise<void>;
-  close: () => Promise<void>;
-  callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<WireToolResult>;
-  listTools: () => Promise<{ tools: WireTool[] }>;
-}
-
-/** A connected client of one spawned dev server. */
-interface Session {
-  /** Call a tool on the `default` profile, naming the target namespace. */
-  call: (name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
-  /** Call a tool on the named profile, naming the target namespace. */
-  callOn: (server: string, name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
-  /** Call a tool exactly as given (the discovery tool takes no profile argument here). */
-  raw: (name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
-  listTools: () => Promise<WireTool[]>;
-  close: () => Promise<void>;
-}
-
 let distSkipReason: string | undefined;
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let admin: Session;
 
-/** The connection settings of the spawned server's `default` profile. */
-function connectionEnv(): Record<string, string> {
-  return {
-    IRIS_HOST,
-    IRIS_PORT,
-    IRIS_USERNAME,
-    IRIS_PASSWORD,
-    IRIS_NAMESPACE: NS,
-    IRIS_HTTPS: "false",
-  };
+/** The built dev server and the target, for the shared wire helpers. */
+function wireOptions(): WireSessionOptions {
+  return { sdkEsmDir: sdkEsmDir as string, entry: DEV_ENTRY, target: TARGET, clientName: "story-38-5-qa-wire-gate" };
 }
 
 /** Spawn the built dev server with `extraEnv` on top of the explicit connection settings, and connect an SDK client over stdio. */
-async function openSession(extraEnv: Record<string, string> = {}): Promise<Session> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir as string, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir as string, "client", "stdio.js")).href;
-  const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }) => SdkClient;
-  };
-  const { StdioClientTransport } = (await import(sdkClientStdio)) as {
-    StdioClientTransport: new (params: {
-      command: string;
-      args: string[];
-      env: Record<string, string>;
-      stderr: string;
-    }) => unknown;
-  };
-
-  const transport = new StdioClientTransport({
-    command: "node",
-    args: [DEV_ENTRY],
-    env: { ...inheritedEnv(), ...connectionEnv(), ...extraEnv },
-    stderr: "pipe",
-  });
-  // The pipe must be drained, or a chatty server blocks on a full stderr buffer.
-  (transport as { stderr?: Readable | null }).stderr?.on("data", () => {});
-
-  const client = new Client({ name: "story-38-5-qa-wire-gate", version: "0.0.0" });
-  await client.connect(transport);
-  return {
-    call: (name, args) => client.callTool({ name, arguments: { server: "default", namespace: NS, ...args } }),
-    callOn: (server, name, args) => client.callTool({ name, arguments: { server, namespace: NS, ...args } }),
-    raw: (name, args) => client.callTool({ name, arguments: args }),
-    listTools: async () => (await client.listTools()).tools,
-    close: () => client.close().catch(() => {}),
-  };
-}
+const openSession = (extraEnv: Record<string, string> = {}): Promise<Session> => openWireSession(wireOptions(), extraEnv);
 
 /** Run `body` with a session whose server was started with `extraEnv`, and always close it. */
-async function withSession<T>(extraEnv: Record<string, string>, body: (session: Session) => Promise<T>): Promise<T> {
-  const session = await openSession(extraEnv);
-  try {
-    return await body(session);
-  } finally {
-    await session.close();
-  }
-}
+const withSession = <T>(extraEnv: Record<string, string>, body: (session: Session) => Promise<T>): Promise<T> =>
+  withWireSession(wireOptions(), extraEnv, body);
 
 // -- The oracle: the Atelier action/query route ----------------------
 
-type Row = Record<string, unknown>;
+type Row = AtelierRow;
 
 /** The rows the Atelier `action/query` route returns for a statement (it never goes through the new endpoint). */
-async function atelier(query: string): Promise<Row[]> {
-  const response = await fetch(`http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/v1/${NS}/action/query`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Basic ${Buffer.from(`${IRIS_USERNAME}:${IRIS_PASSWORD}`).toString("base64")}`,
-    },
-    body: JSON.stringify({ query }),
-    signal: AbortSignal.timeout(30000),
-  });
-  expect(response.status, `Atelier action/query: ${query}`).toBe(200);
-  const body = (await response.json()) as { status?: { errors?: unknown[] }; result?: { content?: unknown } };
-  expect(body.status?.errors ?? [], `Atelier action/query: ${query}`).toEqual([]);
-  return Array.isArray(body.result?.content) ? (body.result.content as Row[]) : [];
-}
+const atelier = (query: string): Promise<Row[]> => atelierQuery(TARGET, query);
 
 /** The fixture table as stored: every row, in ID order. */
 const tableRows = (): Promise<Row[]> => atelier(`SELECT ID, Name, Qty FROM ${T} ORDER BY ID`);
@@ -324,6 +249,7 @@ beforeAll(async () => {
   if (skipReason) return;
 
   admin = await openSession();
+  await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
   await removeFixtures();
   expect(await fixtureDocuments(), "no QaStory385Wire document before the run").toEqual([]);
   expect(await fixtureGlobals(), "no QaStory385Wire global before the run").toEqual([]);
@@ -1102,7 +1028,7 @@ describe("a malformed operator variable stops the server at startup, naming the 
     it(`${name}=${JSON.stringify(value)} exits 1 with the variable's message`, async (testCtx) => {
       if (distSkipReason) return testCtx.skip();
 
-      const outcome = await spawnAndWaitForExit(DEV_ENTRY, [], { ...inheritedEnv(), ...connectionEnv(), [name]: value }, 20000);
+      const outcome = await spawnAndWaitForExit(DEV_ENTRY, [], { ...inheritedEnv(), ...connectionEnv(TARGET), [name]: value }, 20000);
 
       expect(outcome.timedOut, "the server must fail at startup, not keep running").toBe(false);
       expect(outcome.code).toBe(1);

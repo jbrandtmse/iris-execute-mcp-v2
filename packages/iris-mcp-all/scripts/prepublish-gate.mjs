@@ -122,9 +122,16 @@ const gateTestFiles = [
   // `iris_sql_query`, `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory385Wire.cls (persistent, compiled, six rows) and its data/marker globals.
   "src/__tests__/story-38-5-qa-sql-wire-gate.test.ts",
+  // The Epic 38 capstone: ranged reads, guarded edits, the Storage guard and SQL safety over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory386CapEdit.cls and ...QaStory386CapRows.cls (persistent, compiled, six rows) and its table and globals.
+  "src/__tests__/epic38-capstone-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+// `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
+// bootstrap deploys to ONE shared IRIS instance, and they share its Atelier work queue. Run in parallel
+// (vitest's default), two files overlap on that shared state and a gate fails on an interleaving rather
+// than on a defect (DW-511). Sequential file execution makes each file see only its own runs.
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

@@ -1,0 +1,115 @@
+/**
+ * Story 38.6 (AC-3, AC-6) -- the guards of the Epic 38 live gates themselves.
+ *
+ * A gate that is skipped, or that tests some other build than the shipped one, is a green badge over a dead
+ * check (project rule #59). Two properties are pinned here, with no IRIS and no shared state:
+ *
+ *  - The capstone (`epic38-capstone-gate.test.ts`), run against an IRIS that is not reachable (a closed local
+ *    port), skips every test when it is not armed, and fails in `beforeAll` with "may not be skipped" when
+ *    `IRIS_REQUIRE_LIVE` is set. Each case runs the capstone file in its own vitest process, so the real
+ *    `beforeAll` branches execute.
+ *  - The capstone and the Story 38.4 and 38.5 wire gates each call `assertDeployedBootstrapVersion` right
+ *    after their first built-server session has opened, before any test. The check itself is pinned by
+ *    `bootstrap-version-check.test.ts`; the live passing path by the gates.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { inheritedEnv } from "./process-gate-helpers.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_DIR = path.resolve(__dirname, "..", "..");
+const TESTS_DIR = __dirname;
+
+const CAPSTONE = "src/__tests__/epic38-capstone-gate.test.ts";
+const GATES_WITH_VERSION_CHECK = [
+  "epic38-capstone-gate.test.ts",
+  "story-38-4-qa-doc-edit-wire-gate.test.ts",
+  "story-38-5-qa-sql-wire-gate.test.ts",
+];
+
+/** The vitest entry point this package's tests run under. */
+const VITEST_ENTRY = path.join(
+  path.dirname(createRequire(import.meta.url).resolve("vitest/package.json")),
+  "vitest.mjs",
+);
+
+let closedPort = "";
+
+/** A local port nothing listens on: bind an ephemeral port, then release it. */
+async function reserveClosedPort(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(String(port)));
+    });
+  });
+}
+
+/** Run the capstone file in its own vitest process against the closed port; the output is both streams. */
+function runCapstone(armed: boolean): { status: number | null; output: string } {
+  const outcome = spawnSync(process.execPath, [VITEST_ENTRY, "run", CAPSTONE], {
+    cwd: PACKAGE_DIR,
+    env: {
+      ...inheritedEnv(["VITEST", "VITEST_WORKER_ID", "VITEST_POOL_ID", "VITEST_MODE", "TEST", "NODE_ENV"]),
+      IRIS_HOST: "127.0.0.1",
+      IRIS_PORT: closedPort,
+      IRIS_USERNAME: "_SYSTEM",
+      IRIS_PASSWORD: "SYS",
+      IRIS_NAMESPACE: "HSCUSTOM",
+      IRIS_HTTPS: "false",
+      ...(armed ? { IRIS_REQUIRE_LIVE: "1" } : {}),
+    },
+    encoding: "utf8",
+    timeout: 90000,
+  });
+  return { status: outcome.status, output: `${outcome.stdout ?? ""}\n${outcome.stderr ?? ""}` };
+}
+
+beforeAll(async () => {
+  closedPort = await reserveClosedPort();
+});
+
+afterAll(() => {
+  closedPort = "";
+});
+
+describe("Story 38.6: the capstone's arming guard, on its own real path (I/O matrix: unarmed and armed prerequisites)", () => {
+  it("unarmed, with IRIS not reachable: every capstone test is skipped with the reason, and the run passes", () => {
+    const { status, output } = runCapstone(false);
+
+    expect(output).toContain("[SKIP] epic38-capstone-gate:");
+    expect(output).toMatch(/6 skipped/);
+    expect(output).not.toContain("may not be skipped");
+    expect(status, output).toBe(0);
+  }, 120000);
+
+  it("armed, with IRIS not reachable: the capstone fails in beforeAll with 'may not be skipped: <reason>'", () => {
+    const { status, output } = runCapstone(true);
+
+    expect(output).toMatch(/Epic 38 capstone gate may not be skipped: \S/);
+    expect(status, "the armed run must not pass").not.toBe(0);
+  }, 120000);
+});
+
+describe("Story 38.6: every Epic 38 wire gate checks the deployed BOOTSTRAP_VERSION before any test (AC-6)", () => {
+  for (const file of GATES_WITH_VERSION_CHECK) {
+    it(`${file} calls assertDeployedBootstrapVersion right after its admin session opens, ahead of every describe`, () => {
+      const source = readFileSync(path.join(TESTS_DIR, file), "utf8");
+
+      expect(source).toMatch(/admin = await open\w*Session\([^\n]*\);\n\s*await assertDeployedBootstrapVersion\(REPO_ROOT, TARGET\);/);
+      const check = source.indexOf("await assertDeployedBootstrapVersion(");
+      const firstSuite = source.search(/^describe\(/m);
+      expect(firstSuite, `${file} has a describe`).toBeGreaterThan(-1);
+      expect(check).toBeLessThan(firstSuite);
+    });
+  }
+});

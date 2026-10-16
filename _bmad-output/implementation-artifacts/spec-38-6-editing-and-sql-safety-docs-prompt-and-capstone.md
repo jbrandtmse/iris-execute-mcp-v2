@@ -2,9 +2,10 @@
 title: 'Story 38.6: Editing and SQL Safety Docs, Prompt and Capstone'
 type: 'feature'
 created: '2026-10-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '6a3d60f6bd11adaf63cb8a29e5790a06d9c4ea63'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -17,6 +18,13 @@ deferred:
       Spine AD-4 lists them under "Known divergences", and the spine's Deferred section says "The Epic 38 gate routes them to one ledger entry with an owner". A hint changes only through a sanctioned AD-15 change, so 38.6 does not change them. The iris_execute_tests readOnlyHint divergence is DW-498 (owned by 40.4) and is not part of this entry.
     location: >-
       packages/iris-dev-mcp/src/tools/sql.ts; packages/iris-dev-mcp/src/tools/execute.ts; packages/iris-dev-mcp/src/tools/doc.ts
+    severity: low
+  - summary: >-
+      The Epic 38 capstone re-implements the fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) of the Story 38.4 wire gate, and the 38.5 gate carries its own variants, instead of one promoted set.
+    evidence: |-
+      The spec named only the connection env, the wire session and the Atelier query helper for promotion into process-gate-helpers.ts (Task "process-gate-helpers.ts"), so the fixture helpers stayed per-gate; they were already duplicated between the 38.4 and 38.5 gates before this story. A future change to the cleanup contract (stem, global names, table oracle) must be made in three files or the gates diverge (Rule 2, a spec-forced copy).
+    location: >-
+      packages/iris-mcp-all/src/__tests__/epic38-capstone-gate.test.ts; story-38-4-qa-doc-edit-wire-gate.test.ts; story-38-5-qa-sql-wire-gate.test.ts
     severity: low
 ---
 
@@ -319,6 +327,42 @@ deferred:
 
 ## Review Triage Log
 
+### 2026-10-16 — Review pass
+- verdicts: 32 findings — high 0, medium 6, low 22, false 3, maybe-false 1
+- findings (Blind Hunter 10, Edge Case Hunter 11, Verification Gap 4, Intent Alignment 7 divergences; rows in layer order):
+  - `[medium]` `[patch]` Blind 1: `packages/iris-dev-mcp/README.md` (iris_execute_tests re-attach section) still sends the manual `%UnitTest_Result` query to `iris_sql_execute`, which the read-only preset blocks (DW-555) — confirmed by reading the section; reworded to `iris_sql_query`, pinned by a new `story-38-6-doc-claims` test (mutation: reverted wording -> red).
+  - `[low]` `[reject]` Blind 2: DW-559 is closed only for the three bootstrapping gates — decided by orchestrator decision #16 and plan interpretation 1 (the in-process dev gates never bootstrap; the check there would fail without a defect); the residual is named in this log and in the Auto Run Result.
+  - `[low]` `[patch]` Blind 3: `story-38-6-doc-claims` located the CHANGELOG section by position and pinned a moving re-measure sentence by story number — a later story's section would turn it red; the section is now found by heading and the sentence pinned by shape (mutation: a newer section inserted above 38.6 -> still green, with the 38.5 claims test).
+  - `[low]` `[reject]` Blind 4: the `STALE_CONTENT` text still says "Retry with the current text below as expected" — the intent contract freezes the refusal's text block, and the sentence was already there before DW-552; the tool description and the README carry the `mismatches[].current` instruction.
+  - `[low]` `[reject]` Blind 5: `edit-and-test-class` gaps (gutter, insert rule, `ts`, `DOCUMENT_CONFLICT` wording) — `lines` is the structured field and carries no gutter, the insert rule is in the `iris_doc_edit` description the model sees, step 1 keeping `ts` is spec step 1, and "the class changed after you read it" is true of a conflict; no harm named.
+  - `[low]` `[patch]` Blind 6: `deploy-and-test-class` said `parameters: [<runIndex>]` but wrote the predicate as `= <runIndex>`, while the tool hint and the README use `= ?` — the prompt (and its generated skill) now says `= ?`; pinned in `prompt-safety-invariants` (mutation: back to `= <runIndex>` -> red).
+  - `[low]` `[reject]` Blind 7: the no-local-source branch sits in step 2 — that is what the spec's Tasks and plan interpretation 2 prescribe (the class has no local source, so it is fixed in place after the first compile error report).
+  - `[low]` `[patch]` Blind 8: the "main path uses only dev core tools" claim was pinned loosely (core plus `iris_test_status` for both prompts) — the pin is now per prompt, core only for `edit-and-test-class` (mutation: `iris_test_status` added to the body -> red).
+  - `[low]` `[defer]` Blind 9: the capstone re-implements the 38.4 gate's fixture helpers — the spec named only the session, env and Atelier helpers for promotion, and the 38.4 and 38.5 gates already duplicated the rest; recorded in the frontmatter `deferred:` list for a ledger owner.
+  - `[false]` `[reject]` Blind 10: the "Agent code editing" section sits in the wrong place — the spec asks for it "next to SQL write safety", and it directly follows that content in the root README.
+  - `[medium]` `[patch]` Edge 1: the same stale dev README bullet as Blind 1 (carried; one patch).
+  - `[low]` `[reject]` Edge 2: the default suite still runs the three bootstrapping gates in parallel — the spec adds `--no-file-parallelism` to the prepublish script only (Tasks, plan interpretation 3); a race needs a stale deployment, and the full `@iris-mcp/all` suite ran green; named as a residual.
+  - `[low]` `[reject]` Edge 3: the check compares only the `Setup_GetBootstrapVersion()` stamp — that is the contract (the same predicate as the bootstrap probe, and a `src/`-loaded `Setup` reports `dev`); a hand-loaded handler with an unchanged stamp is outside it.
+  - `[low]` `[patch]` Edge 4: the docs say any other value fails startup, but an empty `IRIS_SQL_READ_ONLY` / `IRIS_SQL_MAX_ROWS_AFFECTED` counts as unset (`config.ts`) — the dev README sentence now says so, pinned in `story-38-6-doc-claims` (mutation: phrase removed -> red).
+  - `[low]` `[patch]` Edge 5: the `skills-generated-frontmatter.test.ts` header still said 11 prompts — updated to 12 with the new name (the spec asks for the stale header comments).
+  - `[maybe-false]` `[reject]` Edge 6: a stored line ending in a lone CR, or a BOM on the first line, would not round-trip through `textToLines` — if true it is low; Atelier content lines carry no line terminators and a BOM only precedes a document's first byte, so no input reaches it (checked against the matrix CRLF row, covered as an `expected` written with CRLF).
+  - `[low]` `[reject]` Edge 7: the in-place route of `deploy-and-test-class` has no refusal guidance — the prompt names only `apply`, `regenerateStorage` is disabled by default, and the loop is named for the details.
+  - `[low]` `[reject]` Edge 8: no step for an uncoded `iris_doc_edit` error — the model reads the error text; no concrete harm.
+  - `[low]` `[reject]` Edge 9: a `className` given with `.cls` yields `X.cls.cls` — the argument description says "without the extension".
+  - `[low]` `[reject]` Edge 10: the refusal text vs `current` (same as Blind 4).
+  - `[low]` `[reject]` Edge 11: `afterAll` after a failed `openWireSession` — the same structure as the 38.4 and 38.5 gates; vitest reports the `beforeAll` failure first and the `afterAll` error is noise.
+  - `[low]` `[patch]` Verification Gap 1: the position-dependent CHANGELOG pin (same as Blind 3, carried).
+  - `[medium]` `[patch]` Verification Gap 2: the capstone's cleanup absence assertions had no positive control and no recorded mutation, so a blind oracle would pass — `freshRows` now asserts the document, global and table oracles each see the fixture; mutations: the global filter made blind -> legs 4-6 red; the global kill loop disabled -> `afterAll` red ("no QaStory386Cap global after the run"); each followed by a clean re-run that purged the leak.
+  - `[medium]` `[patch]` Verification Gap 3 (Other): the stale dev README bullet (carried; one patch).
+  - `[low]` `[reject]` Verification Gap 4 (Other): the default-suite parallelism (same as Edge 2).
+  - `[low]` `[patch]` Intent 1: nothing would fail if a wire gate dropped its `assertDeployedBootstrapVersion` call — new `epic38-gate-guards.test.ts` pins the call after the admin session and ahead of every `describe` in the three gates (mutation: call removed from the 38.5 gate -> red); the live AC-6 mutation already showed the gates failing on a mismatch.
+  - `[medium]` `[patch]` Intent 2: the dev README still names `iris_sql_execute` for the manual query (carried; one patch); the description is read from the same exported tool definition `tools/list` serves, so that half is rejected.
+  - `[low]` `[reject]` Intent 3: only one range shape on the wire — the spec's matrix and Tasks put every shape in unit rows and one end-to-end shape in capstone leg 3.
+  - `[medium]` `[patch]` Intent 4: the matrix rows "Unarmed prerequisites" and "Armed prerequisites" had no automated test — `epic38-gate-guards.test.ts` runs the capstone file in its own vitest process against a closed local port, unarmed (all 6 skipped, exit 0) and armed (`may not be skipped: <reason>`, non-zero); mutations: the armed throw disabled -> the armed case red; the throw made unconditional -> the unarmed case red.
+  - `[low]` `[reject]` Intent 5: `--no-file-parallelism` is only in the prepublish script (same as Edge 2).
+  - `[false]` `[reject]` Intent 6: the prompt tests do not use an SDK `Client` — AC-2 says "a real request handler", and `prompts.test.ts` drives the real dev server handler through `callRequest`.
+  - `[false]` `[reject]` Intent 7: the dev `execute.js` mtime is older than its source — `checkDistFresh` compares the newest dist file with the newest source file across the package, and every armed gate ran after the build and passed (a stale dist throws "may not be skipped").
+
 ## Design Notes
 
 **Orchestrator decision #16 (spec gate, 2026-10-16).** The version-guard mutation is approved: it alters the shipped `BOOTSTRAP_VERSION` in the built shared dist, which makes the dev server redeploy the ExecuteMCPv2 classes, with identical content, to the shared instance. That is the normal bootstrap path. One condition applies. After the revert and rebuild, one more armed gate start must return the deployed version to the shipped `d352a6a32158`, and the story must verify it with a read-only version query, recorded in `## Verification`. Never leave the instance on a mutated version marker. The planner's recommendation to close DW-559 as resolved, with the named leftover risk for the non-bootstrapping dev gates, is accepted for adjudication.
@@ -434,7 +478,7 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - `(loop)` `pnpm --filter @iris-mcp/dev build && pnpm --filter @iris-mcp/dev exec vitest run src/__tests__/doc-edit.test.ts src/__tests__/execute.test.ts src/__tests__/test-status.test.ts src/__tests__/prompts.test.ts` -- expected: pass.
 - `(loop)` `pnpm --filter @iris-mcp/ops exec vitest run src/__tests__/prompts.test.ts && pnpm --filter @iris-mcp/interop exec vitest run src/__tests__/prompts.test.ts && pnpm --filter @iris-mcp/admin exec vitest run src/__tests__/prompts.test.ts` -- expected: pass.
 - `(loop)` `pnpm gen:skills && pnpm gen:skills:check && pnpm validate:prompts` -- expected: `--check` clean; `validate-prompts: OK`.
-- `(loop)` `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/docs-prompt-sync.test.ts src/__tests__/validate-prompts.test.ts src/__tests__/skills-generated-frontmatter.test.ts src/__tests__/gen-skills-stray-file.test.ts src/__tests__/prompt-safety-invariants.test.ts src/__tests__/live-gate-roster.test.ts src/__tests__/story-38-6-doc-claims.test.ts src/__tests__/story-38-0-qa-doc-claims.test.ts src/__tests__/story-38-1-qa-doc-claims.test.ts src/__tests__/story-38-2-qa-doc-claims.test.ts src/__tests__/story-38-3-qa-doc-claims.test.ts src/__tests__/story-38-5-qa-doc-claims.test.ts src/__tests__/docs-visibility-roster-sync.test.ts src/__tests__/docs-governance-cli-recipes.test.ts src/__tests__/measure-tools-payload.test.ts` -- expected: pass.
+- `(loop)` `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/docs-prompt-sync.test.ts src/__tests__/validate-prompts.test.ts src/__tests__/skills-generated-frontmatter.test.ts src/__tests__/gen-skills-stray-file.test.ts src/__tests__/prompt-safety-invariants.test.ts src/__tests__/live-gate-roster.test.ts src/__tests__/story-38-6-doc-claims.test.ts src/__tests__/story-38-0-qa-doc-claims.test.ts src/__tests__/story-38-1-qa-doc-claims.test.ts src/__tests__/story-38-2-qa-doc-claims.test.ts src/__tests__/story-38-3-qa-doc-claims.test.ts src/__tests__/story-38-5-qa-doc-claims.test.ts src/__tests__/docs-visibility-roster-sync.test.ts src/__tests__/docs-governance-cli-recipes.test.ts src/__tests__/measure-tools-payload.test.ts src/__tests__/bootstrap-version-check.test.ts src/__tests__/epic38-gate-guards.test.ts` -- expected: pass.
 - `(loop)` `IRIS_HOST=localhost IRIS_PORT=52773 IRIS_NAMESPACE=HSCUSTOM IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_HTTPS=false IRIS_REQUIRE_LIVE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/epic38-capstone-gate.test.ts` -- expected: all pass, none skipped.
 - `(loop)` the same variables with `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-38-4-qa-doc-edit-wire-gate.test.ts` -- expected: all pass, none skipped.
 - `(loop)` the same variables with `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-38-5-qa-sql-wire-gate.test.ts` -- expected: all pass, none skipped.
@@ -460,9 +504,89 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-6 | `BOOTSTRAP_VERSION` in `packages/shared/dist/bootstrap-classes.js` changed by one hex digit (restored by rebuilding shared) | the capstone version check. Side effect: the spawned server sees a stale deployment and redeploys the unchanged embed (identical content, stamp `d352a6a32158`), as any built server does on a stale instance; read the version back afterwards |
 | AC-7 | the capstone entry removed from `gateTestFiles` | `live-gate-roster.test.ts` |
 
+### Implementation record (2026-10-16)
+
+**Epic-close records (AC-7).**
+- `:check`: `pnpm gen:governance-baseline:check` exited 0. Frozen foundation keys 141 (hash `1e62c5ad5bf7`), live keys 206, post-foundation new keys 65: "OK -- every frozen foundation key still exists in the live surface." The baseline file shows no diff.
+- Counts: tools unchanged (dev 31 package / 32 runtime, suite 107 package / 112 runtime, dev `core` 14 package / 15 runtime; the `measure:tools-payload` run shows dev 32 / 15 / 32 visible). Prompts 11 -> 12 (dev 4 -> 5), skills 12 (`gen:skills` "13 file(s) from 12 prompt(s)"; `validate-prompts: OK -- 24 source(s) checked (12 prompt(s) + 12 generated skill(s))`).
+- `BOOTSTRAP_VERSION`: Story 38.6 `d352a6a32158` -> `d352a6a32158` (no ObjectScript change; `pnpm gen:bootstrap` regenerated the same content, `git diff --stat -- packages/shared/src/bootstrap-classes.ts` empty). Epic 38: `2159ec9e6f69` -> `d352a6a32158`.
+- Deployed version (decision #16): the read-only query `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version` through `iris_sql_query` (`server:"default"`, `namespace:"HSCUSTOM"`) returned `d352a6a32158` before the AC-6 mutation and again after the revert, a clean rebuild of shared (dist file `shasum` identical to the backup) and one more armed capstone start (6 passed). The instance was never left on a mutated marker: the shipped embed carries its own `Parameter BOOTSTRAPVERSION = "d352a6a32158"`, so only the exported constant of the dist was mutated.
+- `node scripts/check-epics-sync.mjs`: exit 0, `OK: no genuine drift (all absences are the documented expected class; no orphans).` (229 sprint keys, 229 `epics.md` sections, 0 genuine drift, 0 orphans, 0 duplicates).
+- Payload re-measure (`pnpm measure:tools-payload` after the rebuild): dev full and developer 32 / 84,218 / ~21,055 (was 84,040 / ~21,010), dev core 15 / 43,392 / ~10,848 (was 43,214 / ~10,804); the other four servers are unchanged. The README table and its "Last re-measured at Story 38.6" sentence match.
+- `git diff --stat 8f134196ae80fcbbfc4d915195ddbc01c072f7b6 -- packages/shared/src/governance-baseline.ts packages/shared/src/baseline-classifications.ts ipm/module.xml src/` is empty.
+- Live instance: `iris_doc_list` (`generated:true`) and `iris_global_list` with the filter `QaStory38` (`server:"default"`, `namespace:"HSCUSTOM"`) are empty after the last run; each capstone run also asserts no `QaStory386Cap` document, global or table in `beforeAll` and `afterAll`.
+
+**Results on the final tree.**
+- Per package (build, test, lint, type-check): shared 1601 tests; dev 1392 (57 files, live gates included); admin 498; interop 343; ops 350; data 165; client-config 514; all `pnpm --filter @iris-mcp/all test` 414 tests in 38 files (the default suite, the three live gates among them). Lint is clean (one existing warning in shared).
+- `(loop)` lines: dev doc-edit, execute, test-status and prompts 234 tests; ops, interop and admin `prompts.test.ts` pass; `gen:skills`, `gen:skills:check` and `validate:prompts` clean; the 15-file all docs and prompts set 179 tests (story-38-6-doc-claims 33).
+- Live gates, each in its own call, armed with the six `IRIS_*` variables and `IRIS_REQUIRE_LIVE=1`: capstone 6 passed; Story 38.4 wire gate 10 passed; Story 38.5 wire gate 28 passed; dev `doc-edit-live-gate` (`--no-file-parallelism`) 10 passed. None was skipped.
+- Unarmed or armed with an unreachable instance (a closed local port, `IRIS_PORT=59999`): the capstone skips all 6 tests and logs `[SKIP] epic38-capstone-gate: IRIS is not reachable at ...`; armed it throws `IRIS_REQUIRE_LIVE is set, so the Epic 38 capstone gate may not be skipped: IRIS is not reachable at ...`. A stale shared dist, armed, produced the same "may not be skipped" error with the staleness reason.
+- Version mismatch rows (`dev`, an older hash, an empty version, no row) are covered without IRIS by the new `bootstrap-version-check.test.ts` (8 tests: the SELECT is sent, a match returns the version, each mismatch names both values, a route error is named, and the raw `GET /doc` oracle returns `ts` and lines).
+
+**Mutations (Rule #19).** Each was applied, observed red, reverted by restoring the backed-up file, and checked with `shasum` of the file and an unchanged `git status --short` and `git diff --stat`; every dist touched was rebuilt.
+- mutation: AC-1 "enabled by default" removed from the `tool_support.md` `iris_doc_edit` row, and the `IRIS_SQL_READ_ONLY` row dropped from `cursor.md` -> `story-38-6-doc-claims` 2 tests went red (the `tool_support.md` row 30 test, the `cursor.md` variables test).
+- mutation: AC-1 `--no-file-parallelism` removed from `vitestArgs` in `packages/iris-mcp-all/scripts/prepublish-gate.mjs` -> `story-38-6-doc-claims` "vitest runs the gate files with --no-file-parallelism" went red.
+- mutation: AC-2 `editAndTestClassPrompt` removed from the dev prompt array (dev dist rebuilt) -> dev `prompts.test.ts` 5 tests, `docs-prompt-sync` 3 tests, `validate-prompts` 1 test and `pnpm gen:skills:check` (exit 1, stray `skills/edit-and-test-class`) went red.
+- mutation: AC-2 step 10, the `total`-vs-`Test*` sentence, removed from the `editAndTestClass.ts` body (dev dist rebuilt) -> `prompt-safety-invariants` 2 tests went red (the step-order test and the running-result and rerun test).
+- mutation: AC-3 `findStaleEdits` returns an empty list before comparing (dev dist rebuilt) -> `epic38-capstone-gate` leg 3 went red (`isError` was undefined: the stale edit was applied and stored) on the path built dev server over stdio -> `iris_doc_edit` -> Atelier `GET` then `PUT`; legs 5 and 6 stayed green.
+- mutation: AC-4 `current: joinLines(entry.current) + "\n"` back to `joinLines(entry.current)` -> `doc-edit.test.ts` 12 tests went red (3 refusal-shape pins and 9 round-trip rows, including the range that ends in an empty line); with the dev dist rebuilt, capstone leg 3 went red at the refusal's `current` shape (`"\tSet tSC = $$$OK\n\n"`).
+- mutation: AC-5 the `buildRunningHint` query back to `iris_sql_execute` -> the `execute.test.ts` DW-555 pin went red (1 test); the `deploy-and-test-class` body's `iris_sql_query` back to `iris_sql_execute` (dev dist rebuilt) -> the `prompt-safety-invariants` deploy test went red (1 test).
+- mutation: AC-6 the exported `BOOTSTRAP_VERSION` in `packages/shared/dist/bootstrap-classes.js` changed from `d352a6a32158` to `d352a6a32159` -> the capstone, the 38.4 wire gate and the 38.5 wire gate each failed in `beforeAll` with `The deployed ExecuteMCPv2 classes report BOOTSTRAP_VERSION "d352a6a32158" but the shipped embed ... is "d352a6a32159"` (every test skipped by the failed hook, no leg ran); reverted by a clean rebuild of shared, see the deployed-version record above.
+- mutation: AC-6 the comparison `deployed !== shipped` disabled in `assertDeployedBootstrapVersion` -> `bootstrap-version-check.test.ts` 4 mismatch tests went red.
+- mutation: AC-7 the capstone entry removed from `gateTestFiles` -> `live-gate-roster.test.ts` (the iris-mcp-all case) and the `story-38-6-doc-claims` roster test went red.
+
+**Review patches (Rule #19; each applied, observed red, reverted from a backup copy with `cmp` identical and `git status --short` / `git diff` fingerprints unchanged, dev dist rebuilt where it was touched).**
+- mutation: AC-5 the dev README re-attach section's `iris_sql_query` back to `iris_sql_execute` -> `story-38-6-doc-claims` "the iris_execute_tests re-attach section sends the manual %UnitTest_Result query to iris_sql_query" went red.
+- mutation: AC-1 the dev README phrase "an empty value counts as unset" removed -> `story-38-6-doc-claims` "the SQL write safety note states the accepted values..." went red.
+- mutation: AC-1 a newer CHANGELOG section inserted above the 38.6 section -> `story-38-6-doc-claims` and `story-38-5-qa-doc-claims` stay green (the section is found by heading, the re-measure sentence by shape).
+- mutation: AC-5 the `deploy-and-test-class` predicate `WHERE ti.InstanceIndex = ?` back to `= <runIndex>` (dev dist rebuilt) -> `prompt-safety-invariants` "deploy-and-test-class sends the manual %UnitTest_Result query to iris_sql_query" went red.
+- mutation: AC-2 `iris_test_status` added to the `edit-and-test-class` step 9 text (dev dist rebuilt) -> `prompt-safety-invariants` "every iris_* token of edit-and-test-class is a dev core tool..." went red.
+- mutation: AC-3 the capstone's `iris_global_list` oracle filter made blind (`QaStory386CapNope`) -> legs 4, 5 and 6 went red at "the global oracle sees the data global" (live, armed); the leaked globals were purged by the next clean run.
+- mutation: AC-3 the capstone's global kill loop disabled (`continue` before the kill) -> the `afterAll` hook failed with "no QaStory386Cap global after the run" (live, armed); the leaked `^ExecuteMCPv2.QaStory386CapRD` was purged by the next clean run (its `beforeAll` asserts none remain), and the final `iris_doc_list` and `iris_global_list` with the filter `QaStory386` came back empty.
+- mutation: AC-3 the capstone's armed throw disabled (`if (skipReason && REQUIRE_LIVE && false)`) -> `epic38-gate-guards` "armed, with IRIS not reachable: the capstone fails in beforeAll" went red; the throw made unconditional (`if (skipReason)`) -> "unarmed, with IRIS not reachable: every capstone test is skipped" went red. Path: the capstone file in its own vitest process, closed local port.
+- mutation: AC-6 the `assertDeployedBootstrapVersion` call removed from the 38.5 wire gate's `beforeAll` -> `epic38-gate-guards` "story-38-5-qa-sql-wire-gate.test.ts calls assertDeployedBootstrapVersion right after its admin session opens" went red.
+
+**Results after the review patches.**
+- `(loop)`: dev 234 tests; ops, interop and admin `prompts.test.ts` pass; `gen:skills`, `gen:skills:check` (13 files match) and `validate:prompts` (24 sources, 12 prompts + 12 skills) clean; the 17-file all set 193 tests (adds `bootstrap-version-check` 8 and `epic38-gate-guards` 5); the four live gates, each in its own call, armed: capstone 6, 38.4 gate 10, 38.5 gate 28, dev `doc-edit-live-gate` 10, none skipped.
+- `(once)` after the last patch: `pnpm gen:bootstrap` regenerated `d352a6a32158` with no diff (a `touch` of `packages/shared/dist/bootstrap-classes.js` then restored the dist mtime that `checkDistFresh` compares); per package build, test, lint and type-check: shared 1601, dev 1392, admin 498, interop 343, ops 350, data 165, client-config 514 tests, and `@iris-mcp/all` 39 files, 420 tests; `:check` exit 0 (141 frozen keys, 206 live, 65 post-foundation); `check-epics-sync` OK; the payload re-measure equals the README rows; the guarded files and `src/` show no diff since the foundation commit; `iris_doc_list` (`generated:true`) and `iris_global_list` with the filter `QaStory386` (`server:"default"`, `namespace:"HSCUSTOM"`) empty.
+
+**Notes for the lead.**
+- `pnpm gen:bootstrap` rewrites `packages/shared/src/bootstrap-classes.ts` with identical content, which raises its mtime above the shared dist; `tsc` then does not re-emit, `checkDistFresh` reports the dist stale, and armed gates throw "may not be skipped". It was fixed here by removing `packages/shared/dist` and `packages/shared/tsconfig.tsbuildinfo` and rebuilding shared. Run the `(once)` `gen:bootstrap` check before, not between, the live gates, or rebuild shared after it.
+- The matrix row "a CRLF document" is covered as an `expected` written with CRLF line breaks against LF-based lines: Atelier `content` elements carry no line terminators (rule #54), so a CR-terminated stored line cannot occur.
+- In the promoted helpers, a raw Atelier failure is a thrown `Error` (it was a vitest `expect` failure inside the 38.5 gate); the gates' own assertions are unchanged.
+- `iris-mcp-all` has no `type-check` script. A manual `tsc --strict` over its new and changed gate and test files reports one error, at an unchanged line of `story-38-5-qa-sql-wire-gate.test.ts` (`withSession(env, ...)` with a `{ IRIS_SQL_READ_ONLY?: undefined }` union), which was there before this story.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-Planning only (the invocation said "Halt after planning."). The spec passed the READY FOR DEVELOPMENT gate on the first check. Nothing was implemented, and nothing was written to IRIS.
+**Implemented change.**
+- DW-552: `mismatches[].current` of a `STALE_CONTENT` refusal gains one trailing line break, so `textToLines(current)` returns the addressed lines for every range and `current` passes back as `expected` unchanged; the `iris_doc_edit` description says so.
+- DW-555: the `iris_execute_tests` running hint, description, JSDoc, the `presets.ts` header and the `deploy-and-test-class` prompt name `iris_sql_query` for the manual `%UnitTest_Result` query.
+- New dev prompt and generated skill `edit-and-test-class` (dev 4 -> 5 prompts, suite 11 -> 12); `deploy-and-test-class` gains the in-place route and loses its two rule citations.
+- DW-559 and the Epic 38 capstone: the session, env and Atelier helpers are promoted to `process-gate-helpers.ts` with `assertDeployedBootstrapVersion`; the 38.4 and 38.5 wire gates use them and check the deployed version in `beforeAll`; new `epic38-capstone-gate.test.ts` (six legs, `QaStory386Cap` fixtures); the prepublish gate lists it and runs files one at a time.
+- Docs: new "Agent code editing (Epic 38)" section, each default stated on every Docs-table surface, the client-config guides and the launcher README, the CHANGELOG 38.6 section, the changeset (`@iris-mcp/dev` minor), the payload re-measure.
+- BOOTSTRAP_VERSION `d352a6a32158` -> `d352a6a32158` for this story (no ObjectScript change; `gen:bootstrap` idempotent); for the epic `2159ec9e6f69` -> `d352a6a32158`. Decision #16: the deployed version read back as `d352a6a32158` after the AC-6 mutation, the revert and one more armed capstone start.
+
+**Files changed.**
+- `packages/iris-dev-mcp/src/tools/doc-edit.ts`, `execute.ts`, `presets.ts`: the `current` line break and description sentence; the `iris_sql_query` hint, description and comments.
+- `packages/iris-dev-mcp/src/prompts/editAndTestClass.ts` (new), `index.ts`, `deployAndTestClass.ts`: the prompt, its registration and the deploy prompt update; `skills/edit-and-test-class/SKILL.md`, `skills/deploy-and-test-class/SKILL.md` and `skills/README.md` regenerated.
+- `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`, `epic38-capstone-gate.test.ts` (new), `bootstrap-version-check.test.ts` (new), `epic38-gate-guards.test.ts` (new), `story-38-4-qa-doc-edit-wire-gate.test.ts`, `story-38-5-qa-sql-wire-gate.test.ts`, `story-38-6-doc-claims.test.ts` (new), `prompt-safety-invariants.test.ts`, `docs-prompt-sync.test.ts`, `validate-prompts.test.ts`, `skills-generated-frontmatter.test.ts`; the dev, ops, interop and admin `prompts.test.ts`, the dev `doc-edit.test.ts`, `doc-edit-live-gate.test.ts` and `execute.test.ts`: the new and moved pins.
+- `packages/iris-mcp-all/scripts/prepublish-gate.mjs`: the capstone entry and `--no-file-parallelism`.
+- `README.md`, `packages/iris-dev-mcp/README.md`, `tool_support.md`, `docs/client-config/claude-code.md`, `claude-desktop.md`, `cursor.md`, `extensions/iris-mcp-launcher/README.md`, `CHANGELOG.md`, `.changeset/story-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md`.
+
+**Review findings.** 32 findings, mechanically counted from the Review Triage Log: high 0, medium 6, low 22, false 3, maybe-false 1.
+- Patches applied: 13 rows over 8 root causes. The dev README's stale `iris_sql_execute` re-attach bullet (medium, found by four layers); the capstone's cleanup oracles lacking a positive control (medium); the missing automated pin of the capstone's arming rows (medium) and of the three gates' version-check call; the position-dependent CHANGELOG and re-measure pins in `story-38-6-doc-claims`; the `= <runIndex>` vs `parameters` predicate of the deploy prompt; the loose core-only token pin of `edit-and-test-class`; the empty-value-is-unset doc phrase; and the stale 11-prompt header comment.
+- Deferred: 1 (the capstone's re-implemented fixture helpers, low, in the frontmatter `deferred:` list), plus the plan-time annotation-divergence item.
+- Rejected: 18, each with its reason in the log. The substantive ones: the `STALE_CONTENT` text sentence (the intent freezes the text block), the DW-559 scope for the in-process gates (orchestrator decision #16), and the prepublish-only `--no-file-parallelism` (spec Tasks).
+
+**Follow-up review recommendation: true.** Three medium entries were patched. The named unverified risk is the new `epic38-gate-guards.test.ts`, which runs the capstone in a nested vitest process (`spawnSync` of `process.execPath` on the resolved `vitest.mjs`) and was verified on macOS only; a different OS or runner layout is not demonstrated.
+
+**Verification performed.** Every `(loop)` line was run after the last patch and the `(once)` lines once, as recorded under `## Verification`: package suites green, four armed live gates pass with none skipped, `:check` exit 0 at `1e62c5ad5bf7`/141, `gen:bootstrap` idempotent, `check-epics-sync` OK, the payload table equals the re-measure, guarded files and `src/` unchanged, and no `QaStory386` leftovers on the instance. The Matrix Test Audit found no uncovered row once the arming rows got `epic38-gate-guards.test.ts`.
+
+**Residual risks.**
+- DW-559 covers the capstone and the 38.4 and 38.5 wire gates; the in-process dev-package gates and `epic35-defect-gate` still test whatever is deployed (decision #16 and plan interpretation 1).
+- The default `@iris-mcp/all` suite runs the three bootstrapping gates in parallel; only the prepublish script is serial. A race needs a stale deployment, and a bootstrap redeploy is idempotent.
+- `pnpm gen:bootstrap` rewrites `bootstrap-classes.ts` with identical content and raises its mtime above the shared dist, so armed gates report a stale dist until shared is rebuilt or the dist file touched.
+- `iris-mcp-all` has no `type-check` script; a manual strict `tsc` over its changed tests shows one error in an unchanged line of the 38.5 gate.

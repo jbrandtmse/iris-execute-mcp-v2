@@ -20,10 +20,12 @@ import {
   REFUSAL_CODES,
   refusalResult,
   storageDroppedRefusal,
+  textToLines,
   type ToolContext,
   type ToolResult,
 } from "@iris-mcp/shared";
 import { docEditTool, applyEdits, findStaleEdits, validateEdits, type LineEdit } from "../tools/doc-edit.js";
+import { docGetTool } from "../tools/doc.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 const CLASS_NAME = "Test.Edit.cls";
@@ -763,7 +765,7 @@ describe("iris_doc_edit (Story 38.4)", () => {
           ts: TS_READ,
           totalLines: 13,
           mismatches: [
-            { edit: 1, op: "replace", startLine: 8, endLine: 9, current: "    Set tSC = $$$OK\n    Quit tSC" },
+            { edit: 1, op: "replace", startLine: 8, endLine: 9, current: "    Set tSC = $$$OK\n    Quit tSC\n" },
           ],
         },
         isError: true,
@@ -780,7 +782,7 @@ describe("iris_doc_edit (Story 38.4)", () => {
 
       expect(result.isError).toBe(true);
       expect(sc(result).mismatches).toEqual([
-        { edit: 1, op: "delete", startLine: 8, endLine: 9, current: "    Set tSC = $$$OK\n    Quit tSC" },
+        { edit: 1, op: "delete", startLine: 8, endLine: 9, current: "    Set tSC = $$$OK\n    Quit tSC\n" },
       ]);
       expect(mockHttp.put.mock.calls).toEqual([]);
     });
@@ -816,8 +818,8 @@ describe("iris_doc_edit (Story 38.4)", () => {
           ts: TS_READ,
           totalLines: 13,
           mismatches: [
-            { edit: 1, op: "replace", startLine: 4, endLine: 4, current: "Property Alpha As %String;" },
-            { edit: 3, op: "insert", startLine: 1, endLine: 1, current: "Class Test.Edit Extends %RegisteredObject" },
+            { edit: 1, op: "replace", startLine: 4, endLine: 4, current: "Property Alpha As %String;\n" },
+            { edit: 3, op: "insert", startLine: 1, endLine: 1, current: "Class Test.Edit Extends %RegisteredObject\n" },
           ],
         },
         isError: true,
@@ -835,6 +837,132 @@ describe("iris_doc_edit (Story 38.4)", () => {
 
       expect(result.structuredContent).toBeUndefined();
       expect(result.content[0]?.text).toContain("Edit 2 (delete) addresses line 20");
+    });
+  });
+
+  describe("the current text passed back as expected (DW-552)", () => {
+    /** Every range shape of the matrix, on the 13-line CLASS_LINES (lines 3, 5, 11 and 13 are empty). */
+    const RANGES: Array<{ label: string; startLine: number; endLine: number }> = [
+      { label: "one line", startLine: 4, endLine: 4 },
+      { label: "one empty line", startLine: 3, endLine: 3 },
+      { label: "several lines", startLine: 8, endLine: 9 },
+      { label: "a range that ends in an empty line", startLine: 4, endLine: 5 },
+      { label: "a range that starts and ends in empty lines", startLine: 3, endLine: 5 },
+      { label: "the document's last line (an empty element)", startLine: 13, endLine: 13 },
+      { label: "the last two lines", startLine: 12, endLine: 13 },
+    ];
+
+    /** Run an edit and, when it is refused as stale, the same edit with `current` as `expected`. */
+    async function refuseThenRetry(
+      stale: Record<string, unknown>,
+      retry: (current: string) => Record<string, unknown>,
+    ): Promise<{ refusal: ToolResult; current: string; retried: ToolResult; edit: LineEdit }> {
+      arrange({ read: CLASS_LINES });
+      const refusal = await run([stale]);
+      expect(refusal.isError).toBe(true);
+      expect(sc(refusal).code).toBe("STALE_CONTENT");
+      expect(mockHttp.put.mock.calls).toEqual([]);
+      const mismatches = sc(refusal).mismatches as Array<{ current: string }>;
+      expect(mismatches).toHaveLength(1);
+      const current = (mismatches[0] as { current: string }).current;
+
+      const edit = retry(current) as unknown as LineEdit;
+      const after = applyEdits([edit], CLASS_LINES).lines;
+      mockHttp = createMockHttp();
+      ctx = createMockCtx(mockHttp);
+      arrange({ read: CLASS_LINES, reread: after });
+      const retried = await run([edit]);
+      return { refusal, current, retried, edit };
+    }
+
+    for (const range of RANGES) {
+      it(`a replace of ${range.label}: current parses back to the addressed lines, and passed back as expected the edit applies`, async () => {
+        const addressed = CLASS_LINES.slice(range.startLine - 1, range.endLine);
+        const { current, retried, edit } = await refuseThenRetry(
+          { op: "replace", startLine: range.startLine, endLine: range.endLine, text: "Replaced", expected: "no such text" },
+          (value) => ({ op: "replace", startLine: range.startLine, endLine: range.endLine, text: "Replaced", expected: value }),
+        );
+
+        expect(current.endsWith("\n")).toBe(true);
+        expect(textToLines(current)).toEqual(addressed);
+        expect(retried.isError).toBeUndefined();
+        expect(sc(retried).changed).toBe(true);
+        expect(mockHttp.put.mock.calls).toHaveLength(1);
+        expect(sentLines()).toEqual(applyEdits([edit], CLASS_LINES).lines);
+      });
+    }
+
+    it("a delete of a range that ends in an empty line applies with current passed back", async () => {
+      const { current, retried } = await refuseThenRetry(
+        { op: "delete", startLine: 4, endLine: 5, expected: "no such text" },
+        (value) => ({ op: "delete", startLine: 4, endLine: 5, expected: value }),
+      );
+
+      expect(textToLines(current)).toEqual(["Property Alpha As %String;", ""]);
+      expect(retried.isError).toBeUndefined();
+      expect(sentLines()).toEqual([...CLASS_LINES.slice(0, 3), ...CLASS_LINES.slice(5)]);
+    });
+
+    for (const anchor of [
+      { label: "line 1 (afterLine 0)", afterLine: 0, line: 1 },
+      { label: "an empty anchor line", afterLine: 3, line: 3 },
+      { label: "the last line, which is empty", afterLine: 13, line: 13 },
+    ]) {
+      it(`an insert after ${anchor.label}: current is the anchor line, and passed back as expected the insert applies`, async () => {
+        const { current, retried, edit } = await refuseThenRetry(
+          { op: "insert", afterLine: anchor.afterLine, text: "Inserted", expected: "no such text" },
+          (value) => ({ op: "insert", afterLine: anchor.afterLine, text: "Inserted", expected: value }),
+        );
+
+        expect(textToLines(current)).toEqual([CLASS_LINES[anchor.line - 1]]);
+        expect(retried.isError).toBeUndefined();
+        expect(sentLines()).toEqual(applyEdits([edit], CLASS_LINES).lines);
+      });
+    }
+
+    it("a wrong expected written with CRLF line breaks is refused with the same LF-based current, and current applies", async () => {
+      const { refusal, current, retried } = await refuseThenRetry(
+        { op: "replace", startLine: 8, endLine: 9, text: "Replaced", expected: "wrong 1\r\nwrong 2\r\n" },
+        (value) => ({ op: "replace", startLine: 8, endLine: 9, text: "Replaced", expected: value }),
+      );
+
+      expect(current).toBe("    Set tSC = $$$OK\n    Quit tSC\n");
+      expect(sc(refusal).mismatches).toEqual([{ edit: 1, op: "replace", startLine: 8, endLine: 9, current }]);
+      expect(retried.isError).toBeUndefined();
+    });
+
+    it("the text block of the refusal does not carry the trailing line break of current", async () => {
+      arrange({ read: CLASS_LINES });
+
+      const result = await run([{ op: "replace", startLine: 4, endLine: 5, text: "x", expected: "no such text" }]);
+
+      expect(result.content[0]?.text.endsWith(`${row(5, "")}`)).toBe(true);
+      expect(result.content[0]?.text).toContain(row(4, "Property Alpha As %String;"));
+    });
+
+    it("an expected built from a ranged iris_doc_get read, each line followed by a line break, matches", async () => {
+      for (const range of RANGES) {
+        mockHttp = createMockHttp();
+        ctx = createMockCtx(mockHttp);
+        mockHttp.get.mockResolvedValueOnce(envelope(docResult(CLASS_NAME, CLASS_LINES)));
+        const read = await docGetTool.handler(
+          { name: CLASS_NAME, startLine: range.startLine, endLine: range.endLine },
+          ctx,
+        );
+        const lines = (read.structuredContent as { lines: string[] }).lines;
+        expect(lines, range.label).toEqual(CLASS_LINES.slice(range.startLine - 1, range.endLine));
+        const expected = lines.map((line) => `${line}\n`).join("");
+
+        const edit = { op: "replace", startLine: range.startLine, endLine: range.endLine, text: "Replaced", expected };
+        const after = applyEdits([edit as LineEdit], CLASS_LINES).lines;
+        mockHttp.get.mockResolvedValueOnce(envelope(docResult(CLASS_NAME, CLASS_LINES)));
+        mockHttp.get.mockResolvedValueOnce(envelope(docResult(CLASS_NAME, after, TS_SAVED)));
+        mockHttp.put.mockResolvedValue(envelope(saveResult(CLASS_NAME, TS_SAVED)));
+        const result = await run([edit]);
+
+        expect(result.isError, range.label).toBeUndefined();
+        expect(sc(result).changed, range.label).toBe(true);
+      }
     });
   });
 
@@ -1491,6 +1619,10 @@ describe("iris_doc_edit (Story 38.4)", () => {
       expect(text).toContain("afterLine 0");
       expect(text).toContain("distinctive");
       expect(text).toContain("never the whole document");
+      expect(text).toContain(
+        "`current` of a STALE_CONTENT mismatch can be passed back as `expected` unchanged, and an `expected` built from a ranged read " +
+          "ends every line, the last included, with a line break.",
+      );
       expect(text).not.toMatch(/\/api\/|atelier|\/doc\//i);
     });
 

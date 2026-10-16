@@ -421,7 +421,7 @@ describe("a stale expected text (Story 38.4, AC-3)", () => {
       namespace: IRIS_NAMESPACE,
       ts: before.ts,
       totalLines: before.content.length,
-      mismatches: [{ edit: 1, op: "replace", startLine: setLine, endLine: setLine, current: "\tSet tSC = $$$OK" }],
+      mismatches: [{ edit: 1, op: "replace", startLine: setLine, endLine: setLine, current: "\tSet tSC = $$$OK\n" }],
     });
     expect(put, "no save was sent").not.toHaveBeenCalled();
     expect(await readDoc(EDIT_DOC)).toEqual(before);

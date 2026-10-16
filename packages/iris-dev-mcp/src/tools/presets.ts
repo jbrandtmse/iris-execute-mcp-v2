@@ -27,7 +27,7 @@
  *
  * `iris_test_status` (Story 36.2, Lead decision L-2, 2026-09-10): `developer`
  * include / `core` exclude: the manual re-attach route (`iris_global_get` +
- * `iris_sql_execute`, named in `iris_execute_tests`' `hint`) already works in
+ * `iris_sql_query`, named in `iris_execute_tests`' `hint`) already works in
  * `core` today. NOT in `TOOL_PAIRS` - pairing it with `iris_execute_tests`
  * would force it into `core` too.
  *

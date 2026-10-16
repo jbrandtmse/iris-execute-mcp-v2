@@ -353,7 +353,7 @@ path instead, which does support it.
   including as `null` (VS Code's "remove this variable" signal) when a setting is unset. Without that, an
   ambient `IRIS_PROFILES` / `IRIS_GOVERNANCE` / `IRIS_SERVER_MANAGER` exported in your shell would silently
   leak into every spawned server. Variables the extension exposes no setting for (`IRIS_TIMEOUT`,
-  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit.
+  `IRIS_SQL_MAX_ROWS`, `IRIS_SQL_TIMEOUT`, `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED`, `IRIS_TEST_TIMEOUT`, `IRIS_ACCEPT_LANGUAGE`) are deliberately left alone and still inherit. `IRIS_SQL_READ_ONLY`, `IRIS_SQL_MAX_ROWS_AFFECTED` and `IRIS_TEST_TIMEOUT` are unset by default, and the two SQL safety variables are global: every profile the launcher writes inherits them.
 - User cancellation of the credential prompt is a first-class, expected outcome: the server is reported as not
   started with one clear message. It is never retried automatically and never produces a toast storm. (The real
   `vscode.authentication.getSession({createIfNone:true})` signals cancellation by **rejecting**, not by

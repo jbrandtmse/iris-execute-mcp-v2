@@ -333,7 +333,7 @@ function staleRefusal(
       op: entry.op,
       startLine: entry.startLine,
       endLine: entry.endLine,
-      current: joinLines(entry.current),
+      current: joinLines(entry.current) + "\n",
     })),
   });
 }
@@ -453,6 +453,8 @@ export const docEditTool: ToolDefinition = {
     "and an empty text is one empty line (use delete to remove lines). Make `expected` distinctive when a line such as `}` is not unique. " +
     "All edits apply or none: they are checked together, applied bottom-up against the numbering of the read, and saved in one " +
     "version-checked write; overlapping edits are rejected. " +
+    "`current` of a STALE_CONTENT mismatch can be passed back as `expected` unchanged, and an `expected` built from a ranged read " +
+    "ends every line, the last included, with a line break. " +
     "A STALE_CONTENT refusal lists the current text of every mismatched edit, and a DOCUMENT_CONFLICT refusal means the document " +
     "changed after it was read; nothing is stored in either case, so read the lines again and retry (a conflict is never retried here). " +
     "For a class, an edit that would drop a Storage definition is refused with STORAGE_DROPPED: keep the Storage lines, " +

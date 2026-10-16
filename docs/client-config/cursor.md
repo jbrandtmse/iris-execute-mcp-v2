@@ -273,8 +273,10 @@ Point a server at production in **read-only mode** with one environment variable
 | Variable | Purpose |
 |----------|---------|
 | `IRIS_GOVERNANCE_PRESET` | `"read-only"` blocks every write-classified tool action (suite-wide) while every read keeps working; `"full"` is an explicit alias for today's behavior. An explicit `IRIS_GOVERNANCE` override still wins over the preset. Omit for today's behavior. |
-| `IRIS_SQL_MAX_ROWS` | Optional positive integer — a hard cap on `iris_sql_execute`'s effective row limit, independent of the preset. The response carries `rowsCapped: true` when it clamps a caller's request. Omit for no cap. |
-| `IRIS_SQL_TIMEOUT` | Optional positive number of **seconds** — a per-request timeout override for `iris_sql_execute`. Omit to use the connection's default timeout. |
+| `IRIS_SQL_MAX_ROWS` | Optional positive integer — a hard cap on the rows `iris_sql_execute` and `iris_sql_query` return, independent of the preset. The response carries `rowsCapped: true` when it clamps a caller's request. Omit for no cap. |
+| `IRIS_SQL_TIMEOUT` | Optional positive number of **seconds** — a per-request timeout override for `iris_sql_execute` and `iris_sql_query`. Omit to use the connection's default timeout. |
+| `IRIS_SQL_READ_ONLY` | Optional `true` or `false` (case-insensitive) — `true` makes every `iris_sql_execute` call read-only: only queries (SELECT) run, and any other statement is refused with `SQL_READ_ONLY`. Unset by default (nothing is forced read-only). Global: every profile inherits it; a malformed value fails startup. |
+| `IRIS_SQL_MAX_ROWS_AFFECTED` | Optional non-negative integer (`0` is valid) — a ceiling on the rows one INSERT, UPDATE or DELETE may change through `iris_sql_execute`; a statement that changes more is rolled back and refused with `SQL_ROWS_AFFECTED_CAP`. Unset by default (no ceiling). Global: every profile inherits it; a malformed value fails startup. |
 
 ```json
 {
@@ -298,7 +300,7 @@ Point a server at production in **read-only mode** with one environment variable
 }
 ```
 
-All three are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; `IRIS_SQL_MAX_ROWS`/`IRIS_SQL_TIMEOUT` govern `iris_sql_execute` specifically, which ships on `@iris-mcp/dev`). See the [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable) for the full model.
+All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable) for the full model.
 
 ---
 

@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -333,5 +333,144 @@ describe("objectscript-review — <=300 word rendered body (AC 25.1.1)", () => {
     ]) {
       expect(body).toContain(marker);
     }
+  });
+});
+
+describe("edit-and-test-class and deploy-and-test-class - the in-place edit loop (Story 38.6)", () => {
+  const EDIT_ARGS = { className: "MyApp.Orders", change: "Rename a property", testClass: "MyApp.Tests.OrdersTest" };
+  const OMITTED_ARGS = { className: "MyApp.Orders", change: "Rename a property" };
+
+  /** Every rendering of the two prompts: all arguments given, an optional one omitted, and the skill form. */
+  async function renderings(): Promise<Array<{ label: string; body: string }>> {
+    const edit = (await findPrompt("edit-and-test-class")).prompt;
+    const deploy = (await findPrompt("deploy-and-test-class")).prompt;
+    return [
+      { label: "edit-and-test-class (all arguments)", body: edit.build(EDIT_ARGS) },
+      { label: "edit-and-test-class (testClass omitted)", body: edit.build(OMITTED_ARGS) },
+      { label: "edit-and-test-class (skill form)", body: edit.build({}) },
+      { label: "deploy-and-test-class", body: deploy.build({ classOrPackage: "MyApp.MyClass" }) },
+      { label: "deploy-and-test-class (skill form)", body: deploy.build({}) },
+    ];
+  }
+
+  it("edit-and-test-class is a dev prompt that reads a range, edits with expected, compiles, tests and checks the total, in that order", async () => {
+    const { pkg, prompt } = await findPrompt("edit-and-test-class");
+    expect(pkg).toBe("iris-dev-mcp");
+    for (const args of [EDIT_ARGS, OMITTED_ARGS, {}]) {
+      const body = prompt.build(args);
+      const steps = [
+        "`startLine` / `endLine`",
+        "`iris_doc_edit` with `action: \"apply\"`",
+        "`iris_doc_compile`",
+        "`iris_execute_tests`",
+        "number of `Test*` methods",
+        "`unifiedDiff`",
+      ];
+      const at = steps.map((step) => body.indexOf(step));
+      expect(at.every((index) => index > -1), JSON.stringify(args)).toBe(true);
+      expect([...at].sort((a, b) => a - b), JSON.stringify(args)).toEqual(at);
+      expect(body.indexOf("`iris_doc_get`")).toBeLessThan(body.indexOf("`iris_doc_edit`"));
+    }
+  });
+
+  it("builds expected from the read's lines with a line break after every line, the last included", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("Build each edit's `expected` from the read's `lines`");
+    expect(body).toContain("every line followed by a line break");
+    expect(body).toContain("the last line included");
+  });
+
+  it("on STALE_CONTENT passes mismatches[].current back as expected when the change still applies, else re-reads", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("`STALE_CONTENT`");
+    expect(body).toContain("Pass each `mismatches[].current` back as that edit's `expected`, unchanged");
+    expect(body).toContain("once your change still applies to that text; otherwise read the lines again");
+  });
+
+  it("never regenerates Storage unless the user explicitly asks, and says why", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("`STORAGE_DROPPED`");
+    expect(body).toContain("keep the Storage lines");
+    expect(body).toMatch(/Never use action `regenerateStorage` unless the user explicitly asks/);
+    expect(body).toContain("disabled by default");
+    // The only mention of the override is the prohibition.
+    expect(body.match(/regenerateStorage/g)).toHaveLength(1);
+  });
+
+  it("stops on GOVERNANCE_DISABLED, re-reads on DOCUMENT_CONFLICT, and warns that a local source file is now stale", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toMatch(/`GOVERNANCE_DISABLED` refusal[^.]*stop and tell the user/);
+    expect(body).toMatch(/`DOCUMENT_CONFLICT` refusal[^.]*read the lines again/);
+    expect(body).toContain("out of date because the edit was made in IRIS");
+    expect(body).toContain("loading that file again would overwrite the edit");
+  });
+
+  it("on a running test result follows the hint and never re-submits; a short total is rerun", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain('`status: "running"`');
+    expect(body).toContain("follow the response's `hint`");
+    expect(body).toContain("never re-submit the same target");
+    expect(body).toContain("compare the returned `total` against the number of `Test*` methods");
+    expect(body).toContain("rerun `iris_execute_tests` if `total` is short");
+  });
+
+  it("names the test class when given, and otherwise tells the model to find it or ask", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    expect(prompt.build(EDIT_ARGS)).toContain('`target: "MyApp.Tests.OrdersTest"`');
+    const omitted = prompt.build(OMITTED_ARGS);
+    expect(omitted).toContain("find the test class that covers `MyApp.Orders`");
+    expect(omitted).toContain("or ask the user which test class to run");
+  });
+
+  it("every iris_* token of edit-and-test-class is a dev core tool, and of deploy-and-test-class a dev core tool or iris_test_status", async () => {
+    const presets = (await import(
+      pathToFileURL(resolve(root, "packages/iris-dev-mcp/dist/tools/presets.js")).href
+    )) as { toolPresets: { core: { include: string[] } } };
+    const core = new Set(presets.toolPresets.core.include);
+    const withTestStatus = new Set([...core, "iris_test_status"]);
+    expect(core.has("iris_doc_edit")).toBe(true);
+    expect(core.has("iris_test_status")).toBe(false);
+
+    for (const { label, body } of await renderings()) {
+      const allowed = label.startsWith("edit-and-test-class") ? core : withTestStatus;
+      const tokens = [...new Set(body.match(/\biris_[a-z_]+/g) ?? [])];
+      expect(tokens.length, label).toBeGreaterThan(0);
+      expect(
+        tokens.filter((token) => !allowed.has(token)),
+        label,
+      ).toEqual([]);
+    }
+  });
+
+  it("carries no internal rule number and no repository path", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/Rule #\d/);
+      expect(body, label).not.toMatch(/iris-execute-mcp-v2|packages\/|_bmad|\.claude|node_modules|research\/|deferred-work|spec-\d/);
+    }
+  });
+
+  it("deploy-and-test-class sends the manual %UnitTest_Result query to iris_sql_query, never iris_sql_execute", async () => {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    const body = prompt.build({ classOrPackage: "MyApp.MyClass" });
+    expect(body).toContain("`iris_sql_query` (with `parameters: [<runIndex>]`) joining `%UnitTest_Result.TestMethod`");
+    expect(body).toContain("`WHERE ti.InstanceIndex = ?`");
+    expect(body).not.toContain("InstanceIndex = <runIndex>");
+    expect(body).not.toContain("iris_sql_execute");
+  });
+
+  it("deploy-and-test-class fixes a class that has no local source in place, and keeps the disk route for the rest", async () => {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    const body = prompt.build({ classOrPackage: "MyApp.MyClass" });
+    expect(body).toContain("fix the SOURCE `.cls` file on disk (never edit generated/compiled output)");
+    expect(body).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
+    expect(body).toContain("ranged `iris_doc_get`");
+    expect(body).toContain("`iris_doc_edit`");
+    expect(body).toContain("`iris_doc_compile`");
+    expect(body).toContain("`edit-and-test-class`");
   });
 });

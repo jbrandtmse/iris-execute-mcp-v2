@@ -2,6 +2,54 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 38.6: Editing and SQL safety docs, prompt and capstone
+
+### Added
+
+- **Prompt and skill `edit-and-test-class` (`@iris-mcp/dev`, dev 4 → 5 prompts, suite 11 → 12; no tool, key or preset
+  row is added).** It walks the in-place edit loop for a class already in IRIS: a ranged `iris_doc_get`, a guarded
+  `iris_doc_edit` (`apply`, with `expected` built from the read, one line break after every line), a retry of a
+  `STALE_CONTENT` refusal with `mismatches[].current`, `iris_doc_compile`, then `iris_execute_tests` with a check of
+  `total` against the number of `Test*` methods. Arguments: `className` and `change` (required), `testClass` (optional;
+  when omitted the model finds the test class that covers the class, or asks). Every tool on its main path is in the
+  dev `core` preset. The skill is generated into `skills/edit-and-test-class/SKILL.md`.
+- **The Epic 38 capstone gate** (`epic38-capstone-gate.test.ts`, `@iris-mcp/all`, in the default suite and in the
+  prepublish gate roster): it drives the built dev server over stdio and checks ranged reads, a guarded edit, the
+  `STALE_CONTENT` retry, `STORAGE_DROPPED`, the read-only preset and `SQL_ROWS_AFFECTED_CAP` against the live IRIS,
+  with the raw Atelier API as the oracle. It, and the Story 38.4 and 38.5 wire gates, first assert that the deployed
+  `ExecuteMCPv2` classes carry the `BOOTSTRAP_VERSION` of the built shared dist (DW-559).
+
+### Changed
+
+- **`iris_doc_edit` `STALE_CONTENT`: `mismatches[].current` gains one trailing line break (DW-552; orchestrator
+  decision #11).** It was the addressed lines joined with `\n`; it is now that text plus one `\n`, so it parses back to
+  exactly the addressed lines for every range, including a range that ends in an empty line, and can be passed back as
+  `expected` unchanged. The field shipped in Story 38.4 of this unreleased epic; the refusal's text block and every
+  other field are unchanged.
+- **The running hint of `iris_execute_tests` and its description name `iris_sql_query`, not `iris_sql_execute`, for the
+  manual `%UnitTest_Result` query (DW-555).** The read-only preset blocks `iris_sql_execute` and runs `iris_sql_query`.
+  The `deploy-and-test-class` prompt and skill say the same.
+- **`deploy-and-test-class` prompt and skill:** a class with no local source file is fixed in place (ranged
+  `iris_doc_get`, `iris_doc_edit`, `iris_doc_compile`); a class with a local source keeps the edit-on-disk route. The
+  two internal rule citations are gone from the text.
+- **The `@iris-mcp/all` prepublish gate runs its files one at a time (`--no-file-parallelism`)**, because three gates
+  now spawn dev servers that bootstrap the same shared instance.
+
+### Documentation
+
+- A new "Agent code editing" section of the root README covers ranged reads, the `iris_doc_put` existing-document save
+  and Storage guard (`allowStorageRegeneration`, default `false`), `iris_doc_edit` (`apply` enabled by default,
+  `regenerateStorage` disabled by default) and a table of the refusal codes (`STALE_CONTENT`, `DOCUMENT_CONFLICT`,
+  `STORAGE_DROPPED`, `SQL_READ_ONLY`, `SQL_ROWS_AFFECTED_CAP`: what happened, what to do).
+- The default state of every Epic 38 item is now stated on each surface that lists it: the root and dev READMEs and
+  `tool_support.md` (the `iris_doc_get` range, the `iris_doc_put` guard, the `iris_doc_edit` `current` retry, the three
+  `iris_sql_execute` defaults, and `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED` as global variables with no
+  per-profile key whose malformed value fails startup).
+- The Claude Code, Claude Desktop and Cursor guides list `IRIS_SQL_READ_ONLY` and `IRIS_SQL_MAX_ROWS_AFFECTED`, cover
+  both SQL tools, and say queries under the read-only preset go through `iris_sql_query`. The VS Code launcher README
+  lists both variables and `IRIS_TEST_TIMEOUT` among the variables it passes through untouched.
+- The prompt pack is 12 prompts (dev 5), and the `tools/list` payload table is re-measured.
+
 ## [Pre-release — 2026-10-15] — Story 38.5: SQL write safety
 
 ### Added

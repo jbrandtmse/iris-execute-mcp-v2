@@ -40,6 +40,7 @@ const FOREIGN_PROMPT_NAMES = [
   "diagnose-slow-query",
   "objectscript-review",
   "deploy-and-test-class",
+  "edit-and-test-class",
   "provision-project-environment",
   "audit-security-posture",
 ];

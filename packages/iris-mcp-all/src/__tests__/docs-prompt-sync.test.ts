@@ -19,9 +19,9 @@
  *
  *   1. Every registered prompt's `name` appears in the root README.md.
  *   2. Each owning server's per-server README.md lists exactly its own
- *      prompts (ops 2, dev 3, interop 3, admin 2), and `iris-data-mcp`'s
- *      README does not claim any of the 10 registered prompt names.
- *   3. The root README's "102 tools" claim is still present — a literal
+ *      prompts (ops 2, dev 5, interop 3, admin 2), and `iris-data-mcp`'s
+ *      README does not claim any registered prompt name.
+ *   3. The root README's "107 tools" claim is still present — a literal
  *      guard against prompts silently inflating the documented tool count
  *      (Rule #31: prompts are a framework/protocol surface, not tools).
  *
@@ -47,7 +47,7 @@ const root = resolve(__dirname, "../../../..");
 /** Expected prompt count per owning server package (Story 25.2 AC 25.2.1 / Task 2). */
 const EXPECTED_COUNTS: Record<string, number> = {
   "iris-ops-mcp": 2,
-  "iris-dev-mcp": 4,
+  "iris-dev-mcp": 5,
   "iris-interop-mcp": 3,
   "iris-admin-mcp": 2,
 };
@@ -82,7 +82,7 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("iris-data-mcp's README does not claim any of the 10 registered prompt names (it ships none in v1)", async () => {
+  it("iris-data-mcp's README does not claim any registered prompt name (it ships none in v1)", async () => {
     const prompts = await loadAllPrompts(root);
     const dataReadme = readReadme("iris-data-mcp");
 
