@@ -787,8 +787,8 @@ describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused u
   }
 
   const NOT_RUN = (statementType: string, source: string, remedy: string): string =>
-    `Statement was not run in namespace '${IRIS_NAMESPACE}': it is a ${statementType} statement whose text contains %NOJOURN, which turns ` +
-    `journaling off, so a rows-affected cap (${ROOMY_CAP}, from ${source}) cannot undo it. Nothing was changed. ${remedy}`;
+    `Statement was not run in namespace '${IRIS_NAMESPACE}': it is a ${statementType} statement whose text contains %NOJOURN, the keyword that ` +
+    `turns journaling off, so a rows-affected cap (${ROOMY_CAP}, from ${source}) could not undo its writes. Nothing was changed. ${remedy}`;
 
   const REFUSED: Array<[string, string, string]> = [
     ["DELETE", `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, "DELETE"],
@@ -819,7 +819,8 @@ describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused u
         NOT_RUN(
           statementType,
           "maxRowsAffected",
-          "Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected.",
+          "Remove %NOJOURN from the statement text, a comment or a string included (a value passed in parameters is not checked), " +
+            "or run it without maxRowsAffected.",
         ),
       );
     }
@@ -832,8 +833,50 @@ describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused u
     const result = await run(sqlExecuteTool, { query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`, maxRowsAffected: 0 });
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).not.toHaveProperty("rowsAffected");
+    expect(result.structuredContent).toEqual({
+      code: "SQL_ROWS_AFFECTED_CAP",
+      namespace: IRIS_NAMESPACE,
+      statementType: "DELETE",
+      maxRowsAffected: 0,
+      capSource: "parameter",
+    });
+    expect(result.content[0]?.text).toContain("a rows-affected cap (0, from maxRowsAffected) could not undo its writes.");
     await expectUntouched();
+  }, 60000);
+
+  it("countOnly declines before the %NOJOURN check: the countOnly error, no code, and nothing is written", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, {
+      query: `DELETE %NOJOURN FROM ${T} WHERE ${DEL_WHERE}`,
+      countOnly: true,
+      maxRowsAffected: ROOMY_CAP,
+    });
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "countOnly counts the rows a query returns, and this is a DELETE statement, so nothing was run. Remove countOnly, or pass a SELECT.",
+        },
+      ],
+      isError: true,
+    });
+    await expectUntouched();
+  }, 60000);
+
+  it("a value passed in parameters is not checked: a capped DELETE whose bound value contains the token runs and commits", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    const result = await run(sqlExecuteTool, {
+      query: `DELETE FROM ${T} WHERE ${DEL_WHERE} AND Name <> ?`,
+      parameters: ["%NOJOURN"],
+      maxRowsAffected: ROOMY_CAP,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, rowsAffected: DEL_ROWS });
+    expect(await gateRows()).toBe(SEEDED_ROWS - DEL_ROWS);
   }, 60000);
 
   it("under the operator ceiling (ctx.config.sqlMaxRowsAffected) it is refused with capSource operator, whatever the caller asks", async (testCtx) => {
@@ -855,7 +898,8 @@ describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused u
         NOT_RUN(
           "DELETE",
           "IRIS_SQL_MAX_ROWS_AFFECTED",
-          "Remove %NOJOURN from the statement text, a comment or a string included; the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.",
+          "Remove %NOJOURN from the statement text, a comment or a string included (a value passed in parameters is not checked); " +
+            "the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.",
         ),
       );
     }
@@ -878,7 +922,7 @@ describe("an INSERT, UPDATE or DELETE that asks IRIS not to journal is refused u
     const result = await run(sqlExecuteTool, {
       query:
         `DELETE FROM ${T} WHERE ${DEL_WHERE} AND Name <> '%NOJOURNAL' AND Name <> '%NOJOURN_X' ` +
-        `AND Name <> '%NOJOURN1' AND Name <> '%NOJOURNé'`,
+        `AND Name <> '%NOJOURN1' AND Name <> '%NOJOURN\u00e9'`,
       maxRowsAffected: ROOMY_CAP,
     });
 

@@ -41,7 +41,8 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
   statement type (by keyword only for the refuse-only `%NOJOURN` check above), applies the controls inside IRIS and
   executes the same statement in the same request. A transaction it opens is rolled back to the level it found on every
   exit path, and a statement that changes that transaction is reported as an error, also when the statement then fails.
-  Bootstrap: 29 → 30 classes; `BOOTSTRAP_VERSION` `3af8ca401e7c` → `d352a6a32158` (the value moves with every change to
+  An outcome the tool does not know (a newer deployed `ExecuteMCPv2.REST.Sql`) is reported as an error, never as an
+  empty result. Bootstrap: 29 → 30 classes; `BOOTSTRAP_VERSION` `3af8ca401e7c` → `d352a6a32158` (the value moves with every change to
   an ExecuteMCPv2 class).
 - A live gate (`sql-safety-live-gate.test.ts`, in the `@iris-mcp/dev` prepublish gate roster) drives both tools against a
   real IRIS, including a serializer pin against the Atelier `action/query` rows.

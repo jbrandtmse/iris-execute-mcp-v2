@@ -49,6 +49,19 @@ export function declined(
 }
 
 /**
+ * The result of a deployed endpoint newer than this package, carrying an outcome this package does
+ * not know. The bootstrap checks the deployed classes only at startup, so another client on the same
+ * server can deploy a newer `ExecuteMCPv2.REST.Sql` while this one runs.
+ */
+export function fromNewerEndpoint(
+  outcome: string,
+  statementType: number,
+  statementTypeName: string,
+): AtelierEnvelope<unknown> {
+  return envelope({ outcome, statementType, statementTypeName });
+}
+
+/**
  * The request body a call with no new control sends: the explicit defaults for `readOnly`,
  * `countOnly` and `maxRowsAffected`, in the namespace the call resolved to.
  */

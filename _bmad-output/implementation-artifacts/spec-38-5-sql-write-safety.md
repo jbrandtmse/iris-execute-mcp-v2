@@ -87,7 +87,7 @@ A new read-classified dev tool, `iris_sql_query`, always runs read-only. It decl
   - No change to `iris_sql_analyze` (out of scope: probe 5).
   - No per-profile SQL key in `IRIS_PROFILES` or Server Manager.
   - No server-side row limit on the returned rows: `IRIS_SQL_MAX_ROWS` stays a post-fetch cap.
-  - No keyword matching in the safety path, with ONE refuse-only exception. Under a rows-affected cap (the caller's `maxRowsAffected` or the operator's `IRIS_SQL_MAX_ROWS_AFFECTED`), a statement of type 2, 3 or 4 whose text contains the `%NOJOURN` token, matched case-insensitively at word boundaries, is refused with `SQL_ROWS_AFFECTED_CAP` before it runs, and it writes nothing. A false positive, such as `%NOJOURN` in a comment or a string, can only refuse; it can never let a write through. *(Amended 2026-10-16 by the lead, Rule 5, orchestrator decision #14: `%NOJOURN` turns journaling off, so the cap's rollback cannot undo the write, and IRIS gives no parse-level signal for it.)*
+  - No keyword matching in the safety path, with ONE refuse-only exception. Under a rows-affected cap (the caller's `maxRowsAffected` or the operator's `IRIS_SQL_MAX_ROWS_AFFECTED`), a statement of type 2, 3 or 4 whose text contains the `%NOJOURN` token, matched case-insensitively and not as the start of a longer name (right-bounded only; no left bound, because `DELETE%NOJOURN FROM T` prepares as the keyword), is refused with `SQL_ROWS_AFFECTED_CAP` before it runs, and it writes nothing. A false positive, such as `%NOJOURN` in a comment or a string, can only refuse; it can never let a write through. *(Amended 2026-10-16 by the lead, Rule 5, orchestrator decision #14: `%NOJOURN` turns journaling off, so the cap's rollback cannot undo the write, and IRIS gives no parse-level signal for it.)*
   - No Atelier fallback route.
 - **Other surfaces.**
   - No change to the governance engine or the parent mechanism. No other tool's preset rows change, and no tool leaves `core`.
@@ -456,6 +456,61 @@ Code review 2026-10-16 (bmad-code-review, review tier `full-opus`). All four lay
 - `low` AA-5: the `{a: null}` legacy fake is a pre-existing AD-15 back-compat case; changing it would weaken that pin.
 - `low` AA-6: the QA wire gate's `QaStory385Wire` fixtures are disposable `Temp` classes it removes, and the `QaStory385` emptiness listing covers them.
 
+**Code review 2026-10-16, rework re-review (iteration 1 of 3)** (bmad-code-review, review tier `full-opus`). All four layers delivered: blind-hunter (7 findings), edge-case-hunter (4), verification-gap (3 gap blocks and 1 other finding) and acceptance-auditor (3). Diff: `3fc13ea` (the rework baseline) to the working tree, over the 12 rework files. The 18 raw findings became 9 entries (1 medium and 8 low, all patched or closed in this pass), with 3 rejected. One lead-flagged item became DW-558, a medium. Live probes ran on `default`/HSCUSTOM against disposable `ExecuteMCPv2.Temp.Cr385R2*` and `^CacheTemp.Cr385R2*`, which were removed afterwards. There is no HIGH, so the story is `done` (review outcome CLEAN).
+
+Checklist from round 1:
+- **HIGH `%NOJOURN` cap bypass: fixed.**
+  - `Decline` runs after `%Prepare` and before `TSTART`. It refuses only under a cap and only types 2 to 4, after the read-only, `countOnly` and not-countable checks.
+  - The live tests pin that nothing is written, that the uncapped run is unchanged, and that read-only governs.
+  - `BOOTSTRAP_VERSION` `e615a96a1e70` -> `d352a6a32158` was re-derived by the auditor: all 30 classes are byte-identical, and `Sql` comes before `Dispatch` in both rosters. The deployed copy matches the source.
+- **HIGH TRUNCATE AD mismatch: resolved.** The amended AD-25 matches the code: `tRowsAffected < 0` rolls back, and `HasNoJournal` is the one keyword check, refuse-only.
+
+Lead-flagged items:
+- **(a) The right-bound-only match is the safe reading.** Adding a left bound made a live `DELETE%NOJOURN` run under the cap (mutation under Verification). The Never bullet's literal "at word boundaries" still differs from the shipped reading, which the Spec Change Log records; see rejected R1.
+- **(b) The refusal text is accurate for a real match.** It was patched (entry 2) so that it also reads correctly for a match in a comment or a string, and it now names the `parameters` route.
+- **(c) A global temporary table is theoretical, but IRISTEMP storage is not.** See the Defer entry below.
+
+- [x] [Review][Patch] **MED: an endpoint outcome this tool does not know was reported as a successful empty result.** [packages/iris-dev-mcp/src/tools/sql.ts:212]
+  - Source: blind-hunter. Fix-risk: low (one switch arm and a mock test). Footprint: in-story.
+  - Live evidence: the harness's pre-rework `iris_sql_execute` sent a refused `DELETE %NOJOURN ... WHERE 1=0` with `maxRowsAffected: 0` to the reworked endpoint and got `{"columns":[],"rows":[],"rowCount":0}`.
+  - Version skew is reachable: the bootstrap checks the deployed classes only at startup, and DW-508's downgrade guard will make an older client meeting a newer class the normal case.
+  - Fixed: `case "ok"` breaks, and `default` fails closed with a text that names the outcome. Added the `fromNewerEndpoint` fake, a mock test, a CHANGELOG sentence and a mutation line.
+- [x] [Review][Patch] **LOW: the `%NOJOURN` refusal text was wrong for a match in a comment or a string, and gave no route for a needed literal.** [packages/iris-dev-mcp/src/tools/sql.ts:177-188]
+  - Source: blind-hunter and acceptance-auditor.
+  - Fixed: the text now reads "%NOJOURN, the keyword that turns journaling off, so a rows-affected cap (...) could not undo its writes", and the remedy adds "(a value passed in parameters is not checked)".
+  - A new live test pins that a capped DELETE runs when the token is only in a bound value. The root README cap row says the same.
+- [x] [Review][Patch] **LOW: "one whose text contains %NOJOURN is refused" reads as including a capped SELECT.** [packages/iris-dev-mcp/src/tools/sql.ts:311; packages/iris-dev-mcp/README.md:195]
+  - Source: edge-case-hunter and acceptance-auditor.
+  - Fixed: "an INSERT, UPDATE or DELETE whose text contains the %NOJOURN token", with the pin updated.
+- [x] [Review][Patch] **LOW: the docs said "contains %NOJOURN", but `'%NOJOURNAL'` is not refused.** [packages/iris-dev-mcp/src/tools/sql.ts:275; README.md:456; packages/iris-dev-mcp/README.md:195]
+  - Source: edge-case-hunter.
+  - Fixed: they now say "the %NOJOURN token".
+- [x] [Review][Patch] **LOW: two doc surfaces left out the new refusal.** [README.md:89; packages/iris-dev-mcp/README.md:1018]
+  - Source: blind-hunter.
+  - Fixed: one clause in the `IRIS_SQL_MAX_ROWS_AFFECTED` env row and one sentence in the Safety controls block (Rules #30 and #43). The payload table was re-measured (dev 84,040 / 43,214).
+- [x] [Review][Patch] **LOW (Rule 19): the `maxRowsAffected: 0` live test did not pin the refusal shape.** [packages/iris-dev-mcp/src/__tests__/sql-safety-live-gate.test.ts:829]
+  - Source: blind-hunter and edge-case-hunter.
+  - Fixed: `toEqual` on the full not-run shape with `maxRowsAffected: 0`, and the `(0, from maxRowsAffected)` text.
+- [x] [Review][Patch] **LOW (Rule 19): no test pinned that `countOnly` declines before the `%NOJOURN` check.**
+  - Source: verification-gap.
+  - Fixed: a new live test, with its mutation recorded.
+- [x] [Review][Patch] **LOW (Rule 19): three pinned properties had no `mutation:` line: a left bound, `_` in the lookahead, and the field order.**
+  - Source: verification-gap and blind-hunter.
+  - Closed in this pass: each mutation was applied, seen red and reverted; the lines are under Verification.
+- [x] [Review][Patch] **LOW (Rule 14): a literal non-ASCII letter in the live gate source.** [packages/iris-dev-mcp/src/__tests__/sql-safety-live-gate.test.ts:925]
+  - Source: verification-gap and acceptance-auditor.
+  - Fixed with the `é` escape. It was applied with perl, because the Edit tool turns the escape back into the letter. The file is ASCII-only.
+- [x] [Review][Defer] **MED (lead item c): a capped DML on a table stored in IRISTEMP is not undone, yet the `overCap` text says it was.** [src/ExecuteMCPv2/REST/Sql.cls:231; packages/iris-dev-mcp/src/tools/sql.ts overCap text]
+  - Deferred as DW-558, `routed owner=burndown`. Fix-risk: med. Footprint: in-story, predating the rework.
+  - Live evidence: a persistent class with `DEFAULTGLOBAL = "^CacheTemp.Cr385R2"` (stored in `mgr/iristemp`) held 3 rows. A `DELETE` with `maxRowsAffected: 0` returned `overCap` with "Its row changes were undone", and `COUNT(*)` was then 0.
+  - The `overCap` text is fixed by the intent contract, so the fix is a Rule 5 amendment that hedges IRISTEMP and process-private storage, plus one docs line. Detecting where a table is stored would be a new, high-risk classification path.
+  - A global temporary table cannot show the failure: its data is in `^||` globals (probed), and this webapp clears process-private globals between requests (same job, the `^||` global gone at the next call). It becomes real only if the tool gains process affinity.
+
+**Rejected (3).**
+- R1, fix edits the spec under review (BH2, and the contract half of AA3). The intent contract's Texts, I/O matrix and Execution step 3 do not list `noJournal`, and the Never bullet says "at word boundaries". The intent contract is the lead's to amend. Recommended fold: the shipped text, and "case-insensitively, not as the start of a longer name (no left bound: `DELETE%NOJOURN` prepares as the keyword)".
+- R2, `low` (BH6, EC1): `\p{N}` in the lookahead is wider than IRIS's identifier characters. Two layers probed this live: `%NOJOURN` followed by a non-ASCII digit fails `%Prepare` (SQLCODE -1) before `Decline` runs, so nothing reaches the check. It becomes real only on an IRIS whose lexer prepares such a statement.
+- R3, outside the rework range and not HIGH (VG3): the live gate exercises the deployed `Sql.cls`, not the shipped embed, because there is no `BOOTSTRAP_VERSION` assertion in `beforeAll`. Every prepublish live gate shares this, and it predates the rework, so it was not filed under the re-review rule. Today the deployed copy matches (`d352a6a32158`). Flagged to the lead.
+
 ## Spec Change Log
 
 ### 2026-10-16: rework iteration 1, opened by the lead after code review round 1 (2 HIGH)
@@ -805,6 +860,14 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - AC-3 (docs, review pass of rework 1): mutation: `RESIDUAL_EFFECTS` back to a bare `%NOJOURN` -> `sql-safety.test.ts` `both descriptions say statement-level read-only, not side-effect-free, and list what a rollback does not undo` red.
 - AC-3 (review pass of rework 1): mutation: the `noJournal` refusal text back to the earlier wording -> `sql-safety.test.ts` the parameter-remedy and operator-remedy `%NOJOURN` tests red (2 tests). After each mutation the source was restored from a pristine copy (`cmp` identical), `Sql.cls` reloaded and compiled, and the dists rebuilt.
 - Not claimed: how the IRIS SQL tokenizer treats a non-ASCII letter after the token; the pins are on the match over the statement text, and the recorded behavior is that such a name is not refused.
+
+**Mutations demonstrated in the rework re-review (code review 2026-10-16, Rule 19).** The IRIS-side mutations were loaded into `default`/HSCUSTOM from scratchpad copies with `iris_doc_load` and driven through the armed `sql-safety-live-gate.test.ts -t "asks IRIS not to journal"`; the repository `Sql.cls` (sha1 `54c5a370f489`) was never edited. Afterwards `src/**/Sql.cls` was reloaded and compiled, the deployed `Decline` and `HasNoJournal` read back identical to the source, and `Setup.GetBootstrapVersion()` returned `d352a6a32158`. The `sql.ts` mutations were restored from a pristine copy (`cmp` identical) and the dists rebuilt from clean.
+- AC-3: mutation: a left bound added to `HasNoJournal` (`(?i)(?<![\p{L}\p{N}_])%NOJOURN(?![\p{L}\p{N}_])`) -> live `under maxRowsAffected, every form of the statement is refused...` red on the `no space before the token` row (`DELETE%NOJOURN FROM T` ran under the cap). This is the evidence that the right-bound-only match is the reading that fails safe.
+- AC-3: mutation: `_` dropped from the lookahead (`(?![\p{L}\p{N}])`) -> live `a name that only begins with the token is not the keyword...` red (`'%NOJOURN_X'` refused).
+- AC-3: mutation: the `noJournal` line moved above the `countOnly` line in `Decline` -> live `countOnly declines before the %NOJOURN check...` red.
+- AC-3: mutation: the `noJournal` result fields reordered (`maxRowsAffected` before `statementType`) -> `sql-safety.test.ts` `a statement whose text contains %NOJOURN is refused before it runs, with the parameter remedy and no rowsAffected` red (the `Object.keys` order pin).
+- AC-3: mutation: the `runSql` `default:` arm back to `break`, so an unknown outcome falls through to the success mapping -> `sql-safety.test.ts` `an outcome this tool does not know (a newer deployed endpoint) is an error, never a successful empty result` red.
+- After the last restore: armed live gate 90/90, dev 1373 tests (57 files) with lint and type-check clean, `iris-mcp-all` 355/355.
 
 ## Auto Run Result
 

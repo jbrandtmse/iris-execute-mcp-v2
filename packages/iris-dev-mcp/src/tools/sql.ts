@@ -177,12 +177,12 @@ async function runSql(args: SqlArgs, ctx: ToolContext, tool: "iris_sql_execute" 
       case "noJournal": {
         const remedy =
           ceiling === undefined
-            ? "Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected."
-            : "Remove %NOJOURN from the statement text, a comment or a string included; the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.";
+            ? "Remove %NOJOURN from the statement text, a comment or a string included (a value passed in parameters is not checked), or run it without maxRowsAffected."
+            : "Remove %NOJOURN from the statement text, a comment or a string included (a value passed in parameters is not checked); the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.";
         return refusalResult(
           REFUSAL_CODES.SQL_ROWS_AFFECTED_CAP,
-          `Statement was not run in namespace '${ns}': it is a ${typeName} statement whose text contains %NOJOURN, which turns ` +
-            `journaling off, so a rows-affected cap (${cap}, from ${capName}) cannot undo it. Nothing was changed. ${remedy}`,
+          `Statement was not run in namespace '${ns}': it is a ${typeName} statement whose text contains %NOJOURN, the keyword that ` +
+            `turns journaling off, so a rows-affected cap (${cap}, from ${capName}) could not undo its writes. Nothing was changed. ${remedy}`,
           { namespace: ns, statementType: typeName, maxRowsAffected: cap, capSource },
         );
       }
@@ -209,8 +209,14 @@ async function runSql(args: SqlArgs, ctx: ToolContext, tool: "iris_sql_execute" 
             "started, committed or rolled back a transaction, so the tool could not check or undo its effects reliably and " +
             "some changes may be saved. Check the data the statement touches before running it again.",
         );
-      default:
+      case "ok":
         break;
+      default:
+        return failure(
+          `The SQL endpoint in namespace '${ns}' returned an outcome this tool does not know ('${String(result.outcome)}'), ` +
+            "so the tool cannot tell whether the statement ran or what it changed. Use the @iris-mcp/dev version that matches " +
+            "the ExecuteMCPv2 classes deployed on this server, and check the data the statement touches before running it again.",
+        );
     }
 
     // result.content is an array of row objects, e.g. [{ Col1: "val", Col2: 42 }],
@@ -272,7 +278,7 @@ export const sqlExecuteTool: ToolDefinition = {
     "a statement that changes more is rolled back and refused with SQL_ROWS_AFFECTED_CAP, and under a cap only SELECT, INSERT, " +
     "UPDATE and DELETE run, because those are the statements whose affected rows IRIS counts (the count is the statement's own " +
     "row count: rows that triggers, cascades or functions change are not counted, and a SELECT is not bounded by it), and an INSERT, " +
-    "UPDATE or DELETE whose text contains %NOJOURN (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs " +
+    "UPDATE or DELETE whose text contains the %NOJOURN token (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs " +
     "under a cap, because it turns journaling off and the rollback could not undo it; countOnly (default: false) " +
     "returns only totalCount, the number of rows a SELECT returns, and transfers no rows. " +
     "An operator may set IRIS_SQL_READ_ONLY=true (every call is read-only; unset by default) and IRIS_SQL_MAX_ROWS_AFFECTED " +
@@ -308,7 +314,7 @@ export const sqlExecuteTool: ToolDefinition = {
       .describe(
         "Roll back and refuse an INSERT, UPDATE or DELETE that changes more than this many rows; 0 is a dry count " +
           "(default: no cap; IRIS_SQL_MAX_ROWS_AFFECTED sets a ceiling this cannot raise). Under a cap only SELECT, INSERT, UPDATE and DELETE run, " +
-          "and one whose text contains %NOJOURN is refused.",
+          "and an INSERT, UPDATE or DELETE whose text contains the %NOJOURN token is refused.",
       ),
     countOnly: z
       .boolean()

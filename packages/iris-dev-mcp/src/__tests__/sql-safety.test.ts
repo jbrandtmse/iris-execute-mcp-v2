@@ -14,7 +14,15 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError } from "@iris-mcp/shared";
 import { sqlExecuteTool, sqlQueryTool } from "../tools/sql.js";
 import { createMockHttp, createMockCtx } from "./test-helpers.js";
-import { SQL_PATH, declined, endpointBody, executed, executedDml, executedOther } from "./sql-test-support.js";
+import {
+  SQL_PATH,
+  declined,
+  endpointBody,
+  executed,
+  executedDml,
+  executedOther,
+  fromNewerEndpoint,
+} from "./sql-test-support.js";
 
 type Tool = typeof sqlExecuteTool;
 
@@ -421,9 +429,10 @@ describe("SQL write safety (Story 38.5)", () => {
           {
             type: "text",
             text:
-              "Statement was not run in namespace 'USER': it is a DELETE statement whose text contains %NOJOURN, which turns journaling off, " +
-              "so a rows-affected cap (10, from maxRowsAffected) cannot undo it. " +
-              "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included, or run it without maxRowsAffected.",
+              "Statement was not run in namespace 'USER': it is a DELETE statement whose text contains %NOJOURN, the keyword that turns journaling off, " +
+              "so a rows-affected cap (10, from maxRowsAffected) could not undo its writes. " +
+              "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included " +
+              "(a value passed in parameters is not checked), or run it without maxRowsAffected.",
           },
         ],
         structuredContent: {
@@ -524,9 +533,10 @@ describe("SQL write safety (Story 38.5)", () => {
 
       expect(sentBody().maxRowsAffected).toBe(5);
       expect(result.content[0]?.text).toBe(
-        "Statement was not run in namespace 'USER': it is a UPDATE statement whose text contains %NOJOURN, which turns journaling off, " +
-          "so a rows-affected cap (5, from IRIS_SQL_MAX_ROWS_AFFECTED) cannot undo it. " +
-          "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included; " +
+        "Statement was not run in namespace 'USER': it is a UPDATE statement whose text contains %NOJOURN, the keyword that turns journaling off, " +
+          "so a rows-affected cap (5, from IRIS_SQL_MAX_ROWS_AFFECTED) could not undo its writes. " +
+          "Nothing was changed. Remove %NOJOURN from the statement text, a comment or a string included " +
+          "(a value passed in parameters is not checked); " +
           "the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling applies to every call.",
       );
       expect(result.structuredContent).toEqual({
@@ -700,6 +710,25 @@ describe("SQL write safety (Story 38.5)", () => {
   // -- Errors and transport --------------------------------------------
 
   describe("errors and transport", () => {
+    it("an outcome this tool does not know (a newer deployed endpoint) is an error, never a successful empty result", async () => {
+      mockHttp.post.mockResolvedValue(fromNewerEndpoint("someLaterOutcome", 4, "DELETE"));
+
+      const result = await call(sqlExecuteTool, { query: DELETE_QUERY, maxRowsAffected: 10 });
+
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text:
+              "The SQL endpoint in namespace 'USER' returned an outcome this tool does not know ('someLaterOutcome'), " +
+              "so the tool cannot tell whether the statement ran or what it changed. Use the @iris-mcp/dev version that matches " +
+              "the ExecuteMCPv2 classes deployed on this server, and check the data the statement touches before running it again.",
+          },
+        ],
+        isError: true,
+      });
+    });
+
     it("a multi-statement query is an IRIS prepare error (SQLCODE -25): SQL error, nothing runs", async () => {
       const error = new IrisApiError(
         200,
@@ -789,7 +818,7 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(description).toContain("SQL_ROWS_AFFECTED_CAP");
       expect(description).toContain("A capped statement that is rolled back leaves the same effects.");
       expect(description).toContain(
-        "an INSERT, UPDATE or DELETE whose text contains %NOJOURN (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs under a cap, because it turns journaling off and the rollback could not undo it",
+        "an INSERT, UPDATE or DELETE whose text contains the %NOJOURN token (a comment or a string counts) is refused with SQL_ROWS_AFFECTED_CAP before it runs under a cap, because it turns journaling off and the rollback could not undo it",
       );
       expect(description).toContain("rowsAffected");
       expect(description).toContain("readOnlyForced or maxRowsAffectedCapped");
@@ -818,7 +847,9 @@ describe("SQL write safety (Story 38.5)", () => {
       const shape = (schema as unknown as { shape: Record<string, { description?: string }> }).shape;
       expect(shape.readOnly?.description).toContain("default: false");
       expect(shape.maxRowsAffected?.description).toContain("default: no cap");
-      expect(shape.maxRowsAffected?.description).toContain("one whose text contains %NOJOURN is refused");
+      expect(shape.maxRowsAffected?.description).toContain(
+        "and an INSERT, UPDATE or DELETE whose text contains the %NOJOURN token is refused",
+      );
       expect(shape.countOnly?.description).toContain("default: false");
     });
 

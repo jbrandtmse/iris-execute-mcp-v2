@@ -2964,3 +2964,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: sql-safety-live-gate.test.ts:243-257 repeats doc-put-storage-guard-live-gate.test.ts:156-163 and doc-edit-live-gate.test.ts:135; the spec named the sibling to follow (a weak reason, Rule 2); the iris-mcp-all wire gate cannot import dev test helpers.
 - 2026-10-16T12:35:29Z status=wontfix-accepted owner=38-5-sql-write-safety by=cr note=reopen_if=a fourth live gate copies the loop, or the loop's behavior must change in more than one file
+
+### DW-558: A capped INSERT, UPDATE or DELETE on a table stored in IRISTEMP is not undone by the cap's rollback, yet the overCap text says 'Its row changes were undone'
+- source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: Live 2026-10-16 default/HSCUSTOM: a persistent class with DEFAULTGLOBAL ^CacheTemp.Cr385R2 (dest mgr/iristemp), 3 rows; DELETE with maxRowsAffected 0 gave overCap 'Its row changes were undone', then COUNT(*) was 0. A GTT is unobservable: its data is ^|| and the webapp clears process-private globals between requests (same job, ^|| gone).
+- 2026-10-16T13:51:09Z status=routed owner=burndown by=cr note=lead item (c): amend the CAP rolled-back text to hedge IRISTEMP storage (Rule 5) plus a docs line; storage detection is high-risk
+
+### DW-559: Prepublish live gates never assert that the deployed ExecuteMCPv2 BOOTSTRAP_VERSION equals the shipped embed, so a gate can pass against a stale (older or newer) deployment of the handlers it exercises
+- source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 38.5 re-review 2026-10-16: sql-safety-live-gate and the other armed gates read live results without checking the deployed version; today they match (d352a6a32158); Rule #59 path dimension
+- 2026-10-16T13:54:17Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=the 38.6 capstone (the epic gate) asserts deployed == shipped BOOTSTRAP_VERSION before its live legs; reuse for the other gates if cheap
