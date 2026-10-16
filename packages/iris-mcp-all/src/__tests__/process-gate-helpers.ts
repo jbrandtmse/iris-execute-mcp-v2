@@ -383,8 +383,10 @@ export async function assertDeployedBootstrapVersion(repoRoot: string, target: I
     throw new Error(
       `The deployed ExecuteMCPv2 classes report BOOTSTRAP_VERSION "${deployed}" but the shipped embed ` +
         `(packages/shared/dist/bootstrap-classes.js) is "${shipped}", so this gate would test classes ` +
-        "other than the shipped ones. Rebuild shared and run a built server against this instance so " +
-        "that its bootstrap redeploys them, then rerun the gate.",
+        "other than the shipped ones. The gate's own built server has connected, and its startup bootstrap " +
+        "redeploys a deployment whose version differs, so that bootstrap failed or did not run. Its report " +
+        "goes to the server's stderr, which the gate does not show: start the built server by hand against " +
+        "this instance to read it, fix the cause, then rerun the gate.",
     );
   }
   return deployed;

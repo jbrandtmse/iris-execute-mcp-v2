@@ -472,5 +472,8 @@ describe("edit-and-test-class and deploy-and-test-class - the in-place edit loop
     expect(body).toContain("`iris_doc_edit`");
     expect(body).toContain("`iris_doc_compile`");
     expect(body).toContain("`edit-and-test-class`");
+    expect(body).toContain(
+      "Repeat until `iris_doc_load` (or `iris_doc_compile`, for a class fixed in place) reports zero compile errors.",
+    );
   });
 });

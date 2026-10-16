@@ -100,6 +100,7 @@ describe("Story 38.6: assertDeployedBootstrapVersion (DW-559)", () => {
       expect(outcome).toContain(`BOOTSTRAP_VERSION "${deployed}"`);
       expect(outcome).toContain(`"${shipped}"`);
       expect(outcome).toContain("this gate would test classes other than the shipped ones");
+      expect(outcome).toContain("that bootstrap failed or did not run");
     });
   }
 

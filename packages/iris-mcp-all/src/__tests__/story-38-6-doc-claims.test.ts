@@ -108,6 +108,17 @@ describe("Story 38.6: the Agent code editing section of the root README states e
       expect(cells[2]?.length, `${code} what to do`).toBeGreaterThan(20);
     }
   });
+
+  it("the two SQL rows name each refusal variant and its remedy, as the iris_sql_execute refusal texts do", () => {
+    const readOnly = squash(lineStarting(rootReadme, "| `SQL_READ_ONLY` |"));
+    expect(readOnly).toContain("`iris_sql_execute` with `readOnly: true`");
+    expect(readOnly).toContain("From `iris_sql_query`, run the statement with `iris_sql_execute`");
+    expect(readOnly).toContain("With `readOnly: true`, run it without `readOnly`.");
+    const cap = squash(lineStarting(rootReadme, "| `SQL_ROWS_AFFECTED_CAP` |"));
+    expect(cap).toContain("or the statement was not run at all");
+    expect(cap).toContain("raise `maxRowsAffected` when the cap is the call's own");
+    expect(cap).toContain("Not run: remove `%NOJOURN` from the text, or run the statement without `maxRowsAffected`.");
+  });
 });
 
 describe("Story 38.6: the dev README states each default", () => {
@@ -242,11 +253,14 @@ describe("Story 38.6: the SQL operator variables are documented in the root READ
       expect(readOnly).toContain("`true` or `false` (case-insensitive)");
       expect(readOnly).toContain("Unset by default (nothing is forced read-only)");
       expect(readOnly).toContain("Global: every profile inherits it; a malformed value fails startup.");
+      expect(readOnly).toContain("a call's `readOnly: false` cannot weaken it");
 
       const affected = squash(lineStarting(section, "| `IRIS_SQL_MAX_ROWS_AFFECTED` |"));
       expect(affected).toContain("non-negative integer (`0` is valid)");
       expect(affected).toContain("Unset by default (no ceiling)");
       expect(affected).toContain("Global: every profile inherits it; a malformed value fails startup.");
+      expect(affected).toContain("Under a ceiling only SELECT, INSERT, UPDATE and DELETE run (any other statement, DDL and `CALL` included, is refused before it runs");
+      expect(affected).toContain("a call's `maxRowsAffected` can only tighten it");
 
       for (const variable of ["IRIS_SQL_MAX_ROWS", "IRIS_SQL_TIMEOUT"]) {
         expect(lineStarting(section, `| \`${variable}\` |`), `${variable} row covers both SQL tools`).toContain("`iris_sql_query`");
@@ -293,6 +307,16 @@ describe("Story 38.6: the edit-and-test-class prompt is documented where the pro
 
   it("the payload table names the story that last re-measured it", () => {
     expect(squash(rootReadme)).toMatch(/Last re-measured at Story \d+\.\d+ \(`pnpm measure:tools-payload`/);
+  });
+
+  it("the core preset's stated size spans the smallest and largest core roster of the payload table", () => {
+    const cores = [...rootReadme.matchAll(/^\| @iris-mcp\/\w+ \| [^|]+ \| (\d+) \//gm)].map((match) => Number(match[1]));
+    expect(cores, "the payload table has a core count for each of the five servers").toHaveLength(5);
+    const phrase = `${Math.min(...cores)}- to ${Math.max(...cores)}-tool`;
+    expect(rootReadme.match(new RegExp(phrase, "g")), "root README core size").toHaveLength(3);
+    for (const guide of CLIENT_GUIDES) {
+      expect(lineStarting(read(`docs/client-config/${guide}.md`), "| `IRIS_TOOLS_PRESET` |"), guide).toContain(phrase);
+    }
   });
 });
 

@@ -128,9 +128,10 @@ const gateTestFiles = [
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
-// bootstrap deploys to ONE shared IRIS instance, and they share its Atelier work queue. Run in parallel
-// (vitest's default), two files overlap on that shared state and a gate fails on an interleaving rather
-// than on a defect (DW-511). Sequential file execution makes each file see only its own runs.
+// bootstrap redeploys and compiles the ExecuteMCPv2 classes on ONE shared IRIS instance whenever the
+// deployed version differs from the shipped one. Run in parallel (vitest's default), one gate's version
+// check or legs can overlap another gate's redeploy, and the gate fails on that interleaving rather than on
+// a defect. Sequential file execution lets each file's bootstrap finish before the next file starts.
 const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };

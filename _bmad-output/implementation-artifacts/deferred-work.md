@@ -2939,6 +2939,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: doc-edit.ts:336 sets current=joinLines(lines) and textToLines drops one trailing line break, so the lines ["}",""] give "}\n", which parses as ["}"]: a retry with current is STALE_CONTENT again; an expected built by joining a ranged iris_doc_get slice with \n fails the same way (blind-hunter, verified).
 - 2026-10-15T21:53:24Z status=decision-pending owner=burndown by=cr note=contract call: recommend current=joinLines(lines)+newline (round-trips every range) + a description line; 38.6 prompt depends on it
 - 2026-10-15T22:04:03Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=lead note=decided=orchestrator(Lead-away) decision 11: append a trailing line break to mismatches[].current plus one description line; the 38.6 edit prompt depends on the round trip
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-4: mismatches[].current carries a trailing line break; capstone leg 3 passes current back as expected on a range ending in an empty line (live, armed); description sentence added
 
 ### DW-553: doc-edit.test.ts several-edits fake re-read S2_LINES is a .cls layout IRIS cannot return (no blank line after the class brace or between members)
 - source: spec-38-4-surgical-line-edit-tool.md | severity: low | fix-risk: med | footprint: in-story
@@ -2954,6 +2955,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 38.5 implement review (2026-10-15): iris_sql_query (read-classified) now exists; prompt/skill text predates it
 - 2026-10-16T00:13:57Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=38.6 already updates deploy-and-test-class (AC 38.6.2) and regenerates skills
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-5: running hint, iris_execute_tests description, deploy-and-test-class prompt + regenerated skill name iris_sql_query; pinned by the SDK prompt wire test and doc-claims
 
 ### DW-556: Three live gates (doc-edit-live-gate, doc-put-storage-guard-live-gate, and before this review the 38.5 gates) end with a cleanup it() that removes the shared fixtures, so they pass only while that test runs last
 - source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
@@ -2974,6 +2976,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 38.5 re-review 2026-10-16: sql-safety-live-gate and the other armed gates read live results without checking the deployed version; today they match (d352a6a32158); Rule #59 path dimension
 - 2026-10-16T13:54:17Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=the 38.6 capstone (the epic gate) asserts deployed == shipped BOOTSTRAP_VERSION before its live legs; reuse for the other gates if cheap
+- 2026-10-16T15:53:37Z status=resolved-by:38-6-editing-and-sql-safety-docs-prompt-and-capstone by=adjudication note=AC-6: assertDeployedBootstrapVersion in the capstone + 38.4/38.5 wire gates, red-proven (decision 16, deployed restored to d352a6a32158); residual: non-bootstrapping dev gates still test whatever is deployed (accepted at the spec gate)
 
 ### DW-560: Existing-tool annotation divergences (spine AD-4 Known divergences): iris_sql_execute, iris_execute_command and iris_doc_put declare destructiveHint:false although each can delete or overwrite existing state
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2984,3 +2987,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: the 38.6 spec named only the env/session/Atelier helpers for promotion; three copies now
 - 2026-10-16T15:13:57Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=reopen_if=a fourth live gate (e.g. the Epic 39 or 40 capstone) copies the fixture helpers -- then promote them into process-gate-helpers.ts in that story
+
+### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: vitest.config.ts sets no fileParallelism (untouched since Epic 25); only prepublish-gate.mjs runs --no-file-parallelism; bootstrap.ts has no lock; QA's serial full run was green (428)
+- 2026-10-16T15:51:29Z status=escalated owner=burndown by=cr note=decide: fileParallelism false (or a serial group for the gate files) in iris-mcp-all vitest.config.ts; 1st stale run flakes
+
+### DW-563: iris_doc_edit description says STALE_CONTENT mismatches[].current can be passed back as expected unchanged without the README/prompt condition that the change must still apply to that text
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: doc-edit.ts description sentence is dictated verbatim by the 38.6 intent; the frozen refusal text already said Retry with the current text below as expected
+- 2026-10-16T15:51:30Z status=by-design owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=spec-bound: intent fixes the sentence; condition carried by the edit-and-test-class prompt step 3 and the root README
+
+### DW-564: Generated skills/*/SKILL.md frontmatter carries the gen-skills DO-NOT-EDIT banner naming repository paths (scripts/gen-skills.mjs, packages/iris-dev-mcp/src/prompts/*.ts), which AD-28 keeps out of agent content
+- source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: all 12 generated skills, from scripts/gen-skills.mjs (pre-existing); YAML comment in frontmatter; AD-28's mechanical check lands in Epic 41
+- 2026-10-16T15:51:30Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41's AD-28 internal-reference check scans skills/ frontmatter, or a client shows SKILL.md frontmatter comments to the model
+- 2026-10-16T15:51:48Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41 AD-28 internal-reference check flags the skills/ frontmatter banner

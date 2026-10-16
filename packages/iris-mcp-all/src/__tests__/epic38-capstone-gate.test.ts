@@ -2,9 +2,10 @@
  * Epic 38 capstone gate: the agent-editing and SQL-safety surfaces of Epic 38, driven together on the
  * REAL wire, in the default suite (project rule #21), each leg naming the path it guards (rule #59).
  *
- * Every leg spawns the BUILT iris-dev-mcp dist as a child process, connects the real MCP SDK
- * `Client` over stdio and calls the tools against the live IRIS, with `server: "default"` and an
- * explicit namespace. The independent oracle is the raw Atelier API (`GET /doc` and `action/query`),
+ * Every leg drives the BUILT iris-dev-mcp dist, spawned as a child process, through the real MCP SDK
+ * `Client` over stdio, and calls the tools against the live IRIS with `server: "default"` and an
+ * explicit namespace. Legs 1-4 use the admin session that `beforeAll` opens; legs 5 and 6 each start
+ * their own server with the environment they test. The independent oracle is the raw Atelier API (`GET /doc` and `action/query`),
  * never the tools under test.
  *
  * Before any leg, `beforeAll` asserts that the deployed `ExecuteMCPv2` classes carry the
