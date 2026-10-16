@@ -2315,6 +2315,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: A/B git stash isolation proves the failures exist at the pre-story baseline; consistent with env-var/port contention among concurrently spawned real-server test processes.
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=A/B git stash isolation proves the failures exist at the pre-story baseline
 - 2026-10-15T11:47:33Z status=wontfix-accepted by=x0 note=reopen_if=a clean-tree pnpm turbo run build test lint fails twice in a row locally, or the Story 42.3 CI gates job fails on a rerun of an unchanged commit; Env/port contention among concurrently spawned real-server tests; A/B stash shows it pre-existing; not reproducible read-only here
+- 2026-10-16T17:57:29Z occurrence=38-7-epic-38-burn-down
+- 2026-10-16T17:57:29Z note=38.7: the repo-root turbo run test still runs the dev and all vitest suites concurrently, so their live gates can overlap on the shared instance even though @iris-mcp/all is now serial; same reopen_if
 
 ### DW-445: [35-1-CR-1] A config item whose host ClassName no longer resolves to a business type is UNREACHABLE through set and remove
 - source: legacy:35.1 | severity: high | fix-risk: med | footprint: out-of-footprint
@@ -3017,3 +3019,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: all 12 generated skills, from scripts/gen-skills.mjs (pre-existing); YAML comment in frontmatter; AD-28's mechanical check lands in Epic 41
 - 2026-10-16T15:51:30Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41's AD-28 internal-reference check scans skills/ frontmatter, or a client shows SKILL.md frontmatter comments to the model
 - 2026-10-16T15:51:48Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=cr note=reopen_if=Epic 41 AD-28 internal-reference check flags the skills/ frontmatter banner
+
+### DW-565: An unknown governance key inside a layer (a typo such as {"global":{"iris_doc_putt":false}}) is accepted silently and does nothing: the DW-554 fail-open class one level down
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 38.7 plan probe 2026-10-16; one governance document is shared by all five servers, so each server alone cannot tell another server's key from a typo -- a fix needs the cross-server key universe (iris-mcp-governance universe / deriveKeysForTool)
+- 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=overflow from the Epic 38 burn-down story: for the Epic 39 X.0 gate (warn on a key matching no tool in the suite universe)
+
+### DW-566: IRIS_GOVERNANCE / IRIS_GOVERNANCE_FILE JSON-parse errors embed V8's message, which can quote a snippet of the input, although governance.ts:106 and :406 say contents are never echoed
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 38.7 plan read 2026-10-16
+- 2026-10-16T17:57:29Z status=wontfix-accepted owner=38-7-epic-38-burn-down by=harvest note=reopen_if=a governance document carries a secret, or a parse-error message is reported to echo sensitive content -- then drop V8's message and report only the position
+
+### DW-567: iris_doc_list type description offers 'cls' as an example for category CLS, but Atelier answers GET docnames/CLS/cls with HTTP 400 (CLS accepts only *)
+- source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 38.7 plan probe 2026-10-16, IRIS 2026.2 Atelier v8
+- 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=two-way-door doc fix (<=5 lines + a pin); overflow for the Epic 39 X.0 gate
