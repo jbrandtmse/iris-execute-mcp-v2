@@ -2932,6 +2932,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: .claude/rules/project-rules.md #53 text vs presets.test.ts pin (dev core 14 under L-4); agent-context file, rules are edited at retrospectives
 - 2026-10-15T21:18:38Z status=decision-pending owner=burndown by=harvest note=human=Project Lead rewords Rule #53 to 'guideline' (or keeps it, citing the clarification)
 - 2026-10-15T21:53:24Z occurrence=38-4-surgical-line-edit-tool
+- 2026-10-16T11:37:48Z status=resolved-by:38-4-surgical-line-edit-tool by=lead note=Project Lead directed 2026-10-16: Rule #53 reworded in .claude/rules/project-rules.md -- ~13 runtime tools/server is a guideline, not a cap; everyday-loop exception recorded with the dev core 15 example
 
 ### DW-552: iris_doc_edit STALE_CONTENT mismatches[].current does not round-trip as expected when the addressed range ends in an empty line
 - source: spec-38-4-surgical-line-edit-tool.md | severity: med | fix-risk: low | footprint: in-story

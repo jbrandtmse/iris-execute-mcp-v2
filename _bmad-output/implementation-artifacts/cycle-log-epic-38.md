@@ -115,3 +115,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T00:13:57Z	Story 38.5	adr_verifications_complete	tool=none acs= result=none_required mutations=none model=claude-opus-5-5
 2026-10-16T00:13:57Z	Epic 38	ledger_routed_planned	story=38-6-editing-and-sql-safety-docs-prompt-and-capstone entries=1 excess=0 by=harvest dw=DW-555
 2026-10-16T00:13:58Z	Epic 38	run_paused	reason=user_quota_account_switch no_stage_in_flight=true resume_at=Story_38.5_qa_stage(next:qa->code-review->adjudicate->smoke->fresh->close) then_38.6 epic_context_stale=true(epics.md_38.6_bullets)_rewarm_before_38.6_plan open_stage_spawned=none
+2026-10-16T11:37:48Z	Epic 38	run_resumed	reason=account_switch_complete lead_model=claude-opus-5-5 head=7956c47 origin_match=true tree=rule53_edit_only resume_at=Story_38.5_qa
+2026-10-16T11:37:48Z	Epic 38	rule_file_updated	file=.claude/rules/project-rules.md rule=53 change=core_13_is_guideline_with_everyday_loop_exception directed_by=user ledger=DW-551_resolved
