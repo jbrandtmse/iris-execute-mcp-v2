@@ -5195,6 +5195,7 @@ The epic's closing story. It enriches the docs; each earlier story already shipp
   - `BOOTSTRAP_VERSION` from → to;
   - `check-epics-sync.mjs` OK.
 - DW-552: a `STALE_CONTENT` retry that passes `mismatches[].current` back as `expected` fails again when the range ends in an empty line. `current` is the lines joined with `\n`, and parsing drops one trailing line break. Fix: `current` gets a trailing line break, and the `iris_doc_edit` description gains one line on it. This story's edit prompt depends on the round trip. (ledger; routed by orchestrator decision #11, 2026-10-15)
+- DW-555: the `iris_execute_tests` hints, the `deploy-and-test-class` prompt and its generated skill still send models to `iris_sql_execute` for read-only queries, which the `read-only` preset blocks. Point them at `iris_sql_query`. (ledger; routed by harvest 2026-10-15)
 
 ## Epic 39: Interop Message Forensics (added 2026-10-14)
 

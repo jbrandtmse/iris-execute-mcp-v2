@@ -1,5 +1,11 @@
 # Orchestrator decisions — wave 6 (`/epic-cycle 38-40`, unattended)
 
+> **Run paused 2026-10-15 (Lead request: quota and account switch). No stage was in flight.**
+> - Done and pushed on `epic38`: Stories 38.0 to 38.4.
+> - 38.5 is implemented (`06b1b20`) and sits at `review`. Its QA, code review, smoke and fresh check have not run.
+> - To resume: re-invoke `/epic-cycle 38-40`. Resume mode picks up at Story 38.5's QA stage, then runs 38.6, the Epic 38 burn-down gate (DW-554, a HIGH governance fail-open, must be fixed there), the decision sheet, and the merge to the wave-6 feature branch. Epics 39 and 40 follow.
+> - `epics.md` changed after the last epic-context compile, so the context is re-warmed before the 38.6 plan.
+
 The Project Lead ran this range unattended (2026-10-15) and delegated every escalated question to the orchestrator. Every decision the orchestrator made in the Lead's place is listed here, in order, with the reason and how to reverse it. Retrospectives were skipped and merges into the feature branch were pre-authorized by the Lead's invocation.
 
 | # | When (UTC) | Epic / story | Question | Decision | Why | To reverse |

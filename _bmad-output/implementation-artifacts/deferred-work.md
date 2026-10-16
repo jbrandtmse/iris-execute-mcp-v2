@@ -2948,3 +2948,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: lead smoke Story 38.4 (2026-10-15) | severity: high | fix-risk: low | footprint: in-epic
 - evidence: built dev dist 2026-10-15: IRIS_GOVERNANCE={"iris_doc_put":false} -> iris_server_profiles iris_doc_put:true configSource default, stderr no WARN; documented shape is {"global":{...}} or {"<profile>":{...}}; a top-level key that is not a known profile, or a non-object value, should fail fast like other malformed IRIS_GOVERNANCE (M1/F-3)
 - 2026-10-15T22:05:32Z status=routed owner=burndown by=lead note=smoke-found (pre-existing, Epic 32 parser); Epic 38 burn-down story must fix: reject a non-object layer value and an unknown top-level profile name at startup, with the documented shape in the message
+
+### DW-555: iris_execute_tests hints, the deploy-and-test-class prompt and its generated skill still point models at iris_sql_execute for read-only queries, which the read-only preset blocks; they should name iris_sql_query
+- source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 38.5 implement review (2026-10-15): iris_sql_query (read-classified) now exists; prompt/skill text predates it
+- 2026-10-16T00:13:57Z status=routed owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=38.6 already updates deploy-and-test-class (AC 38.6.2) and regenerates skills
