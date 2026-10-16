@@ -6,6 +6,11 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Changed
 
+- **The launcher clears `MCP_TRANSPORT` in every server it starts** (Story 38.7, DW-539): `MCP_TRANSPORT` joins the
+  launcher-owned variables, so a definition's `env` carries `MCP_TRANSPORT: null`, which removes the variable from the
+  extension host's own environment. The launcher spawns only stdio servers, and a server refuses any other configured
+  transport at startup, so an `MCP_TRANSPORT=http` exported in the shell that started the editor used to stop every
+  spawned server before it answered `initialize`.
 - **`irisMcpLauncher.namespace` now defaults to `USER`** (Story 38.0, DW-469): the extension's default
   `IRIS_NAMESPACE` moved from `HSCUSTOM` to `USER`, following `@iris-mcp/shared`'s `loadConfig()` default and
   every documented table (`USER` exists on every IRIS instance). Users who relied on the old default (for

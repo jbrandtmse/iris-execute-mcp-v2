@@ -199,7 +199,7 @@ async function runSql(args: SqlArgs, ctx: ToolContext, tool: "iris_sql_execute" 
         return refusalResult(
           REFUSAL_CODES.SQL_ROWS_AFFECTED_CAP,
           `Statement was rolled back in namespace '${ns}': the ${typeName} affected ${count}, more than the cap of ${cap} ` +
-            `(from ${capName}). Its row changes were undone. ${remedy}`,
+            `(from ${capName}). Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. ${remedy}`,
           { namespace: ns, statementType: typeName, rowsAffected: affected, maxRowsAffected: cap, capSource },
         );
       }

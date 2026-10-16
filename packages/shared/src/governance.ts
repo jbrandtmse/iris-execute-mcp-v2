@@ -298,8 +298,9 @@ function validateLayer(
  *
  * Shape: `{ "global": { "<key>": true|false }, "profiles": { "<name>": { ... } } }`.
  * Both `global` and `profiles` are optional. Absent/empty `IRIS_GOVERNANCE` ⇒
- * `{}`. Malformed JSON, a non-object root, or a non-boolean value fails fast
- * with an error naming `IRIS_GOVERNANCE`.
+ * `{}`. Malformed JSON, a non-object root, a non-boolean value, or a governance-shaped
+ * top-level key other than `global` and `profiles` fails fast with an error naming
+ * `IRIS_GOVERNANCE`.
  *
  * @param env - Environment map (defaults to `process.env`).
  * @returns The parsed config (`{}` when `IRIS_GOVERNANCE` is unset/empty).
@@ -324,6 +325,21 @@ export function parseGovernanceConfig(
   return parseGovernanceRoot(parsed, governanceError);
 }
 
+/** The documented governance document shape, as the unrecognized-key error names it. */
+const GOVERNANCE_SHAPE = '{"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}';
+
+/**
+ * Whether a top-level key beside `global` and `profiles` looks like governance that
+ * would be silently ignored: a name starting with `iris_` (any case), or a boolean or
+ * object value. Scalar metadata (a string, number or null, such as `comment` or
+ * `version`) is not governance-shaped and stays accepted (Story 32.4).
+ */
+function looksLikeGovernance(key: string, value: unknown): boolean {
+  if (/^iris_/i.test(key)) return true;
+  if (typeof value === "boolean") return true;
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
  * Validate an already-parsed JSON value as a {@link GovernanceConfig} root
  * object — the SHARED shape validation consumed by both the env channel
@@ -331,7 +347,9 @@ export function parseGovernanceConfig(
  * loadGovernanceFile}), so the two can never drift (AC 32.0.1: the file is
  * parsed by the SAME validation, reserved-key rejection included). `fail`
  * builds the thrown error, so each channel's messages name ITS OWN variable
- * (and, for the file, the path).
+ * (and, for the file, the path). A top-level key other than `global` and
+ * `profiles` fails when it looks like governance (see {@link looksLikeGovernance});
+ * the key is named, its value never echoed.
  */
 function parseGovernanceRoot(
   parsed: unknown,
@@ -345,6 +363,15 @@ function parseGovernanceRoot(
 
   const root = parsed as Record<string, unknown>;
   const config: GovernanceConfig = {};
+
+  for (const [key, value] of Object.entries(root)) {
+    if (key === "global" || key === "profiles") continue;
+    if (looksLikeGovernance(key, value)) {
+      throw fail(
+        `"${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape ${GOVERNANCE_SHAPE}: put the key under "global" to apply it to every profile, or under "profiles" for one profile.`,
+      );
+    }
+  }
 
   if (root.global !== undefined) {
     config.global = validateLayer('"global"', root.global, fail);
@@ -380,6 +407,28 @@ function parseGovernanceRoot(
   }
 
   return config;
+}
+
+/**
+ * The warnings for profile names under `profiles` that no configured profile carries,
+ * so their overrides apply to no connection (Story 38.7, DW-554). An unknown name only
+ * warns, never fails startup: one governance file may serve clients with different
+ * `IRIS_PROFILES`, and Server Manager `auto` can drop a profile whose credentials do
+ * not resolve. `source` names the channel: `IRIS_GOVERNANCE`, or
+ * `IRIS_GOVERNANCE_FILE (path: <path>)`.
+ */
+export function unknownProfileWarnings(
+  config: GovernanceConfig | undefined,
+  source: string,
+  configuredProfiles: readonly string[],
+): string[] {
+  if (config?.profiles === undefined) return [];
+  return Object.keys(config.profiles)
+    .filter((name) => !configuredProfiles.includes(name))
+    .map(
+      (name) =>
+        `${source}: profile "${name}" under "profiles" is not a configured profile, so its overrides apply to no connection. Check the name against the configured profiles: ${configuredProfiles.join(", ")}.`,
+    );
 }
 
 /**

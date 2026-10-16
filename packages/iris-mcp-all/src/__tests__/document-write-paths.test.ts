@@ -87,9 +87,9 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
   {
     file: "packages/iris-dev-mcp/src/tools/load.ts",
     pattern: "put",
-    count: 1,
+    count: 2,
     verdict: "excluded",
-    reason: "iris_doc_load uploads files with ignoreConflict on by default and the file is the source of truth for the class text",
+    reason: "iris_doc_load uploads files with ignoreConflict on by default and the file is the source of truth for the class text; with ignoreConflict false the second PUT is the version-checked repeat of the first (Story 38.7, DW-549), which changes the version handling and not the Storage handling",
     ledger: "DW-544",
   },
   {

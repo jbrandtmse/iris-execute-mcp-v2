@@ -2,7 +2,8 @@
 title: 'Story 38.7: Epic 38 Burn-Down'
 type: 'bugfix'
 created: '2026-10-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fe58430779a92377ce4b4970b049c2a8d70177fe'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -32,6 +33,12 @@ deferred:
       Plan-time read-only probe 2026-10-16, IRIS 2026.2 build 221U, Atelier v8, HSCUSTOM: GET /api/atelier/v8/HSCUSTOM/docnames/CLS/cls -> 400; %Api.Atelier.v1:GetDocNames accepts type `*` only for CLS.
     location: packages/iris-dev-mcp/src/tools/doc.ts
     severity: low
+  - summary: >-
+      The repo-root `turbo run test` runs the `@iris-mcp/dev` and `@iris-mcp/all` vitest suites concurrently, so their live gates can still overlap on the one shared IRIS instance (fixtures, bootstrap redeploy) even though `@iris-mcp/all` now runs its own files serially.
+    evidence: |-
+      Review pass 2026-10-16 (edge-case layer; the intent-alignment layer noted the same scope): turbo.json `test` depends only on `build`, and the dev live gates run whenever IRIS is reachable. This is the existing `35-1-DEV-1` flake class, not caused by Story 38.7. To settle: run `pnpm turbo run test` with IRIS reachable and look for fixture collisions, or serialize the live-gate packages (turbo `--concurrency=1` for `test`, or a shared lock).
+    location: turbo.json
+    severity: medium (unverified)
 ---
 
 <intent-contract>
@@ -353,6 +360,41 @@ deferred:
 
 ## Review Triage Log
 
+### 2026-10-16 — Review pass
+- verdicts: 27 findings — high 0, medium 2, low 18, false 6, maybe-false 1
+- findings:
+  - Blind Hunter (10)
+    - `[low]` `reject` An uncompiled production class that extends a custom base production is refused with "does not extend Ens.Production" — the matrix fixes the uncompiled rule as an exact comma piece of the direct `Super` and fixes the refusal text; the refusal is a safe failure that deletes nothing, an uncompiled indirect production is not a case the tool is used for, and resolving ancestry would be a new rule. reopen_if: a user reports a saved-but-uncompiled indirect production that `iris_production_manage delete` will not remove.
+    - `[low]` `reject` `ignoreConflict:false` now overwrites any existing document, and the docs read as protective — the parameter text, the README row and the CHANGELOG Fixed placement are the spec's own prescribed wording (AC-6, decision #7 precedent), and the text states the actual guarantee ("unless the document changes on the server while it is being saved"); the fix would edit the spec.
+    - `[low]` `reject` The serial-suite guard skips on a one-CPU host — the spec requires exactly this skip ("skips with a reason when `os.availableParallelism() < 2`"); the fix would edit the spec.
+    - `[low]` `patch` The dev README `iris_doc_list` row says a refused `modifiedSince` "changes and returns nothing" — reworded to "is refused and lists nothing" in `packages/iris-dev-mcp/README.md:149`; no test pinned the old words.
+    - `[low]` `patch` The `iris_doc_get` soft-error comment says "and no content" while the check is `atelierDocStatusError` alone — the check is the spec's (the helper's own contract is a non-empty string `result.status`), so the comment was corrected in `doc.ts`; the missing README/`tool_support.md` mention of the new error is not asked for by the spec (the CHANGELOG records it).
+    - `[low]` `patch` `export.ts` keeps a `/modified` comment, `filtersApplied.modifiedSince` and an overclaiming test title — the stale comment is corrected; `filtersApplied.modifiedSince` stays for `""` only so that input is byte-identical (the spec's own byte-identical row); the test title describes the request path, which the test does pin.
+    - `[low]` `reject` The governance error advice ("put the key under global or profiles") does not fit a layer-name typo — the sentence is the matrix's verbatim text, pinned in the spec; for a top-level profile the advice is right (move it under `profiles`), and for `globals` the next error names the real problem; the fix would edit the spec.
+    - `[low]` `reject` `looksLikeGovernance` lets `preset`, `disable` or array-valued keys through without a warning — decision #19 (D1) chose "`iris_` prefix, or boolean or object value; scalar metadata stays valid" and declined "reject every unknown key"; an extra server warning for ignored scalar keys is new behavior beyond the spec. reopen_if: an operator loses policy to an ignored non-governance-shaped key.
+    - `[medium]` `patch` `TestProductionManageWiring` pins source text, so a handler that computes the refusal and ignores it still passes, and the live seam's argument order is unpinned — real: two mutations (`If 0`, swapped `GetProductionStatus` arguments) were green. Added source assertions to both tests (gate line exactly once and ordered before both deletes; the live read's argument order and the state rule's arguments), then mutation-verified both (red), reverted byte-identical, reloaded. A refusal for a Running production through the route stays the named residual (decision #17). Grouped with the verification-gap row on the same root.
+    - `[false]` `reject` The deferred-work ledger is not part of the change set — the spec forbids the implementer to write the ledger; the lead harvests the `deferred:` list (Rule 15).
+  - Edge Case Hunter (7)
+    - `[low]` `reject` An array of `iris_` names or a case-variant scalar layer key (`Global`) is accepted and ignored — same root as the `looksLikeGovernance` row above (decision #19).
+    - `[low]` `reject` An uncompiled indirect production is refused — same root as the first Blind row.
+    - `[low]` `reject` A compiled production whose `%Extends` call throws is refused as a non-production — the spec says "false on a throw" (the Loc.Scanner note); the refusal deletes nothing and `iris_doc_delete` remains.
+    - `[low]` `reject` A deployed class with no definition and a same-named config row reaches the orphan branch and the row is removed — that branch and its effect pre-date this story and are unchanged; a deployed non-production class with a same-named production row is not a state the tool meets. Closed `wontfix-theoretical`.
+    - `[maybe-false]` `defer` `turbo run test` runs the dev and all suites concurrently, so live gates can still overlap on the shared instance — not caused by this story (the existing `35-1-DEV-1` flake class, `turbo.json` `test` depends only on `build`); would be medium if true; settled by running `pnpm turbo run test` with IRIS reachable and watching for fixture collisions. Recorded in the frontmatter `deferred:` list.
+    - `[low]` `reject` The probe overlap window is a fixed 2 s, so a worker that starts more than 2 s late hides an overlap — real only under heavy load, and the mutation was observed red; the robust fix is a different probe design. reopen_if: the guard stays green with `fileParallelism: false` removed on a loaded host.
+    - `[low]` `reject` An all-conflict `iris_doc_load` is `isError` with no top-level code — the matrix fixes the per-file `failures[].code` shape and no top-level code for any other `iris_doc_load` failure; the fix would edit the spec.
+  - Verification Gap (7)
+    - `[medium]` `patch` The live branch of the seam and the handler's use of its result are unverified — same root as the Blind `[medium]` row; patched there.
+    - `[low]` `patch` `story-38-7-doc-claims` reads the changeset without a presence guard and takes the launcher CHANGELOG's top section — `changeset version` deletes the file, so the test would go red at release; fixed with the `existsSync` and `it.skipIf` pattern of the 38.0 to 38.2 doc-claims files and by selecting the launcher section by its `## [0.1.0]` heading.
+    - `[low]` `reject` The DW-562 guard detects overlap only inside a fixed 2 s window — same root as the Edge probe row.
+    - `[low]` `patch` `export.ts:143` still names `/modified` — corrected (same root as the Blind `export.ts` row).
+    - `[low]` `reject` The live no-range case asserts the full English status text — the text is a live capture (Rule #36) from this instance; the sibling case's `toContain` is looser by choice. reopen_if: the gate is run on an instance with another locale.
+    - `[false]` `reject` The two probe test files cannot fail when unarmed — by design: they are inert in the default suite and the guard's child run arms them, with the guard going red if a file is missing.
+    - `[false]` `reject` AC-1's mutation covers only under-rejection — the AC carries a mutation line (the rule asks one per AC), and the valid-shape pins are existing tests that go red if the predicate rejected a valid shape.
+  - Intent Alignment (3)
+    - `[false]` `reject` Several matrix rows are proven at unit, in-process `start()` or fake level rather than through a built process (DW-554 warning, DW-533 TS side, DW-539 merge, DW-542, DW-549 conflict, DW-528, DW-530) — each is the spec's own test plan, and the built-process, real-HTTP and live cases the spec requires (process-gate J and K, the IRIS route tests, the spawn case, the live no-range and live load cases) exist and ran.
+    - `[false]` `reject` DW-531 is pinned by a seam plus definition-order wiring and DW-562 covers only the `@iris-mcp/all` config — both are the spec's named scope (I3, I4, AC-3 residual); the turbo-level overlap is the deferred row above.
+    - `[false]` `reject` Surfaces named only indirectly (prose pin tests, changeset bump levels, the decision numbers and DW-529 in the CHANGELOG) — all are spec-listed tasks.
+
 ## Design Notes
 
 **Orchestrator decision #19: DECIDED at the spec gate, 2026-10-16, as recommended (fail on an `iris_`-prefixed key or a boolean- or object-valued key; string and number metadata stay valid; spine AD-8 updated). The planning text follows.** (D1, DW-554 scope): Which unknown top-level governance keys should fail startup?
@@ -502,9 +544,73 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-11 | `fileParallelism: false` removed | the DW-562 guard (overlap observed) |
 | AC-12 | the CHANGELOG `### Changed` DW-554 line removed; the changeset bump changed | `story-38-7-doc-claims` |
 
+### Implementation record (implement stage, 2026-10-16)
+
+All commands ran from `/Users/jbrandt/git/iris-execute-mcp-v2` in the foreground; every IRIS call and armed gate named `localhost:52773`, `HSCUSTOM`, `_SYSTEM`/`SYS`, `IRIS_HTTPS=false` (MCP calls `server:"default"`). DW-562 (serialization) landed before the first bootstrap regeneration. No production was started.
+
+**Baselines, before any change.**
+- `LAUNCHER` (4 files): 132 passed, 0 red (`selectServers` 58, `serverDefinitionProvider` 61, `env` 12, `localSpawnIntegration` 1). No DW-532 red in these four files on this run.
+- `ENV pnpm --filter @iris-mcp/all test` (parallel): 40 files, 433 tests, 13.45 s (14 s wall).
+- DW-556 order: `--sequence.shuffle --sequence.seed=1..10` on `doc-edit-live-gate` (10 of 10 green, 10 tests each) and `doc-put-storage-guard-live-gate` (10 of 10 green, 115 tests each). No seed turned red, so the AC-10 evidence is the `afterAll` mutation and the shuffle seed used is 1.
+
+**After the change.**
+- `@iris-mcp/all` with `ENV`, now serial: 43 files, 453 tests, 48.01 s (was 40 files, 433 tests, 13.45 s parallel). The delta is `serial-probe-a`, `serial-probe-b` and `story-38-7-doc-claims` (+3 files) and +20 tests (probes 2, doc-claims 16, the guard 1, process-gate case K 1).
+- Per package, `build`, `lint`, `type-check` and `test`: shared 73 files / 1629 tests; dev 57 / 1402; interop 22 / 345; admin 35 / 498; ops 20 / 350; data 9 / 165; client-config 21 / 514. Lint has 0 errors; the one warning (an unused `eslint-disable` in `packages/shared/src/cli/governance.ts`) is in code this story did not touch.
+- Launcher: the four `LAUNCHER` files 133 passed (the new spawn case included). The full launcher suite has 5 failed tests and 2 files that cannot load (`constants.test.ts`, `credentials.test.ts`: `@intersystems-community/intersystems-servermanager` is not installed here), in `clientsEngine`, `governanceEngine` and `clientsActivationFlow`, none in a file this story touched (the DW-532 class). `tsc --noEmit` there prints 11 lines about the missing `vscode` module and typings, none in a touched file.
+- IRIS `%UnitTest`: `InteropHostGuardTest` total 11 = 11 `Test*` (6 existing + 5 new), all passed; `InteropProductionDeleteTest` total 7 = 7 (4 + 3), all passed.
+- Armed live gates (`IRIS_REQUIRE_LIVE=1`, none skipped): `doc-get-range-live-gate` 21; `doc-put-bom-live-gate` 7; `doc-edit-live-gate` 9 (file order and seed 1); `doc-put-storage-guard-live-gate` 114 (file order and seed 1); `sql-safety-live-gate` 90; `story-38-5-qa-sql-wire-gate` 28; `story-38-4-qa-doc-edit-wire-gate` 10; `epic38-capstone-gate` 6; `governance-file-process-gate` 10.
+- `BOOTSTRAP_VERSION` `d352a6a32158` to `089f8f0a62b2` for the story, and for the epic `2159ec9e6f69` to `089f8f0a62b2` (intermediate values `39d44573433f` and `58b24ae312e8` during the work). `pnpm gen:bootstrap` re-run is idempotent (identical file hash). Read back after the first armed start: `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` gave `089f8f0a62b2`.
+- `pnpm gen:governance-baseline:check` exit 0 (141 frozen keys, 206 live, 65 post-foundation); `governance-baseline.ts`, `baseline-classifications.ts` and `ipm/module.xml` are unchanged since `3a1566c`; under `src/` only `Interop.cls`, `InteropHostGuardTest.cls` and `InteropProductionDeleteTest.cls` changed; `check-epics-sync.mjs` prints `OK: no genuine drift`; every payload row of the README equals the `pnpm measure:tools-payload` output (dev 84,427 / 43,611 / 84,427 bytes, interop 40,496 / 21,554 / 40,496, the others unchanged).
+- Leftover scan after the last run: `iris_doc_list` (`generated:true`) and `iris_global_list` filtered on `Story38` are empty, and `SELECT COUNT(*) FROM Ens_Config.Production WHERE Name %STARTSWITH 'ExecuteMCPv2.Temp.Story38'` is 0.
+
+**Mutation lines (Rule 19; each applied, observed red, reverted to a byte-identical file, dist rebuilt where it was touched).**
+- mutation: AC-1, `if (looksLikeGovernance(key, value))` forced false in `parseGovernanceRoot`, shared dist rebuilt -> red: 23 shared tests (`governance-edge`, `governance-file`, `governance-cli`, `governance-enforcement`) and process-gate cases J and K (the built server exited 0). Path: the parser through the env, file and CLI channels and the built dev server process.
+- mutation: AC-1, the unknown-profile `logger.warn(warning)` replaced by `void warning` -> red: the two `start()` warning tests in `governance-enforcement`. Path: a real `McpServerBase.start()`.
+- mutation: AC-2, `If '..IsProductionClass(tName)` replaced by `If 0` and the class reloaded on HSCUSTOM -> red: `TestDeleteCompiledNonProductionClassRefused` and `TestDeleteNonProductionClassWithSameNamedRowRefused` (real HTTP answered `{"action":"deleted"...}` and the class was gone).
+- mutation: AC-3, `DeleteBlockedByState` called with `tState` and `tCurrentName` swapped in the seam -> red: `TestDeleteStateRefusalSeamInjected` (6 assertions). Separately the seam call moved after the class `%DeleteId` -> red: `TestProductionManageWiring` (2 assertions). Both on the final `Interop.cls` loaded to HSCUSTOM.
+- mutation: AC-4, `MCP_TRANSPORT` removed from `LAUNCHER_OWNED_VARS` -> red: the two whole-env `toEqual` pins, and the spawn case (`MCP error -32000: Connection closed`, the real server exited 1 on the ambient `MCP_TRANSPORT=http`). Path: the real `resolveEnvForLabel` and a real spawned server over stdio.
+- mutation: AC-5, the no-range status check disabled -> red: 2 unit rows in `doc-get-range`, and the live no-range case on `ExecuteMCPv2.Utils` in `doc-get-range-live-gate`.
+- mutation: AC-6, the retry removed (`current` forced undefined) -> red: 3 `load.test.ts` rows, and the live load case (`uploaded` 0, the 409 reported as a failure). Path: the real `IrisHttpClient` against the live Atelier PUT.
+- mutation: AC-7, the `modifiedSince` early return disabled in the three tools -> red: 5 refusal rows (`doc` 1, `packages` 1, `export` 3), each seeing an HTTP call.
+- mutation: AC-8, the PUT status check disabled -> red: the promote soft-status case.
+- mutation: AC-9, the old sentence restored -> red: 4 `sql-safety.test.ts` pins; the armed `story-38-5-qa-sql-wire-gate` (1 of 28, dev dist rebuilt for the run, then rebuilt again after the revert); and the armed `sql-safety-live-gate` (1 of 90).
+- mutation: AC-10, the `afterAll` removal disabled in `doc-put-storage-guard-live-gate` -> red: the file failed in `afterAll` with `no QaStory383 document after the run: expected [ ...(6) ] to deeply equal []` (114 tests passed); the next run's `beforeAll` purged the leftovers and the final scan is empty.
+- mutation: AC-11, `fileParallelism: false` removed from `packages/iris-mcp-all/vitest.config.ts` -> red: `two test files executed at the same time: expected [ 'a.overlap', 'b.overlap' ] to deeply equal []`, from the guard's child run of the two probe files under the package's own config. The first attempt was red for the wrong reason (`options.minThreads and options.maxThreads must not conflict` when only `--maxWorkers` was passed); the child run passes `--minWorkers=1 --maxWorkers=2`, which only the parallel config honors, so the guard does not depend on the CPU count.
+- mutation: AC-12, the CHANGELOG `(DW-554; ...)` line renamed and the changeset `@iris-mcp/interop` bump changed to `minor` -> red: 2 `story-38-7-doc-claims` tests.
+
+**Review pass (2026-10-16) patch evidence.**
+- `TestProductionManageWiring` gained an assertion that the seam's answer gates the refusal (`If tStateRefusal '= ""`, exactly once, after the seam call and before both deletes), and `TestDeleteStateRefusalSeamLive` gained assertions that pin the order of the live read (`GetProductionStatus(.tCurrentName, .tState)`) and of the state rule's arguments. `MethodSource` is the shared reader of a method definition. `Test*` counts are unchanged (11 and 7).
+- mutation: AC-3 (review), `If tStateRefusal '= ""` replaced by `If 0` in `Interop.cls`, class loaded to HSCUSTOM -> red: `TestProductionManageWiring` (2 assertions). Separately the seam's `GetProductionStatus(.tCurrentName, .tState)` swapped to `(.tState, .tCurrentName)` -> red: `TestDeleteStateRefusalSeamLive` (1 assertion). Path: the stored method definitions on the live instance. `Interop.cls` is byte-identical after each revert (sha `d22d4611ab7b2bb143767409e805f1da89b11576`) and was reloaded; `gen:bootstrap` re-run is still idempotent at `089f8f0a62b2`.
+- The residual stands as the spec names it: a refusal for a Running production through the route needs a running production, which decision #17 forbids.
+- After the last patch, the `(once)` lines ran again: per-package build/test/lint/type-check clean (shared 1629, dev 1402, admin 498, interop 345, ops 350, data 165, client-config 514 tests); `@iris-mcp/all` armed and serial 43 files / 453 tests in 48.18 s; `:check` OK (141 frozen / 206 live / 65 post-foundation); `gen:bootstrap` idempotent at `089f8f0a62b2` (shared dist rebuilt clean afterwards); `check-epics-sync` OK; the payload table equals `pnpm measure:tools-payload`; the frozen files are unchanged since `3a1566c`; under `src/` only the three named classes changed; the leftover scans (`Story38`, `QaStory38`, globals, `Ens_Config.Production`) are empty / 0; `Setup_GetBootstrapVersion()` reads `089f8f0a62b2`.
+
+**Spec corrections for the lead (Rule #42).**
+- The `overCap` text has **6** exact pins, not 5 (`sql-safety.test.ts` x4, `sql-safety-live-gate.test.ts` x1, `story-38-5-qa-sql-wire-gate.test.ts` x1), counted mechanically (Rule #51). All six are updated.
+- `IsProductionClass` reads the uncompiled class's `Super` with `$$$defClassKeyGet`, not `%OpenId`: an `%OpenId` of a `%Dictionary.*Definition` matches the write-path scan's `dictionaryOpen` pattern and would have needed a new roster entry for a read, and the SQL variant that was tried first made the uncompiled-Super test take 29 s on its first run (1.3 s with the macro). The `document-write-paths` roster therefore moves only `load.ts` 1 to 2.
+- `filtersApplied.modifiedSince` stays in the `iris_doc_export` manifest only for `modifiedSince: ""` (byte-identical for that input); a non-empty value is refused before the manifest.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-Planned only (halted after planning, as directed). The ledger inbox has 11 entries, all addressed, plus DW-529 folded into AC-7; none is declined. One orchestrator decision is needed (D1, the DW-554 scope), and the plan follows its recommendation. Plan-time interpretations I1 to I6 and the story decision D2 are under Design Notes. Three plan-found items are in the frontmatter `deferred:` list for harvest.
+**Summary.** All 11 ledger entries are fixed at their root (DW-529 folded into DW-528). `BOOTSTRAP_VERSION` moved `d352a6a32158` to `089f8f0a62b2` (epic: `2159ec9e6f69` to `089f8f0a62b2`); `gen:bootstrap` is idempotent there and the version read back from HSCUSTOM is `089f8f0a62b2`. No tool, action, key or preset row changed; `GOVERNANCE_BASELINE` is untouched at `1e62c5ad5bf7`/141. No production was started.
+
+**Files changed.**
+- Governance: `packages/shared/src/governance.ts` (`parseGovernanceRoot` rejects a governance-shaped top-level key; `unknownProfileWarnings`), `server-base.ts` (the unknown-profile warning), `cli/governance.ts` (comments only).
+- Production delete: `src/ExecuteMCPv2/REST/Interop.cls` (`DeleteStateRefusal`, `IsProductionClass`, the handler wiring), `packages/shared/src/bootstrap-classes.ts` (regenerated), `packages/iris-interop-mcp/src/tools/production.ts` (description) and its README; the two IRIS test classes `InteropHostGuardTest.cls` and `InteropProductionDeleteTest.cls`.
+- Dev tools: `doc.ts` (`iris_doc_get` soft error, exported `currentDocument`, `modifiedSinceUnsupported`), `load.ts` (version-checked retry and `DOCUMENT_CONFLICT`), `export.ts` and `packages.ts` (`modifiedSince` refusal), `env-promote.ts` (PUT status), `sql.ts` (cap text), README and `tool_support.md`.
+- Launcher: `extensions/iris-mcp-launcher/src/env.ts` (`MCP_TRANSPORT` owned), README, CHANGELOG, the two whole-env pins and the new spawn case.
+- Gates and docs: `packages/iris-mcp-all/vitest.config.ts` (`fileParallelism: false`), `epic38-gate-guards.test.ts` and the `serial-probe*` files, process-gate cases J and K, `document-write-paths.test.ts`, `story-38-7-doc-claims.test.ts` (new), the two dev live gates (cleanup case removed, nothing-left assertions), `CHANGELOG.md`, root README, `.changeset/story-38-7-epic-38-burn-down.md`.
+
+**Review.** 27 findings from four layers: high 0, medium 2 (one root, patched), low 18, false 6, maybe-false 1. Patches applied (5 entries, none high): the wiring and seam tests gained source assertions, mutation-verified red (two mutations) and reverted byte-identical; the doc-claims changeset and launcher-section guards; and three wording and comment corrections (dev README row, `doc.ts`, `export.ts`). Deferred: 1 (the repo-root `turbo run test` runs the dev and all suites concurrently; medium, unverified), added to the three plan-time items already in `deferred:`. Rejected with recorded reasons: 19 findings (spec-bound text or scope, decision #19, safe failures that delete nothing, theoretical states, and descriptive audit divergences that match the spec's own test plan); each has its row and reopen condition under `## Review Triage Log`.
+
+**Follow-up review recommended: false.** Patched this pass: high 0, medium 1 (one entry), low 4.
+
+**Verification (after the last patch).** Every `(loop)` line was re-run and passed: shared governance (307), dev (367), interop production (51), launcher four files (133), `@iris-mcp/all` doc and guard files (78), process gate (10, none skipped), `InteropHostGuardTest` 11/11 and `InteropProductionDeleteTest` 7/7 (totals equal the `Test*` counts), the five dev live gates armed (21, 7, 9, 114, 90) with the DW-556 shuffle seed 1 for the two touched, and the three `@iris-mcp/all` wire gates (28, 10, 6). The `(once)` lines ran once: per-package build, test, lint and type-check for shared, dev, admin, interop, ops, data and client-config (0 lint errors; one pre-existing warning in `cli/governance.ts`); `@iris-mcp/all` serial and armed 43 files / 453 tests in 48.18 s (the baseline parallel run was 40 files / 433 tests in 13.45 s); `:check` OK; `check-epics-sync` OK; payload table equals the measure; frozen files unchanged; leftover scans empty. The mutation lines for AC-1 to AC-12 and the review patch are under `## Verification`.
+
+**Residual risks.**
+- A refusal for a Running production through the delete route is never exercised live, because decision #17 forbids starting a production; the seam, the gate line and the live read's argument order are pinned from the stored method definitions instead.
+- The DW-562 guard observes overlap inside a 2 s window, so a heavily loaded host could miss it.
+- The full launcher suite has 5 red tests and 2 files that cannot load in this environment (DW-532, Story 42.7), none in a file this story touched.
+- Spec corrections for the lead (Rule #42): the `overCap` text has 6 exact pins, not 5; `IsProductionClass` reads the uncompiled `Super` with `$$$defClassKeyGet` rather than `%OpenId`. Both are recorded in the implementation record under `## Verification`.

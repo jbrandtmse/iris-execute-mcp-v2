@@ -2,6 +2,66 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 38.7: Epic 38 burn-down
+
+No tool, action, key or preset row is added or removed, and no tool, prompt or governance-baseline count moves. Each
+change below that alters an existing behavior is a sanctioned one (orchestrator decisions #17 to #19; see AD-8 and AD-15
+of the architecture spine); every other existing input keeps its result byte for byte.
+
+### Changed
+
+- **A governance key or layer outside `global` and `profiles` now fails startup (DW-554; orchestrator decision #19).** In
+  `IRIS_GOVERNANCE`, or in the file `IRIS_GOVERNANCE_FILE` names, a flat tool key such as `{"iris_doc_put": false}`, a
+  top-level profile such as `{"prod": {...}}` and a misspelled layer such as `"globals": {...}` used to be accepted and
+  silently ignored, so the policy the operator wrote did not apply. The server now exits 1 before any IRIS traffic, with
+  an error that names the variable (and the file path), the key and the documented shape, and never echoes the value. A
+  key is rejected when its name starts with `iris_` (in any letter case) or its value is a boolean or an object. Plain
+  metadata keys with a string, number or null value, such as `comment` and `version`, stay valid and are ignored. The
+  `iris-mcp-governance` commands `set`, `unset` and `validate` fail with the same message and leave the file as it was.
+  A profile name under `profiles` that is not a configured profile does not fail startup: it logs one `[WARN]` per name,
+  and its overrides apply to no connection.
+- **`iris_production_manage` `delete` refuses a class that is not a production (DW-533).** It used to delete any class
+  whose name it was given. It now deletes only a production class (a compiled class that extends `Ens.Production`, or a
+  class saved but not compiled that has `Ens.Production` among the comma-separated pieces of its `Super`), and answers
+  any other class with `Class 'X' is not a production class (it does not extend Ens.Production), so nothing was deleted.
+  Name a production class.` as an error; the class and any same-named `Ens.Config.Production` row stay. The IRIS-side
+  handler `ExecuteMCPv2.REST.Interop` changes, so `BOOTSTRAP_VERSION` moves from `d352a6a32158` to `089f8f0a62b2` and the
+  first server start after the upgrade redeploys the classes.
+- **`iris_doc_get` without a line range returns an error when IRIS answers a soft error (DW-542).** A document IRIS
+  cannot read (for example a name with no document type, such as `ExecuteMCPv2.Utils`) comes back as HTTP 200 with
+  empty content and a `status` text. The tool used to return that as data; it now returns `isError: true` with the text
+  `Document 'X' could not be read in namespace 'N': <status>. Check the document name and namespace, then retry.`, as the
+  ranged read already did. A result with an empty `status` is unchanged.
+- **A non-empty `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list` is refused (DW-528, and
+  DW-529 with it).** IRIS cannot filter documents by modification time: the change list that the old code called works
+  from a database hash and writes journal bookkeeping. The call now returns `isError: true`, no code and no request
+  (`modifiedSince is not supported, so nothing was listed|exported|counted: ...`), with the advice to compare the `ts` of
+  the documents `iris_doc_list` returns. An absent or empty `modifiedSince` is unchanged, and the parameter stays in the
+  schemas. The tool descriptions and READMEs no longer promise the filter.
+- **The VS Code launcher clears `MCP_TRANSPORT` in the servers it starts (DW-539).** It spawns only stdio servers, and a
+  server refuses any other configured transport at startup, so an `MCP_TRANSPORT=http` in the editor's own environment
+  stopped every server it started. The definition environment now carries `MCP_TRANSPORT: null`, which removes it.
+
+### Fixed
+
+- **`iris_doc_load` with `ignoreConflict: false` replaces an existing document (DW-549; the Story 38.3 `iris_doc_put`
+  precedent, orchestrator decision #7).** Atelier answers a put to an existing document that carries no version token with
+  a 409, so every existing file failed. The tool now repeats the save once with `If-None-Match: <ts>` from the 409, so a
+  file whose document already exists is overwritten unless the document changes while it is being saved; then that file
+  fails with `DOCUMENT_CONFLICT` (nothing stored, no third request) and the other files continue. A new document, the
+  default `ignoreConflict: true` and a 409 with no readable document behave as before.
+- **`iris_env_promote` `execute` reads the status of a document write (DW-530).** A target write that IRIS refuses inside
+  an HTTP 200 answer (a non-empty `result.status`) used to count as written and went on to compile. The step now fails
+  with `IRIS reported an error after the write of 'X' to the target: <status>. The document may have been saved on the
+  target; check it with iris_doc_get before running iris_env_promote again.`, and execution halts like it does for a
+  failed write.
+- **The text of a rows-affected cap refusal no longer overclaims (DW-558).** It said `Its row changes were undone.`; it now
+  says `Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP.` The
+  rest of the text and the structured result are unchanged.
+- **Internal:** the production-delete state guard is one tested seam (DW-531); the two dev live gates that ended with a
+  cleanup test case assert that nothing is left in `beforeAll` and `afterAll` instead, and pass in any test order
+  (DW-556); and the `@iris-mcp/all` default suite runs its files one at a time, with a guard that observes it (DW-562).
+
 ## [Pre-release — 2026-10-16] — Story 38.6: Editing and SQL safety docs, prompt and capstone
 
 ### Added

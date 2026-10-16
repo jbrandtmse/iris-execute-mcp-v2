@@ -520,67 +520,51 @@ describe("iris_doc_list", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  // ── modifiedSince mode ──────────────────────────────────────────
+  // modifiedSince is refused (Story 38.7, DW-528)
 
-  it("should call modified endpoint when modifiedSince is provided", async () => {
-    const modifiedDocs = [
-      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
-    ];
-    mockHttp.get.mockResolvedValue(envelope(modifiedDocs));
-
+  it("refuses a non-empty modifiedSince with the unsupported text, no code and no HTTP request", async () => {
     const result = await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
+      { modifiedSince: "2026-04-05T00:00:00Z", namespace: "HSCUSTOM", generated: false, category: "CLS" },
       ctx,
     );
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      `/api/atelier/v7/USER/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(result.structuredContent).toEqual({ items: modifiedDocs });
-    expect(result.isError).toBeUndefined();
+    expect(mockHttp.get).not.toHaveBeenCalled();
+    expect(mockHttp.head).not.toHaveBeenCalled();
+    expect(result).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "modifiedSince is not supported, so nothing was listed: IRIS has no way to list documents changed since a timestamp " +
+            "(its change list works from a database hash). " +
+            "Omit modifiedSince; to find recent changes, list the documents with iris_doc_list and compare each one's ts.",
+        },
+      ],
+      isError: true,
+    });
+    expect(result.structuredContent).toBeUndefined();
   });
 
-  it("should use namespace override with modifiedSince", async () => {
+  it("an empty or absent modifiedSince is the unchanged docnames request", async () => {
     mockHttp.get.mockResolvedValue(envelope([]));
 
-    await docListTool.handler(
-      { modifiedSince: "2026-04-01T00:00:00Z", namespace: "HSCUSTOM" },
-      ctx,
-    );
+    await docListTool.handler({ modifiedSince: "", category: "CLS", generated: true }, ctx);
+    await docListTool.handler({ category: "CLS", generated: true }, ctx);
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      `/api/atelier/v7/HSCUSTOM/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`,
-    );
+    expect(mockHttp.get.mock.calls).toEqual([
+      ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
+      ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
+    ]);
   });
 
-  it("includes generated=0 on /modified/ branch when modifiedSince and generated:false are both set", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
+  it("the modifiedSince description says the parameter is not supported and what to do instead", () => {
+    const shape = docListTool.inputSchema.shape as Record<string, { description?: string }>;
 
-    await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z", generated: false },
-      ctx,
+    expect(shape.modifiedSince?.description).toBe(
+      "Not supported: IRIS cannot filter documents by modification time, so a call that sets it is refused " +
+        "and changes nothing; compare the ts of the documents iris_doc_list returns instead.",
     );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).toContain("generated=0");
-  });
-
-  it("omits generated query param on /modified/ branch when generated is undefined", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
-
-    await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
-      ctx,
-    );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).not.toContain("generated=");
+    expect(docListTool.description).not.toContain("modifiedSince");
   });
 
   it("should pass generated=0 when generated is false", async () => {
@@ -624,21 +608,6 @@ describe("iris_doc_list", () => {
     mockHttp.get.mockResolvedValue(envelope({ content: docs }));
 
     const result = await docListTool.handler({ category: "CLS" }, ctx);
-
-    expect(result.structuredContent).toEqual({ items: docs });
-    expect(result.isError).toBeUndefined();
-  });
-
-  it("should unwrap result.content for /modified (real Atelier shape)", async () => {
-    const docs = [
-      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
-    ];
-    mockHttp.get.mockResolvedValue(envelope({ content: docs }));
-
-    const result = await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
-      ctx,
-    );
 
     expect(result.structuredContent).toEqual({ items: docs });
     expect(result.isError).toBeUndefined();

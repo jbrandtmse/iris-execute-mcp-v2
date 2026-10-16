@@ -108,15 +108,71 @@ describe("parseGovernanceConfig — additional edge cases", () => {
     expect(cfg.global).toBeUndefined();
   });
 
-  it("ignores unrecognised top-level keys (only global/profiles are read)", () => {
+  it("ignores scalar and other plain top-level keys (only global/profiles are read; Story 32.4 metadata stays valid)", () => {
     const cfg = parseGovernanceConfig({
       IRIS_GOVERNANCE: JSON.stringify({
         foo: 1,
-        notAProfile: { x: true },
+        comment: "team policy",
+        version: 1,
+        note: null,
+        tags: ["a", "b"],
         global: { iris_a: true },
       }),
     });
     expect(cfg).toEqual({ global: { iris_a: true } });
+  });
+
+  it("the effective policy of a document carrying scalar metadata equals the one without it (valid shapes unchanged)", () => {
+    const layers = { global: { iris_a: false }, profiles: { prod: { iris_b: true } } };
+    const keys = ["iris_a", "iris_b", "iris_c"];
+    for (const profile of ["default", "prod"]) {
+      const plain = parseGovernanceConfig({ IRIS_GOVERNANCE: JSON.stringify(layers) });
+      const withMetadata = parseGovernanceConfig({
+        IRIS_GOVERNANCE: JSON.stringify({ comment: "team policy", version: 1, ...layers }),
+      });
+      expect(withMetadata).toEqual(plain);
+      expect(getEffectivePolicy(profile, withMetadata, keys, new Map(), new Set(keys))).toEqual(
+        getEffectivePolicy(profile, plain, keys, new Map(), new Set(keys)),
+      );
+    }
+  });
+
+  // Story 38.7, DW-554: a top-level key that LOOKS like governance but is neither `global` nor `profiles`
+  // would be silently ignored, so it fails fast, naming the key and never echoing its value.
+  const SHAPE =
+    '{"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}';
+  const unrecognizedKeyMessage = (key: string): string =>
+    `IRIS_GOVERNANCE is invalid: "${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape ${SHAPE}: put the key under "global" to apply it to every profile, or under "profiles" for one profile.`;
+
+  it.each([
+    ["a flat tool key", { iris_doc_put: false }, "iris_doc_put"],
+    ["a top-level profile layer", { prod: { iris_doc_put: false } }, "prod"],
+    ["an object-valued `globals` typo beside a valid `global`", { globals: { iris_doc_put: false }, global: { iris_a: true } }, "globals"],
+    ["an upper-case flat tool key", { IRIS_DOC_PUT: false }, "IRIS_DOC_PUT"],
+    ["an iris_-prefixed key with a string value", { iris_doc_put: "false" }, "iris_doc_put"],
+    ["a plain key with a boolean value", { strict: true }, "strict"],
+    ["a plain key with an object value", { notAProfile: { x: true } }, "notAProfile"],
+  ])("rejects %s with the documented shape, naming the key", (_label, document, key) => {
+    expect(() => parseGovernanceConfig({ IRIS_GOVERNANCE: JSON.stringify(document) })).toThrow(
+      new Error(unrecognizedKeyMessage(key)),
+    );
+  });
+
+  it("never echoes a rejected key's value into the error", () => {
+    for (const document of [
+      { iris_doc_put: "SECRET-VALUE-123" },
+      { prod: { iris_doc_put: "SECRET-VALUE-123" } },
+      { globals: { nested: { deep: "SECRET-VALUE-123" } } },
+    ]) {
+      let message = "";
+      try {
+        parseGovernanceConfig({ IRIS_GOVERNANCE: JSON.stringify(document) });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("is not a recognized top-level key");
+      expect(message).not.toContain("SECRET-VALUE-123");
+    }
   });
 
   it("fails fast when a layer value is null (null is not a boolean)", () => {

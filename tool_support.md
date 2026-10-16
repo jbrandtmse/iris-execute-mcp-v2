@@ -31,8 +31,8 @@ This document maps every tool in the IRIS MCP Server Suite to the backing IRIS A
 | 3 | `iris_doc_get` | 🟦 Atelier | `GET \| HEAD /doc/{name}`; optional `startLine`/`endLine` (Story 38.2) return a numbered line range of a UDL text document with `totalLines` and `ts`, and the **whole document when omitted** |
 | 4 | `iris_doc_put` | 🟦 Atelier | `PUT /doc/{name}`; an existing document is saved with a **version-checked save** (a 409 on it is `DOCUMENT_CONFLICT`, never retried; `ignoreConflict` default **false**), and a put to an existing class that drops a Storage definition is refused with `STORAGE_DROPPED` unless `allowStorageRegeneration` is `true` (default **false**) (Story 38.3) |
 | 5 | `iris_doc_delete` | 🟦 Atelier | `DELETE /doc/{name}` |
-| 6 | `iris_doc_list` | 🟦 Atelier | `GET /docnames/{cat}/{type}` + `GET /modified/{ts}` |
-| 7 | `iris_doc_load` | 🟦 Atelier | `PUT /doc/{name}` (bulk) + `POST /action/compile` |
+| 6 | `iris_doc_list` | 🟦 Atelier | `GET /docnames/{cat}/{type}`; a non-empty `modifiedSince` is **refused** before any request (IRIS cannot filter documents by modification time; Story 38.7) |
+| 7 | `iris_doc_load` | 🟦 Atelier | `PUT /doc/{name}` (bulk) + `POST /action/compile`; with `ignoreConflict` **false** an existing document is saved with a version-checked save (a 409 on it is a per-file `DOCUMENT_CONFLICT`, never retried; Story 38.7) |
 | 8 | `iris_doc_compile` | 🟦 Atelier | `POST /action/compile` |
 | 9 | `iris_doc_index` | 🟦 Atelier | `POST /action/index` (class structure) |
 | 10 | `iris_doc_search` | 🟦 Atelier | `GET /action/search` |

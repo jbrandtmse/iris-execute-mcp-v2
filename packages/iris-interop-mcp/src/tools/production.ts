@@ -26,7 +26,9 @@ export const productionManageTool: ToolDefinition = {
     "Create or delete an Interoperability production. For 'create', provides an empty " +
     "production class. For 'delete', the namespace's current production must be " +
     "Stopped: Running, Suspended, Troubled, NetworkStopped and any other state is " +
-    "refused and nothing is deleted. When the production class is gone but its " +
+    "refused and nothing is deleted. 'delete' accepts only a production class (one that extends " +
+    "Ens.Production): any other class is refused and nothing is deleted. " +
+    "When the production class is gone but its " +
     "Ens.Config.Production row remains (an orphan), 'delete' removes that row and " +
     "returns orphanRemoved: true. " +
     "Use iris_production_control to start/stop productions.",

@@ -134,7 +134,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_manage` | Create or delete a production; `delete` refuses the namespace's current production unless it is Stopped, and removes an orphan `Ens.Config.Production` row (class gone) with `orphanRemoved: true` | `action`, `name`, `namespace?` | destructive |
+| `iris_production_manage` | Create or delete a production; `delete` refuses the namespace's current production unless it is Stopped, accepts only a production class (one that extends `Ens.Production`; any other class is refused and nothing is deleted), and removes an orphan `Ens.Config.Production` row (class gone) with `orphanRemoved: true` | `action`, `name`, `namespace?` | destructive |
 | `iris_production_control` | Start, stop, restart, update, recover, or clean | `action`, `name?`, `timeout?`, `force?`, `killAppData?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
 | `iris_production_summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
@@ -870,6 +870,7 @@ All 22 interoperability tools operate in the context of a specific IRIS namespac
 | `401 Unauthorized` | Invalid credentials or insufficient privileges | Check credentials; interop operations may require `%Ens_*` resources |
 | `Production not found` | No production configured in the namespace | Use `iris_production_manage` to create one, or check the namespace |
 | `Production 'X' is running; stop it before deleting` / `Production 'X' is in state Suspended; stop it before deleting` | `iris_production_manage` `delete` of the namespace's current production while it is not Stopped (Running, Suspended, Troubled, NetworkStopped or Unknown). Nothing is deleted | Stop the production first with `iris_production_control`, then delete it |
+| `Class 'X' is not a production class (it does not extend Ens.Production), so nothing was deleted. Name a production class.` | `iris_production_manage` `delete` of a name that is a class but not a production class (compiled, it must extend `Ens.Production`; saved but not compiled, `Ens.Production` must be one of the comma-separated pieces of its `Super`). The class, and any same-named `Ens.Config.Production` row, are left as they are | Name a production class; to remove another kind of class, use `iris_doc_delete` |
 | `Production 'X' does not exist` | `iris_production_manage` `delete` of a name with neither a production class nor an `Ens.Config.Production` row | Check the name; nothing was changed. (A row with no class is an orphan: `delete` removes it and returns `orphanRemoved: true`) |
 | `Config item not found` | Invalid item name | Check item names with `iris_production_status` (detail=true) |
 | `enable` / `disable` does nothing for an item | The item's host class no longer resolves (deleted, renamed or uncompiled), and `enable`/`disable` skip such items | Repair the item first with `iris_production_item` `set` and a `settings.className` naming a compiled `Ens.Host` subclass, then enable or disable it |

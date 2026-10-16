@@ -51,8 +51,8 @@ export function validateDocName(name: string): string | undefined {
 /**
  * Extract a list of items from an Atelier API response `result` payload.
  *
- * Atelier endpoints that return document lists (`/docnames/{cat}/{type}`,
- * `/modified/{timestamp}`) nest the array inside a `content` field:
+ * Atelier endpoints that return document lists (`/docnames/{cat}/{type}`)
+ * nest the array inside a `content` field:
  * `{ status, console, result: { content: [...] } }`. Older unit-test
  * fixtures sometimes passed the array directly as `result: [...]`, so
  * this helper accepts both shapes for backwards compatibility.
@@ -293,6 +293,11 @@ export const docGetTool: ToolDefinition = {
       if (hasRange) {
         return readLineRange(name, ns, response.result as DocGetResult | undefined, startLine, endLine);
       }
+      // A soft error (HTTP 200 with a non-empty result.status) is a failed read, never data.
+      const unreadable = atelierDocStatusError(response.result);
+      if (unreadable !== undefined) {
+        return rangeError(unreadableDocumentText(name, ns, unreadable));
+      }
       return {
         content: [
           { type: "text", text: JSON.stringify(response.result, null, 2) },
@@ -324,7 +329,7 @@ const PUT_STORAGE_REMEDY =
   "or pass allowStorageRegeneration: true to let IRIS regenerate the storage.";
 
 /** What a document's current version looks like in the 409 that Atelier answers a put to an existing document with. */
-interface CurrentDocument {
+export interface CurrentDocument {
   /** The document's current lines (in the input's format: XML text for XML content). */
   content: string[];
   /** The version token to send as `If-None-Match`. */
@@ -338,7 +343,7 @@ interface CurrentDocument {
  * Without `If-None-Match`, Atelier answers a put to an existing document with HTTP 409 and the
  * document as it is now, and writes nothing.
  */
-function currentDocument(error: unknown): CurrentDocument | undefined {
+export function currentDocument(error: unknown): CurrentDocument | undefined {
   if (!(error instanceof IrisApiError) || error.statusCode !== 409) return undefined;
   const result = error.result as { content?: unknown; ts?: unknown } | null | undefined;
   if (result === null || typeof result !== "object") return undefined;
@@ -589,13 +594,31 @@ export const docDeleteTool: ToolDefinition = {
 
 // ── iris_doc_list ───────────────────────────────────────────────────
 
+/** The description of the `modifiedSince` parameter of the document-listing tools, which refuse it. */
+export const MODIFIED_SINCE_DESCRIPTION =
+  "Not supported: IRIS cannot filter documents by modification time, so a call that sets it is refused " +
+  "and changes nothing; compare the ts of the documents iris_doc_list returns instead.";
+
+/**
+ * The refusal for a non-empty `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list`
+ * (`verb` is what the tool did not do: listed, exported or counted). It is an argument error: `isError: true`,
+ * no structured code, and no request is sent, because Atelier's change list works from an opaque per-database
+ * hash with no time semantics, and calling it writes journal bookkeeping.
+ */
+export function modifiedSinceUnsupported(verb: "listed" | "exported" | "counted"): ToolResult {
+  return rangeError(
+    `modifiedSince is not supported, so nothing was ${verb}: IRIS has no way to list documents changed since a timestamp ` +
+      "(its change list works from a database hash). " +
+      "Omit modifiedSince; to find recent changes, list the documents with iris_doc_list and compare each one's ts.",
+  );
+}
+
 export const docListTool: ToolDefinition = {
   name: "iris_doc_list",
   title: "List Documents",
   description:
     "List ObjectScript documents in a namespace with optional category and type filters. " +
     "WARNING: Without a filter, this returns ALL documents including system classes — use the filter parameter or category to limit results. " +
-    "Use modifiedSince to find documents changed after a given timestamp. " +
     "For a structural overview at package granularity, see `iris_package_list`. To pull many documents at once, see `iris_doc_export`.",
   inputSchema: z.object({
     category: z
@@ -636,13 +659,7 @@ export const docListTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured)"),
-    modifiedSince: z
-      .string()
-      .optional()
-      .describe(
-        "ISO 8601 timestamp — when provided, only documents modified since this time are returned " +
-        "(uses the Atelier /modified/ endpoint instead of /docnames/)",
-      ),
+    modifiedSince: z.string().optional().describe(MODIFIED_SINCE_DESCRIPTION),
     cursor: z
       .string()
       .optional()
@@ -668,24 +685,8 @@ export const docListTool: ToolDefinition = {
 
     const ns = ctx.resolveNamespace(namespace);
 
-    // ── Modified-since mode: use /modified/{timestamp} endpoint ───
-    if (modifiedSince) {
-      const base = atelierPath(ctx.atelierVersion, ns, `modified/${encodeURIComponent(modifiedSince)}`);
-      const params = new URLSearchParams();
-      if (generated !== undefined) params.set("generated", String(generated ? 1 : 0));
-      const queryString = params.toString();
-      const path = queryString ? `${base}?${queryString}` : base;
-      const response = await ctx.http.get(path);
-      const allDocs: unknown[] = extractAtelierContentArray(response.result);
-      const { page, nextCursor } = ctx.paginate(allDocs, cursor);
-      const result = { items: page, ...(nextCursor ? { nextCursor } : {}) };
-      return {
-        content: [
-          { type: "text", text: JSON.stringify(result, null, 2) },
-        ],
-        structuredContent: result,
-      };
-    }
+    // modifiedSince is refused before any request.
+    if (modifiedSince) return modifiedSinceUnsupported("listed");
 
     // ── Standard listing: use /docnames/ endpoint ────────────────
     const cat = category ?? "*";

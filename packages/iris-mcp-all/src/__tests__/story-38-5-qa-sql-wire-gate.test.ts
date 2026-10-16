@@ -588,7 +588,7 @@ describe("IRIS_SQL_MAX_ROWS_AFFECTED on the wire (Story 38.5, AC-3)", () => {
         });
         expect(result.content?.[0]?.text, JSON.stringify(args)).toBe(
           `Statement was rolled back in namespace '${NS}': the DELETE affected ${SEEDED_ROWS} rows, more than the cap of 2 ` +
-            "(from IRIS_SQL_MAX_ROWS_AFFECTED). Its row changes were undone. Narrow the statement to at most 2 rows; " +
+            "(from IRIS_SQL_MAX_ROWS_AFFECTED). Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 2 rows; " +
             "a call cannot raise the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling.",
         );
         expect(await tableRows(), `the rows after ${JSON.stringify(args)}`).toEqual(before);

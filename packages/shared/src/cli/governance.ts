@@ -419,8 +419,8 @@ function serializeConfig(config: GovernanceConfig): string {
  * unknown top-level keys. `parseGovernanceRoot` reads only `global` and
  * `profiles`, so re-serializing the parsed config alone VANISHED any other
  * top-level key on the first write — a `"comment"`/`"version"` annotation
- * (silent data loss by re-serialization) or a typo'd layer name like
- * `"globals"` (which also never took effect). `rawRoot` is the raw JSON
+ * (silent data loss by re-serialization) or a scalar near-miss of a layer
+ * name like `"globals"` (which has no effect). `rawRoot` is the raw JSON
  * root parsed from the SAME pre-image bytes the config was validated from;
  * every key it carries is preserved verbatim at its original position, with
  * the mutated `global`/`profiles` layers written back at THEIR original
@@ -462,7 +462,9 @@ function serializeConfigPreservingUnknown(
  * (`"globals"`, `"profile"`, `"Global"`, …). Unknown keys that are NOT
  * layer-shaped (annotations like `"comment"`/`"version"`) are preserved
  * silently; a layer-shaped one additionally earns a stderr warning because
- * it LOOKS like policy that has no effect.
+ * it LOOKS like policy that has no effect. A layer-shaped key whose value is
+ * an object or a boolean never gets here: the shared validator rejects the
+ * file first, so only a scalar near-miss is warned about.
  */
 const LAYER_SHAPED_KEY = /^(globals?|profiles?)$/i;
 

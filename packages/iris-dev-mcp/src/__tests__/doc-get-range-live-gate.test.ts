@@ -13,7 +13,7 @@
  *  - the AD-24 version-token record: a PUT to an existing document with no `If-None-Match` is refused
  *    with HTTP 409 and writes nothing, while `If-None-Match: <ts>` is accepted (AC-1);
  *  - a document IRIS cannot read (an invalid name, read-only) returns the soft-error shape, and the
- *    ranged read reports IRIS's reason (AC-2, M6);
+ *    ranged read reports IRIS's reason (AC-2, M6), and so does a read with no range (Story 38.7, DW-542);
  *  - a %-prefixed system class and a system include file (both read-only) read by range like the
  *    fixtures, an include file's line 1 keeps its `[Type=INC]` header, and a class's `totalLines`
  *    equals the `totalLines` that `iris_loc_count` reports for it (AC-5).
@@ -348,6 +348,25 @@ describe("ranged reads equal the slices of the live full read (Story 38.2, AC-5)
     expect(text.startsWith(`Document '${unreadable}' could not be read in namespace '${IRIS_NAMESPACE}': `)).toBe(true);
     expect(text).toContain("#16006");
     expect(text.endsWith(". Check the document name and namespace, then retry.")).toBe(true);
+  }, 60000);
+
+  it("a no-range read of a name with no document type (ExecuteMCPv2.Utils, read-only) is an error carrying IRIS's reason, never data (Story 38.7, DW-542)", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const name = "ExecuteMCPv2.Utils";
+
+    const result = await docGetTool.handler({ name }, ctx);
+
+    // Captured live 2026-10-16 (IRIS 2026.2 build 221U, Atelier v8, HSCUSTOM): HTTP 200, content "", and
+    // status "ERROR #16006: Document 'ExecuteMCPv2.Utils' name is invalid".
+    expect(result).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text: `Document '${name}' could not be read in namespace '${IRIS_NAMESPACE}': ERROR #16006: Document '${name}' name is invalid. Check the document name and namespace, then retry.`,
+        },
+      ],
+      isError: true,
+    });
   }, 60000);
 });
 

@@ -103,7 +103,7 @@ export function buildGovernanceEnv(settings: LauncherSettings): Record<string, s
 /**
  * Every suite environment variable this launcher OWNS — i.e. every variable
  * whose value is fully determined by a resolved connection or an
- * `irisMcpLauncher.*` setting.
+ * `irisMcpLauncher.*` setting, or by the launcher's own contract (`MCP_TRANSPORT`).
  *
  * `McpStdioServerDefinition.env` is ADDITIVE over the extension host's own
  * environment (`vscode.d.ts`: "Variables in this environment will overwrite or
@@ -143,6 +143,9 @@ const LAUNCHER_OWNED_VARS: readonly string[] = [
   "IRIS_SM_SETTINGS_PATHS",
   "IRIS_SM_WORKSPACE",
   "IRIS_CREDENTIAL_HELPER",
+  // The launcher spawns only stdio servers (AD-23), and a server refuses any other configured
+  // transport at startup, so an ambient MCP_TRANSPORT would stop every spawned server from starting.
+  "MCP_TRANSPORT",
 ];
 
 /**

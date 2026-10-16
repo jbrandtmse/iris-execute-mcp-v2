@@ -270,11 +270,15 @@ beforeAll(async () => {
   if (skipReason) return;
 
   await removeFixtures();
+  expect(await listFixtureDocuments(), "no QaStory383 document before the run").toEqual([]);
+  expect(await listFixtureGlobals(), "no QaStory383 global before the run").toEqual([]);
 }, 60000);
 
 afterAll(async () => {
   if (skipReason) return;
   await removeFixtures();
+  expect(await listFixtureDocuments(), "no QaStory383 document after the run").toEqual([]);
+  expect(await listFixtureGlobals(), "no QaStory383 global after the run").toEqual([]);
 }, 60000);
 
 // -- The record: what IRIS does (AC-1) -------------------------------
@@ -967,15 +971,6 @@ describe("the scanner against IRIS: every scanner fixture (Story 38.3, AC-2)", (
   }
 });
 
-// -- Nothing left behind ---------------------------------------------
-
-describe("cleanup (Story 38.3, AC-5)", () => {
-  it("after the gate removes its fixtures, no document, generated routine or global named QaStory383 remains", async (testCtx) => {
-    if (skipReason) return testCtx.skip();
-
-    await removeFixtures();
-
-    expect(await listFixtureDocuments()).toEqual([]);
-    expect(await listFixtureGlobals()).toEqual([]);
-  }, 60000);
-});
+// Nothing left behind (Story 38.3, AC-5): the `beforeAll` and `afterAll` above remove the QaStory383
+// fixtures and assert that no document, generated routine or global named QaStory383 remains, whatever
+// order the tests ran in.

@@ -66,6 +66,7 @@ import {
   getEffectiveConfigSources,
   presetSeed,
   hasExplicitOverride,
+  unknownProfileWarnings,
 } from "./governance.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
@@ -2028,6 +2029,21 @@ export class McpServerBase {
     // (AC 32.0.2), so a file introduced later can never override a
     // pre-existing IRIS_GOVERNANCE setting.
     this.governanceFileConfig = loadGovernanceFile();
+
+    // A profile name under "profiles" that no configured profile carries only
+    // warns (Story 38.7, DW-554): the parsers have no profile registry, and one
+    // policy document may serve clients with different IRIS_PROFILES.
+    const configuredProfiles = [...this.profiles.keys()];
+    for (const warning of [
+      ...unknownProfileWarnings(this.governanceConfig, "IRIS_GOVERNANCE", configuredProfiles),
+      ...unknownProfileWarnings(
+        this.governanceFileConfig,
+        `IRIS_GOVERNANCE_FILE (path: ${process.env.IRIS_GOVERNANCE_FILE})`,
+        configuredProfiles,
+      ),
+    ]) {
+      logger.warn(warning);
+    }
 
     // Parse the governance safety preset (Story 24.1, spec 02 §2.2), mirroring
     // the IRIS_GOVERNANCE parse immediately above. parseGovernancePreset fails

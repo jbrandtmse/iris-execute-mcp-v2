@@ -14,11 +14,15 @@
 ///       <code>orphanRemoved</code> field (the response is unchanged for this path).</li>
 ///   <li><b>Nonexistent name.</b> Neither a class nor a row: the unchanged "does not exist"
 ///       refusal, and nothing is created or deleted.</li>
+///   <li><b>Class kind (Story 38.7, DW-533).</b> Only a production class is deleted. A compiled
+///       class that is not a production is refused, with or without a same-named
+///       <class>Ens.Config.Production</class> row, and both stay; a class that was saved but never
+///       compiled and has <code>Ens.Production</code> in its Super is deleted.</li>
 /// </ul>
-/// <p>Fixtures are the three disposable names below (all under <code>ExecuteMCPv2.Temp.Story380</code>),
-/// and every production class and <class>Ens.Config.Production</class> row under that prefix is
-/// removed before and after each test, so a killed run cannot leave anything behind. No production
-/// is ever started.</p>
+/// <p>Fixtures are the disposable names below (under <code>ExecuteMCPv2.Temp.Story380</code> and
+/// <code>ExecuteMCPv2.Temp.Story387</code>), and every class and <class>Ens.Config.Production</class>
+/// row under those prefixes is removed before and after each test, so a killed run cannot leave
+/// anything behind. No production is ever started.</p>
 Class ExecuteMCPv2.Tests.InteropProductionDeleteTest Extends %UnitTest.TestCase
 {
 
@@ -31,8 +35,17 @@ Parameter PROD = "ExecuteMCPv2.Temp.Story380Prod";
 /// A name that is never created.
 Parameter MISSING = "ExecuteMCPv2.Temp.Story380Missing";
 
-/// Prefix shared by every fixture this class may create.
+/// Prefix shared by every Story 38.0 fixture this class may create.
 Parameter FIXTUREPREFIX = "ExecuteMCPv2.Temp.Story380";
+
+/// Prefix shared by every Story 38.7 fixture this class may create (the class-kind delete tests).
+Parameter FIXTUREPREFIX387 = "ExecuteMCPv2.Temp.Story387";
+
+/// Disposable compiled class that is not a production (it extends %RegisteredObject).
+Parameter PLAIN = "ExecuteMCPv2.Temp.Story387Plain";
+
+/// Disposable class that is saved but never compiled, and whose Super is Ens.Production.
+Parameter DRAFT = "ExecuteMCPv2.Temp.Story387Draft";
 
 /// Name of the configuration item the orphan-with-items test gives the orphan row (under the
 /// disposable prefix, so the by-name sweep in <method>RemoveFixtures</method> can only reach it).
@@ -50,24 +63,30 @@ Method OnAfterOneTest(testname As %String) As %Status
     Quit $$$OK
 }
 
-/// Remove every production class and Ens.Config.Production row under the fixture prefix.
+/// Remove every class and Ens.Config.Production row under the fixture prefixes (the Story 38.0 and
+/// the Story 38.7 ones), the compiled form of a class included.
 Method RemoveFixtures()
 {
     ; Collect the names first, then delete: no cursor is open while rows disappear.
     Kill tClasses, tRows
-    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ?", ..#FIXTUREPREFIX)
-    If $IsObject(tRS) && (tRS.%SQLCODE >= 0) {
-        While tRS.%Next() { Set tClasses(tRS.%GetData(1)) = "" }
-    }
-    Set tRowRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name FROM Ens_Config.Production WHERE Name %STARTSWITH ?", ..#FIXTUREPREFIX)
-    If $IsObject(tRowRS) && (tRowRS.%SQLCODE >= 0) {
-        While tRowRS.%Next() { Set tRows(tRowRS.%GetData(1)) = "" }
+    Set tPrefixes = $ListBuild(..#FIXTUREPREFIX, ..#FIXTUREPREFIX387)
+    For tPrefixIndex = 1:1:$ListLength(tPrefixes) {
+        Set tPrefix = $List(tPrefixes, tPrefixIndex)
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ?", tPrefix)
+        If $IsObject(tRS) && (tRS.%SQLCODE >= 0) {
+            While tRS.%Next() { Set tClasses(tRS.%GetData(1)) = "" }
+        }
+        Set tRowRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name FROM Ens_Config.Production WHERE Name %STARTSWITH ?", tPrefix)
+        If $IsObject(tRowRS) && (tRowRS.%SQLCODE >= 0) {
+            While tRowRS.%Next() { Set tRows(tRowRS.%GetData(1)) = "" }
+        }
     }
     Set tName = ""
     For {
         Set tName = $Order(tClasses(tName))
         Quit:tName=""
         Do ##class(%Dictionary.ClassDefinition).%DeleteId(tName)
+        If ##class(%Dictionary.CompiledClass).%ExistsId(tName) { Do $System.OBJ.Delete(tName, "-d") }
     }
     Set tName = ""
     For {
@@ -250,6 +269,83 @@ Method TestDeleteNonexistentRefusedNothingChanged() As %Status
     Do $$$AssertTrue('##class(%Dictionary.ClassDefinition).%ExistsId(..#MISSING), "still no class")
     Do $$$AssertTrue('##class(Ens.Config.Production).%ExistsId(..#MISSING), "still no row")
     Do $$$AssertEquals(..FixtureRowCount(), tRowsBefore, "the fixture-prefix row count is unchanged")
+    Quit $$$OK
+}
+
+/// Define the class <var>pName</var> with the superclass list <var>pSuper</var>, saved but not compiled.
+Method DefineClass(pName As %String, pSuper As %String) As %Status
+{
+    Set tDefinition = ##class(%Dictionary.ClassDefinition).%New()
+    Set tDefinition.Name = pName
+    Set tDefinition.Super = pSuper
+    Quit tDefinition.%Save()
+}
+
+/// The expected refusal text for deleting the class <var>pName</var>, which is not a production class.
+Method NotProductionText(pName As %String) As %String
+{
+    Quit "Class '" _ pName _ "' is not a production class (it does not extend Ens.Production), so nothing was deleted. Name a production class."
+}
+
+/// DW-533 - a compiled class that is not a production is refused and still exists. Before the fix
+/// delete removed any class by name.
+Method TestDeleteCompiledNonProductionClassRefused() As %Status
+{
+    Do $$$AssertStatusOK(..DefineClass(..#PLAIN, "%RegisteredObject"), "the plain class is defined")
+    Do $$$AssertStatusOK($System.OBJ.Compile(..#PLAIN, "k-d"), "the plain class is compiled")
+    Do $$$AssertTrue(##class(%Dictionary.CompiledClass).%ExistsId(..#PLAIN), "precondition: the plain class is compiled")
+
+    Set tSC = ..PostJson("/api/executemcp/v2/interop/production", ..ManageBody("delete", ..#PLAIN), .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the delete HTTP call must succeed at the transport level")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertEquals(tHttp, 200, "a refusal still renders HTTP 200 + envelope (Rule #7)")
+    Do $$$AssertTrue(..EnvelopeErrorCount(tEnv) >= 1, "the envelope carries a refusal (got: " _ tEnv.%ToJSON() _ ")")
+    Set tErr = tEnv.status.errors.%Get(0).%Get("error")
+    Do $$$AssertEquals(tErr, "ERROR #5001: " _ ..NotProductionText(..#PLAIN), "the refusal names the class and what to do (got: " _ tErr _ ")")
+    Do $$$AssertTrue('tEnv.result.%IsDefined("action"), "a refusal returns no action result")
+    Do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#PLAIN), "the class definition still exists")
+    Do $$$AssertTrue(##class(%Dictionary.CompiledClass).%ExistsId(..#PLAIN), "the compiled class still exists")
+    Quit $$$OK
+}
+
+/// DW-533 - the same refusal when a same-named Ens.Config.Production row exists: the class and the
+/// row both remain, so the orphan path is not a way around the class check.
+Method TestDeleteNonProductionClassWithSameNamedRowRefused() As %Status
+{
+    Do $$$AssertStatusOK(..DefineClass(..#PLAIN, "%RegisteredObject"), "the plain class is defined")
+    Do $$$AssertStatusOK($System.OBJ.Compile(..#PLAIN, "k-d"), "the plain class is compiled")
+    Set tRow = ##class(Ens.Config.Production).%New()
+    Set tRow.Name = ..#PLAIN
+    Do $$$AssertStatusOK(tRow.%Save(), "the same-named Ens.Config.Production row is created")
+    Kill tRow
+    Do $$$AssertTrue(##class(Ens.Config.Production).%ExistsId(..#PLAIN), "precondition: the row exists")
+
+    Set tSC = ..PostJson("/api/executemcp/v2/interop/production", ..ManageBody("delete", ..#PLAIN), .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the delete HTTP call must succeed at the transport level")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertTrue(..EnvelopeErrorCount(tEnv) >= 1, "the envelope carries a refusal (got: " _ tEnv.%ToJSON() _ ")")
+    Set tErr = tEnv.status.errors.%Get(0).%Get("error")
+    Do $$$AssertEquals(tErr, "ERROR #5001: " _ ..NotProductionText(..#PLAIN), "the refusal is the same (got: " _ tErr _ ")")
+    Do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#PLAIN), "the class still exists")
+    Do $$$AssertTrue(##class(Ens.Config.Production).%ExistsId(..#PLAIN), "the row still exists")
+    Quit $$$OK
+}
+
+/// DW-533 - a class that was saved but never compiled, with Ens.Production among its Super pieces,
+/// is a production class: delete removes it, and the response is the ordinary one.
+Method TestDeleteUncompiledProductionClassDeleted() As %Status
+{
+    Do $$$AssertStatusOK(..DefineClass(..#DRAFT, "Ens.Production"), "the draft production class is saved")
+    Do $$$AssertTrue('##class(%Dictionary.CompiledClass).%ExistsId(..#DRAFT), "precondition: the draft is not compiled")
+
+    Set tSC = ..PostJson("/api/executemcp/v2/interop/production", ..ManageBody("delete", ..#DRAFT), .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the delete HTTP call must succeed at the transport level")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertEquals(..EnvelopeErrorCount(tEnv), 0, "deleting an uncompiled production class carries no errors (got: " _ tEnv.%ToJSON() _ ")")
+    Do $$$AssertEquals(tEnv.result.action, "deleted", "response action is deleted")
+    Do $$$AssertEquals(tEnv.result.name, ..#DRAFT, "response echoes the class name")
+    Do $$$AssertTrue('tEnv.result.%IsDefined("orphanRemoved"), "an ordinary delete carries no orphanRemoved field")
+    Do $$$AssertTrue('##class(%Dictionary.ClassDefinition).%ExistsId(..#DRAFT), "the draft class is gone")
     Quit $$$OK
 }
 

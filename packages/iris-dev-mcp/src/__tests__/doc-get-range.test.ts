@@ -252,6 +252,58 @@ const SOFT_ERROR_RESULT = {
   status: `ERROR #16006: Document '${SOFT_ERROR_NAME}' name is invalid`,
 };
 
+// --- A soft error without a range (Story 38.7, DW-542) ---
+
+/** The soft-error fixture's reason, as IRIS words it. */
+const SOFT_ERROR_STATUS = `ERROR #16006: Document '${SOFT_ERROR_NAME}' name is invalid`;
+
+describe("iris_doc_get without a line range reports a soft error as an error (Story 38.7, DW-542)", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  it("HTTP 200 with a non-empty status and content \"\": isError, IRIS's reason in the text, no structuredContent", async () => {
+    mockHttp.get.mockResolvedValue(envelope(SOFT_ERROR_RESULT));
+
+    const result = await docGetTool.handler({ name: SOFT_ERROR_NAME }, ctx);
+
+    expect(mockHttp.get.mock.calls).toEqual([[`/api/atelier/v7/USER/doc/${encodeURIComponent(SOFT_ERROR_NAME)}`]]);
+    expect(result).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text: `Document '${SOFT_ERROR_NAME}' could not be read in namespace 'USER': ${SOFT_ERROR_STATUS}. Check the document name and namespace, then retry.`,
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it("format xml takes the same path", async () => {
+    mockHttp.get.mockResolvedValue(envelope(SOFT_ERROR_RESULT));
+
+    const result = await docGetTool.handler({ name: SOFT_ERROR_NAME, format: "xml" }, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.content[0]?.text).toContain(SOFT_ERROR_STATUS);
+  });
+
+  it("an empty status keeps today's result, even when content is not a line array", async () => {
+    const noStatus = { ...CLASS_GET_RESULT, content: "" };
+    mockHttp.get.mockResolvedValue(envelope(noStatus));
+
+    const result = await docGetTool.handler({ name: "Test.Fixture.cls" }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual(noStatus);
+  });
+});
+
 /** The exact text of a successful ranged read: the header line, a newline, then the numbered lines. */
 function rangedText(header: string, numbered: string[]): string {
   return [header, ...numbered].join("\n");

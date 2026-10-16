@@ -14,5 +14,8 @@ export default defineConfig({
     // runs). Mirrors the testTimeout bump already used by every package's
     // `vitest.integration.config.ts` for comparable I/O-bound tests.
     testTimeout: 20_000,
+    // The live gates bootstrap, write and remove fixtures on ONE shared IRIS instance, so no two test
+    // files may run at the same time; epic38-gate-guards.test.ts proves this on a child run.
+    fileParallelism: false,
   },
 });

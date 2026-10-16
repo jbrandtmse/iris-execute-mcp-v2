@@ -25,12 +25,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { docPutTool } from "../tools/doc.js";
+import { conflict, currentClass, TS_CURRENT } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 const CLASS_PATH = "/api/atelier/v7/USER/doc/Test.Fixture.cls";
 const ROUTINE_PATH = "/api/atelier/v7/USER/doc/Test.Fixture.mac";
 const TS_CREATE = "2026-10-15 17:59:20.947";
-const TS_CURRENT = "2026-10-15 17:58:02.301";
 const TS_UPDATE = "2026-10-15 17:59:21.512";
 
 /** A class create: IRIS echoes the generated Storage lines, `flags: 1`. */
@@ -83,34 +83,6 @@ const SOFT_ERROR_RESULT = {
   status: "ERROR #16021: Illegal Header Line: this is not a class header",
 };
 
-/**
- * The current document of an existing class as the 409 carries it: the same nine keys as a GET, with
- * the class's lines (and a trailing empty element) in `content`.
- */
-function currentClass(lines: string[], ts = TS_CURRENT): Record<string, unknown> {
-  return {
-    name: "Test.Fixture.cls",
-    db: "HSCUSTOM",
-    ts,
-    upd: false,
-    cat: "CLS",
-    status: "",
-    enc: false,
-    flags: 0,
-    content: [...lines, ""],
-  };
-}
-
-/** The HTTP 409 the shared client throws for a put to an existing document that carries no version token. */
-function conflict(path: string, result: unknown): IrisApiError {
-  return new IrisApiError(
-    409,
-    [],
-    path,
-    `IRIS returned HTTP 409 for PUT ${path}. Check the request parameters and try again.`,
-    result,
-  );
-}
 
 const CLASS_LINES = ["Class Test.Fixture Extends %Persistent", "{", "}"];
 const CLASS_TEXT = CLASS_LINES.join("\n");

@@ -887,6 +887,7 @@ describe("Rule #19 back-compat — selectServers.ts has zero effect on the 31.4 
       IRIS_SM_SETTINGS_PATHS: null,
       IRIS_SM_WORKSPACE: null,
       IRIS_CREDENTIAL_HELPER: null,
+      MCP_TRANSPORT: null,
     });
   });
 });

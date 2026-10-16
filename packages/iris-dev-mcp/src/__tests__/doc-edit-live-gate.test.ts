@@ -614,15 +614,5 @@ describe("a routine edited at its last line with a CRLF text (Story 38.4, AC-7)"
   }, 60000);
 });
 
-// -- Nothing left behind ---------------------------------------------
-
-describe("cleanup (Story 38.4, AC-7)", () => {
-  it("after the gate removes its fixtures, no document, generated routine or global of its QaStory384 fixtures remains", async (testCtx) => {
-    if (skipReason) return testCtx.skip();
-
-    await removeFixtures();
-
-    expect(await listFixtureDocuments()).toEqual([]);
-    expect(await listFixtureGlobals()).toEqual([]);
-  }, 60000);
-});
+// Nothing left behind (Story 38.4, AC-7): the `beforeAll` and `afterAll` above remove the QaStory384
+// fixtures and assert that no document, generated routine or global remains, whatever order the tests ran in.

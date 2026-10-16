@@ -343,7 +343,7 @@ describe("SQL write safety (Story 38.5)", () => {
             type: "text",
             text:
               "Statement was rolled back in namespace 'USER': the DELETE affected 3 rows, more than the cap of 2 (from maxRowsAffected). " +
-              "Its row changes were undone. Narrow the statement to at most 2 rows, or raise maxRowsAffected.",
+              "Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 2 rows, or raise maxRowsAffected.",
           },
         ],
         structuredContent: {
@@ -375,7 +375,7 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toBe(
         "Statement was rolled back in namespace 'USER': the UPDATE affected 3 rows, more than the cap of 0 (from maxRowsAffected). " +
-          "Its row changes were undone. Narrow the statement to at most 0 rows, or raise maxRowsAffected.",
+          "Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 0 rows, or raise maxRowsAffected.",
       );
     });
 
@@ -387,7 +387,7 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(result.content[0]?.text).toBe(
         "Statement was rolled back in namespace 'USER': the DELETE affected an unknown number of rows " +
           "(IRIS reports -1, as it does for TRUNCATE TABLE), more than the cap of 1000 (from maxRowsAffected). " +
-          "Its row changes were undone. Narrow the statement to at most 1000 rows, or raise maxRowsAffected.",
+          "Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 1000 rows, or raise maxRowsAffected.",
       );
       expect((result.structuredContent as { rowsAffected: number }).rowsAffected).toBe(-1);
     });
@@ -499,7 +499,7 @@ describe("SQL write safety (Story 38.5)", () => {
 
       expect(result.content[0]?.text).toBe(
         "Statement was rolled back in namespace 'USER': the DELETE affected 3 rows, more than the cap of 2 (from IRIS_SQL_MAX_ROWS_AFFECTED). " +
-          "Its row changes were undone. Narrow the statement to at most 2 rows; a call cannot raise the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling.",
+          "Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 2 rows; a call cannot raise the operator's IRIS_SQL_MAX_ROWS_AFFECTED ceiling.",
       );
       expect(result.structuredContent).toEqual({
         code: "SQL_ROWS_AFFECTED_CAP",

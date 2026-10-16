@@ -608,7 +608,7 @@ describe("the rows-affected cap (Story 38.5, AC-3, AC-7)", () => {
     });
     expect(result.content[0]?.text).toBe(
       `Statement was rolled back in namespace '${IRIS_NAMESPACE}': the DELETE affected ${DEL_ROWS} rows, more than the cap of 2 (from maxRowsAffected). ` +
-        "Its row changes were undone. Narrow the statement to at most 2 rows, or raise maxRowsAffected.",
+        "Its row changes were undone, except in storage that is not journaled, such as a table stored in IRISTEMP. Narrow the statement to at most 2 rows, or raise maxRowsAffected.",
     );
     await expectUntouched();
     expect(await scalar(`SELECT COUNT(*) FROM ${T} WHERE ${DEL_WHERE}`)).toBe(DEL_ROWS);

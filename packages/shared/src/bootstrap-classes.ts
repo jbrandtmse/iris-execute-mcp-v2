@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "d352a6a32158";
+export const BOOTSTRAP_VERSION = "089f8f0a62b2";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "d352a6a32158";
+Parameter BOOTSTRAPVERSION = "089f8f0a62b2";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -9117,12 +9117,68 @@ ClassMethod DeleteBlockedMessage(pTarget As %String, pState As %Integer) As %Str
     Quit "Production '"_pTarget_"' is in state "_..StateName(pState)_"; stop it before deleting"
 }
 
+/// The refusal text for deleting the production named <var>pTarget</var> when the namespace's current
+/// production state forbids it, or "" when the delete may go ahead. This is the one place that asks the
+/// state question for a delete: <method>ProductionManage</method> calls it before either delete path.
+/// <p>When <var>pInject</var> is 0 the state comes from <code>Ens.Director:GetProductionStatus</code>,
+/// and an error status gives "" (the unguarded behavior). When <var>pInject</var> is 1 the caller supplies
+/// the status (<var>pStatus</var>), the current production's name (<var>pCurrentName</var>) and its state
+/// (<var>pState</var>), so a test can exercise every state without starting a production.</p>
+ClassMethod DeleteStateRefusal(pTarget As %String, pInject As %Boolean = 0, pStatus As %Status = 1, pCurrentName As %String = "", pState As %Integer = 0) As %String
+{
+    Set tSC = pStatus
+    Set tCurrentName = pCurrentName
+    Set tState = pState
+    If 'pInject {
+        Set tSC = ##class(Ens.Director).GetProductionStatus(.tCurrentName, .tState)
+    }
+    If $$$ISERR(tSC) Quit ""
+    If ..DeleteBlockedByState(pTarget, tCurrentName, tState) Quit ..DeleteBlockedMessage(pTarget, tState)
+    Quit ""
+}
+
+/// Whether the class named <var>pName</var> is a production class, so a production delete may remove it.
+/// <p>A compiled class is a production when it extends <class>Ens.Production</class>. A class that is
+/// defined but not compiled is a production when <code>Ens.Production</code> is one of the comma-separated
+/// pieces of its <code>Super</code>. A class that does not exist, or whose check throws, is not one.</p>
+ClassMethod IsProductionClass(pName As %String) As %Boolean
+{
+    Set tIsProduction = 0
+    Try {
+        If ##class(%Dictionary.CompiledClass).%ExistsId(pName) {
+            ; $classmethod throws for a class that is not usable; the inner Try keeps that a plain "no"
+            ; (the Loc.Scanner BuildClassMetadata note explains why it is wrapped).
+            Try {
+                Set tIsProduction = +$classmethod(pName, "%Extends", "Ens.Production")
+            } Catch exExtends {
+                Set tIsProduction = 0
+            }
+        }
+        ElseIf ##class(%Dictionary.ClassDefinition).%ExistsId(pName) {
+            ; Read the definition's Super from the class dictionary: nothing is opened, so nothing can be saved.
+            Set tSuper = $$$defClassKeyGet(pName, $$$cCLASSsuper)
+            For tPiece = 1:1:$Length(tSuper, ",") {
+                If $ZStrip($Piece(tSuper, ",", tPiece), "<>W") = "Ens.Production" {
+                    Set tIsProduction = 1
+                    Quit
+                }
+            }
+        }
+    }
+    Catch ex {
+        Set tIsProduction = 0
+    }
+    Quit tIsProduction
+}
+
 /// Create or delete an Interoperability production.
 /// <p>Accepts a JSON body with <code>action</code> ("create" or "delete"),
 /// <code>name</code> (production class name), and optional <code>namespace</code>.
-/// The namespace's current production must be Stopped before deletion. When the production
-/// class no longer exists but its <code>Ens.Config.Production</code> row does (an orphan), delete
-/// removes that row and reports <code>orphanRemoved</code>.</p>
+/// The namespace's current production must be Stopped before deletion. Only a production class
+/// (one that extends <class>Ens.Production</class>) is deleted: any other class is refused and
+/// nothing is deleted. When the production class no longer exists but its
+/// <code>Ens.Config.Production</code> row does (an orphan), delete removes that row and reports
+/// <code>orphanRemoved</code>.</p>
 ClassMethod ProductionManage() As %Status
 {
     Set tSC = $$$OK
@@ -9202,19 +9258,29 @@ ClassMethod ProductionManage() As %Status
         }
         ElseIf tAction = "delete" {
             ; State guard - runs BEFORE either delete path (the class delete and the
-            ; orphan-row removal below). GetProductionStatus reports only this namespace's
-            ; current production, so the guard applies to that production; a status error
-            ; keeps the unguarded behavior. Anything other than Stopped is refused.
-            Set tSC2 = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
-            If $$$ISOK(tSC2) && ..DeleteBlockedByState(tName, tProdName, tState) {
+            ; orphan-row removal below). The seam asks the state question for this namespace's
+            ; current production only; a status error keeps the unguarded behavior, and
+            ; anything other than Stopped is refused.
+            Set tStateRefusal = ..DeleteStateRefusal(tName)
+            If tStateRefusal '= "" {
                 Set $NAMESPACE = tOrigNS
-                Set tSC = $$$ERROR($$$GeneralError, ..DeleteBlockedMessage(tName, tState))
+                Set tSC = $$$ERROR($$$GeneralError, tStateRefusal)
                 Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
                 Set tSC = $$$OK
                 Quit
             }
 
             If ##class(%Dictionary.ClassDefinition).%ExistsId(tName) {
+                ; Only a production class may be deleted here: any other class is refused, and
+                ; nothing is deleted (a same-named Ens.Config.Production row is left alone too).
+                If '..IsProductionClass(tName) {
+                    Set $NAMESPACE = tOrigNS
+                    Set tSC = $$$ERROR($$$GeneralError, "Class '"_tName_"' is not a production class (it does not extend Ens.Production), so nothing was deleted. Name a production class.")
+                    Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+                    Set tSC = $$$OK
+                    Quit
+                }
+
                 ; Delete the class definition first - Ens.Projection.Production.RemoveProjection()
                 ; fires automatically and handles the Ens.Config.Production record cleanup.
                 ; Deleting in the reverse order (config first, then class) is fragile: if the

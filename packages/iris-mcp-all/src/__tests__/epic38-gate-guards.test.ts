@@ -2,8 +2,11 @@
  * Story 38.6 (AC-3, AC-6) -- the guards of the Epic 38 live gates themselves.
  *
  * A gate that is skipped, or that tests some other build than the shipped one, is a green badge over a dead
- * check (project rule #59). Two properties are pinned here, with no IRIS and no shared state:
+ * check (project rule #59). These properties are pinned here, with no IRIS and no shared state:
  *
+ *  - This package's default suite runs its test files one at a time (`fileParallelism: false` in its vitest
+ *    config), because its live gates bootstrap and write on one shared IRIS instance. A child run of two inert
+ *    probe files under the package's own config observes whether the files ever execute at the same time.
  *  - The capstone (`epic38-capstone-gate.test.ts`), run against an IRIS that is not reachable (a closed local
  *    port), skips every test when it is not armed, and fails in `beforeAll` with "may not be skipped" when
  *    `IRIS_REQUIRE_LIVE` is set, each time with the reason its `beforeAll` derives on this machine (a stale
@@ -17,12 +20,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
+import { availableParallelism, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inheritedEnv, resolveSdkEsmDir, staleDistReason } from "./process-gate-helpers.js";
+import { SERIAL_PROBE_DIR_VAR } from "./serial-probe.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(__dirname, "..", "..");
@@ -88,6 +93,37 @@ function runCapstone(armed: boolean): { status: number | null; output: string } 
   return { status: outcome.status, output: `${outcome.stdout ?? ""}\n${outcome.stderr ?? ""}` };
 }
 
+const SERIAL_PROBES = ["src/__tests__/serial-probe-a.test.ts", "src/__tests__/serial-probe-b.test.ts"];
+
+/**
+ * Run the two serial-probe files in one child vitest process under this package's own config. The child runs
+ * with two workers whatever the machine, so the only thing that can keep the files apart is the config's file
+ * parallelism; `--no-file-parallelism` is never passed. Returns the probes' markers from a scratch directory.
+ */
+function runSerialProbes(): { status: number | null; output: string; markers: string[] } {
+  const markerDir = mkdtempSync(path.join(tmpdir(), "mcp-serial-probe-"));
+  try {
+    const outcome = spawnSync(process.execPath, [VITEST_ENTRY, "run", "--minWorkers=1", "--maxWorkers=2", ...SERIAL_PROBES], {
+      cwd: PACKAGE_DIR,
+      env: {
+        ...inheritedEnv(["VITEST", "VITEST_WORKER_ID", "VITEST_POOL_ID", "VITEST_MODE", "TEST", "NODE_ENV"]),
+        IRIS_HOST: "127.0.0.1",
+        IRIS_PORT: closedPort,
+        [SERIAL_PROBE_DIR_VAR]: markerDir,
+      },
+      encoding: "utf8",
+      timeout: 90000,
+    });
+    return {
+      status: outcome.status,
+      output: `${outcome.stdout ?? ""}\n${outcome.stderr ?? ""}`,
+      markers: existsSync(markerDir) ? readdirSync(markerDir).sort() : [],
+    };
+  } finally {
+    rmSync(markerDir, { recursive: true, force: true });
+  }
+}
+
 beforeAll(async () => {
   closedPort = await reserveClosedPort();
 });
@@ -111,6 +147,23 @@ describe("Story 38.6: the capstone's arming guard, on its own real path (I/O mat
 
     expect(output).toContain(`Epic 38 capstone gate may not be skipped: ${expectedSkipReason()}`);
     expect(status, "the armed run must not pass").not.toBe(0);
+  }, 120000);
+});
+
+describe("Story 38.7: this package's default suite runs its test files one at a time (DW-562)", () => {
+  it("two probe files of a child run under the package's own config never execute at the same time", (testCtx) => {
+    if (availableParallelism() < 2) {
+      console.error("[SKIP] epic38-gate-guards: the serial-suite guard needs two CPUs to be able to observe an overlap.");
+      return testCtx.skip();
+    }
+
+    const { status, output, markers } = runSerialProbes();
+
+    expect(status, output).toBe(0);
+    expect(markers, "both probes ran armed and held their marker for the full time").toEqual(
+      expect.arrayContaining(["a.held", "b.held"]),
+    );
+    expect(markers.filter((name) => name.endsWith(".overlap")), "two test files executed at the same time").toEqual([]);
   }, 120000);
 });
 

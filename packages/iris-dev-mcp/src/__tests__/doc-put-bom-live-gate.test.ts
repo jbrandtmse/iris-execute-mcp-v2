@@ -20,7 +20,7 @@
  * `IRIS_REQUIRE_LIVE` is armed (same arming convention as the other live gates in this directory).
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -219,4 +219,36 @@ describe("iris_doc_load against live IRIS through the shared helpers (Story 38.0
     expect(structured.failures?.[0]?.error).toContain("IRIS refused the upload: ERROR #16021");
     expect(await readStoredLines(LOAD_CLASS), "IRIS stored nothing").toBeUndefined();
   }, 30000);
+
+  it("ignoreConflict false replaces an existing document through the version-checked save: two PUTs, the second carrying the 409's ts (Story 38.7, DW-549)", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+    const sourceLines = (property: string): string => [...CLASS_LINES(LOAD_CLASS).slice(0, 2), property, "}"].join("\n");
+    const file = writeSource(LOAD_CLASS, sourceLines("Property Alpha As %String;"));
+    const first = await docLoadTool.handler({ path: file, baseDir: sourceRoot }, ctx);
+    expect(first.structuredContent).toMatchObject({ total: 1, uploaded: 1, failed: 0 });
+    expect((await readStoredLines(LOAD_CLASS))?.join("\n")).toContain("Property Alpha As %String;");
+
+    writeSource(LOAD_CLASS, sourceLines("Property Beta As %String;"));
+    const put = vi.spyOn(client, "put");
+    let result: Awaited<ReturnType<typeof docLoadTool.handler>>;
+    let calls: unknown[][];
+    try {
+      result = await docLoadTool.handler({ path: file, baseDir: sourceRoot, ignoreConflict: false }, ctx);
+    } finally {
+      calls = [...put.mock.calls];
+      put.mockRestore();
+    }
+
+    expect(result.structuredContent).toEqual({ total: 1, uploaded: 1, failed: 0 });
+    expect(calls).toHaveLength(2);
+    const encoded = encodeURIComponent(`${LOAD_CLASS}.cls`);
+    expect(String(calls[0]?.[0])).toMatch(new RegExp(`/doc/${encoded}$`));
+    expect(calls[0]?.[2]).toBeUndefined();
+    expect(String(calls[1]?.[0])).toMatch(new RegExp(`/doc/${encoded}$`));
+    const versionHeader = (calls[1]?.[2] as { headers?: Record<string, string> } | undefined)?.headers?.["If-None-Match"];
+    expect(versionHeader, "the second PUT carries the ts the 409 returned").toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    const stored = (await readStoredLines(LOAD_CLASS))?.join("\n") ?? "";
+    expect(stored).toContain("Property Beta As %String;");
+    expect(stored).not.toContain("Property Alpha As %String;");
+  }, 60000);
 });

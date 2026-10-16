@@ -56,13 +56,21 @@
  *      the CLI's key universe is exactly the frozen baseline ∪ mentioned
  *      keys (asserted against the built `GOVERNANCE_BASELINE`), and the
  *      server's universe is a superset. One engine, two processes, no drift.
- *   J. **32-1-R3 (Story 32.4) unknown top-level keys survive a write, through
- *      the REAL bin.** A policy file carrying a `"comment"` annotation and a
- *      typo'd layer (`"globals"`) round-trips through `set` AND `unset`:
- *      both unknown keys are preserved VERBATIM at their original positions
+ *   J. **32-1-R3 (Story 32.4) scalar top-level keys survive a write, and (Story
+ *      38.7, DW-554) an object-valued layer typo is refused, through the REAL
+ *      bin.** A policy file carrying a `"comment"` annotation and a scalar
+ *      near-miss (`"globals": "..."`) round-trips through `set` AND `unset`:
+ *      both keys are preserved VERBATIM at their original positions
  *      (pre-Story-32.4 the first write silently dropped them), stderr warns
- *      on the layer-shaped typo, and `validate` still passes. Dist-only —
- *      no live IRIS needed.
+ *      on the layer-shaped near-miss, and `validate` still passes. A file whose
+ *      `"globals"` is an OBJECT is governance that would be silently ignored,
+ *      so `validate`, `set` and `unset` each exit 1 and leave it byte-identical.
+ *      Dist-only, no live IRIS needed.
+ *   K. **DW-554 (Story 38.7) a governance-shaped key outside `global` and
+ *      `profiles` FAILS the BUILT server's startup.** A flat `IRIS_GOVERNANCE`
+ *      and a governance file with a top-level `"prod"` layer each exit non-zero
+ *      naming the variable (and the path) and the documented `"global"` shape,
+ *      before any IRIS traffic. Dist-only, no live IRIS needed.
  *
  * **Keychain note:** no test touches the OS keychain — the default profile is
  * configured entirely from `IRIS_*` env vars, and every denied call is refused
@@ -788,7 +796,7 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
   );
 
   it(
-    "J: 32-1-R3 through the REAL bin — set/unset preserve unknown top-level keys verbatim (comment + typo'd layer), warn on the layer-shaped typo, and validate still passes",
+    "J: through the REAL bin, set/unset preserve scalar top-level keys verbatim (comment + a scalar `globals`), warn on the layer-shaped near-miss, and validate still passes; an object-valued `globals` fails validate/set/unset and the file stays byte-identical",
     async (ctx) => {
       // Dist-only: fixtureDir is created whenever the dev-mcp dist exists, so
       // distSkipReason also covers the fixture-dir-unavailable case.
@@ -796,7 +804,7 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
 
       const r3File = path.join(fixtureDir!, "governance-r3-unknown-keys.json");
       const commentValue = "operator annotation — must survive CLI writes";
-      const typoLayer = { "iris_doc_put": false };
+      const typoLayer = "see the global layer";
       writeFileSync(
         r3File,
         `${JSON.stringify(
@@ -862,7 +870,68 @@ describe("Story 32.0 QA — IRIS_GOVERNANCE_FILE process-level gate (built serve
       expect(afterUnset.comment).toBe(commentValue);
       expect(afterUnset.globals).toEqual(typoLayer);
       expect(afterUnset.global).toEqual({ "iris_doc_compile": false });
+
+      // Story 38.7 (DW-554): the same typo as an OBJECT is governance that would be silently ignored, so the
+      // server's own validator rejects the file and all three commands fail with its message, writing nothing.
+      const objectFile = path.join(fixtureDir!, "governance-object-globals.json");
+      writeFileSync(
+        objectFile,
+        `${JSON.stringify({ comment: commentValue, globals: { "iris_doc_put": false }, global: { "iris_doc_compile": false } }, null, 2)}\n`,
+        "utf8",
+      );
+      const objectBefore = readFileSync(objectFile);
+      for (const argv of [
+        ["validate", "--file", objectFile],
+        ["set", "iris_global_get", "false", "--file", objectFile],
+        ["unset", "iris_doc_compile", "--file", objectFile],
+      ]) {
+        const refused = spawnSync(process.execPath, [GOVERNANCE_CLI_BIN, ...argv], { encoding: "utf8", env: childEnv({}) });
+        expect(refused.error).toBeUndefined();
+        expect(refused.status, `${argv[0]} exits 1`).toBe(1);
+        expect(refused.stderr).toContain("IRIS_GOVERNANCE_FILE is invalid:");
+        expect(refused.stderr).toContain('"globals" is not a recognized top-level key');
+        expect(refused.stderr).toContain(`(path: ${objectFile})`);
+        expect(readFileSync(objectFile).equals(objectBefore), `${argv[0]} left the file byte-identical`).toBe(true);
+      }
     },
     { timeout: 60000 },
+  );
+
+  it(
+    "K: a flat IRIS_GOVERNANCE key, and a governance file with a top-level profile layer, each FAIL the built server's startup naming the variable (and path) and the documented \"global\" shape, before any IRIS traffic",
+    async (ctx) => {
+      if (skipIf(ctx, distSkipReason, "DW-554 startup fail-fast")) return;
+
+      // Dist-only: the throw is in start() before the IRIS health check, so these need no live IRIS.
+      const flat = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
+        childEnv({ IRIS_GOVERNANCE: JSON.stringify({ iris_doc_put: false }) }),
+        45000,
+      );
+      expect(flat.timedOut, flat.stderr).toBe(false);
+      expect(flat.code, flat.stderr).toBe(1);
+      expect(flat.stderr).toContain("IRIS_GOVERNANCE is invalid:");
+      expect(flat.stderr).toContain('"iris_doc_put" is not a recognized top-level key');
+      expect(flat.stderr).toContain('"global"');
+      expect(flat.stderr).not.toContain("/api/atelier");
+
+      const profileLayerPath = path.join(fixtureDir!, "governance-top-level-profile.json");
+      writeFileSync(profileLayerPath, JSON.stringify({ prod: { iris_doc_put: false } }), "utf8");
+      const fileForm = await spawnAndWaitForExit(
+        DEV_MCP_ENTRY_POINT,
+        [],
+        childEnv({ IRIS_GOVERNANCE_FILE: profileLayerPath }),
+        45000,
+      );
+      expect(fileForm.timedOut, fileForm.stderr).toBe(false);
+      expect(fileForm.code, fileForm.stderr).toBe(1);
+      expect(fileForm.stderr).toContain("IRIS_GOVERNANCE_FILE is invalid:");
+      expect(fileForm.stderr).toContain('"prod" is not a recognized top-level key');
+      expect(fileForm.stderr).toContain('"global"');
+      expect(fileForm.stderr).toContain(`(path: ${profileLayerPath})`);
+      expect(fileForm.stderr).not.toContain("/api/atelier");
+    },
+    { timeout: 120000 },
   );
 });
