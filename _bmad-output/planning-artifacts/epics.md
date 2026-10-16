@@ -5198,6 +5198,22 @@ The epic's closing story. It enriches the docs; each earlier story already shipp
 - DW-555: the `iris_execute_tests` hints, the `deploy-and-test-class` prompt and its generated skill still send models to `iris_sql_execute` for read-only queries, which the `read-only` preset blocks. Point them at `iris_sql_query`. (ledger; routed by harvest 2026-10-15)
 - DW-559: no prepublish live gate checks that the deployed `BOOTSTRAP_VERSION` equals the shipped embed, so a gate can pass against a stale deployment. This story's capstone asserts deployed == shipped before its live legs (Rule #59), and other gates reuse that check where it is cheap. (ledger; routed by the lead 2026-10-16)
 
+### Story 38.7: Epic 38 Burn-Down
+
+Story 38.7 is the Epic 38 burn-down story, chartered at the epic's burn-down gate on 2026-10-16 by the orchestrator during the unattended run. It holds the 11 ledger entries the epic found and the decision sheet chose to fix now. The rest of the epic's ledger went to named stories or to the Project Lead. Each bullet is fixed and proven live on the real surface or by mutation (Rule #48), with disposable `ExecuteMCPv2.Temp.*` fixtures only. Changed bootstrapped handlers regenerate the embed (Rule #24). A change to existing behavior is a sanctioned AD-15 change, recorded in the CHANGELOG (orchestrator decisions #17 and #18).
+
+- DW-554 (HIGH): `IRIS_GOVERNANCE` (and `IRIS_GOVERNANCE_FILE`) in the flat shape `{"iris_doc_put": false}` is accepted silently and changes nothing. Fail fast at startup, naming the documented shape, when a layer value is not an object or a top-level key is neither `global` nor a known profile. Existing valid configurations must behave identically.
+- DW-533: the `iris_production_manage` `delete` action removes ANY class given as `name`, because it never checks that the class extends `Ens.Production`, so it also gets around an operator who disabled `iris_doc_delete`. Refuse a non-production class with a clear error, writing nothing.
+- DW-531: pin the production-delete state guard (DW-54) at the handler's wiring through an injectable seam (a classmethod that runs status, predicate and message, called by the handler). Never start a production on the shared instance to test it.
+- DW-539: the VS Code launcher passes an ambient `MCP_TRANSPORT` through to the stdio servers it starts. Since Story 38.1, a non-stdio value makes each of them exit 1. Add it to `LAUNCHER_OWNED_VARS`.
+- DW-542: `iris_doc_get` without a range reports an Atelier soft error (HTTP 200, empty content, non-empty `status`) as success. Report it as `isError` through the shared `atelierDocStatusError`, as the ranged read already does.
+- DW-549: `iris_doc_load` with `ignoreConflict: false` sends an unversioned PUT, so every existing document gets HTTP 409. Use Story 38.3's flow: the 409 carries the `ts`, and the save is retried once with `If-None-Match`.
+- DW-528: `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list` builds `GET /modified/<ts>`, which IRIS answers with 405 (the route is POST-only, with a database-hash body). Probe first, then either implement the real route or refuse `modifiedSince` with a clear error. Fold in DW-529: apply `category` and `type` on that branch, or stop reporting them as applied.
+- DW-530: `iris_env_promote` `execute` writes target documents without inspecting each document's Atelier `result.status`. Reuse `atelierDocStatusError`.
+- DW-556: three live gates end with a cleanup `it()` that removes the shared fixtures, so they pass only in file order. Move the cleanup and its assertions into `afterAll`.
+- DW-558: a capped DML statement on a table stored in IRISTEMP is not undone by the cap's rollback, yet the `overCap` text says "Its row changes were undone". Hedge the text so the claim covers only journaled storage, and add one line to the docs.
+- DW-562: the default `@iris-mcp/all` suite runs the three bootstrapping live gates (38.4, 38.5, the Epic 38 capstone) in parallel, so on a stale instance they can race a redeploy. Serialize them in the default suite as well (`fileParallelism`, or a sequence group for those files).
+
 ## Epic 39: Interop Message Forensics (added 2026-10-14)
 
 **Goal:** An integration engineer can find messages by header fields, body content and Search Table values, and can read any message body. Everything that returns body content or body-derived values is governed by a per-profile PHI data policy.
@@ -5639,6 +5655,7 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
   - Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile. `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
+- DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
 
 ### Story 42.2: Bootstrap Downgrade Guard
 
@@ -5731,6 +5748,7 @@ DW-389, D5.
 - **AC 42.7.1** — The publisher is a project-name publisher (for example `iris-mcp`), with "intersystems" kept out of the name. `extensions/iris-mcp-launcher` gets `private: true` for npm (DW-389), after confirming that `vsce package` and `vsce publish` still work.
 - **AC 42.7.2** — The extension launches `npx -y @iris-mcp/<pkg>@1` (from 42.1). It is published to the VS Code Marketplace and to Open VSX through the release workflow, after npm `1.0.0`.
 - **AC 42.7.3** — Install from each store into a clean VS Code and into an Open VSX client (VSCodium or Cursor). The extension starts the servers, and the result is recorded.
+- DW-532: the launcher's full test suite is red on macOS at its baseline: Windows-only path assertions, an `@intersystems-community/intersystems-servermanager` import the extension's `node_modules` lack, and a 60 s timeout in `clientsActivationFlow`. Make it green on every platform before publishing the extension. (ledger; routed by merge_gate 2026-10-16)
 
 ### Story 42.8: Claude Code Plugin and Registry Listings
 

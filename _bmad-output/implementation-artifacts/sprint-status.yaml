@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-16-2026 08:52'
+last_updated: '10-16-2026 08:57'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -505,6 +505,7 @@ development_status:
   38-4-surgical-line-edit-tool: done
   38-5-sql-write-safety: done
   38-6-editing-and-sql-safety-docs-prompt-and-capstone: done
+  38-7-epic-38-burn-down: backlog
   epic-38-retrospective: optional
 
   epic-39: backlog
@@ -551,3 +552,12 @@ development_status:
   43-3-human-confirmation-through-elicitation: backlog
   43-4-sdk-v2-docs-smokes-and-capstone: backlog
   epic-43-retrospective: optional
+action_items:
+  - id: "epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt"
+    epic: 38
+    action: "Decide whether to build a Streamable HTTP MCP transport: confirm a remote-access
+      use case and design authentication, bind address and sessions (AD-23); until
+      then stdio stays the only transport (DW-538)"
+    owner: "user"
+    status: open
+    ref: ""

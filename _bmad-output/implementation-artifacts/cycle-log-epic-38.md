@@ -150,3 +150,8 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T15:56:18Z	Story 38.6	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=780 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-16T15:56:21Z	Story 38.6	committed	sha=dccd690 code_sha=4d2df68 build_sha=7e79ddf submodules= ci=none run=none branch=epic38 pushed=origin/epic38 verified=merge-base amendments=none
 2026-10-16T15:56:21Z	Story 38.6	story_cycle	plan_to_commit_min=114 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-16T15:58:28Z	Epic 38	decision_sheet_recorded	decided=8 to_action_items=1 to_x0=0 routed_to_burndown_story=6 routed_to_next_wave=1 dropped=1 decided_by=orchestrator(Lead-away) decisions=17,18 taken_before_charter=true
+2026-10-16T15:58:28Z	Epic 38	ledger_routed_planned	story=38-7-epic-38-burn-down entries=11 excess=0 by=burndown
+2026-10-16T15:58:28Z	Epic 38	ledger_routed_planned	story=42-1-pre-publish-package-fixes entries=1 excess=0 by=merge_gate dw=DW-560
+2026-10-16T15:58:28Z	Epic 38	ledger_routed_planned	story=42-7-vs-code-extension-publish entries=1 excess=0 by=burndown dw=DW-532
+2026-10-16T15:58:28Z	Epic 38	ledger_burndown_complete	open_before=14 resolved=0 terminal=1 chartered=1 chartered_size=11 overflow=2 reowned=2 to_decision_sheet=8 open_after=13 cap=8 story_max=12 filed_this_epic=38 closed_this_epic=146 drain_ratio=3.84 burndown_story=38-7-epic-38-burn-down note=chartered_despite_under_cap_because_DW-554_HIGH

@@ -2808,6 +2808,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: DW-527 live probe 2026-10-15 IRIS 2026.2 Atelier v8 HSCUSTOM: GET /modified/<ts> -> 405, OPTIONS ALLOW POST,OPTIONS; %Api.Atelier.v1 route /:namespace/modified/:type is POST (type CLS, body [{dbname,dbhash}]); doc.ts:451
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=user-reachable broken filter; fix the route shape or remove modifiedSince with a clear error
 - 2026-10-15T14:26:42Z occurrence=38-0-epic-37-deferred-cleanup
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
 
 ### DW-529: iris_doc_export modifiedSince branch also drops category and type, yet filtersApplied reports them as applied
 - source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2818,22 +2819,26 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: env-promote.ts:869 awaits targetClient.put(putPath,{enc:false,content}) and never reads result.status; 38.0 added shared atelierDocStatusError which can be reused
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=reuse atelierDocStatusError from @iris-mcp/shared
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
 
 ### DW-531: Production-delete state guard (DW-54) pinned only at its predicate/message, not at the ProductionManage handler wiring (no test drives a refusal of a current non-Stopped production through the route)
 - source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-epic
 - evidence: 38.0 review (blind-hunter, verification-gap, intent-alignment); HSCUSTOM has no current non-Stopped production and starting one on the shared instance leaves Ens.Runtime pointing at a deleted production; Interop.cls:122
 - 2026-10-15T13:36:58Z status=escalated owner=burndown by=harvest note=for the decision sheet: an injectable seam (classmethod: status, predicate, message) vs an operator-approved scratch-namespace production
 - 2026-10-15T14:26:42Z occurrence=38-0-epic-37-deferred-cleanup
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-532: VS Code launcher full test suite red on this macOS host at baseline: 5 tests in 3 files + 2 files that cannot load
 - source: _bmad-output/implementation-artifacts/spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: clientsEngine/governanceEngine assert Windows C:\git paths; constants/credentials tests cannot load @intersystems-community/intersystems-servermanager (absent from extension node_modules); clientsActivationFlow 33-3-3 times out at 60s; reproduced with launcher code at HEAD
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
+- 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
 - evidence: Interop.cls ProductionManage delete: %Dictionary.ClassDefinition %ExistsId(tName) then %DeleteId(tName), no Ens.Production check; iris_production_manage:delete is a frozen-baseline default-enabled write, so it also bypasses an operator who disabled iris_doc_delete
 - 2026-10-15T14:26:53Z status=escalated owner=burndown by=cr note=new refusal on an existing destructive route needs an AD-15/AD-33 Lead decision plus bootstrap regen; pre-existing, re-touched here
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-534: dev, data and all prepublish-gate.mjs never apply the DW-388 target resolution: an unset IRIS variable still defaults silently in their armed gate runs
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2859,11 +2864,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: G48/S-2: Story 38.1 makes every non-stdio transport a startup configuration error; AD-23 and the spine Deferred list allow an HTTP transport only with an auth, bind-address and session design and a confirmed remote-access use case
 - 2026-10-15T15:01:25Z status=decision-pending owner=burndown by=implement note=human=decide the auth, bind-address and session design (and the use case) for Streamable HTTP; AD-23
+- 2026-10-16T15:58:09Z status=dropped by=merge_gate note=action_item:epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt (human=Project Lead decides the remote-access use case and auth design)
 
 ### DW-539: VS Code launcher passes an ambient MCP_TRANSPORT through to the stdio servers it spawns: after Story 38.1 any non-stdio value makes every launched server exit 1
 - source: spec-38-1-reject-the-unimplemented-http-transport.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: extensions/iris-mcp-launcher/src/env.ts LAUNCHER_OWNED_VARS (ambient vars nulled because McpStdioServerDefinition.env is additive over the extension host env) omits MCP_TRANSPORT; resolveTransport now rejects every non-stdio value
 - 2026-10-15T15:52:02Z status=escalated owner=burndown by=cr note=launcher only spawns stdio, so nulling MCP_TRANSPORT loses nothing; rec: add it to LAUNCHER_OWNED_VARS (suite red here, DW-532)
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-540: iris_doc_put without ignoreConflict gets HTTP 409 for every EXISTING document (it can only create); its ignoreConflict description is wrong
 - source: _bmad-output/implementation-artifacts/spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: in-epic
@@ -2882,6 +2889,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-2-line-range-document-read.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Live 2026-10-15 default/HSCUSTOM: iris_doc_get name=ExecuteMCPv2.Utils (no extension) -> {content:"",status:"ERROR #16006 ... name is invalid"}, no isError; doc.ts:266-271 never reads result.status
 - 2026-10-15T17:11:58Z status=escalated owner=burndown by=cr note=AD-15: isError on a result that is a success today needs a Lead decision; reuse atelierDocStatusError as M6 does
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-543: Test env harness makeEnvHarness is copied verbatim into 43 test files (doc-get-range-framework.test.ts copies loc-e2e.test.ts:140-173), so an env-isolation gap fixed in one copy stays in the others
 - source: spec-38-2-line-range-document-read.md | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2921,6 +2929,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: load.ts:449-456 sends PUT with no If-None-Match when ignoreConflict is false; %Api.Atelier.v2 PutDoc answers an unversioned PUT to an existing doc with 409 (38.3 probe record, DW-540); load.ts:348 says 'If true (default), overwrite server copies even when newer'; load.test.ts:314-326 fakes a resolving put
 - 2026-10-15T19:43:42Z status=escalated owner=burndown by=cr note=38.3 Never list excludes load; fix mirrors DW-540 (save with the 409 ts), a behavior change like decision #7
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-550: Three iris-mcp-all repo-scan tests carry their own directory walker (story-38-0-qa-doc-claims, and new in 38.3 document-write-paths and story-38-3-qa-doc-claims) with different skip sets and path forms
 - source: spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: low | footprint: in-story
@@ -2950,6 +2959,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: lead smoke Story 38.4 (2026-10-15) | severity: high | fix-risk: low | footprint: in-epic
 - evidence: built dev dist 2026-10-15: IRIS_GOVERNANCE={"iris_doc_put":false} -> iris_server_profiles iris_doc_put:true configSource default, stderr no WARN; documented shape is {"global":{...}} or {"<profile>":{...}}; a top-level key that is not a known profile, or a non-object value, should fail fast like other malformed IRIS_GOVERNANCE (M1/F-3)
 - 2026-10-15T22:05:32Z status=routed owner=burndown by=lead note=smoke-found (pre-existing, Epic 32 parser); Epic 38 burn-down story must fix: reject a non-object layer value and an unknown top-level profile name at startup, with the documented shape in the message
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
 
 ### DW-555: iris_execute_tests hints, the deploy-and-test-class prompt and its generated skill still point models at iris_sql_execute for read-only queries, which the read-only preset blocks; they should name iris_sql_query
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
@@ -2961,6 +2971,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: doc-edit-live-gate.test.ts and doc-put-storage-guard-live-gate.test.ts each keep a final describe(cleanup) whose it() calls removeFixtures(); under --sequence.shuffle or a test added after it every later test loses its fixture class. Story 38.5 review moved its own gates' assertions into afterAll.
 - 2026-10-16T12:35:29Z status=routed owner=burndown by=cr note=fix: move the nothing-left assertions into afterAll and delete the it(), as Story 38.5 did; re-run each armed gate
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
 
 ### DW-557: The 38.5 live gates copy the kill-every-ExecuteMCPv-global-containing-the-stem cleanup loop from the 38.3 and 38.4 gates instead of a shared helper in live-doc-helpers.ts
 - source: spec-38-5-sql-write-safety.md | severity: low | fix-risk: low | footprint: in-epic
@@ -2971,6 +2982,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-5-sql-write-safety.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: Live 2026-10-16 default/HSCUSTOM: a persistent class with DEFAULTGLOBAL ^CacheTemp.Cr385R2 (dest mgr/iristemp), 3 rows; DELETE with maxRowsAffected 0 gave overCap 'Its row changes were undone', then COUNT(*) was 0. A GTT is unobservable: its data is ^|| and the webapp clears process-private globals between requests (same job, ^|| gone).
 - 2026-10-16T13:51:09Z status=routed owner=burndown by=cr note=lead item (c): amend the CAP rolled-back text to hedge IRISTEMP storage (Rule 5) plus a docs line; storage detection is high-risk
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=burndown note=chartered into the Epic 38 burn-down story
 
 ### DW-559: Prepublish live gates never assert that the deployed ExecuteMCPv2 BOOTSTRAP_VERSION equals the shipped embed, so a gate can pass against a stale (older or newer) deployment of the handlers it exercises
 - source: _bmad-output/implementation-artifacts/spec-38-5-sql-write-safety.md | severity: med | fix-risk: low | footprint: in-epic
@@ -2982,6 +2994,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: spine AD-4 Known divergences + Deferred (the Epic 38 gate routes them to one ledger entry with an owner); correcting a hint is an AD-15 sanctioned change (iris_execute_tests is already DW-498)
 - 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
+- 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -2992,6 +3005,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: vitest.config.ts sets no fileParallelism (untouched since Epic 25); only prepublish-gate.mjs runs --no-file-parallelism; bootstrap.ts has no lock; QA's serial full run was green (428)
 - 2026-10-16T15:51:29Z status=escalated owner=burndown by=cr note=decide: fileParallelism false (or a serial group for the gate files) in iris-mcp-all vitest.config.ts; 1st stale run flakes
+- 2026-10-16T15:58:09Z status=routed owner=38-7-epic-38-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 17: fix now in the Epic 38 burn-down story (sanctioned AD-15 change where behavior moves)
 
 ### DW-563: iris_doc_edit description says STALE_CONTENT mismatches[].current can be passed back as expected unchanged without the README/prompt condition that the change must still apply to that text
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-story
