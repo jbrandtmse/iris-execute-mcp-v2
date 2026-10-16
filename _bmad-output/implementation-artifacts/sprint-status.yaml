@@ -509,7 +509,7 @@ development_status:
   epic-38-retrospective: optional
 
   epic-39: in-progress
-  39-0-epic-38-deferred-cleanup: ready-for-dev
+  39-0-epic-38-deferred-cleanup: in-progress
   39-1-message-header-search: backlog
   39-2-phi-data-policy: backlog
   39-3-message-body-content-search: backlog
