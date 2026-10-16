@@ -5237,6 +5237,14 @@ Story 38.7 is the Epic 38 burn-down story, chartered at the epic's burn-down gat
 - G38 (HL7 schema browsing; probe first, P2);
 - G36 (same-server drift).
 
+### Story 39.0: Epic 38 Deferred Cleanup
+
+This is the `/epic-cycle` retro-review gate story, inserted on 2026-10-16 during the unattended run. Epic 38 has no retrospective; the Lead directed a skip. Epic 38's burn-down story (38.7) left three ledger entries for this gate, and this story fixes all three. Every other non-terminal entry is already owned by a named later story. The one open action item, the DW-538 HTTP-transport decision, belongs to the Project Lead and is not in scope.
+
+- DW-565: an unknown governance key inside a layer, such as `{"global":{"iris_doc_putt":false}}`, is accepted silently and does nothing, so a typo leaves a write tool enabled. One governance document is shared by all five servers, so a server cannot reject a key it doesn't know. Probe first, then give operators a way to catch it: for example, a key that matches no tool or action key of the whole suite is reported (a `check` in the governance CLI, a startup warning, or both). The design and evidence are recorded. Valid documents must behave identically.
+- DW-543: the test env harness `makeEnvHarness` is copied verbatim into 43 test files, so an env-isolation gap fixed in one copy stays open in the others (38.2 and 38.7 each fixed one copy). Promote one harness that scrubs every startup-affecting variable (`IRIS_TOOLS_*`, `IRIS_GOVERNANCE*`, `IRIS_SERVER_MANAGER*`, `IRIS_SM_*`, `IRIS_CREDENTIAL_HELPER`, `IRIS_SQL_*`, `LOG_LEVEL` as needed). Move the copies onto it, never publishing test helpers (DW-506). Every suite stays green with those variables set to hostile values in the environment.
+- DW-567: the `iris_doc_list` `type` description offers `'cls'` as an example for category CLS, but Atelier answers `GET docnames/CLS/cls` with HTTP 400 (CLS accepts only `*`). Correct the example and pin it.
+
 ### Story 39.1: Message Header Search
 
 G32. New read tool `iris_message_search`, action `headers`.

@@ -2906,6 +2906,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-15T17:11:58Z status=wontfix-accepted owner=38-2-line-range-document-read by=cr note=reopen_if=a second test result is found to depend on an env var that its makeEnvHarness copy leaves set
 - 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
 - 2026-10-16T18:57:09Z status=routed owner=burndown by=lead note=reopen_if fired at the 38.7 review (governance-enforcement env harness read ambient IRIS_GOVERNANCE_FILE/PRESET/SERVER_MANAGER); for the Epic 39 X.0 gate: one shared startup-env scrub for test harnesses
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
 
 ### DW-544: iris_doc_load uploads each file with ignoreConflict on by default and has no Storage check, so a file whose class text has no Storage block replaces the stored class and drops its Storage definitions
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3040,6 +3041,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 38.7 plan probe 2026-10-16; one governance document is shared by all five servers, so each server alone cannot tell another server's key from a typo -- a fix needs the cross-server key universe (iris-mcp-governance universe / deriveKeysForTool)
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=overflow from the Epic 38 burn-down story: for the Epic 39 X.0 gate (warn on a key matching no tool in the suite universe)
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
 
 ### DW-566: IRIS_GOVERNANCE / IRIS_GOVERNANCE_FILE JSON-parse errors embed V8's message, which can quote a snippet of the input, although governance.ts:106 and :406 say contents are never echoed
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3050,6 +3052,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 38.7 plan probe 2026-10-16, IRIS 2026.2 Atelier v8
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=two-way-door doc fix (<=5 lines + a pin); overflow for the Epic 39 X.0 gate
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
 
 ### DW-568: iris_production_manage delete passes its production-class check for a library production class (IsProductionClass of Ens.Production answers 1), so only a read-only ENSLIB stops a delete of a built-in base class
 - source: spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: med | footprint: in-story
