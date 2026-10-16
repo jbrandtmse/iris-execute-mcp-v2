@@ -17,3 +17,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-16T22:40:17Z	Story 39.0	story_created	spawn_at=2026-10-16T19:09:55Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-39-0-epic-38-deferred-cleanup.md build_status=ready-for-dev epic_context=reused orchestrator_decisions=20 cycle_iteration=1
 2026-10-16T22:40:17Z	Epic 39	spine_updated	ad=AD-8 reason=clarification by=lead story=39-0-epic-38-deferred-cleanup lint=ok note=keys_inside_layer_decision20
 2026-10-16T22:40:17Z	Story 39.0	spec_validated	service_introducing=false integration_ac=present decision_dependency=none orchestrator_decisions=20 owned_ledger=DW-565,DW-543,DW-567 addressed=3 declined=0 mutates_shared_runtime=false model=claude-opus-5-5
+2026-10-16T22:40:19Z	Story 39.0	stage_spawned	stage=implement spawn_at=2026-10-16T22:40:19Z model=claude-sonnet-5-5 agent_name=39-0-epic-38-deferred-cleanup-implement-1 cycle_iteration=1
