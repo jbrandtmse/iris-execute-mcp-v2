@@ -92,6 +92,10 @@ const gateTestFiles = [
   // `iris_sql_execute` / `iris_sql_query` safety against the real /dev/sql/execute route: writes only the disposable
   // ExecuteMCPv2.Temp.QaStory385Gate.cls and ...QaStory385GateAudit.cls (persistent, compiled) documents, their data and globals.
   "src/__tests__/sql-safety-live-gate.test.ts",
+  // Story 38.7 QA: `modifiedSince` refused with no request on the wire, `iris_doc_load` ignoreConflict:false against IRIS's own 409,
+  // and `iris_env_promote` execute on a target PUT IRIS answers with HTTP 200 and a status: writes only the disposable
+  // ExecuteMCPv2.Temp.QaStory387Mod, ...LoadA/B/C and ...PromA/B (the last two compiled) documents.
+  "src/__tests__/story-38-7-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

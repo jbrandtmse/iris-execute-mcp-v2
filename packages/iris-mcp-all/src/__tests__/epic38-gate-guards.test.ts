@@ -39,6 +39,7 @@ const GATES_WITH_VERSION_CHECK = [
   "epic38-capstone-gate.test.ts",
   "story-38-4-qa-doc-edit-wire-gate.test.ts",
   "story-38-5-qa-sql-wire-gate.test.ts",
+  "story-38-7-qa-wire-gate.test.ts",
 ];
 
 /** The vitest entry point this package's tests run under. */

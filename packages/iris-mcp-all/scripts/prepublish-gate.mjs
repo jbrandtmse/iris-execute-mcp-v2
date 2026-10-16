@@ -125,6 +125,13 @@ const gateTestFiles = [
   // The Epic 38 capstone: ranged reads, guarded edits, the Storage guard and SQL safety over real stdio JSON-RPC against the BUILT iris-dev-mcp dist:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory386CapEdit.cls and ...QaStory386CapRows.cls (persistent, compiled, six rows) and its table and globals.
   "src/__tests__/epic38-capstone-gate.test.ts",
+  // Story 38.7 QA, DW-554: the governance document shape on the BUILT iris-dev-mcp dist against a local listener that records requests
+  // (a rejected key stops startup before any request, valid documents and an unknown profile name still start); no IRIS instance is contacted.
+  "src/__tests__/story-38-7-qa-governance-process.test.ts",
+  // Story 38.7 QA, DW-533 and DW-528: `iris_production_manage` delete of a non-production class, the `modifiedSince` refusal, a no-range
+  // `iris_doc_get` soft error and `ignoreConflict: false` over real stdio JSON-RPC against the BUILT iris-interop-mcp and iris-dev-mcp dists:
+  // writes only the disposable ExecuteMCPv2.Temp.QaStory387WirePlain.cls (compiled), ...Draft.cls (never compiled) and ...Loaded.cls documents.
+  "src/__tests__/story-38-7-qa-wire-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

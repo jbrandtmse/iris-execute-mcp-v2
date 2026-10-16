@@ -120,7 +120,7 @@ describe("Story 38.7: the root README states the governance document shape and t
     expect(flat).toContain("fails startup, naming the variable, the key and the documented shape, and never echoing the value");
     expect(flat).toContain("a name that starts with `iris_` (in any letter case), or a key with a boolean or object value");
     expect(flat).toContain(
-      "Plain metadata keys with a string, number or null value, such as `comment` and `version`, are ignored.",
+      "Plain metadata keys with a string, number, null or array value, such as `comment` and `version`, are ignored.",
     );
     expect(flat).toContain(
       "A profile name under `profiles` that is not a configured profile does not fail startup: it logs one `[WARN]`",

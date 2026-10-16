@@ -16,8 +16,8 @@ of the architecture spine); every other existing input keeps its result byte for
   silently ignored, so the policy the operator wrote did not apply. The server now exits 1 before any IRIS traffic, with
   an error that names the variable (and the file path), the key and the documented shape, and never echoes the value. A
   key is rejected when its name starts with `iris_` (in any letter case) or its value is a boolean or an object. Plain
-  metadata keys with a string, number or null value, such as `comment` and `version`, stay valid and are ignored. The
-  `iris-mcp-governance` commands `set`, `unset` and `validate` fail with the same message and leave the file as it was.
+  metadata keys with a string, number, null or array value, such as `comment` and `version`, stay valid and are ignored.
+  The `iris-mcp-governance` commands `set`, `unset` and `validate` fail with the same message and leave the file as it was.
   A profile name under `profiles` that is not a configured profile does not fail startup: it logs one `[WARN]` per name,
   and its overrides apply to no connection.
 - **`iris_production_manage` `delete` refuses a class that is not a production (DW-533).** It used to delete any class

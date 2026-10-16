@@ -192,6 +192,9 @@ function makeEnvHarness() {
     IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
     IRIS_PROFILES: process.env.IRIS_PROFILES,
     IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
+    IRIS_GOVERNANCE_FILE: process.env.IRIS_GOVERNANCE_FILE,
+    IRIS_GOVERNANCE_PRESET: process.env.IRIS_GOVERNANCE_PRESET,
+    IRIS_SERVER_MANAGER: process.env.IRIS_SERVER_MANAGER,
   };
 
   function setup(): void {
@@ -207,6 +210,9 @@ function makeEnvHarness() {
     // Clear inherited governance/profiles; each test sets what it needs.
     delete process.env.IRIS_GOVERNANCE;
     delete process.env.IRIS_PROFILES;
+    delete process.env.IRIS_GOVERNANCE_FILE;
+    delete process.env.IRIS_GOVERNANCE_PRESET;
+    delete process.env.IRIS_SERVER_MANAGER;
   }
 
   function teardown(): void {

@@ -241,6 +241,7 @@ describe("loadGovernanceFile (AC 32.0.1)", () => {
     ["an object-valued `globals` typo beside a valid `global`", { globals: { iris_doc_put: false }, global: { iris_a: true } }, "globals"],
     ["an upper-case flat tool key", { IRIS_DOC_PUT: false }, "IRIS_DOC_PUT"],
     ["an iris_-prefixed key with a string value", { iris_doc_put: "SECRET-VALUE-123" }, "iris_doc_put"],
+    ["an upper-case iris_ key with a string value", { IRIS_DOC_PUT: "SECRET-VALUE-123" }, "IRIS_DOC_PUT"],
   ])("a file with %s fails fast naming the variable, the path and the documented shape, never echoing a value", (_label, document, key) => {
     const p = writeGovernanceFile("unrecognized-key.json", JSON.stringify(document));
     const message = thrownMessage(() => loadGovernanceFile({ IRIS_GOVERNANCE_FILE: p }));

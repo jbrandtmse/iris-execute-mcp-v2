@@ -5363,6 +5363,7 @@ G35. New read tool `iris_message_body`.
   5. the body read under `allow` shows the value.
 
   It is proven red by disabling redaction (Rule #59).
+- DW-561: the Epic 38 live gates (the 38.4, 38.5 and 38.7 wire gates and the Epic 38 capstone) each carry their own fixture helpers (`putDoc`, `compileDoc`, `fixtureDocuments`, `removeFixtures`, `governanceReport`, `startStub`, and others). Its reopen condition has fired. This capstone would be the fifth copy, so promote one set into `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts` and move the existing gates onto it. (ledger; routed by the lead 2026-10-16)
 
 ## Epic 40: Developer Test Depth (added 2026-10-14)
 

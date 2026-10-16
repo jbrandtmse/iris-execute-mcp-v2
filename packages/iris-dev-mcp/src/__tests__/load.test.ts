@@ -418,6 +418,22 @@ describe("iris_doc_load", () => {
       });
     });
 
+    it("a failure other than a 409 on the version-checked save keeps that error's text, with no code and no third PUT", async () => {
+      mockHttp.put
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"])))
+        .mockRejectedValueOnce(new IrisApiError(500, [], PUT_PATH, "IRIS returned HTTP 500."));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(2);
+      expect(result.structuredContent).toEqual({
+        total: 1,
+        uploaded: 0,
+        failed: 1,
+        failures: [{ file: "c:/src/Test.cls", docName: "Test.cls", error: "IRIS returned HTTP 500." }],
+      });
+    });
+
     it("a failure other than a 409 on the first PUT is not retried", async () => {
       mockHttp.put.mockRejectedValueOnce(new IrisApiError(500, [], PUT_PATH, "IRIS returned HTTP 500."));
 

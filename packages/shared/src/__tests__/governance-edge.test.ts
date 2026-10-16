@@ -150,6 +150,8 @@ describe("parseGovernanceConfig — additional edge cases", () => {
     ["an object-valued `globals` typo beside a valid `global`", { globals: { iris_doc_put: false }, global: { iris_a: true } }, "globals"],
     ["an upper-case flat tool key", { IRIS_DOC_PUT: false }, "IRIS_DOC_PUT"],
     ["an iris_-prefixed key with a string value", { iris_doc_put: "false" }, "iris_doc_put"],
+    ["an upper-case iris_ key with a string value", { IRIS_DOC_PUT: "false" }, "IRIS_DOC_PUT"],
+    ["a mixed-case iris_ key with a number value", { Iris_Doc_Put: 0 }, "Iris_Doc_Put"],
     ["a plain key with a boolean value", { strict: true }, "strict"],
     ["a plain key with an object value", { notAProfile: { x: true } }, "notAProfile"],
   ])("rejects %s with the documented shape, naming the key", (_label, document, key) => {

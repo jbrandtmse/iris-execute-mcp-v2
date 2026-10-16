@@ -545,16 +545,18 @@ describe("iris_doc_list", () => {
     expect(result.structuredContent).toBeUndefined();
   });
 
-  it("an empty or absent modifiedSince is the unchanged docnames request", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
+  it("an empty or absent modifiedSince is the unchanged docnames request and result", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [{ name: "MyApp.Thing.cls", ts: "2026-04-05 12:00:00.000" }] }));
 
-    await docListTool.handler({ modifiedSince: "", category: "CLS", generated: true }, ctx);
-    await docListTool.handler({ category: "CLS", generated: true }, ctx);
+    const withEmpty = await docListTool.handler({ modifiedSince: "", category: "CLS", generated: true }, ctx);
+    const without = await docListTool.handler({ category: "CLS", generated: true }, ctx);
 
     expect(mockHttp.get.mock.calls).toEqual([
       ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
       ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
     ]);
+    expect(withEmpty).toStrictEqual(without);
+    expect(without.structuredContent).toEqual({ items: [{ name: "MyApp.Thing.cls", ts: "2026-04-05 12:00:00.000" }] });
   });
 
   it("the modifiedSince description says the parameter is not supported and what to do instead", () => {

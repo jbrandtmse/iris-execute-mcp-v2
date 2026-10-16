@@ -225,6 +225,8 @@ export interface WireSessionOptions {
   target: IrisTarget;
   /** The client name the SDK reports in the handshake. */
   clientName: string;
+  /** Receives each chunk the server writes to stderr (its log); omitted, the chunks are discarded. */
+  onStderr?: (chunk: string) => void;
 }
 
 /**
@@ -257,7 +259,9 @@ export async function openWireSession(
     stderr: "pipe",
   });
   // The pipe must be drained, or a chatty server blocks on a full stderr buffer.
-  (transport as { stderr?: Readable | null }).stderr?.on("data", () => {});
+  (transport as { stderr?: Readable | null }).stderr?.on("data", (chunk: Buffer | string) => {
+    options.onStderr?.(chunk.toString());
+  });
 
   const namespace = options.target.namespace;
   const client = new Client({ name: options.clientName, version: "0.0.0" });

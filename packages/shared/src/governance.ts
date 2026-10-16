@@ -331,7 +331,7 @@ const GOVERNANCE_SHAPE = '{"global":{"<tool|tool:action>":true|false},"profiles"
 /**
  * Whether a top-level key beside `global` and `profiles` looks like governance that
  * would be silently ignored: a name starting with `iris_` (any case), or a boolean or
- * object value. Scalar metadata (a string, number or null, such as `comment` or
+ * object value. Metadata (a string, number, null or array value, such as `comment` or
  * `version`) is not governance-shaped and stays accepted (Story 32.4).
  */
 function looksLikeGovernance(key: string, value: unknown): boolean {
