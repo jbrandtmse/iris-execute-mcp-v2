@@ -504,7 +504,7 @@ development_status:
   38-3-storage-block-drop-guard: done
   38-4-surgical-line-edit-tool: done
   38-5-sql-write-safety: done
-  38-6-editing-and-sql-safety-docs-prompt-and-capstone: ready-for-dev
+  38-6-editing-and-sql-safety-docs-prompt-and-capstone: in-progress
   epic-38-retrospective: optional
 
   epic-39: backlog
