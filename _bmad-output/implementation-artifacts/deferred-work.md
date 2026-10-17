@@ -3202,3 +3202,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: DW-572 evidence: resendFiltered COUNT shares the WHERE; decision 30: resendFiltered stays unchanged; MessageResend.cls not in the 39.7 diff; nothing carries the residual once DW-572 resolves
 - 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: HEADERHINT in resendFiltered (its pins move) or a tuning note; filtered resend is a default-disabled write
 - 2026-10-17T21:41:21Z status=wontfix-accepted by=merge_gate note=decided=orchestrator(Lead-away) decision 37: reopen_if=an operator enables iris_message_resend resendFiltered and a dry run on a large Ens.MessageHeader exceeds the Web Gateway timeout, or a measured EXPLAIN on a tuned table shows the hint changes no results -- then add the same index hint to resendFiltered with its byte-identity pin re-captured
+
+### DW-589: iris_alerts_manage reset builds clearedAt from local $Horolog and appends a literal Z, so on a non-zero time zone it labels local time as UTC (the DW-584 defect class)
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.0 implement review 2026-10-17: Monitor.cls ~960 $Translate($ZDateTime($Horolog,3,1)," ","T")_"Z"; instance runs at $ZTimeZone 0 so invisible live; pre-existing
+- 2026-10-17T23:04:40Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: use $ZTimeStamp (as UtcCutoff does) and pin under a per-process $ZTimeZone
+
+### DW-590: Under block, the recover-stuck-production prompt step 3 calls iris_production_logs with no report-the-reason, never-read-it-another-way rule for withheld Event Log text (the rule DW-587 added to trace-message-flow)
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.0 implement review 2026-10-17: recoverStuckProduction.ts:54 says nothing about textPolicy; decision 36 scoped DW-587 to trace-message-flow; a prompt-text change is a sanctioned AD-15 change
+- 2026-10-17T23:04:40Z status=escalated owner=burndown by=harvest note=decide at the Epic 40 burn-down decision sheet (same shape as decision 36)
+
+### DW-591: gen:bootstrap rewrites bootstrap-classes.ts even when its content is unchanged, so an idempotence re-run after a build leaves the shared dist older than its source and every armed live gate skips or fails as stale until shared is rebuilt
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.0 implement 2026-10-17; scripts/gen-bootstrap.mjs:180 writeFileSync unconditional; staleDistReason/checkDistFresh compare mtimes
+- 2026-10-17T23:04:41Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: write only when content differs, and pin it
