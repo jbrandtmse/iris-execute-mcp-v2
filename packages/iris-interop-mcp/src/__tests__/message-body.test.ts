@@ -495,6 +495,19 @@ describe("iris_message_body", () => {
       expect(items[0]).toMatchObject({ bodyKind: "other", bodyPolicy: { outcome: "blocked" } });
     });
 
+    it("an unknown or missing bodyKind is withheld and counted under redact and block even when bodyAvailable is false", () => {
+      const unknown = found(1, "Some.Body", "1", "futureKind", false);
+      const missingKind = { id: 2, found: true, bodyClassName: "Some.Body", bodyId: "1", bodyAvailable: false } as BodyReaderRawItem;
+      for (const policy of ["redact", "block"] as const) {
+        const { items, summary } = applyBodyReaderPolicy([unknown, missingKind], policy, 10000);
+        const reason = policy === "block" ? BLOCK_REASONS.blockPolicy() : BLOCK_REASONS.unredactableKind("other");
+        for (const item of items) {
+          expect(item, policy).toMatchObject({ bodyKind: "other", bodyPolicy: { outcome: "blocked", reason }, notShown: reason });
+        }
+        expect(summary, policy).toEqual({ policy, redacted: 0, blocked: 2 });
+      }
+    });
+
     it("a version-skewed reply with text on a stream or a literal bodyId is dropped under redact and block", () => {
       const skewed = [
         found(3, "%Stream.GlobalCharacter", "1", "stream", true, { bodyText: "SYNTHPHI-SKEW-STREAM", bodyTextComplete: true }),
@@ -511,6 +524,28 @@ describe("iris_message_body", () => {
       // Under block, even HL7 text that IRIS should not have sent is dropped.
       const { items: blockedItems } = applyBodyReaderPolicy(skewed, "block", 10000);
       expect(JSON.stringify(blockedItems)).not.toContain("SYNTHPHI");
+    });
+
+    it("a literal header with an empty body ID has no body: none with its reason, never withheld or counted, under every policy", () => {
+      // The route sends bodyId "" for it in every mode, and under all an empty text with it.
+      const noBody = found(7, "", "", "literal", false);
+      const noBodyAll = found(7, "", "", "literal", false, { bodyText: "", bodyTextComplete: true });
+      for (const [policy, raw] of [["block", noBody], ["redact", noBody], ["allow", noBodyAll]] as const) {
+        const { items, summary } = applyBodyReaderPolicy([raw], policy, 10000);
+        expect(items[0], policy).toEqual({
+          id: 7,
+          found: true,
+          bodyClassName: "",
+          bodyId: "",
+          bodyKind: "literal",
+          bodyPolicy: { outcome: "none" },
+          notShown: "The message has no body: its header names no body class and no body ID.",
+        });
+        expect(summary, policy).toEqual({ policy, redacted: 0, blocked: 0 });
+      }
+      // A literal header that holds a value is still its own body: withheld under redact and block.
+      const { items: valued } = applyBodyReaderPolicy([found(7, "", undefined, "literal", false)], "redact", 10000);
+      expect(valued[0]).toMatchObject({ bodyPolicy: { outcome: "blocked", reason: BLOCK_REASONS.unredactableKind("literal") } });
     });
 
     it("only the ten fields of an item are read: a field a later IRIS adds never reaches the result", () => {
@@ -554,15 +589,19 @@ describe("iris_message_body", () => {
     it("tooLarge and unreadable have their own reasons; a text IRIS reports as incomplete is unreadable, never redacted", async () => {
       const incomplete = found(3, "EnsLib.HL7.Message", "3", "hl7v2", true, { bodyText: ADT_ER7, bodyTextComplete: false });
       const neither = found(4, "EnsLib.HL7.Message", "4", "hl7v2", true);
+      // A text with no bodyTextComplete at all (a version-skewed reply) is not known to be whole: unreadable too.
+      const unstated = found(5, "EnsLib.HL7.Message", "5", "hl7v2", true, { bodyText: ADT_ER7 });
       const result = await read("redact", [
         found(1, "EnsLib.HL7.Message", "1", "hl7v2", true, { bodyTextOmitted: "tooLarge" }),
         found(2, "EnsLib.HL7.Message", "2", "hl7v2", true, { bodyTextOmitted: "unreadable" }),
         incomplete,
         neither,
+        unstated,
       ]);
       const reasons = structured(result).items.map((item) => (item.bodyPolicy as { reason: string }).reason);
       expect(reasons).toEqual([
         BLOCK_REASONS.hl7TooLarge(),
+        BLOCK_REASONS.hl7Unreadable(),
         BLOCK_REASONS.hl7Unreadable(),
         BLOCK_REASONS.hl7Unreadable(),
         BLOCK_REASONS.hl7Unreadable(),
@@ -773,6 +812,18 @@ describe("iris_message_body", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text.startsWith("Error reading message bodies with iris_message_body: ")).toBe(true);
       expect(result.content[0]?.text).toContain("Parameter 'bodyRead' must be kind, hl7 or all");
+      // The policy that applied, with no counts, so the audit entry records it rather than the profile's.
+      expect(result.structuredContent).toEqual({ dataPolicy: { policy: "redact", redacted: 0, blocked: 0 } });
+    });
+
+    it("an IrisApiError under a tightened or clamped policy reports the policy that applied", async () => {
+      const error = (): IrisApiError => new IrisApiError(500, [{ error: "boom" }], BODY_URL, "boom");
+      mockHttp.post.mockRejectedValueOnce(error());
+      const tightened = await messageBodyTool.handler({ headerIds: [1], dataPolicy: "block" }, ctxWith("allow"));
+      expect(tightened.structuredContent).toEqual({ dataPolicy: { policy: "block", redacted: 0, blocked: 0 } });
+      mockHttp.post.mockRejectedValueOnce(error());
+      const clamped = await messageBodyTool.handler({ headerIds: [1], dataPolicy: "allow" }, ctxWith("redact"));
+      expect(clamped.structuredContent).toEqual({ dataPolicy: { policy: "redact", redacted: 0, blocked: 0 }, dataPolicyClamped: true });
     });
 
     it("an error that is not an IrisApiError propagates to the framework", async () => {

@@ -15,38 +15,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServerBase } from "@iris-mcp/shared";
-import { callTool, makeEnvHarness, stageDefaultStartup } from "@iris-mcp/shared/test-helpers";
+import { auditLines, callTool, effectivePolicy, makeEnvHarness, stageDefaultStartup } from "@iris-mcp/shared/test-helpers";
 import { messageBodyTool } from "../tools/message-body.js";
 
 const KEY = "iris_message_body";
 
 function makeServer(): McpServerBase {
   return new McpServerBase({ name: "@iris-mcp/interop", version: "0.0.0", tools: [messageBodyTool], needsCustomRest: true });
-}
-
-/** The effective policy `iris_server_profiles` reports for the default profile. */
-async function effectivePolicy(server: McpServerBase): Promise<Record<string, boolean>> {
-  const result = await callTool(server, "iris_server_profiles", {});
-  return (result.structuredContent as { governance: { policy: Record<string, boolean> } }).governance.policy;
-}
-
-/** Poll (bounded) until the audit file has at least `minLines` non-empty lines. */
-async function auditLines(filePath: string, minLines: number): Promise<Array<Record<string, unknown>>> {
-  const deadline = Date.now() + 3000;
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    }
-    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 /** The route's answer for two headers: an HL7 v2 body (with its text) and a stream body. The live route's shape. */
@@ -167,12 +146,15 @@ describe("iris_message_body: the audit trail of the real handler (AD-19)", () =>
   afterEach(env.teardown);
 
   /** Start a real server, answer the route, make the call, and return the result, the audit entry and the raw log. */
-  async function auditedCall(policy: string | undefined, args: Record<string, unknown> = {}) {
+  async function auditedCall(
+    policy: string | undefined,
+    args: Record<string, unknown> = {},
+    reply: () => Response = bodyResponse,
+  ) {
     const dir = mkdtempSync(join(tmpdir(), "iris-message-body-audit-"));
     const auditPath = join(dir, "audit.log");
     process.env.IRIS_AUDIT_LOG = auditPath;
     process.env.IRIS_AUDIT_LOG_PARAMS = "true";
-    process.env.LOG_LEVEL = "DEBUG";
     if (policy !== undefined) process.env.IRIS_DATA_POLICY = policy;
     const logged: string[] = [];
     const spy = vi.spyOn(console, "error").mockImplementation((...parts: unknown[]) => {
@@ -183,7 +165,7 @@ describe("iris_message_body: the audit trail of the real handler (AD-19)", () =>
       const server = makeServer();
       await server.start("stdio");
       env.fetchMock.mockImplementation(async (input: unknown) =>
-        String(input).endsWith("/interop/message/body") ? bodyResponse() : new Response(null, { status: 200 }),
+        String(input).endsWith("/interop/message/body") ? reply() : new Response(null, { status: 200 }),
       );
       const result = await callTool(server, KEY, { headerIds: [1, 3], ...args });
       const entries = await auditLines(auditPath, 2);
@@ -193,7 +175,6 @@ describe("iris_message_body: the audit trail of the real handler (AD-19)", () =>
       spy.mockRestore();
       delete process.env.IRIS_AUDIT_LOG;
       delete process.env.IRIS_AUDIT_LOG_PARAMS;
-      delete process.env.LOG_LEVEL;
       delete process.env.IRIS_DATA_POLICY;
       rmSync(dir, { recursive: true, force: true });
     }
@@ -207,6 +188,8 @@ describe("iris_message_body: the audit trail of the real handler (AD-19)", () =>
     expect(entry).toMatchObject({ tool: KEY, outcome: "ok", dataPolicy: { policy: "redact", redacted: 1, blocked: 1 } });
     expect((entry.params as Record<string, unknown>).headerIds).toEqual([1, 3]);
     expect(raw).not.toContain("SYNTHPHI");
+    // The log is written at the level the logger was created with when first imported (DEBUG unless the
+    // shell's LOG_LEVEL says otherwise); the live gate's spawned server is the proof at an explicit DEBUG.
     expect(log).not.toContain("SYNTHPHI");
     expect(JSON.stringify(result)).not.toContain("SYNTHPHI");
   });
@@ -235,5 +218,19 @@ describe("iris_message_body: the audit trail of the real handler (AD-19)", () =>
 
     expect(result.structuredContent.dataPolicy).toEqual({ policy: "redact", redacted: 1, blocked: 1 });
     expect(entry).toMatchObject({ dataPolicy: { policy: "redact", redacted: 1, blocked: 1 } });
+  });
+
+  it("an error result records the tightened policy too, not the profile's", async () => {
+    // The route's envelope for a namespace that does not exist: an Atelier error, which the client throws.
+    const routeError = (): Response =>
+      new Response(
+        JSON.stringify({ status: { errors: [{ error: "ERROR #5002: ObjectScript error: <NAMESPACE> *EXECMCPTMP395Z" }] }, console: [], result: {} }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const { result, entry } = await auditedCall("allow", { dataPolicy: "block", namespace: "EXECMCPTMP395Z" }, routeError);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ dataPolicy: { policy: "block", redacted: 0, blocked: 0 } });
+    expect(entry).toMatchObject({ tool: KEY, outcome: "error", dataPolicy: { policy: "block", redacted: 0, blocked: 0 } });
   });
 });

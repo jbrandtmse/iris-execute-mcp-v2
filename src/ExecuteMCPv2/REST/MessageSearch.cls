@@ -683,11 +683,13 @@ ClassMethod BodyKind(pClassName As %String) As %String
 /// of its nested children: a batch is a chain of parents (FHS, then BHS, then the messages), and
 /// <code>GetFullSize</code> skips the segments that only point at children, so each node found adds its own
 /// size and one fixed query (<code>ParentId</code> equal to the node's ID, or starting with the ID and a colon)
-/// then finds that node's children. The sum stops as soon as it is greater than <var>pLimit</var>, so the work
-/// is bounded by the limit and not by the size of the body. The segment sizes assume a one-character segment
-/// terminator, which is what an opened body serializes with (the terminator of the text a message was imported
-/// from is not stored), so the sum equals the length the serialization writes. Returns <code>0</code> on any
-/// failure, which makes the caller serialize and check the length itself.
+/// then finds that node's children. The sum stops at the first node that takes it past <var>pLimit</var>, so no
+/// node after that one is sized or queried. Each node that is sized costs one pass over its own stored segment
+/// index, and each node that is queried costs one pass over its children's IDs, which is far less than
+/// serializing the text but grows with the number of segments and children. The segment sizes assume a
+/// one-character segment terminator, which is what an opened body serializes with (the terminator of the text a
+/// message was imported from is not stored), so the sum equals the length the serialization writes. Returns
+/// <code>0</code> on any failure, which makes the caller serialize and check the length itself.
 ClassMethod Hl7Size(pBodyClass As %String, pBodyId As %String, pLimit As %Integer) As %Integer
 {
     Set tSum = 0

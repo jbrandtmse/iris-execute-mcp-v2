@@ -133,7 +133,9 @@ Method TestReadStreamText()
 /// An unsaved <class>Ens.StringRequest</class> dumps its one property. An unsaved
 /// <class>Ens.StreamContainer</class> dumps its public properties only: not the calculated
 /// <code>Stream</code>, none of the internal <code>Stream*</code> properties, and not <code>%%OID</code>. An unsaved
-/// <class>Ens.Config.Item</class> leaves out its transient properties.
+/// <class>Ens.Config.Item</class> leaves out its transient properties. An unsaved <class>Ens.AlarmRequest</class>
+/// leaves out <code>Duration</code> and <code>Until</code>, which are calculated and not transient, so only the
+/// calculated rule removes them.
 Method TestPropertyDump()
 {
     Set tString = ##class(Ens.StringRequest).%New("KEEPME-DUMP")
@@ -144,9 +146,15 @@ Method TestPropertyDump()
     Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tContainer)
     Set tExpected = "{""OriginalFilename"":null,""OutputFolder"":null,""OutputFilename"":null,""Type"":null,""Attributes"":{""collection"":""array"",""count"":0}}"
     Do $$$AssertEquals(tDump.%ToJSON(), tExpected, "a stream container dumps its public properties")
-    Do $$$AssertEquals(tDump.%IsDefined("Stream"), 0, "the calculated Stream property is left out")
+    Do $$$AssertEquals(tDump.%IsDefined("Stream"), 0, "the Stream property (calculated and transient) is left out")
     Do $$$AssertEquals(tDump.%IsDefined("StreamGC"), 0, "an internal stream property is left out")
-    Do $$$AssertEquals(tDump.%IsDefined("%%OID"), 0, "a percent property is left out")
+    Do $$$AssertEquals(tDump.%IsDefined("%%OID"), 0, "%%OID (private, internal and transient) is left out")
+
+    Set tAlarm = ##class(Ens.AlarmRequest).%New()
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tAlarm)
+    Do $$$AssertEquals(tDump.%IsDefined("Timeout"), 1, "a public stored property of an alarm request is dumped")
+    Do $$$AssertEquals(tDump.%IsDefined("Duration"), 0, "a calculated property that is not transient is left out")
+    Do $$$AssertEquals(tDump.%IsDefined("Until"), 0, "and so is another one")
 
     Set tConfigItem = ##class(Ens.Config.Item).%New()
     Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tConfigItem)

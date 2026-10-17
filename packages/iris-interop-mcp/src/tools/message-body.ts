@@ -163,6 +163,7 @@ const FORMATS: Partial<Record<BodyKind, BodyFormat>> = {
 const NOT_SHOWN = {
   missing: "The body class is not compiled in this namespace, so the body cannot be read.",
   unavailable: "The body does not open (it may have been purged), so it cannot be read.",
+  noBody: "The message has no body: its header names no body class and no body ID.",
   noRenderer: (kind: BodyKind): string => `No renderer reads a ${kind} body, so only its class and ID are shown.`,
   tooLarge: (cap: number): string =>
     `The HL7 v2 body is longer than ${cap} characters, so it is not shown; a larger maxChars (at most ${MAX_MAX_CHARS}) reads it whole.`,
@@ -179,13 +180,14 @@ const NOT_SHOWN = {
  * nothing else IRIS sends reaches the result. A found item is decided by {@link decideBodyPolicy}, with
  * the kind from `bodyKind` (a value outside the nine tokens is kind `other`, and is treated as available, so
  * `block` and `redact` withhold it) and `available` true when `bodyAvailable` is `true` or the kind is `literal`
- * (a literal header's value is its own body):
+ * (a literal header's value is its own body), except a `literal` header whose `bodyId` is `""`: Ens writes an
+ * empty class and ID for a message sent with no body object, so that header has no body (`none`, not withheld):
  *  - `blocked`: withheld with the plan's reason; any `bodyText` IRIS sent is dropped, and so is the `bodyId`
  *    of a literal header;
  *  - `redact` (an HL7 v2 body under `redact`): its complete `bodyText` goes to `redactHl7` before anything
  *    else touches it. An `ok` result is `redacted` with the redacted text; a refusal is `blocked` with
  *    `hl7Unparseable(<engine reason>)`; `bodyTextOmitted: "tooLarge"` is `hl7TooLarge`; anything else,
- *    including a text IRIS reports as incomplete, is `hl7Unreadable`;
+ *    including a text IRIS does not report as complete (`bodyTextComplete: true`), is `hl7Unreadable`;
  *  - `none`: an unavailable body is not shown (`missing` or does-not-open); under `allow`, the text IRIS
  *    sent is shown in the format of the kind, or the reason it was not read is given.
  * A shown text is sanitized and then cut to `maxChars`; `truncated` is set when it was cut or IRIS reported
@@ -215,7 +217,8 @@ export function applyBodyReaderPolicy(
     }
     const knownKind = isBodyKind(raw.bodyKind);
     const kind: BodyKind = isBodyKind(raw.bodyKind) ? raw.bodyKind : "other";
-    const available = knownKind ? raw.bodyAvailable === true || kind === "literal" : true;
+    const noBody = kind === "literal" && raw.bodyId === "";
+    const available = knownKind ? raw.bodyAvailable === true || (kind === "literal" && !noBody) : true;
     const plan = decideBodyPolicy(kind, available, policy);
     const base = {
       id: raw.id,
@@ -243,7 +246,7 @@ export function applyBodyReaderPolicy(
     if (plan.outcome === "blocked") return withheld(plan.reason);
 
     if (plan.outcome === "redact") {
-      if (typeof raw.bodyText === "string" && raw.bodyTextComplete !== false) {
+      if (typeof raw.bodyText === "string" && raw.bodyTextComplete === true) {
         const result = redactHl7(raw.bodyText);
         if (!result.ok) return withheld(BLOCK_REASONS.hl7Unparseable(result.reason));
         redacted += 1;
@@ -256,7 +259,8 @@ export function applyBodyReaderPolicy(
     // The policy leaves this body alone: it is not available, or the policy is allow.
     const none: BodyPolicyOutcome = { outcome: "none" };
     if (!available) {
-      return { ...base, bodyPolicy: none, notShown: kind === "missing" ? NOT_SHOWN.missing : NOT_SHOWN.unavailable };
+      const reason = noBody ? NOT_SHOWN.noBody : kind === "missing" ? NOT_SHOWN.missing : NOT_SHOWN.unavailable;
+      return { ...base, bodyPolicy: none, notShown: reason };
     }
     if (typeof raw.bodyText === "string" && FORMATS[kind] !== undefined) {
       return shown(raw.bodyText, none, raw.bodyTextComplete === false);
@@ -437,6 +441,8 @@ export const messageBodyTool: ToolDefinition = {
       };
     } catch (error: unknown) {
       if (error instanceof IrisApiError) {
+        // The policy that applied (tightened) and no counts, so the audit entry records it, not the profile's.
+        const summary: DataPolicySummary = { policy, redacted: 0, blocked: 0 };
         return {
           content: [
             {
@@ -444,6 +450,7 @@ export const messageBodyTool: ToolDefinition = {
               text: `Error reading message bodies with iris_message_body: ${error.message}`,
             },
           ],
+          structuredContent: { dataPolicy: summary, ...clampFlag },
           isError: true,
         };
       }

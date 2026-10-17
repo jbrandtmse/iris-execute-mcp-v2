@@ -189,6 +189,18 @@ const gateTestFiles = [
   // them; EXECMCPTMP395P, the Task 0 probe namespace, is only removed by name) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture,
   // which it removes, asserting nothing is left. No production is started.
   "src/__tests__/story-39-5-body-reader-live-gate.test.ts",
+  // Story 39.5 QA: `iris_message_body` on the BUILT iris-interop-mcp dist against a local listener that records requests and replies as a hostile or
+  // version-skewed IRIS (the wire of redact, allow and block, a caller that cannot widen the read, a text and an extra field for every kind of
+  // body, the bounds of the input, the cut at every maxChars, the HL7 v2 shapes a hostile IRIS could send, the audit file and the console log);
+  // no IRIS instance is contacted.
+  "src/__tests__/story-39-5-qa-process.test.ts",
+  // Story 39.5 QA: the HL7 v2 shapes IRIS stores (a BOM, LF and CRLF ends, a split line, escapes, other separators, control characters, a batch,
+  // non-ASCII values), the 65536-character read limit exactly, the stream reader around its length, astral text and IRIS's own cut inside a
+  // surrogate pair, bodies whose class throws, 20 headers of the largest body, and the odd forms of the route's inputs, over real stdio JSON-RPC
+  // against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists and raw HTTP to the route. Writes only the disposable namespace and
+  // database EXECMCPTMP395Q (its database files and directory too, and the Story395Q classes inside it) and the HSCUSTOM class
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-5-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

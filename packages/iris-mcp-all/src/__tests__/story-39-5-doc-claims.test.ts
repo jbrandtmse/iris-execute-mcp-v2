@@ -40,7 +40,7 @@ function sectionsOf(changelog: string): string[] {
 
 /** The `BOOTSTRAP_VERSION` move this story recorded, pinned as history. */
 const PREVIOUS_BOOTSTRAP_VERSION = "b6ec56073e29";
-const STORY_BOOTSTRAP_VERSION = "fa8227a48af8";
+const STORY_BOOTSTRAP_VERSION = "2fd17b50a024";
 
 /** The right arrow the documents use, by code point. */
 const RIGHT_ARROW = String.fromCodePoint(0x2192);
@@ -80,8 +80,8 @@ describe("Story 39.5: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("`POST /interop/message/body`");
     expect(text).toContain("`ExecuteMCPv2.REST.MessageBody`");
     expect(text).toContain("(`bodyRead`: `kind`, `hl7` or `all`)");
-    expect(text).toContain("Under `redact` (the default) IRIS reads HL7 v2 bodies only");
-    expect(text).toContain("`block` withholds every body and IRIS reads none");
+    expect(text).toContain("Under `redact` (the default) IRIS returns the text of HL7 v2 bodies only");
+    expect(text).toContain("`block` withholds every body and IRIS returns the text of none");
     expect(text).toContain("`allow` shows bodies as stored");
     expect(text).toContain("`dataPolicyClamped: true`");
     expect(text).toContain("body text never reaches the audit file or the console log");
@@ -173,7 +173,7 @@ describe("Story 39.5: the root README names the tool, its default state and the 
     expect(paragraph).toContain("is the one tool built to return body text");
     expect(paragraph).toContain("under `redact` it shows an HL7 v2 body redacted by the reviewed keep-list, complete or not at all, and withholds every other body");
     expect(paragraph).toContain("no other body's content leaves IRIS");
-    expect(paragraph).toContain("under `block` it withholds every body and IRIS reads none");
+    expect(paragraph).toContain("under `block` it withholds every body and IRIS returns the text of none");
     expect(paragraph).toContain("It is a read, enabled by default");
     expect(squash(readme)).toContain("`iris_message_body` takes an optional `dataPolicy` parameter, and a value looser than the profile's is ignored and reported as `dataPolicyClamped: true`");
     expect(squash(readme)).not.toContain("no tool takes a policy parameter yet");
@@ -181,7 +181,7 @@ describe("Story 39.5: the root README names the tool, its default state and the 
 
   it("the policy table says what each value does to the reader", () => {
     const text = squash(readme);
-    expect(text).toContain("The one tool built to show body text, `iris_message_body` (Story 39.5), shows an HL7 v2 body redacted by a reviewed keep-list, complete or not at all, withholds every other body, and never has IRIS read one.");
+    expect(text).toContain("The one tool built to show body text, `iris_message_body` (Story 39.5), shows an HL7 v2 body redacted by a reviewed keep-list, complete or not at all, withholds every other body, and never has IRIS return the text of one; a field the keep-list keeps still holds what the sender put in it, so a redacted text reduces exposure and is not proof that it holds no identifying value.");
     expect(text).toContain("| `allow` | Today's output, unchanged; `iris_message_body` shows each body as stored. |");
   });
 
@@ -227,10 +227,10 @@ describe("Story 39.5: the interop README documents iris_message_body", () => {
 
   it("states the policy line: redact, block and allow, what IRIS reads, the counts, no body text in the logs", () => {
     expect(subsection).toContain("> **Data policy:** the tool is under the PHI data policy (`IRIS_DATA_POLICY`, set per profile; default `redact`)");
-    expect(subsection).toContain("Under `redact` IRIS reads HL7 v2 bodies only");
+    expect(subsection).toContain("Under `redact` IRIS returns the text of HL7 v2 bodies only");
     expect(subsection).toContain("every field that is not on the list is replaced by `***`");
     expect(subsection).toContain("no other body's content leaves IRIS");
-    expect(subsection).toContain("Under `block` every body is withheld and IRIS reads none");
+    expect(subsection).toContain("Under `block` every body is withheld and IRIS returns the text of none");
     expect(subsection).toContain("Under `allow` each body is shown as stored");
     expect(subsection).toContain("`dataPolicy` (`{policy, redacted, blocked}`)");
     expect(subsection).toContain("Neither the audit log nor the console log holds body text under any policy");
@@ -256,7 +256,7 @@ describe("Story 39.5: tool_support.md states the note, the API row and the scope
     expect(note).toContain("The tool is a **read, enabled by default** (and still enabled under the `read-only` preset)");
     expect(note).toContain('`{"global":{"iris_message_body":false}}`');
     expect(note).toContain("It is **governed by the PHI data policy**");
-    expect(note).toContain("under `redact` IRIS reads HL7 v2 bodies only");
+    expect(note).toContain("under `redact` IRIS returns the text of HL7 v2 bodies only");
     expect(note).toContain("a call's `dataPolicy` can only tighten the profile's policy");
     expect(note).toContain("(`core` is 12 runtime tools)");
     expect(note).toContain("(DW-577)");
@@ -275,7 +275,7 @@ describe("Story 39.5: tool_support.md states the note, the API row and the scope
     const row = squash(rows[0] ?? "");
     expect(row).toContain("a read, enabled by default");
     expect(row).toContain("`block` withholds every body");
-    expect(row).toContain("`redact` shows an HL7 v2 body redacted by the reviewed keep-list, complete or not at all, and withholds every other body, which IRIS never reads");
+    expect(row).toContain("`redact` shows an HL7 v2 body redacted by the reviewed keep-list, complete or not at all, and withholds every other body, whose text IRIS never returns");
     expect(row).toContain("`allow` shows bodies as stored");
   });
 

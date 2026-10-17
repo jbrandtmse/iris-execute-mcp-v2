@@ -2,11 +2,13 @@
  * Shared test helpers for IRIS MCP tool unit tests.
  *
  * Consolidates `createMockHttp()`, `createMockCtx()`, `envelope()`, the env
- * harness, and the `McpServerBase` startup helpers `stageDefaultStartup()` and
- * `callTool()`, so that all server packages (iris-dev-mcp, iris-admin-mcp,
+ * harness, the `McpServerBase` startup helpers `stageDefaultStartup()` and
+ * `callTool()`, and the governance and audit readers `effectivePolicy()` and
+ * `auditLines()`, so that all server packages (iris-dev-mcp, iris-admin-mcp,
  * etc.) can import them from a single location.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { vi } from "vitest";
 import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, PaginateResult } from "../index.js";
 
@@ -41,6 +43,31 @@ export async function callTool(server: any, name: string, args: unknown) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entry = (server.server as any)._registeredTools[name];
   return (entry.callback ?? entry.handler ?? entry.cb)(args);
+}
+
+/** The effective governance policy that `iris_server_profiles` reports for the default profile of `server`. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function effectivePolicy(server: any): Promise<Record<string, boolean>> {
+  const result = await callTool(server, "iris_server_profiles", {});
+  return (result.structuredContent as { governance: { policy: Record<string, boolean> } }).governance.policy;
+}
+
+/**
+ * The JSON entries of the audit file at `filePath`, once it holds at least `minLines` non-empty lines. Polls for
+ * up to 3 seconds (the audit writer is asynchronous), then throws.
+ */
+export async function auditLines(filePath: string, minLines: number): Promise<Array<Record<string, unknown>>> {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    if (existsSync(filePath)) {
+      const lines = readFileSync(filePath, "utf-8")
+        .split("\n")
+        .filter((line) => line.trim().length > 0);
+      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    }
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 /**

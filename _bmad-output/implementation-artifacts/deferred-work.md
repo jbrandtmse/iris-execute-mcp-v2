@@ -3124,6 +3124,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 39.2 implement review 2026-10-16 (unverified; no tool reaches Hl7Text yet; Story 39.5 is its first consumer)
 - 2026-10-17T05:29:28Z status=routed owner=39-5-message-body-reader by=harvest note=39.5: check the size bound before full serialization, or stream with a cap; pin with a large synthetic body
 - 2026-10-17T06:22:00Z occurrence=39-2-phi-data-policy
+- 2026-10-17T15:52:37Z status=resolved-by:39-5-message-body-reader by=adjudication note=AC-6: Hl7Size precheck sums stored segment sizes (and batch children) and refuses tooLarge before Hl7Text serializes; timing row on a 2,000,000+ char body + exact-size row, mutation-verified; build 5e02f47
 
 ### DW-578: redactHl7 keeps a line split off a free-text field by a raw LF when it starts with a known HL7 or Z-segment name and the field separator (the name, and a reviewed segment's kept positions)
 - source: spec-39-2-phi-data-policy.md | severity: low | fix-risk: high | footprint: in-story
@@ -3149,3 +3150,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-4-search-table-lookup.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: spec I4 places it under AD-12 (PropType read in the same handler, one round trip); the spine's AD-12 exception list names identifier and operator validation only
 - 2026-10-17T12:07:06Z status=wontfix-accepted owner=39-4-search-table-lookup by=cr note=reopen_if=another handler adds IRIS-side value normalization, or a review files AD-12 against SearchTableValue
+
+### DW-583: iris_message_body under allow cannot show the content of a persistent body held in a character-stream property (HS.Message.XMLMessage ContentStream): the dump rules give its class and size only
+- source: spec-39-5-message-body-reader.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: irislib/HS/Message/XMLMessage.cls:1,13 (%Persistent + %XML.Adaptor, payload in ContentStream); MessageBody.cls PropertyDump stream branch; Design Notes dump rules (spec-bound)
+- 2026-10-17T15:49:37Z status=decision-pending owner=burndown by=cr note=decide: under allow, render a character-stream property's text (to maxChars) for persistent bodies, or a HealthShare renderer

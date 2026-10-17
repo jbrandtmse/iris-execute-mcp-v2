@@ -529,7 +529,7 @@ export interface Hl7ParsedSegment {
  * the redaction engine that does not share its code. Nothing is saved.
  *
  * @param dev - A session on a built iris-dev-mcp server.
- * @param name - An interop-enabled `EXECMCPTMP392<capital letter>` namespace.
+ * @param name - An interop-enabled `EXECMCPTMP392<capital letter>` or `EXECMCPTMP395<capital letter>` namespace.
  * @param text - Complete ER7 text.
  */
 export async function hl7Fields(dev: ToolSession, name: string, text: string): Promise<Hl7ParsedSegment[]> {
@@ -1100,7 +1100,11 @@ Property Code As %String;
 }
 `;
 
-/** A persistent body without a JSON adaptor: the dump rules skip `Secret` (private) and `Temp` (transient). */
+/**
+ * A persistent body without a JSON adaptor: the dump rules skip `Secret` (private), `Temp` (transient), `Shown`
+ * (calculated, not transient: its getter would return a value) and `Multi` (multidimensional, not transient: set
+ * on every open), so each skip rule has a property only it removes.
+ */
 export const STORY395_PLAIN_SOURCE = String.raw`Class Story395.Plain Extends %Persistent
 {
 
@@ -1117,6 +1121,23 @@ Property Ref As Ens.StringRequest;
 Property Secret As %String [ Private ];
 
 Property Temp As %String [ Transient ];
+
+Property Shown As %String [ Calculated ];
+
+Property Multi [ MultiDimensional ];
+
+/// The calculated value, which the dump never shows.
+Method ShownGet() As %String
+{
+    Quit "SYNTHPHI-CALC"
+}
+
+/// Give the multidimensional property a value on every open, which the dump never shows.
+Method %OnOpen() As %Status [ Private, ServerOnly = 1 ]
+{
+    Set ..Multi = "SYNTHPHI-MULTI"
+    Quit $$$OK
+}
 
 /// Save one object whose Ref is the Ens.StringRequest pRefId. Returns its ID or the error text.
 ClassMethod Make(pRefId As %String) As %String
@@ -1270,9 +1291,9 @@ ClassMethod Hl7Text(pName As %String) As %String
 }
 
 /// For each header ID in the comma-separated list pIds: the JSON [{id, precheck, serialized}], where precheck is
-/// ExecuteMCPv2.REST.MessageSearch.Hl7Size with a limit no body reaches, and serialized is the length
-/// OutputToLibraryStream writes for the same body.
-ClassMethod Sizes(pIds As %String) As %String
+/// ExecuteMCPv2.REST.MessageSearch.Hl7Size with the limit pLimit (by default one no body reaches), and serialized
+/// is the length OutputToLibraryStream writes for the same body.
+ClassMethod Sizes(pIds As %String, pLimit As %Integer = 1000000000) As %String
 {
     Set tList = []
     For tI = 1:1:$Length(pIds, ",") {
@@ -1283,7 +1304,7 @@ ClassMethod Sizes(pIds As %String) As %String
         Set tObj = $ClassMethod(tClass, "%OpenId", tBodyId)
         Set tStream = ##class(%Stream.TmpCharacter).%New()
         Set tSC = tObj.OutputToLibraryStream(tStream)
-        Do tList.%Push({"id":(tHeaderId),"precheck":(##class(ExecuteMCPv2.REST.MessageSearch).Hl7Size(tClass, tBodyId, 1000000000)),"serialized":(tStream.Size)})
+        Do tList.%Push({"id":(tHeaderId),"precheck":(##class(ExecuteMCPv2.REST.MessageSearch).Hl7Size(tClass, tBodyId, pLimit)),"serialized":(tStream.Size)})
     }
     Quit tList.%ToJSON()
 }

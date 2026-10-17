@@ -895,6 +895,26 @@ describe("Story 39.5: the route reads least, and refuses before it switches name
     const missing = await route({ namespace: NS_A });
     expect(missing.errors[0]).toContain("Parameter 'headerIds' must be a non-empty array of 1-20 numeric header IDs");
   }, 120000);
+
+  it("the resend preview keeps its own limit of 100 headers and its texts (ValidateHeaderIds at its default)", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const preview = async (body: Record<string, unknown>): Promise<{ errors: string[]; result: Record<string, unknown> }> => {
+      const answer = await executeMcpPost(TARGET, "/interop/message/resend/preview", body);
+      const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
+      return { errors: (parsed.status.errors ?? []).map((entry) => entry.error), result: parsed.result };
+    };
+    // IDs no header of the namespace has, so the preview reads nothing and answers not found for each.
+    const hundred = Array.from({ length: 100 }, (_, index) => 900001 + index);
+    const accepted = await preview({ headerIds: hundred, namespace: NS_A });
+    expect(accepted.errors, "100 header IDs are accepted").toEqual([]);
+    expect((accepted.result as { count?: number }).count, "one header item per ID").toBe(100);
+    expect(JSON.stringify(accepted.result)).not.toContain("SYNTHPHI");
+
+    const refused = await preview({ headerIds: [...hundred, 900101], namespace: NS_A });
+    expect(refused.errors[0]).toContain("Parameter 'headerIds' must contain between 1 and 100 header IDs (found 101)");
+    const missing = await preview({ namespace: NS_A });
+    expect(missing.errors[0]).toContain("Parameter 'headerIds' must be a non-empty array of 1-100 numeric header IDs");
+  }, 120000);
 });
 
 // -- DW-577 ------------------------------------------------------------
@@ -914,6 +934,20 @@ describe("Story 39.5: Hl7Size equals the serialization, and a body over the cap 
     }
     expect(sizes.find((row) => row.id === 13)?.serialized, "the huge message is over 2,000,000 characters").toBeGreaterThanOrEqual(2000000);
     expect(sizes.find((row) => row.id === 16)?.serialized, "the large batch is over the read limit in total").toBeGreaterThan(65536);
+  }, 120000);
+
+  it("the sum stops at the first node that takes it past the limit: a batch is not sized to its end", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const sizes = JSON.parse(await irisMethod(NS_A, "Story395.Seed", "Sizes", ["15,16", 100])) as Array<{
+      id: number;
+      precheck: number;
+      serialized: number;
+    }>;
+    expect(sizes.map((row) => row.id)).toEqual([15, 16]);
+    for (const row of sizes) {
+      expect(row.precheck, `header ${row.id}: the sum passed the limit`).toBeGreaterThan(100);
+      expect(row.precheck, `header ${row.id}: the sum stopped before the batch's last node`).toBeLessThan(row.serialized);
+    }
   }, 120000);
 
   it("Hl7Text answers tooLarge for the huge body in under a quarter of its serialization time", async (testCtx) => {
@@ -968,7 +1002,8 @@ describe("Story 39.5: other namespaces (AC-8, Rules #34 and #41)", () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("Error reading message bodies with iris_message_body:");
     expect(textOf(result)).toContain("NAMESPACE");
-    expect(textOf(result)).not.toContain("SYNTHPHI");
+    // SanitizeError strips the routine reference (+N^Routine) the switch failure carries.
+    expect(textOf(result), "no routine or global reference").not.toMatch(/\^[%A-Za-z]/);
   }, 120000);
 });
 
@@ -1067,7 +1102,7 @@ describe("Story 39.5: the audit file and the console log (AC-7, AD-19)", () => {
       }
 
       expect(readFileSync(session.auditFile, "utf8"), `${label}: the audit file`).not.toContain("SYNTHPHI");
-      expect(session.stderr().length, `${label}: the server logged at DEBUG`).toBeGreaterThan(0);
+      expect(session.stderr().length, `${label}: the server wrote to stderr (LOG_LEVEL=DEBUG)`).toBeGreaterThan(0);
       expect(session.stderr(), `${label}: the server's stderr`).not.toContain("SYNTHPHI");
     }
   }, 120000);

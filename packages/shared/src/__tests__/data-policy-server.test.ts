@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -19,7 +19,7 @@ import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 import type { ServerDiscoveryResult } from "../server-discovery.js";
 import { REFUSAL_CODES, refusalResult } from "../refusals.js";
 import { makeEnvHarness } from "./env-harness.js";
-import { callTool, stageDefaultStartup } from "./test-helpers.js";
+import { auditLines, callTool, stageDefaultStartup } from "./test-helpers.js";
 
 const env = makeEnvHarness();
 beforeEach(env.setup);
@@ -273,19 +273,6 @@ describe("startup fails fast, naming the channel (AD-8)", () => {
     );
   });
 });
-
-/** Poll (bounded) until the file holds at least `minLines` non-empty lines. */
-async function auditLines(path: string, minLines: number): Promise<Array<Record<string, unknown>>> {
-  const start = Date.now();
-  for (;;) {
-    if (existsSync(path)) {
-      const lines = readFileSync(path, "utf-8").split("\n").filter((line) => line.trim() !== "");
-      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    }
-    if (Date.now() - start > 3000) throw new Error(`Timed out waiting for ${minLines} audit line(s)`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("the audit entry's dataPolicy field and PHI inputs (AC-5, AD-19)", () => {
   function auditEnv(params = false): string {

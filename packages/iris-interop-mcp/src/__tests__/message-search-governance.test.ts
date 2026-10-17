@@ -17,12 +17,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServerBase } from "@iris-mcp/shared";
 import type { ToolDefinition } from "@iris-mcp/shared";
-import { callTool, makeEnvHarness, stageDefaultStartup } from "@iris-mcp/shared/test-helpers";
+import { auditLines, callTool, effectivePolicy, makeEnvHarness, stageDefaultStartup } from "@iris-mcp/shared/test-helpers";
 import { messageSearchTool } from "../tools/message-search.js";
 
 const KEYS = [
@@ -40,27 +40,6 @@ function spiedTool(spy: ReturnType<typeof vi.fn>): ToolDefinition {
 
 function makeServer(tool: ToolDefinition): McpServerBase {
   return new McpServerBase({ name: "@iris-mcp/interop", version: "0.0.0", tools: [tool], needsCustomRest: true });
-}
-
-/** The effective policy `iris_server_profiles` reports for the default profile. */
-async function effectivePolicy(server: McpServerBase): Promise<Record<string, boolean>> {
-  const result = await callTool(server, "iris_server_profiles", {});
-  return (result.structuredContent as { governance: { policy: Record<string, boolean> } }).governance.policy;
-}
-
-/** Poll (bounded) until the audit file has at least `minLines` non-empty lines. */
-async function auditLines(filePath: string, minLines: number): Promise<Array<Record<string, unknown>>> {
-  const deadline = Date.now() + 3000;
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    }
-    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 describe("iris_message_search governance (Story 39.1)", () => {

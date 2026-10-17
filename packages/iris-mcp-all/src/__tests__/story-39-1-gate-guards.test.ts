@@ -37,6 +37,7 @@ const GATES = [
   { file: "story-39-4-search-table-live-gate.test.ts", tag: "story-39-4-search-table-live-gate", story: "Story 39.4" },
   { file: "story-39-4-qa-live-gate.test.ts", tag: "story-39-4-qa-live-gate", story: "Story 39.4 QA" },
   { file: "story-39-5-body-reader-live-gate.test.ts", tag: "story-39-5-body-reader-live-gate", story: "Story 39.5" },
+  { file: "story-39-5-qa-live-gate.test.ts", tag: "story-39-5-qa-live-gate", story: "Story 39.5 QA" },
 ] as const;
 
 /** The vitest entry point this package's tests run under. */

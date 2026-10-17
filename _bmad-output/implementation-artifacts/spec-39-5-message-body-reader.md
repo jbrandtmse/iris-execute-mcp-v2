@@ -457,7 +457,48 @@ The expected counts are:
   - Z errors with the sanitized namespace text.
 - **AC-9 (Rules #30, #43; AD-26 scope).** Given the built dists, when the scope and doc-claims tests run, then `iris_message_body` is a governed row in `data-policy-scope.ts` and `tool_support.md`, the docs state its default state and policy behavior, every count surface reads the new counts, and none claims compliance.
 
+### Review Findings
+
+Code review 2026-10-17 (`bmad-code-review`, tier `full-opus`; layers Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor, all delivered). 35 raw findings, 17 entries after grouping, 14 rejected. Each entry: severity / fix-risk / footprint / disposition.
+
+- [x] [Review][Patch] A header with no body (empty class and empty ID, which Ens writes for a message sent with no body object) was reported as a withheld `literal` body and counted in `blocked` under `redact` and `block` (med / med / in-story / fixed) [packages/iris-interop-mcp/src/tools/message-body.ts:220] — the route now sends `bodyId: ""` for it in every mode (`MessageBody.cls:279`), and it is `none` with "The message has no body: its header names no body class and no body ID." Spec gap for the lead: the Boundaries rule `available = bodyAvailable === true || kind === "literal"` now excludes a literal whose body ID is empty; every matrix row is unchanged. (blind)
+- [x] [Review][Patch] The README `redact` row opened "A body is shown only in a form that cannot carry identifying data" for a cell that now covers `iris_message_body`'s keep-list ER7 text (med / low / in-story / fixed) [README.md:708] — scoped to the resend preview, and the reader's sentence says a kept field still holds what the sender put in it. (blind+auditor)
+- [x] [Review][Patch] The docs said IRIS "reads none" / "never reads" a withheld body, but `BodyAvailable` opens every body (low / low / in-story / fixed) [packages/iris-interop-mcp/README.md:271] — now "IRIS returns the text of …" in README, interop README, `tool_support.md`, CHANGELOG and the 8 doc-claims pins. (blind+auditor)
+- [x] [Review][Patch] `Hl7Size`'s comment claimed the work is bounded by the limit and not the body size; it is bounded per node, and each sized node reads its whole segment index (low / med / in-story / fixed) [src/ExecuteMCPv2/REST/MessageSearch.cls:686] (blind+edge)
+- [x] [Review][Patch] An `IrisApiError` result had no `structuredContent.dataPolicy`, so the audit entry recorded the profile's policy, not the tightened one (low / low / in-story / fixed) [packages/iris-interop-mcp/src/tools/message-body.ts:453] (blind+edge)
+- [x] [Review][Patch] `effectivePolicy` and `auditLines` were byte-identical copies of `message-search-governance.test.ts:46-64` (and `auditLines` of `data-policy-server.test.ts:278`), with no stated reason (Rule 2) (med / low / in-story / fixed) [packages/shared/src/__tests__/test-helpers.ts:59] — promoted to `@iris-mcp/shared/test-helpers`; all three files import it. (blind)
+- [x] [Review][Patch] An HL7 v2 `bodyText` with no `bodyTextComplete` was redacted and shown; complete-or-not-at-all is now fail-closed (`=== true`) (low / low / in-story / fixed) [packages/iris-interop-mcp/src/tools/message-body.ts:249] (edge)
+- [x] [Review][Patch] `Hl7Size`'s early stop at the limit had no test that removing it turns red (med / low / in-story / fixed) [packages/iris-mcp-all/src/__tests__/story-39-5-body-reader-live-gate.test.ts:939] — `Story395.Seed.Sizes` takes a limit; the row asserts headers 15 and 16 stop between 100 and the serialized length. (verification-gap)
+- [x] [Review][Patch] No row pinned an unknown or missing `bodyKind` with `bodyAvailable: false` (withheld and counted) (low / low / in-story / fixed) [packages/iris-interop-mcp/src/__tests__/message-body.test.ts:498] (verification-gap)
+- [x] [Review][Patch] The unknown-namespace row could not tell a sanitized text from an unsanitized one, and its `SYNTHPHI` check could not fail (AC-8) (med / low / in-story / fixed) [packages/iris-mcp-all/src/__tests__/story-39-5-body-reader-live-gate.test.ts:1006] (verification-gap)
+- [x] [Review][Patch] The Calculated and MultiDimensional dump rules had no property that only they remove, and two `TestPropertyDump` labels named rules their subject could not isolate (AC-2) (med / low / in-story / fixed) [packages/iris-mcp-all/src/__tests__/interop-namespace-fixture.ts:1125] — `Story395.Plain` gains `Shown` (calculated) and `Multi` (multidimensional, set on open), `TestPropertyDump` gains `Ens.AlarmRequest`, and the labels are accurate. The `%` rule stays unisolated: only system properties carry it, and each is also internal or transient. (verification-gap)
+- [x] [Review][Patch] `ValidateHeaderIds` at its default (the resend preview's 100) was pinned only by an OS class the default suite never runs (low / low / in-story / fixed) [packages/iris-mcp-all/src/__tests__/story-39-5-body-reader-live-gate.test.ts:899] — a live preview row: 100 accepted, 101 refused with the text of 100. (verification-gap)
+- [x] [Review][Patch] Two "the server logged at DEBUG" labels asserted only a non-empty stderr (low / low / in-story / fixed: labels corrected) [packages/iris-mcp-all/src/__tests__/story-39-5-body-reader-live-gate.test.ts:1105] — no DEBUG line is written unconditionally (the CSRF note depends on the instance), so the assertion is unchanged. (verification-gap)
+- [x] [Review][Patch] `LOG_LEVEL = "DEBUG"` in the governance unit test was inert (the logger reads it once at import) (low / low / in-story / fixed: removed, the comment states the contract) [packages/iris-interop-mcp/src/__tests__/message-body-governance.test.ts:157] (verification-gap)
+- [x] [Review][Patch] `MessageBody.TrimSplitPair` re-implemented `ExecuteMCPv2.Utils.SurrogateSafeCutLength` (Rule 2) (med / med / in-story / fixed) [src/ExecuteMCPv2/REST/MessageBody.cls:53] — it delegates; `BOOTSTRAP_VERSION` moves `fa8227a48af8` to `2fd17b50a024`. (auditor)
+- [x] [Review][Patch] The `hl7Fields` doc line still named only `EXECMCPTMP392*` namespaces (Task 20) (low / low / in-story / fixed) [packages/iris-mcp-all/src/__tests__/interop-namespace-fixture.ts:532] (auditor)
+- [x] [Review][Defer] Under `allow`, a persistent body that keeps its payload in a character-stream property (`HS.Message.XMLMessage.ContentStream`, the main HealthShare body class) shows only `{"stream", "size"}` (med / med / in-story / decision-pending) [src/ExecuteMCPv2/REST/MessageBody.cls:187] — deferred: the dump rules are spec-bound ("a stream: class and size, never its content"); a product call for the decision sheet, DW-583. (blind)
+
+**Rejected** (14):
+- low: a literal's `bodyId` is uncut and unsanitized under `allow` — the spec shows the literal with its `bodyId` under `allow`, where the body is shown as stored; a very long literal ID is not an everyday state, and cutting an ID adds a rule. (blind)
+- low: under `allow` non-HL7 kinds are read up to `max(maxChars, 65536)` — the spec's wire table; QA measured 20 × 65536 at about 40 ms. (blind)
+- low: a binary stream is shown as Latin-1 text — the spec renders a stream as text and the earlier triage rejected it (row 14); `reopen_if`: a user reads a binary stream with non-ASCII content. (edge)
+- false: 20 multi-MB XML or JSON bodies could pass the 60 s gateway timeout — serialization costs milliseconds (Task 0: 2.4M characters in about 4 ms); 60 s needs bodies of hundreds of MB. (edge)
+- low: a property dump over 3.6M characters reads as `unreadable` — fail-safe, and it needs more than 3.6M characters of datatype values in one object. (edge)
+- false: a second `%OpenId` could throw after `BodyAvailable` succeeded — a class whose open throws makes `BodyAvailable` false; a purge returns "" and gives `unreadable`; the catch is fail-closed. (edge)
+- low: the raw route accepts a JSON object or booleans as `headerIds` — existing `ValidateHeaderIds` behavior shared with the preview; the tool schema rejects both; a raw caller reads only the IDs it named. (edge)
+- low: the `tooLarge` text suggests a larger `maxChars` at the maximum — the spec's fixed text (earlier triage rows 1, 10). (edge)
+- false: `iris_message_search` returns a literal header's value under `redact` — the 39.2 scope row already documents it as residual (restrict `iris_message_search:headers`); the "never leaves IRIS" claims are about `iris_message_body`. (edge)
+- low: three `NON_HL7_SENTINELS` can never appear — redundant sentinels; the other seven do the work. (verification-gap)
+- low: the first-start budget row usually times a start with nothing to deploy — it is an upper bound; the first deploy was measured (1.35 s). (verification-gap)
+- false: DW-577 is not closed in the ledger — closing it is the lead's `ledger_adjudicated` step; build-auto never writes the ledger. (auditor)
+- false: the `notApplicable` reason echoes a caller value — it names a namespace IRIS has just switched into, not text that can carry PHI, as the 39.1 sibling does. (auditor)
+- false: QA's scratch namespace `EXECMCPTMP395Q` is not in the Boundaries list — it is disposable and removed, with nothing-left assertions, and it reads no HSCUSTOM message. (auditor)
+
 ## Spec Change Log
+
+### 2026-10-17: code review round 1 amendment, recorded by the lead
+- Boundaries `available` rule narrowed. The rule was `available = bodyAvailable === true || kind === "literal"`; it now counts only literals with a non-empty body ID. Ens writes an empty body class and an empty body ID for a message with no body object, which is common for sync responses. Such a header is now reported as kind `none`, with "The message has no body…", not as a withheld `literal`, and the route sends `bodyId: ""`. Every I/O-matrix row is unchanged. Pinned by new rows in `message-body.test.ts` and in the QA live gate.
 
 ## Review Triage Log
 
@@ -729,6 +770,53 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - Task 0 (a): the batch is nested (FHS, then BHS, then the messages), so the fixed query is repeated for every node found, as "recursively" says; one flat query falls short (58 against 290).
 - The recording proxy of the gate keeps every request, 401 challenges included; the server's client answers a challenge with its credentials, so a row that counts served exchanges drops the 401, and the "no route reached" rows count all of them.
 - One exploratory call of the new route named HSCUSTOM and header 1 (a not-found lookup, nothing read); no other call named HSCUSTOM messages.
+
+### QA (2026-10-17): gap fill
+
+Test files (QA), both in the default `@iris-mcp/all` suite and listed in `packages/iris-mcp-all/scripts/prepublish-gate.mjs` `gateTestFiles`:
+- `packages/iris-mcp-all/src/__tests__/story-39-5-qa-process.test.ts` (QA): 15 tests. The BUILT interop dist over stdio against a local listener that replies as a hostile or version-skewed IRIS (a `bodyText` for every kind, a literal `bodyId`, extra item fields, an unknown kind). No IRIS is contacted. Rows: the wire per policy and per `maxChars` over the real HTTP client (exactly `headerIds`, `namespace`, `bodyRead`, `bodyTextMaxChars`); a caller's `dataPolicy` only tightens (nine operator x caller pairs, `block` included) and a caller's own `bodyRead`/`bodyTextMaxChars` is dropped; a hostile reply under `redact`, `block` and `allow` (items hold only their specified keys, fixed reasons, counts, no value in the result, the audit file or the DEBUG log); profiles; `notApplicable`; 30 bad inputs send no request and the boundary values send one; the cut at every `maxChars` of a redacted CR and CRLF text; sanitization before the cut, an astral character at the cut, 1,048,576 characters; 29 HL7 v2 shapes a hostile IRIS could send.
+- `packages/iris-mcp-all/src/__tests__/story-39-5-qa-live-gate.test.ts` (QA): 22 tests, armed, one scratch namespace `EXECMCPTMP395Q` (removed, nothing left) with the `Story395Q` classes. Rows: 20 HL7 v2 shapes IRIS stores under `redact`, `block` and `allow`, checked by IRIS's own parser; the 65536-character read limit exactly (redact, allow with three `maxChars`, route cap and one below, ASCII and non-ASCII); streams of 65536/65537/100000/100001 characters at `maxChars` one below/at/one above; astral text, the JSON export and a literal through IRIS, and IRIS's own cut inside a surrogate pair; a JSON export that throws, a class that throws on open and a container with no stream (fixed text, no exception text); 20 x 65536 characters (redact 46 ms, allow 39 ms); the route's odd forms of `headerIds`, `bodyRead`, `bodyTextMaxChars`; the route's least exposure over every fixture; every audited call names the scratch namespace.
+- Edited (QA): `prepublish-gate.mjs` (both files listed) and `story-39-1-gate-guards.test.ts` (`GATES` gains the QA live gate; its arming and stale-dist guards pass for it).
+
+Findings from running the system (Rule #36):
+- The lead's focus text says `block` is "refused before any /api/executemcp/ request". The spec says otherwise (matrix: wire `bodyRead:"kind"`, the counts `{block, 0, 14}`), and that is the behavior: `block` asks IRIS for the kind only. The QA rows pin the spec.
+- `EnsLib.HL7.Message.ImportFromString` cannot store a character above U+00FF: the parser translates the text from Latin-1 (U+4E2D and U+1F600 become `?`), and with MSH-18 `UTF-8` it reads the string again as bytes (a large text fails with "Seek position ... is past end of file"). The wide HL7 fixtures therefore set their values with `SetValueAt` into the parsed message. A reader-side defect was not found: the stored wide values read back exactly.
+- Shape outcomes under `redact` (engine, 2026-10-17): redacted: plain, BOM (IRIS drops it on import), leading LF, LF ends, CRLF ends, mixed ends, no final terminator, a line split off a field with LF, escapes, repetitions, other separators, control characters, a line separator, a Z segment, MSH only, a batch with no BHS, non-ASCII; withheld as unparseable: a line split off a field with CR, a lowercase segment name, a trailing non-segment line. No shape leaks.
+- The framework drops fields the tool's schema does not name, so a caller cannot pass `bodyRead` through the tool.
+
+Mutations (Rule 19; each applied, observed red, reverted with `cmp` equal, `git status --short` and `git diff --stat` equal to the pre-mutation state, the dist rebuilt or the class reloaded and compared with the deployed text):
+- AC-4: mutation: `applyBodyReaderPolicy` shows the unredacted HL7 text under `redact` -> 6 process rows and 4 live rows (the shapes sweep, the IRIS-parser oracle, the 65536 `redact` row, the non-ASCII `redact` row) red.
+- AC-3: mutation: `withheld()` returns the text IRIS sent -> 5 process rows and the live shapes sweep red.
+- AC-3: mutation: the caller's `dataPolicy` replaces the tightened policy -> 2 process rows (the tighten rows, the smuggling row) red.
+- AC-3: mutation: `redact` sends `bodyRead: "all"` -> 4 process rows red; the live rows stay green (the TypeScript drop rule, the defense in depth of Design Notes I2).
+- AC-1: mutation: `MAX_HEADER_IDS` 21 -> the process bounds row red (21 header IDs reach the route).
+- AC-2: mutation: the text is cut before it is sanitized -> 3 process rows red (CRLF at the cut).
+- AC-2: mutation: `cutText` loses its surrogate guard -> 1 process row and 1 live row red.
+- AC-2 (IRIS): mutation: `ReadStreamText` always reports a complete text -> 3 live rows (the stream boundaries, the route's `bodyTextComplete`, the astral cut) red.
+- AC-2 (IRIS): mutation: `TrimSplitPair` never trims -> the live astral-cut row red.
+- AD-19 (IRIS): mutation: `JsonText` returns the exception text -> the live failing-bodies row red.
+- AC-6 (IRIS): mutation: `Hl7Text` compares `>=` -> 5 live rows (the 65536 `redact` and `allow` rows, the route cap, the 20 x 65536 row, the route sweep) red.
+- AC-7: mutation: `dataPolicy` dropped from the tool definition -> 4 process rows (the audit entries) red.
+
+Run after the last revert: `story-39-5-qa-process.test.ts` 15 passed; `story-39-5-qa-live-gate.test.ts` armed 22 passed; `story-39-1-gate-guards.test.ts` and `live-gate-roster.test.ts` 33 passed; the whole `@iris-mcp/all` suite armed: 69 files, 1215 passed, 4 skipped; `MessageBodyTest` 4/4 and `MessageSearchTest` 5/5 after the class reloads; nothing left (no `EXECMCPTMP*` namespace, no `Story39*` or `ExecuteMCPv2.Temp.*` document in HSCUSTOM).
+
+### Code review (2026-10-17): patches
+
+- **`BOOTSTRAP_VERSION` `fa8227a48af8` to `2fd17b50a024`** (32 classes; `MessageBody.cls` and the `Hl7Size` comment of `MessageSearch.cls`); a second `pnpm gen:bootstrap` gives the same `shasum`; deployed and read back from `ExecuteMCPv2.Setup.BOOTSTRAPVERSION`. CHANGELOG, `tool_support.md`, the changeset and `STORY_BOOTSTRAP_VERSION` carry the new value.
+- Commands, after the last revert: shared (clean build) lint (the one existing warning), type-check, test 80 files / 2051; interop (clean build) lint, type-check, test 29 files / 633; admin 498, ops 350, data 165, client-config 514; `ENV` dev `--no-file-parallelism` 60 files / 1419; `ENV` `@iris-mcp/all test` 69 files, 1218 passed, 4 skipped (the 39.5 gate 30, the QA live gate 23, the QA process test 15); OS classes, one per call: `MessageBodyTest` 4, `MessageSearchTest` 5, `MessagePreviewPolicyTest` 4, `MessageResendTest` 12; `gen:governance-baseline:check` OK; `gen:skills:check` OK; `check-epics-sync` OK; `measure:tools-payload` unchanged (interop `full` 56,442, `core` 37,500); nothing left (`iris_namespace_list` has no `EXECMCPTMP*`; HSCUSTOM has no `Story39*` or `ExecuteMCPv2.Temp.*` class).
+
+Mutations (Rule 19; each applied, observed red, reverted with `cmp` equal to a saved copy, the class reloaded where IRIS-side):
+- AC-3 (empty literal): mutation: `applyBodyReaderPolicy` ignores `noBody` -> `message-body.test.ts` "a literal header with an empty body ID has no body" red.
+- AC-3 (empty literal, IRIS): mutation: `BodyOne` drops `|| (tBodyId = "")` -> `story-39-5-qa-live-gate.test.ts` "a header with no body (empty class and ID)" red.
+- AC-3 (complete or not at all): mutation: `bodyTextComplete !== false` instead of `=== true` -> `message-body.test.ts` "tooLarge and unreadable have their own reasons" red (the unstated row).
+- AC-3 (unknown kind): mutation: an unknown kind takes `raw.bodyAvailable === true` -> `message-body.test.ts` "an unknown or missing bodyKind is withheld and counted" red.
+- AC-7 (audit on error): mutation: no `structuredContent` on the `IrisApiError` result -> 2 rows of `message-body.test.ts` and `message-body-governance.test.ts` "an error result records the tightened policy" red.
+- AC-6 (early stop): mutation: `Hl7Size` without `If tSum > pLimit { Quit }` -> the live row "the sum stops at the first node that takes it past the limit" red.
+- AC-8 (sanitized text): mutation: `MessageBody()` renders `tSC` without `SanitizeError` -> the live row "a namespace that does not exist is an error with the sanitized switch text" red.
+- AC-2 (calculated rule): mutation: `PropertyDump` drops the `Calculated` check -> the live kappa `allow` row (header 12) and `MessageBodyTest:TestPropertyDump` (`Ens.AlarmRequest`) red.
+- AC-2 (multidimensional rule): mutation: `PropertyDump` drops the `MultiDimensional` check -> the live kappa `allow` row (header 12) red.
+- AC-2 (surrogate cut, delegated): mutation: `TrimSplitPair` returns its input -> `MessageBodyTest:TestReadStreamText` and the QA live row "IRIS's own cut at the read limit, inside a surrogate pair" red.
+- AC-8 (preview default): mutation: `ValidateHeaderIds` default `pMax` 20 -> the live row "the resend preview keeps its own limit of 100 headers" red.
 
 ## Auto Run Result
 

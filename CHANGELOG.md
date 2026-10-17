@@ -24,10 +24,10 @@ and its `developer` roster to 25. The frozen governance baseline stays at hash `
   The request names which bodies IRIS may read (`bodyRead`: `kind`, `hl7` or `all`) and a text limit
   (`bodyTextMaxChars`), so a body the policy withholds never leaves IRIS. Every check of the request runs before the
   namespace switch and names the parameter.
-- **It is the first consumer of body text under the PHI data policy.** Under `redact` (the default) IRIS reads HL7 v2
-  bodies only, and the text goes complete and unsanitized through the redaction engine before it is sanitized and cut;
+- **It is the first consumer of body text under the PHI data policy.** Under `redact` (the default) IRIS returns the
+  text of HL7 v2 bodies only, and the text goes complete and unsanitized through the redaction engine before it is sanitized and cut;
   every other body, and an HL7 v2 body over 65536 characters, is withheld with a reason. `block` withholds every body and
-  IRIS reads none; `allow` shows bodies as stored. A call's `dataPolicy` can only tighten the profile's policy, and a
+  IRIS returns the text of none; `allow` shows bodies as stored. A call's `dataPolicy` can only tighten the profile's policy, and a
   looser one is reported as `dataPolicyClamped: true`. Each body carries `bodyPolicy` and the result carries
   `dataPolicy: {policy, redacted, blocked}`. The tool declares `dataPolicy`, so every audit entry carries the policy and
   the counts, and body text never reaches the audit file or the console log.
@@ -45,7 +45,7 @@ and its `developer` roster to 25. The frozen governance baseline stays at hash `
 - **`MessageResend.ValidateHeaderIds` takes a maximum**, `pMax`, 100 by default; with the default its texts are
   byte-identical, and the body route passes 20.
 - **The resend preview decides through `decideBodyPolicy`**; its output is unchanged.
-- **`BOOTSTRAP_VERSION` moves `b6ec56073e29` to `fa8227a48af8`**, and the bootstrap embeds 32 classes instead of 31.
+- **`BOOTSTRAP_VERSION` moves `b6ec56073e29` to `2fd17b50a024`**, and the bootstrap embeds 32 classes instead of 31.
 - **Counts.** The interop README and `tool_support.md` count 24 tools, the suite README 109 tools, and the roster tables
   and the measured `tools/list` payload table are re-measured.
 

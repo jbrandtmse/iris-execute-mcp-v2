@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "fa8227a48af8";
+export const BOOTSTRAP_VERSION = "2fd17b50a024";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "fa8227a48af8";
+Parameter BOOTSTRAPVERSION = "2fd17b50a024";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -13317,11 +13317,13 @@ ClassMethod BodyKind(pClassName As %String) As %String
 /// of its nested children: a batch is a chain of parents (FHS, then BHS, then the messages), and
 /// <code>GetFullSize</code> skips the segments that only point at children, so each node found adds its own
 /// size and one fixed query (<code>ParentId</code> equal to the node's ID, or starting with the ID and a colon)
-/// then finds that node's children. The sum stops as soon as it is greater than <var>pLimit</var>, so the work
-/// is bounded by the limit and not by the size of the body. The segment sizes assume a one-character segment
-/// terminator, which is what an opened body serializes with (the terminator of the text a message was imported
-/// from is not stored), so the sum equals the length the serialization writes. Returns <code>0</code> on any
-/// failure, which makes the caller serialize and check the length itself.
+/// then finds that node's children. The sum stops at the first node that takes it past <var>pLimit</var>, so no
+/// node after that one is sized or queried. Each node that is sized costs one pass over its own stored segment
+/// index, and each node that is queried costs one pass over its children's IDs, which is far less than
+/// serializing the text but grows with the number of segments and children. The segment sizes assume a
+/// one-character segment terminator, which is what an opened body serializes with (the terminator of the text a
+/// message was imported from is not stored), so the sum equals the length the serialization writes. Returns
+/// <code>0</code> on any failure, which makes the caller serialize and check the length itself.
 ClassMethod Hl7Size(pBodyClass As %String, pBodyId As %String, pLimit As %Integer) As %Integer
 {
     Set tSum = 0
@@ -13839,12 +13841,10 @@ ClassMethod CutText(pText As %String, pMaxChars As %Integer, Output pComplete As
 }
 
 /// <var>pText</var> without its last character when that is a high surrogate, the first half of a pair
-/// that a cut separated from its second half.
+/// that a cut separated from its second half (<method>ExecuteMCPv2.Utils:SurrogateSafeCutLength</method>).
 ClassMethod TrimSplitPair(pText As %String) As %String
 {
-    Set tLast = $Ascii($Extract(pText, *))
-    If (tLast >= 55296) && (tLast <= 56319) Quit $Extract(pText, 1, *-1)
-    Quit pText
+    Quit $Extract(pText, 1, ##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(pText, $Length(pText)))
 }
 
 /// Read the text of the stream <var>pStream</var> from its start, at most <var>pMaxChars</var> characters, into
@@ -14035,7 +14035,9 @@ ClassMethod RenderText(pKind As %String, pObj As %RegisteredObject, pMaxChars As
 /// cannot be queried, otherwise <code>{id, found, bodyClassName, bodyId, bodyKind, bodyAvailable}</code> plus
 /// either <code>bodyText</code> and <code>bodyTextComplete</code>, or <code>bodyTextOmitted</code>
 /// (<code>tooLarge</code>, <code>unreadable</code> or <code>noRenderer</code>). <code>bodyId</code> is left out
-/// for a <code>literal</code> header unless <var>pBodyRead</var> is <code>all</code>. What is read follows
+/// for a <code>literal</code> header that holds a value unless <var>pBodyRead</var> is <code>all</code>; a
+/// <code>literal</code> header with an empty body ID (a message sent with no body object) carries
+/// <code>bodyId</code> <code>""</code> in every mode, which says it has no body and holds no value. What is read follows
 /// <method>ReadsText</method>: <code>kind</code> reads nothing, <code>hl7</code> the text of an available HL7 v2
 /// body (<method>ExecuteMCPv2.REST.MessageResend:SetBodyDetail</method>, <var>pMaxChars</var> being its limit),
 /// <code>all</code> that and every other kind (<method>RenderText</method>) and the value of a literal header.
@@ -14066,7 +14068,7 @@ ClassMethod BodyOne(pId As %Integer, pBodyRead As %String, pMaxChars As %Integer
     Do tItem.%Set("id", pId, "number")
     Do tItem.%Set("found", 1, "boolean")
     Do tItem.%Set("bodyClassName", tClass, "string")
-    If (tKind '= "literal") || (pBodyRead = "all") { Do tItem.%Set("bodyId", tBodyId, "string") }
+    If (tKind '= "literal") || (pBodyRead = "all") || (tBodyId = "") { Do tItem.%Set("bodyId", tBodyId, "string") }
     Set tReads = ..ReadsText(pBodyRead, tKind)
     Do ##class(ExecuteMCPv2.REST.MessageResend).SetBodyDetail(tItem, $Select(tReads: "text", 1: "kind"), pMaxChars, tClass, tBodyId, tClassExists)
     If tItem.%IsDefined("bodyText") { Do tItem.%Set("bodyTextComplete", 1, "boolean") }
