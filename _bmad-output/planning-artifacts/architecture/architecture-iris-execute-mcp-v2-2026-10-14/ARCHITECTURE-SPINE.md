@@ -310,6 +310,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block`;
       - `iris_message_body` renders character-stream bodies under `allow`;
       - the message-search statements carry an index hint, which changes the plan only, never results.
+    - **Story 40.0** (orchestrator decisions #36 and #38, made under the same delegation):
+      - the `trace-message-flow` prompt tells agents, under `block`, to report the reason for withheld Event Log and diagram error text and never read it another way (DW-587);
+      - `iris_metrics_interop` `errorCount24h` counts Error entries (it counted Warning), and both it and `messageCount24h` cover the 24 hours before the call in UTC (DW-584);
+      - the `iris_production_logs` `type` filter maps a display name such as `Error` to its stored number; a numeric value still matches as before (DW-585).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -472,6 +476,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Least exposure by default.** Under `redact`, no surface shows more body text than it did before this policy existed. The resend preview keeps its HL7 class-name note and withholds non-HL7 bodies with a reason. The engine's first body-text consumer is `iris_message_body` (Story 39.5).
     - In 39.2 the policy governed the resend preview only.
     - Since Story 39.7, `iris_production_logs` (Event Log `Text`) and `iris_message_diagram` (the Correlator's `Error on message …` texts) are governed under `block` only: their message-derived text is withheld with a fixed reason. Under `redact` and `allow` they are byte-identical to before and stay documented residuals, because free log text cannot be redacted reliably and content sniffing is forbidden (decision #31).
+      - The diagram generator's own `Generation failed for session N: …` text is not withheld under `block`: it carries only a SQL schema error or a system error name and location, never message content (Story 40.0 probe, DW-586).
     - Under `allow`, `iris_message_body` renders character-stream property bodies (for example `HS.Message.XMLMessage` `ContentStream`) within `maxChars`. They are withheld under `redact` and kind-only under `block` (decision #32).
     - The scope as of 2026-10-16 is recorded in `tool_support.md`.
   - **What redaction may read.** Redaction runs only on the complete, unsanitized body. Truncation and sanitization come after redaction, in TypeScript.
