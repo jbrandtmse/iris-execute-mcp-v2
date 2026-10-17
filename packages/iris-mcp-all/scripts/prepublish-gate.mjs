@@ -156,6 +156,15 @@ const gateTestFiles = [
   // too, and the Story393 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes,
   // asserting nothing is left.
   "src/__tests__/story-39-3-body-search-live-gate.test.ts",
+  // Story 39.3 QA: `iris_message_search` `body` on the BUILT iris-interop-mcp dist against a local listener that records requests and replies
+  // as a padded or version-skewed IRIS (block sends no route request, the wire body of redact and allow, header rows only, the audit file
+  // and the console log); no IRIS instance is contacted.
+  "src/__tests__/story-39-3-qa-process.test.ts",
+  // Story 39.3 QA: the value forms of date, time, timestamp and number properties, the three kinds of stream, and the statements the route
+  // prepared (read back from INFORMATION_SCHEMA.STATEMENTS) over real stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and
+  // iris-admin-mcp dists and raw HTTP to the route. Writes only the disposable namespace and database EXECMCPTMP393Q (its database files and
+  // directory too) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-3-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

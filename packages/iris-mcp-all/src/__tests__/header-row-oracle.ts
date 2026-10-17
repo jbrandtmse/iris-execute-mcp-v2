@@ -5,7 +5,7 @@
  * time conversion and the NULL handling are written out here.
  */
 
-import type { AtelierRow } from "./process-gate-helpers.js";
+import { atelierQuery, type AtelierRow, type IrisTarget } from "./process-gate-helpers.js";
 
 /** The header columns every search row is read from, in order. */
 const BASE_COLUMNS = [
@@ -40,6 +40,33 @@ const STATUS_ROW_LABELS = ["Created", "Queued", "Delivered", "Discarded", "Suspe
 /** A stored UTC value as `toISOString()` UTC, or `""`. */
 export function isoOf(stored: string): string {
   return stored === "" ? "" : new Date(`${stored.replace(" ", "T")}Z`).toISOString();
+}
+
+/** A SQL string literal: single-quoted, with each quote doubled. */
+export const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/**
+ * The hand-written JOIN oracle (Rule #36) of the body-search gates: the headers of `bodyClass` inside
+ * `windowSql` whose body row in `table` satisfies `predicate`, in `TimeCreated, ID` order, as the tool
+ * must return them. `predicate` and `windowSql` are written by hand with literals (aliases `h` and `b`);
+ * `extra` adds header conditions. It runs through the raw Atelier route against `namespace`.
+ */
+export async function bodyJoinOracle(
+  target: IrisTarget,
+  namespace: string,
+  table: string,
+  bodyClass: string,
+  windowSql: string,
+  predicate: string,
+  extra = "",
+): Promise<Array<Record<string, unknown>>> {
+  const rows = await atelierQuery(
+    { ...target, namespace },
+    `SELECT ${oracleColumns("h")} FROM Ens.MessageHeader h JOIN ${table} b ON b.%ID = h.MessageBodyId ` +
+      `WHERE h.MessageBodyClassName = ${sqlLiteral(bodyClass)} AND ${windowSql}${extra} AND ${predicate} ` +
+      "ORDER BY h.TimeCreated, h.ID",
+  );
+  return rows.map(expectedRow);
 }
 
 /** The row the tool must return for an oracle row. */

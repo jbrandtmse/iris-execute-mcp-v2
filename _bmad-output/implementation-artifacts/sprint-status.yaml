@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-17-2026 01:21'
+last_updated: '10-17-2026 02:11'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -512,7 +512,7 @@ development_status:
   39-0-epic-38-deferred-cleanup: done
   39-1-message-header-search: done
   39-2-phi-data-policy: done
-  39-3-message-body-content-search: review
+  39-3-message-body-content-search: done
   39-4-search-table-lookup: backlog
   39-5-message-body-reader: backlog
   39-6-message-forensics-docs-prompt-and-capstone: backlog

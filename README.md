@@ -14,7 +14,7 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 |---------|--------|------:|-------------|
 | [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 31 | ObjectScript document CRUD, guarded surgical line edits of existing documents (`iris_doc_edit`), compilation, SQL (with read-only mode, a rows-affected cap and a query-only tool, `iris_sql_query`), globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`), long-running test-run re-attach/read/cancel (`iris_test_status`) |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 23 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message header and message body content search (`iris_message_search` — read-only, a required window of at most 7 days; the `body` action filters on body properties with validated, parameterised conditions and is under the PHI data policy), message resend/replay (duplication hazard — preview before executing) |
+| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 23 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message header and message body content search (`iris_message_search` — read-only, a required window of at most 7 days; the `body` action filters on body properties with validated, parameterised conditions and is under the PHI data policy: enabled by default, refused under `block`), message resend/replay (duplication hazard — preview before executing) |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
@@ -689,7 +689,7 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 | --- | --- | --- | --- |
 | @iris-mcp/dev | 32 / 84,987 / ~21,247 | 15 / 43,878 / ~10,970 | 32 / 84,987 / ~21,247 |
 | @iris-mcp/admin | 27 / 48,369 / ~12,092 | 13 / 16,862 / ~4,216 | 11 / 16,222 / ~4,056 |
-| @iris-mcp/interop | 24 / 48,439 / ~12,110 | 11 / 29,497 / ~7,374 | 24 / 48,439 / ~12,110 |
+| @iris-mcp/interop | 24 / 48,614 / ~12,154 | 11 / 29,672 / ~7,418 | 24 / 48,614 / ~12,154 |
 | @iris-mcp/ops | 22 / 30,812 / ~7,703 | 10 / 13,814 / ~3,454 | 10 / 14,265 / ~3,566 |
 | @iris-mcp/data | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 |
 

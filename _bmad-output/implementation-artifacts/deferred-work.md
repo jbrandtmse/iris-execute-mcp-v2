@@ -3092,6 +3092,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
 - evidence: EXPLAIN in HSCUSTOM: item+status -> Status INTERSECT (Source UNION Target) bitmaps, master map read per id, TimeCreated tested per row, cost 19075; window only -> TimeCreated index range, cost 103.84; resendFiltered COUNT shares the WHERE
 - 2026-10-17T03:11:26Z status=escalated owner=burndown by=cr note=decide the plan strategy (index hint vs TuneTable guidance) with a large-data probe; revisit the add-filters doc advice
+- 2026-10-17T09:11:02Z occurrence=39-3-message-body-content-search
 
 ### DW-573: AD-15/AC-7: no test pins that pre-existing tools/list entries (description, schema, annotations) stay unchanged; the README payload sync compares tool counts only
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3124,3 +3125,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-2-phi-data-policy.md | severity: low | fix-risk: high | footprint: in-story
 - evidence: CR probe on the patched built dist: NTE-3 split before 'ZOE|x' gives ZOE|***; before 'PID|v|...|w' keeps PID-1/PID-8; unknown names (LEE, DOE|) now refuse
 - 2026-10-17T06:22:00Z status=wontfix-accepted owner=39-2-phi-data-policy by=cr note=reopen_if=a 39.5 live sample shows a split-off line kept by name; a fix needs DocType structure validation
+
+### DW-579: A tools/call the MCP SDK rejects as schema-invalid never reaches handleToolCall, so it is never audited (AD-3 step 1 Zod validation; AD-19 one entry per call)
+- source: spec-39-3-message-body-content-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
+- 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move

@@ -37,7 +37,8 @@ was declared in Story 39.1 and now works; it is a read, enabled by default, and 
   `Parameter 'action' must be one of: headers, body`.
 - **`filters` on the `headers` action is refused, on the tool and on the route**, instead of being ignored: a dropped
   filter would return unfiltered results. Before this release the key did not exist, and the tool's schema stripped it.
-- **`searchTable` still answers `NOT_IMPLEMENTED`, now with `availableActions: ["headers","body"]`.**
+- **`searchTable` still answers `NOT_IMPLEMENTED`, now with `availableActions: ["headers","body"]`.** Its message
+  follows them: "Use the 'headers' or 'body' action." (it was "Use the 'headers' action.").
 - **`BOOTSTRAP_VERSION` moves `d440a659ba1e` to `f7b0868c95d0`**; the bootstrap still embeds 31 classes.
   `MessageSearch.HeaderWhere` takes an optional alias for a joined statement and, with none, emits exactly the text it
   did before; a `headers` request answers byte for byte as it did, pinned by a capture taken on `d440a659ba1e`.

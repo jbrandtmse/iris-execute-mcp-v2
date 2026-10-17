@@ -61,7 +61,7 @@ import {
   sideCount,
   sideDefined,
 } from "./interop-namespace-fixture.js";
-import { expectedRow, oracleColumns } from "./header-row-oracle.js";
+import { bodyJoinOracle, sqlLiteral } from "./header-row-oracle.js";
 import { mulberry32 } from "../../../shared/src/__tests__/test-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -325,30 +325,17 @@ const BODY_CLASS = "Story393.Body";
 /** The window W as the SQL the oracle uses: the stored form, both ends inclusive. */
 const WINDOW_SQL = "h.TimeCreated >= '2001-02-03 07:00:00' AND h.TimeCreated <= '2001-02-03 09:00:00'";
 
-const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
 const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
 
-/**
- * The hand-written JOIN oracle (Rule #36): the headers of `bodyClass` in window W whose body row in `table`
- * satisfies `predicate`, in `TimeCreated, ID` order, as the tool must return them. `predicate` is written by
- * hand with literals; `extra` adds header conditions.
- */
-async function joinOracle(
+/** The hand-written JOIN oracle (Rule #36) over window W: `bodyJoinOracle` of `header-row-oracle.ts`. */
+const joinOracle = (
   namespace: string,
   table: string,
   bodyClass: string,
   predicate: string,
   extra = "",
-): Promise<Array<Record<string, unknown>>> {
-  const rows = await atelierQuery(
-    { ...TARGET, namespace },
-    `SELECT ${oracleColumns("h")} FROM Ens.MessageHeader h JOIN ${table} b ON b.%ID = h.MessageBodyId ` +
-      `WHERE h.MessageBodyClassName = ${sqlLiteral(bodyClass)} AND ${WINDOW_SQL}${extra} AND ${predicate} ` +
-      "ORDER BY h.TimeCreated, h.ID",
-  );
-  return rows.map(expectedRow);
-}
+): Promise<Array<Record<string, unknown>>> => bodyJoinOracle(TARGET, namespace, table, bodyClass, WINDOW_SQL, predicate, extra);
 
 type Structured = Record<string, unknown> & {
   action: string;
@@ -893,7 +880,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route d
       requests += 1;
       const answer = await route(routeBody([filterValue]));
       const label = `${slot} ${JSON.stringify(filterValue).slice(0, 120)}`;
-      if (answer.text.includes(MARKER) && answer.errors.length > 0) violations.push(`${label}: the refusal echoes the marker`);
+      if (answer.text.includes(MARKER)) violations.push(`${label}: the response echoes the marker`);
       if (answer.status !== 200) violations.push(`${label}: HTTP ${answer.status}`);
       if (expectedBodies === undefined) {
         if (answer.errors.length === 0) violations.push(`${label}: accepted, but it is not a searchable input`);
@@ -1021,7 +1008,7 @@ describe.skipIf(CAPTURE)("Story 39.3: second namespace, not configured, unknown 
 
     expect(result.isError).toBe(true);
     expect(result.structuredContent?.["code"]).toBeUndefined();
-    expect(textOf(result)).not.toBe("");
+    expect(textOf(result), "the namespace switch error").toContain("<NAMESPACE>");
     expect(textOf(result)).not.toContain("^");
   }, 120000);
 });

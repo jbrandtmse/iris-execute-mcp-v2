@@ -339,7 +339,8 @@ export const messageSearchTool: ToolDefinition = {
     "since midnight, not a formatted string; a timestamp property takes its stored text, such as " +
     "'2001-02-03 08:00:00', not an ISO 8601 'T' form; a number " +
     "is sent in IRIS canonical form (0.5 becomes .5), so give a text property a string. A header whose " +
-    "body no longer exists never matches. A stream " +
+    "body no longer exists never matches. On EnsLib.HL7.Message, RawContent holds only the first 10,000 " +
+    "characters of the message, so a search on it does not see later text. A stream " +
     "property accepts only isNull and notNull. Properties without a column are refused: list and array " +
     "collections, embedded (serial) objects, relationships, multidimensional properties, and transient " +
     "or calculated properties that are not SQL-computed. Everything is validated on the IRIS side and " +
@@ -357,7 +358,7 @@ export const messageSearchTool: ToolDefinition = {
     "call. limit (default 100, max 500) caps the rows returned per page, not the work done: a wide " +
     "window on a busy namespace is scanned in full and can approach the ~60 s Web Gateway timeout, " +
     "so narrow the window or add filters. The body action reads the headers in the window first and " +
-    "each body by its ID.\n\n" +
+    "each body by its ID, so a body filter does not reduce the work.\n\n" +
     "Header filters match by equality, not by pattern (% and _ are ordinary characters), and the name " +
     "filters ignore case: item (the source or the target), source, target, status (Created, " +
     "Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed; rows report " +
@@ -516,7 +517,8 @@ export const messageSearchTool: ToolDefinition = {
     }
 
     // The PHI data policy of the call's profile (Story 39.3, AD-26). A body search reveals what bodies
-    // hold, so `block` refuses it before anything else is checked and before any IRIS call.
+    // hold, so `block` refuses it after the window parse and the action checks, before every other body
+    // check and before any IRIS call.
     const policy = effectiveDataPolicy(ctx.config);
     if (action === "body" && policy === "block") {
       return refusalResult(REFUSAL_CODES.DATA_POLICY_BLOCKED, BODY_BLOCKED_TEXT, {
