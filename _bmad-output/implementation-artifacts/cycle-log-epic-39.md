@@ -46,3 +46,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T03:15:32Z	Story 39.1	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=622 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-17T03:15:35Z	Story 39.1	committed	sha=32b4267 code_sha=c533fc5 build_sha=b52e661 submodules= ci=none run=none branch=epic39 pushed=origin/epic39 verified=merge-base amendments=epics.md:39.2-DW-570,DW-575,39.6-DW-573
 2026-10-17T03:15:35Z	Story 39.1	story_cycle	plan_to_commit_min=147 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-17T03:19:36Z	Epic 39	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=140
+2026-10-17T03:19:36Z	Story 39.2	stage_spawned	stage=plan spawn_at=2026-10-17T03:19:36Z model=claude-opus-5-5 agent_name=39-2-phi-data-policy-plan-1 cycle_iteration=1
