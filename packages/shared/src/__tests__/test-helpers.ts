@@ -1,9 +1,10 @@
 /**
  * Shared test helpers for IRIS MCP tool unit tests.
  *
- * Consolidates `createMockHttp()`, `createMockCtx()`, and `envelope()`
- * so that all server packages (iris-dev-mcp, iris-admin-mcp, etc.)
- * can import them from a single location.
+ * Consolidates `createMockHttp()`, `createMockCtx()`, `envelope()`, the env
+ * harness, and the `McpServerBase` startup helpers `stageDefaultStartup()` and
+ * `callTool()`, so that all server packages (iris-dev-mcp, iris-admin-mcp,
+ * etc.) can import them from a single location.
  */
 
 import { vi } from "vitest";
@@ -14,6 +15,33 @@ import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope
 // never imports this file.
 export { makeEnvHarness } from "./env-harness.js";
 export type { EnvHarnessOptions } from "./env-harness.js";
+
+/**
+ * Queue, on a mocked `fetch`, the two responses a default profile's startup
+ * consumes: the health HEAD (200, no body), then the Atelier version GET (an
+ * envelope naming version `8.0.0`).
+ */
+export function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
+  fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ status: { errors: [] }, console: [], result: { version: "8.0.0" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+/**
+ * Invoke a tool of a constructed `McpServerBase` through the callback the MCP
+ * SDK registered for it, which is the `handleToolCall` path a `tools/call`
+ * request takes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function callTool(server: any, name: string, args: unknown) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const entry = (server.server as any)._registeredTools[name];
+  return (entry.callback ?? entry.handler ?? entry.cb)(args);
+}
 
 /**
  * Create a fully mocked {@link IrisHttpClient} with vi.fn() stubs

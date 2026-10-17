@@ -1,5 +1,6 @@
 /**
- * Vitest `setupFiles` entry for every package's default suite.
+ * Vitest `setupFiles` entry for the default suites of shared, the five servers
+ * and `@iris-mcp/all` (`client-config` does not use it).
  *
  * Runs before each test file is imported, so a variable the code reads once at
  * import time (`LOG_LEVEL` in `logger.ts`) is already clear when it is read.

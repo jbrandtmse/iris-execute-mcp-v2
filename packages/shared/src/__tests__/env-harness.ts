@@ -66,7 +66,8 @@ export function makeEnvHarness(options: EnvHarnessOptions = {}) {
 
   function teardown(): void {
     globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
+    exitMock?.mockRestore();
+    exitMock = undefined;
     vi.restoreAllMocks();
     for (const [name, value] of savedEnv) {
       if (value === undefined) delete process.env[name];

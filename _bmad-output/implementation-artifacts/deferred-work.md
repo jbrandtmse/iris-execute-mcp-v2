@@ -2680,6 +2680,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T19:38:37Z note=39.0 plan 2026-10-16: dist/test-helpers/integration-config.* also ships in the shared tarball today (the inverse direction); Story 42.1 AC 42.1.3 should cover it
 - 2026-10-16T23:53:09Z occurrence=39-0-epic-38-deferred-cleanup
 - 2026-10-16T23:53:09Z note=39.0 implement: AC-7 pack-content gate deferred here; npm pack must list no __tests__/env-harness/startup-env path and no dist/test-helpers (Story 42.1 AC 42.1.3)
+- 2026-10-17T00:45:43Z occurrence=39-0-epic-38-deferred-cleanup
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2911,6 +2912,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
 - 2026-10-16T18:57:09Z status=routed owner=burndown by=lead note=reopen_if fired at the 38.7 review (governance-enforcement env harness read ambient IRIS_GOVERNANCE_FILE/PRESET/SERVER_MANAGER); for the Epic 39 X.0 gate: one shared startup-env scrub for test harnesses
 - 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-4..7: one shared env harness + startup-env setupFiles scrub; 43 copies migrated with identical test counts; every default suite green under hostile variables; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-544: iris_doc_load uploads each file with ignoreConflict on by default and has no Storage check, so a file whose class text has no Storage block replaces the stored class and drops its Storage definitions
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3046,6 +3048,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 38.7 plan probe 2026-10-16; one governance document is shared by all five servers, so each server alone cannot tell another server's key from a typo -- a fix needs the cross-server key universe (iris-mcp-governance universe / deriveKeysForTool)
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=overflow from the Epic 38 burn-down story: for the Epic 39 X.0 gate (warn on a key matching no tool in the suite universe)
 - 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-1..3: startup WARN per provably-dead key (never fails) + iris-mcp-governance check exits 1 on suite-unknown keys; built-process + built-CLI gates; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-566: IRIS_GOVERNANCE / IRIS_GOVERNANCE_FILE JSON-parse errors embed V8's message, which can quote a snippet of the input, although governance.ts:106 and :406 say contents are never echoed
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3057,8 +3060,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 38.7 plan probe 2026-10-16, IRIS 2026.2 Atelier v8
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=two-way-door doc fix (<=5 lines + a pin); overflow for the Epic 39 X.0 gate
 - 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-8: shared type description, every example live-validated 200 against Atelier; old CLS/cls pair pinned as 400; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-568: iris_production_manage delete passes its production-class check for a library production class (IsProductionClass of Ens.Production answers 1), so only a read-only ENSLIB stops a delete of a built-in base class
 - source: spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: 38.7 QA observation; cr probe 2026-10-16: HSCUSTOM %Dictionary.CompiledClass holds Ens.Production and Ens.Enterprise.Production; iris_database_check ENSLIB readOnly true; the same delete was possible before 38.7 (DW-533 narrowed it to production classes)
 - 2026-10-16T18:53:39Z status=wontfix-theoretical owner=38-7-epic-38-burn-down by=cr note=real if ENSLIB is mounted read-write and a delete names a library production class; then refuse a class whose source db is not the namespace routine db
+
+### DW-569: The shared IrisHttpClient turns an HTTP 400 whose Atelier error list is empty into an empty SUCCESS (e.g. iris_doc_list type 'cls' on category CLS returned {items:[]} instead of an error) -- an error response reported as success
+- source: spec-39-0-epic-38-deferred-cleanup.md (QA 2026-10-16) | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: QA 39.0: http-client.ts ~395 maps a 400 with status.errors=[] to a resolved empty result; live GET docnames/CLS/cls -> 400, tool -> {items:[]}
+- 2026-10-17T00:14:32Z status=routed owner=burndown by=qa note=for the Epic 39 burn-down: a non-2xx response is an error even when status.errors is empty; pin with the live 400 pair from doc-type-description-live-gate

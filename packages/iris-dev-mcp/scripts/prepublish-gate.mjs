@@ -96,6 +96,9 @@ const gateTestFiles = [
   // and `iris_env_promote` execute on a target PUT IRIS answers with HTTP 200 and a status: writes only the disposable
   // ExecuteMCPv2.Temp.QaStory387Mod, ...LoadA/B/C and ...PromA/B (the last two compiled) documents.
   "src/__tests__/story-38-7-qa-live-gate.test.ts",
+  // Story 39.0 QA: the examples of the shared `type` description against the real Atelier docnames route, through
+  // `iris_doc_list` and `iris_package_list` (read-only GETs; writes nothing).
+  "src/__tests__/doc-type-description-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

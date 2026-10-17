@@ -9,8 +9,11 @@
  *
  * Expected message texts come from the Story 39.0 intent contract (its I/O matrix), never
  * from the implementation (Rule #36). The "every key of the universe" row builds its
- * document from the REAL built dist through `universe --json`, so a key a real tool
- * carries can never be reported dead.
+ * document and its key map from the REAL built dist through `universe --json`, so the
+ * classifier never reports a key of a real tool dead against the universe derivation
+ * (`check`'s map). The server's own map, `governanceKeysByTool` over its registered
+ * tools, is exercised on the built dev and interop servers by the Story 38.7 process
+ * gate in `@iris-mcp/all`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,7 +32,7 @@ import {
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 import type { ServerDiscoveryResult } from "../server-discovery.js";
 import type { ToolDefinition } from "../tool-types.js";
-import { makeEnvHarness } from "./env-harness.js";
+import { callTool, makeEnvHarness, stageDefaultStartup } from "./test-helpers.js";
 
 // Mock ONLY the `bootstrap` export so establishment never reaches a real IRIS.
 const okBootstrap: BootstrapResult = {
@@ -242,27 +245,8 @@ const ENV_OPTIONS = {
   onSetup: () => bootstrapSpy.mockClear(),
 } as const;
 
-/** The stage of a default profile's startup: a health HEAD, then the Atelier version GET. */
-function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
-  fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
-  fetchMock.mockResolvedValueOnce(
-    new Response(JSON.stringify({ status: { errors: [] }, console: [], result: { version: "8.0.0" } }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-
 function makeServerOpts(tools: ToolDefinition[]): McpServerBaseOptions {
   return { name: "test-server", version: "1.0.0", tools, needsCustomRest: false };
-}
-
-/** Invoke a tool through the SDK-registered callback (the handleToolCall path). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function callTool(server: any, name: string, args: unknown) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entry = (server.server as any)._registeredTools[name];
-  return (entry.callback ?? entry.handler ?? entry.cb)(args);
 }
 
 describe("start() warns about a governance key its own tools prove dead, and keeps running (Story 39.0, AC-1)", () => {

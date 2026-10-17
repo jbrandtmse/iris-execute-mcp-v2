@@ -164,7 +164,7 @@ describe("the startup-env roster matches the variables the source reads (Story 3
   });
 });
 
-/** The packages whose default run is red under a hostile shell without the scrub; client-config's was green, so it has no entry. */
+/** The packages whose default suite runs the scrub: shared, the five servers and `@iris-mcp/all`. `client-config` does not: it is wired only if its default run goes red under a hostile shell, and it stayed green. */
 const SCRUBBED_PACKAGES = [
   "shared",
   "iris-dev-mcp",

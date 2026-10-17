@@ -198,6 +198,18 @@ describe("makeEnvHarness mocks", () => {
   });
 });
 
+describe("the vitest setup file", () => {
+  it("clears every startup variable and leaves the connection variables when it is loaded", async () => {
+    vi.resetModules();
+    await import("./startup-env.setup.js");
+    for (const name of STARTUP_NAMES) expect(process.env[name], name).toBeUndefined();
+    for (const name of CONNECTION_NAMES) {
+      if (name === ABSENT_NAME) expect(process.env[name], name).toBeUndefined();
+      else expect(process.env[name], name).toBe(hostileValue(name));
+    }
+  });
+});
+
 describe("scrubStartupEnv", () => {
   it("clears the 24 startup variables only, and the returned function puts each back exactly", () => {
     const restore = scrubStartupEnv();
