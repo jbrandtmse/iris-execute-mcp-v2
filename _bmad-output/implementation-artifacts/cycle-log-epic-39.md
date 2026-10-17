@@ -149,3 +149,8 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T21:41:00Z	Story 39.7	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1584 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-17T21:41:03Z	Story 39.7	committed	sha=87fe777 code_sha=47a55a9 build_sha=2e307d4 submodules= ci=none run=none branch=epic39 pushed=origin/epic39 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-26,AD-15
 2026-10-17T21:41:03Z	Story 39.7	story_cycle	plan_to_commit_min=184 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-17T21:41:21Z	Epic 39	epic_status_done	stories=8
+2026-10-17T21:41:21Z	Epic 39	model_tier_checkpoint	armed=false stack_risk=none review_tier=full-opus implement_model=claude-sonnet-5-5 high_med_avg=4.5 unresolved_high_med_avg=1.13 metric=unresolved rework_stories=0 review_loop_thrash=0 rework_lang_defects=0 review_high=1 review_med=35 result=hold applied=false
+2026-10-17T21:41:21Z	Epic 39	epic_retro_skipped	reason=user_directed_skip_unattended_run
+2026-10-17T21:41:21Z	Epic 39	decision_sheet_recorded	decided=2 to_action_items=0 to_x0=1 terminal=1 decided_by=orchestrator(Lead-away) decisions=36,37 overflow_to_epic40_x0=DW-584,DW-585,DW-586,DW-587
+2026-10-17T21:41:21Z	Epic 39	ci_green_verified	run=none head=285ccd4 ci=none

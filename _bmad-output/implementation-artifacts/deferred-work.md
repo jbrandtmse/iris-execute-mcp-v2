@@ -3191,8 +3191,10 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: traceMessageFlow.ts steps 4-6 unchanged by 39.7 vs step 3 body rule; the 39.7 Docs table omits the prompt (Rule 56); 39.6 CHANGELOG treats a prompt-body change as AD-15 sanctioned
 - 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: add the block rule to steps 4-5 (AD-15 prompt-body change, regenerate skills) or accept
+- 2026-10-17T21:41:21Z note=decided=orchestrator(Lead-away) decision 36: fix the trace-message-flow prompt text (sanctioned AD-15 prompt change) in the Epic 40 X.0 story
 
 ### DW-588: DW-572 residual: iris_message_resend filtered mode (resendFiltered) keeps the history-wide Status/Source/Target bitmap plan on an untuned Ens.MessageHeader, because decision 30 left its statements unchanged
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: DW-572 evidence: resendFiltered COUNT shares the WHERE; decision 30: resendFiltered stays unchanged; MessageResend.cls not in the 39.7 diff; nothing carries the residual once DW-572 resolves
 - 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: HEADERHINT in resendFiltered (its pins move) or a tuning note; filtered resend is a default-disabled write
+- 2026-10-17T21:41:21Z status=wontfix-accepted by=merge_gate note=decided=orchestrator(Lead-away) decision 37: reopen_if=an operator enables iris_message_resend resendFiltered and a dry run on a large Ens.MessageHeader exceeds the Web Gateway timeout, or a measured EXPLAIN on a tuned table shows the hint changes no results -- then add the same index hint to resendFiltered with its byte-identity pin re-captured
