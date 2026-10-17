@@ -1,0 +1,449 @@
+---
+title: 'Story 39.1: Message Header Search'
+type: 'feature'
+created: '2026-10-16'
+status: 'ready-for-dev'
+baseline_revision: '34d59e0dcfd6c5c17c07856a5d3900a1edbbbd46'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/.claude/rules/project-rules.md'
+  - '{project-root}/.claude/rules/iris-objectscript-basics.md'
+  - '{project-root}/.claude/rules/object-script-testing.md'
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+warnings:
+  - oversized
+deferred: []
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** An engineer cannot search Interoperability message headers without enabling a write. The only header search is the dry run of `iris_message_resend:resendFiltered`, and that key is a default-disabled write. The search also covers only item, status and window (G32).
+
+**Approach:**
+- Add the read tool `iris_message_search` (interop) with the `action` enum `headers` | `body` | `searchTable`, fixed now. `body` and `searchTable` return a `NOT_IMPLEMENTED` refusal until Stories 39.3 and 39.4.
+- `headers` filters by window, item, source, target, status, session, body class and error flag. It returns paged header rows, never body data.
+- Extract the filters-to-WHERE translation out of `resendFiltered` into one ObjectScript helper. The new route and `resendFiltered` both call it, and `resendFiltered`'s wire stays byte-identical.
+
+## Boundaries & Constraints
+
+**Always:**
+- **No caller text in SQL text.**
+  - The helper emits only fixed column names and `?`, and every value is bound.
+  - The row cap is an integer the handler validated in range. Prefer `TOP ?`; interpolate only if the Task 0 probe shows `TOP ?` is unsupported, as `resendFiltered` does today.
+- **Scope (AD-20).** `from` is required and `to` defaults to now. The window spans 0 to 7 days (orchestrator decision b), and IRIS refuses anything outside it before switching namespace or reading. There is no whole-namespace mode. `limit` (default 100, max 500) is an output cap, never timeout protection, and the description says so.
+- **The helper's contract (AD-17).** It owns only the filters-to-WHERE translation. Each caller keeps its own required filters, window, caps, and its choice between refusing and truncating. `resendFiltered` keeps every guard, text and statement shape.
+- **Timestamps.** Input is ISO 8601 with `Z` or an offset, and TS converts it to canonical UTC: whole seconds, plus `.fff` only when the millisecond part is non-zero, trailing zeros trimmed, the same form `Ens.DataType.UTC` `Normalize` stores. Output is `toISOString()` UTC with a `…Raw` sibling, and `""` (never a throw) when the value is empty or malformed.
+- **The new handler** extends `REST.Base`, renders one envelope, and saves and restores `$NAMESPACE`, starting with the catch block (AD-11, AD-13). It runs its statements in Logical select mode (`%SelectMode=0`), so times stay UTC whatever the process default. Its validation texts name the parameter, never the value.
+- **Documented defaults go out explicitly.** TS sends `to` and `limit` explicitly (Rule #10).
+- **Results.** `structuredContent` comes with `content`. Interpretation lives in TS (AD-12): IRIS returns the raw `interopEnabled:false` signal (the `Health.cls:486-497` precedent), and TS reports `notApplicable`.
+- **Classification and visibility.**
+  - `mutates: { headers: "read", body: "read", searchTable: "read" }`, with no `defaultEnabled`.
+  - Annotations: `readOnlyHint:true`, `destructiveHint:false`, `idempotentHint:true`, `openWorldHint:false`; `scope: "NS"`.
+  - Presets: interop `core` include (10 package / 11 runtime) and `developer` include (23).
+- **Live fixtures.**
+  - All live work runs on `server:"default"`. Fixtures are synthetic: `Story391` names, timestamps on 2001-02-03 UTC, so a misrouted query can never match real traffic.
+  - They live only in the disposable namespaces `EXECMCPTMP391A`, `EXECMCPTMP391B` and `EXECMCPTMP391C` and the HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`. All of them are removed, database files included, with nothing-left assertions (Verification).
+- **Rule #16 / #47 probes.** Task 0 probes come first. If a Code Map claim proves wrong, correct the spec and record it.
+
+**Never:**
+- No change to `MessageTrace`/`iris_production_messages`, `PreviewOne`/`BodySummary` (Story 39.2 owns them) or the `resend`/`preview` actions.
+- No PHI-policy work, no `TOOL_PAIRS` change (39.5), no prompt edit (39.6), and no `ipm/module.xml` edit (42.4).
+- Headers never return `ErrorStatus` or `Description`: AD-26 names them as body-derived candidates for Story 39.2 to classify.
+- No `%Library.EnsembleMgr.EnableNamespace` (orchestrator decision a). No security or service change on the shared instance. Never read HSCUSTOM's or another project's messages.
+- No `mode` parameter. No raw SQL input. No `matchCount` (it would scan the whole window).
+- Never run the bare governance-baseline generator, and never hand-edit `bootstrap-classes.ts`.
+- Do not migrate the Epic 38 gates onto shared helpers (DW-561, Story 39.6).
+
+## I/O & Edge-Case Matrix
+
+The fixture **α** (namespace A) is about 12 headers. Together they cover:
+- every filter dimension;
+- rows exactly at `from` and at `to`, and a row outside the window;
+- two rows with the same `TimeCreated`;
+- a fractional-second time;
+- an empty `TimeProcessed`, and a `CorrespondingMessageId`;
+- a source name with literal `'`, `%`, `_` and `OR 1=1--`.
+
+The fixture **β** (namespace B) is 3 headers with different items and sessions. Namespace C has no mappings.
+
+**The oracle** is SQL written by hand and run through `atelierQuery` against the same namespace. Its order is `ORDER BY TimeCreated, ID`.
+
+**A header row** has these fields:
+- `id` (number), `sessionId` (number);
+- `type` (`Request` | `Response` | `Terminate` | `Unknown`);
+- `status` (the `StatusCodeToLabel` label, for example `Error`);
+- `isError` (boolean);
+- `sourceItem`, `targetItem`, `bodyClassName`, `bodyId` (strings);
+- `timeCreated`, `timeCreatedRaw`, `timeProcessed`, `timeProcessedRaw`;
+- `correspondingMessageId` (number or `null`).
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Window only | A; `from`/`to` covering α's day | The rows equal the oracle: ids, order and every field. Boundary rows are included and the outside row is not. | none |
+| Each filter, and a combination | `item` (source or target), `source`, `target`, `status`, `sessionId`, `bodyClass`, `errorOnly:true` (`IsError=1`), and all of them ANDed | Each result equals its own oracle query | none |
+| Hostile text | the odd source name searched exactly; `%`/`_` searched as names | That row only: equality, not `LIKE`. The values never reach SQL text. | none |
+| Paging | `limit:3` over 7+ matches | Pages joined equal the oracle order, with no gap and no duplicate. The tie is broken by `ID`. Only a page that has `hasMore:true` carries `nextCursor`. | none |
+| Defaults | `to` and `limit` omitted | The wire body carries `to` (now, UTC canonical) and `limit:100` | none |
+| Offset input | `from:"2001-02-03T12:00:00+02:00"` | IRIS receives `2001-02-03T10:00:00Z` | none |
+| Bad TS input | a naive, garbage or missing `from`; a malformed `cursor`; `limit` 0, 501 or 2.5 | `isError`, naming the parameter, not its value. No HTTP call. | Zod / handler |
+| Bad direct-REST input | an unknown or missing `action`; a negative window, or one over 7 days; an unparseable time; `limit` out of range; an unknown status; a non-integer `sessionId` or `afterId`; `afterId` without `afterTimeCreated` | The envelope error is `result:{}`, named by parameter, and nothing is read | refusal |
+| Not configured (Rule #41) | namespace C | Success: `notApplicable:true`, a `reason`, `rows:[]`, `hasMore:false` | none |
+| Unknown namespace | `EXECMCPTMP391Z` | `isError` with the sanitized `SwitchNamespace` text | error |
+| Second namespace (Rule #34) | the same filters against A and against B | α rows from A and β rows from B, each equal to its own oracle | none |
+| Unbuilt actions | `body` or `searchTable` with a valid `from` | `refusalResult(NOT_IMPLEMENTED, …, {action, availableActions:["headers"]})`, no HTTP call, audit `outcome:"error"`, audit `action` = the action | refusal |
+| Governance | `{"global":{"iris_message_search:headers":false}}` | `headers` gives `GOVERNANCE_DISABLED`. `body` still reaches `NOT_IMPLEMENTED`. The `read-only` preset leaves all three keys enabled. | denied |
+| Resend wire (AD-17) | `resendFiltered` dry runs and guard refusals b–f over direct REST, against α | Each raw response body is byte-identical to the capture taken before the extraction | none |
+
+</intent-contract>
+
+## Code Map
+
+**The probe record (AC-1; source read at baseline `34d59e0`).** `resendFiltered` (`src/ExecuteMCPv2/REST/MessageResend.cls:441-609`) works as follows.
+- **Required.** `item` (:443) and `from` (:447).
+- **Optional.**
+  - `status`: default `"Errored"`, mapped by `StatusLabelToCode` (:25-39), which also accepts `Error`. 0 means unknown, which is refused (:455).
+  - `to`: default `$ZDATETIME($ZTIMESTAMP,3)`, UTC (:463).
+  - `maxMessages`: default 100, refused below 1 and above 500 (:489-502).
+  - `dryRun`: default 1. `confirm`: default 0.
+- **Timestamps.** `NormalizeTimestamp` (:57) changes `T` to a space, strips `Z`, and adds midnight to a bare date. `WindowDays` (:71) uses `$ZDATETIMEH(…,3)`; an unparseable value is refused (:466-472). The window is refused when negative (:475) and when over 7 days (:481).
+- **Guards.** Guard e (execute without confirm) comes before the namespace switch (:512). Then come the switch (:519), the count (:525-536), and, on execute only, guard d (count over cap, :540) and guard f (`Ens.Director.IsProductionRunning`, :549). The fetch then uses `TOP <maxMessages>`, interpolated after the `+` coercion (:557).
+- **The query.** Every statement shares one WHERE: `(SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ?`, with params item, item, code, from, to. The statements are the COUNT (:525), the fetch (:557) and the dry-run sample (`TOP 20 ID, SourceConfigName, TargetConfigName, Status, TimeCreated, SessionId … ORDER BY TimeCreated`, :580).
+- **The dry-run result** (:597-607): `{action, dryRun, matchCount, sample[{id, sourceItem, targetItem, status (label), timeCreated (raw), sessionId}], item, status (as supplied), from, to (normalized), maxMessages}`.
+- **The TS side** (`message-resend.ts`):
+  - It omits undefined fields (:449-459).
+  - Its local `odbcToIso` (:177-181) passes non-ODBC values through.
+  - `STATUS_LABELS` (:47-57) is local.
+  - The tool's annotations are destructive (:346-351), with `mutates` at :358-362.
+
+**IRIS side**
+- `src/ExecuteMCPv2/REST/MessageResend.cls`: reuse `StatusLabelToCode` (:25), `StatusCodeToLabel` (:43, which emits `Error`), `NormalizeTimestamp` (:57) and `WindowDays` (:71). Cross-handler calls have a precedent: `##class(ExecuteMCPv2.REST.Command).TeardownRedirect` at `REST/Sql.cls:110`.
+- `src/ExecuteMCPv2/REST/Dispatch.cls`: the Epic 26 routes are at :118-120. The new route `POST /interop/message/search` (singular, like resend) goes after :120, under an `<!-- Epic 39 (Story 39.1) -->` comment. %CSP.REST matches whole URLs, so it conflicts with nothing.
+- `src/ExecuteMCPv2/REST/Interop.cls:1359-1440` `MessageTrace` and `Diagram/Loader.cls:64-73` are the other header readers. Both are untouched; they show the `TOP cap+1` truncation idiom and the "dynamic `%SQL.Statement` only, never embedded SQL" rule (`Loader.cls:17-20`).
+- `src/ExecuteMCPv2/REST/Health.cls:479-497`: the `interopEnabled:false` raw-signal precedent.
+- `src/ExecuteMCPv2/Utils.cls`: `SwitchNamespace` (:50), `ValidateRequired` (:77), `SanitizeError` (:124) and `ReadRequestBody` (:1124).
+- `irislib/Ens/MessageHeaderBase.cls`:
+  - The properties are at :16-86. `TimeCreated` is `Ens.DataType.UTC`, and its stored values are UTC `yyyy-mm-dd hh:mm:ss.fff` (`$$$timeUTC`, `EnsUtil.inc:24`).
+  - `UTC.cls:9-17` converts to *local* time in ODBC and Display modes, which is why the handler uses Logical mode.
+  - `MessageStatus` codes 1-9 (`MessageStatus.cls:11-13`) and `MessageType` codes 1-3.
+- `irislib/Ens/MessageHeader.cls`: the SQL table is `Ens.MessageHeader`, with no `SqlFieldName` overrides.
+  - Indexes on `TimeCreated` (:14), `Status`, `SourceConfigName`, `TargetConfigName` and `MessageBodyClassName` (bitmaps), and `SessionId`. There is no index on `IsError`.
+  - `ID` comes from `$Increment(^Ens.MessageHeaderD)`, so a fresh database numbers α from 1, which keeps the wire deterministic.
+  - A plain `%New`+`%Save` does not set `TimeCreated` (`MessageResendTest.cls:82-85`). `NewRequestMessage` (:57-81) does.
+- `src/ExecuteMCPv2/Tests/MessageResendTest.cls` has 12 `Test*` methods, among them `TestHttpGuardRefusals` (:328) and the dry-run rows (:368, :390). Its seed helpers (:60-102) are the `%New` pattern.
+  - `MessageResendLiveTest.cls` is NOT run: it starts a production in HSCUSTOM and deletes `ID > ?`.
+
+**Bootstrap**
+- `scripts/gen-bootstrap.mjs:14-45` `classes[]` has 30 entries, `REST.MessageResend` at :34 and `REST.Dispatch` last at :44. The new class `REST/MessageSearch.cls` goes after :34.
+- `packages/shared/src/__tests__/bootstrap.test.ts`:
+  - the counts at :1027 and :1090, which go from 30 to 31;
+  - the names at :1031-1062;
+  - the base-before-extenders list at :1129-1146;
+  - the `classPaths` roster at :1260-1291.
+- `packages/shared/src/bootstrap-classes.ts:25`: `BOOTSTRAP_VERSION = "089f8f0a62b2"`.
+
+**TypeScript, interop**
+- `packages/iris-interop-mcp/src/tools/index.ts:62-85`: the 22-tool array. Imports go at :57-59, and the header comment at :1-13 holds the counts.
+- `packages/iris-interop-mcp/src/tools/presets.ts:23-79`: `core.include` (9) and `developer.include` (22); the header comment at :8-13.
+- The precedents:
+  - the all-read `mutates` record of `iris_sql_analyze` (`packages/iris-dev-mcp/src/tools/sqlAnalyze.ts:500-518`);
+  - `toStructured` and the error mapping in `message-resend.ts` (:162-170, :492-504).
+- `packages/shared/src/refusals.ts:15-28` `REFUSAL_CODES` and `refusalResult` (:55-67). The call-site precedent is `iris-dev-mcp/src/tools/sql.ts:152-157`.
+- `packages/shared/src/server-base.ts`:
+  - the audit `action` is derived from the `action` argument (:1678, :1749-1762);
+  - the governance key `tool:action` (:1221-1241);
+  - only `GOVERNANCE_DISABLED` audits as `denied`; other refusals audit as `error` (:1769-1776);
+  - `paginate` omits `nextCursor` when there are no more items (:297-303).
+- Test helpers: `@iris-mcp/shared/test-helpers` (`packages/shared/src/__tests__/test-helpers.ts`) exports `makeEnvHarness`, `stageDefaultStartup` (:24), `callTool` (:40), `createMockHttp` (:57), `createMockCtx` (:81) and `envelope` (:118). The audit JSONL read pattern is in `packages/shared/src/__tests__/audit-interceptor.test.ts:104, :174-200`.
+
+**Count and doc pins that move** (interop 22→23 package / 23→24 runtime; `core` 10→11 runtime; suite 107/112→108/113; `developer` totals 79/84→80/85; `core` totals 51/56→52/57)
+- Interop package tests:
+  - `index.test.ts` :24, :38, :46-48, :71, :80, plus the name list at :81-103;
+  - `presets.test.ts:52-56`, including its title.
+- `packages/shared/src/__tests__/pre-feature-tool-snapshot.ts` :19 and :86-109, checked by `iris-mcp-all/.../tool-visibility-snapshot-drift.test.ts` against shared's BUILT dist, so rebuild shared.
+- `packages/shared/src/__tests__/tool-visibility-backcompat.test.ts:126`.
+- `packages/iris-mcp-all/src/__tests__/docs-prompt-sync.test.ts` :119-138 (the literal `"107 tools"`), with `README.md:21` and `docs/migration-v1-v2.md:11,29`.
+- `docs-visibility-roster-sync.test.ts` derives its values live from these doc rows:
+  - root `README.md` :667-669 (roster), :687 (payload), and :691 (`Last re-measured at Story 39.1`, a format pinned by `story-38-6-doc-claims.test.ts:308-309`);
+  - `packages/iris-mcp-all/README.md:45`;
+  - interop `README.md:45`;
+  - the FIRST `` `full` N/N/N/N/N `` in `CHANGELOG.md`, which is the Epic 30 section at :1083-1085 and is edited in place to "as of Story 39.1". The new 39.1 section must not contain that pattern.
+- Not pinned, moved by precedent:
+  - `README.md` :17, :675, :723 and :771 (diagram), plus a governance-defaults row after :542 (the `iris_sql_analyze` all-reads pattern);
+  - `tool_support.md` :160 (`(22)`), a row after :185, :187 (Mix), a Story 39.1 note after :195, and :386, :389, :401 and :415;
+  - interop `README.md`: a Production Monitoring row (:154-161), a `####` subsection with a `> **Governance default:**` line (the precedent is :167), and :851;
+  - `packages/iris-mcp-all/README.md:27,31`;
+  - `docs/epic-summary.md:3`.
+- Not affected: `gen:skills:check` (it reads prompts only), `validate:prompts`, `check-epics-sync`, the frozen baseline, and the "8- to 15-tool" phrase. The universe key count goes from 207 to 210 and is not pinned.
+
+**Live harness** (`packages/iris-mcp-all/src/__tests__/`)
+- `process-gate-helpers.ts`:
+  - `openWireSession`/`withWireSession` (:237, :279). An args `namespace` overrides the session's namespace (:270).
+  - `atelierQuery(target, sql)` (:329). It builds its URL from `target.namespace` (:301), so `{...TARGET, namespace:"EXECMCPTMP391A"}` aims it at the scratch namespace.
+  - Also `staleDistReason` (:41), `isIrisReachable` (:56), `irisTargetFromEnv` (:162), `connectionEnv` (:173), `shippedBootstrapVersion` (:361) and `assertDeployedBootstrapVersion` (:382).
+- The precedents:
+  - `epic38-capstone-gate.test.ts:148-280`: `putDoc`/`compileDoc` closures over one session, `iris_execute_classmethod` seeding, and the `beforeAll`/`afterAll` nothing-left checks;
+  - `scripts/prepublish-gate.mjs:105-136`: the roster with a comment per entry; `DRIVEN_PACKAGES` already lists interop and admin;
+  - `live-gate-roster.test.ts`: a file is armed if it matches `/process\.env\.IRIS_REQUIRE_LIVE\s*===/`.
+
+**Namespace lifecycle** (read-only probe, 2026-10-16, IRIS 2026.2 build 221U, HEALTHSHARE feature enabled)
+- **Governance.** `iris_server_profiles` shows these enabled by default, as frozen-baseline keys: `iris_database_manage:create`/`:delete`, `iris_namespace_manage:create`/`:delete`, `iris_mapping_manage:create`/`:delete`, `iris_doc_put`, `iris_doc_compile`, `iris_doc_delete` and `iris_execute_classmethod`.
+- **Mappings.**
+  - `iris_mapping_list` on HSCUSTOM: packages `Ens`, `EnsLib`, `EnsPortal` and `CSPX.Dashboard` → `ENSLIB`; routine `Ens*` → `ENSLIB`.
+  - On `%ALL`: package `ExecuteMCPv2` → `HSCUSTOM`, so the Temp fixture class and the handlers resolve in any new namespace.
+- **The manager directory** is `/durable/iris/mgr/` (`iris_database_list`).
+- **Admin handlers.**
+  - `iris_database_manage:create` requires `directory`, and calls `CreateDirectoryChain`, `SYS.Database.CreateDatabase` and `Config.Databases.Create` (`Config.cls:331-386`).
+  - Its `delete` is config only (`Config.cls:437`). `IRIS.DAT` and the directory stay, so they need `SYS.Database.DeleteDatabase(dir)` (`irissys/SYS/Database.cls:619`) plus `%File.RemoveDirectoryTree`.
+  - `iris_namespace_manage` has no interop flag (`Config.cls:100-148`).
+- **`EnableNamespace`** (`irislib/%Library/EnsembleMgr.cls:1738`) has side effects beyond the namespace:
+  - on this HealthShare instance it runs `EnableHealthShareNamespace` (:1816-1822);
+  - it creates a portal application (:1825);
+  - it grants SQL privileges (:1829);
+  - it adds a role to the SHARED `/api/interop-editors` application (:1833, :2833-2841).
+
+  Its mapping step alone (:2329-2369) is what makes `Ens.MessageHeader` visible.
+
+## Tasks & Acceptance
+
+**Execution** (in dependency order):
+
+*Task 0: probes and the baseline capture, before any ObjectScript edit.*
+1. **Probes (Rule #16; Verification step L).** Use a throwaway `EXECMCPTMP391P`, built and torn down by Verification steps L1–L5, and `ExecuteMCPv2.Temp.Story391Probe*` classes, deleted before return. Confirm each of these:
+   - (a) A mapping-only namespace hosts `Ens.MessageHeader` `%Save` and SQL.
+   - (b) `%ExecDirect(, sql, args...)` works with a local array.
+   - (c) Whether `TOP ?` is supported.
+   - (d) `$ZDATETIMEH` parses fractional seconds.
+   - (e) Atelier's query select mode for `TimeCreated`/`Status`, and `$ZTIMEZONE`.
+   - (f) `Config.Namespaces.Delete` removes the namespace's mappings.
+   - (g) `SYS.Database.DeleteDatabase` needs no dismount.
+   - (h) No `/csp/<ns>` application or `%DB_<ns>` resource is created.
+   - (i) The deployed bootstrap version is `089f8f0a62b2`.
+
+   Record each result under Verification. If (a) fails, HALT `blocked`, because it needs the Lead's `EnableNamespace` call.
+2. `packages/iris-mcp-all/src/__tests__/interop-namespace-fixture.ts` (new; the harness the gate and Stories 39.3–39.6 use):
+   - `createInteropNamespace(admin, dev, name, {interop})` and `removeInteropNamespace(admin, dev, name)`. The remove is idempotent and ignores what is already gone.
+   - `seedHeaders(dev, name, set)` and `leftovers(dev, names)`.
+   - `FIXTURE_CLASS_SOURCE`: the `ExecuteMCPv2.Temp.Story391Fixture` source. Its methods:
+     - `ManagerDirectory`;
+     - `Seed(pSet)`: α or β, synthetic, with an explicit `TimeCreated`, literal codes and no `$$$` macros;
+     - `RemoveDatabaseFiles(pName)`: refuses any name not matching `1"EXECMCPTMP"1.N1U`, then `DeleteDatabase` and `RemoveDirectoryTree`, in `%SYS`;
+     - `Leftovers(pNames)`: a JSON list of every remaining namespace, database config, mapping, `SYS.Database`, directory, `/csp/<ns>` application or `%DB_<ns>` resource.
+   - The steps follow Verification step L.
+3. `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`:
+   - add `executeMcpPost(target, path, body)`, returning `{status, text}`. It is the raw POST sibling of `atelierQuery` and reuses its auth.
+   - add `docFixtures(session)`, returning `{putDoc, compileDoc, removeDoc}` built over one session (DW-561 progress; the existing gates are not migrated).
+4. `packages/iris-mcp-all/src/__tests__/story-39-1-message-search-live-gate.test.ts` (new): write the `resendFiltered` request list and its capture row. The capture row `it.runIf(process.env.STORY_39_1_CAPTURE === "1")` writes `src/__tests__/fixtures/story-39-1-resend-baseline.json`: `{capturedWithBootstrapVersion, irisVersion, capturedAt, command, cases:[{name, body, status, text}]}`.
+   - Requests: dry runs (status default, status `Completed`, `to` explicit), plus guards b (item, from), c (negative, over 7 days, unparseable), the status and `maxMessages` bounds, e, d (seeded over-cap) and f (no production running). Every one carries an explicit `to` on 2001-02-03.
+   - Run the capture against α with the PRE-change classes deployed (Verification step C).
+
+*Task 1: IRIS side.*
+5. `src/ExecuteMCPv2/REST/MessageSearch.cls` (new, extends `ExecuteMCPv2.REST.Base`):
+   - **`HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Output pParams) As %Status`**: the shared helper.
+     - Keys: `item`, `source`, `target`, `statusCode`, `fromNorm`, `toNorm`, `sessionId`, `bodyClass`, `errorOnly`.
+     - Fixed fragment order: `(SourceConfigName = ? OR TargetConfigName = ?)`, `SourceConfigName = ?`, `TargetConfigName = ?`, `Status = ?`, `TimeCreated >= ?`, `TimeCreated <= ?`, `SessionId = ?`, `MessageBodyClassName = ?`, `IsError = 1`, joined with ` AND `.
+     - `pParams` is the count, with `pParams(i)` the values. The helper never validates and never sees caps.
+   - **`HeaderRow(pRS) As %DynamicObject`**: the matrix row shape, with type and status labels from `MessageResend`. Its select list never includes `ErrorStatus` or `Description`.
+   - **`MessageSearch()`**, the handler:
+     - Read the body.
+     - Validate before the switch: `action` must be `headers`; `from` required; `to` defaults to the UTC now; `NormalizeTimestamp`/`WindowDays` with 0–7 days; status label; `sessionId`/`limit`/`afterId` with `?1.N` and range; `afterTimeCreated` and `afterId` together, with the time parseable; string filters at most 128 characters, `bodyClass` at most 220.
+     - Switch namespace. If `'##class(%Dictionary.CompiledClass).%ExistsId("Ens.MessageHeader")`, restore and return `{action, interopEnabled:false, rows:[], hasMore:false, limit, from, to}`.
+     - Otherwise prepare in Logical mode: `SELECT TOP <limit+1> <columns> FROM Ens.MessageHeader WHERE <HeaderWhere>[ AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))] ORDER BY TimeCreated, ID`.
+     - Return `{action, interopEnabled:true, rows, hasMore, limit, from, to}`.
+6. `src/ExecuteMCPv2/REST/MessageResend.cls`: build the filter object in `resendFiltered`, call `HeaderWhere` once, and use `tWhere` with `tParams...` in its three statements. The guards, texts, `TOP` handling and order stay exactly as before.
+7. `src/ExecuteMCPv2/REST/Dispatch.cls`: add `<Route Url="/interop/message/search" Method="POST" Call="ExecuteMCPv2.REST.MessageSearch:MessageSearch"/>`.
+8. `scripts/gen-bootstrap.mjs`: add `REST/MessageSearch.cls` after `REST/MessageResend.cls`, then run `pnpm gen:bootstrap` and record `BOOTSTRAP_VERSION` from `089f8f0a62b2` to the new value. `packages/shared/src/__tests__/bootstrap.test.ts`: 31 entries in all four lists, with MessageSearch in the base-before-extenders list.
+9. `src/ExecuteMCPv2/Tests/MessageSearchTest.cls` (new; data-free; at most 500 lines; not in the manifest). Its 5 methods:
+   - `TestHeaderWhereResendFilterSet`: the exact current resend WHERE and parameter order.
+   - `TestHeaderWhereEveryFilterOrder`.
+   - `TestHeaderWhereNoCallerText`: hostile values only in `pParams`; `pWhere` equals the fixed text.
+   - `TestHeaderWhereNoFilters`.
+   - `TestHttpValidationRefusals`: every direct-REST refusal row over real HTTP (the `MessageResendTest` `%Net.HttpRequest` pattern). Each asserts that the text contains the parameter name and not the hostile value.
+
+*Task 2: TypeScript.*
+10. `packages/shared/src/refusals.ts`: add `NOT_IMPLEMENTED` with a doc line ("the requested action is declared but not available in this version"). `packages/shared/src/__tests__/refusals.test.ts`: the sorted list.
+11. `packages/iris-interop-mcp/src/tools/message-resend.ts`: export `STATUS_LABELS`; nothing else changes.
+12. `packages/iris-interop-mcp/src/tools/message-search.ts` (new): `messageSearchTool` with the Boundaries classification and annotations.
+    - Input:
+      - `action` (required);
+      - `from` (required); `to`;
+      - `item`, `source`, `target`;
+      - `status` (`STATUS_LABELS`);
+      - `sessionId` (positive integer);
+      - `bodyClass`;
+      - `errorOnly`;
+      - `limit` (integer 1–500);
+      - `cursor`;
+      - `namespace`.
+    - The description follows the tool-descriptions convention: what, when and returns; the default states; `IRIS_GOVERNANCE` per-action keys; the 7-day window; `limit` as an output cap with the ~60 s gateway risk; that `body`/`searchTable` are not yet available; `notApplicable`. It names no REST path.
+    - Exports, for Stories 39.3–39.5: `HeaderRow` and `mapHeaderRow`; `utcToIso` (the strict converter, `""` on empty or malformed); `toCanonicalUtc` (input); and `encodeCursor`/`decodeCursor` (base64url JSON `{t: timeCreatedRaw, id}`, validated on decode).
+    - `body`/`searchTable` return `NOT_IMPLEMENTED` before any HTTP call.
+13. `packages/iris-interop-mcp/src/tools/index.ts` (append after `messageResendTool`, update the header counts) and `presets.ts` (`core.include` and `developer.include`, header comment).
+14. Tests:
+    - `packages/iris-interop-mcp/src/__tests__/message-search.test.ts` (new, mocked HTTP): the definition, the schema, the wire body (with fake timers for `to`), offset normalization, mapping (ISO, `Raw`, `""`, `null`), the cursor round-trip and malformed cursors, `notApplicable`, `NOT_IMPLEMENTED` with no call, and `IrisApiError`.
+    - `message-search-governance.test.ts` (new, real `McpServerBase` through `makeEnvHarness`, `stageDefaultStartup`, `callTool`): the default-enabled keys, the governance row, the `read-only` preset, and audit entries carrying `action` and outcome.
+    - Update `index.test.ts`, `presets.test.ts`, `pre-feature-tool-snapshot.ts` and `tool-visibility-backcompat.test.ts`.
+
+*Task 3: the gate, docs and counts.*
+15. Finish `story-39-1-message-search-live-gate.test.ts`.
+    - It checks `IRIS_REQUIRE_LIVE` itself. It fails on a stale shared, dev, admin or interop dist, or an unreachable IRIS, when armed. Its `beforeAll` runs `assertDeployedBootstrapVersion`, removes leftovers by name, asserts nothing is left, creates A (interop, α), B (interop, β) and C (plain), and puts and compiles the fixture class. Its `afterAll` removes all three namespaces and the class, asserts nothing is left, and closes the sessions.
+    - Rows:
+      - every matrix row through the BUILT interop server, against its oracle;
+      - the direct-REST validation rows through `executeMcpPost`;
+      - the byte-identity rows, comparing every raw `text` with the fixture, plus the assertion `fixture.capturedWithBootstrapVersion === "089f8f0a62b2"` and `!== shippedBootstrapVersion()`.
+    - Add it to `packages/iris-mcp-all/scripts/prepublish-gate.mjs` `gateTestFiles`, with a comment naming what it writes.
+16. Docs (Rule #30/#43, minimal; Story 39.6 enriches):
+    - every pinned and precedent surface in the Code Map count list;
+    - the README payload rows equal to `pnpm measure:tools-payload` after rebuilding;
+    - the CHANGELOG Epic 30 roster line becomes `full` 32/27/24/22/8, `core` 15/13/11/10/8, `developer` 32/11/24/10/8, "as of Story 39.1";
+    - the new top section `## [Pre-release — 2026-10-16] — Story 39.1: Message header search` (Added, Changed: interop `core` 10 → 11 runtime and the `BOOTSTRAP_VERSION` move, Tests; no roster pattern);
+    - `.changeset/story-39-1-message-header-search.md` (`@iris-mcp/shared` minor, `@iris-mcp/interop` minor);
+    - `docs-prompt-sync.test.ts` "108 tools";
+    - `packages/iris-mcp-all/src/__tests__/story-39-1-doc-claims.test.ts` (new), pinning the section by title, the bump map (`skipIf(!changesetPresent)`), and the `tool_support.md` row and default-state note.
+
+**Acceptance Criteria:**
+- AC-1 (39.1.1). Given the baseline source, when the Code Map probe record is checked against `MessageResend.cls` and `message-resend.ts`, then it states `resendFiltered`'s exact filters, query, caps and window rules. When Task 0 runs, its live results, and the earliest IRIS version they were verified on, are recorded under Verification.
+- AC-2 (39.1.2, AD-17). Given the α fixture in a fresh namespace A, when the gate replays every captured `resendFiltered` request over direct REST against the post-change classes, then each raw response body equals its capture from `089f8f0a62b2`. Both `resendFiltered` and the new route get their WHERE only from `MessageSearch.HeaderWhere`, which never emits caller text. `BOOTSTRAP_VERSION` has moved, and both rosters list 31 classes.
+- AC-3 (39.1.3). Given A, when `iris_message_search` `headers` runs through the built interop server with any filter set from the matrix, then the rows (ids, order and every field) equal the hand-written oracle. Pages join without gap or duplicate under the limit, and timestamps are UTC ISO with `…Raw`.
+- AC-4 (39.1.4). Given the built interop server under default configuration, when `tools/list` and `iris_server_profiles` are read, then `iris_message_search` is listed with the stated annotations, and all three keys are enabled reads. Interop counts 23 package and 24 runtime tools, `core` 11 runtime and `developer` 24 runtime, and the docs state the default state.
+- AC-5 (39.1.5; Rules #34, #36, #41). Given namespaces A, B and C, when the same search runs in each, then A and B each equal their own oracle and differ from each other, and C returns `notApplicable`, not an error.
+- AC-6. Given the action `body` or `searchTable`, when it is called with a valid window, then the result is the `NOT_IMPLEMENTED` catalog refusal with no IRIS call, and the audit entry records that action with `outcome:"error"`.
+- AC-7 (AD-15, AD-33). Given the delivered tree, when the suites run, then:
+  - every pre-existing tool's `tools/list` entry is unchanged, and the only new name is `iris_message_search`;
+  - every pre-existing route is unchanged on the wire;
+  - `GOVERNANCE_BASELINE` stays `1e62c5ad5bf7`/141;
+  - every count and doc pin in the Code Map list holds.
+
+## Spec Change Log
+
+## Review Triage Log
+
+## Design Notes
+
+**DECIDED (orchestrator decision #21, spec gate 2026-10-16, as recommended): mapping only.** Orchestrator decision (a): how to make the disposable namespace interop-enabled. Recommended: mapping only.**
+- Create, with `iris_mapping_manage:create`, packages `Ens` and `EnsLib` and routine `Ens*` → `ENSLIB`, the same set HSCUSTOM maps. Do not call `%Library.EnsembleMgr.EnableNamespace`.
+- **Why.** `EnableNamespace` runs the HealthShare namespace installer on this instance (`EnsembleMgr.cls:1816-1822`; the server reports the HEALTHSHARE feature). It also creates a portal application, grants SQL privileges, and adds `%EnsRole_InteropEditorsAPI` to the shared `/api/interop-editors` application (:1825-1838, :2833-2841). Those are security changes on a shared instance, which the environment rules forbid.
+- Its own mapping step (:2329-2369) is all that makes `Ens.MessageHeader` visible. Task 0 (a) proves it live.
+
+**DECIDED (orchestrator decision #22, spec gate 2026-10-16, as recommended): 7 days.** Orchestrator decision (b): the maximum window for `headers`. Recommended: 7 days.**
+- It is `resendFiltered`'s bound over the same table, index and roughly 60 s gateway exposure, and the AC asks for a window that is "required, bounded".
+- It can widen later with an additive change. The alternatives are 31 days, or a separate explicit whole-namespace opt-in; AD-20 allows one, and none is offered now.
+
+**Plan-time interpretations** (apply and report):
+- **I1.** "Source or target config item" means three filters: `item` (either side, `resendFiltered`'s meaning), `source` and `target`.
+- **I2.** "Error-only" means `IsError = 1`. Status `Error` is the separate `status` filter.
+- **I3.** "Paged, with a cap" means a keyset cursor over `(TimeCreated, ID)`, oldest first, with `limit` 100 by default and 500 at most. There is no total count.
+- **I4.** "Byte-identical" means raw HTTP bodies equal a capture taken from the pre-change classes in a fresh namespace. Header ids are deterministic there. The fixture records the bootstrap version it was captured on, and a mechanical assertion proves the capture predates the change.
+- **I5.** The second-namespace smoke is a default-suite gate row (A against B), not a manual step.
+- **I6.** Output `status` keeps the existing `Error` label (`StatusCodeToLabel`), and input accepts `Errored`, the shared `STATUS_LABELS`. The description says so.
+
+**Governing ADs.**
+- **AD-26.** The binding AD. Filters are structured and bound. `headers` returns no body-derived text, and `ErrorStatus`/`Description` are left for Story 39.2's classification.
+- **AD-17.** The shared-helper contract, and the refusal pin over direct REST.
+- **AD-20.** The required window, and the output-cap wording.
+- **AD-4.** The fixed three-action enum, per-action `mutates`, and four truthful annotations.
+- **AD-7.** Both presets; no `TOOL_PAIRS` change. **AD-10.** The counts.
+- **AD-11, AD-13.** The envelope, and namespace restore. **AD-12.** The thin handler, with `notApplicable` interpreted in TS.
+- **AD-14.** The bootstrap regeneration and both rosters. **AD-15, AD-33.** Additive changes, and the byte-identical resend wire.
+- **AD-19.** The derived audit `action`, and the closed `outcome` domain. **AD-1, AD-3.** `ctx.http` and `scope: "NS"`.
+- **AD-5.** `:check` only. **AD-29.** Minor changesets.
+- **Conventions:** Tool descriptions, Tool results, Refusals, Error text, REST routes, Live gates, Live testing on a shared instance, Probes, Performance budgets.
+
+**Extend, don't copy (Rule 2).**
+- `HeaderWhere` is the extraction itself.
+- The new handler reuses `MessageResend`'s `StatusLabelToCode`, `StatusCodeToLabel`, `NormalizeTimestamp` and `WindowDays`.
+- `STATUS_LABELS` is exported rather than copied, and refusals use `refusalResult`.
+- `utcToIso` is a deliberate sibling of resend's local `odbcToIso`. The new contract returns `""` on malformed input (Rule #11), while resend's output must stay byte-identical (AD-15).
+- `executeMcpPost` sits beside `atelierQuery` and reuses its auth.
+- `docFixtures(session)` is the session-parameterized form of the capstone's closures, so this gate does not add a fifth copy. Moving the Epic 38 gates onto it stays with DW-561 in Story 39.6. For the lead: append `occurrence=39-1-message-header-search` to DW-561.
+
+**Integration (Rules 1 and 2).**
+- **Integration ACs:**
+  - AC-3 and AC-5: the built interop server's `iris_message_search` reads the new route and `HeaderWhere`, and produces rows equal to the oracle.
+  - AC-2: `resendFiltered` consumes `HeaderWhere`, with an identical wire.
+- **Consumed-by:**
+  - 39.3 and 39.4 add their actions to this tool and route, reusing the scope filters, `HeaderWhere`, `HeaderRow`/`mapHeaderRow`, the cursor and `NOT_IMPLEMENTED`'s removal.
+  - 39.5 reads header ids from these rows and declares `TOOL_PAIRS`.
+  - 39.6's capstone and Stories 39.3–39.5's gates reuse `interop-namespace-fixture.ts`.
+  - 39.2 classifies `ErrorStatus`/`Description`.
+- **Consumes:**
+  - 39.0's `makeEnvHarness`, `stageDefaultStartup` and `callTool`;
+  - the 38.x process-gate helpers;
+  - `refusalResult`;
+  - `MessageResend`'s helpers.
+
+**Visibility (Rule #53).** Interop `core` goes to 11 runtime tools. Search is the entry of the everyday forensic loop (search → read → diagram), and it is the read-only way to find messages while resend stays disabled (L-4).
+
+**Ledger inbox (Rule 17):** none.
+
+## Verification
+
+Every command runs from `/Users/jbrandt/git/iris-execute-mcp-v2`, in the foreground, with `timeout: 600000`, one package per call.
+- `ENV` is `IRIS_HOST=localhost IRIS_PORT=52773 IRIS_NAMESPACE=HSCUSTOM IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_HTTPS=false IRIS_REQUIRE_LIVE=1`.
+- MCP calls name `server:"default"`. Their `namespace` is `HSCUSTOM`, or one of this story's own `EXECMCPTMP391*` namespaces.
+
+**Step L: the namespace lifecycle.** Each step names the existing tool that does it, as probed on 2026-10-16. Where no tool exists, the fixture class does the step.
+1. **Create the database.** Use `iris_database_manage:create` with `{name:"EXECMCPTMP391A", directory: ManagerDirectory()+"execmcptmp391a/"}`.
+2. **Create the namespace.** Use `iris_namespace_manage:create`, with code and data both `EXECMCPTMP391A`.
+3. **Make it interop-enabled** (A and B only). Use `iris_mapping_manage:create` for package `Ens`, package `EnsLib` and routine `Ens*`, each → `ENSLIB`.
+4. **Seed.** Put and compile `ExecuteMCPv2.Temp.Story391Fixture` in HSCUSTOM (`iris_doc_put`, `iris_doc_compile`), then call `iris_execute_classmethod` `Seed` with `namespace:"EXECMCPTMP391A"`. The `%ALL` mapping makes the class resolve there.
+5. **Tear down, in this order:**
+   - (i) delete the mappings with `iris_mapping_manage:delete`;
+   - (ii) delete the namespace with `iris_namespace_manage:delete`;
+   - (iii) delete the database config with `iris_database_manage:delete`;
+   - (iv) remove `IRIS.DAT` and the directory with `Story391Fixture.RemoveDatabaseFiles` (no tool removes files);
+   - (v) delete the fixture class with `iris_doc_delete`.
+6. **Nothing left.** `Leftovers(["EXECMCPTMP391A","EXECMCPTMP391B","EXECMCPTMP391C"])` returns `[]`. The namespace and database rosters (`iris_namespace_list`, `iris_database_list`) show none of the names, and `iris_doc_list` with the filter `Story391` (and `generated:true`) is empty.
+
+Steps 1–6 also serve the Task 0 probe namespace `EXECMCPTMP391P`.
+
+**Step C: capture** (once, before Task 1).
+- Build shared, dev, admin and interop. Confirm the deployed version is `089f8f0a62b2` (Task 0 i).
+- Run `ENV STORY_39_1_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-message-search-live-gate.test.ts -t capture`.
+- Commit nothing; the lead commits. The fixture file is never edited by hand (Rule #36).
+
+**Shared surfaces:** these change, and other tests assert on them.
+- The interop tools array and both presets.
+- `PRE_FEATURE_SNAPSHOTS`.
+- The refusal catalog list.
+- The bootstrap rosters and `BOOTSTRAP_VERSION`: every armed gate redeploys.
+- The Dispatch routes.
+- The README roster, payload, servers and governance tables; the interop and `iris-mcp-all` READMEs; the CHANGELOG roster line; the `docs-prompt-sync` literal; `tool_support.md`.
+- The `iris-mcp-all` `gateTestFiles`.
+- The governance key universe (+3; not pinned).
+
+Standing criterion: every test added or changed passes on a fresh environment, in either order. The gate creates and removes all its own state. OS test classes run one class per `iris_execute_tests` call, and `total` is compared with the `Test*` count (Rule #35).
+
+**Commands:**
+- `(once)` First, build shared, then dev, admin, interop, ops, data and client-config, one command each. Run Task 0 and Step C.
+- `(loop)` `pnpm --filter @iris-mcp/shared build && pnpm --filter @iris-mcp/shared exec vitest run src/__tests__/refusals.test.ts src/__tests__/bootstrap.test.ts src/__tests__/tool-visibility-backcompat.test.ts` -- expected: pass.
+- `(loop)` `pnpm --filter @iris-mcp/interop build && pnpm --filter @iris-mcp/interop exec vitest run src/__tests__/message-search.test.ts src/__tests__/message-search-governance.test.ts src/__tests__/message-resend.test.ts src/__tests__/message-resend-governance.test.ts src/__tests__/index.test.ts src/__tests__/presets.test.ts src/__tests__/presets.e2e.test.ts` -- expected: pass.
+- `(loop)` `iris_doc_load` `/Users/jbrandt/git/iris-execute-mcp-v2/src/**/MessageSearchTest.cls` (HSCUSTOM), then `iris_execute_tests` with `ExecuteMCPv2.Tests.MessageSearchTest` -- expected: total 5, 0 failed. Then, in a separate call, `ExecuteMCPv2.Tests.MessageResendTest` -- expected: total 12, 0 failed. Run each before Task 1 too, as a baseline.
+- `(loop)` `ENV pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-message-search-live-gate.test.ts` -- expected: pass armed, nothing left.
+- `(loop)` `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-doc-claims.test.ts src/__tests__/docs-visibility-roster-sync.test.ts src/__tests__/docs-prompt-sync.test.ts src/__tests__/tool-visibility-snapshot-drift.test.ts src/__tests__/live-gate-roster.test.ts src/__tests__/story-38-6-doc-claims.test.ts` -- expected: pass.
+- `(once)` For each of shared, dev, admin, interop, ops, data and client-config, one command each: `build`, then `test`, `lint` and `type-check`. Then `ENV pnpm --filter @iris-mcp/dev exec vitest run --no-file-parallelism`, then `ENV pnpm --filter @iris-mcp/all test` -- expected: green, with the armed gates passing on the new `BOOTSTRAP_VERSION`.
+- `(once)` `pnpm gen:bootstrap` run a second time -- expected: no diff. Also `pnpm gen:governance-baseline:check`, `pnpm gen:skills:check`, `node scripts/check-epics-sync.mjs` and `pnpm measure:tools-payload` -- expected: OK, and the README rows equal the output.
+- `(once)` Performance: record the first armed spawn's bootstrap time (under 60 s) and one `headers` call's time on A (under 2 s).
+- `(once)` After every armed run, run Step L6, and for HSCUSTOM `iris_doc_list` filtered on `ExecuteMCPv2.Temp.Story391` -- expected: empty.
+
+**Planned mutations (Rule 19).** For each: apply it, observe red, revert, rebuild any dist it touched, and confirm `git status --short` and `git diff --stat` are unchanged. Record each as `mutation: <change> -> <red test>`.
+
+| AC | Mutation | Expected red |
+|---|---|---|
+| AC-2 | The `resendFiltered` sample's `ORDER BY TimeCreated` changed to `ORDER BY ID DESC` (redeploy) | the gate's byte-identity rows |
+| AC-2 | `HeaderWhere` concatenates `item` into `pWhere` | `TestHeaderWhereNoCallerText`; the gate's hostile-text row |
+| AC-3 | The `IsError = 1` fragment dropped; separately, the keyset clause dropped | the `errorOnly` oracle row; the paging row |
+| AC-3 | `utcToIso` returns the raw value (interop rebuilt) | the gate's field-equality row; the `message-search` mapping rows |
+| AC-4 | `headers: "write"`; separately, the tool removed from `core.include` | the governance default-enabled row; `presets.test.ts` and `docs-visibility-roster-sync` |
+| AC-5 | The handler skips `SwitchNamespace` | the A-against-B row (the 2001 window keeps HSCUSTOM traffic out) |
+| AC-5 | The `CompiledClass` check removed | the C `notApplicable` row |
+| AC-6 | `body` routed to the headers path | the `NOT_IMPLEMENTED` rows (unit and governance) |
+| AC-7 | The changeset bump changed; separately, `NOT_IMPLEMENTED` left out of the sorted list | `story-39-1-doc-claims`; `refusals.test.ts` |
+| AC-1 | none: AC-1 is the probe record, and has no runtime behavior to mutate | n/a |
+
+## Auto Run Result
+
+Status: ready-for-dev
+Blocking condition: none

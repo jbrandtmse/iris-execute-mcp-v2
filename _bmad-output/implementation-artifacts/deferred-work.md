@@ -3024,6 +3024,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:13:57Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=reopen_if=a fourth live gate (e.g. the Epic 39 or 40 capstone) copies the fixture helpers -- then promote them into process-gate-helpers.ts in that story
 - 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
 - 2026-10-16T18:57:09Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=lead note=reopen_if fired at the 38.7 review (fourth gate with its own fixture helpers); the Epic 39 capstone would be the fifth copy -- promote one set there; DW bullet in 39.6
+- 2026-10-17T01:15:30Z occurrence=39-1-message-header-search
+- 2026-10-17T01:15:30Z note=39.1 adds a session-parameterized docFixtures(session) to process-gate-helpers.ts instead of a fifth copy; 39.6 moves the Epic 38 gates onto it
 
 ### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
