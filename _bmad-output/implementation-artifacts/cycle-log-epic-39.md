@@ -132,3 +132,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T18:31:28Z	Epic 39	ledger_routed_planned	story=39-7-epic-39-burn-down entries=5 excess=0 by=burndown
 2026-10-17T18:31:28Z	Epic 39	ledger_routed_planned	story=43-1-framework-migration-to-sdk-v2 entries=1 excess=0 by=merge_gate dw=DW-579
 2026-10-17T18:31:28Z	Epic 39	ledger_burndown_complete	open_before=6 resolved=0 terminal=0 chartered=1 chartered_size=5 overflow=1 reowned=1 to_decision_sheet=3 open_after=6 cap=8 story_max=12 filed_this_epic=15 closed_this_epic=13 drain_ratio=0.87 burndown_story=39-7-epic-39-burn-down note=chartered_because_DW-571_has_many_occurrences
+2026-10-17T18:36:21Z	Epic 39	epic_context_compiled	reason=burndown_story_chartered model=claude-opus-5-5 lines=100
+2026-10-17T18:36:21Z	Story 39.7	stage_spawned	stage=plan spawn_at=2026-10-17T18:36:21Z model=claude-opus-5-5 agent_name=39-7-epic-39-burn-down-plan-1 cycle_iteration=1
