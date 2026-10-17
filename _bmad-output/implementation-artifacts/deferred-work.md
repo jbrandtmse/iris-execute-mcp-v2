@@ -3079,6 +3079,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 39.1 review 2026-10-16; the statement is built like the dry-run sample statement the replay runs; a break fails safe (resends nothing)
 - 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=Epic 39 burn-down: drive it inside the disposable mapping-only namespace (its own Ens.Runtime) with a synthetic production, never HSCUSTOM
 - 2026-10-17T03:13:38Z status=routed owner=39-2-phi-data-policy by=lead note=39.2 owns MessageResend.cls (resend preview under the PHI policy); drive the executing path in the disposable mapping-only namespace with a synthetic production, never HSCUSTOM; DW bullet in 39.2
+- 2026-10-17T06:24:31Z status=resolved-by:39-2-phi-data-policy by=adjudication note=resendFiltered executing path driven live in the disposable mapping-only namespace with a synthetic production (probe showed clean start/stop; never HSCUSTOM), verified against SQL; build 549bbad
 
 ### DW-571: flake: doc-type-description-live-gate.test.ts (dev) failed once in a parallel turbo run; it compares two live listings of the shared HSCUSTOM
 - source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3105,6 +3106,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: Rule 2 (cr 39.1): spec-forced copy; PreviewOne is frozen in 39.1 (Never list) and the spec change log names 39.2 as the story that moves it onto TypeLabel
 - 2026-10-17T03:11:34Z status=routed owner=39-2-phi-data-policy by=cr note=when 39.2 edits PreviewOne, call ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType) instead of its own $Select
+- 2026-10-17T06:24:31Z status=resolved-by:39-2-phi-data-policy by=adjudication note=PreviewOne calls MessageSearch.TypeLabel; the duplicate removed; build 549bbad
 
 ### DW-576: PHI data policy does not yet govern iris_production_logs (Text can carry segment text) or iris_message_diagram (sanitized ErrorStatus filled by parser errors with segment text); under the default redact they still show it
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md (decision 26) | severity: med | fix-risk: med | footprint: in-epic
@@ -3115,3 +3117,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 39.2 implement review 2026-10-16 (unverified; no tool reaches Hl7Text yet; Story 39.5 is its first consumer)
 - 2026-10-17T05:29:28Z status=routed owner=39-5-message-body-reader by=harvest note=39.5: check the size bound before full serialization, or stream with a cap; pin with a large synthetic body
+- 2026-10-17T06:22:00Z occurrence=39-2-phi-data-policy
+
+### DW-578: redactHl7 keeps a line split off a free-text field by a raw LF when it starts with a known HL7 or Z-segment name and the field separator (the name, and a reviewed segment's kept positions)
+- source: spec-39-2-phi-data-policy.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: CR probe on the patched built dist: NTE-3 split before 'ZOE|x' gives ZOE|***; before 'PID|v|...|w' keeps PID-1/PID-8; unknown names (LEE, DOE|) now refuse
+- 2026-10-17T06:22:00Z status=wontfix-accepted owner=39-2-phi-data-policy by=cr note=reopen_if=a 39.5 live sample shows a split-off line kept by name; a fix needs DocType structure validation

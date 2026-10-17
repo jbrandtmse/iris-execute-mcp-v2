@@ -40,7 +40,9 @@ exactly.
   console log.
 - **An HL7 v2 (ER7) redaction engine in `@iris-mcp/shared` (`redactHl7`), with no tool consumer until Story 39.5.** It is
   fail-closed: it keeps a reviewed list of non-identifying fields per segment and redacts every other field, every field
-  of a segment nobody reviewed and every field of a Z-segment, preserving segment order, terminators and separators. The
+  of a segment nobody reviewed and every field of a Z-segment, preserving segment order, terminators and separators. It
+  refuses a text holding a line whose name is not a reviewed segment, an HL7 v2 segment of versions 2.1 to 2.8.2 or a
+  Z-segment (such as a line a raw line feed splits off a free-text field), and a name alone of an unreviewed segment. The
   list and a separate Safe Harbor inventory (45 CFR 164.514(b)(2)(i), reviewed 2026-10-16) are tested to be disjoint. The
   new IRIS-side classifier `MessageSearch.BodyKind` decides a body's kind from its class alone.
 - **The refusal code `DATA_POLICY_BLOCKED`** joins the catalog, for the tools of Stories 39.3 and 39.4.

@@ -230,10 +230,34 @@ function mapSampleRow(row: SampleRowRaw): SampleRowRaw & { timeCreatedRaw?: stri
 }
 
 /**
+ * The header fields a governed preview item takes from IRIS: every field `PreviewOne` returns that is
+ * not body data. Any other field, one a later version of the IRIS classes might add included, is dropped.
+ */
+const PREVIEW_HEADER_FIELDS: ReadonlySet<string> = new Set<keyof PreviewHeaderRaw>([
+  "id",
+  "found",
+  "error",
+  "sessionId",
+  "type",
+  "sourceItem",
+  "targetItem",
+  "status",
+  "isError",
+  "timeCreated",
+  "timeProcessed",
+  "bodyClassName",
+  "bodyClassExists",
+  "correspondingMessageId",
+  "verdict",
+  "reason",
+]);
+
+/**
  * Apply the PHI data policy (`redact` or `block`) to the headers of a preview that asked IRIS for
  * `bodyDetail: "kind"`. IRIS sends no body content in that mode, and this function never reads what a
- * response might still carry: it builds `bodySummary` itself, so a response of the legacy shape (a
- * `bodySummary` of body text and no `bodyKind`) cannot pass body content through.
+ * response might still carry: each item keeps only the {@link PREVIEW_HEADER_FIELDS} and the function
+ * builds `bodySummary` itself, so a response of the legacy shape (a `bodySummary` of body text and no
+ * `bodyKind`), or one with a field this version does not know, cannot pass body content through.
  *
  * Each FOUND header is mapped by the first rule that holds:
  *  1. a `bodyKind` that is not one of the nine tokens (a missing one included): withheld, as kind `other`;
@@ -242,8 +266,7 @@ function mapSampleRow(row: SampleRowRaw): SampleRowRaw & { timeCreatedRaw?: stri
  *  4. policy `redact`: an `hl7v2` body is `redacted` with `bodySummary` the class note
  *     `(non-stream body; class=<bodyClassName>)` (no body text is requested or shown); any other kind
  *     is withheld with `bodySummary` `""`.
- * Then `bodyKind` and `bodyPolicy` are set, and `bodyText`, `bodyTextOmitted` and `bodyAvailable` are
- * dropped. A header that was not found carries no body fields.
+ * Then `bodyKind` and `bodyPolicy` are set. A header that was not found carries no body fields.
  *
  * @returns The mapped headers and what the policy did over them.
  */
@@ -254,13 +277,9 @@ export function applyPreviewBodyPolicy(
   let redacted = 0;
   let blocked = 0;
   const mapped = headers.map((raw): PreviewHeaderRaw => {
-    const copy: PreviewHeaderRaw = { ...raw };
-    delete copy.bodySummary;
-    delete copy.bodyText;
-    delete copy.bodyTextOmitted;
-    delete copy.bodyAvailable;
-    delete copy.bodyKind;
-    delete copy.bodyPolicy;
+    const copy = Object.fromEntries(
+      Object.entries(raw).filter(([key]) => PREVIEW_HEADER_FIELDS.has(key)),
+    ) as PreviewHeaderRaw;
     if (raw.found !== true) return copy;
     let kind: BodyKind = "other";
     let bodyPolicy: BodyPolicyOutcome;
@@ -478,7 +497,9 @@ export const messageResendTool: ToolDefinition = {
           );
         }
         // The data policy (Story 39.2). `allow` is today's request and today's result; `redact` and
-        // `block` ask IRIS for the body kind only, so no body content leaves IRIS in either mode.
+        // `block` ask IRIS for the body kind only, and the result carries only the header fields, the
+        // policy's own fields and the count, whatever IRIS returned (an older class that ignores
+        // `bodyDetail` still sends a `bodySummary`, which is dropped here).
         const policy = effectiveDataPolicy(ctx.config);
         if (policy === "allow") {
           const body = { headerIds: input.headerIds, namespace: ns };
@@ -510,7 +531,11 @@ export const messageResendTool: ToolDefinition = {
         lines.push(`Data policy ${applied}: ${redacted} redacted, ${blocked} withheld.`);
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
-          structuredContent: toStructured({ ...result, headers, dataPolicy: governed.summary }),
+          structuredContent: toStructured({
+            headers,
+            ...(result.count !== undefined ? { count: result.count } : {}),
+            dataPolicy: governed.summary,
+          }),
         };
       }
 

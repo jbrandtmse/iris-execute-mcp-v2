@@ -234,6 +234,18 @@ describe("iris_message_resend preview under the data policy", () => {
       }
     });
 
+    it("a field IRIS does not send today reaches no result, on an item or at the top", async () => {
+      const header = { ...kindHeader(1, "stream", true), description: "SYNTHPHI-DESCRIPTION", bodyExcerpt: "SYNTHPHI-EXCERPT" };
+      for (const policy of ["redact", "block"] as const) {
+        mockHttp.post.mockResolvedValueOnce(envelope({ headers: [header], count: 1, warnings: ["SYNTHPHI-TOP"] }));
+        const result = await messageResendTool.handler({ action: "preview", headerIds: [1] }, ctxWith(policy));
+        expect(JSON.stringify(result), policy).not.toContain("SYNTHPHI");
+        const structured = result.structuredContent as { headers: Array<Record<string, unknown>> };
+        expect(Object.keys(structured).sort(), policy).toEqual(["count", "dataPolicy", "headers"]);
+        expect(Object.keys(structured.headers[0] ?? {}), policy).not.toContain("description");
+      }
+    });
+
     it("a header that was not found carries no body field, even one IRIS should not have sent", async () => {
       const result = await preview("redact", [{ id: 5, found: false, error: "Header 5 not found", bodySummary: "SYNTHPHI-X", bodyText: "SYNTHPHI-Y" }], [5]);
       expect(JSON.stringify(result)).not.toContain("SYNTHPHI");

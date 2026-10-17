@@ -33,7 +33,8 @@ function notApplicable(reason: string, names: readonly string[]): Array<[string,
   return names.map((name) => [name, { scope: "notApplicable", reason }]);
 }
 
-export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = Object.fromEntries([
+/** The rows, one per tool name; {@link DATA_POLICY_SCOPE} indexes them, so a name may appear only once. */
+export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyScopeRow]> = [
   [
     "iris_message_resend",
     {
@@ -58,6 +59,10 @@ export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = O
   ["iris_doc_export", residual("Writes document source to local files, which can hold message text. Restrict it with its governance key.")],
   ["iris_doc_edit", residual("Returns a unified diff and numbered excerpts of the edited document, which can hold message text. Restrict it with its governance key.")],
   ["iris_routine_intermediate", residual("Returns the compiled intermediate code of a routine, which can hold message text. Restrict it with its governance key.")],
+  ["iris_macro_info", residual("Returns a macro's definition and expanded value, which are source text and can hold message text. Restrict it with its governance key.")],
+  ["iris_rule_get", residual("Returns the source of a rule class (UDL with its rule XML), which can hold message text. Restrict it with its governance key.")],
+  ["iris_task_list", residual("Returns each task's last status text, which a task's own code writes and which can quote data. Restrict it with its governance key.")],
+  ["iris_task_history", residual("Returns the status and result text of task runs, which a task's own code writes and which can quote data. Restrict it with its governance key.")],
   ["iris_lookup_manage", residual("Returns and sets lookup table values, which can hold identifying data. Restrict it with its governance key.")],
   ["iris_lookup_transfer", residual("Exports whole lookup tables, values included. Restrict it with its governance key.")],
   [
@@ -94,7 +99,6 @@ export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = O
     "iris_doc_compile",
     "iris_doc_index",
     "iris_doc_load",
-    "iris_macro_info",
     "iris_server_info",
     "iris_server_namespace",
     "iris_global_set",
@@ -142,12 +146,11 @@ export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = O
     "iris_credential_manage",
     "iris_credential_list",
     "iris_rule_list",
-    "iris_rule_get",
     "iris_transform_list",
     "iris_interop_rest",
     "iris_default_settings_manage",
   ]),
-  ...notApplicable("Reports metrics, jobs, locks, journals, mirrors, licenses, tasks, backups and configuration of the instance, never message data.", [
+  ...notApplicable("Reports metrics, jobs, locks, journals, mirrors, licenses, task schedules, backups and configuration of the instance, never message data.", [
     "iris_metrics_system",
     "iris_metrics_alerts",
     "iris_metrics_interop",
@@ -163,9 +166,7 @@ export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = O
     "iris_license_info",
     "iris_ecp_status",
     "iris_task_manage",
-    "iris_task_list",
     "iris_task_run",
-    "iris_task_history",
     "iris_config_manage",
     "iris_health_check",
   ]),
@@ -176,4 +177,7 @@ export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = O
     "iris_rest_manage",
   ]),
   ...notApplicable("The framework's discovery tool reports profile metadata and the governance policy only.", ["iris_server_profiles"]),
-] as Array<[string, DataPolicyScopeRow]>);
+];
+
+/** The scope row of every tool name of the suite. */
+export const DATA_POLICY_SCOPE: Readonly<Record<string, DataPolicyScopeRow>> = Object.fromEntries(DATA_POLICY_SCOPE_ROWS);

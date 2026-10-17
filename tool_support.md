@@ -396,6 +396,10 @@ The PHI data policy (`dataPolicy`: `block`, `redact` or `allow`, default `redact
 | `iris_doc_export` | residual | Writes document source to local files, which can hold message text. |
 | `iris_doc_edit` | residual | Returns a unified diff and numbered excerpts of the edited document, which can hold message text. |
 | `iris_routine_intermediate` | residual | Returns the compiled intermediate code of a routine, which can hold message text. |
+| `iris_macro_info` | residual | Returns a macro's definition and expanded value, which are source text and can hold message text. |
+| `iris_rule_get` | residual | Returns the source of a rule class (UDL with its rule XML), which can hold message text. |
+| `iris_task_list` | residual | Returns each task's last status text, which a task's own code writes and which can quote data. |
+| `iris_task_history` | residual | Returns the status and result text of task runs, which a task's own code writes and which can quote data. |
 | `iris_lookup_manage` | residual | Returns and sets lookup table values, which can hold identifying data. |
 | `iris_lookup_transfer` | residual | Exports whole lookup tables, values included. |
 | `iris_production_messages` | residual | Returns header columns; for a header with no body class the body ID is the literal body value. |

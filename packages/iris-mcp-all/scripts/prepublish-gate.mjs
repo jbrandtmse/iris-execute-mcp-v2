@@ -146,6 +146,10 @@ const gateTestFiles = [
   // Story 39.2: a bad data-policy setting fails the BUILT iris-interop-mcp dist's startup, and valid ones are reported, against a local
   // listener that records requests; no IRIS instance is contacted.
   "src/__tests__/story-39-2-data-policy-startup.test.ts",
+  // Story 39.2 QA: the BUILT iris-interop-mcp dist against a local listener that records requests and replies as a hostile or version-skewed IRIS
+  // (the wire body per policy, no body content in the result, the audit file or stderr, the four channels in order), and `redactHl7` of the BUILT
+  // shared dist in a fresh Node process against the reviewed keep-list table; no IRIS instance is contacted.
+  "src/__tests__/story-39-2-qa-process.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

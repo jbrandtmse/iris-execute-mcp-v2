@@ -4,9 +4,17 @@
  * {@link redactHl7} turns the complete ER7 text of one message into text that carries no identifying
  * value. It is fail-closed: a reviewed list of non-identifying fields, {@link HL7_KEEP_FIELDS}, names
  * the only fields it keeps. Every other field of a reviewed segment, and every field of any other
- * segment (PD1, MRG, a Z-segment, a segment added in a later HL7 version), is redacted. A field nobody
+ * segment (PD1, MRG, a Z-segment, any other segment of HL7 v2.1 to v2.8.2), is redacted. A field nobody
  * reviewed is redacted, never kept: a list that is wrong by omission over-redacts, where a list of
  * identifying fields that is wrong by omission leaks.
+ *
+ * A segment name is copied to the output, so only a name the engine knows is accepted: a reviewed
+ * segment, a segment of {@link HL7_STANDARD_SEGMENT_NAMES}, or a Z-segment. Any other line is refused,
+ * never copied: that includes a line split off a free-text field by a raw line feed (IRIS stores a line
+ * feed as a segment break), such as `LEE` or `DOE|...`. A line with no fields is accepted only for a
+ * reviewed segment. What the names cannot tell apart: a split-off line that starts with the three
+ * characters of a known segment name and then the field separator is read as that segment, so those
+ * three characters are kept (and, for a reviewed segment, its kept positions).
  *
  * The engine reads only the text it is given. It must be given the COMPLETE, unsanitized text: a text
  * that was cut or flattened before it got here has already lost the structure the redaction follows.
@@ -84,6 +92,27 @@ export const HL7_KEEP_FIELDS: Readonly<Record<string, readonly number[]>> = {
   // 1 Set ID - SPM; 4 Specimen Type
   SPM: [1, 4],
 };
+
+/**
+ * Every segment name of the HL7 v2 standard, versions 2.1 to 2.8.2: the union of the
+ * `<SegmentStructure name=...>` entries of the schema documents `2.1.HL7` to `2.8.2.HL7` that IRIS
+ * 2026.2 (Build 221U) ships, 191 names. Together with the reviewed segments and the Z-segments, these
+ * are the only segment names {@link redactHl7} accepts.
+ */
+export const HL7_STANDARD_SEGMENT_NAMES: ReadonlySet<string> = new Set([
+  "ABS", "ACC", "ADD", "ADJ", "AFF", "AIG", "AIL", "AIP", "AIS", "AL1", "APR", "ARQ", "ARV", "AUT", "BHS", "BLC",
+  "BLG", "BPO", "BPX", "BTS", "BTX", "BUI", "CDM", "CDO", "CER", "CM0", "CM1", "CM2", "CNS", "CON", "CSP", "CSR",
+  "CSS", "CTD", "CTI", "DB1", "DG1", "DMI", "DON", "DPS", "DRG", "DSC", "DSP", "ECD", "ECR", "ED1", "EDU", "EQL",
+  "EQP", "EQU", "ERQ", "ERR", "EVN", "FAC", "FHS", "FT1", "FTS", "GOL", "GP1", "GP2", "GT1", "IAM", "IAR", "IIM",
+  "ILT", "IN1", "IN2", "IN3", "INV", "IPC", "IPR", "ISD", "ITM", "IVC", "IVT", "LAN", "LCC", "LCH", "LDP", "LOC",
+  "LRL", "MCP", "MFA", "MFE", "MFI", "MRG", "MSA", "MSH", "NCK", "NDS", "NK1", "NPU", "NSC", "NST", "NTE", "OBR",
+  "OBX", "ODS", "ODT", "OM1", "OM2", "OM3", "OM4", "OM5", "OM6", "OM7", "OMC", "ORC", "ORG", "ORO", "OVR", "PAC",
+  "PCE", "PCR", "PD1", "PDA", "PDC", "PEO", "PES", "PID", "PKG", "PM1", "PMT", "PR1", "PRA", "PRB", "PRC", "PRD",
+  "PRT", "PSG", "PSH", "PSL", "PSS", "PTH", "PV1", "PV2", "PYE", "QAK", "QID", "QPD", "QRD", "QRF", "QRI", "RCP",
+  "RDF", "RDT", "REL", "RF1", "RFI", "RGS", "RMI", "ROL", "RQ1", "RQD", "RX1", "RXA", "RXC", "RXD", "RXE", "RXG",
+  "RXO", "RXR", "RXV", "SAC", "SCD", "SCH", "SCP", "SDD", "SFT", "SGH", "SGT", "SHP", "SID", "SLT", "SPM", "SPR",
+  "STF", "STZ", "TCC", "TCD", "TQ1", "TQ2", "TXA", "UAC", "UB1", "UB2", "URD", "URS", "VAR", "VND", "VTQ",
+]);
 
 /** One field of the Safe Harbor inventory, tagged with its 45 CFR 164.514(b)(2)(i) category. */
 export interface Hl7SafeHarborField {
@@ -190,12 +219,25 @@ const SEPARATOR_SEGMENTS = new Set(["MSH", "FHS", "BHS"]);
 
 const SEGMENT_NAME = /^[A-Z][A-Z0-9]{2}$/;
 
+const Z_SEGMENT_NAME = /^Z[A-Z0-9]{2}$/;
+
 const REASONS = {
   noHeader: "The text does not start with an MSH, FHS or BHS segment.",
   badSeparators: "The field or encoding separators are not usable for redaction.",
   badSegment: "A segment name is not three capital letters or digits followed by the field separator.",
+  unknownSegment: "A segment name is neither an HL7 v2 segment (versions 2.1 to 2.8.2) nor a Z-segment.",
+  fieldlessSegment: "A segment with no fields is not one of the reviewed segments.",
   failed: "The text could not be processed.",
 } as const;
+
+/** Whether the engine may copy `name` to its output: a reviewed, a standard or a Z-segment name. */
+function knownSegmentName(name: string): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(HL7_KEEP_FIELDS, name) ||
+    HL7_STANDARD_SEGMENT_NAMES.has(name) ||
+    Z_SEGMENT_NAME.test(name)
+  );
+}
 
 /** The separators of one MSH, FHS or BHS segment that the redaction splits on. */
 interface Separators {
@@ -272,8 +314,10 @@ function redactField(value: string, seps: Separators): { text: string; leaves: n
  * counts the fields that had at least one non-empty leaf replaced.
  *
  * Refuses (`ok: false`) a text whose first segment is not an MSH, FHS or BHS; whose separators repeat,
- * are alphanumeric or contain `*`; or that holds a segment whose name is not three capital letters or
- * digits followed by the field separator.
+ * are alphanumeric or contain `*`; that holds a segment whose name is not three capital letters or
+ * digits followed by the field separator, or is neither a reviewed segment, a segment of
+ * {@link HL7_STANDARD_SEGMENT_NAMES} nor a Z-segment; or that holds a line of a name alone (no fields)
+ * whose segment is not a reviewed one.
  *
  * @param text - The complete, unsanitized ER7 text.
  */
@@ -313,7 +357,11 @@ export function redactHl7(text: string): Hl7RedactionResult {
       if (content.length > 3 && content.charAt(3) !== seps.field) {
         return { ok: false, reason: REASONS.badSegment };
       }
+      if (!knownSegmentName(name)) return { ok: false, reason: REASONS.unknownSegment };
       if (content.length === 3) {
+        if (!Object.prototype.hasOwnProperty.call(HL7_KEEP_FIELDS, name)) {
+          return { ok: false, reason: REASONS.fieldlessSegment };
+        }
         out += content + line.terminator;
         continue;
       }

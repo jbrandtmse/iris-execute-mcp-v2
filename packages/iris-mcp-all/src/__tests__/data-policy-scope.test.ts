@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAllToolNames, loadAllTools } from "../../../../scripts/lib/tool-catalog.mjs";
-import { DATA_POLICY_SCOPE, DATA_POLICY_SCOPE_DATE } from "./data-policy-scope.js";
+import { DATA_POLICY_SCOPE, DATA_POLICY_SCOPE_DATE, DATA_POLICY_SCOPE_ROWS } from "./data-policy-scope.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../../../..");
@@ -48,13 +48,16 @@ function tableRows(section: string): Map<string, string> {
 }
 
 describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
-  it("is exhaustive as of 2026-10-16", () => {
+  it("names 2026-10-16 as the date the classification is exhaustive as of", () => {
     expect(DATA_POLICY_SCOPE_DATE).toBe("2026-10-16");
   });
 
   it("gives every tool name of the suite exactly one row, and no row names a tool that does not exist", async () => {
     const names = [...(await loadAllToolNames(root))].sort();
     expect(names.length, "the scan reads every server's tools (an empty scan would pass everything below)").toBeGreaterThan(100);
+    const rowNames = DATA_POLICY_SCOPE_ROWS.map(([name]) => name);
+    expect(rowNames.filter((name, index) => rowNames.indexOf(name) !== index), "no tool name has a second row").toEqual([]);
+    expect([...rowNames].sort()).toEqual(names);
     expect(Object.keys(DATA_POLICY_SCOPE).sort()).toEqual(names);
   });
 

@@ -15,6 +15,7 @@ import {
   HL7_REDACTED_VALUE,
   HL7_REDACTION_REVIEW,
   HL7_SAFE_HARBOR_FIELDS,
+  HL7_STANDARD_SEGMENT_NAMES,
   redactHl7,
 } from "../hl7-redaction.js";
 import {
@@ -30,6 +31,8 @@ const FIXED_REASONS = [
   "The text does not start with an MSH, FHS or BHS segment.",
   "The field or encoding separators are not usable for redaction.",
   "A segment name is not three capital letters or digits followed by the field separator.",
+  "A segment name is neither an HL7 v2 segment (versions 2.1 to 2.8.2) nor a Z-segment.",
+  "A segment with no fields is not one of the reviewed segments.",
   "The text could not be processed.",
 ];
 
@@ -227,6 +230,24 @@ describe("refusals", () => {
       }
       expect(redactHl7(result.text)).toEqual({ ok: true, text: result.text, redactedFields: expect.any(Number) });
     }
+  });
+});
+
+describe("the segment names the engine accepts", () => {
+  // The inventory is the union of the <SegmentStructure name=...> entries of IRIS 2026.2 (Build 221U)'s
+  // schema documents 2.1.HL7 to 2.8.2.HL7, captured with
+  // `grep -o "<SegmentStructure name=['\"][^'\"]*['\"]" irislib/2.*.HL7 | sed -E "s/.*name=['\"]([^'\"]*)['\"]/\1/" | sort -u | grep -E '^[A-Z][A-Z0-9]{2}$'`.
+  it("are the 191 standard segment names of HL7 v2.1 to v2.8.2, none of them a Z-segment", () => {
+    expect(HL7_STANDARD_SEGMENT_NAMES.size).toBe(191);
+    for (const name of HL7_STANDARD_SEGMENT_NAMES) {
+      expect(name).toMatch(/^[A-Z][A-Z0-9]{2}$/);
+      expect(name.startsWith("Z"), name).toBe(false);
+    }
+    for (const name of ["PD1", "MRG", "PV2", "IN2", "ARV", "DON", "PRT", "UAC"]) expect(HL7_STANDARD_SEGMENT_NAMES.has(name), name).toBe(true);
+  });
+
+  it("include every reviewed segment", () => {
+    for (const name of Object.keys(HL7_KEEP_FIELDS)) expect(HL7_STANDARD_SEGMENT_NAMES.has(name), name).toBe(true);
   });
 });
 

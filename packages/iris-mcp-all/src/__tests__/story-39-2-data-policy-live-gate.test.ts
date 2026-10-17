@@ -307,7 +307,8 @@ const PI_KINDS = ["hl7v2", "hl7v2", "stream", "persistent", "streamContainer", "
 const BLOCK_REASON = "The block data policy withholds every message body.";
 const kindReason = (kind: string): string => `A ${kind} body cannot be redacted reliably, so the redact data policy withholds it.`;
 
-describe("Story 39.2: the baseline predates this story (AD-15)", () => {
+// Not in a capture run: there the shipped build is the one the capture is taken on.
+describe.skipIf(CAPTURE)("Story 39.2: the baseline predates this story (AD-15)", () => {
   it("was captured on the classes before the change, which differ from the shipped ones", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const baseline = readBaseline();
@@ -491,6 +492,34 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
   }, 120000);
 });
 
+describe.skipIf(CAPTURE)("Story 39.2: the IRIS-side classifier and body checks, called directly (AC-3)", () => {
+  /** Call a class method of the deployed REST classes in A and return its result as text. */
+  async function irisMethod(className: string, methodName: string, args: unknown[]): Promise<string> {
+    const result = await dev.call("iris_execute_classmethod", { namespace: NS_A, className, methodName, args });
+    expect(result.isError, `${className}.${methodName}: ${textOf(result)}`).toBeFalsy();
+    return String((result.structuredContent as { returnValue?: unknown } | undefined)?.returnValue ?? "");
+  }
+
+  it("BodyKind names the kinds fixture pi has no body of; BodyAvailable and Hl7Text refuse a body that does not open", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const search = "ExecuteMCPv2.REST.MessageSearch";
+    const resend = "ExecuteMCPv2.REST.MessageResend";
+    const kinds: Array<[string, string]> = [
+      ["EnsLib.EDI.XML.Document", "xmlvdoc"],
+      ["EnsLib.EDI.X12.Document", "vdoc"],
+      ["%Library.DynamicObject", "other"],
+    ];
+    for (const [className, kind] of kinds) expect(await irisMethod(search, "BodyKind", [className]), className).toBe(kind);
+    // No body is read: -1 is never the ID of a stored object, and the other class does not exist.
+    expect(await irisMethod(resend, "BodyAvailable", ["Ens.StringRequest", -1, 1]), "a body whose ID does not open").toBe("0");
+    expect(await irisMethod(resend, "BodyAvailable", ["No.Such.Story392Class", "1", 1]), "a class whose open throws").toBe("0");
+    expect(await irisMethod(search, "Hl7Text", ["No.Such.Story392Class", "1", 1000]), "a class that does not exist").toBe("unreadable");
+    expect(await irisMethod(search, "Hl7Text", ["EnsLib.HL7.Message", "NoSuchStory392Id", 1000]), "an HL7 ID that does not open").toBe(
+      "unreadable",
+    );
+  }, 120000);
+});
+
 describe.skipIf(CAPTURE)("Story 39.2: a policy per profile (AC-7)", () => {
   it("a profile with its own value is not changed by the file's global value, and discovery reports both", async (testCtx) => {
     if (skipReason) return skip(testCtx);
@@ -608,6 +637,61 @@ describe.skipIf(CAPTURE)("Story 39.2: the redaction engine, parsed by IRIS befor
   }, 180000);
 });
 
+// -- QA: the text IRIS stores, through the engine, and a header that is not found ----------------------------
+
+describe.skipIf(CAPTURE)("Story 39.2 QA: the complete text IRIS returns goes through the engine and IRIS parses the result alike (AC-2, AD-26; Rule #36)", () => {
+  it("headers 1, 2 and 8 (ADT, ACK, non-default separators): redacted without an identifying value, positions as IRIS reads them", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const engine = (await import(pathToFileURL(path.join(REPO_ROOT, "packages", "shared", "dist", "index.js")).href)) as {
+      redactHl7: (text: string) => { ok: boolean; text?: string; redactedFields?: number; reason?: string };
+    };
+    const answer = await executeMcpPost(TARGET, "/interop/message/resend/preview", { headerIds: [1, 2, 8], namespace: NS_A, bodyDetail: "text" });
+    expect(answer.status, answer.text).toBe(200);
+    const items = (JSON.parse(answer.text) as { result: { headers: Item[] } }).result.headers;
+    expect(items.map((item) => item.bodyKind)).toEqual(["hl7v2", "hl7v2", "hl7v2"]);
+
+    for (const item of items) {
+      const label = `header ${String(item.id)}`;
+      const original = String(item.bodyText);
+      expect(original, `${label}: IRIS returned the complete text`).toContain("SYNTHPHI");
+      expect(original.endsWith("\r"), `${label}: CR-terminated as IRIS stores it`).toBe(true);
+      const result = engine.redactHl7(original);
+      expect(result.ok, `${label}: ${String(result.reason)}`).toBe(true);
+      expect(result.redactedFields, `${label}: fields were redacted`).toBeGreaterThan(0);
+      const redacted = String(result.text);
+      expect(redacted, `${label}: no identifying value survives`).not.toContain("SYNTHPHI");
+      expect(redacted.endsWith("\r"), `${label}: the terminator is kept`).toBe(true);
+
+      const before = await hl7Fields(dev, NS_A, original);
+      const after = await hl7Fields(dev, NS_A, redacted);
+      expect(before.length, `${label}: IRIS parsed the original`).toBeGreaterThan(1);
+      expect(checkRedactedPositions(before, after, separatorCharacters(original)), label).toEqual([]);
+    }
+    expect(engine.redactHl7(String(items[0]?.bodyText)).text, "the observation identifier is kept").toContain("KEEPME-GLUCOSE");
+    expect(engine.redactHl7(String(items[2]?.bodyText)).text, "the message declares its own separators").toMatch(/^MSH#!@\$%#/);
+  }, 120000);
+
+  it("a header that does not exist carries no body field and counts as neither redacted nor withheld, under redact and block", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const baselineLine = (readBaseline().tool[1] as ToolCapture).text.split("\n")[1];
+    expect(baselineLine, "the capture's line for the missing header").toContain("NOT FOUND");
+    const block = await interopSession({ IRIS_DATA_POLICY: "block" });
+    for (const [label, session, policy] of [
+      ["redact", interop, "redact"],
+      ["block", block, "block"],
+    ] as Array<[string, WireSession, string]>) {
+      const result = await preview(session, [3, 999]);
+      expect(result.isError, label).toBeFalsy();
+      const missing = itemsOf(result)[1] as Item;
+      expect(missing, label).toMatchObject({ id: 999, found: false });
+      for (const key of ["bodySummary", "bodyKind", "bodyPolicy", "bodyAvailable", "bodyText"]) expect(key in missing, `${label}: ${key}`).toBe(false);
+      expect((result.structuredContent as { dataPolicy: unknown }).dataPolicy, label).toEqual({ policy, redacted: 0, blocked: 1 });
+      expect(textOf(result).split("\n")[1], `${label}: the per-item error line is today's`).toBe(baselineLine);
+      expect(JSON.stringify(result), label).not.toContain("SYNTHPHI");
+    }
+  }, 120000);
+});
+
 // -- DW-570: the executing path of resendFiltered ---------------------------
 
 describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture leaves nothing behind (DW-570, AC-8)", () => {
@@ -619,9 +703,11 @@ describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture lea
     await docs.compileDoc("Story392.Operation.cls");
     await docs.compileDoc("Story392.Production.cls");
 
+    // Set before the start: a start that fails part way can leave the production running, and afterAll
+    // must stop it then too (a forced stop of a production that never started only adds a teardown note).
+    productionStarted = true;
     const started = await interop.call("iris_production_control", { action: "start", name: "Story392.Production", namespace: NS_A });
     expect(started.isError, textOf(started)).toBeFalsy();
-    productionStarted = true;
 
     const answer = await executeMcpPost(TARGET, "/interop/message/resend", {
       action: "resendFiltered",
