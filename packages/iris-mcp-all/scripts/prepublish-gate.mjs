@@ -207,6 +207,11 @@ const gateTestFiles = [
   // Story 39.7: the Epic 39 burn-down on the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists over real stdio JSON-RPC.
   // Writes EXECMCPTMP397A (its database files too), Story397.* inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-39-7-burn-down-live-gate.test.ts",
+  // Story 39.7 QA: DW-569 (a 400, 404 or 500 with an empty error list is isError, a 2xx answer is unchanged, `iris_macro_info` keeps its empty result for
+  // no document) on the BUILT dev, admin, ops, data and interop dists, and DW-576 (`iris_production_logs` and `iris_message_diagram` under redact, allow and
+  // block: the result, a failed read, the audit file and the console log) on the BUILT interop dist, against a local listener that answers the startup
+  // handshake and records requests; no IRIS instance is contacted.
+  "src/__tests__/story-39-7-qa-process.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

@@ -187,6 +187,8 @@ Generates one Mermaid `sequenceDiagram` per requested session — the Management
 
 > **Governance default:** `iris_message_diagram` is a pure **read** (`mutates: "read"`) and is **enabled by default** under `IRIS_GOVERNANCE`.
 
+> **PHI data policy:** under `block`, each error warning keeps its `Error on message <id>: ` prefix and the rest of its text, in `warnings[]` and in its `%%` line, becomes a fixed reason; the result then carries `dataPolicy`. Under `redact` (the default) and `allow` the diagram is shown unchanged. See [PHI data policy](#phi-data-policy-iris_data_policy).
+
 **Options:**
 
 | Option | Default | Description |

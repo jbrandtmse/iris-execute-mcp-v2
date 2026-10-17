@@ -52,7 +52,7 @@ describe("a document name IRIS refuses (HTTP 400, empty error list, reason in re
     expect(await docGetTool.handler({ name: NAME, format: "xml" }, ctx)).toStrictEqual(expected);
   });
 
-  it("iris_doc_put reports IRIS's reason as a refusal that stored nothing, on every save path", async () => {
+  it("iris_doc_put reports IRIS's reason as a refusal that stored nothing, on the first put with and without ignoreConflict", async () => {
     mockHttp.put.mockRejectedValue(refused("PUT"));
     const expected = {
       content: [

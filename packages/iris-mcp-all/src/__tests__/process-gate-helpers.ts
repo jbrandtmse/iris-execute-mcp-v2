@@ -812,6 +812,24 @@ export async function pollAuditEntries(file: string, options: AuditPollOptions):
   }
 }
 
+/**
+ * The number of entries the JSON-lines audit file `file` holds once no entry has landed for `stableReads` reads
+ * `intervalMs` apart (0 when there is no file). The server writes an entry after it has sent the reply, so a test
+ * that asserts on the entries its own calls add takes this count first and then reads only what follows it.
+ */
+export async function settledAuditCount(file: string, intervalMs = 50, stableReads = 3): Promise<number> {
+  const count = (): number =>
+    (existsSync(file) ? readFileSync(file, "utf8") : "").split("\n").filter((line) => line.trim() !== "").length;
+  let last = count();
+  for (let stable = 0; stable < stableReads; ) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    const now = count();
+    stable = now === last ? stable + 1 : 0;
+    last = now;
+  }
+  return last;
+}
+
 /** A request a stub listener recorded. */
 export interface RecordedRequest {
   method: string;

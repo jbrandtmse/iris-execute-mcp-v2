@@ -482,9 +482,7 @@ export const docLoadTool: ToolDefinition = {
           const current = ignoreConflictFlag ? undefined : currentDocument(putError);
           if (current === undefined) throw putError;
           try {
-            putResponse = await atelierDocRequest(() =>
-              ctx.http.put(apiPath, body, { headers: { "If-None-Match": current.ts } }),
-            );
+            putResponse = await ctx.http.put(apiPath, body, { headers: { "If-None-Match": current.ts } });
           } catch (saveError: unknown) {
             if (saveError instanceof IrisApiError && saveError.statusCode === 409) {
               failures.push({

@@ -440,6 +440,32 @@ The Event Log rows (`Ens.Util.Log`, saved directly):
   - The built interop server (consumer of `BLOCK_REASONS` and `PropertyDump` through the route) produces the matrix outputs.
   - The 39.7 gate (consumer of the `hsLib` fixture option) creates and removes `EXECMCPTMP397A` with no leftovers.
 
+### Review Findings
+
+Code review 2026-10-17 (`/bmad-code-review`, tier full-opus; Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor all delivered; frozen diff `6f761f2` plus the QA working tree). 26 rows -> 13 entries (high 0, med 3, low 9, maybe-false 1) and 7 dismissed rows (1 false).
+
+- [x] [Review][Patch] **CHANGELOG AD-15 list missed inputs that now error** (low; blind+edge+gap+auditor; fix-risk low). Live probes: `action/search` with `files=` answers 400 with no errors. Atelier `docnames` rejects CLS with any type, and RTN with a non-routine type (`iris_doc_list`, `iris_package_list`, `iris_doc_export`). The Mgmnt API `GetApplication` answers 400 with only `{msg}` (`iris_rest_manage get`). The audit entries of logs and diagram gain `dataPolicy` under every policy. Fixed: the CHANGELOG sentences, `story-39-7-doc-claims` pins and the QA comment "exactly when the query is empty".
+- [x] [Review][Patch] **CHANGELOG Tests omits `story-39-7-qa-process.test.ts`** (low; blind; fix-risk low). Added a bullet and a pin.
+- [x] [Review][Patch] **Three `atelierDocRequest` wraps on the 409-retry PUTs cannot be reached** (low; blind+gap; fix-risk low; Rule #54). The wraps were at `doc.ts` (ignoreConflict and If-None-Match retries) and `load.ts`. `%Api.Atelier.v1.PutDoc` refuses a name at `LockItem`, before the 409, so a retry never sees that answer. Removed; the retries are byte-identical to the baseline. The `doc-name-refused-400` title now names the paths it drives. Dev: 1434 tests green, plus lint and type-check.
+- [x] [Review][Patch] **DW-576 audit rows were not hermetic** (med; gap+blind; fix-risk low; Rule 19). The gate's row read `.at(-1)` after `count: 1`, which can be another test's entry. The QA row counted `before` while earlier writes were still landing. Fix: new `settledAuditCount` in `process-gate-helpers.ts`, with a unit row. Both rows now assert `slice(before)` of their own calls. Green: QA 41/41 in order and shuffled; the armed gate twice.
+- [x] [Review][Patch] **DW-572 plan row never required the item + status statement** (low; blind; fix-risk low). It now asserts that statement is stored (verified armed).
+- [x] [Review][Patch] **Body class + status + errorOnly compares two empty results** (low; gap; fix-risk low). Added an `errorOnly` shape that expects `[4]` (verified armed).
+- [x] [Review][Patch] **Interop README `iris_message_diagram` section did not mention `block`** (low; blind; fix-risk low). Added a PHI note next to the governance default, with a pin.
+- [x] [Review][Patch] **`no-control-regex` lint error in the 39.7 gate** (low; reviewer; fix-risk low). Added the repo's disable comment.
+- [x] [Review][Patch] **Plan half of `headerPlanProblems` never shown red on the gate's path** (low; gap+auditor; Rules 19/#59). Closed in-pass by the suffixed-hint mutation under Verification: the plan half goes red on `EXECMCPTMP397A`.
+- [x] [Review][Patch] **No `mutation:` line for the `iris_doc_put` and `iris_doc_edit` refused-name rows** (low; gap). Closed in-pass; see Verification.
+- [x] [Review][Defer] **Under `block`, `trace-message-flow` gives no rule for withheld log and diagram text** (med; blind; out-of-footprint; a prompt-body change is AD-15) -> DW-587, escalated, owner `burndown`.
+- [x] [Review][Defer] **DW-572 residual: `resendFiltered` keeps the history-wide bitmap plan** (med; blind; out-of-footprint; decision #30) -> DW-588, escalated, owner `burndown`.
+- [x] [Review][Defer] **The diagram docs claim more than `block` withholds, if DW-586 is real** (maybe-false; blind+edge) -> DW-586, occurrence.
+- Dismissed:
+  - HSLIB-less IRIS fails `beforeAll`: every gate already assumes the HealthShare dev instance, the header states it, and the failure is loud. reopen_if a contributor runs the default suite on a non-HealthShare IRIS.
+  - `iris_doc_delete` / `iris_doc_index` flip (false): live, DELETE of a typeless name answers 500 with errors and `action/index` answers 200, so neither changed.
+  - An unreadable stream shows `text: ""`: the spec's dump rule sets `pComplete = 0`, so the item reads `truncated: true`.
+  - The `JsonText` `&& tDumpComplete` term is unpinned (rare read failure; the fix is a new fixture). reopen_if a body with a failing character-stream read is reported.
+  - `iris_rest_manage` loses the Mgmnt `msg` text: rare (a malformed `.spec`), and summary mode lost it before too.
+  - The gate's refused GET/PUT break the Never wording: the fix is a spec edit; flag for the retro.
+  - D2/D6/D9/D10 lack default-state pins: the section intros carry the phrase and the 39.1/39.3/39.5 doc-claims tests pin it.
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -735,6 +761,59 @@ No plan reads a bitmap index of `Status`, `SourceConfigName` or `TargetConfigNam
 **Churn record (DW-571, AC-3).** The dev package ran armed three times in default parallel mode, 3 of 3 green (61 files, 1432 tests each). A scratch script (scratchpad, deleted) then ran `doc-type-description-live-gate.test.ts` three times while it wrote and deleted `ExecuteMCPv2.Temp.Story397Churn0` to `...7` in HSCUSTOM (314 operations, 0 failures): 3 of 3 green. With the old count comparison restored as a mutation (the `iris_package_list` row comparing `totalDocs` with a second raw read), five runs under churn (632 operations) gave 3 green and 2 red, both red on that row. The old row was restored byte-identical, and `iris_doc_list` (HSCUSTOM, `Story397Churn`, generated included) is empty. The review patches touched no file this record exercises (the `iris_package_list` row, `packages.ts`, `http-client.ts`), so the churn runs are carried; the dev package then ran armed 3 of 3 again after the patches.
 
 **Spec error found, scope widened (Rule #16; flag for the retro).** Design Notes R2 says only two non-2xx paths become visible. The dev suite and the 38.7 wire gate showed a third: Atelier refuses a document name it rejects (for example `iris_doc_get` of `ExecuteMCPv2.Utils`, a name with no document type) with HTTP 400, an empty error list and the reason only in `result.status` (captured live 2026-10-17, GET and PUT of `doc/ExecuteMCPv2.Utils` and `doc/Probe397NoType`). `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and `iris_doc_load` read that answer (`atelierDocStatusError`), and the old carve-out is what made it reach them. A new shared helper `atelierDocRequest` (`atelier.ts`, exported) returns that one answer as an envelope, so each tool keeps its output byte for byte (pinned by `doc-name-refused-400.test.ts`, the existing `doc-get-range-live-gate` and `story-38-7-qa-wire-gate` rows, and a new live row in the 39.7 gate that also checks a put of a refused name stores nothing); every other failure still throws. `iris_doc_export`, `iris_routine_intermediate` and `iris_doc_convert` do not read `result.status`, so a refused name is now an HTTP 400 error there instead of an empty success (the DW-569 rule, no pin moved). Review pass: `iris_doc_load` keeps the wrap and gains a unit row (a glob can match a file whose name has no document type); the wraps in `iris_env_promote` (its names come from a diff of existing documents) and on the `iris_doc_edit` save (its document was just read under the same name) were removed, because no refused name reaches them (Rule #54), and the unwrapped answer is an error either way. The spec's "one tool-level exception" (`iris_macro_info`) is therefore five tools in fact: `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` and `iris_doc_load` through `atelierDocRequest`, plus the `iris_macro_info` fallback; flag the Design Notes R2 and the intent's "The one tool-level exception" wording for the retro.
+
+### QA stage (2026-10-17; IRIS 2026.2 build 221U, Atelier v8, `default`/HSCUSTOM)
+
+Gap analysis against the matrix and the ACs: every row had a pinning test, and the live gate already drives DW-569 on the built dev server, DW-572 on the route statements, DW-576 and DW-583 (the `HS.Message.XMLMessage` ContentStream under allow, redact and block in `EXECMCPTMP397A`). Three gaps remained and are filled by one new default-suite file:
+- DW-569 had no wire proof on the admin, ops, data and interop servers (only `http-client.test.ts` in-process), and no row for a 400 with an unusable body.
+- DW-576 had no byte-identity pin on the wire for redact and allow, and no wire or audit row for a failed read (the error response, its `structuredContent` and its audit `dataPolicy`).
+- DW-569 and DW-576 had no hostile-listener row on the built dists: the live gate depends on IRIS answering a particular way.
+
+Files (QA):
+- `packages/iris-mcp-all/src/__tests__/story-39-7-qa-process.test.ts` (QA) - 41 tests, default suite, no IRIS: the built dev, admin, ops, data and interop dists over real stdio JSON-RPC against a local listener that answers the startup handshake (Atelier v8, bootstrap version equal to the shipped one) and records every other request. Rows: a representative tool of each package (`iris_doc_list`, `iris_doc_search`, `iris_namespace_list`, `iris_jobs_list`, `iris_analytics_cubes list`, `iris_production_queues`) answers HTTP 400, 404 and 500 with an empty error list as `isError` after exactly one request, and its 2xx answer is its output byte for byte; a 2xx answer that lists errors is still an error; a 400 with an empty body, an HTML page, `null`, `{}` or `[]` is an error; `iris_doc_list` CLS/`cls` and an empty `iris_doc_search` query (Atelier's real 400s) are errors while a miss and a hit are returned as they came; `iris_macro_info` keeps `{name, definition: {}, location: {}}` only for no document or `""` and errors for a document, a 404, a 500 or a 400 that lists errors; `iris_production_logs` and `iris_message_diagram` under the default, `allow` and `block` profiles (redact and allow byte for byte with no `dataPolicy` or `textPolicy`; block withholds in place with the fixed reasons, also inside a loop, and counts; a failed read has one text under every policy and adds `dataPolicy {block,0,0}` only under block; audit entries carry the policy and counts, in order, for two successful and two failed reads; no audit file or DEBUG console log holds an identifying value). The 2xx expectations are written by hand from the tools' output templates; the one captured shape (the Event Log route in `%SYS`, HTTP 200 listing `ERROR #5001: SQL error:  Table 'ENS_UTIL.LOG' not found`) cites its `curl`.
+- `packages/iris-mcp-all/scripts/prepublish-gate.mjs` (QA) - the new file is listed in `gateTestFiles` with a comment (Rule 8: it refuses to skip under `IRIS_REQUIRE_LIVE`; `live-gate-roster.test.ts` enforces it).
+
+Commands and results:
+- New file, 41 tests: green three times in file order and three times with `--sequence.shuffle` (no order dependence). `eslint` on it exits 0; the only `tsc` complaint on the file's import graph is the existing `rootDir` note for `scripts/lib/dist-freshness.mjs`.
+- `story-39-7-burn-down-live-gate.test.ts` armed (`ENV`), one call: 18 of 18 passed, none skipped (the HS mapping probe holds: fixture nu seeds `HS.Message.XMLMessage` through the `HS` -> HSLIB mapping). `story-39-5-body-reader-live-gate.test.ts` armed, one call: 30 of 30 (carries the amended header-12 allow row). After each: `iris_namespace_list` shows no `EXECMCPTMP397A`, and `iris_doc_list` (HSCUSTOM, `Story39` and `ExecuteMCPv2.Temp.`, generated included) is empty.
+- OS tests, one class per call: `MessageBodyTest` 5 of 5, `MessageSearchTest` 7 of 7 (`total` equals the `Test*` count).
+- `live-gate-roster`, `gate-helper-copies`, `story-39-7-doc-claims`, `data-policy-scope` and the `GATES` completeness check: green.
+- Live plan check, `iris_sql_analyze` `explain` (plan only, HSCUSTOM), item `Story397.Router` + status 9 + a window: with the hint, `Read index map Ens.MessageHeader.TimeCreated, looping on TimeCreated (with a range condition) and ID` and per-row tests, cost 130109; the same text without the hint, `Status INTERSECT (Source UNION Target)` bitmaps, cost 19075. Matches the recorded after-table.
+
+Mutation lines (each applied, observed red, reverted byte-identical by `cmp` against a saved copy, rebuilt; `git status --short` showed only the two QA files after each):
+- mutation: AC-1 `http-client.ts` restores the 400-with-no-errors carve-out (shared rebuilt) -> `story-39-7-qa-process.test.ts`: the HTTP 400 row of each of the six tools (dev x2, admin, ops, data, interop), the 400-with-no-usable-body row, the CLS/`cls` row, the empty-query row, the macro-with-a-document 400 row, and the failed-read rows of logs and diagram (12 tests red; the old client showed `IRIS Jobs (undefined process(es)):` as a success).
+- mutation: AC-2 OD-2 fallback disabled (`docname === ""` -> `false`, dev rebuilt) -> the "no document, and document \"\"" macro row (`HTTP 400 for POST .../getmacrolocation`).
+- mutation: AC-5 `monitor.ts` returns `response.result` under block (interop rebuilt) -> the logs block row, the empty-list block row and the audit row.
+- mutation: AC-5 `diagram.ts` adds `dataPolicy` under redact and allow (interop rebuilt) -> the diagram redact/allow byte-identity row and the audit row.
+- mutation: AC-5 `monitor.ts` drops `structuredContent {dataPolicy}` from the block error response (interop rebuilt) -> the logs failed-read row.
+- mutation: Rule 8 the new file removed from `gateTestFiles` -> `live-gate-roster.test.ts` "iris-mcp-all: every armed test file is in scripts/prepublish-gate.mjs gateTestFiles".
+
+Findings (no code change made; for the lead):
+- `iris_doc_search` with `files: ""` is a second input that Atelier answers HTTP 400 with an empty error list (probed live: `GET .../action/search?query=ZZZNOPE397&...&files=` -> 400, `result: []`; every other probed search input, including `max=0`, `wild`, and a `files` glob that matches nothing, is 200). It now errors where it returned `{matches: []}`. The CHANGELOG sanctioned-change sentence names only the empty `query`; add the empty `files` (AD-15). The tool sends the caller's `""` as is (Rule #10 only defaults an omitted `files`).
+- Atelier answers a 400 with no error list for category CLS with ANY specific type, and for category RTN with type `cls`, `csp`, `obj` or an unknown type (probed live over the category x type grid); `iris_doc_list`, `iris_package_list` and `iris_doc_export` now report those as errors. The 39.0 description covers the CLS case; this is the same DW-569 effect and needs no action.
+- The framework appends `Details: <status.errors text>` to the text of a thrown `IrisApiError` that lists errors, for a 2xx or a 4xx. `iris_production_logs` and `iris_message_diagram` therefore echo the route's error list in their error text (R3). The Event Log route's errors are SQL and namespace errors, so no message text is reachable that way; recorded so a later change to that route re-opens the question.
+- Not re-filed: DW-584, DW-585, DW-586, DW-579, DW-572, and the three `deferred:` items in the frontmatter.
+
+### Code review stage (2026-10-17; IRIS 2026.2 build 221U, `default`/HSCUSTOM)
+
+Commands after the review patches:
+- `@iris-mcp/dev`: build; test 61 files / 1434 tests; lint and type-check clean.
+- `@iris-mcp/all` unit files (39.7/39.6/39.5 doc-claims, `process-gate-helpers`, `live-gate-roster`, `gate-helper-copies`, `docs-visibility-roster-sync`): 245 green.
+- `story-39-7-qa-process.test.ts`: 41/41 in file order and with `--sequence.shuffle`.
+- `story-39-7-burn-down-live-gate.test.ts` armed: 18/18, twice (before and after the mutation below).
+- `MessageSearchTest`: 7/7 after the restored class was reloaded.
+- eslint and `tsc` on the changed `@iris-mcp/all` files: clean.
+- Afterwards: `iris_namespace_list` shows no `EXECMCPTMP397A`, and `iris_doc_list` (HSCUSTOM, `Story397`, generated included) is empty.
+
+Live probes (Atelier v8):
+- `DELETE doc/ExecuteMCPv2.Temp.CR397NoType` answers 500 with a non-empty error list.
+- `POST action/index ["ExecuteMCPv2.Utils"]` answers 200.
+- `action/search` with `files=` answers 400 with `errors: []`.
+
+Mutation lines (each applied, observed red, then reverted; restored byte-identical by `cmp` against a saved copy):
+- mutation: AC-4 (review pass, plan half) the three `HEADERHINT` index names suffixed (`StatusX`, `SourceConfigNameX`, `TargetConfigNameX`). Class reloaded into HSCUSTOM, restored byte-identical to HEAD and reloaded. -> the 39.7 gate's "after real calls, every route statement ... passes headerPlanProblems" row went red on the item + status statement with "the plan does not read the Ens.MessageHeader TimeCreated index map with a range condition" and "the plan reads the Status bitmap index", while the statement half passed the suffixed names. Path: SDK `Client` -> built interop -> `iris_message_search` -> route -> `INFORMATION_SCHEMA.STATEMENTS` of `EXECMCPTMP397A`. The plan half is falsifiable on the scratch namespace.
+- mutation: widened scope (review pass) the first `iris_doc_put` PUT in `doc.ts` without `atelierDocRequest` -> `doc-name-refused-400.test.ts` "iris_doc_put reports IRIS's reason as a refusal that stored nothing, on the first put with and without ignoreConflict".
+- mutation: widened scope (review pass) the `iris_doc_edit` read in `doc-edit.ts` without `atelierDocRequest` -> `doc-name-refused-400.test.ts` "iris_doc_edit reports IRIS's reason when it cannot read the document".
 
 ## Auto Run Result
 

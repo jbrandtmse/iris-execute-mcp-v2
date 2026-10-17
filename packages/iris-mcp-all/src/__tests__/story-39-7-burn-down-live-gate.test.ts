@@ -54,6 +54,7 @@ import {
   postEnvelope,
   rawIrisRequest,
   resolveSdkEsmDir,
+  settledAuditCount,
   skipTest,
   staleDistReason,
   teardownRecorder,
@@ -426,6 +427,7 @@ describe("Story 39.7: DW-572, the header statements read the window and carry th
         extra: " AND h.MessageBodyClassName = 'Story397.StreamBody' AND h.Status = 9",
         expectedIds: [2, 3],
       },
+      { name: "error-only", args: { errorOnly: true }, extra: " AND h.IsError = 1", expectedIds: [4] },
       { name: "session", args: { sessionId: 397001 }, extra: " AND h.SessionId = 397001", expectedIds: [1, 2] },
       { name: "window only", args: {}, extra: "", expectedIds: [1, 2, 3, 4] },
     ];
@@ -504,6 +506,13 @@ describe("Story 39.7: DW-572, the header statements read the window and carry th
     const routeJoins = stored.filter((row) => squash(String(row["Statement"])).includes("SELECTTOP?H.ID,"));
     expect(routeHeaders.length, "the index holds the unaliased headers statements of the calls").toBeGreaterThanOrEqual(2);
     expect(routeJoins.length, "the index holds the aliased statement of the body call").toBeGreaterThanOrEqual(1);
+    expect(
+      routeHeaders.some((row) => {
+        const text = squash(String(row["Statement"]));
+        return text.includes("(SOURCECONFIGNAME=?ORTARGETCONFIGNAME=?)") && text.includes("STATUS=?");
+      }),
+      "the item and status statement, the shape DW-572 bounds, is among them",
+    ).toBe(true);
 
     for (const row of [...routeHeaders, ...routeJoins]) {
       expect(headerPlanProblems(String(row["Statement"]), String(row["Plan"])), String(row["Statement"])).toEqual([]);
@@ -659,12 +668,18 @@ describe("Story 39.7: DW-576, iris_production_logs and iris_message_diagram unde
       ["allow", allowS, { policy: "allow", redacted: 0, blocked: 0 }, { policy: "allow", redacted: 0, blocked: 0 }],
     ];
     for (const [label, session, logsPolicy, diagramPolicy] of expected) {
+      // Earlier tests wrote to this session's file too: once their entries have landed, only what these two calls add is read.
+      const before = await settledAuditCount(session.auditFile);
       await productionLogs(session.session);
       await messageDiagram(session.session);
-      const logs = await pollAuditEntries(session.auditFile, { tool: "iris_production_logs", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
-      const diagrams = await pollAuditEntries(session.auditFile, { tool: "iris_message_diagram", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
-      expect(logs.at(-1), `${label}: the logs entry`).toMatchObject({ outcome: "ok", dataPolicy: logsPolicy });
-      expect(diagrams.at(-1), `${label}: the diagram entry`).toMatchObject({ outcome: "ok", dataPolicy: diagramPolicy });
+      const all = await pollAuditEntries(session.auditFile, { count: before + 2, returnAll: true, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
+      expect(
+        all.slice(before).map((entry) => ({ tool: entry["tool"], outcome: entry["outcome"], dataPolicy: entry["dataPolicy"] })),
+        `${label}: the entries of this test's two calls, in order`,
+      ).toEqual([
+        { tool: "iris_production_logs", outcome: "ok", dataPolicy: logsPolicy },
+        { tool: "iris_message_diagram", outcome: "ok", dataPolicy: diagramPolicy },
+      ]);
     }
     for (const [label, session] of [["block", blockS], ["redact", redactS], ["allow", allowS]] as const) {
       expect(session.stderr().length, `${label}: the server wrote to stderr at LOG_LEVEL=DEBUG`).toBeGreaterThan(0);
@@ -708,6 +723,7 @@ describe("Story 39.7: DW-583, a character stream is shown under allow, bounded b
     const parsed = jsonOf(s1);
     expect(parsed["Content"]?.["text"], "CR LF and U+0001 survive as JSON escapes").toBe(S1_CONTENT);
     expect(parsed["Content"]?.["size"]).toBe(S1_CONTENT.length);
+    // eslint-disable-next-line no-control-regex
     expect(/[\u0000-\u001f\u007f]/.test(String(s1["text"])), "the shown text holds no raw C0 character").toBe(false);
     expect(parsed["Blob"], "the binary stream is class and size, with no text").toEqual({ stream: "%Stream.GlobalBinary", size: 16 });
     expect(parsed["Second"]?.["text"]).toBe("KEEPME397-SECOND");

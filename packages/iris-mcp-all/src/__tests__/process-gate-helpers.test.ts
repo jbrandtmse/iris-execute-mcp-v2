@@ -22,6 +22,7 @@ import {
   lineNumber,
   pollAuditEntries,
   postEnvelope,
+  settledAuditCount,
   rawIrisRequest,
   routeRequests,
   skipIfReason,
@@ -349,6 +350,14 @@ describe("DW-561: pollAuditEntries", () => {
     await expect(pollAuditEntries(missing, { intervalMs: 5, timeoutMs: 40, excerpt: 10 })).rejects.toThrow(
       `fewer than 1 audit entries in ${missing}: no file`,
     );
+  });
+
+  it("settledAuditCount counts an entry that lands after the first read, and is 0 for no file", async () => {
+    const file = path.join(scratch, "audit-d.jsonl");
+    writeFileSync(file, line({ tool: "t1", n: 1 }));
+    setTimeout(() => appendFileSync(file, line({ tool: "t1", n: 2 })), 15);
+    await expect(settledAuditCount(file, 20, 3)).resolves.toBe(2);
+    await expect(settledAuditCount(path.join(scratch, "no-such-d.jsonl"), 5, 2)).resolves.toBe(0);
   });
 });
 

@@ -16,7 +16,13 @@ from `2fd17b50a024` to `7d12cd8b3a1e`, because `MessageSearch.cls` and `MessageB
   error list as an empty success, so a rejected request (`iris_doc_list` with category `CLS` and type `cls`, or an empty
   `iris_doc_search` query) looked like a legitimate empty result. It now throws `IrisApiError` for every non-2xx
   response; a 2xx response is handled exactly as before. Sanctioned change (AD-15): `iris_doc_search` with an empty
-  `query` was `{matches: []}` and is now an error naming HTTP 400. `iris_macro_info` with no `document` keeps its
+  `query`, or with an empty `files` list (`files: ""`; an omitted `files` still sends the documented default), was
+  `{matches: []}` and is now an error naming HTTP 400. Sanctioned change (AD-15): a document listing Atelier rejects
+  (category `CLS` with any type, or category `RTN` with a type that is not a routine type, such as `cls`) was an empty
+  result in `iris_doc_list`, `iris_package_list` and `iris_doc_export` and is now an error naming HTTP 400. Sanctioned
+  change (AD-15): outside Atelier, `iris_rest_manage` `get` of a spec-first application whose specification IRIS cannot
+  read (the Mgmnt API answers HTTP 400 with only a `msg`) returned a result with no specification and is now an error
+  naming HTTP 400. `iris_macro_info` with no `document` keeps its
   documented empty result, `{name, definition: {}, location: {}}`, byte for byte. A second path relied on the old
   rule: Atelier refuses a document name with no document type (`iris_doc_get` of `ExecuteMCPv2.Utils`) with HTTP 400, an
   empty error list and the reason only in `result.status`. `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and
@@ -31,8 +37,9 @@ from `2fd17b50a024` to `7d12cd8b3a1e`, because `MessageSearch.cls` and `MessageB
   `textPolicy {outcome: "blocked", reason}`, and each error warning of a diagram keeps its `Error on message <id>: `
   prefix while the rest, in `warnings[]` and in every Mermaid `%% Error on message <id>: ` line, becomes a fixed reason;
   the result carries `dataPolicy {policy: "block", redacted: 0, blocked: <n>}`, which the audit entry records. Under
-  `redact` and `allow` both tools are byte-identical to before, with no `dataPolicy` key. The scope rows of both tools
-  are now governed, under `block` only.
+  `redact` and `allow` both tools are byte-identical to before, with no `dataPolicy` key. Under every policy the audit
+  entry of a call to either tool now records `dataPolicy`: the counts above under `block`, and the profile's policy
+  with 0 counts under `redact` and `allow`. The scope rows of both tools are now governed, under `block` only.
 - **`iris_message_body` shows the text of a character stream under `allow` (DW-583).** The property dump of a
   persistent body shows a character stream (such as the `ContentStream` of `HS.Message.XMLMessage`) as
   `{stream, size, text}`, read within one shared budget of `maxChars` characters, with `truncated` true exactly when
@@ -70,6 +77,11 @@ from `2fd17b50a024` to `7d12cd8b3a1e`, because `MessageSearch.cls` and `MessageB
   disposable namespace with `Story397.*` fixtures (an `HS.Message.XMLMessage`, two stream bodies, four headers and two
   Event Log rows): the 400 pair and the unchanged 2xx rows, the header statements and their plans, logs and diagram under
   every policy with the audit entries, and the stream bodies. It is listed in the prepublish roster and the arming guard.
+- **`story-39-7-qa-process.test.ts`** drives the built dev, admin, ops, data and interop dists over real stdio against
+  a local listener, with no IRIS: a 400, 404 or 500 with an empty error list is an error for a tool of each package
+  while a 2xx answer is unchanged, `iris_macro_info` keeps its empty result for no document, and `iris_production_logs`
+  and `iris_message_diagram` run under every policy, with a failed read, the audit file and the console log. It is
+  listed in the prepublish roster.
 - **`story-39-7-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
 - **Unit and OS tests** pin the client's non-2xx rule (`http-client.test.ts`), the `iris_macro_info` fallback, the two
   new block reasons, the block and the unchanged redact and allow outputs of both tools (`logs-diagram-policy.test.ts`),

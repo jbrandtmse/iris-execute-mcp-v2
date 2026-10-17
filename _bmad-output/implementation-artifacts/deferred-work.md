@@ -3077,6 +3077,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: QA 39.0: http-client.ts ~395 maps a 400 with status.errors=[] to a resolved empty result; live GET docnames/CLS/cls -> 400, tool -> {items:[]}
 - 2026-10-17T00:14:32Z status=routed owner=burndown by=qa note=for the Epic 39 burn-down: a non-2xx response is an error even when status.errors is empty; pin with the live 400 pair from doc-type-description-live-gate
 - 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
+- 2026-10-17T21:38:00Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=every non-2xx Atelier response is an IrisApiError (iris_macro_info no-document fallback kept); built-server process test across five packages; newly erroring inputs named in the CHANGELOG; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
 
 ### DW-570: iris_message_resend resendFiltered executing path (the ID fetch after guard f) is exercised by no test: only MessageResendLiveTest reaches it and it starts a production in HSCUSTOM (forbidden on the shared instance)
 - source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: in-epic
@@ -3095,6 +3096,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T14:26:14Z occurrence=39-5-message-body-reader
 - 2026-10-17T17:42:27Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
 - 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
+- 2026-10-17T21:38:00Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=the iris_package_list row compares its own request and envelope; 3/3 green under churn vs old row red in 2/5; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
 
 ### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
@@ -3102,6 +3104,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T03:11:26Z status=escalated owner=burndown by=cr note=decide the plan strategy (index hint vs TuneTable guidance) with a large-data probe; revisit the add-filters doc advice
 - 2026-10-17T09:11:02Z occurrence=39-3-message-body-content-search
 - 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 30: bound the search statement plan only (index hint), EXPLAIN before/after; resendFiltered unchanged
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=index hint on the headers/body/searchTable statements; plan rows from INFORMATION_SCHEMA.STATEMENTS read the TimeCreated range; hint red-proven with ignored index names; resendFiltered untouched (residual DW-588); build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
 
 ### DW-573: AD-15/AC-7: no test pins that pre-existing tools/list entries (description, schema, annotations) stay unchanged; the README payload sync compares tool counts only
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3126,6 +3129,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T03:55:04Z status=routed owner=burndown by=lead note=Epic 39 burn-down: bring both under dataPolicy (a sanctioned AD-15 change, orchestrator decision 26) or document as residual with an operator switch
 - 2026-10-17T18:21:28Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
 - 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=burndown note=decision 31: under block withhold message-derived text of iris_production_logs/iris_message_diagram; redact/allow unchanged and documented residual
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=under block iris_production_logs and iris_message_diagram withhold message-derived text with fixed reasons; redact/allow byte-identical; built interop process test; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
 
 ### DW-577: MessageSearch Hl7Text serializes the whole HL7 message before comparing its size with the cap (a large body is fully materialized first)
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md | severity: med | fix-risk: med | footprint: in-epic
@@ -3165,6 +3169,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: irislib/HS/Message/XMLMessage.cls:1,13 (%Persistent + %XML.Adaptor, payload in ContentStream); MessageBody.cls PropertyDump stream branch; Design Notes dump rules (spec-bound)
 - 2026-10-17T15:49:37Z status=decision-pending owner=burndown by=cr note=decide: under allow, render a character-stream property's text (to maxChars) for persistent bodies, or a HealthShare renderer
 - 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 32: render character-stream body content under allow only, bounded by maxChars; redact withholds; block kind-only
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=PropertyDump renders character-stream text under allow within one shared maxChars budget; redact withholds; block kind-only; live gate with an HS.Message.XMLMessage body; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
 
 ### DW-584: iris_metrics_interop 24-hour error count (Monitor.cls:579) counts Event Log Type=3 (Warning; Error is 2) and compares a local $Horolog cutoff with UTC TimeLogged
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3180,3 +3185,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 39.7 implement review 2026-10-17 (unverified whether <text> can carry message content)
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe what <text> can carry; withhold under block if message-derived
+- 2026-10-17T21:35:25Z occurrence=39-7-epic-39-burn-down
+
+### DW-587: Under block, the trace-message-flow prompt and its generated skill give no rule for withheld Event Log and diagram error text: steps 5-6 ask what the error log says, with no report-the-reason, never-read-it-another-way line like step 3 has for bodies
+- source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: traceMessageFlow.ts steps 4-6 unchanged by 39.7 vs step 3 body rule; the 39.7 Docs table omits the prompt (Rule 56); 39.6 CHANGELOG treats a prompt-body change as AD-15 sanctioned
+- 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: add the block rule to steps 4-5 (AD-15 prompt-body change, regenerate skills) or accept
+
+### DW-588: DW-572 residual: iris_message_resend filtered mode (resendFiltered) keeps the history-wide Status/Source/Target bitmap plan on an untuned Ens.MessageHeader, because decision 30 left its statements unchanged
+- source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: DW-572 evidence: resendFiltered COUNT shares the WHERE; decision 30: resendFiltered stays unchanged; MessageResend.cls not in the 39.7 diff; nothing carries the residual once DW-572 resolves
+- 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: HEADERHINT in resendFiltered (its pins move) or a tuning note; filtered resend is a default-disabled write

@@ -88,7 +88,10 @@ describe("Story 39.7: the CHANGELOG section and the changeset (D11)", () => {
   it("Changed names the sanctioned changes of DW-569, DW-576, DW-583 and DW-572, with the default state of the two tools", () => {
     const text = squash(section);
     expect(text).toContain("**Every non-2xx answer from IRIS is an error (DW-569).**");
-    expect(text).toContain("`iris_doc_search` with an empty `query` was `{matches: []}` and is now an error naming HTTP 400");
+    expect(text).toContain("`iris_doc_search` with an empty `query`, or with an empty `files` list (`files: \"\"`; an omitted `files` still sends the documented default), was `{matches: []}` and is now an error naming HTTP 400");
+    expect(text).toContain("was an empty result in `iris_doc_list`, `iris_package_list` and `iris_doc_export` and is now an error naming HTTP 400");
+    expect(text).toContain("`iris_rest_manage` `get` of a spec-first application whose specification IRIS cannot read");
+    expect(text).toContain("Under every policy the audit entry of a call to either tool now records `dataPolicy`");
     expect(text).toContain("`iris_macro_info` with no `document` keeps its documented empty result");
     expect(text).toContain("`iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and `iris_doc_load` read that answer through the new shared `atelierDocRequest`");
     expect(text).toContain("`iris_doc_export`, `iris_doc_convert` and `iris_routine_intermediate` with a document name Atelier refuses, and `iris_macro_info` with a non-empty `document` that Atelier refuses");
@@ -114,6 +117,7 @@ describe("Story 39.7: the CHANGELOG section and the changeset (D11)", () => {
     expect(text).toContain("**DW-571:**");
     expect(text).toContain("**`story-39-7-burn-down-live-gate.test.ts`**");
     expect(text).toContain("**`story-39-7-doc-claims.test.ts`**");
+    expect(text).toContain("**`story-39-7-qa-process.test.ts`**");
     expect(text).toContain("`logs-diagram-policy.test.ts`");
     expect(text).toContain("`MessageBodyTest.TestPropertyDumpStreams`");
   });
@@ -217,6 +221,12 @@ describe("Story 39.7: the Interoperability README (D2, D4, D5, D6)", () => {
     );
     expect(section).toContain("under `redact` and `allow` they show that text unchanged");
     expect(section).not.toContain("So are `iris_message_diagram` and `iris_production_logs`");
+  });
+
+  it("the iris_message_diagram section states its block form next to its default state", () => {
+    const note = lineStarting(interopReadme, "> **PHI data policy:** under `block`, each error warning keeps its `Error on message <id>: ` prefix");
+    expect(note, "the note follows the section's governance default").not.toBe("");
+    expect(note).toContain("Under `redact` (the default) and `allow` the diagram is shown unchanged.");
   });
 
   it("D6: the renderer table and the maxChars row state the character-stream rule", () => {

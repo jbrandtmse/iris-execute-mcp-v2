@@ -455,12 +455,10 @@ export const docPutTool: ToolDefinition = {
         }
 
         if (ignoreConflict) {
-          response = await atelierDocRequest(() => ctx.http.put(ignoreConflictPath, body));
+          response = await ctx.http.put(ignoreConflictPath, body);
         } else {
           try {
-            response = await atelierDocRequest(() =>
-              ctx.http.put(path, body, { headers: { "If-None-Match": current.ts } }),
-            );
+            response = await ctx.http.put(path, body, { headers: { "If-None-Match": current.ts } });
           } catch (saveError: unknown) {
             if (saveError instanceof IrisApiError && saveError.statusCode === 409) {
               return refusalResult(
