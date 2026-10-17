@@ -157,7 +157,7 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/interop` — Interoperability (22)
+## `@iris-mcp/interop` — Interoperability (23)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -183,8 +183,9 @@ their Zod schemas but silently dropped them server-side.
 | 20 | `iris_default_settings_manage` | 🟥 ExecuteMCPv2 | `/interop/defaultsettings` |
 | 21 | `iris_message_diagram` | 🟥 ExecuteMCPv2 | `/interop/production/messages/diagram` |
 | 22 | `iris_message_resend` | 🟥 ExecuteMCPv2 | `/interop/message/resend` + `/interop/message/resend/preview` |
+| 23 | `iris_message_search` | 🟥 ExecuteMCPv2 | `/interop/message/search` |
 
-**Mix:** 0 Atelier · 22 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
+**Mix:** 0 Atelier · 23 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_default_settings_manage` (`list`/`get`/`set`/`delete`) and extended `iris_production_item` with `add`/`remove` actions plus arbitrary host/adapter settings (interop stays 19 → 20: one new tool; `iris_production_item` is enhanced in place). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_default_settings_manage:set`/`:delete` and `iris_production_item:add`/`:remove`. Reads/pre-existing actions are **enabled by default**: `iris_default_settings_manage:list`/`:get` and the original `iris_production_item:enable`/`:disable`/`:get`/`:set` (the latter four are pre-governance baseline keys). *Epic 18 (2026-06-17) hardened the new add/arbitrary-settings surface — bad-className/duplicate-name/unknown-`@`-suffix inputs are now rejected before any write — without changing these governance defaults.*
 >
@@ -195,6 +196,8 @@ their Zod schemas but silently dropped them server-side.
 > **Epic 26 (2026-07-09) — governance defaults:** added `iris_message_resend` (interop 21 → 22) — resend/replay Interoperability messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API, by explicit header IDs (`resend`) or a bounded item+status+time-window filter with a dry-run-first double gate (`resendFiltered`; executing requires `dryRun:false` AND `confirm:true`, Epic-20 double-gate pattern). `preview` is a pure **read** and is **enabled by default**. `resend`/`resendFiltered` are truthfully classified `write` and are **DEFAULT-DISABLED** — unlike `iris_production_control:clean`, this tool deliberately does NOT use the `defaultEnabled` mechanism, because resend duplicates business/clinical data flow downstream rather than recovering a wedged production; enable via `IRIS_GOVERNANCE` (e.g. `{"global":{"iris_message_resend:resend":true,"iris_message_resend:resendFiltered":true}}`). Backed by the new ObjectScript handler `ExecuteMCPv2.REST.MessageResend.cls` (`BOOTSTRAP_VERSION` `13b4b5f003ab` → `1f3afba4ac52`).
 >
 > **Epic 35 (2026-08-19) — `iris_production_item` composite-key correctness (Story 35.1) + `iris_interop_rest` contract notes (Story 35.5/35.8).** `Ens.Config.Item` is keyed by the composite `(production, name)` pair, not `name` alone: `get` and `set` accept an optional `production` to disambiguate an item name that exists in more than one production (omitted ⇒ `get` resolves the first matching row and, since Story 38.0, reports its `production` in the response; `set` defaults to the namespace's active production), and `set`/`remove` remain reachable for items whose host class no longer resolves to a business type (a two-arg `NameExists` + item-list fallback keeps them repairable). `set` now persists durably (`%Save()` + `SaveToClass` dual-write — the production class XData is the source of truth; the SQL extent is a re-synced cache). `iris_interop_rest`'s `name` is an ObjectScript **package name** (e.g. `MyApi`, `MyCompany.MyApi`) — URL-path values like `/myapi` are rejected by IRIS `$ZNAME` validation; `delete` removes the application registration (spec + dispatch) but the generated `.impl` implementation class is **preserved by design** (IRIS `%REST.API.DeleteApplication` — the impl class carries user-written endpoint code; delete it separately if unwanted). **No tool or action key moved** (Rule #31); `iris_production_item:set` stays a pre-governance baseline key (**enabled by default**) and `:add`/`:remove` stay **default-disabled** writes, exactly as the Epic 17 note above states — verified mechanically against the default seed 2026-08-19.
+>
+> **Story 39.1 (2026-10-16) — governance defaults:** added `iris_message_search` (interop 22 → 23) — a read-only search of `Ens.MessageHeader` over the new route `POST /interop/message/search`. Its `action` enum is fixed: `headers` searches the headers of a required window (`from` required, `to` defaulting to now, at most 7 days; filters `item`, `source`, `target`, `status`, `sessionId`, `bodyClass`, `errorOnly`; keyset-paged, `limit` 100 by default and 500 at most) and returns header rows only, never body content, `ErrorStatus` or `Description`; `body` and `searchTable` answer with the `NOT_IMPLEMENTED` refusal until their stories land. All three keys are truthfully `read` and are **enabled by default** (and stay enabled under the `read-only` preset); an operator can restrict one with `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_message_search:headers":false}}`. The tool is in the interop `core` and `developer` presets. The filters-to-WHERE translation moved out of `iris_message_resend`'s `resendFiltered` into one shared helper (`ExecuteMCPv2.REST.MessageSearch.HeaderWhere`); the `resendFiltered` dry-run and refusal wire is byte-identical to a capture taken before the move (the path that resends needs a running production and is covered by `MessageResendLiveTest` only). New class `ExecuteMCPv2.REST.MessageSearch.cls` (bootstrap 30 → 31 classes, `BOOTSTRAP_VERSION` `089f8f0a62b2` → `6dcdd238c792`).
 
 ---
 
@@ -351,7 +354,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 107-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 108-tool total.
 
 ---
 
@@ -383,10 +386,10 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 |---|:---:|:---:|:---:|:---:|:---:|
 | `@iris-mcp/dev` | 20 | 11 | 0 | **31** | **32** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
-| `@iris-mcp/interop` | 0 | 22 | 0 | **22** | **23** |
+| `@iris-mcp/interop` | 0 | 23 | 0 | **23** | **24** |
 | `@iris-mcp/ops` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **20** | **82** | **5** | **107** | **112** |
+| **Total** | **20** | **83** | **5** | **108** | **113** |
 
 ---
 
@@ -398,7 +401,7 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 82 of the 107 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 83 of the 108 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -412,7 +415,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 d
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 82 of 107 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 83 of 108 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

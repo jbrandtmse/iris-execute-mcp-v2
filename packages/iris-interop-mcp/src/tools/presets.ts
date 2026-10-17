@@ -4,13 +4,16 @@
  * approved spec §2.5 table (approved 2026-07-12 — "implement as written").
  *
  * `core` = the troubleshoot-a-production loop: status/summary/control, item
- * config, logs/queues/messages, trace diagram, resend. `iris_production_control`
- * keeps the MCP-instructions `recover` guidance intact under every preset.
- * 9 package tools = 10 runtime (+ `iris_server_profiles`).
- * `developer` = the full 22-tool interop server (all interop tools are
+ * config, logs/queues/messages, message search, trace diagram, resend.
+ * `iris_production_control` keeps the MCP-instructions `recover` guidance
+ * intact under every preset. `iris_message_search` (Story 39.1) joins `core`
+ * as the entry of the everyday forensic loop (search, read, diagram): it is a
+ * read, and the way to find messages while resend stays disabled. 10 package
+ * tools = 11 runtime (+ `iris_server_profiles`).
+ * `developer` = the full 23-tool interop server (all interop tools are
  * dev-relevant).
  *
- * `include ∪ exclude` MUST equal the package's full 22-tool set for both
+ * `include` plus `exclude` MUST equal the package's full 23-tool set for both
  * presets — enforced at `McpServerBase` construction by `assertPresetCoverage`
  * (see `index.ts`) and at test time by `presets.test.ts`.
  *
@@ -30,6 +33,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_production_logs",
       "iris_production_queues",
       "iris_production_messages",
+      "iris_message_search",
       "iris_message_diagram",
       "iris_message_resend",
     ],
@@ -73,6 +77,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_default_settings_manage",
       "iris_message_diagram",
       "iris_message_resend",
+      "iris_message_search",
     ],
     exclude: [],
   },

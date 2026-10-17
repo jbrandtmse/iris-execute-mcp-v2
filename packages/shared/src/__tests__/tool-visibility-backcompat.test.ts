@@ -120,10 +120,10 @@ describe("AC 30.0.4 â€” Rule #19 back-compat capstone: no visibility env vars â‡
     });
   }
 
-  it("sanity: every package's snapshot count matches its documented pre-feature total (11-tool-visibility-presets.md section 2.5, + iris_test_status Story 36.2, + iris_doc_edit Story 38.4, + iris_sql_query Story 38.5)", () => {
+  it("sanity: every package's snapshot count matches its documented pre-feature total (11-tool-visibility-presets.md section 2.5, + iris_test_status Story 36.2, + iris_doc_edit Story 38.4, + iris_sql_query Story 38.5, + iris_message_search Story 39.1)", () => {
     expect(PRE_FEATURE_SNAPSHOTS["iris-dev-mcp"]).toHaveLength(31);
     expect(PRE_FEATURE_SNAPSHOTS["iris-admin-mcp"]).toHaveLength(26);
-    expect(PRE_FEATURE_SNAPSHOTS["iris-interop-mcp"]).toHaveLength(22);
+    expect(PRE_FEATURE_SNAPSHOTS["iris-interop-mcp"]).toHaveLength(23);
     expect(PRE_FEATURE_SNAPSHOTS["iris-ops-mcp"]).toHaveLength(21);
     expect(PRE_FEATURE_SNAPSHOTS["iris-data-mcp"]).toHaveLength(7);
   });

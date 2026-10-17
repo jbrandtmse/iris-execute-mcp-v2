@@ -1023,8 +1023,8 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_CLASSES ───────────────────────────────────────────
 
   describe("BOOTSTRAP_CLASSES", () => {
-    it("should contain exactly 30 classes", () => {
-      expect(BOOTSTRAP_CLASSES.size).toBe(30);
+    it("should contain exactly 31 classes", () => {
+      expect(BOOTSTRAP_CLASSES.size).toBe(31);
     });
 
     it("should contain all required class names", () => {
@@ -1049,6 +1049,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Security.cls",
         "ExecuteMCPv2.REST.Interop.cls",
         "ExecuteMCPv2.REST.MessageResend.cls",
+        "ExecuteMCPv2.REST.MessageSearch.cls",
         "ExecuteMCPv2.REST.Loc.cls",
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Health.cls",
@@ -1087,7 +1088,7 @@ describe("bootstrap", () => {
     it("should return an array of BootstrapClass objects", () => {
       const classes = getBootstrapClasses();
       expect(Array.isArray(classes)).toBe(true);
-      expect(classes.length).toBe(30);
+      expect(classes.length).toBe(31);
     });
 
     it("should return classes in compilation order", () => {
@@ -1136,6 +1137,7 @@ describe("bootstrap", () => {
         "ExecuteMCPv2.REST.Interop.cls",
         "ExecuteMCPv2.REST.Loc.cls",
         "ExecuteMCPv2.REST.MessageResend.cls",
+        "ExecuteMCPv2.REST.MessageSearch.cls",
         "ExecuteMCPv2.REST.Monitor.cls",
         "ExecuteMCPv2.REST.Security.cls",
         "ExecuteMCPv2.REST.Sql.cls",
@@ -1278,6 +1280,7 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.Security.cls", "src/ExecuteMCPv2/REST/Security.cls"],
       ["ExecuteMCPv2.REST.Interop.cls", "src/ExecuteMCPv2/REST/Interop.cls"],
       ["ExecuteMCPv2.REST.MessageResend.cls", "src/ExecuteMCPv2/REST/MessageResend.cls"],
+      ["ExecuteMCPv2.REST.MessageSearch.cls", "src/ExecuteMCPv2/REST/MessageSearch.cls"],
       ["ExecuteMCPv2.REST.Loc.cls", "src/ExecuteMCPv2/REST/Loc.cls"],
       ["ExecuteMCPv2.REST.Monitor.cls", "src/ExecuteMCPv2/REST/Monitor.cls"],
       ["ExecuteMCPv2.REST.Health.cls", "src/ExecuteMCPv2/REST/Health.cls"],

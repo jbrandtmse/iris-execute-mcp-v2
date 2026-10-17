@@ -2,10 +2,10 @@
 title: 'Story 39.1: Message Header Search'
 type: 'feature'
 created: '2026-10-16'
-status: 'ready-for-dev'
-baseline_revision: '34d59e0dcfd6c5c17c07856a5d3900a1edbbbd46'
+status: 'done'
+baseline_revision: 'aee1631db5e00d6bbb175dc966e80b08b89d3bac'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/.claude/rules/iris-objectscript-basics.md'
@@ -13,7 +13,14 @@ context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The executing path of resendFiltered (the TOP-n ID fetch that runs after guard f, then ResendBatch) is exercised by no test in this story's suite.
+    evidence: |-
+      The 20 replayed requests and every MessageResendTest method stop at guard d (more matches than the cap) or guard f (no production running); only MessageResendLiveTest reaches the fetch, and it starts a production in HSCUSTOM, which this story is forbidden to run. The statement was rewritten from literal SQL to tWhere/tParams, with the same construction as the sample statement the byte-identity rows do run, and a broken fetch fails safe (it resends nothing). Settle by running MessageResendLiveTest in a window the Lead approves, or by a smoke that starts a production in a disposable namespace.
+    location: >-
+      src/ExecuteMCPv2/REST/MessageResend.cls:567
+    severity: medium
 ---
 
 <intent-contract>
@@ -318,7 +325,64 @@ The fixture **β** (namespace B) is 3 headers with different items and sessions.
 
 ## Spec Change Log
 
+Implement pass, 2026-10-17. No Code Map claim proved wrong at Task 0. Amendments applied in place, none changing intent:
+- **Fixture alpha holds 13 headers, not "about 12".** Header 13 is stored with a trailing-zero time (`2001-02-03 14:00:00.300`) and sits last on a page of 3, so the live paging row proves the cursor survives a stored form IRIS reads back as `.3`. `SEEDED_IDS.alpha` is `1..13`; the window-only result is 11 rows.
+- **The Atelier `action/query` route renders a SQL NULL integer as `0`.** The gate's oracle therefore reads NULL-ness of `CorrespondingMessageId` from its own `IS NULL` column; the tool returns `null`.
+- **`executeMcpPost` pins `Accept-Language: en-US,en;q=0.9`**, as `IrisHttpClient` does. Without it `fetch` sends `*`, IRIS resolves that to Arabic, and the captured `%Status` prefixes would not be reproducible (Rule #13).
+- **Rule 2 dispositions.** `MessageSearchTest` carries its own `ResolvePort`/`PostJson` helpers: eight sibling OS test classes carry theirs, and a shared base would edit them. `TypeLabel` is defined in `MessageSearch` because `PreviewOne` (Story 39.2) must not change here; 39.2 can move it onto `TypeLabel`.
+- **`HeaderWhere` initializes its fragment list with `""`.** Starting from `$ListBuild()` the join loop raised `<NULL VALUE>` (the list carried a null first element).
+
+Review pass, 2026-10-16. Amendments applied in place, none changing intent:
+- **The name filters (`item`, `source`, `target`, `bodyClass`) ignore case.** The Boundaries and the tool description said "exact match"; a live gate row showed the `%String` name properties use the default collation, so equality is case-insensitive. `%` and `_` stay ordinary characters. The description, the interop README and the CHANGELOG say so.
+- **The direct-REST default `to` carries milliseconds** (`$ZDATETIME($ZTIMESTAMP, 3, 1, 3)`), so a header created in the current second is inside the window. The tool always sends `to` explicitly.
+- **Paging guidance.** The cursor stays `{t, id}`. An omitted `to` is recomputed as now on each call, so the description and README tell callers to pass the same `from` and `to` on every page of a window near 7 days.
+- **The `resendFiltered` byte-identity claim is scoped to what is replayed:** dry runs and guard refusals. The path that resends needs a running production and is covered by `MessageResendLiveTest` only (deferred; see the frontmatter).
+
 ## Review Triage Log
+
+### 2026-10-16 — Review pass
+- verdicts: 40 findings — high 0, medium 12, low 26, false 2, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Blind: the doc-claims test compared the CHANGELOG's historical `089f8f0a62b2 to <hash>` line with the live embed version, so Story 39.2's regeneration would turn the default suite red — fixed: both versions are pinned as literals, as Story 39.0's test does; mutation (CHANGELOG hash edited) is red.
+  - `[medium]` `[defer]` Blind: the executing-path fetch statement of `resendFiltered` (`MessageResend.cls:567`) is run by no test — verified: the replayed requests and `MessageResendTest` stop at guard d or f, and only `MessageResendLiveTest` (starts a production in HSCUSTOM, forbidden here) reaches it; the statement has the construction of the sample statement the replay does run, and a break would fail safe; deferred, with the docs over-claim patched under the Intent row on the same subject.
+  - `[low]` `[reject]` Blind: `%SelectMode = 0` is unproven and resend's statements keep the process default — probe (e): a REST process already starts Logical and `$ZTIMEZONE` is 0, so the property cannot vary on this shared instance; resend's default is the pre-existing REST default; reopen_if an instance with a non-zero `$ZTIMEZONE` is available.
+  - `[medium]` `[patch]` Blind: paging with `to` omitted recomputes `to` per page, so a window near 7 days can be refused mid-paging — real; embedding `to` in the cursor changes the specified cursor shape, so the description and README now tell callers to pass the same `from` and `to` on every page.
+  - `[low]` `[reject]` Blind: the gate hard-codes HSCUSTOM as the fixture home — the `%ALL` mapping of `ExecuteMCPv2` to HSCUSTOM is what makes the fixture class resolve in scratch namespaces and the environment rules fix the target; reopen_if the bootstrap namespace changes.
+  - `[low]` `[patch]` Blind: `body`/`searchTable` reach `NOT_IMPLEMENTED` only after window validation — the behavior is spec-bound (matrix: "with a valid from", AC-6: "valid window"); the description and README now say "with a valid window".
+  - `[medium]` `[patch]` Blind: "every filter is an exact match" is unverified — verified live: the name properties are `%String` with the default collation, so a lowercase source matches the same rows; gate rows added for source, item and body class (red under a `%EXACT` mutation) and the description, README and CHANGELOG now say the name filters ignore case.
+  - `[low]` `[patch]` Blind: paging rows never exactly full, `TypeLabel` "Unknown" untested, helpers without direct tests — added the `limit 11` page and a page-count assertion (the first version of the row survived a "full page reports more" mutation, the strengthened one is red); the "Unknown" branch is unreachable for stored types 1 to 3 and the helpers are covered through the HTTP refusal rows, so those parts are rejected.
+  - `[low]` `[patch]` Blind: `afterAll` stops at the first failed removal — each step now runs in its own guard and the failures are asserted at the end; mutation (namespace B not removed) is red.
+  - `[low]` `[patch]` Blind: grammar "a **11-tool runtime roster**" — fixed to "an" in the interop README; the doc-claims substring is unchanged.
+  - `[medium]` `[patch]` Edge: page 2 with `to` omitted recomputes `to` — same root cause as the paging row above; the same documentation fix.
+  - `[low]` `[patch]` Edge: `body`/`searchTable` without `from` or with a malformed `from` get a window error — same root cause as the `NOT_IMPLEMENTED` ordering row above.
+  - `[low]` `[reject]` Edge: the default `to` comes from the MCP host clock, not the IRIS clock — spec-bound (Rule #10: TS sends `to` explicitly); reopen_if a clock-skew report.
+  - `[low]` `[patch]` Edge: the direct-REST default `to` (`$ZDATETIME($ZTIMESTAMP, 3)`) has no fraction, so a header created in the current second is excluded — verified live (the new gate row was red: `to` was `2026-10-17 02:15:01`); now `$ZDATETIME($ZTIMESTAMP, 3, 1, 3)`, row green, bootstrap regenerated.
+  - `[low]` `[reject]` Edge: empty-string filters are silently dropped — the documented contract of `HeaderWhere` (an absent or empty key adds no fragment); matching an empty name is not a stated need and a `.min(1)` guard adds behavior; reopen_if a caller needs it.
+  - `[low]` `[patch]` Edge: teardown stops at the first failure — same root cause as the `afterAll` row above.
+  - `[medium]` `[patch]` Edge: the doc-claims test ties a historical CHANGELOG line to the live embed — same root cause as the first row.
+  - `[medium]` `[patch]` Edge: the exact-match claim is imprecise (collation) — same root cause as the collation row above.
+  - `[false]` `[reject]` Edge: `HeaderWhere` drops empty filters, so a blank filter could widen a destructive resend — `resendFiltered` requires `item` and `from`, maps `status` to a non-zero code and always has a normalized `to`, so the helper always receives five non-empty values; the byte-identity rows pin the five-parameter shape and a guard would be unreachable.
+  - `[medium]` `[defer]` Gap: the `resendFiltered` fetch statement runs in no test — same root cause as the second row; the proposed fix (extract the fetch) moves the unverified part to its call site and adds a public method.
+  - `[low]` `[patch]` Gap: nothing fails if `resendFiltered` stops using `HeaderWhere` — mutation run: `HeaderWhere` skipping the status fragment turns the byte-identity row red (and the status gate row), which shows resend consumes the helper; line written.
+  - `[low]` `[patch]` Gap: validate-before-switch ordering is pinned by no test — route row added (a bad `from` sent with a namespace that cannot be switched to); mutation (switch moved before validation) is red on that row.
+  - `[medium]` `[patch]` Gap: the fixture harness's name guards are exercised by no test — a default-suite unit test with stub sessions (10 tests) and a gate row for the OS-side refusals (using `EXECMCPTMP391`, which names no directory); mutations (widened regex; OS guard disabled) are red.
+  - `[medium]` `[patch]` Gap: the "nothing left" oracle was never shown to detect a leftover — a positive control in `beforeAll`; mutations (`Leftovers` returns `[]`; namespace B not removed) are red.
+  - `[medium]` `[patch]` Gap: the 39.1 gate's armed fail-closed path is unproven — `story-39-1-gate-guards.test.ts` runs the gate in child vitest processes against a closed port (unarmed skips with the reason, armed fails with "may not be skipped") and pins the source order of the freshness and version checks; mutation (throw disarmed) is red.
+  - `[low]` `[reject]` Gap: `%SelectMode = 0` cannot be shown to matter — same root cause as the third row.
+  - `[low]` `[patch]` Gap: the live defaults row cannot detect TS omitting `to`/`limit` — the pin is the unit test (exact `toHaveBeenCalledWith`); mutation (`limit` not sent) is red on 3 unit rows; line written.
+  - `[false]` `[reject]` Gap: the route row "an unparseable to" with token `to` could match another message — if a hostile `to` were not rejected the response would be a success with no errors and the row's first assertion would fail; every window text names its parameters.
+  - `[low]` `[reject]` Gap: the unknown-namespace row asserts only `isError` — the skip-`SwitchNamespace` mutation turns it red (recorded); a text assertion would pin IRIS's wording.
+  - `[low]` `[reject]` Gap: the `toCanonicalUtc` trimming table restates the spec — the live cursor path (stored `.300` read back as `.3`, header 13) is a reality oracle for the trimmed form.
+  - `[low]` `[patch]` Gap: ACs and sub-claims with no `mutation:` line — AC-2 rosters: the generator roster without `MessageSearch`, regenerated, is red on 6 `bootstrap.test.ts` rows; AC-7 tools array: the tool removed from the array is red on 6 interop rows; AC-1 is n/a; the baseline and "pre-existing entries unchanged" sub-claims have no code to mutate (the diff changes pre-existing tool code by one `export`) and are held by `gen:governance-baseline:check`.
+  - `[low]` `[reject]` Gap: concurrent runs would collide on the fixed names — by design: fixed names plus this package's serial file execution (pinned by `epic38-gate-guards`) are the convention.
+  - `[low]` `[reject]` Gap: the byte-identity baseline depends on an engine-defined tie order — captured on one recorded IRIS build; reopen_if the IRIS version changes and the row goes red without a code change.
+  - `[low]` `[reject]` Gap: `HeaderWhere`'s `Catch` and the callers' `ISERR` branches are unreachable — defensive wrappers the project's try/catch convention requires; a public helper can be misused with a non-object.
+  - `[low]` `[reject]` Intent: Logical select mode is asserted nowhere — same root cause as the third row.
+  - `[low]` `[patch]` Intent: refusal ordering is a code-order property no test observes — same root cause as the validate-before-switch row.
+  - `[medium]` `[patch]` Intent: the CHANGELOG and `tool_support.md` called the route's and the `resendFiltered` wire byte-identical though only dry runs and refusals are replayed — both reworded, the CHANGELOG now says the path that resends is covered by `MessageResendLiveTest` only, and `story-39-1-doc-claims` pins the wording; the test gap itself is the deferred row.
+  - `[low]` `[patch]` Intent: `NOT_IMPLEMENTED` conditions — same root cause as the `NOT_IMPLEMENTED` ordering row above.
+  - `[low]` `[patch]` Intent: the route's success path is never driven directly — gate row added: the route with `to` and `limit` omitted against namespace C (reads nothing).
+  - `[low]` `[patch]` Intent: window bounds of 0 days and exactly 7 days are unpinned on the new route — live row added; mutation (`MAXWINDOWDAYS` 6) is red on it.
 
 ## Design Notes
 
@@ -443,7 +507,86 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-7 | The changeset bump changed; separately, `NOT_IMPLEMENTED` left out of the sorted list | `story-39-1-doc-claims`; `refusals.test.ts` |
 | AC-1 | none: AC-1 is the probe record, and has no runtime behavior to mutate | n/a |
 
+### Results (implement pass, 2026-10-17)
+
+**Task 0 probes** (IRIS 2026.2, Build 221U; this is the earliest version they were verified on; scratch namespace `EXECMCPTMP391P`, removed):
+- (a) A mapping-only namespace (`Ens`, `EnsLib`, routine `Ens*` to ENSLIB) hosts `Ens.MessageHeader`: `%ExistsId` is true, `%Save` returns OK with ID 1, SQL counts it. Without the mappings the class does not exist (namespace C).
+- (b) `%ExecDirect(, sql, tParams...)` and `%Execute(tArgs...)` work with a local array whose top node is the count.
+- (c) `TOP ?` is supported (prepared, executed with ORDER BY, returned the bound number of rows), so the handler binds it; nothing is interpolated.
+- (d) `$ZDATETIMEH("2001-02-03 12:00:00.123", 3)` is `58473,43200.123`; whole seconds parse too.
+- (e) A REST process starts with `%SelectMode` 0 (Logical); `$ZTIMEZONE` is 0, so Logical and ODBC modes cannot be told apart on this instance (the handler sets Logical explicitly). The Atelier `action/query` route returns Logical values (`Status` 8, the stored `TimeCreated`).
+- (f) `Config.Namespaces.Delete` removes the namespace's mappings (none listed after the namespace delete, before any `iris_mapping_manage:delete`). The fixture still deletes them first, as Step L5 says.
+- (g) `SYS.Database.DeleteDatabase` needs no dismount (the database was mounted; the call returned OK and the directory was then removable).
+- (h) Creating the database and namespace made no `/csp/<ns>` application and no `%DB_<ns>` resource: `Leftovers` listed only the namespace, the database configuration, the three mappings, the `SYS.Database` and the directory.
+- (i) The deployed `BOOTSTRAP_VERSION` was `089f8f0a62b2`.
+
+**Step C.** The capture ran on `089f8f0a62b2` at 2026-10-17T01:26:31Z, 20 requests, IRIS 2026.2 (Build 221U): `STORY_39_1_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-message-search-live-gate.test.ts -t capture`. The fixture was written by the test, never edited. The byte-identity row is green on the post-change classes.
+
+**`BOOTSTRAP_VERSION`: `089f8f0a62b2` to `6dcdd238c792`** (the implement pass reached `4171efadc9d5`; the review pass's default-`to` fix moved it once more); 31 classes in both rosters; a second `pnpm gen:bootstrap` produced no diff.
+
+**Commands.** `OS` runs: `MessageResendTest` 12 of 12 before Task 1 and after it; `MessageSearchTest` 5 of 5. Builds of shared, dev, admin, interop, ops, data and client-config were clean, and `lint` and `type-check` passed for each. Tests: shared 1694, dev 1419 (armed, `--no-file-parallelism`), admin 498, interop 431, ops 350, data 165, client-config 514, `@iris-mcp/all` 606 passed and 1 skipped (the armed-by-env capture row). `pnpm gen:governance-baseline:check`, `pnpm gen:skills:check` and `node scripts/check-epics-sync.mjs` are OK; `pnpm measure:tools-payload` equals the README rows.
+
+**Performance.** The first armed run on the new version (31 classes deployed by the first built-server start) finished its whole gate in 12.1 s, so the bootstrap took well under the 60 s budget; later runs report `[PERF] bootstrap start 181 ms; one headers call on A 55 ms` (budget 2 s).
+
+**Step L6 after every armed run:** the gate's `afterAll` asserts `Leftovers` is `[]` and the `Story391` document listing is empty; after the last run the namespace, database and `iris_doc_list` rosters (HSCUSTOM, `Story391`, generated included) hold nothing of this story.
+
+**Mutations (Rule 19).** Each applied, observed red, reverted; `shasum` of every changed file identical to the pre-mutation snapshot, interop rebuilt after its mutations, and the IRIS classes reloaded from the reverted sources.
+- mutation: the `resendFiltered` sample `ORDER BY TimeCreated` changed to `ORDER BY ID DESC` (reloaded into HSCUSTOM) -> `every resendFiltered request answers byte for byte` (case `dry run, default status`)
+- mutation: `HeaderWhere` concatenates `item` into `pWhere` -> `TestHeaderWhereNoCallerText` (also `TestHeaderWhereEveryFilterOrder`, `TestHeaderWhereResendFilterSet`), and the gate rows `the odd item name matches its source and its target` and `a prefix of the odd name matches nothing`
+- mutation: the `IsError = 1` fragment dropped -> gate row `errorOnly is the IsError flag, not the status`
+- mutation: the keyset clause dropped (`If (tAfterNorm '= "") && 0`) -> gate rows `pages of 3 join ...` and `pages of 2 join ...`
+- mutation: `utcToIso` returns the stored value (`if (value !== "") return value;`, interop rebuilt) -> `message-search.test.ts` `utcToIso` and `mapHeaderRow` rows, and the gate row `window only`
+- mutation: `headers: "write"` -> `message-search-governance.test.ts` `enables all three keys under an empty IRIS_GOVERNANCE` (and 3 more) and `message-search.test.ts` `classifies all three actions as reads`
+- mutation: `iris_message_search` moved from `core.include` to `core.exclude` (interop rebuilt) -> `presets.test.ts` `pins the exact roster sizes` and `includes iris_message_search in both presets`; `docs-visibility-roster-sync` (5 rows)
+- mutation: the handler skips `SwitchNamespace` (`If 0 {`) -> gate rows `A and B each return their own rows`, `a namespace with no Interoperability mappings is notApplicable` and `a namespace that does not exist is an error`
+- mutation: the `CompiledClass` check removed (`If 0 {`) -> gate row `a namespace with no Interoperability mappings is notApplicable, not an error`
+- mutation: `body` routed to the headers path (`if (action === "searchTable")`) -> `message-search.test.ts` `body returns the NOT_IMPLEMENTED refusal and makes no HTTP call` and `message-search-governance.test.ts` `denies headers with GOVERNANCE_DISABLED ..., while body still reaches NOT_IMPLEMENTED`
+- mutation: the changeset bump `"@iris-mcp/shared": patch` -> `story-39-1-doc-claims.test.ts` `the changeset bumps exactly shared minor and interop minor (AD-29)`
+- mutation: `NOT_IMPLEMENTED` left out of the sorted list in `refusals.test.ts` -> `refusals.test.ts` `holds exactly the codes ...`
+
+**Review-pass results (2026-10-16).** Commands run after the last patch: `MessageSearchTest` 5 of 5 and `MessageResendTest` 12 of 12 (one class per call); builds, `lint` and `type-check` clean for shared, dev, admin, interop, ops, data and client-config (one pre-existing `lint` warning in `shared/src/cli/governance.ts`, not this story's); tests: shared 1694, dev 1419 (armed, `--no-file-parallelism`; a default parallel run failed `doc-type-description-live-gate.test.ts`, which compares two live listings of the shared HSCUSTOM, and the file passed alone and in the serial run), admin 498, interop 431, ops 350, data 165, client-config 514, `@iris-mcp/all` 627 passed and 1 skipped (the capture row); `pnpm gen:bootstrap` a second time: no diff; `pnpm gen:governance-baseline:check`, `pnpm gen:skills:check` and `node scripts/check-epics-sync.mjs`: OK; `pnpm measure:tools-payload`: the README interop row was re-measured after the description change (`44,701`/`25,759`) and equals the output. Performance: the first armed spawn on `6dcdd238c792` deployed 31 classes in 1314 ms (budget 60 s); one `headers` call on A took 54 ms (budget 2 s). Step L6 after the last armed run: `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP391*` name, and `iris_doc_list` (HSCUSTOM, `Story391` and `ExecuteMCPv2.Temp.`, generated included) is empty.
+
+**Review-pass mutations (Rule 19).** Each applied, observed red, reverted; `shasum` of each changed file matched its pre-mutation snapshot, and the IRIS classes were reloaded from the reverted sources.
+- mutation: the route's default `to` as it was, `$ZDATETIME($ZTIMESTAMP, 3)` (observed before the fix) -> gate row `route: leaving out to and limit answers with now, to the millisecond, and 100`
+- mutation: the namespace switch moved above the input checks -> gate row `route: a bad from, sent with a namespace that cannot be switched to`
+- mutation: `HeaderWhere` skips the status fragment -> gate rows `every resendFiltered request answers byte for byte ...` and `status Errored is status code 8` (resend consumes the helper)
+- mutation: the `source` fragment as `%EXACT(SourceConfigName) = ?` -> gate row `a source name in another case matches the same rows`
+- mutation: after the fetch loop, `hasMore` set whenever the page is full -> gate row `pages of 11 join ...` (red only with the page-count assertion; the first version survived it)
+- mutation: `MAXWINDOWDAYS` 6 -> gate rows `accepts a window of no length and a window of exactly 7 days` and `route: a window over 7 days`
+- mutation: fixture `Leftovers` returns `[]` -> the gate's `beforeAll` positive control (`the leftovers check sees EXECMCPTMP391A while it exists`)
+- mutation: `afterAll` skips removing namespace B -> the gate's `afterAll` (`every teardown step completed`)
+- mutation: fixture `RemoveDatabaseFiles` name guard disabled (`If 0`) -> gate row `the fixture class refuses a name that is not a scratch namespace, and runs nothing`
+- mutation: `FIXTURE_NAME` widened to `/^EXECMCPTMP/` -> `interop-namespace-fixture.test.ts` (4 refusal rows)
+- mutation: the gate's `IRIS_REQUIRE_LIVE` throw disarmed -> `story-39-1-gate-guards.test.ts` `armed, with IRIS not reachable ...`
+- mutation: `limit` dropped from the wire body -> `message-search.test.ts` `sends to (now, canonical UTC) and limit 100 explicitly ...` (and 2 more)
+- mutation: the CHANGELOG's `BOOTSTRAP_VERSION` edited -> `story-39-1-doc-claims.test.ts` `states the BOOTSTRAP_VERSION move ...`
+- mutation: `MessageSearch` removed from the `gen-bootstrap.mjs` roster and regenerated -> `bootstrap.test.ts` (6 rows, among them `should contain exactly 31 classes`)
+- mutation: `messageSearchTool` removed from the interop tools array -> `index.test.ts` and `presets.test.ts` (6 rows)
+
+**Residual risks.** (1) The executing path of `resendFiltered` is unverified here (deferred, frontmatter). (2) `%SelectMode = 0` cannot be shown to matter on an instance whose `$ZTIMEZONE` is 0; the line is explicit and pinned only by review. (3) The cursor at stored trailing-zero times is proven on the synthetic fixture only. (4) The review-pass patches (about 250 lines of test code and one IRIS expression) were verified by the mutations above but not re-reviewed by the adversarial layers.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** `iris_message_search` (interop, read-only) searches message headers over the new route `POST /interop/message/search`. Its `action` enum is `headers` | `body` | `searchTable`; `headers` takes a required window of at most 7 days plus item, source, target, status, session, body class and error-flag filters, and returns keyset-paged header rows (oldest first, `limit` 100 by default and 500 at most) with UTC ISO times and `...Raw` siblings. `body` and `searchTable` return the new `NOT_IMPLEMENTED` refusal with no IRIS call. A namespace without Interoperability returns `notApplicable`. The filters-to-WHERE translation moved out of `resendFiltered` into `MessageSearch.HeaderWhere`, which both handlers call; `resendFiltered`'s dry runs and refusals answer byte for byte as before. `BOOTSTRAP_VERSION` moved `089f8f0a62b2` to `6dcdd238c792` (31 classes). Interop is at 23 package tools (24 advertised), `core` 11 and `developer` 24; all three keys are reads, enabled by default.
+
+**Files changed.**
+- `src/ExecuteMCPv2/REST/MessageSearch.cls` (new): `HeaderWhere`, `HeaderRow`, and the `MessageSearch` handler.
+- `src/ExecuteMCPv2/REST/MessageResend.cls`, `src/ExecuteMCPv2/REST/Dispatch.cls`: `resendFiltered` builds its WHERE from `HeaderWhere`; the new route.
+- `src/ExecuteMCPv2/Tests/MessageSearchTest.cls` (new): 5 OS tests.
+- `scripts/gen-bootstrap.mjs`, `packages/shared/src/bootstrap-classes.ts` (generated), `packages/shared/src/__tests__/bootstrap.test.ts`: the roster entry and the regenerated embed.
+- `packages/shared/src/refusals.ts` and its test, `pre-feature-tool-snapshot.ts`, `tool-visibility-backcompat.test.ts`: `NOT_IMPLEMENTED` and the new tool name.
+- `packages/iris-interop-mcp/src/tools/message-search.ts` (new), `index.ts`, `presets.ts`, `message-resend.ts` (`STATUS_LABELS` exported): the tool, its registration and both preset rows.
+- `packages/iris-interop-mcp/src/__tests__/message-search.test.ts`, `message-search-governance.test.ts` (new), `index.test.ts`, `presets.test.ts`, `presets.e2e.test.ts`: unit, governance and count tests.
+- `packages/iris-mcp-all/src/__tests__/interop-namespace-fixture.ts` (new harness), `interop-namespace-fixture.test.ts` (name-guard unit test), `story-39-1-message-search-live-gate.test.ts` (60 rows), `story-39-1-gate-guards.test.ts`, `story-39-1-doc-claims.test.ts`, `fixtures/story-39-1-resend-baseline.json`, `process-gate-helpers.ts` (`executeMcpPost`, `docFixtures`), `docs-prompt-sync.test.ts`, and `scripts/prepublish-gate.mjs` (gate listed).
+- `README.md`, `packages/iris-interop-mcp/README.md`, `packages/iris-mcp-all/README.md`, `tool_support.md`, `CHANGELOG.md`, `docs/epic-summary.md`, `docs/migration-v1-v2.md`, `.changeset/story-39-1-message-header-search.md`: counts, the default state of the three keys, the new section and the bumps.
+
+**Review findings.** 40 findings from four layers (high 0, medium 12, low 26, false 2): 25 rows patched (18 root causes; 7 medium), 2 rows deferred (1 entry), 13 rows rejected. Patches: the doc-claims version pin; paging guidance for an omitted `to`; the case-insensitivity of the name filters (docs and gate rows); the direct-REST default `to` with milliseconds; the `NOT_IMPLEMENTED` wording; the exactly-full page row; a per-step teardown; the fixture name-guard unit test and OS-refusal gate row; the leftovers positive control; the gate-guards test; the refusal-ordering, defaults, and window-bound rows; the docs over-claim about the resending path; and mutation lines for the resend-uses-helper, rosters and tools-array claims. Deferred: the executing path of `resendFiltered` (see the frontmatter). Rejected, each with its reason in the triage log: `%SelectMode` unprovable on a UTC instance (twice, plus the intent-layer repeat); the hard-coded HSCUSTOM fixture home; the host-clock default `to` (spec-bound); empty-string filters (documented `HeaderWhere` contract); empty-filter widening of a resend (unreachable); the vacuous-looking `to` token row (false); the unknown-namespace text assertion; the `toCanonicalUtc` table; concurrent-run collision (by design); the engine tie order of the byte-identity baseline; and `HeaderWhere`'s defensive branches.
+
+**Follow-up review recommendation: true** (7 medium entries patched). The unverified risk: the review-pass patches (about 250 lines of default-suite test code, the gate rows, and the one-expression IRIS change that moved `BOOTSTRAP_VERSION` again) were verified by the mutations above but not re-reviewed by the adversarial layers.
+
+**Verification performed.** The `## Verification` loop lines after every patch pass and the `(once)` lines once after the last patch, with the counts and mutation lines recorded under `### Results` and `Review-pass results`.
+
+**Residual risks.** The executing path of `resendFiltered` is unverified here; `%SelectMode = 0` cannot be shown to matter while `$ZTIMEZONE` is 0; the cursor at stored trailing-zero times is proven on the synthetic fixture only.

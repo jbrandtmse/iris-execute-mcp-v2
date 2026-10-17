@@ -14,11 +14,11 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 |---------|--------|------:|-------------|
 | [@iris-mcp/dev](packages/iris-dev-mcp/README.md) | Development | 31 | ObjectScript document CRUD, guarded surgical line edits of existing documents (`iris_doc_edit`), compilation, SQL (with read-only mode, a rows-affected cap and a query-only tool, `iris_sql_query`), globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion (`iris_env_diff`, `iris_env_promote`), long-running test-run re-attach/read/cancel (`iris_test_status`) |
 | [@iris-mcp/admin](packages/iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay (duplication hazard — preview before executing) |
+| [@iris-mcp/interop](packages/iris-interop-mcp/README.md) | Interoperability | 23 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message header search (`iris_message_search` — read-only, a required window of at most 7 days), message resend/replay (duplication hazard — preview before executing) |
 | [@iris-mcp/ops](packages/iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check` — one call, verdict + findings), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](packages/iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **107 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
+> **108 tools** across 5 servers — install one or all. Each server additionally provides one framework tool, `iris_server_profiles` (see [Discovering profiles and policy](#discovering-profiles-and-policy-call-this-first)), so the advertised count per server is one greater than the package totals above.
 
 ### Meta-package
 
@@ -481,6 +481,7 @@ An agent changes a class in IRIS in four steps: read the lines, edit them, compi
 | `STORAGE_DROPPED` | The save would drop a Storage definition of a class. Nothing was stored. | Keep the Storage lines in the content or the edit. Only for a deliberate change of the data layout: `allowStorageRegeneration: true` on `iris_doc_put`, or `iris_doc_edit` action `regenerateStorage` (disabled by default). |
 | `SQL_READ_ONLY` | A statement other than a query reached a read-only path: `iris_sql_query`, `iris_sql_execute` with `readOnly: true`, or any `iris_sql_execute` call while the operator's `IRIS_SQL_READ_ONLY` is `true`. Nothing was changed. | From `iris_sql_query`, run the statement with `iris_sql_execute` (the `read-only` preset blocks it). With `readOnly: true`, run it without `readOnly`. Under `IRIS_SQL_READ_ONLY`, run a SELECT, or ask the operator to lift it. |
 | `SQL_ROWS_AFFECTED_CAP` | Under a cap (`maxRowsAffected` or the operator's `IRIS_SQL_MAX_ROWS_AFFECTED`), either an INSERT, UPDATE or DELETE changed more rows than the cap and was rolled back, or the statement was not run at all: only SELECT, INSERT, UPDATE and DELETE run under a cap, and an INSERT, UPDATE or DELETE whose text contains `%NOJOURN` is refused before it runs. | Over the cap: narrow the statement to fewer rows, or raise `maxRowsAffected` when the cap is the call's own. Not run: remove `%NOJOURN` from the text, or run the statement without `maxRowsAffected`. A call cannot raise or bypass the operator's ceiling. |
+| `NOT_IMPLEMENTED` | The requested action is declared but not available in this version (today: `iris_message_search` actions `body` and `searchTable`). No IRIS call was made. | Use an action listed in `availableActions` (`headers`). |
 
 ### Worked example — enable a write action globally, block it on `prod`
 
@@ -539,6 +540,7 @@ Per the default-seed rule above, the **new write actions** added after governanc
 | interop | `iris_production_item` | `add`, `remove` (new) | `enable`, `disable`, `get`, `set` (pre-governance baseline) |
 | interop | `iris_message_diagram` | — (flat read tool, no actions) | whole tool (message-trace Mermaid diagrams, Epic 21) |
 | interop | `iris_message_resend` | `resend`, `resendFiltered` (message resend/replay, Epic 26) | `preview` |
+| interop | `iris_message_search` | — (all three actions are reads; Story 39.1) | `headers`, `body`, `searchTable` (all enabled by default, and still enabled under the read-only preset; `body` and `searchTable` answer `NOT_IMPLEMENTED` until their stories land) |
 | dev | `iris_sql_analyze` | — (all five actions are reads) | `explain`, `stats`, `indexUsage`, `running`, `advise` (Epic 28) |
 | dev | `iris_loc_count` | — (flat read tool, no actions) | whole tool (namespace lines-of-code metrics, Epic 22) |
 | dev | `iris_env_diff` | — (flat read tool, no actions) | whole tool (cross-profile environment drift detection, Epic 27) |
@@ -664,15 +666,15 @@ Design intents differ per preset:
 
 | Preset | dev | admin | interop | ops | data | Package total | Runtime total |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **full** (default) | 31 | 26 | 22 | 21 | 7 | 107 | 112 |
-| **developer** | 31 | 10 | 22 | 9 | 7 | 79 | 84 |
-| **core** | 14 | 12 | 9 | 9 | 7 | 51 | 56 |
+| **full** (default) | 31 | 26 | 23 | 21 | 7 | 108 | 113 |
+| **developer** | 31 | 10 | 23 | 9 | 7 | 80 | 85 |
+| **core** | 14 | 12 | 10 | 9 | 7 | 52 | 57 |
 
 Every `core` server lands at 8 to 15 runtime tools — inside the researched 5-15-tool window (`dev` is at 15 because `iris_doc_edit` and `iris_sql_query` joined the everyday loop; the target of about 13 is a guideline). The exact per-tool `include`/`exclude` disposition for each server is declared explicitly in that package's `src/tools/presets.ts` (transcribed from and kept in lockstep with [`research/feature-specs/11-tool-visibility-presets.md#2.5`](_bmad-output/planning-artifacts/research/feature-specs/11-tool-visibility-presets.md) — the authoritative per-tool table; a mismatch fails a per-package unit test AND a construction-time assert, so it cannot drift silently). In short:
 
 - **`@iris-mcp/dev`** `core` = the authoring loop (get/edit/put/list/compile/load) + execution & debug loop (command/classmethod/tests, global get/set/kill) + SQL execute and SQL query. `developer` = the full 31-tool server (every dev tool is dev-relevant).
 - **`@iris-mcp/admin`** `core` = the everyday admin loop (namespaces, databases, users, webapps, permission checks). `developer` = only what developers self-serve (namespace/db/mapping/webapp config) — no user/security administration.
-- **`@iris-mcp/interop`** `core` = the troubleshoot-a-production loop (status/summary/control, item config, logs/queues/messages, trace diagram, resend) — `iris_production_control` stays visible so the `recover`-first MCP guidance holds under every preset. `developer` = the full 22-tool server.
+- **`@iris-mcp/interop`** `core` = the troubleshoot-a-production loop (status/summary/control, item config, logs/queues/messages, message search, trace diagram, resend) — `iris_production_control` stays visible so the `recover`-first MCP guidance holds under every preset. `developer` = the full 23-tool server.
 - **`@iris-mcp/ops`** `core` = monitoring-persona basics (health, system metrics, alert metrics, jobs/locks/processes, tasks, license). `developer` = the runtime debugging slice (interop metrics + task history) — no backup/mirror/ECP/config surface.
 - **`@iris-mcp/data`** — already inside the 5-15 sweet spot: both `core` and `developer` include all 7 tools.
 
@@ -684,11 +686,11 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 | --- | --- | --- | --- |
 | @iris-mcp/dev | 32 / 84,852 / ~21,213 | 15 / 43,743 / ~10,936 | 32 / 84,852 / ~21,213 |
 | @iris-mcp/admin | 27 / 48,234 / ~12,059 | 13 / 16,727 / ~4,182 | 11 / 16,087 / ~4,022 |
-| @iris-mcp/interop | 23 / 40,496 / ~10,124 | 10 / 21,554 / ~5,389 | 23 / 40,496 / ~10,124 |
+| @iris-mcp/interop | 24 / 44,701 / ~11,175 | 11 / 25,759 / ~6,440 | 24 / 44,701 / ~11,175 |
 | @iris-mcp/ops | 22 / 30,677 / ~7,669 | 10 / 13,679 / ~3,420 | 10 / 14,130 / ~3,533 |
 | @iris-mcp/data | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 | 8 / 12,508 / ~3,127 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 84,852 → 43,743, ~48%). Last re-measured at Story 39.0 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,234 → 16,727; `@iris-mcp/dev`: 84,852 → 43,743, ~48%). Last re-measured at Story 39.1 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status`, which `core` excludes.
 
 ---
 
@@ -720,7 +722,7 @@ See the [client configuration index](docs/client-config/README.md) — covering 
 
 Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) — parameterized, workflow-shaped instructions that teach an MCP client the *sequence* of tool calls an expert would use for a task, not just the tools themselves. This is a separate MCP protocol capability from tools: prompts are discoverable via `prompts/list` and rendered via `prompts/get`, on any client that supports the [MCP `prompts` capability](https://modelcontextprotocol.io/). A server only advertises `prompts` when it has at least one registered — servers with none behave exactly as before (Rule #19 back-compat).
 
-**Prompts do not change the 107-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
+**Prompts do not change the 108-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
 
 ### The v1 pack — 12 prompts, grouped by owning server
 
@@ -768,7 +770,7 @@ Servers communicate over the **MCP protocol** (spec v2025-11-25) using the **std
            │          │          │          │
      ┌─────▼──┐ ┌─────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌─────▼──┐
      │  dev   │ │ admin  │ │interop │ │  ops   │ │  data  │
-     │(31)    │ │(26)    │ │(22)    │ │(21)    │ │(7)     │
+     │(31)    │ │(26)    │ │(23)    │ │(21)    │ │(7)     │
      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
          │          │          │          │          │
          └──────────┴──────┬───┴──────────┴──────────┘

@@ -292,6 +292,14 @@ export async function withWireSession<T>(
 /** One row of an Atelier query result. */
 export type AtelierRow = Record<string, unknown>;
 
+/** The headers of a raw JSON request to the target: the content type and its Basic credentials. */
+function rawJsonHeaders(target: IrisTarget): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`,
+  };
+}
+
 /** The `result` of an Atelier response, after its HTTP status and `status.errors` have been checked. */
 async function atelierResult(
   target: IrisTarget,
@@ -300,10 +308,7 @@ async function atelierResult(
 ): Promise<{ content?: unknown; ts?: unknown }> {
   const response = await fetch(`http://${target.host}:${target.port}/api/atelier/v1/${target.namespace}/${subpath}`, {
     method: init.method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`,
-    },
+    headers: rawJsonHeaders(target),
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     signal: AbortSignal.timeout(30000),
   });
@@ -334,6 +339,74 @@ export async function atelierQuery(target: IrisTarget, query: string): Promise<A
     throw new Error(`${error instanceof Error ? error.message : String(error)}: ${query}`);
   }
   return Array.isArray(result.content) ? (result.content as AtelierRow[]) : [];
+}
+
+/** A raw HTTP answer: its status and its body text, byte for byte. */
+export interface RawPostResult {
+  status: number;
+  text: string;
+}
+
+/**
+ * POST `body` as JSON to the ExecuteMCPv2 REST service at `path` (for example `/interop/message/resend`)
+ * and return the HTTP status and the raw response text. The request goes straight to the route, past
+ * every MCP-layer check, so it exercises the handler's own guards; it uses the same credentials as
+ * {@link atelierQuery}.
+ *
+ * @param target - The IRIS instance to call.
+ * @param path - The route below `/api/executemcp/v2`, with its leading slash.
+ * @param body - The JSON request body.
+ */
+export async function executeMcpPost(target: IrisTarget, path: string, body: unknown): Promise<RawPostResult> {
+  const response = await fetch(`http://${target.host}:${target.port}/api/executemcp/v2${path}`, {
+    method: "POST",
+    // Without an explicit value, fetch sends `Accept-Language: *`, which IRIS resolves to its
+    // alphabetically first locale; the suite's own client pins this same English value.
+    headers: { ...rawJsonHeaders(target), "Accept-Language": "en-US,en;q=0.9" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  return { status: response.status, text: await response.text() };
+}
+
+/** Document fixtures written and compiled through one tool session. */
+export interface DocFixtures {
+  /** Replace the document `docName` with `source` (removing any earlier copy first). */
+  putDoc: (docName: string, source: string) => Promise<void>;
+  /** Compile `docName` and require success. */
+  compileDoc: (docName: string) => Promise<void>;
+  /** Remove `docName`; a document that is not there is not an error. */
+  removeDoc: (docName: string) => Promise<void>;
+}
+
+/**
+ * The document helpers of a gate, bound to one dev-server session. Each call names the session's
+ * namespace unless `namespace` says otherwise.
+ *
+ * @param session - A session on a built iris-dev-mcp server.
+ * @param namespace - The namespace the documents live in; the session's own when omitted.
+ */
+export function docFixtures(session: WireSession, namespace?: string): DocFixtures {
+  const where: Record<string, unknown> = namespace === undefined ? {} : { namespace };
+  const failure = (what: string, result: WireToolResult): Error =>
+    new Error(`${what}: ${result.content?.[0]?.text ?? "no content"}`);
+  const removeDoc = async (docName: string): Promise<void> => {
+    await session.call("iris_doc_delete", { name: docName, ...where });
+  };
+  return {
+    removeDoc,
+    putDoc: async (docName, source) => {
+      await removeDoc(docName);
+      const result = await session.call("iris_doc_put", { name: docName, content: source, ...where });
+      if (result.isError) throw failure(`creating ${docName}`, result);
+    },
+    compileDoc: async (docName) => {
+      const result = await session.call("iris_doc_compile", { doc: docName, ...where });
+      if (result.isError || (result.structuredContent as { success?: unknown } | undefined)?.success !== true) {
+        throw failure(`compiling ${docName}`, result);
+      }
+    },
+  };
 }
 
 /** A document as the Atelier `GET /doc` route stores and returns it. */

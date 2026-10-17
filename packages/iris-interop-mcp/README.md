@@ -42,7 +42,7 @@ Optionally, set `IRIS_GOVERNANCE_FILE` to the path of a JSON file of the same sh
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **10-tool runtime roster** (9 package tools + `iris_server_profiles`) — the troubleshoot-a-production loop: status/summary/control, item config, logs/queues/messages, trace diagram, resend. `iris_production_control` stays visible under `core` so the `recover`-first MCP guidance holds under every preset. `IRIS_TOOLS_PRESET=developer` keeps all **23 runtime tools** (22 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets). (This server's registered prompts — `recover-stuck-production`, `resend-failed-messages`, `trace-message-flow` — only call tools that stay visible under `core`, so no prompt-pack limitation applies here.)
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to an **11-tool runtime roster** (10 package tools + `iris_server_profiles`) — the troubleshoot-a-production loop: status/summary/control, item config, logs/queues/messages, message search, trace diagram, resend. `iris_production_control` stays visible under `core` so the `recover`-first MCP guidance holds under every preset. `IRIS_TOOLS_PRESET=developer` keeps all **24 runtime tools** (23 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets). (This server's registered prompts — `recover-stuck-production`, `resend-failed-messages`, `trace-message-flow` — only call tools that stay visible under `core`, so no prompt-pack limitation applies here.)
 
 ---
 
@@ -157,6 +157,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
 | `iris_production_messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
 | `iris_message_diagram` | Mermaid sequence diagram from a message-trace session (Visual Trace as renderable text) | `sessionIds`, `labelMode?`, `maxRows?`, `dedup?`, `namespace?` | readOnly, idempotent |
+| `iris_message_search` | Search message headers in a required window of at most 7 days (`headers`; `body` and `searchTable` are not yet available) | `action`, `from`, `to?`, `item?`, `source?`, `target?`, `status?`, `sessionId?`, `bodyClass?`, `errorOnly?`, `limit?`, `cursor?`, `namespace?` | readOnly, idempotent |
 | `iris_message_resend` | Resend/replay Interoperability messages (`preview` read; `resend`/`resendFiltered` writes) | `action`, `headerIds?`, `item?`, `status?`, `from?`, `to?`, `maxMessages?`, `dryRun?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
 
@@ -194,6 +195,30 @@ MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order [ERROR]
 %% Unpaired request: message 90412 (MyApp.Service.FileIn -> MyApp.Process.Router) has no matching response
 %% Error on message 90412: connection refused
 ```
+
+#### `iris_message_search` — Search Message Headers
+
+Searches `Ens.MessageHeader` without enabling any write. The `action` enum is fixed: `headers` searches the headers of a required window, and `body` and `searchTable` are declared for later releases (calling them returns the `NOT_IMPLEMENTED` refusal and makes no IRIS call). Rows come back oldest first as header rows only — `id`, `sessionId`, `type`, `status`, `isError`, `sourceItem`, `targetItem`, `bodyClassName`, `bodyId`, UTC ISO 8601 `timeCreated` and `timeProcessed` (each with a `...Raw` sibling that keeps the stored value, and `""` when empty), and `correspondingMessageId` (`null` when none). A row never carries message body content, `ErrorStatus` or `Description`.
+
+> **Governance default:** all three actions (`headers`, `body`, `searchTable`) are pure **reads** (`mutates: "read"`) and are **enabled by default** under `IRIS_GOVERNANCE`, including under the `read-only` preset. Restrict one with, for example, `{"global": {"iris_message_search:headers": false}}`. The tool is in the `core` and `developer` visibility presets.
+
+**Options (`headers`):**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `from` | *(required)* | Window start: ISO 8601 with `Z` or an offset (a time with no zone is refused) |
+| `to` | now | Window end, in the same form. The window may span at most **7 days**; there is no whole-namespace mode |
+| `item` | — | Config item name; matches the source or the target |
+| `source`, `target` | — | Source or target config item name |
+| `status` | — | `Created`, `Queued`, `Delivered`, `Discarded`, `Suspended`, `Deferred`, `Aborted`, `Errored` or `Completed`; rows report `Errored` as `Error` |
+| `sessionId` | — | A positive integer session ID |
+| `bodyClass` | — | Message body class name |
+| `errorOnly` | `false` | Only messages whose `IsError` flag is set (not the same as status `Error`) |
+| `limit` | `100` | Rows per page, 1 to 500. An **output cap**, not timeout protection: the window is scanned in full, so a wide window on a busy namespace can approach the ~60 s Web Gateway timeout — narrow the window or add filters |
+| `cursor` | — | The `nextCursor` of the previous page. Only a page with `hasMore: true` carries one |
+| `namespace` | server default | Target namespace |
+
+Every filter is an equality match, not a pattern (`%` and `_` are ordinary characters), bound as a parameter on the IRIS side. The item, source, target and body-class names compare without regard to case, as `Ens.MessageHeader` stores them. When you page a window close to 7 days wide, pass the same `from` and `to` on every page: an omitted `to` is recomputed as now on each call. `body` and `searchTable` return `NOT_IMPLEMENTED` once the window is valid. A namespace without Interoperability returns `notApplicable: true` with a `reason`, not an error.
 
 #### `iris_message_resend` — Resend / Replay Messages
 
@@ -848,7 +873,7 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 22 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 23 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, monitoring, and diagram tools

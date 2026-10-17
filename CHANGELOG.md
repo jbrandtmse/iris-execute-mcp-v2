@@ -2,6 +2,50 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 39.1: Message header search
+
+One tool is added, `iris_message_search`: the interop server goes from 22 to 23 package tools (24 advertised) and the
+suite from 107 to 108 package tools (113 advertised). Its three governance keys, `iris_message_search:headers`, `:body`
+and `:searchTable`, are reads and are enabled by default. The frozen governance baseline stays at hash `1e62c5ad5bf7`
+(141 keys). No existing route changes except `resendFiltered`, whose dry runs and refusals a live gate replays byte for
+byte against a capture taken before the change.
+
+### Added
+
+- **`iris_message_search` (interop, read-only).** It searches message headers without enabling a write, which until now
+  needed the dry run of `iris_message_resend` `resendFiltered`, a default-disabled write. The `action` enum is fixed:
+  `headers` returns paged header rows for a window you must name (`from` required, `to` defaulting to now, at most 7
+  days; no whole-namespace mode), filtered by `item` (source or target), `source`, `target`, `status`, `sessionId`,
+  `bodyClass` and `errorOnly`; `body` and `searchTable` return the new `NOT_IMPLEMENTED` refusal, with no IRIS call, until
+  Stories 39.3 and 39.4. A row never carries body content, `ErrorStatus` or `Description`. Times go in as ISO 8601 with
+  `Z` or an offset (a time with no zone is refused) and come out as UTC ISO 8601 with a `...Raw` sibling. Results are
+  ordered by `TimeCreated` then `ID` and paged by a keyset cursor: `limit` is 100 by default and 500 at most, an output
+  cap and not timeout protection, and only a page with `hasMore: true` carries `nextCursor`. A namespace without
+  Interoperability returns `notApplicable: true` with a `reason`. Every filter is matched by equality and bound as a
+  parameter; the item, source, target and body-class names compare without regard to case, as `Ens.MessageHeader` stores
+  them. New route `POST /interop/message/search` and handler `ExecuteMCPv2.REST.MessageSearch`.
+- **The refusal code `NOT_IMPLEMENTED`** joins the catalog in `@iris-mcp/shared`: the requested action is declared but
+  not available in this version.
+
+### Changed
+
+- **The interop `core` preset gains `iris_message_search`** (10 to 11 runtime tools) and `developer` includes it (23 to
+  24); `iris_message_search` is the entry of the search, read and diagram loop, and the read-only way to find messages
+  while resend stays disabled.
+- **`resendFiltered` builds its WHERE clause from the shared helper `MessageSearch.HeaderWhere`.** Its guards, error
+  texts, statement shapes and response are unchanged; a live gate replays 20 requests (dry runs and guard refusals)
+  against a capture taken before the extraction and compares the raw response bodies. The path that resends, which needs
+  a running production, is exercised by `MessageResendLiveTest` only, and this story does not run it.
+- **`BOOTSTRAP_VERSION` moves `089f8f0a62b2` to `6dcdd238c792`** and the bootstrap embeds 31 classes instead of 30.
+
+### Tests
+
+- **A disposable-namespace harness for live Interoperability gates.** `interop-namespace-fixture.ts` creates and removes
+  scratch namespaces with their databases, maps `Ens` and `EnsLib` to ENSLIB so `Ens.MessageHeader` works, seeds
+  synthetic headers dated 2001-02-03 UTC, and reports anything left behind. The new gate checks every row of the search
+  against a hand-written SQL oracle in two namespaces and the not-configured case, and replays the `resendFiltered`
+  requests byte for byte.
+
 ## [Pre-release — 2026-10-16] — Story 39.0: Epic 38 deferred cleanup
 
 No tool, action, governance key, preset row or prompt is added or removed, and no count moves: the dev server stays at
@@ -1080,8 +1124,8 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
 `iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
-tool counts, as of Story 38.5): `full` 32/27/23/22/8 (dev/admin/interop/ops/data), `core`
-15/13/10/10/8, `developer` 32/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
+tool counts, as of Story 39.1): `full` 32/27/24/22/8 (dev/admin/interop/ops/data), `core`
+15/13/11/10/8, `developer` 32/11/24/10/8 — every `core` server lands at about 13 runtime tools, a
 guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under

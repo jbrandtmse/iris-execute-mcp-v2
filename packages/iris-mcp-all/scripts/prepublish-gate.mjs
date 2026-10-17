@@ -132,6 +132,11 @@ const gateTestFiles = [
   // `iris_doc_get` soft error and `ignoreConflict: false` over real stdio JSON-RPC against the BUILT iris-interop-mcp and iris-dev-mcp dists:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory387WirePlain.cls (compiled), ...Draft.cls (never compiled) and ...Loaded.cls documents.
   "src/__tests__/story-38-7-qa-wire-gate.test.ts",
+  // Story 39.1: `iris_message_search` `headers` and the `resendFiltered` wire over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, and raw HTTP to the route. Writes only the disposable namespaces and databases
+  // EXECMCPTMP391A, EXECMCPTMP391B and EXECMCPTMP391C (their database files and directories too) and the HSCUSTOM class
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-1-message-search-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

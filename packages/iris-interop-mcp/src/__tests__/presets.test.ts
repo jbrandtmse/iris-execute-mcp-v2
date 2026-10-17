@@ -49,11 +49,16 @@ describe("iris-interop-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes from spec §2.5 (interop: core 9/13, developer 22/0)", () => {
-    expect(toolPresets.core.include.length).toBe(9);
+  it("pins the exact roster sizes from spec section 2.5 plus iris_message_search (interop: core 10/13, developer 23/0)", () => {
+    expect(toolPresets.core.include.length).toBe(10);
     expect(toolPresets.core.exclude.length).toBe(13);
-    expect(toolPresets.developer.include.length).toBe(22);
+    expect(toolPresets.developer.include.length).toBe(23);
     expect(toolPresets.developer.exclude.length).toBe(0);
+  });
+
+  it("includes iris_message_search in both presets (Story 39.1, Rule #53)", () => {
+    expect(toolPresets.core.include).toContain("iris_message_search");
+    expect(toolPresets.developer.include).toContain("iris_message_search");
   });
 
   it("core stays within the researched ≤13-runtime-tool window (+1 for iris_server_profiles)", () => {

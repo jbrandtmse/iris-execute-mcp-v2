@@ -9,7 +9,8 @@
  * credential / lookup table tools from Story 5.5,
  * rules, transforms, and REST API tools from Story 5.6,
  * the message-trace sequence-diagram tool from Story 21.0,
- * and the message resend/replay tool from Story 26.2.
+ * the message resend/replay tool from Story 26.2,
+ * and the message header search tool from Story 39.1 (23 package tools in all).
  */
 
 import type { ToolDefinition } from "@iris-mcp/shared";
@@ -57,6 +58,9 @@ import {
 import {
   messageResendTool,
 } from "./message-resend.js";
+import {
+  messageSearchTool,
+} from "./message-search.js";
 
 /** All tool definitions registered by the iris-interop-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -82,4 +86,5 @@ export const tools: ToolDefinition[] = [
   defaultSettingsManageTool,
   messageDiagramTool,
   messageResendTool,
+  messageSearchTool,
 ];

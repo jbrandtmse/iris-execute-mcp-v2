@@ -1,0 +1,260 @@
+{
+  "capturedWithBootstrapVersion": "089f8f0a62b2",
+  "irisVersion": "IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026 09:59:12 EDT",
+  "capturedAt": "2026-10-17T01:26:31.451Z",
+  "command": "STORY_39_1_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-message-search-live-gate.test.ts -t capture",
+  "cases": [
+    {
+      "name": "dry run, default status",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":4,\"sample\":[{\"id\":3,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Gamma\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":4,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":9,\"sourceItem\":\"Story391.Delta\",\"targetItem\":\"Story391.Alpha\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 13:00:00\",\"sessionId\":500},{\"id\":10,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 15:20:00\",\"sessionId\":500}],\"item\":\"Story391.Alpha\",\"status\":\"Errored\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, status Completed",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "status": "Completed"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":2,\"sample\":[{\"id\":2,\"sourceItem\":\"Story391.Beta\",\"targetItem\":\"Story391.Alpha\",\"status\":\"Completed\",\"timeCreated\":\"2001-02-03 06:00:00\",\"sessionId\":100},{\"id\":11,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Gamma\",\"status\":\"Completed\",\"timeCreated\":\"2001-02-03 18:00:00\",\"sessionId\":600}],\"item\":\"Story391.Alpha\",\"status\":\"Completed\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, hostile item name, status Delivered",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Odd'%_ OR 1=1--",
+        "from": "2001-02-03T06:00:00Z",
+        "status": "Delivered"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":1,\"sample\":[{\"id\":5,\"sourceItem\":\"Story391.Odd'%_ OR 1=1--\",\"targetItem\":\"Story391.Beta\",\"status\":\"Delivered\",\"timeCreated\":\"2001-02-03 08:00:00.5\",\"sessionId\":300}],\"item\":\"Story391.Odd'%_ OR 1=1--\",\"status\":\"Delivered\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, ODBC window",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03 18:00:00",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03 06:00:00",
+        "status": "Error"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":4,\"sample\":[{\"id\":3,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Gamma\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":4,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":9,\"sourceItem\":\"Story391.Delta\",\"targetItem\":\"Story391.Alpha\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 13:00:00\",\"sessionId\":500},{\"id\":10,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 15:20:00\",\"sessionId\":500}],\"item\":\"Story391.Alpha\",\"status\":\"Error\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, fractional from on a fractional row",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Odd'%_ OR 1=1--",
+        "from": "2001-02-03T08:00:00.5Z",
+        "status": "Delivered"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":1,\"sample\":[{\"id\":5,\"sourceItem\":\"Story391.Odd'%_ OR 1=1--\",\"targetItem\":\"Story391.Beta\",\"status\":\"Delivered\",\"timeCreated\":\"2001-02-03 08:00:00.5\",\"sessionId\":300}],\"item\":\"Story391.Odd'%_ OR 1=1--\",\"status\":\"Delivered\",\"from\":\"2001-02-03 08:00:00.5\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, maxMessages echoed",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "maxMessages": 5
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":4,\"sample\":[{\"id\":3,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Gamma\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":4,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 07:30:00\",\"sessionId\":200},{\"id\":9,\"sourceItem\":\"Story391.Delta\",\"targetItem\":\"Story391.Alpha\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 13:00:00\",\"sessionId\":500},{\"id\":10,\"sourceItem\":\"Story391.Alpha\",\"targetItem\":\"Story391.Delta\",\"status\":\"Error\",\"timeCreated\":\"2001-02-03 15:20:00\",\"sessionId\":500}],\"item\":\"Story391.Alpha\",\"status\":\"Errored\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":5}}"
+    },
+    {
+      "name": "dry run, window of exactly 7 days",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T00:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-01-27T00:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":0,\"sample\":[],\"item\":\"Story391.Alpha\",\"status\":\"Errored\",\"from\":\"2001-01-27 00:00:00\",\"to\":\"2001-02-03 00:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "dry run, no match",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Nothing",
+        "from": "2001-02-03T06:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"resendFiltered\",\"dryRun\":true,\"matchCount\":0,\"sample\":[],\"item\":\"Story391.Nothing\",\"status\":\"Errored\",\"from\":\"2001-02-03 06:00:00\",\"to\":\"2001-02-03 18:00:00\",\"maxMessages\":100}}"
+    },
+    {
+      "name": "guard b, item missing",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "from": "2001-02-03T06:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Required parameter 'item' is missing or empty\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Required parameter &#39;item&#39; is missing or empty\"]}],\"summary\":\"ERROR #5001: Required parameter &#39;item&#39; is missing or empty\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard b, from missing",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Required parameter 'from' is missing or empty\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Required parameter &#39;from&#39; is missing or empty\"]}],\"summary\":\"ERROR #5001: Required parameter &#39;from&#39; is missing or empty\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard c, negative window",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T06:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T18:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'from' must be earlier than 'to' (the requested window is negative). No changes were made.\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;from&#39; must be earlier than &#39;to&#39; (the requested window is negative). No changes were made.\"]}],\"summary\":\"ERROR #5001: Parameter &#39;from&#39; must be earlier than &#39;to&#39; (the requested window is negative). No changes were made.\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard c, window over 7 days",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T00:00:01Z",
+        "item": "Story391.Alpha",
+        "from": "2001-01-27T00:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: The 'from'/'to' window spans approximately 7.00 days, exceeding the maximum allowed window of 7 days; narrow the range and retry. No changes were made.\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"The &#39;from&#39;/&#39;to&#39; window spans approximately 7.00 days, exceeding the maximum allowed window of 7 days; narrow the range and retry. No changes were made.\"]}],\"summary\":\"ERROR #5001: The &#39;from&#39;/&#39;to&#39; window spans approximately 7.00 days, exceeding the maximum allowed window of 7 days; narrow the range and retry. No changes were made.\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard c, unparseable from",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "not-a-date"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameters 'from'/'to' must be valid ISO-8601 or ODBC timestamps\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameters &#39;from&#39;/&#39;to&#39; must be valid ISO-8601 or ODBC timestamps\"]}],\"summary\":\"ERROR #5001: Parameters &#39;from&#39;/&#39;to&#39; must be valid ISO-8601 or ODBC timestamps\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard c, unparseable to",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-13-45T99:99:99Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameters 'from'/'to' must be valid ISO-8601 or ODBC timestamps\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameters &#39;from&#39;/&#39;to&#39; must be valid ISO-8601 or ODBC timestamps\"]}],\"summary\":\"ERROR #5001: Parameters &#39;from&#39;/&#39;to&#39; must be valid ISO-8601 or ODBC timestamps\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "status not recognized",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "status": "Bogus"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'status' must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;status&#39; must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\"]}],\"summary\":\"ERROR #5001: Parameter &#39;status&#39; must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "maxMessages below 1",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "maxMessages": 0
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'maxMessages' must be a positive integer\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;maxMessages&#39; must be a positive integer\"]}],\"summary\":\"ERROR #5001: Parameter &#39;maxMessages&#39; must be a positive integer\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "maxMessages above 500",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "maxMessages": 501
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'maxMessages' exceeds the hard cap of 500 (got 501)\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;maxMessages&#39; exceeds the hard cap of 500 (got 501)\"]}],\"summary\":\"ERROR #5001: Parameter &#39;maxMessages&#39; exceeds the hard cap of 500 (got 501)\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard e, execute without confirm",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "dryRun": false
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: resendFiltered execution requires dryRun:false and confirm:true; by default dryRun is true and only previews matching messages without resending. No changes were made.\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"resendFiltered execution requires dryRun:false and confirm:true; by default dryRun is true and only previews matching messages without resending. No changes were made.\"]}],\"summary\":\"ERROR #5001: resendFiltered execution requires dryRun:false and confirm:true; by default dryRun is true and only previews matching messages without resending. No changes were made.\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard d, more matches than the cap",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "dryRun": false,
+        "confirm": true,
+        "maxMessages": 1
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: 4 messages match the filter, exceeding the maxMessages cap of 1; narrow the time window or item filter and retry. No changes were made.\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"4 messages match the filter, exceeding the maxMessages cap of 1; narrow the time window or item filter and retry. No changes were made.\"]}],\"summary\":\"ERROR #5001: 4 messages match the filter, exceeding the maxMessages cap of 1; narrow the time window or item filter and retry. No changes were made.\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "guard f, no production running",
+      "body": {
+        "action": "resendFiltered",
+        "namespace": "EXECMCPTMP391A",
+        "to": "2001-02-03T18:00:00Z",
+        "item": "Story391.Alpha",
+        "from": "2001-02-03T06:00:00Z",
+        "dryRun": false,
+        "confirm": true
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Cannot resend: no Interoperability production is running in this namespace. Start the production first. No changes were made.\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Cannot resend: no Interoperability production is running in this namespace. Start the production first. No changes were made.\"]}],\"summary\":\"ERROR #5001: Cannot resend: no Interoperability production is running in this namespace. Start the production first. No changes were made.\"},\"console\":[],\"result\":{}}"
+    }
+  ]
+}

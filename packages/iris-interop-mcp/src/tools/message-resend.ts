@@ -45,7 +45,7 @@ import { z } from "zod";
 const BASE_URL = "/api/executemcp/v2";
 
 /** `Ens.DataType.MessageStatus` display labels accepted by `resendFiltered`'s `status` filter. */
-const STATUS_LABELS = [
+export const STATUS_LABELS = [
   "Created",
   "Queued",
   "Delivered",

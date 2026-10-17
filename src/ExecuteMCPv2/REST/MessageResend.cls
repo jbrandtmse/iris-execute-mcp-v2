@@ -516,14 +516,24 @@ ClassMethod MessageResend() As %Status
                 Quit
             }
 
+            ; --- The match filter (item = source OR target; status; window) as one WHERE clause,
+            ; translated by the shared header-search helper ---
+            Set tFilters = {}
+            Do tFilters.%Set("item", tItemName)
+            Do tFilters.%Set("statusCode", tStatusCode)
+            Do tFilters.%Set("fromNorm", tFromNorm)
+            Do tFilters.%Set("toNorm", tToNorm)
+            Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderWhere(tFilters, .tWhere, .tParams)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
             If tNamespace '= "" {
                 Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
             }
 
-            ; --- Enumerate matches (item = source OR target; status; window) ---
-            Set tCountSQL = "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ?"
-            Set tCountRS = ##class(%SQL.Statement).%ExecDirect(, tCountSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+            ; --- Enumerate matches ---
+            Set tCountSQL = "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE " _ tWhere
+            Set tCountRS = ##class(%SQL.Statement).%ExecDirect(, tCountSQL, tParams...)
             If '$IsObject(tCountRS) || (tCountRS.%SQLCODE < 0) {
                 Set $NAMESPACE = tOrigNS
                 Set tMsg = $Select('$IsObject(tCountRS): "SQL execution failed", 1: "SQL error: " _ tCountRS.%Message)
@@ -554,8 +564,8 @@ ClassMethod MessageResend() As %Status
                     Quit
                 }
 
-                Set tFetchSQL = "SELECT TOP " _ tMaxMessages _ " ID FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ? ORDER BY TimeCreated"
-                Set tFetchRS = ##class(%SQL.Statement).%ExecDirect(, tFetchSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+                Set tFetchSQL = "SELECT TOP " _ tMaxMessages _ " ID FROM Ens.MessageHeader WHERE " _ tWhere _ " ORDER BY TimeCreated"
+                Set tFetchRS = ##class(%SQL.Statement).%ExecDirect(, tFetchSQL, tParams...)
                 Set tIds(0) = 0
                 If $IsObject(tFetchRS) && (tFetchRS.%SQLCODE >= 0) {
                     Set tN = 0
@@ -577,8 +587,8 @@ ClassMethod MessageResend() As %Status
             }
             Else {
                 ; --- Dry run: count + first-20 sample, resends nothing ---
-                Set tSampleSQL = "SELECT TOP 20 ID, SourceConfigName, TargetConfigName, Status, TimeCreated, SessionId FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ? ORDER BY TimeCreated"
-                Set tSampleRS = ##class(%SQL.Statement).%ExecDirect(, tSampleSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+                Set tSampleSQL = "SELECT TOP 20 ID, SourceConfigName, TargetConfigName, Status, TimeCreated, SessionId FROM Ens.MessageHeader WHERE " _ tWhere _ " ORDER BY TimeCreated"
+                Set tSampleRS = ##class(%SQL.Statement).%ExecDirect(, tSampleSQL, tParams...)
                 Set tSample = []
                 If $IsObject(tSampleRS) && (tSampleRS.%SQLCODE >= 0) {
                     While tSampleRS.%Next() {

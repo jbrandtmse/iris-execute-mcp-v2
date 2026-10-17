@@ -69,7 +69,7 @@ describe("E2E — iris-interop-mcp real McpServerBase construction with the wire
     expect(server.getToolNames()).not.toContain("iris_credential_manage");
   });
 
-  it("IRIS_TOOLS_PRESET=developer yields exactly developer.include (all 22) + iris_server_profiles", () => {
+  it("IRIS_TOOLS_PRESET=developer yields exactly developer.include (all 23) + iris_server_profiles", () => {
     clearVisibilityEnv();
     process.env.IRIS_TOOLS_PRESET = "developer";
     const server = new McpServerBase({
