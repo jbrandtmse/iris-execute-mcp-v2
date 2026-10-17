@@ -80,3 +80,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T09:15:03Z	Story 39.3	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1102 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-17T09:15:05Z	Story 39.3	committed	sha=7a9f7de code_sha=4e09437 build_sha=e556857 submodules= ci=none run=none branch=epic39 pushed=origin/epic39 verified=merge-base amendments=none
 2026-10-17T09:15:05Z	Story 39.3	story_cycle	plan_to_commit_min=165 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-17T09:15:13Z	Story 39.4	stage_spawned	stage=plan spawn_at=2026-10-17T09:15:13Z model=claude-opus-5-5 agent_name=39-4-search-table-lookup-plan-1 cycle_iteration=1
