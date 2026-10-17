@@ -214,7 +214,8 @@ describe("Story 39.5: the interop README documents iris_message_body", () => {
     expect(subsection).toContain("| `maxChars` | `10000` | The most characters of text shown per body, 1 to 1048576. An **output cap**");
     expect(subsection).toContain("It can only **tighten** the profile's policy");
     for (const format of ["`er7`", "`xml`", "`json`", "`text`"]) expect(subsection, format).toContain(format);
-    expect(subsection).toContain("a stream is its class and size, never its content");
+    // Story 39.7 (DW-583): a character stream shows its text under allow; a binary stream stays its class and size.
+    expect(subsection).toContain("a character stream shows its text and a binary stream its class and size");
   });
 
   it("states the whole-or-nothing rule for HL7 v2, the sanitization and the notApplicable answer", () => {

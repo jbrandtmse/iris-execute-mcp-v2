@@ -2,6 +2,81 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 39.7: Epic 39 burn-down
+
+Five ledger entries are fixed (DW-569, DW-571, DW-572, DW-576 and DW-583). No tool, action, governance key, preset row,
+annotation, input schema or environment variable is added, so no default state and no tool count moves: the suite stays
+at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the Interoperability `core` roster stays at
+12 runtime tools, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves
+from `2fd17b50a024` to `7d12cd8b3a1e`, because `MessageSearch.cls` and `MessageBody.cls` changed.
+
+### Changed
+
+- **Every non-2xx answer from IRIS is an error (DW-569).** The shared HTTP client used to treat an HTTP 400 with an empty
+  error list as an empty success, so a rejected request (`iris_doc_list` with category `CLS` and type `cls`, or an empty
+  `iris_doc_search` query) looked like a legitimate empty result. It now throws `IrisApiError` for every non-2xx
+  response; a 2xx response is handled exactly as before. Sanctioned change (AD-15): `iris_doc_search` with an empty
+  `query` was `{matches: []}` and is now an error naming HTTP 400. `iris_macro_info` with no `document` keeps its
+  documented empty result, `{name, definition: {}, location: {}}`, byte for byte. A second path relied on the old
+  rule: Atelier refuses a document name with no document type (`iris_doc_get` of `ExecuteMCPv2.Utils`) with HTTP 400, an
+  empty error list and the reason only in `result.status`. `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and
+  `iris_doc_load` read that answer through the new shared `atelierDocRequest`, so each keeps reporting IRIS's reason
+  (`ERROR #16006: Document '...' name is invalid`) exactly as before; every other failure still throws. Sanctioned
+  change (AD-15): the tools that do not read that reason now report the refusal as an error naming HTTP 400, where they
+  returned an empty or status-only result: `iris_doc_export`, `iris_doc_convert` and `iris_routine_intermediate` with a
+  document name Atelier refuses, and `iris_macro_info` with a non-empty `document` that Atelier refuses (a name with no
+  document type), as Atelier does for an empty one.
+- **`iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block` (DW-576).** Both are
+  reads, enabled by default. Under the `block` PHI data policy each Event Log entry loses `text` and gains
+  `textPolicy {outcome: "blocked", reason}`, and each error warning of a diagram keeps its `Error on message <id>: `
+  prefix while the rest, in `warnings[]` and in every Mermaid `%% Error on message <id>: ` line, becomes a fixed reason;
+  the result carries `dataPolicy {policy: "block", redacted: 0, blocked: <n>}`, which the audit entry records. Under
+  `redact` and `allow` both tools are byte-identical to before, with no `dataPolicy` key. The scope rows of both tools
+  are now governed, under `block` only.
+- **`iris_message_body` shows the text of a character stream under `allow` (DW-583).** The property dump of a
+  persistent body shows a character stream (such as the `ContentStream` of `HS.Message.XMLMessage`) as
+  `{stream, size, text}`, read within one shared budget of `maxChars` characters, with `truncated` true exactly when
+  cut. A binary stream stays `{stream, size}`; `redact` withholds the body and `block` returns the kind only, so neither
+  reads it out of IRIS.
+- **The header reads of `iris_message_search` carry an index hint (DW-572).** The `headers`, `body` and `searchTable`
+  statements read `Ens.MessageHeader` with `%IGNOREINDEX` on its `Status`, `SourceConfigName` and `TargetConfigName`
+  bitmap indexes, so on an untuned table an item, status or source filter reads the `TimeCreated` window instead of
+  intersecting history-wide bitmaps, and a body class filter is intersected with a bitmap of the window's `TimeCreated`
+  range. It changes the plan only: the rows and their order are unchanged. The `limit` text
+  now says a filter narrows the rows returned, not the window scanned.
+- **The `tools/list` snapshot re-pins four entries.** The descriptions of `iris_production_logs`,
+  `iris_message_diagram`, `iris_message_body` and `iris_message_search` changed (`pnpm gen:tools-list-snapshot --force`,
+  the sanctioned step). No other entry moves.
+- **`BOOTSTRAP_VERSION` moves from `2fd17b50a024` to `7d12cd8b3a1e`** (`pnpm gen:bootstrap`, idempotent on a second run).
+
+### Fixed
+
+- **DW-571:** the `iris_package_list` row of `doc-type-description-live-gate.test.ts` no longer compares the counts of
+  two reads of the shared HSCUSTOM, which concurrent writes made flaky. It compares the request it sent with the wire
+  read's request, and `totalDocs` with the document count of the very envelope the handler received.
+
+### Documentation
+
+- **The data policy.** The suite README, the Interoperability README, `tool_support.md` and the three client guides
+  state that `iris_production_logs` and `iris_message_diagram` (both reads, enabled by default) are governed under
+  `block` only, that `iris_message_body` shows character-stream text under `allow`, and that the audit list names both
+  tools. `tool_support.md` has a Story 39.7 note and two governed scope rows (the table's date stays 2026-10-16).
+- **`iris_message_search`** says a filter narrows the rows returned, not the window scanned (suite README,
+  Interoperability README and the tool description).
+
+### Tests
+
+- **`story-39-7-burn-down-live-gate.test.ts`** drives the built dev, admin and interop servers over the SDK client on a
+  disposable namespace with `Story397.*` fixtures (an `HS.Message.XMLMessage`, two stream bodies, four headers and two
+  Event Log rows): the 400 pair and the unchanged 2xx rows, the header statements and their plans, logs and diagram under
+  every policy with the audit entries, and the stream bodies. It is listed in the prepublish roster and the arming guard.
+- **`story-39-7-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
+- **Unit and OS tests** pin the client's non-2xx rule (`http-client.test.ts`), the `iris_macro_info` fallback, the two
+  new block reasons, the block and the unchanged redact and allow outputs of both tools (`logs-diagram-policy.test.ts`),
+  `HeaderStatement` and the existence of the three hinted indexes (`MessageSearchTest`), and the stream dump
+  (`MessageBodyTest.TestPropertyDumpStreams`). `headerPlanProblems` is the shared plan checker, and the 39.3 and 39.4
+  gates' statement literals gain the hint. The 39.5 gate's header 12 row now expects the stream's text.
+
 ## [Pre-release — 2026-10-17] — Story 39.6: Message forensics docs, prompt and capstone
 
 No tool, action, governance key, preset row, annotation, schema or environment variable is added, so no default state and

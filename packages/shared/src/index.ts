@@ -28,6 +28,7 @@ export {
   requireMinVersion,
   atelierPath,
   atelierDocStatusError,
+  atelierDocRequest,
 } from "./atelier.js";
 export {
   stripLeadingBom,

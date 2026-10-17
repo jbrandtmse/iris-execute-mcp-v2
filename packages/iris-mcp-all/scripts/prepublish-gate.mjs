@@ -204,6 +204,9 @@ const gateTestFiles = [
   // The Epic 39 capstone: search, then read, under the PHI data policy over real stdio JSON-RPC against the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists;
   // writes only EXECMCPTMP396A (its database files too), Story396.* and Story394.SearchTable inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/epic39-capstone-gate.test.ts",
+  // Story 39.7: the Epic 39 burn-down on the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists over real stdio JSON-RPC.
+  // Writes EXECMCPTMP397A (its database files too), Story397.* inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-39-7-burn-down-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

@@ -4,7 +4,8 @@
 /// keeps a body the policy withholds inside IRIS. <method>TestRenderNoRenderer</method> pins the kinds that have
 /// no renderer. <method>TestReadStreamText</method> pins the prefix rule and <code>bodyTextComplete</code> of
 /// every stream-based kind. <method>TestPropertyDump</method> pins the property dump of a persistent body that has
-/// no JSON adaptor.</p>
+/// no JSON adaptor, and <method>TestPropertyDumpStreams</method> the text of its character streams within a shared
+/// budget (Story 39.7).</p>
 Class ExecuteMCPv2.Tests.MessageBodyTest Extends %UnitTest.TestCase
 {
 
@@ -161,6 +162,86 @@ Method TestPropertyDump()
     Do $$$AssertEquals(tDump.%IsDefined("Name"), 1, "a public property of a configuration item is dumped")
     Do $$$AssertEquals(tDump.%IsDefined("VirtualSettings"), 0, "a transient property is left out")
     Do $$$AssertEquals(tDump.%IsDefined("ModifiedSettings"), 0, "and so is another transient property")
+}
+
+/// An unsaved <class>ExecuteMCPv2.Tests.MessageBodyStreamFixture</class> (a name, two character streams and a binary
+/// stream) is dumped with the text of each character stream when the dump has a budget (<code>pMaxChars</code>).
+/// The budget is shared across the dump, a binary stream stays its class and size, and with no budget the dump is
+/// what it was without the argument. Where the class exists (HealthShare, IRIS for Health), an unsaved
+/// <code>HS.Message.XMLMessage</code> shows its <code>ContentStream</code> text. And
+/// <method>ExecuteMCPv2.REST.MessageBody:JsonText</method> reports a cut stream as incomplete.
+Method TestPropertyDumpStreams()
+{
+    Set tContentText = "<a>SYNTHPHI-STREAM</a>" _ $Char(13, 10) _ "line2" _ $Char(1) _ "KEEPME-TAIL"
+    Set tSecondText = "KEEPME-SECOND"
+    Set tFixture = ##class(ExecuteMCPv2.Tests.MessageBodyStreamFixture).%New()
+    Set tFixture.Name = "KEEPME-NAME"
+    Do tFixture.Content.Write(tContentText)
+    Do tFixture.Blob.Write("0123456789ABCDEF")
+    Do tFixture.Second.Write(tSecondText)
+    Set tContentSize = $Length(tContentText)
+    Set tSecondSize = $Length(tSecondText)
+
+    ; A budget above the streams' total: each character stream shows its whole text, in full.
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, 100000, .tComplete)
+    Do $$$AssertEquals(tComplete, 1, "a large budget: complete")
+    Do $$$AssertEquals(tDump.%Get("Name"), "KEEPME-NAME", "a datatype property is a string")
+    Do $$$AssertEquals(tDump.%Get("Content").%Get("stream"), "%Stream.GlobalCharacter", "Content: the stream class")
+    Do $$$AssertEquals(tDump.%Get("Content").%Get("size"), tContentSize, "Content: the size")
+    Do $$$AssertEquals(tDump.%Get("Content").%Get("text"), tContentText, "Content: the whole text, CR LF and the control character included")
+    Do $$$AssertEquals(tDump.%Get("Second").%Get("text"), tSecondText, "Second: the whole text")
+    Do $$$AssertEquals(tDump.%Get("Blob").%Get("stream"), "%Stream.GlobalBinary", "Blob: the stream class")
+    Do $$$AssertEquals(tDump.%Get("Blob").%Get("size"), 16, "Blob: the size")
+    Do $$$AssertEquals(tDump.%Get("Blob").%IsDefined("text"), 0, "a binary stream has no text")
+    Do $$$AssertTrue(tDump.%ToJSON() '[ $Char(1), "the JSON escapes the control character, so no raw C0 character is in it")
+
+    ; Exactly the two texts' length: still complete. One less: the second stream is cut and the dump is incomplete.
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, tContentSize + tSecondSize, .tComplete)
+    Do $$$AssertEquals(tComplete, 1, "a budget of exactly the two texts: complete")
+    Do $$$AssertEquals(tDump.%Get("Second").%Get("text"), tSecondText, "and the second text is whole")
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, tContentSize + tSecondSize - 1, .tComplete)
+    Do $$$AssertEquals(tComplete, 0, "a budget one short: not complete")
+    Do $$$AssertEquals(tDump.%Get("Second").%Get("text"), $Extract(tSecondText, 1, tSecondSize - 1), "and the second text is cut by one character")
+
+    ; A budget of 10 is spent by the first stream: the second shows an empty text.
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, 10, .tComplete)
+    Do $$$AssertEquals(tComplete, 0, "budget 10: not complete")
+    Do $$$AssertEquals(tDump.%Get("Content").%Get("text"), $Extract(tContentText, 1, 10), "budget 10: Content is cut to 10 characters")
+    Do $$$AssertEquals(tDump.%Get("Content").%Get("size"), tContentSize, "budget 10: the size is still the full size")
+    Do $$$AssertEquals(tDump.%Get("Second").%Get("text"), "", "budget 10: Second shows an empty text")
+    Do $$$AssertEquals(tDump.%Get("Second").%Get("size"), tSecondSize, "budget 10: Second still reports its size")
+
+    ; No budget: the dump is what it was before the argument existed, and is complete.
+    Set tExpected = "{""Name"":""KEEPME-NAME"",""Content"":{""stream"":""%Stream.GlobalCharacter"",""size"":" _ tContentSize _ "},""Blob"":{""stream"":""%Stream.GlobalBinary"",""size"":16},""Second"":{""stream"":""%Stream.GlobalCharacter"",""size"":" _ tSecondSize _ "}}"
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture)
+    Do $$$AssertEquals(tDump.%ToJSON(), tExpected, "one argument: streams are class and size only")
+    Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, 0, .tComplete)
+    Do $$$AssertEquals(tDump.%ToJSON(), tExpected, "a budget of 0: streams are class and size only")
+    Do $$$AssertEquals(tComplete, 1, "a budget of 0: complete, nothing was cut")
+
+    ; An unsaved HS.Message.XMLMessage shows its ContentStream text. The class is part of HealthShare and IRIS for
+    ; Health, so the rows run only in a namespace that has it.
+    If ##class(%Dictionary.CompiledClass).%ExistsId("HS.Message.XMLMessage") {
+        Set tXml = $ClassMethod("HS.Message.XMLMessage", "%New")
+        Do tXml.ContentStream.Write("<Patient><Name>SYNTHPHI-XML</Name></Patient>")
+        Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tXml, 1000, .tComplete)
+        Do $$$AssertEquals(tDump.%Get("ContentStream").%Get("text"), "<Patient><Name>SYNTHPHI-XML</Name></Patient>", "the XML message shows its ContentStream text")
+        Do $$$AssertEquals(tComplete, 1, "and is complete")
+        Set tDump = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tXml)
+        Do $$$AssertEquals(tDump.%Get("ContentStream").%IsDefined("text"), 0, "with no budget the XML message shows class and size only")
+    }
+
+    ; JsonText reads the dump within its limit and reports a cut stream as incomplete.
+    Set tResult = ##class(ExecuteMCPv2.REST.MessageBody).JsonText(tFixture, 10, .tText, .tComplete)
+    Do $$$AssertEquals(tResult, "", "JsonText with a small limit: read")
+    Do $$$AssertEquals(tComplete, 0, "JsonText with a small limit: not complete")
+    Do $$$AssertEquals($Length(tText), 10, "JsonText with a small limit: the first 10 characters of the JSON")
+    Set tResult = ##class(ExecuteMCPv2.REST.MessageBody).JsonText(tFixture, 100000, .tText, .tComplete)
+    Do $$$AssertEquals(tResult, "", "JsonText with a large limit: read")
+    Do $$$AssertEquals(tComplete, 1, "JsonText with a large limit: complete")
+    Set tFull = ##class(ExecuteMCPv2.REST.MessageBody).PropertyDump(tFixture, 100000).%ToJSON()
+    Do $$$AssertEquals(tText, tFull, "JsonText with a large limit: the whole dump, stream text included")
+    Do $$$AssertTrue(tText [ "SYNTHPHI-STREAM", "and the stream text is in it")
 }
 
 }

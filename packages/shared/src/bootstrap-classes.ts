@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "2fd17b50a024";
+export const BOOTSTRAP_VERSION = "7d12cd8b3a1e";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "2fd17b50a024";
+Parameter BOOTSTRAPVERSION = "7d12cd8b3a1e";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -12690,6 +12690,14 @@ Parameter MAXSEARCHTABLEVALUE As %Integer = 256;
 /// <code>ErrorStatus</code> and <code>Description</code> are deliberately absent.
 Parameter COLUMNS As %String = "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId";
 
+/// The index hint every header read of a search carries, placed right after <code>FROM</code> (and after
+/// <code>%INORDER</code> where the statement has it). It names the three bitmap indexes of
+/// <class>Ens.MessageHeader</class> on <code>Status</code>, <code>SourceConfigName</code> and
+/// <code>TargetConfigName</code>, so the optimizer reads the <code>TimeCreated</code> index map over the
+/// window instead of intersecting history-wide bitmaps. It changes the plan only, never the rows or their
+/// order. An index name that does not exist is ignored silently, so a test pins that all three exist.
+Parameter HEADERHINT As %String = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName";
+
 /// Translate header filters into a WHERE clause body and its parameters.
 /// <p><var>pFilters</var> may hold: <code>item</code> (source OR target), <code>source</code>,
 /// <code>target</code>, <code>statusCode</code>, <code>fromNorm</code> (inclusive lower bound),
@@ -13041,15 +13049,30 @@ ClassMethod BodyFilterWhere(pClassName As %String, pFilters As %RawString, pAlia
 ClassMethod BodyStatement(pBodyTable As %String, pWhere As %String, pBodyWhere As %String, pCursor As %Boolean = 0) As %String
 {
     If pBodyTable = "" {
-        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
     }
     Else {
-        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
     }
     If pCursor {
         Set tSQL = tSQL _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))"
     }
     Quit tSQL _ " ORDER BY h.TimeCreated, h.ID"
+}
+
+/// The text of the <code>headers</code> action's statement: the columns of <parameter>COLUMNS</parameter>
+/// read from <class>Ens.MessageHeader</class> (unaliased) with <parameter>HEADERHINT</parameter> right after
+/// <code>FROM</code>, then <code>WHERE</code> <var>pWhere</var> (<method>HeaderWhere</method>'s clause with no
+/// alias). With <var>pCursor</var> the keyset clause follows it. The order is always
+/// <code>TimeCreated, ID</code>. Every other character is fixed text or a parameter marker, in the order the
+/// caller binds: the page size, <var>pWhere</var>'s, then the cursor's three.
+ClassMethod HeaderStatement(pWhere As %String, pCursor As %Boolean = 0) As %String
+{
+    Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM " _ ..#HEADERHINT _ " Ens.MessageHeader WHERE " _ pWhere
+    If pCursor {
+        Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
+    }
+    Quit tSQL _ " ORDER BY TimeCreated, ID"
 }
 
 /// Resolve the Search Table class <var>pClassName</var>: in <var>pTable</var> the delimited SQL table of its
@@ -13708,11 +13731,7 @@ ClassMethod MessageSearch() As %Status
             Set tSQL = ..BodyStatement("", tWhere, tBodyWhere, tAfterNorm '= "")
         }
         Else {
-            Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM Ens.MessageHeader WHERE " _ tWhere
-            If tAfterNorm '= "" {
-                Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
-            }
-            Set tSQL = tSQL _ " ORDER BY TimeCreated, ID"
+            Set tSQL = ..HeaderStatement(tWhere, tAfterNorm '= "")
         }
         Set tArgs = 1
         Set tArgs(1) = tLimit + 1
@@ -13800,7 +13819,8 @@ ClassMethod MessageSearch() As %Status
 /// <code>unreadable</code>. An HL7 v2 body is never cut, because a redaction engine needs it whole.</li>
 /// <li><code>xmlvdoc</code>: the XML text. <code>persistent</code>: JSON, from <code>%JSONExportToStream</code>
 /// when the class extends <class>%JSON.Adaptor</class>, otherwise a dump of its dictionary properties
-/// (<method>PropertyDump</method>). <code>stream</code> and <code>streamContainer</code>: the stream text.
+/// (<method>PropertyDump</method>, which also reads the text of each character-stream property within the
+/// read limit). <code>stream</code> and <code>streamContainer</code>: the stream text.
 /// <code>literal</code> (an empty body class): the header's body ID. These are read as a prefix of
 /// <code>bodyTextMaxChars</code> characters.</li>
 /// <li><code>vdoc</code> and <code>other</code>: no renderer (<code>noRenderer</code>); <code>missing</code>:
@@ -13914,9 +13934,11 @@ ClassMethod XmlText(pDoc As %RegisteredObject, pMaxChars As %Integer, Output pTe
 }
 
 /// Read the JSON text of the persistent object <var>pObj</var>: <code>%JSONExportToStream</code> when its class
-/// extends <class>%JSON.Adaptor</class>, otherwise the <method>PropertyDump</method>. The whole text is built,
-/// then its first <var>pMaxChars</var> characters are returned. Returns <code>""</code> or
-/// <code>unreadable</code>, as <method>ReadStreamText</method> does.
+/// extends <class>%JSON.Adaptor</class>, otherwise the <method>PropertyDump</method> with the limit
+/// <var>pMaxChars</var>, so that the text of its character streams is read within that limit. The whole text is
+/// built, then its first <var>pMaxChars</var> characters are returned; <var>pComplete</var> is 1 only when neither
+/// that cut nor the dump cut anything. Returns <code>""</code> or <code>unreadable</code>, as
+/// <method>ReadStreamText</method> does.
 ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
 {
     Set pText = ""
@@ -13930,8 +13952,10 @@ ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pT
             Set tResult = ..ReadStreamText(tStream, pMaxChars, .pText, .pComplete)
         }
         Else {
-            Set tJson = ..PropertyDump(pObj).%ToJSON()
-            Set pText = ..CutText(tJson, pMaxChars, .pComplete)
+            Set tDump = ..PropertyDump(pObj, pMaxChars, .tDumpComplete)
+            Set tJson = tDump.%ToJSON()
+            Set pText = ..CutText(tJson, pMaxChars, .tCutComplete)
+            Set pComplete = (tCutComplete && tDumpComplete)
             Set tResult = ""
         }
     }
@@ -13949,14 +13973,22 @@ ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pT
 /// Each value is:
 /// <ul>
 /// <li>a datatype: its logical value as a JSON string, <code>null</code> when it is empty;</li>
-/// <li>a stream: <code>{"stream": class, "size": Size}</code>, never its content;</li>
+/// <li>a stream: <code>{"stream": class, "size": Size}</code>; with <var>pMaxChars</var> above 0 a character
+/// stream (<code>IsCharacter()</code>) also carries <code>"text"</code>, its first characters read by
+/// <method>ReadStreamText</method> within the budget the earlier streams of the dump left, <code>""</code> once
+/// the budget is spent. A binary stream, or any stream when <var>pMaxChars</var> is 0, is never read;</li>
 /// <li>an object: <code>{"class": class, "id": %Id}</code> when it is persistent, <code>{"class": class}</code>
 /// otherwise, and <code>null</code> when it is not set;</li>
 /// <li>a list or array collection: <code>{"collection": "list"|"array", "count": Count()}</code>.</li>
 /// </ul>
-ClassMethod PropertyDump(pObj As %RegisteredObject) As %DynamicObject
+/// <p><var>pMaxChars</var> is one budget shared across the whole dump (0, the default, reads no stream text, so
+/// the dump is what it was without the argument). <var>pComplete</var> is 0 when a stream's text was cut or could
+/// not be read, otherwise 1.</p>
+ClassMethod PropertyDump(pObj As %RegisteredObject, pMaxChars As %Integer = 0, Output pComplete As %Boolean) As %DynamicObject
 {
+    Set pComplete = 1
     Set tOut = {}
+    Set tBudget = pMaxChars
     Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name, Collection, Private, Internal, Calculated, Transient, MultiDimensional FROM %Dictionary.CompiledProperty WHERE parent = ? ORDER BY SequenceNumber, Name", $ClassName(pObj))
     If '$IsObject(tRS) || (tRS.%SQLCODE < 0) Quit tOut
     While tRS.%Next() {
@@ -13977,6 +14009,13 @@ ClassMethod PropertyDump(pObj As %RegisteredObject) As %DynamicObject
                 If tValue.%Extends("%Stream.Object") {
                     Do tEntry.%Set("stream", $ClassName(tValue), "string")
                     Do tEntry.%Set("size", tValue.Size, "number")
+                    If (pMaxChars > 0) && tValue.IsCharacter() {
+                        Set tUnreadable = ..ReadStreamText(tValue, tBudget, .tText, .tStreamComplete)
+                        If tUnreadable '= "" { Set tStreamComplete = 0 }
+                        If 'tStreamComplete { Set pComplete = 0 }
+                        Set tBudget = tBudget - $Length(tText)
+                        Do tEntry.%Set("text", tText, "string")
+                    }
                 }
                 ElseIf tValue.%Extends("%Library.Persistent") {
                     Do tEntry.%Set("class", $ClassName(tValue), "string")

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
+import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { docIndexTool, docSearchTool, macroInfoTool } from "../tools/intelligence.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
@@ -223,6 +223,18 @@ describe("iris_doc_search", () => {
     ).rejects.toThrow(/v2/);
   });
 
+  // Story 39.7 (DW-569): an empty query is answered HTTP 400 with no error list; the shared client now
+  // throws it, and the handler (which has no catch) lets it through as an error.
+  it("should let an HTTP 400 for an empty query surface as an error", async () => {
+    mockHttp.get.mockRejectedValue(
+      new IrisApiError(400, [], "/api/atelier/v7/USER/action/search", "IRIS returned HTTP 400", {}),
+    );
+
+    await expect(
+      docSearchTool.handler({ query: "" }, ctx),
+    ).rejects.toMatchObject({ name: "IrisApiError", statusCode: 400 });
+  });
+
   it("should have readOnlyHint: true annotation", () => {
     expect(docSearchTool.annotations).toEqual({
       readOnlyHint: true,
@@ -326,6 +338,99 @@ describe("iris_macro_info", () => {
     await expect(
       macroInfoTool.handler({ name: "OK" }, ctx),
     ).rejects.toThrow("ECONNREFUSED");
+  });
+
+  // Story 39.7 (DW-569, OD-2): the client now throws on every non-2xx response, so the one
+  // documented empty result (no document) is kept by a narrow fallback in the handler.
+  describe("no document (Story 39.7)", () => {
+    const empty400 = (result: unknown) =>
+      new IrisApiError(
+        400,
+        [],
+        "/api/atelier/v7/USER/action/getmacrodefinition",
+        "IRIS returned HTTP 400 for POST /api/atelier/v7/USER/action/getmacrodefinition. Check the request parameters and try again.",
+        result,
+      );
+
+    it("keeps today's output when the document is omitted", async () => {
+      mockHttp.post
+        .mockRejectedValueOnce(empty400({}))
+        .mockRejectedValueOnce(empty400({}));
+
+      const result = await macroInfoTool.handler({ name: "OK" }, ctx);
+
+      expect(result.structuredContent).toEqual({ name: "OK", definition: {}, location: {} });
+      expect(result.content[0]?.text).toBe(
+        JSON.stringify({ name: "OK", definition: {}, location: {} }, null, 2),
+      );
+      expect(mockHttp.post).toHaveBeenCalledTimes(2);
+      // Promise.all order: the definition call is issued first, the location call second.
+      expect(mockHttp.post.mock.calls[0]?.[0]).toContain("/action/getmacrodefinition");
+      expect(mockHttp.post.mock.calls[1]?.[0]).toContain("/action/getmacrolocation");
+    });
+
+    it("keeps today's output when the document is an empty string", async () => {
+      mockHttp.post
+        .mockRejectedValueOnce(empty400({}))
+        .mockRejectedValueOnce(empty400({}));
+
+      const result = await macroInfoTool.handler({ name: "OK", document: "" }, ctx);
+
+      expect(result.structuredContent).toEqual({ name: "OK", definition: {}, location: {} });
+    });
+
+    it("uses the error envelope's own result for each call", async () => {
+      mockHttp.post
+        .mockRejectedValueOnce(empty400({ definition: [] }))
+        .mockRejectedValueOnce(empty400({ document: "", line: "" }));
+
+      const result = await macroInfoTool.handler({ name: "OK" }, ctx);
+
+      expect(result.structuredContent).toEqual({
+        name: "OK",
+        definition: { definition: [] },
+        location: { document: "", line: "" },
+      });
+    });
+
+    it("still throws a 400 when a document is given", async () => {
+      mockHttp.post.mockRejectedValue(empty400({}));
+
+      await expect(
+        macroInfoTool.handler({ name: "OK", document: "MyApp.Service.cls" }, ctx),
+      ).rejects.toMatchObject({ name: "IrisApiError", statusCode: 400 });
+    });
+
+    it("throws a 400 for a document name with no document type, which Atelier refuses like an empty name", async () => {
+      mockHttp.post.mockRejectedValue(empty400({}));
+
+      await expect(
+        macroInfoTool.handler({ name: "OK", document: "MyApp.Service" }, ctx),
+      ).rejects.toMatchObject({ name: "IrisApiError", statusCode: 400 });
+    });
+
+    it("still throws a 400 that carries Atelier errors, and other statuses, without a document", async () => {
+      mockHttp.post.mockRejectedValue(
+        new IrisApiError(400, [{ code: 1, msg: "bad" }], "/p", "m", {}),
+      );
+      await expect(macroInfoTool.handler({ name: "OK" }, ctx)).rejects.toMatchObject({
+        statusCode: 400,
+      });
+
+      mockHttp.post.mockReset();
+      mockHttp.post.mockRejectedValue(new IrisApiError(500, [], "/p", "m", {}));
+      await expect(macroInfoTool.handler({ name: "OK" }, ctx)).rejects.toMatchObject({
+        statusCode: 500,
+      });
+    });
+
+    it("still throws a non-JSON 400 that has no envelope result", async () => {
+      mockHttp.post.mockRejectedValue(new IrisApiError(400, [], "/p", "non-JSON response"));
+
+      await expect(macroInfoTool.handler({ name: "OK" }, ctx)).rejects.toMatchObject({
+        statusCode: 400,
+      });
+    });
   });
 
   it("should have readOnlyHint: true annotation", () => {

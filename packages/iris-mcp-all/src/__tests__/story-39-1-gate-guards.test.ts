@@ -1,11 +1,12 @@
 /**
- * Stories 39.1 to 39.5 and the Epic 39 capstone -- the arming guard of the live message-forensics
+ * Stories 39.1 to 39.5, 39.7 and the Epic 39 capstone -- the arming guard of the live message-forensics
  * gates listed in `GATES` (`story-39-1-message-search-live-gate.test.ts`,
  * `story-39-2-data-policy-live-gate.test.ts`,
  * `story-39-3-body-search-live-gate.test.ts`, `story-39-3-qa-live-gate.test.ts`,
  * `story-39-4-search-table-live-gate.test.ts`, `story-39-4-qa-live-gate.test.ts`,
  * `story-39-5-body-reader-live-gate.test.ts`, `story-39-5-qa-live-gate.test.ts` and
- * `epic39-capstone-gate.test.ts`) on their own real path (project rule #59). No IRIS and no shared state.
+ * `epic39-capstone-gate.test.ts` and `story-39-7-burn-down-live-gate.test.ts`) on their own real path (project
+ * rule #59). No IRIS and no shared state.
  *
  * Each gate runs in the default suite and in the prepublish gate. Run against an IRIS that is not reachable (a
  * closed local port) it must skip every test with the reason when it is not armed, and fail in `beforeAll` with
@@ -43,6 +44,7 @@ const GATES = [
   { file: "story-39-5-body-reader-live-gate.test.ts", tag: "story-39-5-body-reader-live-gate", story: "Story 39.5" },
   { file: "story-39-5-qa-live-gate.test.ts", tag: "story-39-5-qa-live-gate", story: "Story 39.5 QA" },
   { file: "epic39-capstone-gate.test.ts", tag: "epic39-capstone-gate", story: "Epic 39 capstone" },
+  { file: "story-39-7-burn-down-live-gate.test.ts", tag: "story-39-7-burn-down-live-gate", story: "Story 39.7" },
 ] as const;
 
 /** The vitest entry point this package's tests run under. */

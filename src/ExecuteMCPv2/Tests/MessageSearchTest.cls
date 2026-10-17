@@ -3,6 +3,8 @@
 /// <p><b>Section A</b> pins <method>ExecuteMCPv2.REST.MessageSearch.HeaderWhere</method>: the WHERE
 /// clause <code>resendFiltered</code> relied on before the extraction, the fixed fragment order,
 /// that a caller's text only ever travels in the parameter array, and the no-filter case.</p>
+/// <p><b>Section A2</b> pins <method>ExecuteMCPv2.REST.MessageSearch.HeaderStatement</method>, whose index hint
+/// bounds the plan to the window, and that the three indexes the hint names exist.</p>
 /// <p><b>Section B</b> drives every refusal of the <code>POST /interop/message/search</code> route over
 /// real HTTP (<code>%Net.HttpRequest</code>, the pattern of
 /// <class>ExecuteMCPv2.Tests.MessageResendTest</class>). Each refusal names the offending parameter,
@@ -117,6 +119,40 @@ Method TestHeaderWhereNoFilters()
     Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderWhere(tEmpty, .tWhere2, .tParams2)
     Do $$$AssertEquals(tWhere2, "", "Empty values add no fragment")
     Do $$$AssertEquals(tParams2, 0, "Empty values add no parameter")
+}
+
+/// ==================== Section A2: HeaderStatement (Story 39.7) ====================
+
+/// <method>ExecuteMCPv2.REST.MessageSearch.HeaderStatement</method> is the <code>headers</code> action's whole
+/// statement: today's text with the index hint right after <code>FROM</code>, the keyset clause when paged, and
+/// the order <code>TimeCreated, ID</code>.
+Method TestHeaderStatementText()
+{
+    Set tHint = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName"
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.MessageSearch).#HEADERHINT, tHint, "The hint names the three bitmap indexes in one comma list")
+    Set tColumns = "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId"
+    Set tWhere = "(SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ?"
+    Set tPlain = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderStatement(tWhere)
+    Do $$$AssertEquals(tPlain, "SELECT TOP ? " _ tColumns _ " FROM " _ tHint _ " Ens.MessageHeader WHERE " _ tWhere _ " ORDER BY TimeCreated, ID", "The plain statement")
+    Set tPaged = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderStatement(tWhere, 1)
+    Do $$$AssertEquals(tPaged, "SELECT TOP ? " _ tColumns _ " FROM " _ tHint _ " Ens.MessageHeader WHERE " _ tWhere _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?)) ORDER BY TimeCreated, ID", "The paged statement")
+    Do $$$AssertEquals($Length(tPlain, "?") - 1, 6, "Six markers: the page size and HeaderWhere's five")
+    Do $$$AssertEquals($Length(tPaged, "?") - 1, 9, "Nine markers with the cursor's three")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.MessageSearch).HeaderStatement(tWhere, 0), tPlain, "An explicit 0 is the plain statement")
+}
+
+/// The hint ignores an index by its name, and an unknown name is ignored silently, so a renamed index would make
+/// the hint a no-op without any failure. The three names must exist in the compiled dictionary of
+/// <class>Ens.MessageHeader</class>.
+Method TestHeaderHintIndexesExist()
+{
+    Set tNames = $ListBuild("Status", "SourceConfigName", "TargetConfigName")
+    For tI = 1:1:$ListLength(tNames) {
+        Set tName = $List(tNames, tI)
+        Do $$$AssertTrue(##class(%Dictionary.CompiledIndex).%ExistsId("Ens.MessageHeader||" _ tName), "Ens.MessageHeader has the index " _ tName)
+        Do $$$AssertTrue(##class(ExecuteMCPv2.REST.MessageSearch).#HEADERHINT [ ("Ens.MessageHeader." _ tName), "The hint names " _ tName)
+    }
+    Do $$$AssertTrue(##class(%Dictionary.CompiledIndex).%ExistsId("Ens.MessageHeader||TimeCreated"), "The index the plan should read exists")
 }
 
 /// ==================== Section B: the route's refusals over real HTTP ====================

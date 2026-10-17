@@ -56,6 +56,14 @@ Parameter MAXSEARCHTABLEVALUE As %Integer = 256;
 /// <code>ErrorStatus</code> and <code>Description</code> are deliberately absent.
 Parameter COLUMNS As %String = "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId";
 
+/// The index hint every header read of a search carries, placed right after <code>FROM</code> (and after
+/// <code>%INORDER</code> where the statement has it). It names the three bitmap indexes of
+/// <class>Ens.MessageHeader</class> on <code>Status</code>, <code>SourceConfigName</code> and
+/// <code>TargetConfigName</code>, so the optimizer reads the <code>TimeCreated</code> index map over the
+/// window instead of intersecting history-wide bitmaps. It changes the plan only, never the rows or their
+/// order. An index name that does not exist is ignored silently, so a test pins that all three exist.
+Parameter HEADERHINT As %String = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName";
+
 /// Translate header filters into a WHERE clause body and its parameters.
 /// <p><var>pFilters</var> may hold: <code>item</code> (source OR target), <code>source</code>,
 /// <code>target</code>, <code>statusCode</code>, <code>fromNorm</code> (inclusive lower bound),
@@ -407,15 +415,30 @@ ClassMethod BodyFilterWhere(pClassName As %String, pFilters As %RawString, pAlia
 ClassMethod BodyStatement(pBodyTable As %String, pWhere As %String, pBodyWhere As %String, pCursor As %Boolean = 0) As %String
 {
     If pBodyTable = "" {
-        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
     }
     Else {
-        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
     }
     If pCursor {
         Set tSQL = tSQL _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))"
     }
     Quit tSQL _ " ORDER BY h.TimeCreated, h.ID"
+}
+
+/// The text of the <code>headers</code> action's statement: the columns of <parameter>COLUMNS</parameter>
+/// read from <class>Ens.MessageHeader</class> (unaliased) with <parameter>HEADERHINT</parameter> right after
+/// <code>FROM</code>, then <code>WHERE</code> <var>pWhere</var> (<method>HeaderWhere</method>'s clause with no
+/// alias). With <var>pCursor</var> the keyset clause follows it. The order is always
+/// <code>TimeCreated, ID</code>. Every other character is fixed text or a parameter marker, in the order the
+/// caller binds: the page size, <var>pWhere</var>'s, then the cursor's three.
+ClassMethod HeaderStatement(pWhere As %String, pCursor As %Boolean = 0) As %String
+{
+    Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM " _ ..#HEADERHINT _ " Ens.MessageHeader WHERE " _ pWhere
+    If pCursor {
+        Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
+    }
+    Quit tSQL _ " ORDER BY TimeCreated, ID"
 }
 
 /// Resolve the Search Table class <var>pClassName</var>: in <var>pTable</var> the delimited SQL table of its
@@ -1074,11 +1097,7 @@ ClassMethod MessageSearch() As %Status
             Set tSQL = ..BodyStatement("", tWhere, tBodyWhere, tAfterNorm '= "")
         }
         Else {
-            Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM Ens.MessageHeader WHERE " _ tWhere
-            If tAfterNorm '= "" {
-                Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
-            }
-            Set tSQL = tSQL _ " ORDER BY TimeCreated, ID"
+            Set tSQL = ..HeaderStatement(tWhere, tAfterNorm '= "")
         }
         Set tArgs = 1
         Set tArgs(1) = tLimit + 1

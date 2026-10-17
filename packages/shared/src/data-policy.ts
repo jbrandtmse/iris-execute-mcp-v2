@@ -216,6 +216,12 @@ export const BLOCK_REASONS = {
   /** The redaction engine refused the text; `engineReason` is the engine's fixed reason. */
   hl7Unparseable: (engineReason: string): string =>
     `The HL7 v2 body could not be parsed (${engineReason}), so the redact data policy withholds it.`,
+  /** `block` withholds an Event Log entry's text (`iris_production_logs`). */
+  eventLogText: (): string =>
+    "The block data policy withholds Event Log text, which can carry message content.",
+  /** `block` withholds the text of an error warning in `iris_message_diagram`. */
+  diagramErrorText: (): string =>
+    "The block data policy withholds error text, which can carry message content.",
 } as const;
 
 /**

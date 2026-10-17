@@ -253,6 +253,19 @@ describe("the fixed block reasons", () => {
       "The HL7 v2 body could not be parsed (The text does not start with an MSH, FHS or BHS segment.), so the redact data policy withholds it.",
     );
   });
+
+  // Story 39.7 (DW-576): the two reasons for the tools whose message-derived text block withholds. The texts
+  // carry no input and no `;`, which the Mermaid writer would escape.
+  it("pins the Event Log and diagram error texts of Story 39.7", () => {
+    expect(BLOCK_REASONS.eventLogText()).toBe(
+      "The block data policy withholds Event Log text, which can carry message content.",
+    );
+    expect(BLOCK_REASONS.diagramErrorText()).toBe(
+      "The block data policy withholds error text, which can carry message content.",
+    );
+    expect(BLOCK_REASONS.diagramErrorText()).not.toContain(";");
+    expect(BLOCK_REASONS.eventLogText()).not.toContain(";");
+  });
 });
 
 describe("decideBodyPolicy (Story 39.5, AD-26): the policy's decision for one body", () => {

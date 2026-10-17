@@ -6,17 +6,19 @@
  * gate reads the examples out of `DOC_TYPE_DESCRIPTION` itself, pairs each with the category its sentence names,
  * and sends it to the live route `GET /api/atelier/v<N>/<ns>/docnames/<category>/<type>`:
  *
- *  - the WIRE status of every example is 200. The status is read with a plain `fetch`, because the tools cannot
- *    show it: the shared HTTP client turns an HTTP 400 with an empty error list into an empty success (by design,
- *    for Atelier endpoints that answer 400 for "no results"), so `iris_doc_list` with category CLS and type `cls`
- *    returns `{ items: [] }` and looks exactly like a legitimately empty listing. Asserting "the handler did not
- *    throw" here would pass for the very examples the old description got wrong;
+ *  - the WIRE status of every example is 200. The status is read with a plain `fetch`, which also keeps the
+ *    wire read independent of the code under test. The shared HTTP client throws `IrisApiError` for every
+ *    non-2xx response, an HTTP 400 with an empty error list included (Story 39.7, DW-569), so a handler call with
+ *    an example the route rejects is an error and cannot look like a legitimately empty listing;
  *  - the handlers send the same request: `iris_doc_list` returns the head of the names the wire read returns (it
- *    pages), and `iris_package_list` rolls up exactly that many documents, for every example;
+ *    pages), and `iris_package_list` sends exactly the plain docnames request and rolls up the documents of the
+ *    very envelope it received, for every example. The package row compares what cannot move under concurrent
+ *    writes to the shared namespace (its own request and its own envelope), never the counts of two separate reads;
  *  - the description's CLS sentence holds: category CLS with no type is HTTP 200 and lists classes only;
  *  - control: the examples the OLD description offered answer HTTP 400 on the same route (captured 2026-10-16,
  *    IRIS 2026.2 build 221U, Atelier v8, HSCUSTOM; source `irislib/%Api/Atelier/v1.cls` `GetDocNames`): category
- *    CLS with type `cls`, and category RTN with type `cls`. That is what makes a 200 row evidence.
+ *    CLS with type `cls`, and category RTN with type `cls`. That is what makes a 200 row evidence. The handlers
+ *    reject those two requests with `IrisApiError` 400 and an empty error list.
  *
  * Read-only: every request is a GET on the docnames route. Nothing is written to IRIS, and the filtered reads match
  * only documents every IRIS ships (`%Library.Base`, the `%occ` includes), so any namespace works. The examples are paired
@@ -29,8 +31,9 @@
  * instead when `IRIS_REQUIRE_LIVE` is armed (same arming convention as the other live gates in this directory).
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import {
+  IrisApiError,
   IrisHttpClient,
   atelierPath,
   buildToolContext,
@@ -124,6 +127,10 @@ beforeAll(async () => {
   }
 }, 60000);
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("every example of the type description is accepted by the live Atelier docnames route (Story 39.0, DW-567, AC-8)", () => {
   it("the description offers examples for RTN and for category '*', each paired with its category", () => {
     const examples = examplesOf(DOC_TYPE_DESCRIPTION);
@@ -166,19 +173,29 @@ describe("every example of the type description is accepted by the live Atelier 
     }
   }, 60000);
 
-  it("iris_package_list sends the same request: for every example it rolls up exactly the documents the wire read returns", async (testCtx) => {
+  it("iris_package_list sends the same request: for every example it sends the plain docnames request and rolls up the documents of the envelope it received", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     let rolledUp = 0;
 
     for (const { category, type } of examplesOf(DOC_TYPE_DESCRIPTION)) {
-      const wire = await wireRead(category, type);
+      // The shared namespace can gain or lose documents between two reads, so two separate reads are never
+      // compared: the request is compared with the wire read's request, and the count with the handler's own envelope.
+      const get = vi.spyOn(ctx.http, "get");
 
       const result = await packageListTool.handler({ category, type, system: "true", namespace: IRIS_NAMESPACE }, ctx);
 
       expect(result.isError, `${category}/${type}`).toBeUndefined();
+      expect(get, `${category}/${type}: one request`).toHaveBeenCalledTimes(1);
+      expect(get.mock.calls[0]?.[0], `${category}/${type}: the request the wire read sends, with no query string`).toBe(
+        atelierPath(version, IRIS_NAMESPACE, `docnames/${category}/${type}`),
+      );
+      const received = (await get.mock.results[0]?.value) as { result?: { content?: unknown[] } };
       const { totalDocs } = result.structuredContent as { totalDocs: number };
-      expect(totalDocs, `${category}/${type}`).toBe(wire.names.length);
+      expect(totalDocs, `${category}/${type}: the documents of the envelope the handler received`).toBe(
+        received.result?.content?.length,
+      );
       if (totalDocs > 0) rolledUp += 1;
+      get.mockRestore();
     }
 
     expect(rolledUp, "typed reads roll up documents").toBeGreaterThanOrEqual(3);
@@ -211,5 +228,27 @@ describe("every example of the type description is accepted by the live Atelier 
     expect(clsWithCls.status).toBe(400);
     expect(rtnWithCls.status).toBe(400);
     expect(starWithCls.status, "the one pairing the description keeps").toBe(200);
+  }, 60000);
+
+  // Story 39.7 (DW-569): the two requests the wire answers 400 with no error list are errors on the handler too.
+  it("the iris_doc_list handler rejects category CLS with type 'cls' and category RTN with type 'cls' with IrisApiError 400 and an empty error list", async (testCtx) => {
+    if (skipReason) return testCtx.skip();
+
+    for (const args of [
+      { category: "CLS", type: "cls", filter: SHIPPED_CLASS },
+      { category: "RTN", type: "cls", filter: "%occ" },
+    ]) {
+      let caught: unknown;
+      try {
+        await docListTool.handler({ ...args, namespace: IRIS_NAMESPACE }, ctx);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught, `${args.category}/cls is rejected`).toBeInstanceOf(IrisApiError);
+      expect((caught as IrisApiError).statusCode).toBe(400);
+      expect((caught as IrisApiError).errors).toEqual([]);
+      expect((caught as IrisApiError).originalUrl).toContain(`docnames/${args.category}/cls`);
+    }
   }, 60000);
 });

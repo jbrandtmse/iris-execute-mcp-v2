@@ -256,7 +256,8 @@ Method TestBodyTableSystemClasses()
     Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderWhere(tWindow, .tHeaderWhere, .tHeaderParams, "h")
     Set tBodyWhere = "b.""StringValue"" = ?"
     Set tSelect = "SELECT TOP ? h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId"
-    Set tFrom = " FROM %INORDER Ens.MessageHeader h, ""Ens"".""StringRequest"" b WHERE h.MessageBodyId = b.%ID AND h.TimeCreated >= ? AND h.TimeCreated <= ? AND b.""StringValue"" = ?"
+    Set tHint = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName"
+    Set tFrom = " FROM %INORDER " _ tHint _ " Ens.MessageHeader h, ""Ens"".""StringRequest"" b WHERE h.MessageBodyId = b.%ID AND h.TimeCreated >= ? AND h.TimeCreated <= ? AND b.""StringValue"" = ?"
     Set tSQL = ##class(ExecuteMCPv2.REST.MessageSearch).BodyStatement(tTable, tHeaderWhere, tBodyWhere)
     Do $$$AssertEquals(tSQL, tSelect _ tFrom _ " ORDER BY h.TimeCreated, h.ID", "The statement is fixed text, the dictionary's table and the two clauses")
     Do $$$AssertTrue($Piece(tSQL, " FROM ", 1) '[ "b.", "Nothing of the body is selected")

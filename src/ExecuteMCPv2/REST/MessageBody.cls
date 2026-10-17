@@ -8,7 +8,8 @@
 /// <code>unreadable</code>. An HL7 v2 body is never cut, because a redaction engine needs it whole.</li>
 /// <li><code>xmlvdoc</code>: the XML text. <code>persistent</code>: JSON, from <code>%JSONExportToStream</code>
 /// when the class extends <class>%JSON.Adaptor</class>, otherwise a dump of its dictionary properties
-/// (<method>PropertyDump</method>). <code>stream</code> and <code>streamContainer</code>: the stream text.
+/// (<method>PropertyDump</method>, which also reads the text of each character-stream property within the
+/// read limit). <code>stream</code> and <code>streamContainer</code>: the stream text.
 /// <code>literal</code> (an empty body class): the header's body ID. These are read as a prefix of
 /// <code>bodyTextMaxChars</code> characters.</li>
 /// <li><code>vdoc</code> and <code>other</code>: no renderer (<code>noRenderer</code>); <code>missing</code>:
@@ -122,9 +123,11 @@ ClassMethod XmlText(pDoc As %RegisteredObject, pMaxChars As %Integer, Output pTe
 }
 
 /// Read the JSON text of the persistent object <var>pObj</var>: <code>%JSONExportToStream</code> when its class
-/// extends <class>%JSON.Adaptor</class>, otherwise the <method>PropertyDump</method>. The whole text is built,
-/// then its first <var>pMaxChars</var> characters are returned. Returns <code>""</code> or
-/// <code>unreadable</code>, as <method>ReadStreamText</method> does.
+/// extends <class>%JSON.Adaptor</class>, otherwise the <method>PropertyDump</method> with the limit
+/// <var>pMaxChars</var>, so that the text of its character streams is read within that limit. The whole text is
+/// built, then its first <var>pMaxChars</var> characters are returned; <var>pComplete</var> is 1 only when neither
+/// that cut nor the dump cut anything. Returns <code>""</code> or <code>unreadable</code>, as
+/// <method>ReadStreamText</method> does.
 ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
 {
     Set pText = ""
@@ -138,8 +141,10 @@ ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pT
             Set tResult = ..ReadStreamText(tStream, pMaxChars, .pText, .pComplete)
         }
         Else {
-            Set tJson = ..PropertyDump(pObj).%ToJSON()
-            Set pText = ..CutText(tJson, pMaxChars, .pComplete)
+            Set tDump = ..PropertyDump(pObj, pMaxChars, .tDumpComplete)
+            Set tJson = tDump.%ToJSON()
+            Set pText = ..CutText(tJson, pMaxChars, .tCutComplete)
+            Set pComplete = (tCutComplete && tDumpComplete)
             Set tResult = ""
         }
     }
@@ -157,14 +162,22 @@ ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pT
 /// Each value is:
 /// <ul>
 /// <li>a datatype: its logical value as a JSON string, <code>null</code> when it is empty;</li>
-/// <li>a stream: <code>{"stream": class, "size": Size}</code>, never its content;</li>
+/// <li>a stream: <code>{"stream": class, "size": Size}</code>; with <var>pMaxChars</var> above 0 a character
+/// stream (<code>IsCharacter()</code>) also carries <code>"text"</code>, its first characters read by
+/// <method>ReadStreamText</method> within the budget the earlier streams of the dump left, <code>""</code> once
+/// the budget is spent. A binary stream, or any stream when <var>pMaxChars</var> is 0, is never read;</li>
 /// <li>an object: <code>{"class": class, "id": %Id}</code> when it is persistent, <code>{"class": class}</code>
 /// otherwise, and <code>null</code> when it is not set;</li>
 /// <li>a list or array collection: <code>{"collection": "list"|"array", "count": Count()}</code>.</li>
 /// </ul>
-ClassMethod PropertyDump(pObj As %RegisteredObject) As %DynamicObject
+/// <p><var>pMaxChars</var> is one budget shared across the whole dump (0, the default, reads no stream text, so
+/// the dump is what it was without the argument). <var>pComplete</var> is 0 when a stream's text was cut or could
+/// not be read, otherwise 1.</p>
+ClassMethod PropertyDump(pObj As %RegisteredObject, pMaxChars As %Integer = 0, Output pComplete As %Boolean) As %DynamicObject
 {
+    Set pComplete = 1
     Set tOut = {}
+    Set tBudget = pMaxChars
     Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name, Collection, Private, Internal, Calculated, Transient, MultiDimensional FROM %Dictionary.CompiledProperty WHERE parent = ? ORDER BY SequenceNumber, Name", $ClassName(pObj))
     If '$IsObject(tRS) || (tRS.%SQLCODE < 0) Quit tOut
     While tRS.%Next() {
@@ -185,6 +198,13 @@ ClassMethod PropertyDump(pObj As %RegisteredObject) As %DynamicObject
                 If tValue.%Extends("%Stream.Object") {
                     Do tEntry.%Set("stream", $ClassName(tValue), "string")
                     Do tEntry.%Set("size", tValue.Size, "number")
+                    If (pMaxChars > 0) && tValue.IsCharacter() {
+                        Set tUnreadable = ..ReadStreamText(tValue, tBudget, .tText, .tStreamComplete)
+                        If tUnreadable '= "" { Set tStreamComplete = 0 }
+                        If 'tStreamComplete { Set pComplete = 0 }
+                        Set tBudget = tBudget - $Length(tText)
+                        Do tEntry.%Set("text", tText, "string")
+                    }
                 }
                 ElseIf tValue.%Extends("%Library.Persistent") {
                     Do tEntry.%Set("class", $ClassName(tValue), "string")

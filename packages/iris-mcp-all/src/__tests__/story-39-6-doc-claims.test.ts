@@ -250,7 +250,9 @@ describe("Story 39.6: the root README states the loop, the prompts and the snaps
 
   it("the audit paragraph names every governed tool and the declared PHI input, and keeps its earlier text", () => {
     const audit = squash(sliceBetween(rootReadme, /^## Compliance & Auditability$/m, /^---$/m));
-    expect(audit).toContain("(today `iris_message_body`, the `body` and `searchTable` actions of `iris_message_search`, and the `preview` action of `iris_message_resend`)");
+    expect(audit).toContain(
+      "(today `iris_message_body`, the `body` and `searchTable` actions of `iris_message_search`, the `preview` action of `iris_message_resend`, and `iris_production_logs` and `iris_message_diagram`, which are governed under `block`)",
+    );
     expect(audit).toContain("(a search value, a body filter value; today the `filters` of `iris_message_search`)");
     expect(audit).not.toContain("(today the `preview` action of `iris_message_resend`)");
     expect(audit).toContain('{"policy":"redact","redacted":4,"blocked":3}');

@@ -228,7 +228,9 @@ describe("iris_message_body", () => {
       expect(text).toContain("maxChars (default 10000, max 1048576)");
       expect(text).toContain("caps the text shown per body");
       expect(text).toContain("It caps the output only");
-      expect(text).toContain("An XML or JSON body is serialized whole before it is cut");
+      expect(text).toContain("An XML body is serialized whole before it is cut, and so is a JSON export");
+      expect(text).toContain("a character stream in a property dump is read only up to the read limit");
+      expect(text).toContain("a character stream shows its text and a binary stream its class and size");
       expect(text).toContain("An HL7 v2 body is read only whole");
       expect(text).toContain("65536 characters");
       expect(text).toContain("under the allow policy a larger maxChars (at most 1048576) reads a longer one");

@@ -500,18 +500,19 @@ describe("Story 39.5: every kind renders as the renderer table says under allow 
       truncated: false,
     });
     expect(by(11)).toMatchObject({ format: "json", text: '{"Name":"SYNTHPHI-JSON-NAME","Code":"KEEPME-JSON"}', truncated: false });
-    // The dump rules: header 12's Ref is header 4's string body.
+    // The dump rules: header 12's Ref is header 4's string body. Since Story 39.7 (DW-583) a character stream
+    // shows its text under allow, so `Note` carries the stream's own text.
     const stringId = String(by(4).bodyId);
     expect(by(12)).toMatchObject({
       format: "json",
       text:
         '{"Name":"SYNTHPHI-PLAIN","Count":"7","Tags":{"collection":"list","count":1},' +
-        '"Note":{"stream":"%Stream.GlobalCharacter","size":13},' +
+        '"Note":{"stream":"%Stream.GlobalCharacter","size":13,"text":"SYNTHPHI-NOTE"},' +
         `"Ref":{"class":"Ens.StringRequest","id":"${stringId}"}}`,
       truncated: false,
     });
     expect(String(by(12).text)).not.toContain("SYNTHPHI-PRIVATE");
-    expect(String(by(12).text)).not.toContain("SYNTHPHI-NOTE");
+    expect(String(by(12).text)).toContain("SYNTHPHI-NOTE");
     expect(by(13)).toMatchObject({ bodyPolicy: { outcome: "none" }, notShown: tooLargeShown(65536) });
     expect(by(14)).toMatchObject({ bodyPolicy: { outcome: "none" }, notShown: UNOPENED_TEXT });
     expect(by(15)).toMatchObject({ format: "er7", text: lf(batchSmall), truncated: false });

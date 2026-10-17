@@ -404,7 +404,7 @@ export const messageSearchTool: ToolDefinition = {
     "pass the same from and to on every page, because an omitted to is recomputed as now on each " +
     "call. limit (default 100, max 500) caps the rows returned per page, not the work done: a wide " +
     "window on a busy namespace is scanned in full and can approach the ~60 s Web Gateway timeout, " +
-    "so narrow the window or add filters. The body action reads the headers in the window first and " +
+    "so narrow the window: a filter narrows the rows returned, not the window scanned. The body action reads the headers in the window first and " +
     "each body by its ID, so a body filter does not reduce the work; the searchTable action also reads the " +
     "headers in the window first and probes the Search Table by each header's body ID, so a Search Table " +
     "filter does not reduce that work either.\n\n" +

@@ -2,9 +2,10 @@
 title: 'Story 39.7: Epic 39 Burn-Down'
 type: 'bugfix'
 created: '2026-10-17'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '6f761f2e8617f50450931ee93ec97920743998ac'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -26,6 +27,12 @@ deferred:
       src/ExecuteMCPv2/REST/Interop.cls:1207 and :1225-1229 (tType from the query string, bound unchanged to %ExecDirect, select mode 0); irislib/Ens/DataType/LogType.cls:11-13. Source reading only, not probed live: probe it in a disposable namespace before fixing.
     location: 'src/ExecuteMCPv2/REST/Interop.cls:1225'
     severity: 'med'
+  - summary: >-
+      Under block, iris_message_diagram leaves the text of a per-session generation failure ("Generation failed for session N: <text>" in warnings[] and the matching Mermaid "%% <text>" line) unchanged; only the "Error on message <id>: " warnings are withheld.
+    evidence: |-
+      src/ExecuteMCPv2/Diagram/Generate.cls:253-258 (ApplyFailure) writes the sanitized exception status of the generator; packages/iris-interop-mcp/src/tools/diagram.ts ERROR_WARNING matches only the Correlator's "Error on message <id>: " template. No path was shown that puts header-derived text into that exception. To settle: force a generation failure in a disposable mapping-only namespace over a header whose fields hold SYNTHPHI text and read the warning under block.
+    location: 'packages/iris-interop-mcp/src/tools/diagram.ts:63'
+    severity: 'medium (unverified)'
 ---
 
 <intent-contract>
@@ -436,6 +443,44 @@ The Event Log rows (`Ens.Util.Log`, saved directly):
 
 ## Review Triage Log
 
+### 2026-10-17 — Review pass
+- verdicts: 34 findings — high 0, medium 5, low 27, false 1, maybe-false 1
+- findings:
+  - `[low]` `[patch]` macro fallback comment says Atelier answers 400 "exactly when the document name is empty" (Blind) — probed live: `MyApp.Service` and a blank name also answer 400 with `status.errors: []` and `result: {}`, so a typeless non-empty `document` now throws where it returned the empty result; comment replaced with the true rule, CHANGELOG sanctioned-change sentence added, `intelligence.test.ts` row added.
+  - `[low]` `[reject]` `iris_doc_delete` and `iris_doc_index` flip from a silent success to a throw on a refused name (Blind) — that is the DW-569 rule itself, stated in the CHANGELOG's first bullet; a false "deleted" success becoming an error is the intended effect, and a guard would be more than a direct correction.
+  - `[medium]` `[patch]` `atelierDocRequest` wrappers at `iris_doc_load`, `iris_env_promote` and the `iris_doc_edit` PUT are unpinned, and the last two cannot be reached (Blind) — `load.test.ts` row added (mutation recorded); the two `env_promote` wraps and the `doc-edit.ts` PUT wrap removed, `env-promote.ts` is back to baseline (Rule #54); CHANGELOG and `story-39-7-doc-claims.test.ts` pin updated.
+  - `[low]` `[patch]` root README audit paragraph says the counts are "bodies" (Blind) — sentence extended for `iris_production_logs` and `iris_message_diagram`; the default-policy audit key is the specified fallback (AC-5) and the CHANGELOG says the audit entry records it.
+  - `[low]` `[reject]` "read limit" undefined in the `iris_message_body` text and the shared budget unstated (Blind) — wording is the Docs D6/D9 row; the budget is in the CHANGELOG and the class comments; wontfix-accepted, reopen_if a client reports a later stream's `text: ""` as a defect.
+  - `[low]` `[patch]` diagram policy tests use warning texts the generator never writes (Blind) — `logs-diagram-policy.test.ts` now uses the `Correlator` and `Generate` shapes ("has no matching response", "Correlation conflict: response ...", "Generation failed for session N: ..."); the failure-text residual is the deferred item below.
+  - `[low]` `[reject]` the hint stops at `iris_message_search`, thin evidence on a tuned table (Blind) — the spec's Never list forbids a `HeaderWhere` or `resendFiltered` change, R1 records that cost rises, decision #30 fixed the three names; by-design.
+  - `[low]` `[reject]` dedup residual documented only in `tool_support.md` (Blind) — the Docs D7 row places it there and it is a one-bit signal; wontfix-accepted, reopen_if an operator reads the Interoperability README PHI section as promising no signal.
+  - `[low]` `[patch]` the 39.7 gate needs HealthShare and says so nowhere (Blind) — the gate header now states that `HS.Message.XMLMessage` needs the HSLIB database; the OS test is guarded (below).
+  - `[low]` `[reject]` an empty `iris_doc_search` query fails with a generic message and the description promises an empty array (Blind) — sanctioned DW-569 change in the CHANGELOG; adding `.min(1)` would change an input schema, which the spec forbids; by-design.
+  - `[low]` `[patch]` CHANGELOG and `tool_support.md` claim a body class filter reads the `TimeCreated` window though `MessageBodyClassName` is not hinted (Edge) — verified against the EXPLAIN table (`MessageBodyClassName ∩` a range bitmap); both texts now say an item, status or source filter reads the window and a body class filter is intersected with the window's range bitmap.
+  - `[low]` `[patch]` macro fallback claim falsified for a non-empty refused name (Edge) — same root as the first row; fixed there.
+  - `[low]` `[patch]` `iris_doc_export`, `iris_doc_convert` and `iris_routine_intermediate` lose a status-only result on a refused name (Edge) — the DW-569 effect; now listed as a sanctioned change in the CHANGELOG with the macro case.
+  - `[maybe-false]` `[defer]` `Generate.ApplyFailure` writes `Generation failed for session N: <text>` into `warnings[]` and a Mermaid `%% ` line, and `block` leaves both unchanged (Edge) — the text is the sanitized exception status of the generator; no path shown that puts header-derived content in it; to settle: force a generation failure on a scratch namespace over a header with `SYNTHPHI` content and read the warning. Deferred, medium if true (unverified).
+  - `[medium]` `[patch]` the `searchTable` statement carries the hint but only its text is pinned; no check that its plan reads the `TimeCreated` range (Gap) — the 39.4 route-statement loop now also asserts `headerPlanProblems` on every stored `searchTable` statement; it passes live (armed 39.4 gate), and goes red with the statement hint removed (mutation recorded).
+  - `[medium]` `[patch]` `atelierDocRequest` at `iris_doc_load`, `iris_env_promote` and the `iris_doc_edit` PUT unpinned (Gap) — same root as the third row; fixed there.
+  - `[low]` `[patch]` `TestPropertyDumpStreams` calls `HS.Message.XMLMessage` with no guard (Gap) — the XML block now runs only where `%Dictionary.CompiledClass.%ExistsId` finds the class, created through `$ClassMethod` so the test class compiles without it; the guard primitive probed (0 for an absent class, 1 for `HS.Message.XMLMessage`).
+  - `[low]` `[patch]` AC-3 mutation recorded as prose (Gap) — `mutation:` line written from the churn record.
+  - `[low]` `[patch]` AC-9 has no `mutation:` line (Gap) — demonstrated (a description edit without a snapshot re-pin) and recorded.
+  - `[low]` `[patch]` AC-10 has no `mutation:` line (Gap) — demonstrated (`hsLib` branch disabled) and recorded.
+  - `[low]` `[patch]` AC-4 mutation covered `HeaderStatement` only (Gap) — the `BodyStatement` hint dropped, red in 4 places, recorded.
+  - `[low]` `[reject]` the audit row reads `.at(-1)` after a `count: 1` poll, so it can read an earlier call's entry (Gap) — every entry of one session carries the same expected `dataPolicy`, and the AC-5 mutation turned these rows red; wontfix-accepted, reopen_if one session's calls can differ in policy or counts.
+  - `[low]` `[reject]` the `headerPlanProblems` negative controls sit behind the live skip (Gap) — the gate-guard test requires every gate test to skip when unarmed, and 39.3 and 39.4 place theirs the same way; the armed prepublish run executes it; wontfix-accepted, reopen_if the unarmed default suite must prove oracle helpers.
+  - `[low]` `[patch]` the 39.3 QA checker's negative controls lack a "no index hint" row (Gap) — row added, with an assertion that the hint was present in the statement it removes.
+  - `[low]` `[reject]` the "body class, status and error-only" shape has empty `expectedIds` (Gap) — the sibling "body class and status" shape expects `[2, 3]`, so the oracle comparison is not vacuous as a pair; theoretical.
+  - `[low]` `[reject]` the changeset assertions are `skipIf` the file is gone (Gap) — by design: `changeset version` consumes the file at release, as the test comment says.
+  - `[medium]` `[patch]` dead `atelierDocRequest` branches (Gap, other) — same root as the third row; fixed there.
+  - `[low]` `[patch]` no per-tool pin for the new errors of `iris_doc_export`, `iris_routine_intermediate` and `iris_doc_convert` (Gap, other) — same root as the thirteenth row: named in the CHANGELOG, covered generically by the `http-client.test.ts` non-2xx rows.
+  - `[low]` `[reject]` the diff adds a second tool-level mechanism, `atelierDocRequest`, beyond the intent's "one tool-level exception" (Intent) — it honours the stronger line "every path the entries do not name stays byte-identical"; the third refused-name path is a spec error flagged in Results for the retro, and the fix that would align the two is a spec edit.
+  - `[false]` `[reject]` DW-571 compares a recomputed path, not a wire read (Intent) — Task 4 specifies exactly that comparison (`atelierPath(version, ns, "docnames/<category>/<type>")` against the spied call).
+  - `[medium]` `[patch]` plan surface for `searchTable` is a text pin plus canned controls (Intent) — same root as the `searchTable` plan row; fixed there.
+  - `[low]` `[reject]` error responses gain `dataPolicy`, text crosses the IRIS hop, dedup residual (Intent) — all specified (Tasks 9 and 10, Design Notes); the residual is in `tool_support.md`.
+  - `[low]` `[reject]` the IRIS-side read budget is `bodyTextMaxChars`, not `maxChars` (Intent) — the TypeScript cut applies `maxChars` afterwards, as the 39.5 design states; same root as the "read limit" row.
+  - `[low]` `[patch]` the gate header says the dev rows only read, but the gate sends one put of a typeless `ExecuteMCPv2.Temp.*` name (Intent) — header corrected; the row asserts that nothing is stored and `afterAll` lists `Story397` documents.
+
 ## Design Notes
 
 **Orchestrator decisions: DECIDED at the spec gate, 2026-10-17, both as recommended (#34 = OD-1: the index hint covers the `body` and `searchTable` statements too; #35 = OD-2: `iris_macro_info` with no document keeps its empty result via the narrow fallback). The lead updated the spine (AD-26 residual note; AD-15 sanctioned list), Rule 20.** The planning text follows:
@@ -645,7 +690,72 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - AC-7: `JsonText` calls `PropertyDump(pObj)` without the cap → the gate's H1 allow row and `TestPropertyDumpStreams`.
 - AC-8: drop "enabled by default" from D1 → `story-39-7-doc-claims`.
 
+### Results (implement stage, 2026-10-17; IRIS 2026.2 build 221U, Atelier v8, `default`/HSCUSTOM)
+
+**Bootstrap move.** `BOOTSTRAP_VERSION` `2fd17b50a024` → `7d12cd8b3a1e` (`pnpm gen:bootstrap`, run after the last class edit; a second run printed the same version and left `bootstrap-classes.ts` byte-identical; `bootstrap-version-check.test.ts` green). The gate's `assertDeployedBootstrapVersion` passed against the deployed classes. `MessageBodyStreamFixture` is not in the manifest.
+
+**Commands.**
+- `shared`: build, test (80 files, 2065 tests), lint (0 errors; 1 existing warning in `src/cli/governance.ts`), type-check: green. `dev`: test 61 files / 1434 tests; `admin` 498; `interop` 669; `ops` 350; `data` 165; `client-config` 514: each build, test, lint and type-check green (also green armed: `dev` three times in default parallel mode, 3 of 3, re-run after the review patches).
+- `@iris-mcp/all` armed (`IRIS_REQUIRE_LIVE=1`), `--no-file-parallelism`, five calls: story-38/epic35/37/38 (18 files, 255 tests); story-39-0/1/2 including `story-39-1-gate-guards` (9 files, 266 passed, 2 skipped = the `CAPTURE` rows); story-39-3/4 (8 files, 309 passed, 2 skipped); story-39-5/6/7 and `epic39-capstone-gate` (10 files, 303 tests); everything else (33 files, 357 tests). All 78 files green; every call re-run after the last review patch. The nine affected gates (`story-39-1-message-search`, `-39-2-data-policy`, `-39-3-body-search`, `-39-3-qa`, `-39-4-search-table`, `-39-4-qa`, `-39-5-body-reader`, `-39-5-qa` and `epic39-capstone-gate`) ran inside those grouped runs, sequentially in one process each, with only the `CAPTURE` rows skipped.
+- OS tests, one class per call, after the classes were re-loaded from the final source: `MessageSearchTest` 7/7, `MessageBodyTest` 5/5, `MessageBodySearchTest` 5/5, `MessageSearchTableTest` 5/5 (`total` equals the `Test*` count; no failure). `BOOTSTRAP_VERSION` stays `7d12cd8b3a1e` and a further `gen:bootstrap` leaves `bootstrap-classes.ts` byte-identical.
+- `pnpm gen:tools-list-snapshot --force` once, after the final build: exactly four entries moved (`iris_production_logs`, `iris_message_diagram`, `iris_message_body` (description and the `maxChars` property text), `iris_message_search`); `gen:tools-list-snapshot:check` exit 0, 114 entries. `pnpm measure:tools-payload`: only the interop row moved (`25 / 57,046 / ~14,262`, `12 / 38,104 / ~9,526`, `25 / 57,046 / ~14,262`); the five README rows equal the output line for line.
+- `gen:governance-baseline:check` exit 0 (141 frozen keys, file untouched), `check-epics-sync.mjs` OK, `gen:skills:check` OK, `validate:prompts` OK (13 prompts, 13 skills).
+- After every armed run: `leftovers` for `EXECMCPTMP397A` `[]` (asserted in `afterAll`), `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP397A`, `iris_doc_list` of HSCUSTOM (generated included) for `Story397`, `ExecuteMCPv2.Temp.` and `Probe397` is empty.
+
+**EXPLAIN after-table** (`iris_sql_analyze` `explain`, HSCUSTOM, plan only, the `HeaderStatement` text with literals):
+
+| Shape (`headers`) | Plan after the hint | Cost |
+|---|---|---|
+| window only | `Read index map Ens.MessageHeader.TimeCreated, looping on TimeCreated (with a range condition) and ID` | 103.84 |
+| item + status | the same range read, `Status` and item tested per row | 130109 (was `Status ∩ (Source ∪ Target)` bitmaps, 19075) |
+| status only | the same range read | 1037.2 |
+| source only | the same range read | 25970 |
+| session | `SessionId ∩` a TimeCreated-range bitmap (Module-C reads the range) | 24059 |
+| body class + status + error-only | `MessageBodyClassName ∩` a TimeCreated-range bitmap | 22732 |
+
+No plan reads a bitmap index of `Status`, `SourceConfigName` or `TargetConfigName`. The gate's own route statements (headers, and the aliased `body` join with the hint after `%INORDER`) all pass `headerPlanProblems`; the header maps are read before the body table.
+
+**Mutation lines** (each applied, observed red, reverted byte-identical by `cmp` against a saved copy, rebuilt or reloaded):
+- mutation: AC-1 restore the `isEmptyResult400` carve-out in `http-client.ts` -> `http-client.test.ts` "throws IrisApiError on HTTP 400 ..." and "throws on a POST that answers HTTP 400 ..." rows, and the gate's "the 400 pair" and "an empty search query" rows (SDK `Client` -> built dev -> `iris_doc_list` / `iris_doc_search` -> live Atelier).
+- mutation: AC-2 `if (!response.ok || response.status !== 200)` -> the 201 and 202 rows of the 2xx table. AC-2 OD-2 fallback disabled (`false &&`) -> the gate's "iris_macro_info with no document" row and three `intelligence.test.ts` rows.
+- mutation: AC-4 `HeaderStatement` without `HEADERHINT` (class reloaded into HSCUSTOM) -> `TestHeaderStatementText` and the gate's "after real calls, every route statement ... holds the hint" row (path: SDK `Client` -> built interop -> `iris_message_search` -> route -> `INFORMATION_SCHEMA.STATEMENTS` of `EXECMCPTMP397A`).
+- mutation: AC-5 `monitor.ts` returns `response.result` under block -> the gate's "logs under block" and audit rows (on the wire) and four `logs-diagram-policy.test.ts` rows; `dataPolicy` added under redact and allow -> the three AD-15 pin rows and the audit row; `diagram.ts` leaves the Mermaid lines unchanged under block -> the gate's "a diagram under block" row (wire) and four unit rows.
+- mutation: AC-6 `dataPolicy: {}` removed from `diagram.ts` -> `data-policy-scope.test.ts` "the governed rows equal the tools that declare dataPolicy".
+- mutation: AC-7 `JsonText` calls `PropertyDump(pObj, 0, ...)` (class reloaded) -> `TestPropertyDumpStreams` and three gate DW-583 rows.
+- mutation: AC-8 "enabled by default" dropped from D1 -> `story-39-7-doc-claims` "D1: logs and diagram are under the policy only under block ...".
+- mutation: widened scope (below) `doc.ts` GET without `atelierDocRequest` -> `doc-name-refused-400.test.ts` "iris_doc_get reports IRIS's reason" and the two `doc-get-range-live-gate` rows (Story 38.2 AC-5, Story 38.7 DW-542).
+- mutation: AC-3 the old count comparison restored in the `iris_package_list` row of `doc-type-description-live-gate.test.ts` (`totalDocs` against a second raw read), five runs under churn of `ExecuteMCPv2.Temp.Story397Churn*` in HSCUSTOM -> that row red in 2 of the 5 runs (the churn record below); the new row is 3 of 3 green under the same churn.
+- mutation: AC-4 (review pass) `FROM %INORDER Ens.MessageHeader h` in both `BodyStatement` branches, no `HEADERHINT` (class reloaded into HSCUSTOM, restored byte-identical and reloaded) -> `MessageBodySearchTest.TestBodyTableSystemClasses`, `MessageSearchTableTest.TestSearchTableStatementText`, the 39.7 gate's "after real calls, every route statement for the headers and the body join holds the hint and passes headerPlanProblems" row, and the 39.4 gate's "after real calls, every route statement for the Search Table has the header-first plan" row (path: SDK `Client` -> built interop -> `iris_message_search` -> route -> `INFORMATION_SCHEMA.STATEMENTS`).
+- mutation: AC-9 (review pass) one word of the `iris_production_logs` description changed in `monitor.ts`, interop rebuilt, snapshot not regenerated (restored byte-identical, rebuilt) -> `tools-list-snapshot.test.ts` "the live tools/list of the built dists against the committed snapshot" and "--check on the committed snapshot exits 0".
+- mutation: AC-10 (review pass) `if (false && options.hsLib)` in `createInteropNamespace` (restored byte-identical) -> the 39.7 gate's `beforeAll` seed red with `<CLASS DOES NOT EXIST>SaveXml *HS.Message.XMLMessage`; `afterAll` removed the namespace (`iris_namespace_list` shows no `EXECMCPTMP397A`).
+- mutation: review-pass `iris_doc_load` row: `atelierDocRequest` removed from the first PUT in `load.ts` (restored byte-identical) -> `load.test.ts` "reports IRIS's reason for a document name it refuses with HTTP 400 ..." (`expected 'IRIS returned HTTP 400' to be 'IRIS refused the upload: ERROR #16006...'`).
+- No separate mutation (review pass): the new `headerPlanProblems` assertion of the 39.4 route-statement row and the "no index hint" negative control of the 39.3 QA checker are covered by the AC-4 `BodyStatement` mutation above for the statement side; the plan side of `headerPlanProblems` is pinned by the canned negative controls in the 39.7 gate's "the checker can fail" row (a bitmap plan, a plan without the range read). The plan side was not red-tested against a live hint-less plan (the scratch tables are tiny); the EXPLAIN after-table records the live plan effect.
+
+**Churn record (DW-571, AC-3).** The dev package ran armed three times in default parallel mode, 3 of 3 green (61 files, 1432 tests each). A scratch script (scratchpad, deleted) then ran `doc-type-description-live-gate.test.ts` three times while it wrote and deleted `ExecuteMCPv2.Temp.Story397Churn0` to `...7` in HSCUSTOM (314 operations, 0 failures): 3 of 3 green. With the old count comparison restored as a mutation (the `iris_package_list` row comparing `totalDocs` with a second raw read), five runs under churn (632 operations) gave 3 green and 2 red, both red on that row. The old row was restored byte-identical, and `iris_doc_list` (HSCUSTOM, `Story397Churn`, generated included) is empty. The review patches touched no file this record exercises (the `iris_package_list` row, `packages.ts`, `http-client.ts`), so the churn runs are carried; the dev package then ran armed 3 of 3 again after the patches.
+
+**Spec error found, scope widened (Rule #16; flag for the retro).** Design Notes R2 says only two non-2xx paths become visible. The dev suite and the 38.7 wire gate showed a third: Atelier refuses a document name it rejects (for example `iris_doc_get` of `ExecuteMCPv2.Utils`, a name with no document type) with HTTP 400, an empty error list and the reason only in `result.status` (captured live 2026-10-17, GET and PUT of `doc/ExecuteMCPv2.Utils` and `doc/Probe397NoType`). `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and `iris_doc_load` read that answer (`atelierDocStatusError`), and the old carve-out is what made it reach them. A new shared helper `atelierDocRequest` (`atelier.ts`, exported) returns that one answer as an envelope, so each tool keeps its output byte for byte (pinned by `doc-name-refused-400.test.ts`, the existing `doc-get-range-live-gate` and `story-38-7-qa-wire-gate` rows, and a new live row in the 39.7 gate that also checks a put of a refused name stores nothing); every other failure still throws. `iris_doc_export`, `iris_routine_intermediate` and `iris_doc_convert` do not read `result.status`, so a refused name is now an HTTP 400 error there instead of an empty success (the DW-569 rule, no pin moved). Review pass: `iris_doc_load` keeps the wrap and gains a unit row (a glob can match a file whose name has no document type); the wraps in `iris_env_promote` (its names come from a diff of existing documents) and on the `iris_doc_edit` save (its document was just read under the same name) were removed, because no refused name reaches them (Rule #54), and the unwrapped answer is an error either way. The spec's "one tool-level exception" (`iris_macro_info`) is therefore five tools in fact: `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` and `iris_doc_load` through `atelierDocRequest`, plus the `iris_macro_info` fallback; flag the Design Notes R2 and the intent's "The one tool-level exception" wording for the retro.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Five Epic 39 ledger entries are fixed, each proven live or by mutation (Rule #48). DW-569: the shared HTTP client throws `IrisApiError` for every non-2xx answer; `iris_macro_info` with no document keeps its empty result through a narrow fallback, and a shared `atelierDocRequest` keeps the refused-document-name reason in `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (read) and `iris_doc_load`. DW-571: the `iris_package_list` row compares its own request and its own envelope. DW-572: `HEADERHINT` and `HeaderStatement`, with the hint also in both `BodyStatement` branches (OD-1). DW-576: `iris_production_logs` and `iris_message_diagram` withhold message-derived text in TypeScript under `block` only. DW-583: `MessageBody.PropertyDump` reads character-stream text under one shared budget. `BOOTSTRAP_VERSION` `2fd17b50a024` -> `7d12cd8b3a1e`. No tool, action, key, preset row, annotation, input schema or environment variable is added; counts do not move.
+
+**Files changed.**
+- `packages/shared/src/http-client.ts`, `atelier.ts`, `data-policy.ts`, `index.ts`: the non-2xx rule, `atelierDocRequest`, `BLOCK_REASONS.eventLogText()` and `diagramErrorText()`.
+- `packages/iris-dev-mcp/src/tools/intelligence.ts`, `doc.ts`, `doc-edit.ts`, `load.ts`: the `iris_macro_info` fallback and the refused-name wraps.
+- `packages/iris-interop-mcp/src/tools/monitor.ts`, `diagram.ts`, `message-body.ts`, `message-search.ts`: block withholding and the four description edits.
+- `src/ExecuteMCPv2/REST/MessageSearch.cls`, `MessageBody.cls`, `packages/shared/src/bootstrap-classes.ts` (generated): hint, `HeaderStatement`, stream text in the dump.
+- `src/ExecuteMCPv2/Tests/*`: the OS tests for the statements and the dump, and the data-free `MessageBodyStreamFixture`.
+- `packages/iris-mcp-all/src/__tests__/*` and `scripts/prepublish-gate.mjs`: the 39.7 live gate and doc-claims test, the fixture (`hsLib`, `seedBurnDown`), `headerPlanProblems`, the scope rows, the moved 39.3, 39.4, 39.5 and doc-claims pins, rosters, and the re-pinned snapshot (4 entries).
+- `packages/iris-dev-mcp/src/__tests__/*`, `packages/iris-interop-mcp/src/__tests__/*`, `packages/shared/src/__tests__/*`: unit rows for each change.
+- `README.md`, `packages/iris-interop-mcp/README.md`, `tool_support.md`, `docs/client-config/*`, `CHANGELOG.md`, `.changeset/story-39-7-epic-39-burn-down.md`: docs and records.
+
+**Review.** 34 findings from four layers: high 0, medium 5, low 27, false 1, maybe-false 1 (counted mechanically from the triage rows). Routed: 20 patch, 13 reject, 1 defer. Patches applied (grouped by root cause): the `iris_macro_info` comment and CHANGELOG for a refused non-empty document; the `atelierDocRequest` wraps (`iris_doc_load` row added; the two `iris_env_promote` wraps and the `iris_doc_edit` save wrap removed as unreachable, `env-promote.ts` back to baseline); the `searchTable` plan check in the 39.4 gate; the HS guard in `TestPropertyDumpStreams`; real warning shapes in the policy tests; the "no index hint" row in the 39.3 QA checker; body class wording in the CHANGELOG and `tool_support.md`; the README audit sentence; the gate header; four `mutation:` lines (AC-3, AC-4 body, AC-9, AC-10). Deferred: the unchanged diagram failure-warning text under `block` (medium, unverified). Rejected with reasons in the triage log: 13 rows (the DW-569 rule itself, spec-mandated wording, the spec's Never list, accepted residuals, theoretical).
+
+**Follow-up review recommendation.** `true`: two medium entries were patched on this first pass (the wrapper pins and the `searchTable` plan check). The unverified risk is the patched code: the removal of the `iris_env_promote` and `iris_doc_edit` save wraps, the new 39.4 `headerPlanProblems` assertion and the OS-test guard were verified by the full suites and armed gates but not re-read by the review layers.
+
+**Verification.** Every package built, tested, linted and type-checked green after the last patch (shared 2065, dev 1434, admin 498, interop 669, ops 350, data 165, client-config 514 tests; `@iris-mcp/all` armed in five calls, 78 files). The four OS classes pass 7/5/5/5. `gen:bootstrap` idempotent at `7d12cd8b3a1e`; `gen:tools-list-snapshot:check`, `gen:governance-baseline:check` (141, `1e62c5ad5bf7`), `check-epics-sync.mjs`, `gen:skills:check` and `validate:prompts` clean; `measure:tools-payload` equals the README rows. Dev ran armed 3 of 3 in default parallel mode. The churn runs (3 of 3 green; old row red in 2 of 5) are carried from the implement pass: no file they exercise changed. Nothing is left on the instance (`EXECMCPTMP397A` gone, no `Story397` or `ExecuteMCPv2.Temp.` document).
+
+**Residual risks.** The plan side of `headerPlanProblems` is pinned by canned plans and by the recorded EXPLAIN, not by a live hint-less plan on the tiny scratch tables. The OS-test HS guard is not run in a namespace that lacks `HS`. A spec error for the retro: Design Notes R2 and the intent's "one tool-level exception" missed the refused-document-name path, which needed `atelierDocRequest`.

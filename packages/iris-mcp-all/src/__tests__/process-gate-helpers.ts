@@ -374,6 +374,46 @@ export async function executeMcpPost(target: IrisTarget, path: string, body: unk
   return { status: response.status, text: await response.text() };
 }
 
+/** A raw HTTP answer whose body was also parsed as JSON. */
+export interface RawIrisAnswer {
+  status: number;
+  /** The body text, byte for byte. */
+  text: string;
+  /** The body parsed as JSON; `undefined` when it is not JSON. */
+  json: unknown;
+}
+
+/**
+ * A raw GET or POST of any path of the target (for example `/api/atelier/v8/HSCUSTOM/action/search?query=x`)
+ * with the credentials of {@link atelierQuery}, whatever the answer's status: unlike the Atelier helpers it
+ * never throws on a non-200 answer, so a gate can read the status of a request the suite's own client now turns
+ * into an error. It is an oracle independent of the code under test.
+ *
+ * @param target - The IRIS instance to call.
+ * @param urlPath - The path (and query string) below the web port, with its leading slash.
+ * @param init - The method and, for a POST, the JSON body.
+ */
+export async function rawIrisRequest(
+  target: IrisTarget,
+  urlPath: string,
+  init: { method: "GET" | "POST"; body?: unknown },
+): Promise<RawIrisAnswer> {
+  const response = await fetch(`http://${target.host}:${target.port}${urlPath}`, {
+    method: init.method,
+    headers: { ...rawJsonHeaders(target), "Accept-Language": "en-US,en;q=0.9" },
+    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    signal: AbortSignal.timeout(60000),
+  });
+  const text = await response.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = undefined;
+  }
+  return { status: response.status, text, json };
+}
+
 /** Document fixtures written and compiled through one tool session. */
 export interface DocFixtures {
   /** Replace the document `docName` with `source` (removing any earlier copy first). */

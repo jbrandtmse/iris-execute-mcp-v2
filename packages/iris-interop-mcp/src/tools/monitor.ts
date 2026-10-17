@@ -11,11 +11,45 @@
  * All tools are annotated with `readOnlyHint: true` and have scope NS.
  */
 
-import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  BLOCK_REASONS,
+  IrisApiError,
+  effectiveDataPolicy,
+  type DataPolicySummary,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
+
+/**
+ * The Event Log result with every entry's `text` withheld (the `block` data policy): the entry is rebuilt with
+ * the same keys in the same order, `text` replaced in place by `textPolicy {outcome: "blocked", reason}`. Every
+ * other key of the result is kept, `dataPolicy` is added, and the withheld count is the number of entries.
+ * Withholding is by policy and by the entry's own `text` key, never by looking at the text.
+ */
+function withholdLogText(result: unknown): Record<string, unknown> {
+  const source =
+    result !== null && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {};
+  const rows = Array.isArray(source.entries) ? source.entries : [];
+  const textPolicy = { outcome: "blocked" as const, reason: BLOCK_REASONS.eventLogText() };
+  const entries = rows.map((row: unknown) => {
+    const entry =
+      row !== null && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : {};
+    const rebuilt: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(entry)) {
+      if (key === "text") rebuilt.textPolicy = textPolicy;
+      else rebuilt[key] = value;
+    }
+    if (!Object.prototype.hasOwnProperty.call(rebuilt, "textPolicy")) rebuilt.textPolicy = textPolicy;
+    return rebuilt;
+  });
+  const dataPolicy: DataPolicySummary = { policy: "block", redacted: 0, blocked: entries.length };
+  return { ...source, entries, dataPolicy };
+}
 
 // ── iris_production_logs ─────────────────────────────────────
 
@@ -26,7 +60,8 @@ export const productionLogsTool: ToolDefinition = {
     "Query event log entries from an Interoperability production. Returns entries from " +
     "Ens_Util.Log with timestamp, type, item name, and message text. " +
     "Filter by log type (Info/Warning/Error/Trace/Assert/Alert), config item name, " +
-    "and maximum row count.",
+    "and maximum row count. Under the block PHI data policy (IRIS_DATA_POLICY) each entry's text is " +
+    "withheld with a reason in textPolicy; under redact and allow it is shown unchanged.",
   inputSchema: z.object({
     type: z
       .enum(["Info", "Warning", "Error", "Trace", "Assert", "Alert"])
@@ -52,6 +87,10 @@ export const productionLogsTool: ToolDefinition = {
     openWorldHint: false,
   },
   scope: "NS",
+  // Story 39.7 (AD-26, decision #31): the policy governs every call, under `block` only. The audit entry
+  // carries `dataPolicy` from the response's own counts; under redact and allow the response has none, so the
+  // entry records the profile's policy with 0 counts.
+  dataPolicy: {},
   handler: async (args, ctx) => {
     const { type, itemName, count, namespace } = args as {
       type?: string;
@@ -60,6 +99,7 @@ export const productionLogsTool: ToolDefinition = {
       namespace?: string;
     };
 
+    const blocked = effectiveDataPolicy(ctx.config) === "block";
     const ns = ctx.resolveNamespace(namespace);
     const params = new URLSearchParams();
     params.set("namespace", ns);
@@ -71,7 +111,7 @@ export const productionLogsTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
-      const result = response.result;
+      const result = blocked ? withholdLogText(response.result) : response.result;
       return {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
@@ -87,6 +127,9 @@ export const productionLogsTool: ToolDefinition = {
               text: `Error querying production logs: ${error.message}`,
             },
           ],
+          ...(blocked
+            ? { structuredContent: { dataPolicy: { policy: "block", redacted: 0, blocked: 0 } } }
+            : {}),
           isError: true,
         };
       }

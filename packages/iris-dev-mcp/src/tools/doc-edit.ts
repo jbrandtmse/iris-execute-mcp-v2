@@ -14,6 +14,7 @@
 
 import {
   alignLines,
+  atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
   DIFF_CONTEXT_LINES,
@@ -510,10 +511,11 @@ export const docEditTool: ToolDefinition = {
 
     const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodeURIComponent(name)}`);
 
-    // The one read: the lines every check runs against, and the version the save is checked against.
+    // The one read: the lines every check runs against, and the version the save is checked against. A
+    // document name IRIS refuses is answered HTTP 400 with the reason in `result.status`, read as unreadable.
     let read: TextDocumentRead;
     try {
-      read = readTextDocument((await ctx.http.get(path)).result as DocGetResult | undefined);
+      read = readTextDocument((await atelierDocRequest(() => ctx.http.get(path))).result as DocGetResult | undefined);
     } catch (error: unknown) {
       if (error instanceof IrisApiError && error.statusCode === 404) {
         return failure(

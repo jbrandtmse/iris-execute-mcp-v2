@@ -11,6 +11,7 @@
  */
 
 import {
+  atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
   documentLines,
@@ -289,7 +290,8 @@ export const docGetTool: ToolDefinition = {
     const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`) + (qs ? `?${qs}` : "");
 
     try {
-      const response = await ctx.http.get(path);
+      // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
+      const response = await atelierDocRequest(() => ctx.http.get(path));
       if (hasRange) {
         return readLineRange(name, ns, response.result as DocGetResult | undefined, startLine, endLine);
       }
@@ -432,14 +434,15 @@ export const docPutTool: ToolDefinition = {
     const guardsStorage = isClassDocument(name) && allowStorageRegeneration !== true;
 
     let response: AtelierEnvelope;
+    // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
     if (ignoreConflict && !guardsStorage) {
-      response = await ctx.http.put(ignoreConflictPath, body);
+      response = await atelierDocRequest(() => ctx.http.put(ignoreConflictPath, body));
     } else {
       // The first request carries no version token. A new document is created by it. For an existing
       // document Atelier refuses it with HTTP 409 and writes nothing, and the refusal carries the
       // document as it is now: the guard's read, and the version the save is checked against.
       try {
-        response = await ctx.http.put(path, body);
+        response = await atelierDocRequest(() => ctx.http.put(path, body));
       } catch (error: unknown) {
         const current = currentDocument(error);
         if (current === undefined) throw error;
@@ -452,10 +455,12 @@ export const docPutTool: ToolDefinition = {
         }
 
         if (ignoreConflict) {
-          response = await ctx.http.put(ignoreConflictPath, body);
+          response = await atelierDocRequest(() => ctx.http.put(ignoreConflictPath, body));
         } else {
           try {
-            response = await ctx.http.put(path, body, { headers: { "If-None-Match": current.ts } });
+            response = await atelierDocRequest(() =>
+              ctx.http.put(path, body, { headers: { "If-None-Match": current.ts } }),
+            );
           } catch (saveError: unknown) {
             if (saveError instanceof IrisApiError && saveError.statusCode === 409) {
               return refusalResult(

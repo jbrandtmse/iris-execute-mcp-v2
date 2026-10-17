@@ -48,6 +48,40 @@ export const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "
 /** Ignore case and white space: the statement index stores a statement upper-cased and tokenized. */
 export const squash = (text: string): string => text.replace(/\s+/g, "").toUpperCase();
 
+/**
+ * The index hint (Story 39.7, DW-572) every header read of the search route carries right after `FROM` (after
+ * `%INORDER` where the statement has it), written by hand: the three bitmap indexes of `Ens.MessageHeader` whose
+ * history-wide intersections the optimizer prefers over the `TimeCreated` window.
+ */
+export const HEADER_INDEX_HINT =
+  "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName";
+
+/** The three index names {@link HEADER_INDEX_HINT} ignores. */
+const HINTED_INDEXES = ["Status", "SourceConfigName", "TargetConfigName"] as const;
+
+/**
+ * What is wrong with a header statement of the search route as the statement index stores it, and with its plan
+ * (Story 39.7, DW-572): the statement lacks the `%IGNOREINDEX` hint with the three names, the plan does not read
+ * the `Ens.MessageHeader.TimeCreated` index map with a range condition, or the plan reads a bitmap index of
+ * `Status`, `SourceConfigName` or `TargetConfigName`. The plan lines are the wording of IRIS 2026.2 (Build 221U);
+ * another build that words them differently is a re-capture of these patterns, not a regression. The measure is the
+ * access path, not the cost: the cost of a window-bounded plan can be higher than the unbounded plan's on an untuned
+ * table.
+ */
+export function headerPlanProblems(statement: string, plan: string): string[] {
+  const problems: string[] = [];
+  const text = squash(statement);
+  if (!text.includes("%IGNOREINDEX") || HINTED_INDEXES.some((name) => !text.includes(squash(`Ens.MessageHeader.${name}`)))) {
+    problems.push("the statement lacks the %IGNOREINDEX hint with Status, SourceConfigName and TargetConfigName");
+  }
+  if (!/Read index map Ens\.MessageHeader(?:\(H\))?\.TimeCreated, looping on (?:H\.)?TimeCreated \(with a range condition/.test(plan)) {
+    problems.push("the plan does not read the Ens.MessageHeader TimeCreated index map with a range condition");
+  }
+  const bitmap = /bitmap index Ens\.MessageHeader(?:\(H\))?\.(Status|SourceConfigName|TargetConfigName)\b/.exec(plan);
+  if (bitmap) problems.push(`the plan reads the ${bitmap[1]} bitmap index`);
+  return problems;
+}
+
 /** The twelve header columns the search route selects, written by hand. */
 export const HEADER_COLUMNS =
   "h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId";

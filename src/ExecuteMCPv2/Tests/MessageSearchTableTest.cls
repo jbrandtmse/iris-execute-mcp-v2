@@ -216,13 +216,14 @@ Method TestSearchTableStatementText()
 
     Set tSQL = ##class(ExecuteMCPv2.REST.MessageSearch).BodyStatement("", tHeaderWhere, tClause)
     Do $$$AssertEquals($Extract(tSQL, 1, 31), "SELECT TOP ? h.ID, h.SessionId,", "The select list starts with the header columns")
-    Do $$$AssertTrue(tSQL [ " FROM %INORDER Ens.MessageHeader h WHERE ", "The headers are read first, in window order, with no joined table")
+    Set tHint = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName"
+    Do $$$AssertTrue(tSQL [ " FROM %INORDER " _ tHint _ " Ens.MessageHeader h WHERE ", "The headers are read first, in window order, with the index hint and no joined table")
     Do $$$AssertTrue(tSQL '[ "Ens.MessageHeader h,", "No second table follows the header table")
     Do $$$AssertTrue(tSQL '[ " b ", "No body alias")
     Do $$$AssertTrue($Piece(tSQL, " FROM ", 1) '[ "b.", "Nothing of the body is selected")
     Do $$$AssertTrue($Piece(tSQL, " FROM ", 1) '[ "s0", "Nothing of the Search Table is selected")
     Do $$$AssertTrue($Piece(tSQL, " FROM ", 1) '[ "PropValue", "No Search Table value is selected")
-    Do $$$AssertEquals(tSQL, "SELECT TOP ? h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId FROM %INORDER Ens.MessageHeader h WHERE " _ tHeaderWhere _ " AND " _ tClause _ " ORDER BY h.TimeCreated, h.ID", "The whole statement is fixed text, HeaderWhere's clause and the Search Table clauses")
+    Do $$$AssertEquals(tSQL, "SELECT TOP ? h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId FROM %INORDER " _ tHint _ " Ens.MessageHeader h WHERE " _ tHeaderWhere _ " AND " _ tClause _ " ORDER BY h.TimeCreated, h.ID", "The whole statement is fixed text, HeaderWhere's clause and the Search Table clauses")
     Do $$$AssertEquals($Length(tSQL, "?") - 1, 6, "Six markers: the page size, two window bounds, the document class, the PropId and the value")
     Set tPaged = ##class(ExecuteMCPv2.REST.MessageSearch).BodyStatement("", tHeaderWhere, tClause, 1)
     Do $$$AssertEquals(tPaged, $Piece(tSQL, " ORDER BY", 1) _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?)) ORDER BY h.TimeCreated, h.ID", "The keyset clause follows the filters")
@@ -230,7 +231,7 @@ Method TestSearchTableStatementText()
     Set tTable = """Ens"".""StringRequest"""
     Set tBodyWhere = "b.""StringValue"" = ?"
     Set tJoined = ##class(ExecuteMCPv2.REST.MessageSearch).BodyStatement(tTable, "h.TimeCreated >= ?", tBodyWhere)
-    Do $$$AssertEquals(tJoined, "SELECT TOP ? h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId FROM %INORDER Ens.MessageHeader h, ""Ens"".""StringRequest"" b WHERE h.MessageBodyId = b.%ID AND h.TimeCreated >= ? AND b.""StringValue"" = ? ORDER BY h.TimeCreated, h.ID", "With a body table the statement is what Story 39.3 shipped")
+    Do $$$AssertEquals(tJoined, "SELECT TOP ? h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId FROM %INORDER " _ tHint _ " Ens.MessageHeader h, ""Ens"".""StringRequest"" b WHERE h.MessageBodyId = b.%ID AND h.TimeCreated >= ? AND b.""StringValue"" = ? ORDER BY h.TimeCreated, h.ID", "With a body table the statement is what Story 39.3 shipped")
 
     Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).BodyFilterShape("")
     Do $$$AssertEquals(..Message(tSC), "Parameter 'filters' is required for the body action: a list of 1 to 10 filters", "The default names the body action")

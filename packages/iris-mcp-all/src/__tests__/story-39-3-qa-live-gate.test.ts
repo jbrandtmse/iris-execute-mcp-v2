@@ -61,7 +61,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
-import { HEADER_COLUMNS, bodyJoinOracle, squash } from "./header-row-oracle.js";
+import { HEADER_COLUMNS, HEADER_INDEX_HINT, bodyJoinOracle, squash } from "./header-row-oracle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -434,7 +434,7 @@ describe("Story 39.3 QA: a stream accepts isNull and notNull only, whatever its 
 function planProblems(statement: string, plan: string): string[] {
   const problems: string[] = [];
   const text = squash(statement);
-  const head = squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER Ens.MessageHeader h, ${BODY_TABLE} b WHERE h.MessageBodyId = b.%ID AND`);
+  const head = squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER ${HEADER_INDEX_HINT} Ens.MessageHeader h, ${BODY_TABLE} b WHERE h.MessageBodyId = b.%ID AND`);
   if (!text.includes(head)) problems.push("the select list is not exactly the header columns read first through %INORDER with the body joined on the body ID");
   const selectList = text.split("FROM%INORDER")[0] ?? "";
   if (selectList.includes("B.")) problems.push("the select list names the body alias");
@@ -474,7 +474,7 @@ describe("Story 39.3 QA: the statements the route prepared read the headers firs
 
   it("the checker can fail: a statement that selects a body column, or does not read the headers first, is reported", (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
-    const good = squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER Ens.MessageHeader h, ${BODY_TABLE} b WHERE h.MessageBodyId = b.%ID AND b."Label" = ?`);
+    const good = squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER ${HEADER_INDEX_HINT} Ens.MessageHeader h, ${BODY_TABLE} b WHERE h.MessageBodyId = b.%ID AND b."Label" = ?`);
     const goodPlan = "Read master map Ens.MessageHeader(H).IDKEY, using the given idkey value.\nRead master map Story393.QaBody(B).IDKEY, using the given idkey value.";
     expect(planProblems(good, goodPlan), "a well-formed statement and plan").toEqual([]);
 
@@ -482,6 +482,9 @@ describe("Story 39.3 QA: the statements the route prepared read the headers firs
     expect(planProblems(withBodyColumn, goodPlan).length, "a body column in the select list").toBeGreaterThan(0);
     const withoutInorder = good.replace("%INORDER", "");
     expect(planProblems(withoutInorder, goodPlan).length, "no %INORDER").toBeGreaterThan(0);
+    const withoutHint = good.replace(squash(HEADER_INDEX_HINT), "");
+    expect(withoutHint, "the hint was in the statement").not.toBe(good);
+    expect(planProblems(withoutHint, goodPlan).length, "no index hint").toBeGreaterThan(0);
     const bodyFirst = "Read master map Story393.QaBody(B).IDKEY, using the given idkey value.\nRead master map Ens.MessageHeader(H).IDKEY, using the given idkey value.";
     expect(planProblems(good, bodyFirst).length, "the body read before the header").toBeGreaterThan(0);
     const scan = `${goodPlan}\nRead master map Story393.QaBody(B).IDKEY, looping on B.ID.`;

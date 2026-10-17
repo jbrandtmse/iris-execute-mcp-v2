@@ -28,7 +28,7 @@
  *   names as keys.
  */
 
-import { IrisHttpClient } from "./http-client.js";
+import { IrisHttpClient, type AtelierEnvelope } from "./http-client.js";
 import { IrisApiError } from "./errors.js";
 import { logger } from "./logger.js";
 
@@ -176,10 +176,11 @@ export function atelierPath(
  *
  * A request can return HTTP 200 with an empty `status.errors` envelope and
  * still fail for that document: IRIS reports the failure (for example
- * `ERROR #16021: Illegal Header Line: ...` on a PUT, which stores nothing, or
- * a document that cannot be read on a GET, which carries `content: ""`) only as
- * a string-typed `result.status`, which the shared HTTP client never throws
- * on. A successful `/doc` result carries `result.status === ""` (or no status).
+ * `ERROR #16021: Illegal Header Line: ...` on a PUT, which stores nothing) only
+ * as a string-typed `result.status`, which the shared HTTP client does not throw
+ * on. A document name Atelier refuses is answered the same way with HTTP 400
+ * (see {@link atelierDocRequest}). A successful `/doc` result carries
+ * `result.status === ""` (or no status).
  *
  * @param result - The `result` member of the `/doc` response envelope.
  * @returns The status text when it is a non-empty string; `undefined` when
@@ -190,6 +191,33 @@ export function atelierDocStatusError(result: unknown): string | undefined {
   if (result === null || typeof result !== "object") return undefined;
   const status = (result as { status?: unknown }).status;
   return typeof status === "string" && status !== "" ? status : undefined;
+}
+
+/**
+ * Run an Atelier `/doc` request and return its envelope, keeping one answer readable: a document name that
+ * Atelier refuses (for example a name with no document type) is answered HTTP 400 with an EMPTY `status.errors`
+ * and the reason only in the string `result.status` (`ERROR #16006: Document 'X' name is invalid`). The shared
+ * HTTP client throws on every non-2xx response, so that answer arrives as an {@link IrisApiError} that carries
+ * the envelope's `result`; this returns it as an envelope with that `result`, so the caller reads the per-document
+ * reason with {@link atelierDocStatusError} exactly as it reads the soft error of a 2xx answer. Every other failure
+ * (a 404, a 409, a 400 that lists errors or carries no status text, a connection failure) still throws.
+ *
+ * @param call - The request, such as `() => ctx.http.get(path)`.
+ */
+export async function atelierDocRequest<T = unknown>(call: () => Promise<AtelierEnvelope<T>>): Promise<AtelierEnvelope<T>> {
+  try {
+    return await call();
+  } catch (error: unknown) {
+    if (
+      error instanceof IrisApiError &&
+      error.statusCode === 400 &&
+      error.errors.length === 0 &&
+      atelierDocStatusError(error.result) !== undefined
+    ) {
+      return { status: { errors: [], summary: "" }, console: [], result: error.result as T };
+    }
+    throw error;
+  }
 }
 
 // ── Internal helpers ────────────────────────────────────────────────

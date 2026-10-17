@@ -78,7 +78,7 @@ import {
   sideCount,
   sideDefined,
 } from "./interop-namespace-fixture.js";
-import { HEADER_COLUMNS, searchTableCondition, searchTableOracle, squash } from "./header-row-oracle.js";
+import { HEADER_COLUMNS, HEADER_INDEX_HINT, headerPlanProblems, searchTableCondition, searchTableOracle, squash } from "./header-row-oracle.js";
 import { fuzzText } from "./fuzz-corpus.js";
 import { mulberry32 } from "../../../shared/src/__tests__/test-helpers.js";
 
@@ -1166,7 +1166,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the audit trail redacts the filters and re
 function planProblems(statement: string, plan: string): string[] {
   const problems: string[] = [];
   const text = squash(statement);
-  if (!text.includes(squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER Ens.MessageHeader h WHERE`))) {
+  if (!text.includes(squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER ${HEADER_INDEX_HINT} Ens.MessageHeader h WHERE`))) {
     problems.push("the statement is not exactly the header columns read first from the header table through %INORDER, with no other table");
   }
   const selectList = text.split("FROM%INORDER")[0] ?? "";
@@ -1187,7 +1187,7 @@ function planProblems(statement: string, plan: string): string[] {
 }
 
 describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the headers first and the Search Table by each header's body ID (Rules #19, #59)", () => {
-  const GOOD_STATEMENT = `SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER Ens.MessageHeader h WHERE h.TimeCreated >= ? AND EXISTS (SELECT 1 FROM "EnsLib_HL7"."SearchTable" s0 WHERE s0.DocId = h.MessageBodyId AND s0.PropId = ?)`;
+  const GOOD_STATEMENT = `SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER ${HEADER_INDEX_HINT} Ens.MessageHeader h WHERE h.TimeCreated >= ? AND EXISTS (SELECT 1 FROM "EnsLib_HL7"."SearchTable" s0 WHERE s0.DocId = h.MessageBodyId AND s0.PropId = ?)`;
   const GOOD_PLAN = [
     "Read master map Ens.MessageHeader(H).IDKEY, using the given idkey value.",
     "Read index map EnsLib_HL7.SearchTable(S0).indexDocId, using the given S0.DocId, S0.PropId, and S0.PropValue.",
@@ -1202,6 +1202,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
     expect(planProblems(GOOD_STATEMENT.replace("h.ID,", "h.ID, s0.PropValue,"), GOOD_PLAN).length, "a Search Table column in the select list").toBeGreaterThan(0);
     expect(planProblems(GOOD_STATEMENT.replace("%INORDER", ""), GOOD_PLAN).length, "no %INORDER").toBeGreaterThan(0);
     expect(planProblems(GOOD_STATEMENT.replace("Ens.MessageHeader h WHERE", 'Ens.MessageHeader h, "EnsLib_HL7"."SearchTable" s9 WHERE'), GOOD_PLAN).length, "a joined Search Table").toBeGreaterThan(0);
+    expect(planProblems(GOOD_STATEMENT.replace(HEADER_INDEX_HINT, ""), GOOD_PLAN).length, "no index hint").toBeGreaterThan(0);
     expect(planProblems(GOOD_STATEMENT, [...GOOD_PLAN.split("\n")].reverse().join("\n")).length, "the Search Table read before the headers").toBeGreaterThan(0);
     expect(planProblems(GOOD_STATEMENT, `${GOOD_PLAN}\nRead master map EnsLib_HL7.SearchTable(S0).indexValue, using the given S0.PropId, and looping on S0.PropValue.`).length, "a scan of the property").toBeGreaterThan(0);
     expect(planProblems(GOOD_STATEMENT, "Read master map Ens.MessageHeader(H).IDKEY, using the given idkey value.").length, "no read of the Search Table by DocId").toBeGreaterThan(0);
@@ -1234,6 +1235,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
 
     for (const row of routeStatements) {
       expect(planProblems(String(row["Statement"]), String(row["Plan"])), String(row["Statement"])).toEqual([]);
+      expect(headerPlanProblems(String(row["Statement"]), String(row["Plan"])), `the window plan of ${String(row["Statement"])}`).toEqual([]);
     }
     for (const call of calls) {
       const mine = routeStatements.filter((row) => squash(String(row["Statement"])).includes(squash(call.fragment)));

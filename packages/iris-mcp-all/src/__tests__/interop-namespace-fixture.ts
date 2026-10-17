@@ -40,7 +40,12 @@
  * `SYNTHPHI396` and appears only in PID-3 and OBX-5; the values that must survive redaction contain
  * `KEEPME396`.
  *
- * Shared by Stories 39.1 to 39.6.
+ * Story 39.7 adds the `hsLib` option of `createInteropNamespace` (the `HS` package mapped to HSLIB, so
+ * `HS.Message.XMLMessage` resolves), and the `STORY397_*` sources (`Story397.StreamBody` and `Story397.Seed`:
+ * four headers, an XML message, two stream bodies and two Event Log rows, fixture nu), which `seedBurnDown`
+ * compiles INSIDE a scratch namespace.
+ *
+ * Shared by Stories 39.1 to 39.7.
  */
 
 import { docFixtures, type WireSession } from "./process-gate-helpers.js";
@@ -67,6 +72,10 @@ export const SEEDED_IDS: Record<SeedSet, string> = {
 const INTEROP_PACKAGE_MAPPINGS = ["Ens", "EnsLib"] as const;
 const INTEROP_ROUTINE_MAPPING = "Ens*";
 const MAPPING_DATABASE = "ENSLIB";
+
+/** The package an `hsLib` namespace maps to HSLIB, so `HS.Message.XMLMessage` resolves in it. */
+const HS_PACKAGE_MAPPING = "HS";
+const HS_MAPPING_DATABASE = "HSLIB";
 
 /** A scratch name this fixture manages. */
 const FIXTURE_NAME = /^EXECMCPTMP\d+[A-Z]$/;
@@ -328,6 +337,7 @@ ClassMethod Leftovers(pNames As %String) As %String
             If ##class(Config.Databases).Exists(tName) { Do tList.%Push("database configuration "_tName) }
             If ##class(Config.MapPackages).Exists(tName, "Ens") { Do tList.%Push("package mapping "_tName_" Ens") }
             If ##class(Config.MapPackages).Exists(tName, "EnsLib") { Do tList.%Push("package mapping "_tName_" EnsLib") }
+            If ##class(Config.MapPackages).Exists(tName, "HS") { Do tList.%Push("package mapping "_tName_" HS") }
             If ##class(Config.MapRoutines).Exists(tName, "Ens*") { Do tList.%Push("routine mapping "_tName_" Ens*") }
             If $IsObject(##class(SYS.Database).%OpenId(tDir)) { Do tList.%Push("SYS.Database "_tDir) }
             If ##class(%File).DirectoryExists(tDir) { Do tList.%Push("directory "_tDir) }
@@ -415,13 +425,15 @@ export async function removeFixtureClass(dev: WireSession): Promise<void> {
  * @param admin - A session on a built iris-admin-mcp server.
  * @param dev - A session on a built iris-dev-mcp server.
  * @param name - `EXECMCPTMP<digits><capital letter>`.
- * @param options - `interop`: whether `Ens.MessageHeader` is visible in the namespace.
+ * @param options - `interop`: whether `Ens.MessageHeader` is visible in the namespace. `hsLib` (default
+ *   false): also map the `HS` package to HSLIB, so `HS.Message.XMLMessage` resolves; its data stays in the
+ *   scratch database.
  */
 export async function createInteropNamespace(
   admin: ToolSession,
   dev: ToolSession,
   name: string,
-  options: { interop: boolean },
+  options: { interop: boolean; hsLib?: boolean },
 ): Promise<void> {
   assertFixtureName(name);
   const directory = `${await fixtureMethod(dev, "ManagerDirectory", [])}${name.toLowerCase()}/`;
@@ -432,21 +444,30 @@ export async function createInteropNamespace(
     { action: "create", name, codeDatabase: name, dataDatabase: name },
     `creating namespace ${name}`,
   );
-  if (!options.interop) return;
-  for (const mapped of INTEROP_PACKAGE_MAPPINGS) {
+  if (options.interop) {
+    for (const mapped of INTEROP_PACKAGE_MAPPINGS) {
+      await callChecked(
+        admin,
+        "iris_mapping_manage",
+        { action: "create", type: "package", namespace: name, name: mapped, database: MAPPING_DATABASE },
+        `mapping package ${mapped} in ${name}`,
+      );
+    }
     await callChecked(
       admin,
       "iris_mapping_manage",
-      { action: "create", type: "package", namespace: name, name: mapped, database: MAPPING_DATABASE },
-      `mapping package ${mapped} in ${name}`,
+      { action: "create", type: "routine", namespace: name, name: INTEROP_ROUTINE_MAPPING, database: MAPPING_DATABASE },
+      `mapping routines ${INTEROP_ROUTINE_MAPPING} in ${name}`,
     );
   }
-  await callChecked(
-    admin,
-    "iris_mapping_manage",
-    { action: "create", type: "routine", namespace: name, name: INTEROP_ROUTINE_MAPPING, database: MAPPING_DATABASE },
-    `mapping routines ${INTEROP_ROUTINE_MAPPING} in ${name}`,
-  );
+  if (options.hsLib) {
+    await callChecked(
+      admin,
+      "iris_mapping_manage",
+      { action: "create", type: "package", namespace: name, name: HS_PACKAGE_MAPPING, database: HS_MAPPING_DATABASE },
+      `mapping package ${HS_PACKAGE_MAPPING} in ${name}`,
+    );
+  }
 }
 
 /**
@@ -460,7 +481,7 @@ export async function createInteropNamespace(
  */
 export async function removeInteropNamespace(admin: ToolSession, dev: ToolSession, name: string): Promise<void> {
   assertFixtureName(name);
-  for (const mapped of INTEROP_PACKAGE_MAPPINGS) {
+  for (const mapped of [...INTEROP_PACKAGE_MAPPINGS, HS_PACKAGE_MAPPING]) {
     await admin.call("iris_mapping_manage", { action: "delete", type: "package", namespace: name, name: mapped });
   }
   await admin.call("iris_mapping_manage", {
@@ -1483,6 +1504,170 @@ export async function seedCapstone(dev: WireSession, name: string): Promise<void
     { className: "Story396.Seed", args: [] },
     STORY396_IDS,
     "the capstone fixture mu",
+  );
+}
+
+/**
+ * Story 39.7 burn-down fixture nu. It is compiled INSIDE a scratch namespace that maps `HS` to HSLIB (never in
+ * HSCUSTOM), so the database file that `removeInteropNamespace` deletes takes it away. Four headers on
+ * 2001-02-03 UTC (`Story391Fixture.Add`), three bodies and two Event Log rows. Every identifying value contains
+ * `SYNTHPHI397` and every value that must survive contains `KEEPME397`.
+ *
+ * | header | session | type, status | source to target | body |
+ * |---|---|---|---|---|
+ * | 1 | 397001 | Request, Completed | Story397.Service to Story397.Router | X1, an `HS.Message.XMLMessage` |
+ * | 2 | 397001 | Response, Completed | Story397.Router to Story397.Service | S1, a `Story397.StreamBody` |
+ * | 3 | 397002 | Request, Completed | Story397.Service to Story397.Operation | S2, a `Story397.StreamBody` |
+ * | 4 | 397002 | Response, Error (IsError) | Story397.Operation to Story397.Service | none (a literal with no value) |
+ *
+ * Times are 12:00:01 to 12:00:04. Header 4 answers header 3 and carries an `ErrorStatus` that names
+ * `SYNTHPHI397-ERR`. The Event Log rows are saved directly: row 1 is an Error of `Story397.Operation` in session
+ * 397002 and row 2 an Info of `Story397.Service` with no session.
+ */
+export const STORY397_STREAM_BODY_SOURCE = String.raw`Class Story397.StreamBody Extends %Persistent
+{
+
+Property Name As %String;
+
+Property Content As %Stream.GlobalCharacter;
+
+Property Blob As %Stream.GlobalBinary;
+
+Property Second As %Stream.GlobalCharacter;
+
+}
+`;
+
+/** Seeds fixture nu; refuses any namespace that is not an `EXECMCPTMP397<capital letter>` one or that holds headers. */
+export const STORY397_SEED_SOURCE = String.raw`Class Story397.Seed
+{
+
+/// Seed fixture nu into the current namespace, which must be an empty EXECMCPTMP397 scratch namespace.
+/// Returns the JSON ID map {"headers":"1,2,3,4","logs":"1,2","xml":"1","stream":"1,2"}, or the first error text.
+ClassMethod Seed() As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP397"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP397 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    Set tContent = "<a>SYNTHPHI397-STREAM</a>"_$Char(13, 10)_"line2"_$Char(1)_"KEEPME397-TAIL"
+    Set tLong = $Translate($Justify("", 70000), " ", "x")_"SYNTHPHI397-LONG-END"
+    Set tBodies = ""
+    Set tBodies = tBodies_$ListBuild(..SaveXml())
+    Set tBodies = tBodies_$ListBuild(..SaveStreamBody("KEEPME397-S1", tContent, "SYNTHPHI397-BLOB", "KEEPME397-SECOND"))
+    Set tBodies = tBodies_$ListBuild(..SaveStreamBody("KEEPME397-S2", tLong, "", "SYNTHPHI397-SECOND-2"))
+    Set tError = ..FirstError(tBodies, 3)
+    If tError '= "" { Quit tError }
+    Set tH = ""
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(397001, 1, 9, 0, "Story397.Service", "Story397.Router", "HS.Message.XMLMessage", $List(tBodies, 1), "2001-02-03 12:00:01"))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(397001, 2, 9, 0, "Story397.Router", "Story397.Service", "Story397.StreamBody", $List(tBodies, 2), "2001-02-03 12:00:02"))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(397002, 1, 9, 0, "Story397.Service", "Story397.Operation", "Story397.StreamBody", $List(tBodies, 3), "2001-02-03 12:00:03"))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(397002, 2, 8, 1, "Story397.Operation", "Story397.Service", "", "", "2001-02-03 12:00:04", "", $List(tH, 3)))
+    Set tError = ..FirstError(tH, 4)
+    If tError '= "" { Quit tError }
+    Set tStatus = ..SetErrorStatus($List(tH, 4), "SYNTHPHI397-ERR PID|1||SYNTHPHI397-MRN-D")
+    If $Extract(tStatus, 1, 6) = "ERROR:" { Quit tStatus }
+    Set tL = ""
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story397.Operation", 397002, "SYNTHPHI397-LOG-1 PID|1||SYNTHPHI397-MRN-D", "Story397.Seed", "Seed", "2001-02-03 12:00:05.000"))
+    Set tL = tL_$ListBuild(..SaveLog(4, "Story397.Service", "", "KEEPME397-LOG-2 SYNTHPHI397-LOG-2", "", "", "2001-02-03 12:00:06.000"))
+    Set tError = ..FirstError(tL, 2)
+    If tError '= "" { Quit tError }
+    Quit {"headers":($ListToString(tH)),"logs":($ListToString(tL)),"xml":($List(tBodies, 1)),"stream":($List(tBodies, 2)_","_$List(tBodies, 3))}.%ToJSON()
+}
+
+/// The first ERROR: text among the first pCount items of the list pList, or "".
+ClassMethod FirstError(pList As %List, pCount As %Integer) As %String
+{
+    Set tError = ""
+    For tI = 1:1:pCount {
+        If $Extract($List(pList, tI), 1, 6) = "ERROR:" {
+            Set tError = $List(pList, tI)
+            Quit
+        }
+    }
+    Quit tError
+}
+
+/// Save the XML message X1 and return its ID, or the error text.
+ClassMethod SaveXml() As %String
+{
+    Set tObj = ##class(HS.Message.XMLMessage).%New()
+    Set tObj.Name = "KEEPME397-XML"
+    Do tObj.ContentStream.Write("<Patient><Name>SYNTHPHI397-XML</Name><Code>KEEPME397-CODE</Code></Patient>")
+    Set tSC = tObj.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tObj.%Id()
+}
+
+/// Save one Story397.StreamBody and return its ID, or the error text. An empty pBlob leaves the binary stream empty.
+ClassMethod SaveStreamBody(pName As %String, pContent As %String, pBlob As %String, pSecond As %String) As %String
+{
+    Set tObj = ##class(Story397.StreamBody).%New()
+    Set tObj.Name = pName
+    Do tObj.Content.Write(pContent)
+    If pBlob '= "" { Do tObj.Blob.Write(pBlob) }
+    Do tObj.Second.Write(pSecond)
+    Set tSC = tObj.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tObj.%Id()
+}
+
+/// Give the header pHeaderId an ErrorStatus whose text is pText. Returns the header ID or the error text.
+ClassMethod SetErrorStatus(pHeaderId As %Integer, pText As %String) As %String
+{
+    Set tHeader = ##class(Ens.MessageHeader).%OpenId(pHeaderId)
+    If '$IsObject(tHeader) { Quit "ERROR: header "_pHeaderId_" does not open" }
+    Set tHeader.ErrorStatus = $$$ERROR($$$GeneralError, pText)
+    Set tSC = tHeader.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit pHeaderId
+}
+
+/// Save one Event Log row directly and return its ID, or the error text. An empty pSession, pClass or pMethod is left unset.
+ClassMethod SaveLog(pType As %Integer, pItem As %String, pSession As %String, pText As %String, pClass As %String, pMethod As %String, pTime As %String) As %String
+{
+    Set tLog = ##class(Ens.Util.Log).%New()
+    Set tLog.Type = pType
+    Set tLog.ConfigName = pItem
+    Set tLog.Text = pText
+    Set tLog.TimeLogged = pTime
+    If pSession '= "" { Set tLog.SessionId = pSession }
+    If pClass '= "" { Set tLog.SourceClass = pClass }
+    If pMethod '= "" { Set tLog.SourceMethod = pMethod }
+    Set tSC = tLog.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tLog.%Id()
+}
+
+}
+`;
+
+/** The Story397 documents compiled into the scratch namespace, in compile order. */
+export const STORY397_DOCUMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["Story397.StreamBody.cls", STORY397_STREAM_BODY_SOURCE],
+  ["Story397.Seed.cls", STORY397_SEED_SOURCE],
+];
+
+/**
+ * What `Story397.Seed.Seed` returns: four headers, two Event Log rows, the XML message X1 and the stream bodies S1
+ * and S2, numbered from 1 in a fresh namespace.
+ */
+export const STORY397_IDS = { headers: "1,2,3,4", logs: "1,2", xml: "1", stream: "1,2" } as const;
+
+/**
+ * Put and compile the `Story397` classes into the scratch namespace `name`, then seed fixture nu and check the
+ * IDs it received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, `HS`-mapped, empty `EXECMCPTMP397<capital letter>` namespace.
+ */
+export async function seedBurnDown(dev: WireSession, name: string): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY397_DOCUMENTS,
+    { className: "Story397.Seed", args: [] },
+    STORY397_IDS,
+    "the burn-down fixture nu",
   );
 }
 

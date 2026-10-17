@@ -306,13 +306,15 @@ export const messageBodyTool: ToolDefinition = {
     "ID, in request order (a repeated ID gives a repeated item): the body class and ID, the body kind and " +
     "the body rendered by kind. An HL7 v2 body is shown as ER7 text (format er7). An XML virtual document " +
     "is shown as XML (xml). A persistent object is shown as JSON (json): its JSON export when its class " +
-    "extends %JSON.Adaptor, otherwise a dump of its public properties, where a stream is its class and " +
-    "size only and a list or array is its count. A stream or a stream container is shown as text (text), " +
+    "extends %JSON.Adaptor, otherwise a dump of its public properties, where a character stream shows its " +
+    "text and a binary stream its class and size, and a list or array is its count. A stream or a stream " +
+    "container is shown as text (text), " +
     "and so is the value of a header with no body class. Any other body (another virtual document such as " +
     "X12 or EDIFACT, a class that is not compiled, a body that no longer opens) is shown as its class and " +
     "ID with a reason in notShown. A header that does not exist is {id, found: false, error}.\n\n" +
     "maxChars (default 10000, max 1048576) caps the text shown per body: a longer text is cut, with " +
-    "truncated: true. It caps the output only. An XML or JSON body is serialized whole before it is cut. An " +
+    "truncated: true. It caps the output only. An XML body is serialized whole before it is cut, and so is a " +
+    "JSON export, but a character stream in a property dump is read only up to the read limit. An " +
     "HL7 v2 body is read only whole: IRIS never cuts one, so a body longer than 65536 characters is not " +
     "shown, and under the allow policy a larger maxChars (at most 1048576) reads a longer one.\n\n" +
     "PHI data policy (IRIS_DATA_POLICY, set per profile; default redact). block withholds every body. " +
@@ -344,7 +346,8 @@ export const messageBodyTool: ToolDefinition = {
       .optional()
       .describe(
         `Most characters of text shown per body (default ${DEFAULT_MAX_CHARS}, max ${MAX_MAX_CHARS}). An ` +
-          "output cap: the body is read whole first (HL7 v2) or serialized whole (XML, JSON). Under allow it " +
+          "output cap: the body is read whole first (HL7 v2) or serialized whole (XML, JSON export); a " +
+          "character stream in a property dump is read only up to the read limit. Under allow it " +
           "also raises the HL7 v2 read limit above 65536.",
       ),
     dataPolicy: z

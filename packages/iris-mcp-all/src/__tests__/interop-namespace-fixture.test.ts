@@ -9,17 +9,21 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
+  FIXTURE_CLASS_SOURCE,
   STORY392_IDS,
   STORY395_DOCUMENTS,
   STORY395_IDS,
   STORY396_DOCUMENTS,
   STORY396_IDS,
+  STORY397_DOCUMENTS,
+  STORY397_IDS,
   createInteropNamespace,
   hl7Fields,
   leftovers,
   removeInteropNamespace,
   seedBodies,
   seedBodyReader,
+  seedBurnDown,
   seedCapstone,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
@@ -59,6 +63,10 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(hl7Fields(dev, name, "MSH|^~\\&|")).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedBodyReader(dev as never, name, "a")).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedCapstone(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedBurnDown(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(createInteropNamespace(admin, dev, name, { interop: true, hsLib: true })).rejects.toThrow(
+        /not a fixture namespace name/,
+      );
 
       expect(admin.call).not.toHaveBeenCalled();
       expect(dev.call).not.toHaveBeenCalled();
@@ -132,6 +140,65 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       expect.objectContaining({ namespace: "EXECMCPTMP396A", className: "Story396.Seed", methodName: "Seed", args: [] }),
     );
     expect(STORY396_IDS).toEqual({ headers: "1,2,3,4", hl7: "1,2,3" });
+  });
+
+  it("lets a scratch name through for the Story 39.7 burn-down seed, which compiles the body class first and then seeds with no arguments", async () => {
+    const seeder = stubSession(JSON.stringify(STORY397_IDS));
+    seeder.call.mockImplementation(async () => ({
+      isError: false,
+      content: [],
+      structuredContent: { returnValue: JSON.stringify(STORY397_IDS), success: true },
+    }));
+    await expect(seedBurnDown(seeder as never, "EXECMCPTMP397A")).resolves.toBeUndefined();
+    const compiled = seeder.call.mock.calls
+      .filter(([tool]) => tool === "iris_doc_compile")
+      .map(([, args]) => (args as { doc: string }).doc);
+    expect(compiled, "the classes compiled, in order").toEqual(["Story397.StreamBody.cls", "Story397.Seed.cls"]);
+    expect(STORY397_DOCUMENTS.map(([doc]) => doc)).toEqual(compiled);
+    expect(seeder.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP397A", className: "Story397.Seed", methodName: "Seed", args: [] }),
+    );
+    expect(STORY397_IDS).toEqual({ headers: "1,2,3,4", logs: "1,2", xml: "1", stream: "1,2" });
+    expect(Object.keys(STORY397_IDS), "the key order is the order the seed writes its map in").toEqual([
+      "headers",
+      "logs",
+      "xml",
+      "stream",
+    ]);
+  });
+
+  it("maps HS to HSLIB only when hsLib is set, and removes an HS mapping in every teardown", async () => {
+    const mappingCalls = (session: ReturnType<typeof stubSession>) =>
+      session.call.mock.calls.filter(([tool]) => tool === "iris_mapping_manage").map(([, args]) => args as Record<string, unknown>);
+
+    const without = stubSession("C:/mgr/");
+    await createInteropNamespace(without, without, "EXECMCPTMP397A", { interop: true });
+    expect(mappingCalls(without).some((args) => args.name === "HS"), "no HS mapping without hsLib").toBe(false);
+
+    const withHs = stubSession("C:/mgr/");
+    await createInteropNamespace(withHs, withHs, "EXECMCPTMP397A", { interop: true, hsLib: true });
+    expect(mappingCalls(withHs)).toContainEqual({
+      action: "create",
+      type: "package",
+      namespace: "EXECMCPTMP397A",
+      name: "HS",
+      database: "HSLIB",
+    });
+
+    const teardown = stubSession("removed");
+    await removeInteropNamespace(teardown, teardown, "EXECMCPTMP397A");
+    expect(mappingCalls(teardown)).toContainEqual({
+      action: "delete",
+      type: "package",
+      namespace: "EXECMCPTMP397A",
+      name: "HS",
+    });
+  });
+
+  it("the Leftovers method of the fixture class reports an HS package mapping", () => {
+    expect(FIXTURE_CLASS_SOURCE).toContain('Config.MapPackages).Exists(tName, "HS")');
+    expect(FIXTURE_CLASS_SOURCE).toContain('"package mapping "_tName_" HS"');
   });
 
   it("refuses a seed answer that is not the ID map, naming what it returned", async () => {

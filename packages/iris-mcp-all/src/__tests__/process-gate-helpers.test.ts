@@ -22,6 +22,7 @@ import {
   lineNumber,
   pollAuditEntries,
   postEnvelope,
+  rawIrisRequest,
   routeRequests,
   skipIfReason,
   skipTest,
@@ -277,6 +278,32 @@ describe("DW-561: stub sessions", () => {
     } finally {
       await stub.close();
     }
+  });
+
+  it("rawIrisRequest answers the status, the text and the parsed JSON of any path, and does not throw on a non-200 answer (Story 39.7)", async () => {
+    const stub = await startRouteStub("/api/atelier/v8/HSCUSTOM/action/getmacrodefinition");
+    try {
+      stub.serving = true;
+      const target = stubTarget(stub.port, "u");
+      stub.reply = (request) => stubEnvelope({ echoed: request });
+      const served = await rawIrisRequest(target, "/api/atelier/v8/HSCUSTOM/action/getmacrodefinition", {
+        method: "POST",
+        body: { docname: "" },
+      });
+      expect(served.status).toBe(200);
+      expect(served.json).toEqual(stubEnvelope({ echoed: { docname: "" } }));
+      expect(JSON.parse(served.text)).toEqual(served.json);
+      const posted = stub.requests.find((request) => request.method === "POST");
+      expect(JSON.parse(posted?.body ?? "null")).toEqual({ docname: "" });
+
+      const refused = await rawIrisRequest(target, "/api/atelier/v8/HSCUSTOM/docnames/CLS/cls?filter=x", { method: "GET" });
+      expect(refused).toEqual({ status: 503, text: "", json: undefined });
+    } finally {
+      await stub.close();
+    }
+    await expect(
+      rawIrisRequest({ host: "127.0.0.1", port: "1", username: "u", password: "p", namespace: "N" }, "/x", { method: "GET" }),
+    ).rejects.toThrow();
   });
 });
 

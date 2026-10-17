@@ -44,6 +44,22 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
     },
   ],
   [
+    "iris_production_logs",
+    {
+      scope: "governed",
+      reason:
+        "Governed under block only: block withholds each entry's Event Log text with a reason. Under redact and allow the text is shown unchanged, because free text cannot be redacted reliably; restrict it with its governance key.",
+    },
+  ],
+  [
+    "iris_message_diagram",
+    {
+      scope: "governed",
+      reason:
+        "Governed under block only: block withholds the sanitized ErrorStatus text in error warnings and the diagram with a reason. Under redact and allow it is shown unchanged; restrict it with its governance key.",
+    },
+  ],
+  [
     "iris_message_resend",
     {
       scope: "governed",
@@ -88,14 +104,6 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
   ],
   ["iris_env_diff", residual("Compares configuration values across profiles, lookup values included. Restrict it with its governance key.")],
   ["iris_env_promote", residual("Copies configuration values across profiles, lookup values included. Restrict it with its governance key.")],
-  [
-    "iris_production_logs",
-    residual("The Event Log text of an adapter or a parser can carry segment text. Restrict it with its governance key."),
-  ],
-  [
-    "iris_message_diagram",
-    residual("A header's sanitized ErrorStatus, which parser errors fill with segment text, appears in the diagram. Restrict it with its governance key."),
-  ],
   ["iris_transform_test", residual("Returns the output of a transformation run on a caller-supplied message. Restrict it with its governance key.")],
   ["iris_docdb_document", residual("Returns the content of DocDB documents. Restrict it with its governance key.")],
   ["iris_docdb_find", residual("Returns the content of DocDB documents that match. Restrict it with its governance key.")],
