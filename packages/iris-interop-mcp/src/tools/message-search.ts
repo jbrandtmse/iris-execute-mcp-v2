@@ -11,8 +11,10 @@
  *   structured `{property, op, value}` filters over one exact body class. It never returns a body value.
  *   The PHI data policy governs it: under `block` it is refused with `DATA_POLICY_BLOCKED` before any IRIS
  *   call; under `redact` and `allow` it runs.
- * - **searchTable** (read): declared so the governance key and the preset rows never change; it answers
- *   with the `NOT_IMPLEMENTED` refusal and makes no IRIS call.
+ * - **searchTable** (read, Story 39.4): the same header rows, for the headers whose body has the Search
+ *   Table entries a list of `{property, op, value}` filters asks for, over one exact Search Table class
+ *   (for example an HL7 medical record number). It never returns a Search Table value. The data policy
+ *   governs it exactly as it governs `body`.
  *
  * All three keys are reads, so all are enabled by default. Every filter value is matched on the IRIS side
  * and bound as a parameter, a filter's property and operator are resolved there too, and this layer
@@ -40,12 +42,9 @@ const BASE_URL = "/api/executemcp/v2";
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-/** The actions that exist now. */
-const AVAILABLE_ACTIONS = ["headers", "body"] as const;
-
 /**
- * The operators of a body filter. The IRIS side owns the map from each to its SQL fragment
- * (`ExecuteMCPv2.REST.MessageSearch.BodyOpSql`); a later search surface shares this list.
+ * The operators of a body or Search Table filter. The IRIS side owns the map from each to its SQL fragment
+ * (`ExecuteMCPv2.REST.MessageSearch.BodyOpSql`).
  */
 export const BODY_FILTER_OPS = [
   "eq",
@@ -60,9 +59,9 @@ export const BODY_FILTER_OPS = [
   "notNull",
 ] as const;
 
-/** One structured condition on a body property. */
+/** One structured condition on a body property, or on a property of a Search Table class. */
 export interface BodyFilter {
-  /** The exact, case-sensitive name of a property of the body class. */
+  /** The exact, case-sensitive name of a property of the body class or Search Table class. */
   property: string;
   /** The operator. */
   op: (typeof BODY_FILTER_OPS)[number];
@@ -70,7 +69,7 @@ export interface BodyFilter {
   value?: string | number | boolean;
 }
 
-/** The most filters one body search takes, and the longest string value of one. */
+/** The most filters one body or Search Table search takes, and the longest string value of one. */
 const MAX_BODY_FILTERS = 10;
 const MAX_FILTER_VALUE = 1024;
 
@@ -79,6 +78,23 @@ const BODY_BLOCKED_TEXT =
   "The block data policy withholds message body data, and a body search reveals what bodies hold, so " +
   "the body action is refused. Use the headers action, or ask the operator for a looser IRIS_DATA_POLICY " +
   "for this profile.";
+
+/** The text of the refusal a `block` data policy gives the searchTable action. */
+const SEARCH_TABLE_BLOCKED_TEXT =
+  "The block data policy withholds message body data, and a Search Table lookup reveals values taken from " +
+  "message bodies, so the searchTable action is refused. Use the headers action, or ask the operator for a " +
+  "looser IRIS_DATA_POLICY for this profile.";
+
+/** What the data-policy line says a body or Search Table result holds. */
+const POLICY_LINE_TAIL = {
+  body: "the body action returns no body content.",
+  searchTable: "the searchTable action returns no Search Table or body values.",
+} as const;
+
+/** The note a Search Table result that matched nothing adds: an index holds only what was indexed. */
+const SEARCH_TABLE_NO_MATCH_NOTE =
+  "A Search Table holds only the messages indexed when they were processed (or by BuildIndex), so no " +
+  "match does not prove that no message holds the value.";
 
 // -- Response shapes (ExecuteMCPv2.REST.MessageSearch) ----------------
 
@@ -101,6 +117,8 @@ export interface RawHeaderRow {
 interface SearchResult {
   action: string;
   interopEnabled: boolean;
+  /** The searchTable action only: false when the namespace has no Search Table property at all. */
+  searchTablesConfigured?: boolean;
   rows: RawHeaderRow[];
   hasMore: boolean;
   limit: number;
@@ -318,7 +336,8 @@ export const messageSearchTool: ToolDefinition = {
   title: "Search Interoperability Messages",
   description:
     "Search Interoperability message headers in a required time window. Use it to find messages by " +
-    "item, status, session, body class or error flag, or (body action) by what their bodies hold, " +
+    "item, status, session, body class or error flag, by what their bodies hold (body action), or by an " +
+    "indexed Search Table value such as an HL7 medical record number (searchTable action), " +
     "before reading, diagramming or resending them. " +
     "Returns paged header rows only: id, sessionId, type, status, isError, sourceItem, targetItem, " +
     "bodyClassName, bodyId, UTC times (timeCreated, timeProcessed, each with a ...Raw sibling) and " +
@@ -350,31 +369,61 @@ export const messageSearchTool: ToolDefinition = {
     "DATA_POLICY_BLOCKED code and no IRIS call, so use headers or ask the operator for a looser policy; " +
     "under redact and allow it runs. Which headers match still shows what the bodies hold, so an " +
     "operator who does not accept that uses block or restricts the body key.\n" +
-    "- **searchTable** (read, enabled by default): not yet available. Calling it (with a valid window) " +
-    "returns the NOT_IMPLEMENTED refusal and makes no IRIS call; use headers or body.\n\n" +
+    "- **searchTable** (read, enabled by default): find messages by an indexed Search Table value, such as " +
+    "the HL7 messages of one medical record number. It requires searchTableClass, the exact name of a " +
+    "compiled virtual-document Search Table class in the namespace, such as EnsLib.HL7.SearchTable, and " +
+    "filters: 1 to 10 conditions combined with AND, each {property, op, value}, with the same operators and " +
+    "value rules as the body action. property is the exact, case-sensitive name of a property that class " +
+    "defines or inherits from its Search Table superclasses (not a column name). EnsLib.HL7.SearchTable has " +
+    "MSHTypeName (MSH-9 as ADT_A01), MSHControlID (MSH-10), PatientID (PID-2, every PID-3 repetition and " +
+    "PID-4: use it for a medical record number), PatientName (PID-5) and PatientAcct (PID-18). A message " +
+    "matches eq, lt, le, gt, ge, contains or startsWith when it has at least one non-empty entry for the " +
+    "property whose stored value satisfies it, so a multi-valued property such as PatientID matches on any " +
+    "of its values. ne matches when the message has no entry equal to the value, not when some entry " +
+    "differs. isNull matches when it has no non-empty entry (a message that was never indexed included) and " +
+    "notNull when it has at least one. Values are normalized as the Search Table stores them: a default " +
+    "property ignores case (give the value in any case); a String:CaseSensitive property such as " +
+    "MSHControlID compares exactly; an Integer, Numeric or Boolean property takes only eq, ne, isNull and " +
+    "notNull, with its value normalized (0007 is 7), because a range or substring of a stored number is " +
+    "meaningless; a | is stored as +; and the Search Table stores each value truncated to 256 characters, " +
+    "so a value longer than 256 characters is refused. " +
+    "Only headers of the Search Table's document class match (EnsLib.HL7.Message for EnsLib.HL7.SearchTable), " +
+    "because its entries are keyed by that class's IDs; bodyClass, when given, must be the exact name of a " +
+    "compiled class that is or extends it, and replaces it. Custom search tables (Ens.CustomSearchTable " +
+    "subclasses) are not supported. An unknown property is refused with an error that lists the class's " +
+    "configured property names. A namespace with no Search Table property returns notApplicable: true. " +
+    "A Search Table holds only the messages indexed when they were processed (or rebuilt with BuildIndex), " +
+    "so no match does not prove that no message holds the value. Everything is validated on the IRIS side " +
+    "and every value is bound as a parameter. The result is the header rows of the matching messages, plus " +
+    "dataPolicy; it never contains a Search Table value. The searchTable action is under the PHI data " +
+    "policy like body: under block it is refused with the DATA_POLICY_BLOCKED code and no IRIS call; under " +
+    "redact and allow it runs. Which headers match still shows what the bodies hold, so an operator who " +
+    "does not accept that uses block or restricts the searchTable key.\n\n" +
     "Scope: from is required (ISO 8601 with Z or an offset); to defaults to now; the window may span " +
     "at most 7 days. There is no whole-namespace mode. When paging a window close to 7 days wide, " +
     "pass the same from and to on every page, because an omitted to is recomputed as now on each " +
     "call. limit (default 100, max 500) caps the rows returned per page, not the work done: a wide " +
     "window on a busy namespace is scanned in full and can approach the ~60 s Web Gateway timeout, " +
     "so narrow the window or add filters. The body action reads the headers in the window first and " +
-    "each body by its ID, so a body filter does not reduce the work.\n\n" +
+    "each body by its ID, so a body filter does not reduce the work; the searchTable action also reads the " +
+    "headers in the window first and probes the Search Table by each header's body ID, so a Search Table " +
+    "filter does not reduce that work either.\n\n" +
     "Header filters match by equality, not by pattern (% and _ are ordinary characters), and the name " +
     "filters ignore case: item (the source or the target), source, target, status (Created, " +
     "Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed; rows report " +
     "Errored as Error), sessionId, bodyClass (on the headers action), and errorOnly (the IsError flag, " +
-    "which is separate from status Error). The filters parameter belongs to the body action only; " +
-    "the headers action refuses it.\n\n" +
+    "which is separate from status Error). The filters parameter belongs to the body and searchTable " +
+    "actions only, and searchTableClass to the searchTable action only; the other actions refuse them.\n\n" +
     "A namespace without Interoperability returns notApplicable: true with a reason, not an error.\n\n" +
     "GOVERNANCE - all three actions are reads and enabled by default. An operator can restrict one " +
-    'with IRIS_GOVERNANCE, e.g. {"global": {"iris_message_search:headers": false}}; the body key is ' +
-    "iris_message_search:body.",
+    'with IRIS_GOVERNANCE, e.g. {"global": {"iris_message_search:headers": false}}; the other keys are ' +
+    "iris_message_search:body and iris_message_search:searchTable.",
   inputSchema: z.object({
     action: z
       .enum(["headers", "body", "searchTable"])
       .describe(
-        "Action: headers (search headers), body (search by body content; needs bodyClass and filters). " +
-          "searchTable is not yet available (NOT_IMPLEMENTED).",
+        "Action: headers (search headers), body (search by body content; needs bodyClass and filters), " +
+          "searchTable (search by an indexed Search Table value; needs searchTableClass and filters).",
       ),
     from: z
       .string()
@@ -395,7 +444,17 @@ export const messageSearchTool: ToolDefinition = {
       .optional()
       .describe(
         "Message body class name. On headers it filters by class name (ignoring case). On body it is " +
-          "REQUIRED: the exact name of a persistent class with an SQL table, such as Ens.StringRequest.",
+          "REQUIRED: the exact name of a persistent class with an SQL table, such as Ens.StringRequest. " +
+          "On searchTable it is optional: the exact name of a compiled class that is or extends the " +
+          "Search Table's document class, which it replaces as the header class to match.",
+      ),
+    searchTableClass: z
+      .string()
+      .max(220)
+      .optional()
+      .describe(
+        "searchTable action only (REQUIRED there; the other actions refuse it): the exact name of a " +
+          "compiled virtual-document Search Table class in the namespace, such as EnsLib.HL7.SearchTable.",
       ),
     filters: z
       .array(
@@ -405,7 +464,7 @@ export const messageSearchTool: ToolDefinition = {
             .min(1)
             .max(128)
             .regex(/^[A-Za-z][A-Za-z0-9]*$/)
-            .describe("The exact, case-sensitive name of one property of bodyClass."),
+            .describe("The exact, case-sensitive name of one property of bodyClass (or of searchTableClass)."),
           op: z.enum(BODY_FILTER_OPS).describe("The operator."),
           value: z
             .union([z.string().min(1).max(MAX_FILTER_VALUE), z.number(), z.boolean()])
@@ -417,8 +476,9 @@ export const messageSearchTool: ToolDefinition = {
       .max(MAX_BODY_FILTERS)
       .optional()
       .describe(
-        "body action only (REQUIRED there; the headers action refuses it): 1 to 10 conditions on body " +
-          "properties, combined with AND. Each is {property, op, value}.",
+        "body and searchTable actions only (REQUIRED there; the headers action refuses it): 1 to 10 " +
+          "conditions on body properties (body) or Search Table properties (searchTable), combined with " +
+          "AND. Each is {property, op, value}.",
       ),
     errorOnly: z
       .boolean()
@@ -454,9 +514,10 @@ export const messageSearchTool: ToolDefinition = {
     body: "read",
     searchTable: "read",
   },
-  // The PHI data policy governs the body action (Story 39.3, AD-26): a body search reveals what bodies
-  // hold. `filters` carries the search values, so the audit log redacts it under redact and block.
-  dataPolicy: { actions: ["body"], phiInputs: ["filters"] },
+  // The PHI data policy governs the body and searchTable actions (Stories 39.3 and 39.4, AD-26): a body
+  // search and a Search Table lookup reveal what bodies hold. `filters` carries the search values, so the
+  // audit log redacts it under redact and block.
+  dataPolicy: { actions: ["body", "searchTable"], phiInputs: ["filters"] },
   handler: async (args, ctx) => {
     const input = args as {
       action: "headers" | "body" | "searchTable";
@@ -468,6 +529,7 @@ export const messageSearchTool: ToolDefinition = {
       status?: (typeof STATUS_LABELS)[number];
       sessionId?: number;
       bodyClass?: string;
+      searchTableClass?: string;
       filters?: BodyFilter[];
       errorOnly?: boolean;
       limit?: number;
@@ -503,37 +565,45 @@ export const messageSearchTool: ToolDefinition = {
       to = converted;
     }
 
-    if (action === "searchTable") {
-      return refusalResult(
-        REFUSAL_CODES.NOT_IMPLEMENTED,
-        `The '${action}' action of iris_message_search is not available in this version. ` +
-          "Use the 'headers' or 'body' action.",
-        { action, availableActions: [...AVAILABLE_ACTIONS] },
-      );
-    }
-
     if (action === "headers" && input.filters !== undefined) {
-      return validationError("'filters' applies only to the body action.");
+      return validationError("'filters' applies only to the body and searchTable actions.");
+    }
+    if (action !== "searchTable" && input.searchTableClass !== undefined) {
+      return validationError("'searchTableClass' applies only to the searchTable action.");
     }
 
-    // The PHI data policy of the call's profile (Story 39.3, AD-26). A body search reveals what bodies
-    // hold, so `block` refuses it after the window parse and the action checks, before every other body
-    // check and before any IRIS call.
+    // The PHI data policy of the call's profile (Stories 39.3 and 39.4, AD-26). A body search and a Search
+    // Table lookup reveal what bodies hold, so `block` refuses them after the window parse and the action
+    // checks, before every other check of the action and before any IRIS call.
     const policy = effectiveDataPolicy(ctx.config);
-    if (action === "body" && policy === "block") {
-      return refusalResult(REFUSAL_CODES.DATA_POLICY_BLOCKED, BODY_BLOCKED_TEXT, {
-        action: "body",
-        policy: "block",
-      });
+    if (policy === "block" && (action === "body" || action === "searchTable")) {
+      return refusalResult(
+        REFUSAL_CODES.DATA_POLICY_BLOCKED,
+        action === "body" ? BODY_BLOCKED_TEXT : SEARCH_TABLE_BLOCKED_TEXT,
+        { action, policy: "block" },
+      );
     }
 
     if (action === "body") {
       if (input.bodyClass === undefined || input.bodyClass === "") {
         return validationError("'bodyClass' is required for the body action: the exact name of the body class.");
       }
+    }
+    if (action === "searchTable") {
+      if (input.searchTableClass === undefined || input.searchTableClass === "") {
+        return validationError(
+          "'searchTableClass' is required for the searchTable action: the exact name of a Search Table class, " +
+            "such as EnsLib.HL7.SearchTable.",
+        );
+      }
+    }
+    if (action === "body" || action === "searchTable") {
       if (input.filters === undefined || input.filters.length === 0) {
         return validationError(
-          `'filters' is required for the body action: 1 to ${MAX_BODY_FILTERS} {property, op, value} conditions.`,
+          action === "body"
+            ? `'filters' is required for the body action: 1 to ${MAX_BODY_FILTERS} {property, op, value} conditions.`
+            : `'filters' is required for the searchTable action: 1 to ${MAX_BODY_FILTERS} {property, op, value} ` +
+                "conditions on its Search Table properties.",
         );
       }
     }
@@ -557,21 +627,22 @@ export const messageSearchTool: ToolDefinition = {
     if (input.status !== undefined) body.status = input.status;
     if (input.sessionId !== undefined) body.sessionId = input.sessionId;
     if (input.bodyClass !== undefined) body.bodyClass = input.bodyClass;
-    if (action === "body") body.filters = input.filters;
+    if (action === "searchTable") body.searchTableClass = input.searchTableClass;
+    if (action === "body" || action === "searchTable") body.filters = input.filters;
     if (input.errorOnly !== undefined) body.errorOnly = input.errorOnly;
     if (cursor !== undefined) {
       body.afterTimeCreated = cursor.t;
       body.afterId = cursor.id;
     }
 
-    // What the policy did over a body search: it returns header rows only, so nothing is redacted or
-    // withheld. The headers action carries no such field.
+    // What the policy did over a body search or a Search Table lookup: it returns header rows only, so
+    // nothing is redacted or withheld. The headers action carries no such field.
     const dataPolicy: DataPolicySummary | undefined =
-      action === "body" ? { policy, redacted: 0, blocked: 0 } : undefined;
+      action === "headers" ? undefined : { policy, redacted: 0, blocked: 0 };
     const policyLine =
-      dataPolicy === undefined
+      action === "headers" || dataPolicy === undefined
         ? []
-        : [`Data policy ${dataPolicy.policy}: header rows only; the body action returns no body content.`];
+        : [`Data policy ${dataPolicy.policy}: header rows only; ${POLICY_LINE_TAIL[action]}`];
 
     try {
       const response = await ctx.http.post<SearchResult>(`${BASE_URL}/interop/message/search`, body);
@@ -580,23 +651,32 @@ export const messageSearchTool: ToolDefinition = {
       const toRaw = result.to ?? "";
       const window = { from: utcToIso(fromRaw), fromRaw, to: utcToIso(toRaw), toRaw };
 
+      const notApplicable = (reason: string) => ({
+        content: [{ type: "text" as const, text: [reason, ...policyLine].join("\n") }],
+        structuredContent: toStructured({
+          action,
+          notApplicable: true,
+          reason,
+          rows: [],
+          hasMore: false,
+          limit: result.limit ?? limit,
+          ...window,
+          ...(dataPolicy !== undefined ? { dataPolicy } : {}),
+        }),
+      });
+
       if (result.interopEnabled === false) {
-        const reason =
+        return notApplicable(
           `Interoperability is not configured in namespace '${ns}': it has no message headers to search. ` +
-          "Search an Interoperability-enabled namespace.";
-        return {
-          content: [{ type: "text" as const, text: [reason, ...policyLine].join("\n") }],
-          structuredContent: toStructured({
-            action,
-            notApplicable: true,
-            reason,
-            rows: [],
-            hasMore: false,
-            limit: result.limit ?? limit,
-            ...window,
-            ...(dataPolicy !== undefined ? { dataPolicy } : {}),
-          }),
-        };
+            "Search an Interoperability-enabled namespace.",
+        );
+      }
+      if (action === "searchTable" && result.searchTablesConfigured === false) {
+        return notApplicable(
+          `No Search Table is configured in namespace '${ns}': it has no Search Table properties ` +
+            "(Ens.Config.SearchTableProp is empty), so there is nothing to look up. Compile or deploy a " +
+            "Search Table class there, or use the headers or body action.",
+        );
       }
 
       const rows = (result.rows ?? []).map(mapHeaderRow);
@@ -616,7 +696,7 @@ export const messageSearchTool: ToolDefinition = {
 
       const heading =
         rows.length === 0
-          ? "No message headers matched."
+          ? ["No message headers matched.", ...(action === "searchTable" ? [SEARCH_TABLE_NO_MATCH_NOTE] : [])].join(" ")
           : `${rows.length} message header(s) from ${window.from || fromRaw} to ${window.to || toRaw}` +
             (hasMore ? "; more are available - pass nextCursor as cursor." : ".");
       return {

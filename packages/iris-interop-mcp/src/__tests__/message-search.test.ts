@@ -88,15 +88,17 @@ describe("iris_message_search", () => {
       expect(messageSearchTool.defaultEnabled).toBeUndefined();
     });
 
-    it("describes the scope, the output cap, the unbuilt actions, notApplicable and the governance keys", () => {
+    it("describes the scope, the output cap, all three actions, notApplicable and the governance keys", () => {
       const description = messageSearchTool.description;
       expect(description).toContain("at most 7 days");
       expect(description).toContain("not the work done");
       expect(description).toContain("60 s Web Gateway timeout");
-      expect(description).toContain("NOT_IMPLEMENTED");
+      expect(description, "searchTable is built, so it is not described as unavailable").not.toContain("NOT_IMPLEMENTED");
+      expect(description).toContain("**searchTable** (read, enabled by default)");
       expect(description).toContain("notApplicable: true");
       expect(description).toContain("IRIS_GOVERNANCE");
       expect(description).toContain("iris_message_search:headers");
+      expect(description).toContain("iris_message_search:searchTable");
       expect(description).toContain("enabled by default");
     });
 
@@ -480,24 +482,28 @@ describe("iris_message_search", () => {
     });
   });
 
-  // -- handler: unbuilt actions ------------------------------------------------
+  // -- handler: every action is built ------------------------------------------
 
-  describe("actions that are declared but not built", () => {
-    it.each(["searchTable"])("%s returns the NOT_IMPLEMENTED refusal and makes no HTTP call", async (action) => {
-      const result = await messageSearchTool.handler(
-        { action, from: "2001-02-03T06:00:00Z", to: "2001-02-03T18:00:00Z" },
-        ctx,
-      );
+  describe("every declared action is built", () => {
+    it.each(["headers", "body", "searchTable"])(
+      "%s with nothing else is a validation error or a call, never the NOT_IMPLEMENTED refusal",
+      async (action) => {
+        mockHttp.post.mockResolvedValue(envelope({ action, interopEnabled: true, rows: [], hasMore: false, limit: 100 }));
 
-      expect(result.isError).toBe(true);
-      expect(result.structuredContent).toEqual({
-        code: "NOT_IMPLEMENTED",
-        action,
-        availableActions: ["headers", "body"],
-      });
-      expect(result.content[0]?.text).toContain(`'${action}'`);
-      expect(mockHttp.post).not.toHaveBeenCalled();
-    });
+        const result = await messageSearchTool.handler(
+          { action, from: "2001-02-03T06:00:00Z", to: "2001-02-03T18:00:00Z" },
+          ctx,
+        );
+
+        expect((result.structuredContent as { code?: unknown } | undefined)?.code).toBeUndefined();
+        if (action === "headers") {
+          expect(result.isError).toBeFalsy();
+        } else {
+          expect(result.isError).toBe(true);
+          expect(mockHttp.post).not.toHaveBeenCalled();
+        }
+      },
+    );
   });
 
   // -- handler: IRIS errors -------------------------------------------------------

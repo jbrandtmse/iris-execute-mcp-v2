@@ -1,6 +1,6 @@
 /**
  * The independent oracle for header rows, shared by the live gates that search `Ens.MessageHeader`
- * (Stories 39.1 and 39.3). It turns a row of the raw Atelier `action/query` route into the row the
+ * (Stories 39.1, 39.3 and 39.4). It turns a row of the raw Atelier `action/query` route into the row the
  * `iris_message_search` tool must return, using nothing from the code under test: the labels, the
  * time conversion and the NULL handling are written out here.
  */
@@ -64,6 +64,52 @@ export async function bodyJoinOracle(
     { ...target, namespace },
     `SELECT ${oracleColumns("h")} FROM Ens.MessageHeader h JOIN ${table} b ON b.%ID = h.MessageBodyId ` +
       `WHERE h.MessageBodyClassName = ${sqlLiteral(bodyClass)} AND ${windowSql}${extra} AND ${predicate} ` +
+      "ORDER BY h.TimeCreated, h.ID",
+  );
+  return rows.map(expectedRow);
+}
+
+/**
+ * One Search Table condition of the Story 39.4 oracle: `h.MessageBodyId [NOT] IN (...)` over the entries of
+ * the property `propName` of the Search Table extent `classExtent` (its table is `extentTable`). The
+ * PropId is resolved by this SQL's own join on `Ens_Config.SearchTableProp`, never taken from the code
+ * under test. `predicate` is written by hand with literals on the stored form (alias `s`). `negate` selects
+ * the messages with no entry that satisfies it, which is how the oracle writes `ne` and `isNull`.
+ */
+export function searchTableCondition(
+  extentTable: string,
+  classExtent: string,
+  propName: string,
+  predicate: string,
+  negate = false,
+): string {
+  return (
+    `h.MessageBodyId ${negate ? "NOT IN" : "IN"} (SELECT s.DocId FROM ${extentTable} s, Ens_Config.SearchTableProp p ` +
+    `WHERE p.ClassExtent = ${sqlLiteral(classExtent)} AND p.Name = ${sqlLiteral(propName)} AND s.PropId = p.PropId AND ${predicate})`
+  );
+}
+
+/**
+ * The hand-written `IN` / `NOT IN` oracle (Rule #36) of the Search Table gate: the `EnsLib.HL7.Message`
+ * headers inside `windowSql` whose body ID is (or, with `negate`, is not) among the entries of `propName`
+ * that satisfy `predicate`, in `TimeCreated, ID` order, as the tool must return them. `extra` adds further
+ * header conditions (it starts with ` AND `). It runs through the raw Atelier route against `namespace`.
+ */
+export async function searchTableOracle(
+  target: IrisTarget,
+  namespace: string,
+  extentTable: string,
+  classExtent: string,
+  propName: string,
+  windowSql: string,
+  predicate: string,
+  negate = false,
+  extra = "",
+): Promise<Array<Record<string, unknown>>> {
+  const rows = await atelierQuery(
+    { ...target, namespace },
+    `SELECT ${oracleColumns("h")} FROM Ens.MessageHeader h WHERE h.MessageBodyClassName = 'EnsLib.HL7.Message' ` +
+      `AND ${windowSql}${extra} AND ${searchTableCondition(extentTable, classExtent, propName, predicate, negate)} ` +
       "ORDER BY h.TimeCreated, h.ID",
   );
   return rows.map(expectedRow);

@@ -26,6 +26,10 @@
  * (a body class, a second body class for the other namespace, and the seed), plus `sideCount`, `resetSide` and
  * `sideDefined` for the injection fuzz's side-effect oracle.
  *
+ * Story 39.4 adds the `STORY394_*` class sources (an HL7 Search Table subclass, a second one for the other
+ * namespace and the seed that indexes six messages with `IndexDoc`), which `seedSearchTable` compiles
+ * INSIDE a scratch namespace.
+ *
  * Shared by Stories 39.1 to 39.6.
  */
 
@@ -826,6 +830,211 @@ export const STORY393_IDS: Record<"a" | "b", Record<string, string>> = {
 };
 
 /**
+ * Story 39.4 Search Table fixture sources. They are compiled INSIDE a scratch namespace (set `a`:
+ * `Story393.Side`, `Story394.SearchTable`, `Story394.SubMessage`, `Story394.Seed`; set `b`: `Story394.SearchTableB`,
+ * `Story394.Seed`), never in HSCUSTOM, so the database file that `removeInteropNamespace` deletes takes
+ * them away. Every identifying value contains `SYNTHPHI394`, and values that must survive a result
+ * contain `KEEPME394`.
+ *
+ * Search Table PropIds are assigned in name order when the first Search Table class of a namespace is
+ * compiled, so B compiles `Story394.SearchTableB` (which adds `AOnlyInB`) before any other Search Table
+ * work and its `PatientID` PropId (5) differs from A's (4).
+ */
+export const STORY394_SEARCH_TABLE_SOURCE = String.raw`Class Story394.SearchTable Extends EnsLib.HL7.SearchTable
+{
+
+XData SearchSpec [ XMLNamespace = "http://www.intersystems.com/EnsSearchTable" ]
+{
+<Items>
+<Item DocType="" PropName="Story394Int" PropType="Integer">[PID:1]</Item>
+<Item DocType="" PropName="Story394Empty" StoreNulls="true">{2:6}</Item>
+</Items>
+}
+
+}
+`;
+
+export const STORY394_SEARCH_TABLE_B_SOURCE = String.raw`Class Story394.SearchTableB Extends EnsLib.HL7.SearchTable
+{
+
+XData SearchSpec [ XMLNamespace = "http://www.intersystems.com/EnsSearchTable" ]
+{
+<Items>
+<Item DocType="" PropName="AOnlyInB">{2:7}</Item>
+</Items>
+}
+
+}
+`;
+
+/** A strict subclass of the HL7 document class that no header carries: `bodyClass` set to it replaces the document class in the lookup. */
+export const STORY394_SUB_MESSAGE_SOURCE = String.raw`Class Story394.SubMessage Extends EnsLib.HL7.Message
+{
+
+}
+`;
+
+/** Seeds fixture tau (set a) or the second namespace's messages (set b); uses only $ClassMethod for the table, so it compiles in both. */
+export const STORY394_SEED_SOURCE = String.raw`Class Story394.Seed
+{
+
+/// Seed set pSet ("a" or "b") into the current namespace, which must be an empty EXECMCPTMP394
+/// scratch namespace. Returns a JSON ID map.
+ClassMethod Seed(pSet As %String) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP394"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP394 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If pSet = "a" { Quit ..SeedA() }
+    If pSet = "b" { Quit ..SeedB() }
+    Quit "REFUSED: the set must be a or b"
+}
+
+ClassMethod SeedA() As %String
+{
+    Set tTable = "Story394.SearchTable"
+    Set tM = ""
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A01", "Story394-CTL-a", "0007", "SYNTHPHI394-ALT-1", "SYNTHPHI394-MRN-1", "SYNTHPHI394^ONE", ""))
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ORU^R01", "Story394-CTL-A", "12", "", "SYNTHPHI394-MRN-2~SYNTHPHI394-MRN-1", "SYNTHPHI394^TWO", "KEEPME394-MOM"))
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A08", "Story394-CTL-3", "3", "", "SYNTHPHI394-MRN-3", "", ""))
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A01", "Story394-CTL-4", "", "", "SYNTHPHI394-MRN-4", "", ""))
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A01", "Story394-CTL-5", "", "", "SYNTHPHI394-MRN-5", "", ""))
+    Set tM = tM_$ListBuild(..Save(tTable, 0, "ADT^A01", "Story394-CTL-6", "", "", "SYNTHPHI394-MRN-6", "", ""))
+    Set tError = ..FirstError(tM, 6)
+    If tError '= "" { Quit tError }
+    Set tString = ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveString("SYNTHPHI394-MRN-1")
+    If $Extract(tString, 1, 6) = "ERROR:" { Quit tString }
+    Set tH = ""
+    Set tH = tH_$ListBuild(..AddHeader(1, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 1), "2001-02-03 08:00:00"))
+    Set tH = tH_$ListBuild(..AddHeader(2, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 2), "2001-02-03 08:00:01"))
+    Set tH = tH_$ListBuild(..AddHeader(3, 1, 8, 1, "Story394.Other", "EnsLib.HL7.Message", $List(tM, 3), "2001-02-03 08:00:02"))
+    Set tH = tH_$ListBuild(..AddHeader(4, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 4), "2001-02-03 08:00:03"))
+    Set tH = tH_$ListBuild(..AddHeader(5, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 5), "2001-02-03 08:00:03"))
+    Set tH = tH_$ListBuild(..AddHeader(6, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 6), "2001-02-03 08:00:05"))
+    Set tH = tH_$ListBuild(..AddHeader(7, 1, 9, 0, "Story394.Target", "Ens.StringRequest", tString, "2001-02-03 08:00:06"))
+    Set tH = tH_$ListBuild(..AddHeader(8, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", "999", "2001-02-03 08:00:07"))
+    Set tH = tH_$ListBuild(..AddHeader(9, 1, 9, 0, "Story394.Target", "", "1", "2001-02-03 08:00:08"))
+    Set tH = tH_$ListBuild(..AddHeader(10, 2, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 1), "2001-02-03 08:00:09", 1))
+    Set tH = tH_$ListBuild(..AddHeader(11, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 1), "2001-02-04 09:00:00"))
+    Set tError = ..FirstError(tH, 11)
+    If tError '= "" { Quit tError }
+    Quit {"headers":($ListToString(tH)),"hl7":($ListToString(tM)),"string":(tString)}.%ToJSON()
+}
+
+ClassMethod SeedB() As %String
+{
+    Set tTable = "Story394.SearchTableB"
+    Set tM = ""
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A01", "Story394-CTL-B1", "", "", "SYNTHPHI394-MRN-1", "SYNTHPHI394^BONE", "", "SYNTHPHI394-AONLY-1"))
+    Set tM = tM_$ListBuild(..Save(tTable, 1, "ADT^A01", "Story394-CTL-B2", "", "", "SYNTHPHI394-MRN-B2", "SYNTHPHI394^BTWO", ""))
+    Set tError = ..FirstError(tM, 2)
+    If tError '= "" { Quit tError }
+    Set tH = ""
+    Set tH = tH_$ListBuild(..AddHeader(1, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 1), "2001-02-03 08:00:00"))
+    Set tH = tH_$ListBuild(..AddHeader(2, 1, 9, 0, "Story394.Target", "EnsLib.HL7.Message", $List(tM, 2), "2001-02-03 08:00:01"))
+    Set tError = ..FirstError(tH, 2)
+    If tError '= "" { Quit tError }
+    Quit {"headers":($ListToString(tH)),"hl7":($ListToString(tM))}.%ToJSON()
+}
+
+/// The first ERROR: text among the first pCount items of the list pList, or "".
+ClassMethod FirstError(pList As %List, pCount As %Integer) As %String
+{
+    Set tError = ""
+    For tI = 1:1:pCount {
+        If $Extract($List(pList, tI), 1, 6) = "ERROR:" {
+            Set tError = $List(pList, tI)
+            Quit
+        }
+    }
+    Quit tError
+}
+
+/// Save one header: session 394000 plus pN, a Request or Response, the source Story394.Source.
+ClassMethod AddHeader(pN As %Integer, pType As %Integer, pStatus As %Integer, pIsError As %Boolean, pTarget As %String, pBodyClass As %String, pBodyId As %String, pTime As %String, pCorresponding As %String = "") As %String
+{
+    Quit ##class(ExecuteMCPv2.Temp.Story391Fixture).Add(394000 + pN, pType, pStatus, pIsError, "Story394.Source", pTarget, pBodyClass, pBodyId, pTime, "", pCorresponding)
+}
+
+/// Save one untyped HL7 message (segments MSH, PID, PV1, CR terminators) and, when pIndex is true,
+/// index it with the Search Table class pTable. Returns the message ID or the error text.
+ClassMethod Save(pTable As %String, pIndex As %Boolean, pType As %String, pControl As %String, pPid1 As %String, pPid2 As %String, pPid3 As %String, pPid5 As %String, pPid6 As %String, pPid7 As %String = "") As %String
+{
+    Set tCR = $Char(13)
+    Set tText = "MSH|^~\&|SYNTHPHI394-APP|SYNTHPHI394-FAC|||20010203080000||"_pType_"|"_pControl_"|P|2.5.1"_tCR
+    Set tText = tText_"PID|"_pPid1_"|"_pPid2_"|"_pPid3_"||"_pPid5_"|"_pPid6_"|"_pPid7_tCR
+    Set tText = tText_"PV1|1|I"_tCR
+    Set tId = ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveHl7(tText)
+    If $Extract(tId, 1, 6) = "ERROR:" { Quit tId }
+    If pIndex {
+        Set tSC = $ClassMethod(pTable, "IndexDoc", ##class(EnsLib.HL7.Message).%OpenId(tId))
+        If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    }
+    Quit tId
+}
+
+}
+`;
+
+/** The Story394 documents compiled into a scratch namespace, in compile order, for each seed set. */
+const STORY394_DOCUMENTS: Record<"a" | "b", ReadonlyArray<readonly [string, string]>> = {
+  a: [
+    ["Story393.Side.cls", STORY393_SIDE_SOURCE],
+    ["Story394.SearchTable.cls", STORY394_SEARCH_TABLE_SOURCE],
+    ["Story394.SubMessage.cls", STORY394_SUB_MESSAGE_SOURCE],
+    ["Story394.Seed.cls", STORY394_SEED_SOURCE],
+  ],
+  b: [
+    ["Story394.SearchTableB.cls", STORY394_SEARCH_TABLE_B_SOURCE],
+    ["Story394.Seed.cls", STORY394_SEED_SOURCE],
+  ],
+};
+
+/**
+ * What `Story394.Seed.Seed` returns: namespace A has eleven headers over six HL7 messages (the sixth is
+ * not indexed) and one `Ens.StringRequest` whose body ID equals the first message's; B has two headers
+ * over two indexed messages.
+ */
+export const STORY394_IDS: Record<"a" | "b", Record<string, string>> = {
+  a: { headers: "1,2,3,4,5,6,7,8,9,10,11", hl7: "1,2,3,4,5,6", string: "1" },
+  b: { headers: "1,2", hl7: "1,2" },
+};
+
+/**
+ * Put and compile `documents` into the scratch namespace `name`, run `className.Seed(args)` there, and
+ * check the JSON ID map it returns against `expected`. `what` names the seed in error text.
+ */
+async function putCompileSeed(
+  dev: WireSession,
+  name: string,
+  documents: ReadonlyArray<readonly [string, string]>,
+  seed: { className: string; args: unknown[] },
+  expected: Record<string, string>,
+  what: string,
+): Promise<void> {
+  const docs = docFixtures(dev, name);
+  for (const [doc, source] of documents) {
+    await docs.putDoc(doc, source);
+    await docs.compileDoc(doc);
+  }
+  const content = await callChecked(
+    dev,
+    "iris_execute_classmethod",
+    { namespace: name, className: seed.className, methodName: "Seed", args: seed.args },
+    `seeding ${what} into ${name}`,
+  );
+  const returned = String(content.returnValue ?? "");
+  let ids: unknown;
+  try {
+    ids = JSON.parse(returned);
+  } catch {
+    throw new Error(`seeding ${what} into ${name} returned ${JSON.stringify(returned.slice(0, 120))}`);
+  }
+  if (JSON.stringify(ids) !== JSON.stringify(expected)) {
+    throw new Error(`seeding ${what} into ${name} returned ${JSON.stringify(returned.slice(0, 200))}`);
+  }
+}
+
+/**
  * Put and compile the `Story393` classes of `set` into the scratch namespace `name`, then seed it and
  * check the IDs it received.
  *
@@ -835,32 +1044,34 @@ export const STORY393_IDS: Record<"a" | "b", Record<string, string>> = {
  */
 export async function seedBodySearch(dev: WireSession, name: string, set: "a" | "b"): Promise<void> {
   assertFixtureName(name);
-  const docs = docFixtures(dev, name);
-  for (const [doc, source] of STORY393_DOCUMENTS[set]) {
-    await docs.putDoc(doc, source);
-    await docs.compileDoc(doc);
-  }
-  const content = await callChecked(
+  await putCompileSeed(
     dev,
-    "iris_execute_classmethod",
-    {
-      namespace: name,
-      className: "Story393.Seed",
-      methodName: "Seed",
-      args: [set, JSON.stringify(STORY393_EXACT_VALUES)],
-    },
-    `seeding the body-search set ${set} into ${name}`,
+    name,
+    STORY393_DOCUMENTS[set],
+    { className: "Story393.Seed", args: [set, JSON.stringify(STORY393_EXACT_VALUES)] },
+    STORY393_IDS[set],
+    `the body-search set ${set}`,
   );
-  const returned = String(content.returnValue ?? "");
-  let ids: unknown;
-  try {
-    ids = JSON.parse(returned);
-  } catch {
-    throw new Error(`seeding the body-search set ${set} into ${name} returned ${JSON.stringify(returned.slice(0, 120))}`);
-  }
-  if (JSON.stringify(ids) !== JSON.stringify(STORY393_IDS[set])) {
-    throw new Error(`seeding the body-search set ${set} into ${name} returned ${JSON.stringify(returned.slice(0, 200))}`);
-  }
+}
+
+/**
+ * Put and compile the `Story394` classes of `set` into the scratch namespace `name`, then seed it (the
+ * Search Table entries are made with `IndexDoc`; no production runs) and check the IDs it received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, empty `EXECMCPTMP394<capital letter>` namespace.
+ * @param set - `a` (tau: eleven headers over six messages and a string) or `b` (two indexed messages).
+ */
+export async function seedSearchTable(dev: WireSession, name: string, set: "a" | "b"): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY394_DOCUMENTS[set],
+    { className: "Story394.Seed", args: [set] },
+    STORY394_IDS[set],
+    `the Search Table set ${set}`,
+  );
 }
 
 /** Call a `Story393.Side` class method in the scratch namespace `name` and return its string result. */

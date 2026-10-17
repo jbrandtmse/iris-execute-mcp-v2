@@ -82,7 +82,7 @@ describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
     expect(governed).toEqual(declared);
     expect(governed).toEqual([
       ["iris_message_resend", ["preview"]],
-      ["iris_message_search", ["body"]],
+      ["iris_message_search", ["body", "searchTable"]],
     ]);
   });
 

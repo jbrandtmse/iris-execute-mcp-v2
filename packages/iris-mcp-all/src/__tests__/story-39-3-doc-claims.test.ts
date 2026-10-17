@@ -122,35 +122,37 @@ describe("Story 39.3: the root README names the body action, its default state a
     expect(row).not.toContain("no tool returns it yet");
   });
 
-  it("the NOT_IMPLEMENTED row names searchTable only, with headers and body available", () => {
+  it("the NOT_IMPLEMENTED row says no tool returns it any more (searchTable was built in Story 39.4)", () => {
     const row = squash(readme.split("\n").find((line) => line.startsWith("| `NOT_IMPLEMENTED` |")) ?? "");
-    expect(row).toContain("action `searchTable`");
-    expect(row).toContain("(`headers`, `body`)");
+    expect(row).toContain("No tool returns it as of Story 39.4");
+    expect(row).toContain("the code stays in the catalog");
+    expect(row).not.toContain("today: `iris_message_search` action `searchTable`");
   });
 
-  it("the governance-defaults row says body searches by body content, is refused under block, and searchTable is not implemented", () => {
+  it("the governance-defaults row says body searches by body content and is refused under block, and so is searchTable", () => {
     const row = squash(readme.split("\n").find((line) => line.startsWith("| interop | `iris_message_search` |")) ?? "");
     expect(row, "the governance-defaults row").not.toBe("");
     expect(row).toContain("all enabled by default");
     expect(row).toContain("`body` searches by body content and is refused under the `block` data policy");
-    expect(row).toContain("`searchTable` answers `NOT_IMPLEMENTED` until Story 39.4");
+    expect(row).toContain("`searchTable` finds messages by an indexed Search Table value and is refused under the `block` data policy too, Story 39.4");
+    expect(row).not.toContain("until Story 39.4");
   });
 
-  it("the policy table and the IRIS_DATA_POLICY row name the body action under block and its residual under redact", () => {
+  it("the policy table and the IRIS_DATA_POLICY row name the body and searchTable actions under block and their residual under redact", () => {
     const table = squash(readme.slice(readme.indexOf("| Value | Effect |"), readme.indexOf("**Where to set it.**")));
     expect(table, "the policy value table").toContain("| `block` |");
-    expect(table).toContain("The `body` action of `iris_message_search` is refused.");
+    expect(table).toContain("The `body` and `searchTable` actions of `iris_message_search` are refused.");
     expect(table).toContain("which headers match still shows what the bodies hold");
-    expect(table).toContain("restrict `iris_message_search:body` with its governance key");
+    expect(table).toContain("restrict `iris_message_search:body` and `iris_message_search:searchTable` with their governance keys");
 
     const row = squash(readme.split("\n").find((line) => line.startsWith("| `IRIS_DATA_POLICY` |")) ?? "");
     expect(row, "the IRIS_DATA_POLICY row").not.toBe("");
-    expect(row).toContain("`block` withholds every body and refuses the `body` action of `iris_message_search`");
+    expect(row).toContain("`block` withholds every body and refuses the `body` and `searchTable` actions of `iris_message_search`");
   });
 
-  it("the aggregate package README names the body content search and its policy refusal", () => {
+  it("the aggregate package README names the body and Search Table search and their policy refusal", () => {
     const aggregate = squash(read("packages/iris-mcp-all/README.md"));
-    expect(aggregate).toContain("message header and body content search (`iris_message_search`, read-only; the body action is refused under the `block` data policy)");
+    expect(aggregate).toContain("message header, body content and Search Table search (`iris_message_search`, read-only; the body and searchTable actions are refused under the `block` data policy)");
   });
 
   it("the PHI data policy section lists the body action first among what the policy governs", () => {
@@ -198,9 +200,11 @@ describe("Story 39.3: the interop README documents the body search", () => {
     expect(text).toContain("it is not a compliance certification");
   });
 
-  it("keeps the Story 39.1 governance sentence and now says searchTable is the one not-yet-available action", () => {
+  it("keeps the Story 39.1 governance sentence and says searchTable is built (Story 39.4), no longer declared for a later release", () => {
     expect(text).toContain("> **Governance default:** all three actions (`headers`, `body`, `searchTable`) are pure **reads**");
-    expect(text).toContain("`searchTable` is declared for a later release");
+    expect(text).toContain("`searchTable` finds them by an indexed Search Table value (below)");
+    expect(text).not.toContain("declared for a later release");
+    expect(text).not.toContain("NOT_IMPLEMENTED");
   });
 });
 
@@ -217,10 +221,10 @@ describe("Story 39.3: tool_support.md states the note, the scope row and the cou
     expect(note).toContain("(still 31 classes)");
   });
 
-  it("the scope table lists iris_message_search as governed, with the body action's default state", () => {
+  it("the scope table lists iris_message_search as governed, with the body and searchTable actions' default state", () => {
     const row = squash(toolSupport.split("\n").find((line) => line.startsWith("| `iris_message_search` | governed |")) ?? "");
     expect(row, "the governed row").not.toBe("");
-    expect(row).toContain("The `body` action is under the policy");
+    expect(row).toContain("The `body` and `searchTable` actions are under the policy");
     expect(row).toContain("`DATA_POLICY_BLOCKED` under `block`");
     expect(row).toContain("a read, enabled by default");
     expect(row).toContain("restrict `iris_message_search:headers` with its governance key");

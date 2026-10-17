@@ -47,9 +47,9 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
     "iris_message_search",
     {
       scope: "governed",
-      governedActions: ["body"],
+      governedActions: ["body", "searchTable"],
       reason:
-        "The body action is under the policy: refused under block; under redact and allow it returns header rows only. The headers action is not: for a header with no body class the body ID is the literal body value, so restrict iris_message_search:headers with its governance key. searchTable arrives in Story 39.4.",
+        "The body and searchTable actions are under the policy: refused under block; under redact and allow they return header rows only. The headers action is not: for a header with no body class the body ID is the literal body value, so restrict iris_message_search:headers with its governance key.",
     },
   ],
 

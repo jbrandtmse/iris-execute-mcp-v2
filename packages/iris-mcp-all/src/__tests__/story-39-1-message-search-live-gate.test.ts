@@ -579,8 +579,8 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
 
   const ROUTE_CASES: Array<[string, Record<string, unknown>, string]> = [
     ["no action", { namespace: NS_A, from: FROM }, "action"],
-    ["an unknown action", { ...valid, action: HOSTILE }, "action"],
-    ["an action that is not built", { ...valid, action: "searchTable" }, "action"],
+    ["an unknown action", { ...valid, action: HOSTILE }, "must be one of: headers, body, searchTable"],
+    ["searchTable without its searchTableClass", { ...valid, action: "searchTable" }, "searchTableClass"],
     ["a negative window", { ...valid, from: TO, to: FROM }, "earlier"],
     ["a window over 7 days", { ...valid, from: "2001-01-27T00:00:00Z", to: "2001-02-03T00:00:01Z" }, "7 days"],
     ["an unparseable from", { ...valid, from: HOSTILE }, "from"],
@@ -652,16 +652,28 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   }, 120000);
 });
 
-describe("Story 39.1: searchTable is declared but not built (AC-6)", () => {
-  for (const action of ["searchTable"]) {
-    it(`${action} returns the NOT_IMPLEMENTED refusal`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const result = await search(interop, { action });
+/** A valid searchTable lookup of A: the namespace has the Interoperability mappings and no Search Table. */
+const SEARCH_TABLE_LOOKUP = {
+  action: "searchTable",
+  searchTableClass: "EnsLib.HL7.SearchTable",
+  filters: [{ property: "PatientID", op: "eq", value: "x" }],
+};
 
-      expect(result.isError).toBe(true);
-      expect(result.structuredContent).toEqual({ code: "NOT_IMPLEMENTED", action, availableActions: ["headers", "body"] });
-    }, 120000);
-  }
+describe("Story 39.1 (updated by Story 39.4): searchTable is built, and a namespace with no Search Table is notApplicable (AC-6)", () => {
+  it("a valid lookup of A, which has no Search Table property, is notApplicable and not NOT_IMPLEMENTED", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const result = await search(interop, SEARCH_TABLE_LOOKUP);
+
+    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      action: "searchTable",
+      notApplicable: true,
+      rows: [],
+      hasMore: false,
+      dataPolicy: { policy: "redact", redacted: 0, blocked: 0 },
+    });
+    expect(result.structuredContent).not.toHaveProperty("code");
+  }, 120000);
 });
 
 // -- Visibility and governance --------------------------------------------------
@@ -698,7 +710,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     expect(ids(searched.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
   }, 120000);
 
-  it("an operator's disable of headers denies it, and searchTable still reaches NOT_IMPLEMENTED", async (testCtx) => {
+  it("an operator's disable of headers denies it, and searchTable still runs", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const denied = await search(governed);
     expect(denied.isError).toBe(true);
@@ -708,8 +720,9 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
       server: "default",
     });
 
-    const unbuilt = await search(governed, { action: "searchTable" });
-    expect(unbuilt.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "searchTable" });
+    const ran = await search(governed, SEARCH_TABLE_LOOKUP);
+    expect(ran.isError, textOf(ran)).toBeFalsy();
+    expect(ran.structuredContent).toMatchObject({ action: "searchTable", notApplicable: true });
   }, 120000);
 });
 
@@ -976,7 +989,7 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
 });
 
 describe("Story 39.1 (QA): the audit trail of the built server names the action and the outcome (AC-6)", () => {
-  it("records headers as ok, and body (a validation refusal) and searchTable (NOT_IMPLEMENTED) as error, with each action named", async (testCtx) => {
+  it("records headers as ok, and body and searchTable (each a validation refusal) as error, with each action named", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const dir = mkdtempSync(path.join(tmpdir(), "story-39-1-audit-"));
     const auditPath = path.join(dir, "audit.log");
@@ -988,8 +1001,11 @@ describe("Story 39.1 (QA): the audit trail of the built server names the action 
       expect(noInput.isError).toBe(true);
       expect(noInput.structuredContent).toBeUndefined();
       expect(textOf(noInput)).toContain("'bodyClass'");
-      const unbuilt = await audited.call("iris_message_search", { action: "searchTable", namespace: NS_B, from: FROM, to: TO });
-      expect(unbuilt.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "searchTable" });
+      // searchTable without its searchTableClass is refused by the tool's own validation too, so its outcome is error.
+      const noClass = await audited.call("iris_message_search", { action: "searchTable", namespace: NS_B, from: FROM, to: TO });
+      expect(noClass.isError).toBe(true);
+      expect(noClass.structuredContent).toBeUndefined();
+      expect(textOf(noClass)).toContain("'searchTableClass'");
 
       // The child process writes the log on its own schedule: wait, bounded, for the three entries.
       const deadline = Date.now() + 10000;

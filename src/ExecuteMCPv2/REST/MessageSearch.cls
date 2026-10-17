@@ -1,10 +1,10 @@
-/// REST handler for searching Interoperability messages (Stories 39.1 and 39.3).
+/// REST handler for searching Interoperability messages (Stories 39.1, 39.3 and 39.4).
 /// <p><method>MessageSearch</method> is a read-only route, <code>POST /interop/message/search</code>.
-/// Its <code>action</code> body field selects the operation: <code>headers</code> and <code>body</code>.
-/// Both filter <code>Ens.MessageHeader</code> by a required time window plus optional item,
-/// source, target, status, session, body class and error flag, and return header rows (never body data,
-/// <code>ErrorStatus</code> or <code>Description</code>) in <code>TimeCreated, ID</code> order, one page
-/// at a time, with a keyset cursor taken from the last row of the previous page.</p>
+/// Its <code>action</code> body field selects the operation: <code>headers</code>, <code>body</code> and
+/// <code>searchTable</code>. All three filter <code>Ens.MessageHeader</code> by a required time window plus
+/// optional item, source, target, status, session, body class and error flag, and return header rows (never
+/// body data, <code>ErrorStatus</code> or <code>Description</code>) in <code>TimeCreated, ID</code> order,
+/// one page at a time, with a keyset cursor taken from the last row of the previous page.</p>
 /// <p>The <code>body</code> action also takes a required <code>bodyClass</code> and a list of structured
 /// <code>filters</code>, <code>{property, op, value}</code>, and keeps the headers whose body, read by its
 /// ID in the table of that class, satisfies every one of them. Nothing a caller sends becomes SQL text:
@@ -13,6 +13,14 @@
 /// <method>BodyTable</method> takes the table name from the class dictionary, and every value is a
 /// parameter. The shape of the filters is checked by <method>BodyFilterShape</method> before the namespace
 /// is switched.</p>
+/// <p>The <code>searchTable</code> action takes a required <code>searchTableClass</code>, the exact name of
+/// a compiled virtual-document Search Table class, the same <code>filters</code>, and an optional
+/// <code>bodyClass</code> that narrows the document class. It keeps the headers of that document class
+/// whose body ID has the Search Table entries every filter asks for. A property is resolved by
+/// <method>SearchTableFilterWhere</method> to the integer PropId of its <code>Ens.Config.SearchTableProp</code>
+/// row and is bound, never written; an operator is written only by <method>SearchTableClause</method> from
+/// a closed table; a value is normalized as the Search Table stores it
+/// (<method>SearchTableValue</method>) and bound; the table name comes from the class dictionary.</p>
 /// <p><method>HeaderWhere</method> is the one place a set of header filters becomes a WHERE clause. It is
 /// shared by this handler and by <class>ExecuteMCPv2.REST.MessageResend</class>'s
 /// <code>resendFiltered</code>. It owns only that translation: each caller keeps its own required
@@ -33,11 +41,16 @@ Parameter DEFAULTLIMIT As %Integer = 100;
 /// The longest window, in days, between <code>from</code> and <code>to</code>.
 Parameter MAXWINDOWDAYS As %Integer = 7;
 
-/// The most filters one body search takes.
+/// The most filters one body or Search Table search takes.
 Parameter MAXBODYFILTERS As %Integer = 10;
 
 /// The longest string value of one body filter, in characters.
 Parameter MAXFILTERVALUE As %Integer = 1024;
+
+/// The longest value of one Search Table filter, in characters: a Search Table stores at most this many
+/// characters of a value (<code>PropValue</code> is truncated), so a longer one can never equal a stored
+/// value, and an index lookup by one past about 440 characters fails in IRIS with SQLCODE -490.
+Parameter MAXSEARCHTABLEVALUE As %Integer = 256;
 
 /// The columns every header row is read from, in the order <method>HeaderRow</method> uses them.
 /// <code>ErrorStatus</code> and <code>Description</code> are deliberately absent.
@@ -150,20 +163,21 @@ ClassMethod BodyOpSql(pOp As %String) As %String
 /// return a refusal status naming the parameter path, <code>filters</code> or
 /// <code>filters[i].property</code>, <code>.op</code>, <code>.value</code>, with <code>i</code> counted
 /// from 0. No text names a value. It touches no namespace and no dictionary, so a caller runs it before it
-/// switches namespace.
+/// switches namespace. <var>pAction</var> is the action whose input is checked (<code>body</code> or
+/// <code>searchTable</code>); it only names that action in the text of a missing <code>filters</code>.
 /// <p>The value must be a non-empty array of at most <parameter>MAXBODYFILTERS</parameter> objects, each
 /// holding only <code>property</code>, <code>op</code> and <code>value</code>. A <code>property</code> is
 /// 1 to 128 letters and digits starting with a letter. An <code>op</code> is one that
 /// <method>BodyOpSql</method> knows. A <code>value</code> is required unless the operator is
 /// <code>isNull</code> or <code>notNull</code>, where it must be absent or null; otherwise it is a string of
 /// 1 to <parameter>MAXFILTERVALUE</parameter> characters, a finite number or a boolean.</p>
-ClassMethod BodyFilterShape(pFilters As %RawString) As %Status
+ClassMethod BodyFilterShape(pFilters As %RawString, pAction As %String = "body") As %Status
 {
     Set tSC = $$$OK
     Try {
         If '$IsObject(pFilters) {
             If pFilters = "" {
-                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' is required for the body action: a list of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' is required for the " _ pAction _ " action: a list of 1 to " _ ..#MAXBODYFILTERS _ " filters")
             }
             Else {
                 Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must be an array of 1 to " _ ..#MAXBODYFILTERS _ " filters")
@@ -263,9 +277,9 @@ ClassMethod ReadFilterNumber(pFilter As %DynamicObject, Output pNumber As %Numer
 /// <code>"schema"."table"</code> with both names in double quotes, taken from the class dictionary. The
 /// class must be compiled in this namespace, its name must equal <var>pClassName</var> exactly (a case
 /// variant is another name), it must be persistent, and its schema and table names must be non-empty and
-/// hold no double quote. Otherwise the status names <code>bodyClass</code>, without its value, and
-/// <var>pTable</var> is empty.
-ClassMethod BodyTable(pClassName As %String, Output pTable As %String) As %Status
+/// hold no double quote. Otherwise the status names the parameter <var>pParam</var> (<code>bodyClass</code>
+/// unless the caller says otherwise), without its value, and <var>pTable</var> is empty.
+ClassMethod BodyTable(pClassName As %String, Output pTable As %String, pParam As %String = "bodyClass") As %Status
 {
     Set pTable = ""
     Set tFound = 0
@@ -284,7 +298,7 @@ ClassMethod BodyTable(pClassName As %String, Output pTable As %String) As %Statu
     }
     If tFound Quit $$$OK
     Set pTable = ""
-    Quit $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must name a compiled persistent class with an SQL table in this namespace")
+    Quit $$$ERROR($$$GeneralError, "Parameter '" _ pParam _ "' must name a compiled persistent class with an SQL table in this namespace")
 }
 
 /// How the property <var>pProperty</var> of the class <var>pClassName</var> may be searched, from the
@@ -387,13 +401,244 @@ ClassMethod BodyFilterWhere(pClassName As %String, pFilters As %RawString, pAlia
 /// <method>BodyFilterWhere</method>'s (alias <code>b</code>); with <var>pCursor</var> the keyset clause
 /// follows them. Every other character is fixed text or a parameter marker, in the order the caller binds:
 /// the page size, <var>pWhere</var>'s, <var>pBodyWhere</var>'s, then the cursor's three.
+/// <p>With an empty <var>pBodyTable</var> there is no joined table: the statement reads the headers alone and
+/// <var>pBodyWhere</var> is a set of conditions on the header (alias <code>h</code>), as the Search Table
+/// lookup's <method>SearchTableClause</method> clauses are.</p>
 ClassMethod BodyStatement(pBodyTable As %String, pWhere As %String, pBodyWhere As %String, pCursor As %Boolean = 0) As %String
 {
-    Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+    If pBodyTable = "" {
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
+    }
+    Else {
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+    }
     If pCursor {
         Set tSQL = tSQL _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))"
     }
     Quit tSQL _ " ORDER BY h.TimeCreated, h.ID"
+}
+
+/// Resolve the Search Table class <var>pClassName</var>: in <var>pTable</var> the delimited SQL table of its
+/// extent root (<code>"schema"."table"</code>, taken from the class dictionary by <method>BodyTable</method>)
+/// and in <var>pDocClass</var> its <code>DOCCLASS</code>. The class must be compiled in this namespace under
+/// exactly that name (a case variant is another name), persistent, not abstract and a subclass of
+/// <class>Ens.VDoc.SearchTable</class>; it must have an extent root with an SQL table; and its
+/// <code>DOCCLASS</code> must name a compiled class. Otherwise the status names
+/// <code>searchTableClass</code>, without its value, and both outputs are empty.
+ClassMethod SearchTableClass(pClassName As %String, Output pTable As %String, Output pDocClass As %String) As %Status
+{
+    Set pTable = ""
+    Set pDocClass = ""
+    Set tFound = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        If $IsObject(tClass) && (tClass.Name = pClassName) && (tClass.ClassType = "persistent") && 'tClass.Abstract && $ClassMethod(pClassName, "%Extends", "Ens.VDoc.SearchTable") {
+            Set tRoot = ##class(Ens.VDoc.SearchTableGenerator).GetExtentSuperclass(pClassName)
+            If tRoot '= "" {
+                Set tDocClass = $Parameter(pClassName, "DOCCLASS")
+                If (tDocClass '= "") && ##class(%Dictionary.CompiledClass).%ExistsId(tDocClass) && $$$ISOK(..BodyTable(tRoot, .tTable, "searchTableClass")) {
+                    Set pTable = tTable
+                    Set pDocClass = tDocClass
+                    Set tFound = 1
+                }
+            }
+        }
+    } Catch {
+        Set tFound = 0
+    }
+    If tFound Quit $$$OK
+    Set pTable = ""
+    Set pDocClass = ""
+    Quit $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' must be the exact, case-sensitive name of a compiled Search Table class (a persistent subclass of Ens.VDoc.SearchTable with an SQL table and a document class) in this namespace")
+}
+
+/// Whether the body class <var>pBodyClass</var> is a compiled class, under exactly that name, that is or
+/// extends the document class <var>pDocClass</var>. Anything that cannot be determined is false.
+ClassMethod BodyClassExtends(pBodyClass As %String, pDocClass As %String) As %Boolean
+{
+    Set tResult = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pBodyClass)
+        If $IsObject(tClass) && (tClass.Name = pBodyClass) {
+            Set tResult = +$ClassMethod(pBodyClass, "%Extends", pDocClass)
+        }
+    } Catch {
+        Set tResult = 0
+    }
+    Quit tResult
+}
+
+/// Whether this namespace has any Search Table property, a row of <class>Ens.Config.SearchTableProp</class>.
+/// The statement is fixed. A SQL failure is thrown, so a caller's Try/Catch answers it with an error and
+/// it can never read as "none configured".
+ClassMethod SearchTablesConfigured() As %Boolean
+{
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 PropId FROM Ens_Config.SearchTableProp")
+    If tRS.%SQLCODE < 0 {
+        Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+    }
+    Quit tRS.%Next()
+}
+
+/// The value <var>pValue</var> of a Search Table filter as the Search Table stores it for a property of
+/// type <var>pPropType</var>, which is how <class>Ens.VDoc.SearchTableGenerator</class> normalizes a value
+/// before it stores it: a case-insensitive string is lower-cased, an integer is truncated (<code>+v\1</code>),
+/// a numeric is a number (<code>+v</code>), a boolean is 1 for true, yes and on and otherwise the truth of
+/// the value, and every other type (a case-sensitive string, a date and time, and any type this method does
+/// not know) is unchanged. A <code>|</code> is stored as <code>+</code>, so it is replaced last, in every type.
+ClassMethod SearchTableValue(pPropType As %String, pValue As %String) As %String
+{
+    Set tValue = $Case(pPropType, "String:CaseInsensitive": $ZConvert(pValue, "L"), "Integer": +pValue\1, "Numeric": +pValue, "Boolean": $Case($ZConvert(pValue, "L"), "true": 1, "yes": 1, "on": 1, : ''pValue), : pValue)
+    Quit $Replace(tValue, "|", "+")
+}
+
+/// Whether the operator <var>pOp</var> may be used on a Search Table property of type <var>pPropType</var>.
+/// The ten operators of <method>BodyOpSql</method> may be used on a string or a date and time. An integer, a
+/// numeric and a boolean are stored as text, so a range, a substring or a prefix of one would compare text
+/// and mean nothing: they accept only <code>eq</code>, <code>ne</code>, <code>isNull</code> and
+/// <code>notNull</code>. Anything that is not one of the ten operators is refused.
+ClassMethod SearchTableOpAllowed(pPropType As %String, pOp As %String) As %Boolean
+{
+    If ..BodyOpSql(pOp) = "" Quit 0
+    If (pPropType = "Integer") || (pPropType = "Numeric") || (pPropType = "Boolean") {
+        Quit (pOp = "eq") || (pOp = "ne") || (pOp = "isNull") || (pOp = "notNull")
+    }
+    Quit 1
+}
+
+/// The condition on a header (alias <code>h</code>) for filter number <var>pIndex</var>: a correlated
+/// <code>EXISTS</code> or <code>NOT EXISTS</code> over the Search Table <var>pTable</var>
+/// (<method>SearchTableClass</method>'s delimited name, alias <code>s</code><var>pIndex</var>), probing it by
+/// the header's body ID and a PropId. The marker <code>?</code> stands for the PropId, then, except for
+/// <code>isNull</code> and <code>notNull</code>, for the value, so the caller binds them in that order.
+/// <code>eq lt le gt ge contains startsWith</code> need an entry whose value is not the empty StoreNulls
+/// marker and satisfies <method>BodyOpSql</method>'s fragment; <code>ne</code> needs that there is no entry
+/// equal to the value; <code>notNull</code> needs an entry that is not the marker and <code>isNull</code>
+/// that there is none. A <code>String:CaseSensitive</code> value is compared with <code>%EXACT</code>; any
+/// other type is compared by the column's collation. An operator that is not one of the ten gives
+/// <code>""</code>. This is the only place an operator becomes part of the lookup, and it returns no part of
+/// its arguments.
+ClassMethod SearchTableClause(pIndex As %Integer, pTable As %String, pPropType As %String, pOp As %String) As %String
+{
+    Set tFragment = ..BodyOpSql(pOp)
+    If tFragment = "" Quit ""
+    Set tAlias = "s" _ (+pIndex)
+    Set tColumn = $Select(pPropType = "String:CaseSensitive": "%EXACT(" _ tAlias _ ".PropValue)", 1: tAlias _ ".PropValue")
+    Set tProbe = "SELECT 1 FROM " _ pTable _ " " _ tAlias _ " WHERE " _ tAlias _ ".DocId = h.MessageBodyId AND " _ tAlias _ ".PropId = ?"
+    Set tEntry = tProbe _ " AND " _ tAlias _ ".PropValue <> ''"
+    If pOp = "ne" Quit "NOT EXISTS (" _ tProbe _ " AND " _ tColumn _ " = ?)"
+    If pOp = "notNull" Quit "EXISTS (" _ tEntry _ ")"
+    If pOp = "isNull" Quit "NOT EXISTS (" _ tEntry _ ")"
+    Quit "EXISTS (" _ tEntry _ " AND " _ tColumn _ " " _ tFragment _ ")"
+}
+
+/// The shape of the Search Table filters <var>pFilters</var>, checked before the namespace is switched and
+/// again by <method>SearchTableFilterWhere</method>: <method>BodyFilterShape</method>'s rules for the
+/// <code>searchTable</code> action, plus a value of at most <parameter>MAXSEARCHTABLEVALUE</parameter>
+/// characters for every operator that takes one (a Search Table stores no more, and an index lookup by a much
+/// longer value fails in IRIS). A refusal names <code>filters[i].value</code>, never the value. It touches no
+/// namespace and no dictionary.
+ClassMethod SearchTableShape(pFilters As %RawString) As %Status
+{
+    Set tSC = ..BodyFilterShape(pFilters, "searchTable")
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        For tI = 0:1:pFilters.%Size() - 1 {
+            Set tFilter = pFilters.%Get(tI)
+            Set tOp = tFilter.%Get("op")
+            If (tOp '= "isNull") && (tOp '= "notNull") && ($Length(tFilter.%Get("value")) > ..#MAXSEARCHTABLEVALUE) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters[" _ tI _ "].value' is longer than the " _ ..#MAXSEARCHTABLEVALUE _ " characters a Search Table stores")
+                Quit
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    Quit tSC
+}
+
+/// Translate the Search Table filters <var>pFilters</var> of the class <var>pClassName</var> (its extent
+/// table is <var>pTable</var>, from <method>SearchTableClass</method>) into a WHERE clause body and its
+/// parameters, <var>pWhere</var> and <var>pParams</var> as <method>HeaderWhere</method> returns them. The
+/// shape is checked again here with <method>SearchTableShape</method>, so a caller cannot skip it. The class's
+/// properties are listed once, by <class>Ens.VDoc.SearchTableGenerator</class>'s <code>getPropsList</code>,
+/// which returns those of the class and its Search Table superclasses; each filter's <code>property</code>
+/// must equal the name of one of them exactly. Each filter becomes the <method>SearchTableClause</method> of
+/// its operator and the property's type, and its parameters are the property's integer PropId, then, except
+/// for <code>isNull</code> and <code>notNull</code>, the value normalized by <method>SearchTableValue</method>.
+/// The clauses are joined with <code>" AND "</code>. A property that is not one of the class's is refused,
+/// and so is an operator the property's type does not allow, with a status naming
+/// <code>filters[i].property</code> or <code>filters[i].op</code>, never the value; the property refusal lists
+/// the class's property names (at most 50), which are configuration.
+ClassMethod SearchTableFilterWhere(pClassName As %String, pTable As %String, pFilters As %RawString, Output pWhere As %String, Output pParams) As %Status
+{
+    Set pWhere = ""
+    Kill pParams
+    Set pParams = 0
+    Set tSC = ..SearchTableShape(pFilters)
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        Kill tProps, tByName
+        Set tSC = ##class(Ens.VDoc.SearchTableGenerator).getPropsList(pClassName, .tProps)
+        If $$$ISERR(tSC) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' names a class whose Search Table properties cannot be listed")
+        }
+        Else {
+            For tN = 1:1:+$Get(tProps) {
+                Set tByName(tProps(tN)) = $ListBuild(tProps(tN, "PropId"), tProps(tN, "PropType"))
+            }
+            For tI = 0:1:pFilters.%Size() - 1 {
+                Set tPath = "filters[" _ tI _ "]"
+                Set tFilter = pFilters.%Get(tI)
+                Set tProperty = tFilter.%Get("property")
+                Set tOp = tFilter.%Get("op")
+                If '$Data(tByName(tProperty)) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is not a property of this Search Table class" _ ..PropertyNames(.tByName))
+                    Quit
+                }
+                Set tPropId = $List(tByName(tProperty), 1)
+                Set tPropType = $List(tByName(tProperty), 2)
+                If '..SearchTableOpAllowed(tPropType, tOp) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' is not allowed for a Search Table property of type " _ tPropType _ ": an integer, numeric or boolean property accepts only eq, ne, isNull and notNull")
+                    Quit
+                }
+                Set pWhere = pWhere _ $Select(tI > 0: " AND ", 1: "") _ ..SearchTableClause(tI, pTable, tPropType, tOp)
+                Set pParams = pParams + 1
+                Set pParams(pParams) = tPropId
+                If (tOp '= "isNull") && (tOp '= "notNull") {
+                    Set pParams = pParams + 1
+                    Set pParams(pParams) = ..SearchTableValue(tPropType, tFilter.%Get("value"))
+                }
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    If $$$ISERR(tSC) {
+        Set pWhere = ""
+        Kill pParams
+        Set pParams = 0
+    }
+    Quit tSC
+}
+
+/// The tail of a property refusal: the names in the array <var>pByName</var> (subscripts), in order, at most
+/// 50 of them and then how many more, or a note that there are none.
+ClassMethod PropertyNames(ByRef pByName) As %String
+{
+    Set tNames = ""
+    Set tCount = 0
+    Set tName = ""
+    For {
+        Set tName = $Order(pByName(tName))
+        If tName = "" Quit
+        Set tCount = tCount + 1
+        If tCount <= 50 {
+            Set tNames = tNames _ $Select(tNames = "": "", 1: ", ") _ tName
+        }
+    }
+    If tCount = 0 Quit ": the class has no configured properties"
+    Quit ". Use one of: " _ tNames _ $Select(tCount > 50: " and " _ (tCount - 50) _ " more", 1: "")
 }
 
 /// The label of an <code>Ens.DataType.MessageType</code> code, or <code>"Unknown"</code>.
@@ -525,24 +770,31 @@ ClassMethod IsTimestamp(pNorm As %String) As %Boolean
     Quit $$$ISOK(##class(ExecuteMCPv2.REST.MessageResend).WindowDays(pNorm, pNorm, .tDays))
 }
 
-/// Search message headers. The JSON body holds <code>action</code> (<code>headers</code> or
-/// <code>body</code>), <code>from</code> (required, ISO-8601 or ODBC UTC), optional <code>to</code> (default
-/// now, to the millisecond, so a header created in the current second is inside the window), at most
-/// 7 days after <code>from</code>, optional <code>item</code>, <code>source</code>, <code>target</code>,
-/// <code>status</code> (a label, <code>Errored</code> or <code>Error</code> for status 8),
-/// <code>sessionId</code>, <code>bodyClass</code>, <code>errorOnly</code>, <code>limit</code>
-/// (1 to 500, default 100), the keyset cursor <code>afterTimeCreated</code> with <code>afterId</code>,
-/// and <code>namespace</code>. The <code>body</code> action requires <code>bodyClass</code>, which is then
-/// the exact name of a persistent class and matches only the headers of that class, and
-/// <code>filters</code>, a list of 1 to 10 <code>{property, op, value}</code> objects (see
-/// <method>BodyFilterShape</method>); the <code>headers</code> action refuses a <code>filters</code> key.
-/// <p>The result is <code>{action, interopEnabled, rows, hasMore, limit, from, to}</code>.
+/// Search message headers. The JSON body holds <code>action</code> (<code>headers</code>,
+/// <code>body</code> or <code>searchTable</code>), <code>from</code> (required, ISO-8601 or ODBC UTC),
+/// optional <code>to</code> (default now, to the millisecond, so a header created in the current second is
+/// inside the window), at most 7 days after <code>from</code>, optional <code>item</code>,
+/// <code>source</code>, <code>target</code>, <code>status</code> (a label, <code>Errored</code> or
+/// <code>Error</code> for status 8), <code>sessionId</code>, <code>bodyClass</code>, <code>errorOnly</code>,
+/// <code>limit</code> (1 to 500, default 100), the keyset cursor <code>afterTimeCreated</code> with
+/// <code>afterId</code>, and <code>namespace</code>. The <code>body</code> action requires
+/// <code>bodyClass</code>, which is then the exact name of a persistent class and matches only the headers
+/// of that class, and <code>filters</code>, a list of 1 to 10 <code>{property, op, value}</code> objects (see
+/// <method>BodyFilterShape</method>). The <code>searchTable</code> action requires
+/// <code>searchTableClass</code> and <code>filters</code> and takes an optional <code>bodyClass</code>, the
+/// exact name of a compiled class that is, or extends, the Search Table's document class (it then replaces
+/// that class as the header class predicate). The <code>headers</code> action refuses a <code>filters</code>
+/// key, and <code>searchTableClass</code> is refused on every action but <code>searchTable</code>.
+/// <p>The result is <code>{action, interopEnabled, rows, hasMore, limit, from, to}</code>, and for
+/// <code>searchTable</code> also <code>searchTablesConfigured</code>.
 /// <code>interopEnabled</code> is false, with no rows, when the namespace has no
-/// <code>Ens.MessageHeader</code>. Every refusal is the standard envelope with <code>result:{}</code>;
-/// nothing is read before the input is valid, and nothing is written. A failure of the body statement's
-/// preparation carries its sanitized status, which holds only dictionary names and parameter markers; a
-/// failure while it runs is the fixed text <code>The body search failed with SQLCODE n.</code>, so no
-/// response names a filter value or body content.</p>
+/// <code>Ens.MessageHeader</code>; <code>searchTablesConfigured</code> is false, with no rows, when it has no
+/// <code>Ens.Config.SearchTableProp</code> row, a check that comes before the class is looked up. Every
+/// refusal is the standard envelope with <code>result:{}</code>; nothing is read before the input is valid,
+/// and nothing is written. A failure of the body or Search Table statement's preparation carries its
+/// sanitized status, which holds only dictionary names and parameter markers; a failure while it runs is the
+/// fixed text <code>The body search failed with SQLCODE n.</code> or <code>The Search Table lookup failed
+/// with SQLCODE n.</code>, so no response names a filter value or body content.</p>
 ClassMethod MessageSearch() As %Status
 {
     Set tSC = $$$OK
@@ -559,12 +811,16 @@ ClassMethod MessageSearch() As %Status
         Set tAction = tBody.%Get("action")
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
         If $$$ISERR(tSC) Quit
-        If (tAction '= "headers") && (tAction '= "body") {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: headers, body")
+        If (tAction '= "headers") && (tAction '= "body") && (tAction '= "searchTable") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: headers, body, searchTable")
             Quit
         }
         If (tAction = "headers") && tBody.%IsDefined("filters") {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' applies only to the body action")
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' applies only to the body and searchTable actions")
+            Quit
+        }
+        If (tAction '= "searchTable") && tBody.%IsDefined("searchTableClass") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' applies only to the searchTable action")
             Quit
         }
 
@@ -581,6 +837,8 @@ ClassMethod MessageSearch() As %Status
         Set tSC = ..ReadString(tBody, "target", 128, .tTarget)
         If $$$ISERR(tSC) Quit
         Set tSC = ..ReadString(tBody, "bodyClass", 220, .tBodyClass)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "searchTableClass", 220, .tSearchTableClass)
         If $$$ISERR(tSC) Quit
         Set tSC = ..ReadString(tBody, "status", 64, .tStatusLabel)
         If $$$ISERR(tSC) Quit
@@ -648,17 +906,33 @@ ClassMethod MessageSearch() As %Status
             }
         }
 
-        ; The body action's whole input is checked here, before the namespace is switched.
+        ; The body and searchTable actions' whole input is checked here, before the namespace is switched.
+        Set tClassPattern = "^%?[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*$"
         Set tBodyFilters = ""
         If tAction = "body" {
             Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tBodyClass, "bodyClass")
             If $$$ISERR(tSC) Quit
-            If '$Match(tBodyClass, "^%?[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*$") {
+            If '$Match(tBodyClass, tClassPattern) {
                 Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must be a class name, such as Package.Class")
                 Quit
             }
             Set tBodyFilters = tBody.%Get("filters")
             Set tSC = ..BodyFilterShape(tBodyFilters)
+            If $$$ISERR(tSC) Quit
+        }
+        ElseIf tAction = "searchTable" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSearchTableClass, "searchTableClass")
+            If $$$ISERR(tSC) Quit
+            If '$Match(tSearchTableClass, tClassPattern) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            If (tBodyClass '= "") && '$Match(tBodyClass, tClassPattern) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            Set tBodyFilters = tBody.%Get("filters")
+            Set tSC = ..SearchTableShape(tBodyFilters)
             If $$$ISERR(tSC) Quit
         }
 
@@ -706,10 +980,41 @@ ClassMethod MessageSearch() As %Status
             If $$$ISERR(tSC) Quit
         }
 
+        ; The searchTable action reads the headers of the document class first, in window order, and probes
+        ; the Search Table by each header's body ID. It is checked in this order: a namespace with no Search
+        ; Table property at all is not applicable, then the class, then bodyClass, then each filter.
+        If tAction = "searchTable" {
+            If '..SearchTablesConfigured() {
+                Do tResult.%Set("interopEnabled", 1, "boolean")
+                Do tResult.%Set("searchTablesConfigured", 0, "boolean")
+                Do tResult.%Set("rows", [])
+                Do tResult.%Set("hasMore", 0, "boolean")
+                Quit
+            }
+            Set tSC = ..SearchTableClass(tSearchTableClass, .tSearchTable, .tDocClass)
+            If $$$ISERR(tSC) Quit
+            Set tHeaderClass = tDocClass
+            If tBodyClass '= "" {
+                If '..BodyClassExtends(tBodyClass, tDocClass) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must name a compiled class that is, or extends, the Search Table's document class " _ tDocClass)
+                    Quit
+                }
+                Set tHeaderClass = tBodyClass
+            }
+            Do tFilters.%Set("bodyClass", tHeaderClass)
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams, "h")
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..SearchTableFilterWhere(tSearchTableClass, tSearchTable, tBodyFilters, .tBodyWhere, .tBodyParams)
+            If $$$ISERR(tSC) Quit
+        }
+
         ; TOP is a parameter and the keyset clause comes after the filters, so the parameters
-        ; are the page size, then HeaderWhere's, then the body filters', then the cursor's.
+        ; are the page size, then HeaderWhere's, then the body or Search Table filters', then the cursor's.
         If tAction = "body" {
             Set tSQL = ..BodyStatement(tBodyTable, tWhere, tBodyWhere, tAfterNorm '= "")
+        }
+        ElseIf tAction = "searchTable" {
+            Set tSQL = ..BodyStatement("", tWhere, tBodyWhere, tAfterNorm '= "")
         }
         Else {
             Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM Ens.MessageHeader WHERE " _ tWhere
@@ -723,7 +1028,7 @@ ClassMethod MessageSearch() As %Status
         For tI = 1:1:tWhereParams {
             Set tArgs = tArgs + 1, tArgs(tArgs) = tWhereParams(tI)
         }
-        If tAction = "body" {
+        If (tAction = "body") || (tAction = "searchTable") {
             For tI = 1:1:tBodyParams {
                 Set tArgs = tArgs + 1, tArgs(tArgs) = tBodyParams(tI)
             }
@@ -742,6 +1047,9 @@ ClassMethod MessageSearch() As %Status
         If tRS.%SQLCODE < 0 {
             If tAction = "body" {
                 Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            }
+            ElseIf tAction = "searchTable" {
+                Set tSC = $$$ERROR($$$GeneralError, "The Search Table lookup failed with SQLCODE " _ tRS.%SQLCODE _ ".")
             }
             Else {
                 Set tSC = $$$ERROR($$$GeneralError, "SQL error: " _ tRS.%Message)
@@ -762,7 +1070,14 @@ ClassMethod MessageSearch() As %Status
             Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
             Quit
         }
+        If (tAction = "searchTable") && (tRS.%SQLCODE < 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "The Search Table lookup failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            Quit
+        }
         Do tResult.%Set("interopEnabled", 1, "boolean")
+        If tAction = "searchTable" {
+            Do tResult.%Set("searchTablesConfigured", 1, "boolean")
+        }
         Do tResult.%Set("rows", tRows)
         Do tResult.%Set("hasMore", tHasMore, "boolean")
     }

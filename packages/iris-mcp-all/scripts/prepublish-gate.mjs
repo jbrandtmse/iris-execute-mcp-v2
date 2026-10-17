@@ -165,6 +165,13 @@ const gateTestFiles = [
   // iris-admin-mcp dists and raw HTTP to the route. Writes only the disposable namespace and database EXECMCPTMP393Q (its database files and
   // directory too) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-39-3-qa-live-gate.test.ts",
+  // Story 39.4: `iris_message_search` `searchTable`, its data policy and audit rows over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, the injection fuzz over raw HTTP to the route, and the plan of the statements the route prepared
+  // (read back from INFORMATION_SCHEMA.STATEMENTS), with a hand-written IN / NOT IN oracle over the search table. Writes only the disposable
+  // namespaces and databases EXECMCPTMP394A, EXECMCPTMP394B and EXECMCPTMP394C (their database files and directories too, and the Story393.Side
+  // and Story394 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting
+  // nothing is left.
+  "src/__tests__/story-39-4-search-table-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

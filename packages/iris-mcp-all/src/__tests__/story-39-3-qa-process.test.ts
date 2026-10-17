@@ -319,7 +319,7 @@ describe("Story 39.3 QA: under block the body action sends no route request (AC-
     expect(routeRequests().slice(before), "block made no request to a route").toEqual([]);
   }, 60000);
 
-  it("the window is parsed before the policy, and searchTable is decided before it: neither is a policy refusal, and neither sends a request", async (ctx) => {
+  it("the window is parsed before the policy (a validation error, not a policy refusal), and searchTable is itself refused by the policy: neither sends a request", async (ctx) => {
     if (skipIfNeeded(ctx)) return;
     const s = await session({ IRIS_DATA_POLICY: "block" });
     const before = seen();
@@ -330,7 +330,7 @@ describe("Story 39.3 QA: under block the body action sends no route request (AC-
     expect(textOf(badFrom)).toContain("'from' must be an ISO 8601");
 
     const table = await s.call("iris_message_search", { ...SEARCH, action: "searchTable", filters: undefined, bodyClass: undefined });
-    expect(table.structuredContent).toEqual({ code: "NOT_IMPLEMENTED", action: "searchTable", availableActions: ["headers", "body"] });
+    expect(table.structuredContent).toEqual({ code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block" });
 
     expect(routeRequests().slice(before)).toEqual([]);
   }, 60000);

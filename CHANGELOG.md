@@ -2,6 +2,65 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 39.4: Search Table lookup
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `iris_message_search:searchTable`
+was declared in Story 39.1 and now works; it is a read, enabled by default, and is under the PHI data policy (default
+`redact`) like `body`.
+
+### Added
+
+- **The `searchTable` action of `iris_message_search` finds messages by an indexed Search Table value.** It takes a
+  required `searchTableClass`, the exact name of a compiled virtual-document Search Table class such as
+  `EnsLib.HL7.SearchTable`, and `filters`: 1 to 10 conditions combined with AND, each `{property, op, value}`, with the
+  operators and value rules of `body`; a value is at most 256 characters, which is all a Search Table stores. An HL7
+  medical record number is `PatientID eq <MRN>`. It takes the scope options of `headers` (the required window of at
+  most 7 days, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, the cursor and `namespace`) and
+  an optional `bodyClass` that narrows the document class, and returns the same header rows, paged by the same cursor,
+  never a Search Table or body value. The result also carries `dataPolicy: {policy, redacted: 0, blocked: 0}`. A
+  message matches a value operator when it has at least one non-empty entry that satisfies it; `ne` matches when it has
+  no entry equal to the value, and `isNull` and `notNull` test for the absence and presence of a non-empty entry. A
+  value is normalized as the Search Table stores it for the property's type, an Integer, Numeric or Boolean property
+  accepts only `eq`, `ne`, `isNull` and `notNull`, and a `String:CaseSensitive` property compares exactly.
+- **No caller text becomes SQL.** The IRIS handler resolves each property, through IRIS's own `getPropsList`, to the
+  integer PropId of its `Ens.Config.SearchTableProp` row and binds it, maps each operator from a closed list, takes the
+  table from the class dictionary and binds every value and the page size as parameters. A class that is not a compiled,
+  persistent Search Table subclass with a document class is refused (a custom Search Table, an abstract base, a document
+  class, a name that is not exact), and so is a property the class does not define; that refusal lists the class's
+  configured property names. Every refusal names the parameter, such as `filters[1].property`, and never the value, and
+  every shape rule runs before the namespace switch. A namespace with no Search Table property answers `notApplicable`.
+- **`searchTable` is under the PHI data policy.** Under `block` it is refused with
+  `{code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block"}` before any IRIS call; under `redact` and
+  `allow` it runs. The tool's `dataPolicy.actions` becomes `["body", "searchTable"]`, and `filters`, already a declared
+  PHI input, is written as `"[REDACTED]"` in the audit log under `redact` and `block`.
+
+### Changed
+
+- **The search route's `action` text lists all three actions.** A request with an unknown action is refused with
+  `Parameter 'action' must be one of: headers, body, searchTable`.
+- **`filters` on the `headers` action is refused naming both actions**: `'filters' applies only to the body and
+  searchTable actions.` And `searchTableClass` is refused on `headers` and `body`, on the tool and on the route, instead
+  of being ignored.
+- **`searchTable` no longer answers `NOT_IMPLEMENTED`**, and no tool returns that code now; it stays in the catalog.
+- **The PHI data policy scope table lists `iris_message_search` as governed for `body` and `searchTable`.**
+- **`BOOTSTRAP_VERSION` moves `f7b0868c95d0` to `a6df36481aa9`**; the bootstrap still embeds 31 classes.
+  `MessageSearch.BodyFilterShape` and `BodyTable` gain optional parameters, and `BodyStatement` can emit a statement
+  with no joined table; with their defaults they emit exactly the text they did before. Every `headers` and `body`
+  request in the capture list answers byte for byte as it did, pinned by a capture taken on `f7b0868c95d0`; the
+  requests changed above (the route's `action` text, `filters` on `headers`, `searchTableClass` on `headers` or `body`)
+  are the exceptions. `resendFiltered` is unchanged.
+
+### Tests
+
+- An injection fuzz drives the search route directly against disposable namespaces, with write-shaped payloads (a
+  statement that calls a function incrementing a global), a side-effect oracle, a TypeScript oracle for results and an
+  echo oracle; a hand-written `IN` / `NOT IN` query over the search table is the oracle for every operator on every
+  kind of property, a synthetic HL7 message is found by its medical record number, a second namespace with different
+  PropIds and a namespace with no Search Table are searched too, the plan of every statement the route prepared is read
+  back from the statement index, and the audit file, the console log and every response are checked for a marker.
+  `ExecuteMCPv2.Tests.MessageSearchTableTest` covers the statement builders over system classes.
+
 ## [Pre-release — 2026-10-16] — Story 39.3: Message body content search
 
 No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113

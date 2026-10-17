@@ -62,6 +62,7 @@ import {
   sideDefined,
 } from "./interop-namespace-fixture.js";
 import { bodyJoinOracle, sqlLiteral } from "./header-row-oracle.js";
+import { fuzzText as sharedFuzzText } from "./fuzz-corpus.js";
 import { mulberry32 } from "../../../shared/src/__tests__/test-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -691,7 +692,7 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
       filters: [filter("Code", "eq", MARKER)],
     });
     expect(withFilters.isError).toBe(true);
-    expect(textOf(withFilters)).toBe("'filters' applies only to the body action.");
+    expect(textOf(withFilters)).toBe("'filters' applies only to the body and searchTable actions.");
 
     const noClass = await interop.call("iris_message_search", { action: "body", namespace: NS_A, from: FROM, to: TO, filters: [filter("Code", "eq", "x")] });
     expect(noClass.isError).toBe(true);
@@ -821,18 +822,9 @@ const EXACT_OPS: Record<string, (stored: string, value: string) => boolean> = {
 const exactBodies = (op: string, value: string): number[] =>
   STORY393_EXACT_VALUES.flatMap((stored, index) => (EXACT_OPS[op]?.(stored, value) ? [index + 1] : []));
 
-const FUZZ_TOKENS = [
-  "'", '"', "--", "/*", "*/", ";", "(", ")", ",", "?", "%", "_", "[", "]", "\\", " ", "\r", "\n", "\t", String.fromCodePoint(0xe9), "||",
-  "=", "<>", "OR 1=1", "UNION SELECT", "Story393.Side_Bump()", "a", "Z", "0", "9", ".",
-];
-
-/** Text made of the fuzz alphabet; with `marker` it embeds SYNTHPHI393 at a random position. */
+/** Text made of the shared fuzz alphabet; with `marker` it embeds SYNTHPHI393 at a random position. */
 function fuzzText(random: () => number, marker: boolean): string {
-  const parts: string[] = [];
-  const count = 1 + Math.floor(random() * 8);
-  for (let index = 0; index < count; index += 1) parts.push(FUZZ_TOKENS[Math.floor(random() * FUZZ_TOKENS.length)] as string);
-  if (marker) parts.splice(Math.floor(random() * (parts.length + 1)), 0, MARKER);
-  return parts.join("");
+  return sharedFuzzText(random, marker ? MARKER : undefined);
 }
 
 describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route directly (AC-3, Rule #59, AD-26)", () => {
@@ -1070,12 +1062,25 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
     }
   }, 120000);
 
-  it("searchTable still refuses with NOT_IMPLEMENTED and the two available actions, and makes no IRIS call (it is aimed at a missing namespace)", async (testCtx) => {
+  it("searchTable (built in Story 39.4) runs a valid lookup of A, which has no Search Table, as notApplicable with the policy", async (testCtx) => {
     if (skipReason) return skip(testCtx);
-    const result = await interop.call("iris_message_search", { action: "searchTable", namespace: NS_Z, from: FROM, to: TO });
+    const result = await interop.call("iris_message_search", {
+      action: "searchTable",
+      namespace: NS_A,
+      from: FROM,
+      to: TO,
+      searchTableClass: "EnsLib.HL7.SearchTable",
+      filters: [filter("PatientID", "eq", "x")],
+    });
 
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toEqual({ code: "NOT_IMPLEMENTED", action: "searchTable", availableActions: ["headers", "body"] });
+    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      action: "searchTable",
+      notApplicable: true,
+      rows: [],
+      dataPolicy: { policy: "redact", redacted: 0, blocked: 0 },
+    });
+    expect(result.structuredContent).not.toHaveProperty("code");
   }, 120000);
 });
 

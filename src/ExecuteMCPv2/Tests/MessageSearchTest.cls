@@ -213,8 +213,8 @@ Method TestHttpValidationRefusals()
     Do ..AssertRefused(tBody, "action", tHostile, "unknown action")
 
     Set tBody = ..ValidBody()
-    Do tBody.%Set("action", "searchTable")
-    Do ..AssertRefused(tBody, "action", "", "an action that is not available")
+    Do tBody.%Set("action", "bogus")
+    Do ..AssertRefused(tBody, "must be one of: headers, body, searchTable", "", "an action that does not exist")
 
     Set tBody = ..ValidBody()
     Do tBody.%Remove("from")

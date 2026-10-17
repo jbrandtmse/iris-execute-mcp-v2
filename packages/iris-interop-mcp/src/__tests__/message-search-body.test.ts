@@ -75,8 +75,8 @@ describe("iris_message_search body (Story 39.3)", () => {
   // -- definition ---------------------------------------------------------
 
   describe("definition", () => {
-    it("declares body as the governed action and filters as the PHI input", () => {
-      expect(messageSearchTool.dataPolicy).toEqual({ actions: ["body"], phiInputs: ["filters"] });
+    it("declares body and searchTable as the governed actions and filters as the PHI input", () => {
+      expect(messageSearchTool.dataPolicy).toEqual({ actions: ["body", "searchTable"], phiInputs: ["filters"] });
       expect(messageSearchTool.mutates).toEqual({ headers: "read", body: "read", searchTable: "read" });
     });
 
@@ -274,7 +274,7 @@ describe("iris_message_search body (Story 39.3)", () => {
       const result = await messageSearchTool.handler({ action: "headers", ...WINDOW, filters: BODY_ARGS.filters }, ctx);
 
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toBe("'filters' applies only to the body action.");
+      expect(result.content[0]?.text).toBe("'filters' applies only to the body and searchTable actions.");
       expect(result.structuredContent).toBeUndefined();
       expect(mockHttp.post).not.toHaveBeenCalled();
     });
