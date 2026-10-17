@@ -154,3 +154,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T21:41:21Z	Epic 39	epic_retro_skipped	reason=user_directed_skip_unattended_run
 2026-10-17T21:41:21Z	Epic 39	decision_sheet_recorded	decided=2 to_action_items=0 to_x0=1 terminal=1 decided_by=orchestrator(Lead-away) decisions=36,37 overflow_to_epic40_x0=DW-584,DW-585,DW-586,DW-587
 2026-10-17T21:41:21Z	Epic 39	ci_green_verified	run=none head=285ccd4 ci=none
+2026-10-17T21:41:46Z	Epic 39	epic_merged_to_feature	repos=. feature=feature/feature-wave-6-competitive-gaps feature_sha=5336736 merge_sha=5336736 submodules= epic_branch_deleted=local_and_remote deleted_with=-d_fully_merged_check verified=merge-base_origin
+2026-10-17T21:41:46Z	Epic 39	epic_summary	stories=8 total_high=1 total_med=35 total_smoke_defects=0 rework_events=0 bootstrap=089f8f0a62b2_to_7d12cd8b3a1e tools_interop=22_to_24 orchestrator_decisions=20-37 review_degraded=0
