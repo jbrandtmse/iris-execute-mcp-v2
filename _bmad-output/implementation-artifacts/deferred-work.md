@@ -3076,6 +3076,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-0-epic-38-deferred-cleanup.md (QA 2026-10-16) | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: QA 39.0: http-client.ts ~395 maps a 400 with status.errors=[] to a resolved empty result; live GET docnames/CLS/cls -> 400, tool -> {items:[]}
 - 2026-10-17T00:14:32Z status=routed owner=burndown by=qa note=for the Epic 39 burn-down: a non-2xx response is an error even when status.errors is empty; pin with the live 400 pair from doc-type-description-live-gate
+- 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
 
 ### DW-570: iris_message_resend resendFiltered executing path (the ID fetch after guard f) is exercised by no test: only MessageResendLiveTest reaches it and it starts a production in HSCUSTOM (forbidden on the shared instance)
 - source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: in-epic
@@ -3093,12 +3094,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T11:24:38Z occurrence=39-4-search-table-lookup
 - 2026-10-17T14:26:14Z occurrence=39-5-message-body-reader
 - 2026-10-17T17:42:27Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
+- 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
 
 ### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
 - evidence: EXPLAIN in HSCUSTOM: item+status -> Status INTERSECT (Source UNION Target) bitmaps, master map read per id, TimeCreated tested per row, cost 19075; window only -> TimeCreated index range, cost 103.84; resendFiltered COUNT shares the WHERE
 - 2026-10-17T03:11:26Z status=escalated owner=burndown by=cr note=decide the plan strategy (index hint vs TuneTable guidance) with a large-data probe; revisit the add-filters doc advice
 - 2026-10-17T09:11:02Z occurrence=39-3-message-body-content-search
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 30: bound the search statement plan only (index hint), EXPLAIN before/after; resendFiltered unchanged
 
 ### DW-573: AD-15/AC-7: no test pins that pre-existing tools/list entries (description, schema, annotations) stay unchanged; the README payload sync compares tool counts only
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3122,6 +3125,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 39.2 plan: TCPOutboundAdapter.cls:68,72, Parser.cls:262,287 (logs); Parser.cls:223,280, Correlator.cls:194-198 (diagram); AD-15 sanctioned only the preview change in 39.2
 - 2026-10-17T03:55:04Z status=routed owner=burndown by=lead note=Epic 39 burn-down: bring both under dataPolicy (a sanctioned AD-15 change, orchestrator decision 26) or document as residual with an operator switch
 - 2026-10-17T18:21:28Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=burndown note=decision 31: under block withhold message-derived text of iris_production_logs/iris_message_diagram; redact/allow unchanged and documented residual
 
 ### DW-577: MessageSearch Hl7Text serializes the whole HL7 message before comparing its size with the cap (a large body is fully materialized first)
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md | severity: med | fix-risk: med | footprint: in-epic
@@ -3139,6 +3143,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-3-message-body-content-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
 - 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move
+- 2026-10-17T18:31:10Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=merge_gate note=decided=orchestrator(Lead-away) decision 33: the SDK v2 call-path rewrite audits schema-invalid calls (one entry, outcome error, no argument values); DW bullet in 43.1
 
 ### DW-580: iris_message_search searchTable matches only headers whose body class is exactly the Search Table's DOCCLASS; indexed bodies of a DOCCLASS subclass are left out unless bodyClass names that subclass
 - source: spec-39-4-search-table-lookup.md | severity: med | fix-risk: med | footprint: in-story
@@ -3159,3 +3164,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-5-message-body-reader.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: irislib/HS/Message/XMLMessage.cls:1,13 (%Persistent + %XML.Adaptor, payload in ContentStream); MessageBody.cls PropertyDump stream branch; Design Notes dump rules (spec-bound)
 - 2026-10-17T15:49:37Z status=decision-pending owner=burndown by=cr note=decide: under allow, render a character-stream property's text (to maxChars) for persistent bodies, or a HealthShare renderer
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 32: render character-stream body content under allow only, bounded by maxChars; redact withholds; block kind-only

@@ -5377,6 +5377,16 @@ G35. New read tool `iris_message_body`.
 - DW-561: the Epic 38 live gates (the 38.4, 38.5 and 38.7 wire gates and the Epic 38 capstone) each carry their own fixture helpers (`putDoc`, `compileDoc`, `fixtureDocuments`, `removeFixtures`, `governanceReport`, `startStub`, and others). Its reopen condition has fired. This capstone would be the fifth copy, so promote one set into `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts` and move the existing gates onto it. (ledger; routed by the lead 2026-10-16)
 - DW-573: no test pins that the `tools/list` entries of pre-existing tools (description, schema, annotations) stay unchanged when an epic adds tools (AD-15). The README payload sync compares tool counts only. Add one snapshot-style pin, captured from the built servers, as part of this epic's close-out. (ledger; routed by cr 2026-10-16)
 
+### Story 39.7: Epic 39 Burn-Down
+
+The Epic 39 burn-down story was chartered at the epic's burn-down gate on 2026-10-17 by the orchestrator during the unattended run, with the decision sheet taken first (orchestrator decisions #30–#33). It holds the five ledger entries the epic found and the sheet decided to fix now. DW-579 went to Story 43.1. Each fix is proven live on the real surface or by mutation (Rule #48). Fixtures are synthetic, in disposable mapping-only namespaces, and no production is ever started in HSCUSTOM. Changed bootstrapped handlers regenerate the embed (Rule #24). Behavior changes are sanctioned AD-15 changes and are recorded in the CHANGELOG.
+
+- DW-569: the shared `IrisHttpClient` turns an HTTP 400 whose Atelier error list is empty into an empty success. For example, `iris_doc_list` with type `'cls'` on category CLS returned `{items:[]}`. Report every non-2xx response as an error even when `status.errors` is empty, and pin it with the live 400 pair from `doc-type-description-live-gate`. Every tool shares the client, so prove that no current 2xx path changes.
+- DW-571 (flake, many occurrences): `doc-type-description-live-gate.test.ts` (dev) compares two live listings of the shared HSCUSTOM, so a concurrent write elsewhere breaks it. Make the comparison immune to concurrent changes (a fixed filter, or comparing the request rather than counts), and prove it stable under a parallel run.
+- DW-572: `iris_message_search` `headers` on an untuned `Ens.MessageHeader`. The 7-day window does not bound the scan when a name or status filter is set. A read-only EXPLAIN gave cost 19,075, against 103.84 for the window alone. Bound the search statement's plan to the time index, for example with an index hint on the search statement only, measured by EXPLAIN before and after. Do not change `resendFiltered`'s statement or sample order, whose byte identity is pinned. *(Decision #30.)*
+- DW-576: `iris_production_logs` (`Text` can carry segment text) and `iris_message_diagram` (`ErrorStatus` filled by parser errors) are outside the PHI policy. Under `block`, withhold their message-derived text, with a reason. Under `redact` and `allow` they stay unchanged, as documented residuals. Log text is free text that cannot be redacted reliably, and AD-26 forbids content sniffing. Update `tool_support.md` and the docs. *(Decision #31.)*
+- DW-583: under `allow`, `iris_message_body` shows only the class and size of a body whose content is in a character-stream property, such as `HS.Message.XMLMessage` `ContentStream`, HealthShare's main body class. Render that stream's text under `allow` only, bounded by `maxChars` with the existing truncation reporting. Under `redact` it stays withheld, because it is not HL7 v2. Under `block` it is kind metadata only. *(Decision #32.)*
+
 ## Epic 40: Developer Test Depth (added 2026-10-14)
 
 **Goal:** A developer can measure line-by-line code coverage of the classes their tests exercise, as a per-class and per-method summary and as Cobertura XML with a target check, and can run TestProduction-based tests without disturbing the instance.
@@ -5848,6 +5858,7 @@ DW-441.
   - tool counts are unchanged;
   - `bootstrap-classes.ts` is absent from the diff;
   - `pnpm audit` on production dependencies is recorded, and the HTTP-stack advisories that v1 carried are expected to drop.
+- DW-579: a `tools/call` that the MCP SDK rejects as schema-invalid never reaches `handleToolCall`, so it is never audited (AD-3 step 1, Zod validation; AD-19, one audit entry per call). This story rewrites the call path for SDK v2: make a schema-invalid call produce its single audit entry, outcome `error`, with no argument values logged. (ledger; routed by merge_gate 2026-10-17, orchestrator decision #33)
 
 ### Story 43.2: Serve MCP Revision 2026-07-28
 
