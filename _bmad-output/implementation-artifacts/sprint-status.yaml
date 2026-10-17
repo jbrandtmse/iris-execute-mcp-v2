@@ -516,7 +516,7 @@ development_status:
   39-4-search-table-lookup: done
   39-5-message-body-reader: done
   39-6-message-forensics-docs-prompt-and-capstone: done
-  39-7-epic-39-burn-down: ready-for-dev
+  39-7-epic-39-burn-down: in-progress
   epic-39-retrospective: optional
 
   epic-40: backlog
