@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "a6df36481aa9";
+export const BOOTSTRAP_VERSION = "b6ec56073e29";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "a6df36481aa9";
+Parameter BOOTSTRAPVERSION = "b6ec56073e29";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -13103,15 +13103,19 @@ ClassMethod BodyClassExtends(pBodyClass As %String, pDocClass As %String) As %Bo
 }
 
 /// Whether this namespace has any Search Table property, a row of <class>Ens.Config.SearchTableProp</class>.
-/// The statement is fixed. A SQL failure is thrown, so a caller's Try/Catch answers it with an error and
-/// it can never read as "none configured".
+/// The statement is fixed. A SQL failure, when the statement is prepared or when its row is fetched, is
+/// thrown, so a caller's Try/Catch answers it with an error and it can never read as "none configured".
 ClassMethod SearchTablesConfigured() As %Boolean
 {
     Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 PropId FROM Ens_Config.SearchTableProp")
     If tRS.%SQLCODE < 0 {
         Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
     }
-    Quit tRS.%Next()
+    Set tFound = tRS.%Next()
+    If tRS.%SQLCODE < 0 {
+        Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+    }
+    Quit tFound
 }
 
 /// The value <var>pValue</var> of a Search Table filter as the Search Table stores it for a property of

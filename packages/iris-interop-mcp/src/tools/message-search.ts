@@ -379,8 +379,8 @@ export const messageSearchTool: ToolDefinition = {
     "PID-4: use it for a medical record number), PatientName (PID-5) and PatientAcct (PID-18). A message " +
     "matches eq, lt, le, gt, ge, contains or startsWith when it has at least one non-empty entry for the " +
     "property whose stored value satisfies it, so a multi-valued property such as PatientID matches on any " +
-    "of its values. ne matches when the message has no entry equal to the value, not when some entry " +
-    "differs. isNull matches when it has no non-empty entry (a message that was never indexed included) and " +
+    "of its values. ne matches when the message has no entry equal to the value (a message that was never " +
+    "indexed included), not when some entry differs. isNull matches when it has no non-empty entry (a message that was never indexed included) and " +
     "notNull when it has at least one. Values are normalized as the Search Table stores them: a default " +
     "property ignores case (give the value in any case); a String:CaseSensitive property such as " +
     "MSHControlID compares exactly; an Integer, Numeric or Boolean property takes only eq, ne, isNull and " +

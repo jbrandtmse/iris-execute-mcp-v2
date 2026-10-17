@@ -1,7 +1,8 @@
 /**
- * Stories 39.1 and 39.3 -- the arming guard of the three live message-search gates
- * (`story-39-1-message-search-live-gate.test.ts`, `story-39-3-body-search-live-gate.test.ts` and
- * `story-39-3-qa-live-gate.test.ts`) on their own real path (project rule #59). No IRIS and no shared state.
+ * Stories 39.1, 39.3 and 39.4 -- the arming guard of the live message-search gates listed in `GATES`
+ * (`story-39-1-message-search-live-gate.test.ts`, `story-39-3-body-search-live-gate.test.ts`,
+ * `story-39-3-qa-live-gate.test.ts`, `story-39-4-search-table-live-gate.test.ts` and
+ * `story-39-4-qa-live-gate.test.ts`) on their own real path (project rule #59). No IRIS and no shared state.
  *
  * Each gate runs in the default suite and in the prepublish gate. Run against an IRIS that is not reachable (a
  * closed local port) it must skip every test with the reason when it is not armed, and fail in `beforeAll` with
@@ -33,6 +34,7 @@ const GATES = [
   { file: "story-39-3-body-search-live-gate.test.ts", tag: "story-39-3-body-search-live-gate", story: "Story 39.3" },
   { file: "story-39-3-qa-live-gate.test.ts", tag: "story-39-3-qa-live-gate", story: "Story 39.3 QA" },
   { file: "story-39-4-search-table-live-gate.test.ts", tag: "story-39-4-search-table-live-gate", story: "Story 39.4" },
+  { file: "story-39-4-qa-live-gate.test.ts", tag: "story-39-4-qa-live-gate", story: "Story 39.4 QA" },
 ] as const;
 
 /** The vitest entry point this package's tests run under. */

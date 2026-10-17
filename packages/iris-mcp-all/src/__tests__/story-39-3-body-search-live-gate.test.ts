@@ -994,6 +994,28 @@ describe.skipIf(CAPTURE)("Story 39.3: second namespace, not configured, unknown 
     expect(viaRoute.result).toMatchObject({ action: "body", interopEnabled: false, rows: [], hasMore: false });
   }, 120000);
 
+  it("searchTable there is notApplicable for no Interoperability too: Interoperability is checked before the Search Table configuration (Story 39.4)", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    // C has no Ens_Config.SearchTableProp table, so a configuration read before the Interoperability check would be an SQL error.
+    const lookup = { action: "searchTable", namespace: NS_C, from: FROM, to: TO, searchTableClass: "EnsLib.HL7.SearchTable", filters: [filter("PatientID", "eq", "x")] };
+    const result = await interop.call("iris_message_search", lookup);
+
+    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      action: "searchTable",
+      notApplicable: true,
+      rows: [],
+      hasMore: false,
+      dataPolicy: { policy: "redact", redacted: 0, blocked: 0 },
+    });
+    expect(String((result.structuredContent as { reason?: unknown }).reason)).toContain(NS_C);
+
+    const viaRoute = await route(lookup);
+    expect(viaRoute.errors, viaRoute.text).toEqual([]);
+    expect(viaRoute.result).toMatchObject({ action: "searchTable", interopEnabled: false, rows: [], hasMore: false });
+    expect(viaRoute.result, "the configuration is never read there").not.toHaveProperty("searchTablesConfigured");
+  }, 120000);
+
   it("a namespace that does not exist, with a valid shape, is an error carrying the sanitized switch text", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const result = await bodySearch(interop, { namespace: NS_Z, filters: [filter("Code", "eq", "x")] });

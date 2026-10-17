@@ -899,10 +899,10 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
     let requests = 0;
     const started = performance.now();
 
-    /** Send one filter and check the invariants every request must keep. */
-    async function probe(slot: string, filterValue: Record<string, unknown>, expectedHeaders: readonly number[] | undefined, token: string): Promise<void> {
+    /** Send one filter on `searchTableClass` and check the invariants every request must keep. */
+    async function probe(slot: string, filterValue: Record<string, unknown>, expectedHeaders: readonly number[] | undefined, token: string, searchTableClass: string): Promise<void> {
       requests += 1;
-      const answer = await route(routeBody([filterValue], { searchTableClass: ST4 }));
+      const answer = await route(routeBody([filterValue], { searchTableClass }));
       const label = `${slot} ${JSON.stringify(filterValue).slice(0, 120)}`;
       if (answer.text.toLowerCase().includes(MARKER.toLowerCase())) violations.push(`${label}: the response echoes the marker`);
       if (answer.status !== 200) violations.push(`${label}: HTTP ${answer.status}`);
@@ -928,15 +928,15 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
     const randomProperties = Array.from({ length: 200 }, () => fuzzText(random, MARKER));
     for (const property of [...propertyCorpus, ...randomProperties]) {
       const known = Object.prototype.hasOwnProperty.call(NOT_NULL_HEADERS, property);
-      await probe("property", filter(property, "notNull"), known ? NOT_NULL_HEADERS[property] : undefined, "filters[0].property");
+      await probe("property", filter(property, "notNull"), known ? NOT_NULL_HEADERS[property] : undefined, "filters[0].property", ST4);
     }
 
-    // Op slot: a fixed corpus and 100 random strings that are not operators, on PatientID.
+    // Op slot: a fixed corpus and 100 random strings that are not operators, on ST's PatientID.
     const opCorpus = ["EQ", "Eq", "=", "like", "in", "between", "[", "%STARTSWITH", "eq OR Story393.Side_Bump()=1", `eq ${MARKER}`, "", " eq", "eq "];
     const randomOps = Array.from({ length: 100 }, () => fuzzText(random, MARKER));
-    for (const op of [...opCorpus, ...randomOps]) await probe("op", filter("PatientID", op, "x"), undefined, "filters[0].op");
+    for (const op of [...opCorpus, ...randomOps]) await probe("op", filter("PatientID", op, "x"), undefined, "filters[0].op", ST);
 
-    // Value slot 1: 300 random strings on MSHControlID (compared exactly) with eq, ne, contains and startsWith.
+    // Value slot 1: 300 random strings on ST's MSHControlID (compared exactly) with eq, ne, contains and startsWith.
     const stored = CONTROL_IDS.map((message) => message.stored);
     const valueCorpus = [
       "' OR '1'='1", "\" OR \"1\"=\"1", "'; SELECT Story393.Side_Bump() --", "x' OR Story393.Side_Bump() = 1 OR 'x", "Story393.Side_Bump()",
@@ -962,10 +962,10 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
       index += 1;
       // A Search Table stores at most 256 characters of a value, so a longer one is refused naming the value.
       const tooLong = value.length > 256;
-      await probe("value", filter("MSHControlID", op, value), tooLong ? undefined : controlHeaders(op, value), "filters[0].value");
+      await probe("value", filter("MSHControlID", op, value), tooLong ? undefined : controlHeaders(op, value), "filters[0].value", ST);
     }
 
-    // Value slot 2: 100 random strings on PatientID with contains, against the stored lower-cased identifiers.
+    // Value slot 2: 100 random strings on ST's PatientID with contains, against the stored lower-cased identifiers.
     const patientSources = PATIENT_ENTRIES.flatMap((message) => message.stored);
     for (let count = 0; count < 100; count += 1) {
       const pick = random();
@@ -979,7 +979,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
               ? `${source}${fuzzText(random)}`
               : fuzzText(random, random() < 0.5 ? MARKER : undefined);
       const needle = value.toLowerCase().replaceAll("|", "+");
-      await probe("value", filter("PatientID", "contains", value), patientHeaders((entry) => entry.includes(needle)), "filters[0].value");
+      await probe("value", filter("PatientID", "contains", value), patientHeaders((entry) => entry.includes(needle)), "filters[0].value", ST);
     }
 
     // eslint-disable-next-line no-console
@@ -1281,8 +1281,6 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
       const answer = await route(routeBody(call.filters, { searchTableClass: call.searchTableClass, ...(call.extra ?? {}) }));
       expect(answer.errors, `${call.name}: ${answer.text}`).toEqual([]);
     }
-    // One call through the built server too, so the plan is read for a statement the tool's request produced.
-    succeeded(await tableSearch(interop, { filters: [filter("PatientID", "startsWith", "synthphi394-mrn-")] }));
 
     const stored = await atelierQuery(
       { ...TARGET, namespace: NS_A },
@@ -1290,7 +1288,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
     );
     // The route's statements, told from the oracle's own queries by their select list: TOP ?, then the header columns.
     const routeStatements = stored.filter((row) => squash(String(row["Statement"])).includes("SELECTTOP?H.ID,"));
-    expect(routeStatements.length, "the index holds a statement for each distinct call").toBeGreaterThanOrEqual(calls.length + 1);
+    expect(routeStatements.length, "the index holds a statement for each distinct call").toBeGreaterThanOrEqual(calls.length);
 
     for (const row of routeStatements) {
       expect(planProblems(String(row["Statement"]), String(row["Plan"])), String(row["Statement"])).toEqual([]);

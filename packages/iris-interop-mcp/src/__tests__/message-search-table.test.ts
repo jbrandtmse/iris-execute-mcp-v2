@@ -99,7 +99,7 @@ describe("iris_message_search searchTable (Story 39.4)", () => {
         "PatientID (PID-2, every PID-3 repetition and PID-4",
         "medical record number",
         "at least one non-empty entry",
-        "ne matches when the message has no entry equal to the value",
+        "ne matches when the message has no entry equal to the value (a message that was never indexed included)",
         "isNull matches when it has no non-empty entry",
         "String:CaseSensitive",
         "Integer, Numeric or Boolean property takes only eq, ne, isNull and notNull",

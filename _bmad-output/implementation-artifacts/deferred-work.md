@@ -3026,6 +3026,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T18:57:09Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=lead note=reopen_if fired at the 38.7 review (fourth gate with its own fixture helpers); the Epic 39 capstone would be the fifth copy -- promote one set there; DW bullet in 39.6
 - 2026-10-17T01:15:30Z occurrence=39-1-message-header-search
 - 2026-10-17T01:15:30Z note=39.1 adds a session-parameterized docFixtures(session) to process-gate-helpers.ts instead of a fifth copy; 39.6 moves the Epic 38 gates onto it
+- 2026-10-17T12:06:54Z occurrence=39-4-search-table-lookup
+- 2026-10-17T12:06:54Z note=39.4 copies route/succeeded/skip/searchEntries (39.4 gate, 39.4 QA live gate) and startStub/session (39.4 QA process)
 
 ### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3131,3 +3133,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-3-message-body-content-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
 - 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move
+
+### DW-580: iris_message_search searchTable matches only headers whose body class is exactly the Search Table's DOCCLASS; indexed bodies of a DOCCLASS subclass are left out unless bodyClass names that subclass
+- source: spec-39-4-search-table-lookup.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: MessageSearch.cls:996-1004 binds DOCCLASS via HeaderWhere; IRIS IndexDoc accepts %Extends(DOCCLASS), and Ens.SearchTableBase.SearchHeader and EnsPortal/MsgFilter/Assistant.cls:1502-1511 match subclasses
+- 2026-10-17T12:07:01Z status=by-design owner=39-4-search-table-lookup by=cr note=spec I7/Boundaries; documented in the description; reopen by spec amendment to match subclasses (Ens.IsASub) as SearchHeader does
+
+### DW-581: No test drives MessageSearch.SearchTablesConfigured to a SQL failure, so a regression that answers notApplicable for a failed configuration read would stay green
+- source: spec-39-4-search-table-lookup.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: no test references the error path; forcing a failure in an Interoperability namespace needs a privilege-limited user (no security changes on the shared instance) or a test seam
+- 2026-10-17T12:07:03Z status=wontfix-accepted owner=39-4-search-table-lookup by=cr note=reopen_if=SearchTablesConfigured changes, or a namespace with SearchTableProp rows answers notApplicable
+
+### DW-582: AD-12's recorded IRIS-side exceptions do not name Search Table value normalization (MessageSearch.SearchTableValue mirrors Ens.VDoc.SearchTableGenerator's stored form)
+- source: spec-39-4-search-table-lookup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: spec I4 places it under AD-12 (PropType read in the same handler, one round trip); the spine's AD-12 exception list names identifier and operator validation only
+- 2026-10-17T12:07:06Z status=wontfix-accepted owner=39-4-search-table-lookup by=cr note=reopen_if=another handler adds IRIS-side value normalization, or a review files AD-12 against SearchTableValue

@@ -40,7 +40,7 @@ function sectionsOf(changelog: string): string[] {
 
 /** The `BOOTSTRAP_VERSION` move this story recorded, pinned as history. */
 const PREVIOUS_BOOTSTRAP_VERSION = "f7b0868c95d0";
-const STORY_BOOTSTRAP_VERSION = "a6df36481aa9";
+const STORY_BOOTSTRAP_VERSION = "b6ec56073e29";
 
 /** The right arrow the documents use, by code point. */
 const RIGHT_ARROW = String.fromCodePoint(0x2192);
@@ -173,7 +173,7 @@ describe("Story 39.4: the interop README documents the Search Table lookup", () 
 
   it("states the stock HL7 properties, the clause semantics and the case rules", () => {
     expect(text).toContain("`PatientID` (PID-2, every PID-3 repetition and PID-4: use it for a medical record number)");
-    expect(text).toContain("`ne` matches when the message has no entry equal to the value (not when some entry differs)");
+    expect(text).toContain("`ne` matches when the message has no entry equal to the value (not when some entry differs), a message that was never indexed included");
     expect(text).toContain("`isNull` when it has no non-empty entry (a message that was never indexed included)");
     expect(text).toContain("a `String:CaseSensitive` property such as `MSHControlID` compares exactly");
     expect(text).toContain("an Integer, Numeric or Boolean property accepts only `eq`, `ne`, `isNull` and `notNull`");

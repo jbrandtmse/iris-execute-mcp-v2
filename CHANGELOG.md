@@ -32,11 +32,13 @@ was declared in Story 39.1 and now works; it is a read, enabled by default, and 
   every shape rule runs before the namespace switch. A namespace with no Search Table property answers `notApplicable`.
 - **`searchTable` is under the PHI data policy.** Under `block` it is refused with
   `{code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block"}` before any IRIS call; under `redact` and
-  `allow` it runs. The tool's `dataPolicy.actions` becomes `["body", "searchTable"]`, and `filters`, already a declared
-  PHI input, is written as `"[REDACTED]"` in the audit log under `redact` and `block`.
+  `allow` it runs. `filters`, already a declared PHI input, is written as `"[REDACTED]"` in the audit log under `redact`
+  and `block`.
 
 ### Changed
 
+- **The tool's `dataPolicy.actions` becomes `["body", "searchTable"]`**, so a `searchTable` audit entry carries the
+  additive `dataPolicy` field as a `body` entry does.
 - **The search route's `action` text lists all three actions.** A request with an unknown action is refused with
   `Parameter 'action' must be one of: headers, body, searchTable`.
 - **`filters` on the `headers` action is refused naming both actions**: `'filters' applies only to the body and
@@ -44,7 +46,7 @@ was declared in Story 39.1 and now works; it is a read, enabled by default, and 
   of being ignored.
 - **`searchTable` no longer answers `NOT_IMPLEMENTED`**, and no tool returns that code now; it stays in the catalog.
 - **The PHI data policy scope table lists `iris_message_search` as governed for `body` and `searchTable`.**
-- **`BOOTSTRAP_VERSION` moves `f7b0868c95d0` to `a6df36481aa9`**; the bootstrap still embeds 31 classes.
+- **`BOOTSTRAP_VERSION` moves `f7b0868c95d0` to `b6ec56073e29`**; the bootstrap still embeds 31 classes.
   `MessageSearch.BodyFilterShape` and `BodyTable` gain optional parameters, and `BodyStatement` can emit a statement
   with no joined table; with their defaults they emit exactly the text they did before. Every `headers` and `body`
   request in the capture list answers byte for byte as it did, pinned by a capture taken on `f7b0868c95d0`; the

@@ -469,15 +469,19 @@ ClassMethod BodyClassExtends(pBodyClass As %String, pDocClass As %String) As %Bo
 }
 
 /// Whether this namespace has any Search Table property, a row of <class>Ens.Config.SearchTableProp</class>.
-/// The statement is fixed. A SQL failure is thrown, so a caller's Try/Catch answers it with an error and
-/// it can never read as "none configured".
+/// The statement is fixed. A SQL failure, when the statement is prepared or when its row is fetched, is
+/// thrown, so a caller's Try/Catch answers it with an error and it can never read as "none configured".
 ClassMethod SearchTablesConfigured() As %Boolean
 {
     Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 PropId FROM Ens_Config.SearchTableProp")
     If tRS.%SQLCODE < 0 {
         Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
     }
-    Quit tRS.%Next()
+    Set tFound = tRS.%Next()
+    If tRS.%SQLCODE < 0 {
+        Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+    }
+    Quit tFound
 }
 
 /// The value <var>pValue</var> of a Search Table filter as the Search Table stores it for a property of

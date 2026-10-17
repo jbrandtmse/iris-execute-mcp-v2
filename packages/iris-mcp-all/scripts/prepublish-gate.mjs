@@ -172,6 +172,16 @@ const gateTestFiles = [
   // and Story394 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting
   // nothing is left.
   "src/__tests__/story-39-4-search-table-live-gate.test.ts",
+  // Story 39.4 QA: `iris_message_search` `searchTable` on the BUILT iris-interop-mcp dist against a local listener that records requests and
+  // replies as a padded or version-skewed IRIS (block sends no route request, the wire body of redact and allow with every scope filter and
+  // the cursor, header rows only, both notApplicable answers, the audit file and the console log); no IRIS instance is contacted.
+  "src/__tests__/story-39-4-qa-process.test.ts",
+  // Story 39.4 QA: a lookup in HSCUSTOM (a real Interoperability namespace with no Search Table property, read-only: a row count and lookups
+  // that read no message), filters that combine with AND on one multi-valued property, and every scope filter at once with paging, over real
+  // stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists and raw HTTP to the route. Writes only the
+  // disposable namespace and database EXECMCPTMP394Q (its database files and directory too, and the Story394 classes inside it) and the
+  // HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-4-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
