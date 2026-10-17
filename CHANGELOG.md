@@ -2,6 +2,62 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 39.5: Message body reader
+
+One tool is added, `iris_message_body`: the suite goes from 108 to 109 package tools (113 to 114 advertised), the
+Interoperability server from 23 to 24 package tools (24 to 25 advertised), its `core` roster from 11 to 12 runtime tools,
+and its `developer` roster to 25. The frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys).
+
+### Added
+
+- **`iris_message_body` reads message bodies by header ID.** It takes 1 to 20 `headerIds`, an optional `maxChars` (1 to
+  1048576, default 10000), an optional `dataPolicy` and an optional `namespace`, and returns one item per ID in request
+  order, duplicates included: the body class and ID, the body kind and the body rendered by kind. An HL7 v2 body is shown
+  as ER7 text, an XML virtual document as XML, a persistent object as JSON (`%JSONExportToStream` when its class extends
+  `%JSON.Adaptor`, otherwise a dump of its public properties), a stream or stream container as text, and a header with
+  no body class as its literal value. Any other body is shown as its class and ID with a reason. Each shown text is cut
+  at `maxChars` with `truncated`; an HL7 v2 body is read only whole, and a larger `maxChars` reads a longer one under
+  `allow`. A header that does not exist is `{id, found: false, error: "Header <id> not found"}`. It is a read, enabled by
+  default (one governance key, `iris_message_body`; `{"global":{"iris_message_body":false}}` restricts it), and it stays
+  enabled under the `read-only` preset.
+- **A new route, `POST /interop/message/body`, served by the new bootstrapped class `ExecuteMCPv2.REST.MessageBody`.**
+  The request names which bodies IRIS may read (`bodyRead`: `kind`, `hl7` or `all`) and a text limit
+  (`bodyTextMaxChars`), so a body the policy withholds never leaves IRIS. Every check of the request runs before the
+  namespace switch and names the parameter.
+- **It is the first consumer of body text under the PHI data policy.** Under `redact` (the default) IRIS reads HL7 v2
+  bodies only, and the text goes complete and unsanitized through the redaction engine before it is sanitized and cut;
+  every other body, and an HL7 v2 body over 65536 characters, is withheld with a reason. `block` withholds every body and
+  IRIS reads none; `allow` shows bodies as stored. A call's `dataPolicy` can only tighten the profile's policy, and a
+  looser one is reported as `dataPolicyClamped: true`. Each body carries `bodyPolicy` and the result carries
+  `dataPolicy: {policy, redacted, blocked}`. The tool declares `dataPolicy`, so every audit entry carries the policy and
+  the counts, and body text never reaches the audit file or the console log.
+- **`decideBodyPolicy` and `BodyPolicyPlan` in `@iris-mcp/shared`**: the policy's decision for one body, shared by the
+  resend preview and the body reader.
+- **A third pair in `TOOL_PAIRS`**: `iris_message_search` and `iris_message_body` are always visible together, in the
+  `core` and `developer` presets.
+- **The PHI data policy scope table lists `iris_message_body` as governed.**
+
+### Changed
+
+- **`Hl7Text` refuses a body over the cap before it serializes it (DW-577).** The new `MessageSearch.Hl7Size` sums the
+  stored segment sizes of the message and of every nested batch child, stops once the sum passes the cap, and returns 0
+  on failure; the existing check of the serialized length stays, and the outcomes of every body that fits are unchanged.
+- **`MessageResend.ValidateHeaderIds` takes a maximum**, `pMax`, 100 by default; with the default its texts are
+  byte-identical, and the body route passes 20.
+- **The resend preview decides through `decideBodyPolicy`**; its output is unchanged.
+- **`BOOTSTRAP_VERSION` moves `b6ec56073e29` to `fa8227a48af8`**, and the bootstrap embeds 32 classes instead of 31.
+- **Counts.** The interop README and `tool_support.md` count 24 tools, the suite README 109 tools, and the roster tables
+  and the measured `tools/list` payload table are re-measured.
+
+### Tests
+
+- A live gate reads a fixture of seventeen bodies of every kind through the built interop server, under `redact`,
+  `block` and `allow`, with a recording proxy that keeps what the tool asked IRIS for and what IRIS sent; it checks the
+  XML and JSON texts against recordings, the dump rules, the redacted HL7 texts against IRIS's own parser, a second
+  namespace and a namespace with no Interoperability, the route's refusals, the audit file and the console log, and that
+  `Hl7Size` equals the length IRIS serializes on every HL7 fixture (two batches included) and answers in under a quarter
+  of the serialization time. `ExecuteMCPv2.Tests.MessageBodyTest` covers the renderers.
+
 ## [Pre-release — 2026-10-17] — Story 39.4: Search Table lookup
 
 No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
@@ -1291,9 +1347,10 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
-`iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
-tool counts, as of Story 39.1): `full` 32/27/24/22/8 (dev/admin/interop/ops/data), `core`
-15/13/11/10/8, `developer` 32/11/24/10/8 — every `core` server lands at about 13 runtime tools, a
+`iris_doc_get` / `iris_doc_edit` are a second pair, and as of Story 39.5 `iris_message_search` /
+`iris_message_body` are a third). Roster summary (runtime
+tool counts, as of Story 39.5): `full` 32/27/25/22/8 (dev/admin/interop/ops/data), `core`
+15/13/12/10/8, `developer` 32/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
 guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under

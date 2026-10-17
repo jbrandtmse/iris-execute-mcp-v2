@@ -217,3 +217,37 @@ export const BLOCK_REASONS = {
   hl7Unparseable: (engineReason: string): string =>
     `The HL7 v2 body could not be parsed (${engineReason}), so the redact data policy withholds it.`,
 } as const;
+
+/**
+ * What a policy decides for one body before any text is read: `none` (the policy does not touch it), `blocked`
+ * (withheld, with the fixed `reason`) or `redact` (the consumer redacts it, which only an HL7 v2 body allows).
+ */
+export type BodyPolicyPlan =
+  | { outcome: "none" }
+  | { outcome: "blocked"; reason: string }
+  | { outcome: "redact" };
+
+/**
+ * The policy's decision for one body, from its kind and whether it can be read. The first rule that holds
+ * decides:
+ *  1. a body that is not available (`available` is `false`): `none`;
+ *  2. policy `block`: `blocked` ({@link BLOCK_REASONS.blockPolicy});
+ *  3. policy `redact`: `redact` for an `hl7v2` body, otherwise `blocked` ({@link BLOCK_REASONS.unredactableKind});
+ *  4. policy `allow`: `none`.
+ *
+ * A kind outside the nine tokens is the consumer's to map (to `other`) before it calls this.
+ *
+ * @param kind - The body kind, from `ExecuteMCPv2.REST.MessageSearch.BodyKind`.
+ * @param available - Whether the body can be read (a literal header value counts as available to a reader).
+ * @param policy - The policy that applies to the call.
+ */
+export function decideBodyPolicy(kind: BodyKind, available: boolean, policy: DataPolicy): BodyPolicyPlan {
+  if (!available) return { outcome: "none" };
+  if (policy === "block") return { outcome: "blocked", reason: BLOCK_REASONS.blockPolicy() };
+  if (policy === "redact") {
+    return isRedactableBodyKind(kind)
+      ? { outcome: "redact" }
+      : { outcome: "blocked", reason: BLOCK_REASONS.unredactableKind(kind) };
+  }
+  return { outcome: "none" };
+}

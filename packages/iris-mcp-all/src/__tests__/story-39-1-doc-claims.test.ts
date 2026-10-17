@@ -103,14 +103,14 @@ describe("Story 39.1: the CHANGELOG section and the changeset", () => {
 describe("Story 39.1: tool_support.md states the tool and the default state", () => {
   const toolSupport = read("tool_support.md");
 
-  it("lists the tool as row 23 of the interop section, which counts 23", () => {
+  it("lists the tool as row 23 of the interop section, which counts 24 since Story 39.5", () => {
     // The characters the document uses, by code point: U+2014 em dash, U+1F7E5 large red square, U+00B7 middle dot.
     const emDash = String.fromCodePoint(0x2014);
     const redSquare = String.fromCodePoint(0x1f7e5);
     const middleDot = String.fromCodePoint(0xb7);
-    expect(toolSupport).toContain(`## \`@iris-mcp/interop\` ${emDash} Interoperability (23)`);
+    expect(toolSupport).toContain(`## \`@iris-mcp/interop\` ${emDash} Interoperability (24)`);
     expect(toolSupport).toContain(`| 23 | \`iris_message_search\` | ${redSquare} ExecuteMCPv2 | \`/interop/message/search\` |`);
-    expect(toolSupport).toContain(`**Mix:** 0 Atelier ${middleDot} 23 ExecuteMCPv2 ${middleDot} 0 other`);
+    expect(toolSupport).toContain(`**Mix:** 0 Atelier ${middleDot} 24 ExecuteMCPv2 ${middleDot} 0 other`);
   });
 
   it("the Story 39.1 note says all three keys are reads, enabled by default, and how to restrict one", () => {
@@ -124,9 +124,9 @@ describe("Story 39.1: tool_support.md states the tool and the default state", ()
     expect(note).toContain("`MessageResendLiveTest` only");
   });
 
-  it("counts the suite at 108 tools, 83 of them on the custom handlers, and the interop row at 23 / 24", () => {
-    expect(toolSupport).toContain("| `@iris-mcp/interop` | 0 | 23 | 0 | **23** | **24** |");
-    expect(toolSupport).toContain("| **Total** | **20** | **83** | **5** | **108** | **113** |");
+  it("counts the suite at 109 tools, 84 of them on the custom handlers, and the interop row at 24 / 25 (Story 39.5 added one)", () => {
+    expect(toolSupport).toContain("| `@iris-mcp/interop` | 0 | 24 | 0 | **24** | **25** |");
+    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
   });
 });
 
@@ -167,10 +167,10 @@ describe("Story 39.1: the READMEs state the tool, its default state and the refu
     expect(text).toContain("`notApplicable: true`");
   });
 
-  it("the interop README lists the tool in the Production Monitoring table and counts 23 tools", () => {
+  it("the interop README lists the tool in the Production Monitoring table and counts 24 tools since Story 39.5", () => {
     expect(interopReadme).toContain("| `iris_message_search` |");
-    expect(interopReadme).toContain("All 23 interoperability tools operate in the context");
-    expect(interopReadme).toContain("**11-tool runtime roster** (10 package tools + `iris_server_profiles`)");
-    expect(interopReadme).toContain("**24 runtime tools** (23 + `iris_server_profiles`)");
+    expect(interopReadme).toContain("All 24 interoperability tools operate in the context");
+    expect(interopReadme).toContain("**12-tool runtime roster** (11 package tools + `iris_server_profiles`)");
+    expect(interopReadme).toContain("**25 runtime tools** (24 + `iris_server_profiles`)");
   });
 });

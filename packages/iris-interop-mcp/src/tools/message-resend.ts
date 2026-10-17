@@ -41,9 +41,9 @@
 import {
   BLOCK_REASONS,
   IrisApiError,
+  decideBodyPolicy,
   effectiveDataPolicy,
   isBodyKind,
-  isRedactableBodyKind,
   type BodyKind,
   type BodyPolicyOutcome,
   type DataPolicy,
@@ -73,7 +73,7 @@ export const STATUS_LABELS = [
  * integer (CR 26.1-3 — the TS layer rejects a JSON object / non-numeric
  * string before the request ever reaches IRIS).
  */
-const headerIdSchema = z.union([
+export const headerIdSchema = z.union([
   // `/^[1-9]\d*$/` (not `/^\d+$/`) keeps the string arm symmetric with the
   // number arm's `.positive()`: rejects "0" and leading-zero strings like
   // "007" (which IRIS would otherwise silently coerce to header 7 on the
@@ -261,9 +261,10 @@ const PREVIEW_HEADER_FIELDS: ReadonlySet<string> = new Set<keyof PreviewHeaderRa
  *
  * Each FOUND header is mapped by the first rule that holds:
  *  1. a `bodyKind` that is not one of the nine tokens (a missing one included): withheld, as kind `other`;
- *  2. `bodyAvailable` is not `true` (no readable body): outcome `none`, `bodySummary` `""`;
- *  3. policy `block`: withheld, `bodySummary` `""`;
- *  4. policy `redact`: an `hl7v2` body is `redacted` with `bodySummary` the class note
+ *  2. to 4. the shared `decideBodyPolicy` decides (it is the one place these rules live):
+ *     `bodyAvailable` is not `true` (no readable body): outcome `none`, `bodySummary` `""`;
+ *     policy `block`: withheld, `bodySummary` `""`;
+ *     policy `redact`: an `hl7v2` body is `redacted` with `bodySummary` the class note
  *     `(non-stream body; class=<bodyClassName>)` (no body text is requested or shown); any other kind
  *     is withheld with `bodySummary` `""`.
  * Then `bodyKind` and `bodyPolicy` are set. A header that was not found carries no body fields.
@@ -288,15 +289,14 @@ export function applyPreviewBodyPolicy(
       bodyPolicy = { outcome: "blocked", reason: BLOCK_REASONS.unredactableKind("other") };
     } else {
       kind = raw.bodyKind;
-      if (raw.bodyAvailable !== true) {
-        bodyPolicy = { outcome: "none" };
-      } else if (policy === "block") {
-        bodyPolicy = { outcome: "blocked", reason: BLOCK_REASONS.blockPolicy() };
-      } else if (isRedactableBodyKind(kind)) {
+      const plan = decideBodyPolicy(kind, raw.bodyAvailable === true, policy);
+      if (plan.outcome === "redact") {
         bodyPolicy = { outcome: "redacted", redactedFields: 0 };
         bodySummary = `(non-stream body; class=${raw.bodyClassName ?? ""})`;
+      } else if (plan.outcome === "blocked") {
+        bodyPolicy = { outcome: "blocked", reason: plan.reason };
       } else {
-        bodyPolicy = { outcome: "blocked", reason: BLOCK_REASONS.unredactableKind(kind) };
+        bodyPolicy = { outcome: "none" };
       }
     }
     if (bodyPolicy.outcome === "redacted") redacted += 1;

@@ -30,6 +30,10 @@
  * namespace and the seed that indexes six messages with `IndexDoc`), which `seedSearchTable` compiles
  * INSIDE a scratch namespace.
  *
+ * Story 39.5 adds the `STORY395_*` class sources (a body with a JSON adaptor, a plain persistent body and the
+ * seed that saves seventeen bodies of every kind with their headers), which `seedBodyReader` compiles INSIDE a
+ * scratch namespace; the seed class also measures `Hl7Size` against the serialization.
+ *
  * Shared by Stories 39.1 to 39.6.
  */
 
@@ -173,10 +177,11 @@ ClassMethod SeedBodies(pSet As %String) As %String
 
 /// The segments of the ER7 text pText, parsed in memory by EnsLib.HL7.Message (nothing is saved), as
 /// JSON [{"name":"PID","fields":["1","",...]}]. Field k of a segment is element k of "fields", and
-/// MSH-1 is the field separator, so the numbering is the HL7 one. Runs only in an EXECMCPTMP392 namespace.
+/// MSH-1 is the field separator, so the numbering is the HL7 one. Runs only in an EXECMCPTMP392 or
+/// EXECMCPTMP395 namespace.
 ClassMethod Hl7Fields(pText As %String) As %String
 {
-    If $NAMESPACE '? 1"EXECMCPTMP392"1U { Quit "REFUSED: Hl7Fields runs only in a namespace named EXECMCPTMP392 followed by one capital letter" }
+    If $NAMESPACE '? 1"EXECMCPTMP39"1(1"2",1"5")1U { Quit "REFUSED: Hl7Fields runs only in a namespace named EXECMCPTMP392 or EXECMCPTMP395 followed by one capital letter" }
     Set tMsg = ##class(EnsLib.HL7.Message).ImportFromString(pText, .tSC)
     If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
     Set tList = []
@@ -1071,6 +1076,281 @@ export async function seedSearchTable(dev: WireSession, name: string, set: "a" |
     { className: "Story394.Seed", args: [set] },
     STORY394_IDS[set],
     `the Search Table set ${set}`,
+  );
+}
+
+/**
+ * Story 39.5 body-reader fixture sources. They are compiled INSIDE a scratch namespace (set `a`: `JsonBody`,
+ * `Plain`, `Seed`; set `b`: `Seed`), never in HSCUSTOM, so the database file that `removeInteropNamespace`
+ * deletes takes them away. Every identifying value contains `SYNTHPHI`, and values that must survive a
+ * result contain `KEEPME`.
+ *
+ * Fixture kappa (set `a`) has seventeen headers, one body of every shape the reader decides: HL7 v2 (an ADT, an
+ * ACK, a message with other separators, a 70,180-character message, a 2.4-million-character message, a small
+ * and a large batch, a dangling ID), a stream, a string, a stream container, an XML virtual document, a body
+ * with a JSON adaptor, a plain persistent body, a missing class, a literal and a class that never opens.
+ */
+export const STORY395_JSON_BODY_SOURCE = String.raw`Class Story395.JsonBody Extends (%Persistent, %JSON.Adaptor)
+{
+
+Property Name As %String;
+
+Property Code As %String;
+
+}
+`;
+
+/** A persistent body without a JSON adaptor: the dump rules skip `Secret` (private) and `Temp` (transient). */
+export const STORY395_PLAIN_SOURCE = String.raw`Class Story395.Plain Extends %Persistent
+{
+
+Property Name As %String;
+
+Property Count As %Integer;
+
+Property Tags As list Of %String;
+
+Property Note As %Stream.GlobalCharacter;
+
+Property Ref As Ens.StringRequest;
+
+Property Secret As %String [ Private ];
+
+Property Temp As %String [ Transient ];
+
+/// Save one object whose Ref is the Ens.StringRequest pRefId. Returns its ID or the error text.
+ClassMethod Make(pRefId As %String) As %String
+{
+    Set tObj = ..%New()
+    Set tObj.Name = "SYNTHPHI-PLAIN"
+    Set tObj.Count = 7
+    Do tObj.Tags.Insert("SYNTHPHI-TAG")
+    Do tObj.Note.Write("SYNTHPHI-NOTE")
+    Set tObj.Ref = ##class(Ens.StringRequest).%OpenId(pRefId)
+    Set tObj.Secret = "SYNTHPHI-PRIVATE"
+    Set tObj.Temp = "SYNTHPHI-TEMP"
+    Set tSC = tObj.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tObj.%Id()
+}
+
+}
+`;
+
+/** Seeds fixture kappa (set a) or the second namespace's bodies (set b); uses only $ClassMethod for the classes set b lacks, so it compiles in both. */
+export const STORY395_SEED_SOURCE = String.raw`Class Story395.Seed
+{
+
+/// Seed set pSet ("a" or "b") into the current namespace, which must be an empty EXECMCPTMP395
+/// scratch namespace. Returns a JSON ID map.
+ClassMethod Seed(pSet As %String) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP395"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP395 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If pSet = "a" { Quit ..SeedA() }
+    If pSet = "b" { Quit ..SeedB() }
+    Quit "REFUSED: the set must be a or b"
+}
+
+ClassMethod SeedA() As %String
+{
+    Set tString = ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveString("SYNTHPHI-STRING")
+    Set tBodies = ""
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("adt")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("ack")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("%Stream.GlobalCharacter", ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveStream(##class(ExecuteMCPv2.Temp.Story391Fixture).StreamText())))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Ens.StringRequest", tString))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Ens.StreamContainer", ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveContainer("SYNTHPHI-CONTAINER")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Story395.Body.Missing", "1"))
+    Set tBodies = tBodies_$ListBuild($ListBuild("", "SYNTHPHI-LITERAL"))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("alt")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("big")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.EDI.XML.Document", ..SaveXml()))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Story395.JsonBody", ..SaveJson()))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Story395.Plain", $ClassMethod("Story395.Plain", "Make", tString)))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("huge")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", "999999"))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("batchSmall")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7("batchLarge")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("%Library.DynamicObject", "1"))
+    Quit ..AddHeaders(tBodies, 17)
+}
+
+ClassMethod SeedB() As %String
+{
+    Set tCR = $Char(13)
+    Set tText = "MSH|^~\&|SYNTHPHI-B-APP|SYNTHPHI-B-FAC|||20010203090001||ADT^A01^ADT_A01|SYNTHPHI-B-CTL|P|2.5.1"_tCR
+    Set tText = tText_"PID|1||SYNTHPHI-B-MRN"_tCR
+    Set tText = tText_"OBX|1|TX|B^KEEPME-B^L||SYNTHPHI-B-NOTE"_tCR
+    Set tBodies = ""
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveHl7(tText)))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Ens.StringRequest", ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveString("SYNTHPHI-B-STRING")))
+    Quit ..AddHeaders(tBodies, 2)
+}
+
+/// Save one Completed Request header for each of the first pCount (class, body ID) pairs of the list pBodies:
+/// session 395000 plus n, from Story395.Source to Story395.Target, created 2001-02-03 11:00:00 plus n seconds.
+/// Returns the JSON ID map {"headers":"1,2,..."}, or the first error text.
+ClassMethod AddHeaders(pBodies As %List, pCount As %Integer) As %String
+{
+    Set tIds = ""
+    For tI = 1:1:pCount {
+        Set tBody = $List(pBodies, tI)
+        If $Extract($List(tBody, 2), 1, 6) = "ERROR:" { Quit }
+        Set tId = ##class(ExecuteMCPv2.Temp.Story391Fixture).Add(395000 + tI, 1, 9, 0, "Story395.Source", "Story395.Target", $List(tBody, 1), $List(tBody, 2), "2001-02-03 11:00:" _ $Extract(100 + tI, 2, 3))
+        If $Extract(tId, 1, 6) = "ERROR:" { Quit }
+        Set tIds = tIds_$Select(tIds = "": "", 1: ",")_tId
+    }
+    If $Length(tIds, ",") '= pCount { Quit "FAILED: headers: "_tIds_" "_$Get(tBody)_" "_$Get(tId) }
+    Quit {"headers":(tIds)}.%ToJSON()
+}
+
+/// Save the ER7 text pName as an unsent EnsLib.HL7.Message and return its ID, or the error text.
+ClassMethod SaveHl7(pName As %String) As %String
+{
+    Quit ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveHl7(..Hl7Text(pName))
+}
+
+/// Save the XML virtual document and return its ID, or the error text.
+ClassMethod SaveXml() As %String
+{
+    Set tDoc = ##class(EnsLib.EDI.XML.Document).ImportFromString("<Patient><Name>SYNTHPHI-XML-NAME</Name><Code>KEEPME-XML</Code></Patient>", .tSC)
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Set tSC = tDoc.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tDoc.%Id()
+}
+
+/// Save one Story395.JsonBody and return its ID, or the error text.
+ClassMethod SaveJson() As %String
+{
+    Set tObj = $ClassMethod("Story395.JsonBody", "%New")
+    Set $Property(tObj, "Name") = "SYNTHPHI-JSON-NAME"
+    Set $Property(tObj, "Code") = "KEEPME-JSON"
+    Set tSC = tObj.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tObj.%Id()
+}
+
+/// The text of length pChars made of repeats of pUnit.
+ClassMethod Filler(pChars As %Integer, pUnit As %String) As %String
+{
+    Set tText = ""
+    For { Quit:$Length(tText)>=pChars  Set tText = tText_pUnit }
+    Quit $Extract(tText, 1, pChars)
+}
+
+/// The synthetic ER7 text pName ("adt", "ack", "alt", "big", "huge", "batchSmall" or "batchLarge"), with CR
+/// segment terminators. The first four are the Story391Fixture texts.
+ClassMethod Hl7Text(pName As %String) As %String
+{
+    Set tCR = $Char(13)
+    If (pName = "adt") || (pName = "ack") || (pName = "alt") || (pName = "big") {
+        Quit ##class(ExecuteMCPv2.Temp.Story391Fixture).Hl7Text(pName)
+    }
+    If pName = "huge" {
+        Set tText = "MSH|^~\&|SYNTHPHI-APP|SYNTHPHI-FAC|||20010203090013||ORU^R01^ORU_R01|SYNTHPHI-CTL13|P|2.5.1"_tCR
+        Set tText = tText_"PID|1||SYNTHPHI-MRN13"_tCR
+        Set tFiller = ..Filler(60000, "SYNTHPHI-HUGE ")
+        For tI = 1:1:40 { Set tText = tText_"OBX|"_tI_"|TX|NOTE^KEEPME-NOTE^L||"_tFiller_"|||||F"_tCR }
+        Quit tText
+    }
+    If (pName = "batchSmall") || (pName = "batchLarge") {
+        Set tFiller = $Select(pName = "batchLarge": ..Filler(30000, "SYNTHPHI-BATCH "), 1: "")
+        Set tCount = $Select(pName = "batchLarge": 3, 1: 2)
+        Set tText = "FHS|^~\&|SYNTHPHI-FAPP"_tCR_"BHS|^~\&|SYNTHPHI-BAPP"_tCR
+        For tI = 1:1:tCount {
+            Set tText = tText_"MSH|^~\&|SYNTHPHI-APP|SYNTHPHI-FAC|||2001020309001"_tI_"||ADT^A01^ADT_A01|SYNTHPHI-CTL15"_tI_"|P|2.5.1"_tCR
+            Set tText = tText_"PID|1||SYNTHPHI-MRN15"_$Char(64 + tI)_tCR
+            If tFiller '= "" { Set tText = tText_"OBX|1|TX|NOTE^KEEPME-NOTE^L||"_tFiller_"|||||F"_tCR }
+        }
+        Quit tText_"BTS|"_tCount_tCR_"FTS|1"_tCR
+    }
+    Quit ""
+}
+
+/// For each header ID in the comma-separated list pIds: the JSON [{id, precheck, serialized}], where precheck is
+/// ExecuteMCPv2.REST.MessageSearch.Hl7Size with a limit no body reaches, and serialized is the length
+/// OutputToLibraryStream writes for the same body.
+ClassMethod Sizes(pIds As %String) As %String
+{
+    Set tList = []
+    For tI = 1:1:$Length(pIds, ",") {
+        Set tHeaderId = +$Piece(pIds, ",", tI)
+        Set tHeader = ##class(Ens.MessageHeader).%OpenId(tHeaderId)
+        Set tClass = tHeader.MessageBodyClassName
+        Set tBodyId = tHeader.MessageBodyId
+        Set tObj = $ClassMethod(tClass, "%OpenId", tBodyId)
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tSC = tObj.OutputToLibraryStream(tStream)
+        Do tList.%Push({"id":(tHeaderId),"precheck":(##class(ExecuteMCPv2.REST.MessageSearch).Hl7Size(tClass, tBodyId, 1000000000)),"serialized":(tStream.Size)})
+    }
+    Quit tList.%ToJSON()
+}
+
+/// How long the HL7 text read of header pHeaderId takes under the limit pMax, against how long the body's
+/// serialization takes: {"result", "hl7TextMs", "serializeMs"}, each time the minimum of three runs.
+ClassMethod Timing(pHeaderId As %Integer, pMax As %Integer) As %String
+{
+    Set tHeader = ##class(Ens.MessageHeader).%OpenId(pHeaderId)
+    Set tClass = tHeader.MessageBodyClassName
+    Set tBodyId = tHeader.MessageBodyId
+    Set tObj = $ClassMethod(tClass, "%OpenId", tBodyId)
+    Set tSerializeMs = ""
+    Set tTextMs = ""
+    For tI = 1:1:3 {
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tStart = $ZH
+        Set tSC = tObj.OutputToLibraryStream(tStream)
+        Set tMs = ($ZH - tStart) * 1000
+        If (tSerializeMs = "") || (tMs < tSerializeMs) { Set tSerializeMs = tMs }
+        Set tStart = $ZH
+        Set tResult = ##class(ExecuteMCPv2.REST.MessageSearch).Hl7Text(tClass, tBodyId, pMax, .tText)
+        Set tMs = ($ZH - tStart) * 1000
+        If (tTextMs = "") || (tMs < tTextMs) { Set tTextMs = tMs }
+    }
+    Quit {"result":(tResult),"hl7TextMs":(tTextMs),"serializeMs":(tSerializeMs)}.%ToJSON()
+}
+
+}
+`;
+
+/** The Story395 documents compiled into a scratch namespace, in compile order, for each seed set. */
+export const STORY395_DOCUMENTS: Record<"a" | "b", ReadonlyArray<readonly [string, string]>> = {
+  a: [
+    ["Story395.JsonBody.cls", STORY395_JSON_BODY_SOURCE],
+    ["Story395.Plain.cls", STORY395_PLAIN_SOURCE],
+    ["Story395.Seed.cls", STORY395_SEED_SOURCE],
+  ],
+  b: [["Story395.Seed.cls", STORY395_SEED_SOURCE]],
+};
+
+/**
+ * What `Story395.Seed.Seed` returns: namespace A has seventeen headers (fixture kappa), B has two (an HL7
+ * message that holds `SYNTHPHI-B-MRN`, and a string).
+ */
+export const STORY395_IDS: Record<"a" | "b", Record<string, string>> = {
+  a: { headers: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17" },
+  b: { headers: "1,2" },
+};
+
+/**
+ * Put and compile the `Story395` classes of `set` into the scratch namespace `name`, then seed it and check
+ * the IDs it received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, empty `EXECMCPTMP395<capital letter>` namespace.
+ * @param set - `a` (kappa: seventeen headers) or `b` (two headers).
+ */
+export async function seedBodyReader(dev: WireSession, name: string, set: "a" | "b"): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY395_DOCUMENTS[set],
+    { className: "Story395.Seed", args: [set] },
+    STORY395_IDS[set],
+    `the body-reader set ${set}`,
   );
 }
 

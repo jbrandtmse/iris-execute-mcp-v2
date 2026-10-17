@@ -93,24 +93,24 @@ ClassMethod WindowDays(pFromNorm As %String, pToNorm As %String, Output pDays As
     Quit tSC
 }
 
-/// Validate a <code>headerIds</code> JSON array: must be an array of 1-100
-/// entries, each a numeric (positive-integer-string) header ID. On success,
-/// <var>pIds</var> is populated <code>pIds(0)=count</code>, <code>pIds(i)=+id</code>
-/// for <code>i=1..count</code>. Returns the first validation failure as a
+/// Validate a <code>headerIds</code> JSON array: must be an array of 1-<var>pMax</var>
+/// entries (100 unless the caller names another limit), each a numeric (positive-integer-string)
+/// header ID. On success, <var>pIds</var> is populated <code>pIds(0)=count</code>,
+/// <code>pIds(i)=+id</code> for <code>i=1..count</code>. Returns the first validation failure as a
 /// descriptive <var>%Status</var> — input hygiene guard (a), Rule #29 spirit.
-ClassMethod ValidateHeaderIds(pArr As %DynamicArray, Output pIds) As %Status
+ClassMethod ValidateHeaderIds(pArr As %DynamicArray, Output pIds, pMax As %Integer = 100) As %Status
 {
     Set tSC = $$$OK
     Kill pIds
     Set pIds(0) = 0
     Try {
         If '$IsObject(pArr) {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must be a non-empty array of 1-100 numeric header IDs")
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must be a non-empty array of 1-"_pMax_" numeric header IDs")
             Quit
         }
         Set tCount = pArr.%Size()
-        If (tCount < 1) || (tCount > 100) {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must contain between 1 and 100 header IDs (found "_tCount_")")
+        If (tCount < 1) || (tCount > pMax) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must contain between 1 and "_pMax_" header IDs (found "_tCount_")")
             Quit
         }
         Set tIter = pArr.%GetIterator()

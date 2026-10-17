@@ -162,7 +162,7 @@ describe("Story 39.3: the root README names the body action, its default state a
     expect(paragraph).toContain("The `body` action of `iris_message_search` (Story 39.3)");
     expect(paragraph).toContain("refused with `DATA_POLICY_BLOCKED` and no IRIS call");
     expect(paragraph).toContain("it is a read, enabled by default");
-    expect(paragraph).toContain("no tool returns HL7 body text yet");
+    expect(paragraph).toContain("`iris_message_body` is the one tool built to return HL7 body text");
   });
 });
 
@@ -231,8 +231,8 @@ describe("Story 39.3: tool_support.md states the note, the scope row and the cou
     expect(toolSupport.split("\n").filter((line) => line.startsWith("| `iris_message_search` |"))).toHaveLength(1);
   });
 
-  it("keeps the suite at 108 package tools and 113 advertised", () => {
-    expect(toolSupport).toContain("| **Total** | **20** | **83** | **5** | **108** | **113** |");
+  it("counts the suite at 109 package tools and 114 advertised (Story 39.5 added one)", () => {
+    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
   });
 });
 

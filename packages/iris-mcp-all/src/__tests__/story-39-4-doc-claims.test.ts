@@ -223,8 +223,8 @@ describe("Story 39.4: tool_support.md states the note, the scope row and the cou
     expect(toolSupport.split("\n").filter((line) => line.startsWith("| `iris_message_search` |"))).toHaveLength(1);
   });
 
-  it("keeps the suite at 108 package tools and 113 advertised", () => {
-    expect(toolSupport).toContain("| **Total** | **20** | **83** | **5** | **108** | **113** |");
+  it("counts the suite at 109 package tools and 114 advertised (Story 39.5 added one)", () => {
+    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
   });
 });
 

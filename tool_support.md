@@ -157,7 +157,7 @@ their Zod schemas but silently dropped them server-side.
 
 ---
 
-## `@iris-mcp/interop` — Interoperability (23)
+## `@iris-mcp/interop` — Interoperability (24)
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
@@ -184,8 +184,9 @@ their Zod schemas but silently dropped them server-side.
 | 21 | `iris_message_diagram` | 🟥 ExecuteMCPv2 | `/interop/production/messages/diagram` |
 | 22 | `iris_message_resend` | 🟥 ExecuteMCPv2 | `/interop/message/resend` + `/interop/message/resend/preview` |
 | 23 | `iris_message_search` | 🟥 ExecuteMCPv2 | `/interop/message/search` |
+| 24 | `iris_message_body` | 🟥 ExecuteMCPv2 | `/interop/message/body` |
 
-**Mix:** 0 Atelier · 23 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
+**Mix:** 0 Atelier · 24 ExecuteMCPv2 · 0 other — **fully custom**. Ensemble/Interoperability isn't exposed by Atelier at all.
 
 > **Epic 17 (2026-06-16) — governance defaults:** added `iris_default_settings_manage` (`list`/`get`/`set`/`delete`) and extended `iris_production_item` with `add`/`remove` actions plus arbitrary host/adapter settings (interop stays 19 → 20: one new tool; `iris_production_item` is enhanced in place). Write actions are governance-classified `write` and **default-disabled** under an `IRIS_GOVERNANCE` policy: `iris_default_settings_manage:set`/`:delete` and `iris_production_item:add`/`:remove`. Reads/pre-existing actions are **enabled by default**: `iris_default_settings_manage:list`/`:get` and the original `iris_production_item:enable`/`:disable`/`:get`/`:set` (the latter four are pre-governance baseline keys). *Epic 18 (2026-06-17) hardened the new add/arbitrary-settings surface — bad-className/duplicate-name/unknown-`@`-suffix inputs are now rejected before any write — without changing these governance defaults.*
 >
@@ -204,6 +205,8 @@ their Zod schemas but silently dropped them server-side.
 > **Story 39.3 (2026-10-16) — message body content search:** the `body` action of `iris_message_search` is built. It takes a required `bodyClass` (the exact name of a persistent body class) and 1 to 10 structured `filters` (`{property, op, value}`, ANDed; operators `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `isNull`, `notNull`), plus the scope options of `headers`, and returns the same header rows, never a body value. The IRIS handler resolves each property to its compiled `SqlFieldName` (a delimited identifier), maps each operator from a closed list, takes the table from the class dictionary and binds every value as a parameter; a refusal names the parameter, never the value. **No tool, action or governance key is added, so no default state and no tool count moves** (`body` stays an enabled-by-default read; it is refused with `DATA_POLICY_BLOCKED` under the `block` data policy, and `filters` is a declared PHI input, so the audit log redacts it under `redact` and `block`). `headers` refuses a `filters` key, and `searchTable` still answers `NOT_IMPLEMENTED`, now with `availableActions: ["headers","body"]`. `BOOTSTRAP_VERSION` `d440a659ba1e` → `f7b0868c95d0` (still 31 classes). The scope row of `iris_message_search` in the [PHI data policy scope](#phi-data-policy-scope-as-of-2026-10-16) table is now governed for `body`.
 
 > **Story 39.4 (2026-10-17) — Search Table lookup:** the `searchTable` action of `iris_message_search` is built. It takes a required `searchTableClass` (the exact name of a compiled virtual-document Search Table class, such as `EnsLib.HL7.SearchTable`) and the same 1 to 10 structured `filters` as `body` (`{property, op, value}`, ANDed), plus the scope options of `headers`, and returns the same header rows, never a Search Table or body value. The IRIS handler resolves each property to the integer PropId of its `Ens.Config.SearchTableProp` row (through IRIS's own `getPropsList`) and binds it, maps each operator from a closed list, normalizes each value as the Search Table stores it, takes the table from the class dictionary and binds every value; a namespace with no Search Table property answers `notApplicable`. **No tool, action or governance key is added, so no default state and no tool count moves** (`searchTable` stays an enabled-by-default read; it is refused with `DATA_POLICY_BLOCKED` under the `block` data policy, and `filters`, already a declared PHI input, is redacted in the audit log under `redact` and `block`). No tool returns `NOT_IMPLEMENTED` any more; the code stays in the catalog. `BOOTSTRAP_VERSION` `f7b0868c95d0` → `b6ec56073e29` (still 31 classes). The scope row of `iris_message_search` in the [PHI data policy scope](#phi-data-policy-scope-as-of-2026-10-16) table is now governed for `body` and `searchTable`.
+
+> **Story 39.5 (2026-10-17) — message body reader:** added `iris_message_body` (interop 23 → 24; the suite goes from 108 to 109 package tools, 113 to 114 advertised) — a read of the bodies of 1 to 20 message headers by ID, over the new route `POST /interop/message/body`, rendered by kind: an HL7 v2 body as ER7 text, an XML virtual document as XML, a persistent object as JSON (its `%JSON.Adaptor` export, otherwise a dump of its public properties), a stream or stream container as text, and a header with no body class as its literal value; any other body is shown as its class and ID with a reason. Each shown text is cut at `maxChars` (default 10000, at most 1048576), with `truncated`. The tool is a **read, enabled by default** (and still enabled under the `read-only` preset): one governance key, `iris_message_body`, which an operator restricts with `{"global":{"iris_message_body":false}}`. It is **governed by the PHI data policy** and is the first consumer of body text: the route is told which bodies it may read, so under `redact` IRIS reads HL7 v2 bodies only and no other body's content leaves IRIS, and the HL7 v2 text goes complete through the redaction engine before it is sanitized and cut; `block` reads no body; `allow` shows bodies as stored; a call's `dataPolicy` can only tighten the profile's policy. The tool is the second member of a pair with `iris_message_search` in `TOOL_PAIRS` and is in the `core` and `developer` presets (`core` is 12 runtime tools). `Hl7Text` now refuses a body over the cap from the stored segment sizes (`MessageSearch.Hl7Size`, batch children included) before it serializes anything (DW-577), and `ValidateHeaderIds` takes a maximum (20 for this route, 100 elsewhere). New class `ExecuteMCPv2.REST.MessageBody.cls` (bootstrap 31 → 32 classes, `BOOTSTRAP_VERSION` `b6ec56073e29` → `fa8227a48af8`). The scope row of `iris_message_body` in the [PHI data policy scope](#phi-data-policy-scope-as-of-2026-10-16) table is governed, dated 2026-10-17; the table's own date stays 2026-10-16.
 
 ---
 
@@ -360,7 +363,7 @@ were silently returning stale or per-process data.
   omitted `files`, which let the Atelier server's narrower default kick
   in and returned empty results for matches that lived in `.cls` files.
 
-> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 108-tool total.
+> **Placeholder note:** `iris_debug_session` (FR106) and `iris_debug_terminal` (FR107) are documented in the PRD but deferred post-MVP. The `debug.ts` file is a 14-line placeholder with no exports, and they do not count against the 109-tool total.
 
 ---
 
@@ -384,6 +387,7 @@ The PHI data policy (`dataPolicy`: `block`, `redact` or `allow`, default `redact
 
 | Tool | Scope | Why |
 |---|---|---|
+| `iris_message_body` | governed | Returns message bodies (a read, enabled by default; added 2026-10-17). `block` withholds every body; `redact` shows an HL7 v2 body redacted by the reviewed keep-list, complete or not at all, and withholds every other body, which IRIS never reads; `allow` shows bodies as stored. A call's `dataPolicy` only tightens. |
 | `iris_message_resend` | governed | The `preview` action's body summary is the one body-derived output. Under `redact` an HL7 v2 body shows only its class name and every other body is withheld with a reason; `block` withholds every body; `allow` is unchanged. `resend` and `resendFiltered` return status texts only. |
 | `iris_message_search` | governed | The `body` and `searchTable` actions are under the policy: refused with `DATA_POLICY_BLOCKED` under `block`; under `redact` and `allow` they return header rows only (default state of each: a read, enabled by default). The `headers` action is not: for a header with no body class the body ID is the literal body value, so restrict `iris_message_search:headers` with its governance key. |
 | `iris_sql_execute` | residual | Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or `IRIS_SQL_READ_ONLY`. |
@@ -421,7 +425,7 @@ The PHI data policy (`dataPolicy`: `block`, `redact` or `allow`, default `redact
 
 Every other tool is not applicable: it returns no body or body-derived text. That includes the `resend` and `resendFiltered` actions of `iris_message_resend` (status texts). A header's `ErrorStatus` and `Description` are reachable only through the residual tools above; the governed forensics tools keep excluding both. A header with no body class is the one header column that holds a body value: its body ID is the literal body, which is why the `headers` action of `iris_message_search` and `iris_production_messages` are restricted through their governance keys rather than the policy.
 
-A restriction on a residual tool is the tool's own governance key (`IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_FILE`) or the tool-visibility presets, not the data policy. The data policy changes the default output of the resend preview (the one sanctioned change of Story 39.2) and, under `block`, refuses the `body` and `searchTable` actions of `iris_message_search`; it adds no tool, no action and no tool count.
+A restriction on a residual tool is the tool's own governance key (`IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_FILE`) or the tool-visibility presets, not the data policy. The data policy changes the default output of the resend preview (the one sanctioned change of Story 39.2), under `block` refuses the `body` and `searchTable` actions of `iris_message_search`, and governs every body `iris_message_body` returns (the tool Story 39.5 adds); the policy itself adds no action and no governance key.
 
 ---
 
@@ -439,10 +443,10 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 |---|:---:|:---:|:---:|:---:|:---:|
 | `@iris-mcp/dev` | 20 | 11 | 0 | **31** | **32** |
 | `@iris-mcp/admin` | 0 | 26 | 0 | **26** | **27** |
-| `@iris-mcp/interop` | 0 | 23 | 0 | **23** | **24** |
+| `@iris-mcp/interop` | 0 | 24 | 0 | **24** | **25** |
 | `@iris-mcp/ops` | 0 | 21 | 0 | **21** | **22** |
 | `@iris-mcp/data` | 0 | 2 | 5 | **7** | **8** |
-| **Total** | **20** | **83** | **5** | **108** | **113** |
+| **Total** | **20** | **84** | **5** | **109** | **114** |
 
 ---
 
@@ -454,7 +458,7 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 83 of the 108 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 84 of the 109 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -468,7 +472,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 d
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 83 of 108 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 84 of 109 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

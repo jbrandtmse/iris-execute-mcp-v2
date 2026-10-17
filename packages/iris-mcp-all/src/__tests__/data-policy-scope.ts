@@ -36,6 +36,14 @@ function notApplicable(reason: string, names: readonly string[]): Array<[string,
 /** The rows, one per tool name; {@link DATA_POLICY_SCOPE} indexes them, so a name may appear only once. */
 export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyScopeRow]> = [
   [
+    "iris_message_body",
+    {
+      scope: "governed",
+      reason:
+        "Returns message bodies under the policy: block withholds every body; redact shows an HL7 v2 body redacted by the reviewed keep-list and withholds every other body; allow shows bodies as stored.",
+    },
+  ],
+  [
     "iris_message_resend",
     {
       scope: "governed",

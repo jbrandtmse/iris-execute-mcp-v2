@@ -176,7 +176,7 @@ describe("Story 39.2: the root README states the variable, the refusal code, the
   it("describes the preview as built: the class name for an HL7 v2 body, every other body withheld", () => {
     expect(policy).toContain("An HL7 v2 body shows only its class name");
     expect(policy).toContain("every other body is withheld with a reason");
-    expect(policy).toContain("no tool returns HL7 body text yet");
+    expect(policy).toContain("`iris_message_body` is the one tool built to return HL7 body text");
   });
 
   it("carries the exposure sentence exactly", () => {
@@ -204,8 +204,8 @@ describe("Story 39.2: tool_support.md and the interop README state the scope and
     expect(note).toContain(`\`${PREVIOUS_BOOTSTRAP_VERSION}\` ${RIGHT_ARROW} \`${STORY_BOOTSTRAP_VERSION}\``);
   });
 
-  it("tool_support.md keeps the suite at 108 package tools and 113 advertised", () => {
-    expect(toolSupport).toContain("| **Total** | **20** | **83** | **5** | **108** | **113** |");
+  it("tool_support.md counts the suite at 109 package tools and 114 advertised (Story 39.5 added one)", () => {
+    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
   });
 
   it("the interop README states the policy on the preview bullet, with the exposure sentence", () => {

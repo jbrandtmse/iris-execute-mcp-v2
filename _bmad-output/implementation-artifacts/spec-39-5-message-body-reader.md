@@ -2,7 +2,8 @@
 title: 'Story 39.5: Message Body Reader'
 type: 'feature'
 created: '2026-10-17'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '3b8089fb2756e6b0c4521ce413f1c03bb220d6a7'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -459,6 +460,47 @@ The expected counts are:
 
 ## Review Triage Log
 
+### 2026-10-17 — Review pass
+- verdicts: 36 findings — high 0, medium 5, low 23, false 8, maybe-false 0
+- findings (Blind Hunter 1-9, Edge Case Hunter 10-19, Verification Gap 20-28 with its Other findings, Intent Alignment 29-36):
+  - 1 `[low]` `[reject]` Blind: the `tooLarge` reason tells a caller at `maxChars` 1048576 to raise `maxChars` — by-design: the text is the spec's fixed Design Notes text and matrix row 13 pins this very case; the body cannot be read at all, which the README says ("never shown"); `reopen_if`: a user reports the hint as confusing.
+  - 2 `[low]` `[reject]` Blind: `noRenderer` renders "a other body" and names the token `vdoc` — by-design: the spec's fixed template ("No renderer reads a `<kind>` body"), kind from the closed token list; `other` never opens, so the text is rare and cosmetic.
+  - 3 `[low]` `[patch]` Blind: the README, CHANGELOG and doc-claims pin say an HL7 v2 body is "shown only whole", but the default `maxChars` 10000 cuts it — real wording error; patched to "read only whole" (the tool description's own wording) in `packages/iris-interop-mcp/README.md`, `CHANGELOG.md` and the pin in `story-39-5-doc-claims.test.ts`, with a clause saying a body IRIS read whole is still cut at `maxChars`.
+  - 4 `[low]` `[reject]` Blind: no aggregate bound on a response (20 bodies at `maxChars` 1048576) — by-design: `maxChars` is the per-body bound the spec chose (Design Notes I4, AD-20), reachable only by a caller who raises it under an operator's `allow`; an aggregate cap would change the specified behavior.
+  - 5 `[medium]` `[patch]` Blind: "`ValidateHeaderIds` byte-identical at the default" had no mechanical proof and no OS test at `pMax` 20 — real (the recorded mutation died on `<UNDEFINED> pMax`, not on a text or limit assertion); patched with exact-text and at-limit assertions in `MessageResendTest.TestValidateHeaderIdsGuard` (default 100 and 20) and a live gate row (20 headers read, 21 refused with the text of 20); AC-8 mutation line written.
+  - 6 `[low]` `[patch]` Blind: `Hl7Size` has no OS test and the long-terminator shortfall is "reasoned, not run" — the shortfall premise is refuted live (row 30); the OS-test part is by-design (the DW-577 evidence rows are live, per the matrix); patched the `Hl7Size` doc comment, which implied a reachable shortfall, and removed the invalid `deferred:` item.
+  - 7 `[low]` `[reject]` Blind: no non-ASCII or astral content in any live fixture — hardening beyond the matrix: the surrogate rules are pinned by `TestReadStreamText`, `CutText` assertions and the `cutText` unit rows; the JSON/HTTP encoding is the framework's; `reopen_if`: a non-ASCII body renders wrongly.
+  - 8 `[low]` `[reject]` Blind: the redact/block unit tables feed states the real route cannot produce (Rule #54) — by-design: Task 19 requires the version-skewed rows, the spec names the TypeScript drop rule as a second line (I2), and the live rows use the real shapes.
+  - 9 `[false]` `[reject]` Blind: wrong matrix claims were appended, not amended (Rule #42) — the rows sit inside the read-only `<intent-contract>`; the corrections are recorded under Verification, as the rule for this pipeline allows, and the finding's fix is to edit this build's spec.
+  - 10 `[low]` `[reject]` Edge: the `tooLarge` hint at the top `maxChars` (same defect as 1) — see 1.
+  - 11 `[low]` `[reject]` Edge: `Hl7Size` enqueues every child row before testing the limit — theoretical: the cost is one list append per stored child ID, and the serialization it exists to avoid is skipped; no reachable batch makes it matter.
+  - 12 `[low]` `[patch]` Edge: C1 controls and U+2028/2029 are not sanitized while the description says "other control characters" — behavior is by-design (the spec defines the set: C0 except TAB and LF, and DEL); the over-claim is real, so the description and the README now say "other C0 control characters and DEL".
+  - 13 `[low]` `[reject]` Edge: 20 bodies at the top `maxChars` can reach about 40 million characters (same defect as 4) — see 4.
+  - 14 `[low]` `[reject]` Edge: a binary stream is returned as text under `allow` — the spec says "a stream or stream container as text"; the output is bounded by `maxChars` and sanitized; a `noRenderer` for binary streams would add a branch and a reason the spec does not list; `reopen_if`: a user reads a binary stream container and asks for it.
+  - 15 `[false]` `[reject]` Edge: a `found: false` item carries an arbitrary `error` string — `error` is one of the ten fields the spec says to read, the route sends only its two fixed texts, and no body content reaches it.
+  - 16 `[false]` `[reject]` Edge: an unknown policy value falls through to allow semantics — no real input reaches it: `DataPolicy` is a closed union, `effectiveDataPolicy` and `tightenDataPolicy` return validated values only, and a malformed setting fails startup (Rule #54).
+  - 17 `[low]` `[patch]` Edge: `ValidateHeaderIds` echoes an invalid entry although the route's doc comment says its texts never carry a value — the echo is existing, byte-identical text; the `MessageBody.cls` doc comment was the wrong claim and now says only that the text names the parameter.
+  - 18 `[low]` `[reject]` Edge: `SetBodyDetail` opens every body even under `kind` — by-design: `bodyAvailable`, a specified field, needs the open, the preview already did it, and no content leaves IRIS.
+  - 19 `[low]` `[reject]` Edge: wall-clock budgets in the default suite are flaky on a shared instance — the budgets are the spec's (60 s, 2 s) and the measured values are 1.4 s and 20 ms.
+  - 20 `[medium]` `[patch]` Verification: `ValidateHeaderIds` default text and the upper bound unpinned — same defect as 5; patched there.
+  - 21 `[low]` `[reject]` Verification: the retained post-serialization check in `Hl7Text` has no single-fault test — after the live probe (row 30) it is reachable only when `Hl7Size` returns 0 (a failed query), so a test needs a double that makes `Hl7Size` undercount, a state the real system cannot produce (Rule #54); the check is the spec's kept defense and is unchanged.
+  - 22 `[medium]` `[patch]` Verification: the `CutText` cut branch has no test at any layer — real (the TypeScript cut masks it); patched with `CutText` assertions in `MessageBodyTest.TestReadStreamText` (caps 10, 30 and 31, a surrogate pair, empty text), the class staying at four methods.
+  - 23 `[medium]` `[patch]` Verification: the live audit row waits on entries it did not create — real (an earlier row's entry satisfied the wait); patched with a `maxChars` marker per call (7001 to 7003) that only the call's own entry carries.
+  - 24 `[medium]` `[patch]` Verification: "sanitization after redaction" cannot be told apart by output — real (both orders give the same text); patched with a wrapped `redactHl7` that records its argument: the engine must receive the complete text with CRLF and the control character intact, at `maxChars` 5; a second row pins that the engine is not run under `block` or `allow`.
+  - 25 `[low]` `[reject]` Verification: the `maxChars` 120 and 150 rows pass under truncation-first — true, but the `maxChars` 5 unit and live rows are the pinning rows and do discriminate (mutation recorded); the others are extra coverage.
+  - 26 `[low]` `[patch]` Verification: `mutation:` lines missing for some sub-clauses, and the AC-8 line stale — one mutation per AC is the rule; the AC-8 line is rewritten with the limit mutation of row 5; AC-7's second bullet and AC-8's sub-bullets have the preview, `notApplicable` and namespace rows as their pins and no further line is needed.
+  - 27 `[low]` `[reject]` Verification: `MessageBodyTest` has no automated host — the project runs OS classes through `iris_execute_tests` per the spec's Verification; not a regression.
+  - 28 `[low]` `[reject]` Verification: the `bodyTextComplete: false` HL7 fake is a state the route cannot produce — by-design: the spec requires the fail-closed branch (anything else is `hl7Unreadable`), and the row is labeled as a guard.
+  - 29 `[false]` `[reject]` Intent: the matrix is not transcribed literally — the two corrections are recorded under Verification (Rule #42) and the contract is unchanged; no defect claimed.
+  - 30 `[false]` `[reject]` Intent: DW-577 is closed for the default terminator only (the `deferred:` item) — refuted live: a CRLF-terminated text (124 characters) saved, reopened and measured gave a precheck of 121 and a serialization of 121, because the terminator is not stored (`%OnOpen` takes the first five separator characters), so `Hl7Size` equals the serialization for every stored message; the item was removed.
+  - 31 `[false]` `[reject]` Intent: the DW-577 change is nearly invisible at the tool surface — by spec design the evidence rows are in-IRIS (`Sizes`, `Timing`); no defect claimed.
+  - 32 `[low]` `[reject]` Intent: the TypeScript drop rules are tested on synthetic replies only — same as 8.
+  - 33 `[low]` `[reject]` Intent: the ObjectScript handler is covered by the live gate and little else — Task 12 lists the four OS methods; `CutText` is added by row 22.
+  - 34 `[false]` `[reject]` Intent: audit and no-echo evidence depends on the logger — no defect claimed; the live row and the governance test assert it, and row 23 hardens the live row.
+  - 35 `[false]` `[reject]` Intent: counts and sentences of earlier stories' tests moved — spec-mandated shared-surface updates (Code Map), no defect claimed.
+  - 36 `[low]` `[reject]` Intent: binary streams are read as text — same as 14.
+- patches applied: rows 3, 5, 6, 12, 17, 20, 22, 23, 24, 26 (medium entries 5/20, 22, 23, 24; low entries 3, 6, 12, 17, 26 as patched here). Each patch to a test has a `mutation:` line in Verification.
+
 ## Design Notes
 
 **Plan-time interpretations** (apply and report):
@@ -610,6 +652,19 @@ Standing criterion: every test added or changed passes on a fresh environment, i
   - `iris_namespace_list` and `iris_database_list` show none of them;
   - `iris_doc_list` (HSCUSTOM, `Story395` and `ExecuteMCPv2.Temp.`, generated included) is empty.
 
+**Task 0 evidence** (2026-10-17; IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U); probe namespace `EXECMCPTMP395P`, class `Story395.Probe`; deployed `BOOTSTRAP_VERSION` `b6ec56073e29` = the shipped embed):
+- **(a) Sizes** (IDs 1-5 = `adt`, `ack`, `alt`, `big`, `huge`; 6 = `batchSmall`; 10 = `batchLarge`). The probe `Hl7Size` (planned algorithm, limit 10^9) equals the length `OutputToLibraryStream` writes (`%Stream.TmpCharacter.Size`) for all seven: `adt` 749, `ack` 156, `alt` 183, `big` 70180, `huge` 2401585, `batchSmall` 290, `batchLarge` 90514. `GetFullSize(id)` alone equals the serialized length for the five plain messages and is only 29 for a batch parent. **The batch is nested, not flat**: `batchSmall` 6 (FHS) -> 7 (BHS, `ParentId` `6:2`) -> 8 and 9 (`ParentId` `7:2`); `batchLarge` 10 -> 11 (`10:2`) -> 12, 13, 14 (`11:2`), each message 30152. A single flat `ParentId = id OR ParentId %STARTSWITH id:` query finds only the BHS child (flat sum 58 against 290 serialized), so `Hl7Size` repeats that fixed query for every node it finds (a worklist, "recursively" of the Boundaries) and then equals the serialized length. It never exceeds the serialized length, so no fitting body is withheld; the sum with limit 100 stops early (174 for `batchSmall`, 30210 for `batchLarge`, both over 100).
+- **(b) Work bound** (`huge`, minimum of three `$ZH` runs, two repeats): `serializeMs` 4.649 and 4.059; probe `Hl7Size` (limit 65536) `sizeMs` 0.28 and 0.256; ratio 16.6 and 15.9 (at least 8), so `huge` stays 2,401,585 characters.
+- **(c) XML** (`EnsLib.EDI.XML.Document` `ImportFromString`, `%Save`, `%OpenId`, `OutputToLibraryStream`): the exact output is the input text, 72 characters, no declaration: `<Patient><Name>SYNTHPHI-XML-NAME</Name><Code>KEEPME-XML</Code></Patient>`.
+- **(d) JSON** (`Story395.JsonBody`, `%JSONExportToStream`): the exact output is 50 characters: `{"Name":"SYNTHPHI-JSON-NAME","Code":"KEEPME-JSON"}`.
+- **(e) Dump input** (`%Dictionary.CompiledProperty`, by `SequenceNumber`, `Name`):
+  - `Ens.StringRequest`: `StringValue` (`%Library.String`, seq 1); `%%OID` (Private, Internal, Transient, seq 4) and `%Concurrency` (Internal, Transient, seq 21). The dump rules give `{"StringValue":"..."}`, as header 4 expects.
+  - `Ens.StreamContainer`: `OriginalFilename` (1), `OutputFolder` (2), `OutputFilename` (3), `%%OID` (4), `Stream` (`%Stream.Object`, Calculated, Transient, 4), `Type` (5), `StreamFC`, `StreamFB`, `StreamGC`, `StreamGB`, `StreamCF`, `StreamBF`, `StreamCG`, `StreamBG` and `CharEncodingTable` (all Internal, 6-14), `Attributes` (array of `%Library.String`, 15), `%Concurrency` (21). The dump keeps `OriginalFilename`, `OutputFolder`, `OutputFilename`, `Type` and `Attributes` (`{"collection":"array","count":0}` when empty), and no Internal stream property.
+  - `Story395.Plain`: `Name` (1), `Count` (`%Library.Integer`, 2), `Tags` (list, 3), `Note` (`%Stream.GlobalCharacter`, 4), `Ref` (`Ens.StringRequest`, 5), `Secret` (Private, 6), `Temp` (Transient, 7), `%%OID`, `%Concurrency`. The dump rules give the Design Notes JSON for header 12 (`Secret` and `Temp` skipped), so those rows stand.
+- **(f) Batches**: `SaveHl7` of `batchSmall` returns 6 and of `batchLarge` returns 10 (the parent IDs); the parents open and `OutputToLibraryStream` writes the whole batch, children included (290 and 90514 characters). `batchSmall` has 3 descendants (one BHS, two messages) and `batchLarge` 4 (one BHS, three messages).
+- **(g)** A class compiled in P calls `ExecuteMCPv2.Temp.Story391Fixture.SaveHl7` and `Hl7Text` (resolved at run time through the `%ALL` mapping); the deployed `BOOTSTRAP_VERSION` is `b6ec56073e29`.
+- **(h) Terminator (review pass, probe in `EXECMCPTMP395P`, removed).** A CRLF-terminated 3-segment text (124 characters) and its LF-terminated twin (121) were saved with `SaveHl7`, given a header, and measured with `Story395.Seed.Sizes`: both give a precheck of 121 and a serialized length of 121. The segment terminator is not stored (`EnsLib.HL7.Message.%OnOpen` sets `Separators` to the first five characters, so `$$$SEGTERM` is empty and the default CR is written), so `Hl7Size` equals the serialization of every stored message, whatever terminator it was imported with.
+
 **Planned mutations (Rule 19).** For each: apply it, observe red, revert, rebuild any dist and reload any class, and confirm that `git status --short` and `git diff --stat` are unchanged. Record each as `mutation: <change> -> <red test>`.
 
 | AC | Mutation | Expected red |
@@ -632,7 +687,71 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-8 | `ValidateHeaderIds` texts use `pMax` without the default 100 | `MessageResendTest`; the 39.1 replay |
 | AC-9 | the scope row removed | `data-policy-scope.test.ts` |
 
+### Implementation results (2026-10-17)
+
+**Commands (all green).**
+- OS classes in HSCUSTOM, one per call: `MessageBodyTest` 4/4, `MessagePreviewPolicyTest` 4/4, `MessageResendTest` 12/12, `MessageSearchTest` 5/5, `MessageBodySearchTest` 5/5, `MessageSearchTableTest` 5/5.
+- Armed gates, one per call: the 39.5 gate 28 passed (after the review pass); the 39.2 gate 17 passed and 1 skipped (the capture row); the 39.1 gate 103 passed and 1 skipped; the 39.4 gate 84 passed and 1 skipped; the 39.3 gate 93 passed and 1 skipped. Then `ENV pnpm --filter @iris-mcp/all test` (armed, rerun after the review patches): 67 files, 1174 passed, 4 skipped; `ENV pnpm --filter @iris-mcp/dev exec vitest run --no-file-parallelism`: 60 files, 1419 passed.
+- `build`, `test`, `lint` and `type-check` for shared (80 files, 2051 tests), dev, admin (498), interop (29 files, 627), ops (350), data (165) and client-config (514): green. `lint` of shared reports one existing warning (an unused disable directive in `cli/governance.ts`). A plain unarmed `pnpm --filter @iris-mcp/dev test` failed `doc-type-description-live-gate` once on the shared instance (the same document-count flake the 39.4 run recorded) and passed in the armed sequential run. `@iris-mcp/all` has no `lint` or `type-check` script, so its new test files were checked with a temporary `tsc --noEmit` project (clean, deleted) and the root `eslint` (clean).
+- `gen:governance-baseline:check` OK (210 live keys, 69 post-foundation, the frozen 141 all present), `gen:skills:check` OK, `check-epics-sync.mjs` OK, a second `gen:bootstrap` gives a byte-identical `bootstrap-classes.ts` (same `shasum`), and `measure:tools-payload` gives interop `full` 25 / 56,442 and `core` 12 / 37,500, which the README rows equal ("Last re-measured at Story 39.5").
+- **`BOOTSTRAP_VERSION` `b6ec56073e29` to `fa8227a48af8`** (32 classes). Intermediate values `72114cc919eb` (until `BodyOne` took its read decision from `ReadsText` alone, which mutation 3 below needed) and `1d9a7c6ac400` (until the review pass corrected the doc comments of `Hl7Size` and `MessageBody`) existed; the documents carry the final value.
+- Performance: the first armed bootstrap 1.4 s (budget 60 s); one `redact` read of A's 17 headers 20 to 24 ms (budget 2 s); `Story395.Seed.Timing(13, 65536)`: `Hl7Text` 0.14 ms against a serialization of 2.3 ms (ratio about 17; the gate needs 4); Task 0 (b): `Hl7Size` 0.256 to 0.28 ms against 4.06 to 4.65 ms.
+- Nothing left: the four `EXECMCPTMP395*` names read `[]` in `leftovers`; `iris_namespace_list` and `iris_database_list` show none; `iris_doc_list` (HSCUSTOM, `Story39`, `ExecuteMCPv2.Temp.`, generated included) is empty. The disposable Task 0 harness test file and probe classes are deleted.
+
+**Mutations (Rule 19).** Each was applied, observed red, reverted (`cmp` or `shasum` equal to the saved copy), and the dist rebuilt or the class reloaded.
+- AC-4: mutation: `applyBodyReaderPolicy` passes the HL7 text unredacted under `redact` -> 10 unit rows (`message-body.test.ts`, `message-body-governance.test.ts`) and 6 live rows (the redact row, redaction-before-truncation, the tighten row, the profile row, the IRIS-parser row, the second-namespace row) red.
+- AC-3: mutation: `redact` sends `bodyRead:"all"` -> 4 unit rows (`bodyReadWire`, the per-policy wire, two tighten rows) and 2 live rows (the redact row through the recorded wire, the tighten row) red. The live sweep over the shaped result stays green, which is the defense in depth Design Notes I2 names.
+- AC-3: mutation: `ReadsText("hl7", ...)` returns 1 for every kind (class reloaded) -> `TestReadsText` and 2 live rows (the redact row's raw-response check, the route `hl7` row) red.
+- AC-3: mutation: truncation before redaction -> 2 unit rows and the live "before truncation" row red.
+- AC-3: mutation: `tightenDataPolicy` bypassed -> 2 unit rows and the live tighten row red.
+- AC-3: mutation: the `bodyId` of a literal header kept under `redact` -> 4 unit rows red. **The live rows stay green**: IRIS sends no literal `bodyId` under `kind` or `hl7`, so the spec's expected live red ("the redact sweep") is unattainable; the unit rows pin the TypeScript drop rule.
+- AC-6: mutation: the precheck removed from `Hl7Text` -> the live work-bound row red (9.764 ms against 2.374 ms).
+- AC-6: mutation: `Hl7Size` skips the children -> the live exact row red (header 15: 29 against 290). **The `batchLarge` redact row stays green**: the post-serialization check, which stays, still refuses it.
+- AC-6: mutation: the precheck compares `>=` -> the live cap-boundary row red.
+- AC-2: mutation: `PropertyDump` keeps `Private` and `Transient` properties -> `TestPropertyDump` (through the `Ens.Config.Item` assertions added for the transient flag) and the live header 12 row (`SYNTHPHI-PRIVATE`) red. The `Private` flag is pinned by the live row only: no system class has a public-looking private property.
+- AC-2: mutation: `cutText` ignores `maxChars` -> 4 unit rows and 2 live rows (the cap row, the before-truncation row) red.
+- AC-1: mutation: the route validates after `SwitchNamespace` -> the live refusal row red (the `<NAMESPACE>` error appears first).
+- AC-5: mutation: the pair removed from `TOOL_PAIRS` -> 2 rows of `tool-visibility.test.ts` and 2 rows of the interop `presets.test.ts` red.
+- AC-5: mutation: `iris_message_body` moved out of `core` -> 7 unit rows (`presets.test.ts`, `presets.e2e.test.ts`) and the live visibility row red.
+- AC-7: mutation: `dataPolicy` dropped from the definition -> 5 unit rows (the definition and four audit rows of `message-body-governance.test.ts`) and `data-policy-scope.test.ts` red.
+- AC-8: mutation: `ValidateHeaderIds` without its default of 100 -> 3 rows of `MessageResendTest` red (`<UNDEFINED> pMax`). The 39.1 replay was not run under it.
+- AC-8 (review pass): mutation: `ValidateHeaderIds` compares `tCount >= pMax` instead of `tCount > pMax` (class reloaded) -> `MessageResendTest:TestValidateHeaderIdsGuard` red (the 100-entry and 20-entry acceptances fail with "between 1 and 100 ... (found 100)" and "between 1 and 20 ... (found 20)"). Reverted (`cmp` equal), class reloaded.
+- AC-1 (review pass): mutation: `MessageBody.MAXIDS` 21 instead of 20 (class reloaded) -> the live gate row "the limit is 20 headers" red (21 IDs accepted, no refusal). Reverted (`cmp` equal), class reloaded.
+- AC-2 (review pass): mutation: `MessageBody.CutText` returns the text uncut -> `MessageBodyTest:TestReadStreamText` red (cap 10 and the surrogate pair). Reverted (`cmp` equal), class reloaded.
+- AC-3 (review pass): mutation: `applyBodyReaderPolicy` passes `sanitizeBodyText(raw.bodyText)` to `redactHl7` -> the unit row "the engine is given the complete text exactly as IRIS sent it" red (the other rows stay green, which is why the row exists). Reverted (`cmp` equal).
+- AC-7 (review pass): mutation: the live audit row looks for an entry carrying a marker no call sent (`marker + 1000`) -> the audit row red ("no audit entry"), where the previous wait on any earlier entry stayed green. Reverted (`cmp` equal).
+- AC-9: mutation: the scope row removed -> 3 rows of `data-policy-scope.test.ts` red.
+
+**Spec corrections found by running the system (Rule #42).** The intent contract is unchanged; the gate follows these.
+- The matrix row "Route, least exposure" lists `SYNTHPHI-S` among the strings the raw text must not hold. The ADT fixture holds `SYNTHPHI-STREET` and `SYNTHPHI-SUB`, so under `hl7` the raw text does hold that prefix. The gate uses the stream's own value `SYNTHPHI-S1`.
+- The matrix row "Cap" says items 1, 3 and 10 have exactly 100 characters at `maxChars:100`. Item 10's XML is 72 characters (Task 0 (c)). The gate checks items 1, 3 and 12 at 100, item 10 whole at 100, and item 10 cut at 50.
+- Task 0 (a): the batch is nested (FHS, then BHS, then the messages), so the fixed query is repeated for every node found, as "recursively" says; one flat query falls short (58 against 290).
+- The recording proxy of the gate keeps every request, 401 challenges included; the server's client answers a challenge with its credentials, so a row that counts served exchanges drops the 401, and the "no route reached" rows count all of them.
+- One exploratory call of the new route named HSCUSTOM and header 1 (a not-found lookup, nothing read); no other call named HSCUSTOM messages.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** `iris_message_body` reads 1 to 20 message bodies by header ID over the new route `POST /interop/message/body` (`ExecuteMCPv2.REST.MessageBody`). The policy decides what IRIS may read at all (`bodyRead`: `kind` none, `hl7` HL7 v2 only, `all` every renderable kind) and, per body, in TypeScript (`decideBodyPolicy`, shared with the resend preview): HL7 v2 text goes complete and unsanitized through `redactHl7`, then sanitization and the `maxChars` cut. Interop is 24 package / 25 advertised tools, `core` 12 runtime (L-4), the suite 109 / 114; the tool pairs with `iris_message_search`. DW-577 is closed: `Hl7Size` sums the stored segment sizes (batch children included) so `Hl7Text` refuses an over-cap body before serializing. `BOOTSTRAP_VERSION` `b6ec56073e29` to `fa8227a48af8` (32 classes). Frozen governance baseline `1e62c5ad5bf7`/141 unchanged.
+
+**Files changed** (`git diff --stat` since `baseline_revision` has the full list):
+- IRIS: `src/ExecuteMCPv2/REST/MessageBody.cls` (new route handler), `MessageSearch.cls` (`Hl7Size`, precheck), `MessageResend.cls` (`ValidateHeaderIds` `pMax`), `Dispatch.cls` (route), `Tests/MessageBodyTest.cls` (new), `Tests/MessageResendTest.cls` (limit texts).
+- TypeScript: `packages/iris-interop-mcp/src/tools/message-body.ts` (new tool), `index.ts`, `presets.ts`, `message-resend.ts` (preview on `decideBodyPolicy`, `headerIdSchema` exported); `packages/shared/src/data-policy.ts`, `index.ts`, `tool-visibility.ts` (`TOOL_PAIRS`), `bootstrap-classes.ts` (generated), `scripts/gen-bootstrap.mjs`.
+- Tests: new unit, governance, live-gate and doc-claims files; the 39.1 to 39.4 pins, interop and shared roster tests, and `interop-namespace-fixture.ts` updated.
+- Docs: root, interop, all and shared READMEs, `tool_support.md`, `CHANGELOG.md`, `docs/`, `.changeset/story-39-5-message-body-reader.md`, `data-policy-scope`.
+
+**Review findings** (36 from four layers; high 0, medium 5, low 23, false 8):
+- Patches applied: the `ValidateHeaderIds` text and limit pins (OS test and a live route row), the `CutText` pins in `MessageBodyTest`, the live audit row's own-entry marker, a wrapped `redactHl7` row that pins the engine receives the complete unsanitized text, the "read only whole" and "C0 control characters and DEL" wording (README, CHANGELOG, tool description, doc-claims pin), the `Hl7Size` and `MessageBody` doc comments (bootstrap moved to `fa8227a48af8`), and the removal of the implement stage's `deferred:` item.
+- Items deferred: none. The implement stage's `Hl7Size` long-terminator item was refuted by a live probe (the terminator is not stored, so the precheck equals the serialization for every stored message) and removed.
+- Rejected, with reasons in the Review Triage Log: by-design fixed texts (rows 1, 2), the per-body `maxChars` bound (4, 13), unreachable-state or theoretical items (11, 14, 16, 21), spec-bound or descriptive rows (9, 29 to 36), and the rest as low.
+- Follow-up review recommended: `false`. Four medium entries were patched, but every patch is a test, a comment or a wording change, each with a recorded failing mutation (Verification), and every `(once)` command was rerun after the last patch; no unverified risk can be named.
+
+**Verification performed (after the last patch).** `pnpm gen:bootstrap` twice more: identical bytes (same `shasum`). `build`, `test`, `lint` and `type-check` for shared (80 files, 2051 tests), dev, admin (498), interop (29 files, 629), ops (350), data (165) and client-config (514): green (shared `lint` keeps its one existing warning). `ENV` dev `--no-file-parallelism`: 60 files, 1419 passed; the plain unarmed dev `test` hit the `doc-type-description-live-gate` document-count flake (passes armed, alone and in the sequential run). `ENV` `@iris-mcp/all test`: 67 files, 1174 passed, 4 skipped, which includes the 39.5, 39.1, 39.2, 39.3 and 39.4 gates. OS classes one per call: `MessageBodyTest` 4, `MessagePreviewPolicyTest` 4, `MessageResendTest` 12, `MessageSearchTest` 5, `MessageBodySearchTest` 5, `MessageSearchTableTest` 5. `gen:governance-baseline:check` OK, `gen:skills:check` OK, `check-epics-sync` OK, `measure:tools-payload` rows equal the README (interop `full` 56,442, `core` 37,500). Nothing left: no `EXECMCPTMP395*` namespace or database, no `Story39*` or `ExecuteMCPv2.Temp.*` document in HSCUSTOM.
+
+**Residual risks and notes for the lead.**
+- The handoff made one exploratory call of the new route naming HSCUSTOM and header 1 (a not-found lookup, nothing read); no other call named HSCUSTOM messages.
+- A plain unarmed `pnpm --filter @iris-mcp/dev test` can fail `doc-type-description-live-gate` on the shared instance (document counts move while other projects work); it passes armed.
+- `pnpm gen:bootstrap` rewrites `bootstrap-classes.ts` even when the bytes are identical, which leaves `packages/shared/dist` stale by mtime; delete `packages/shared/dist` and `tsconfig.tsbuildinfo` and rebuild if a gate reports a stale shared dist.
+- The `Hl7Text` post-serialization check stays as the spec requires; it is reachable only if `Hl7Size` returns 0 (a failed query), so it has no single-fault test (triage row 21).

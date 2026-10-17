@@ -365,10 +365,15 @@ describe("TOOL_PAIRS", () => {
     expect(TOOL_PAIRS).toContainEqual(["iris_doc_get", "iris_doc_edit"]);
   });
 
-  it("is exactly the two pairs, so an unreviewed addition fails here", () => {
+  it("contains the iris_message_search / iris_message_body pair (Story 39.5)", () => {
+    expect(TOOL_PAIRS).toContainEqual(["iris_message_search", "iris_message_body"]);
+  });
+
+  it("is exactly the three pairs, so an unreviewed addition fails here", () => {
     expect(TOOL_PAIRS).toEqual([
       ["iris_env_diff", "iris_env_promote"],
       ["iris_doc_get", "iris_doc_edit"],
+      ["iris_message_search", "iris_message_body"],
     ]);
   });
 

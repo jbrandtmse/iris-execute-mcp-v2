@@ -61,6 +61,7 @@ export {
   applyDataPolicies,
   effectiveDataPolicy,
   tightenDataPolicy,
+  decideBodyPolicy,
 } from "./data-policy.js";
 export type {
   DataPolicy,
@@ -69,6 +70,7 @@ export type {
   DataPolicySummary,
   BodyKind,
   BodyPolicyOutcome,
+  BodyPolicyPlan,
 } from "./data-policy.js";
 export {
   HL7_REDACTION_REVIEW,

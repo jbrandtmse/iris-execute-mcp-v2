@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { assertPresetCoverage } from "@iris-mcp/shared";
+import { assertPresetCoverage, TOOL_PAIRS } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { toolPresets } from "../tools/presets.js";
 
@@ -49,16 +49,53 @@ describe("iris-interop-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes from spec section 2.5 plus iris_message_search (interop: core 10/13, developer 23/0)", () => {
-    expect(toolPresets.core.include.length).toBe(10);
+  it("pins the exact roster sizes from spec section 2.5 plus iris_message_search and iris_message_body (interop: core 11/13, developer 24/0)", () => {
+    expect(toolPresets.core.include.length).toBe(11);
     expect(toolPresets.core.exclude.length).toBe(13);
-    expect(toolPresets.developer.include.length).toBe(23);
+    expect(toolPresets.developer.include.length).toBe(24);
     expect(toolPresets.developer.exclude.length).toBe(0);
   });
 
   it("includes iris_message_search in both presets (Story 39.1, Rule #53)", () => {
     expect(toolPresets.core.include).toContain("iris_message_search");
     expect(toolPresets.developer.include).toContain("iris_message_search");
+  });
+
+  it("includes iris_message_body in both presets: reading a found message is the next step of the everyday forensic loop (Story 39.5, L-4, Rule #53)", () => {
+    expect(toolPresets.core.include).toContain("iris_message_body");
+    expect(toolPresets.developer.include).toContain("iris_message_body");
+    expect(toolPresets.core.exclude).not.toContain("iris_message_body");
+  });
+
+  it("core holds 12 runtime tools (11 package tools + iris_server_profiles), inside the ~13 guideline (L-4, AD-7)", () => {
+    expect(toolPresets.core.include.length + 1).toBe(12);
+  });
+
+  describe("TOOL_PAIRS co-visibility", () => {
+    it("every pair interop-mcp owns both members of is together-in or together-out of every preset", () => {
+      const toolNameSet = new Set(toolNames);
+      let owned = 0;
+      for (const [a, b] of TOOL_PAIRS) {
+        if (!toolNameSet.has(a) || !toolNameSet.has(b)) continue; // pair not owned by this package
+        owned += 1;
+        for (const preset of ["core", "developer"] as const) {
+          const roster = toolPresets[preset];
+          expect(
+            roster.include.includes(a),
+            `"${a}" and "${b}" must be co-visible in preset "${preset}"`,
+          ).toBe(roster.include.includes(b));
+        }
+      }
+      expect(owned, "interop-mcp owns exactly one pair").toBe(1);
+    });
+
+    it("iris_message_search / iris_message_body are co-visible: both in core and both in developer (Story 39.5)", () => {
+      expect(TOOL_PAIRS).toContainEqual(["iris_message_search", "iris_message_body"]);
+      for (const preset of ["core", "developer"] as const) {
+        expect(toolPresets[preset].include, preset).toContain("iris_message_search");
+        expect(toolPresets[preset].include, preset).toContain("iris_message_body");
+      }
+    });
   });
 
   it("core stays within the researched ≤13-runtime-tool window (+1 for iris_server_profiles)", () => {

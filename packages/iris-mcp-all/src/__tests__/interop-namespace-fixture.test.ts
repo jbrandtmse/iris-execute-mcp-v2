@@ -10,11 +10,14 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   STORY392_IDS,
+  STORY395_DOCUMENTS,
+  STORY395_IDS,
   createInteropNamespace,
   hl7Fields,
   leftovers,
   removeInteropNamespace,
   seedBodies,
+  seedBodyReader,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
 
@@ -51,6 +54,7 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(leftovers(dev, [name])).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedBodies(dev, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(hl7Fields(dev, name, "MSH|^~\\&|")).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedBodyReader(dev as never, name, "a")).rejects.toThrow(/not a fixture namespace name/);
 
       expect(admin.call).not.toHaveBeenCalled();
       expect(dev.call).not.toHaveBeenCalled();
@@ -83,5 +87,26 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       "iris_execute_classmethod",
       expect.objectContaining({ namespace: "EXECMCPTMP392A", methodName: "Hl7Fields" }),
     );
+  });
+
+  it("lets a scratch name through for the Story 39.5 body-reader seed, and compiles only the classes of its set", async () => {
+    for (const set of ["a", "b"] as const) {
+      const seeder = stubSession(JSON.stringify(STORY395_IDS[set]));
+      seeder.call.mockImplementation(async () => ({
+        isError: false,
+        content: [],
+        structuredContent: { returnValue: JSON.stringify(STORY395_IDS[set]), success: true },
+      }));
+      await expect(seedBodyReader(seeder as never, "EXECMCPTMP395A", set)).resolves.toBeUndefined();
+      const compiled = seeder.call.mock.calls
+        .filter(([tool]) => tool === "iris_doc_compile")
+        .map(([, args]) => (args as { doc: string }).doc);
+      expect(compiled, `the classes compiled for set ${set}`).toEqual(STORY395_DOCUMENTS[set].map(([doc]) => doc));
+      expect(seeder.call).toHaveBeenCalledWith(
+        "iris_execute_classmethod",
+        expect.objectContaining({ namespace: "EXECMCPTMP395A", className: "Story395.Seed", methodName: "Seed", args: [set] }),
+      );
+    }
+    expect(STORY395_DOCUMENTS.b.map(([doc]) => doc), "namespace B compiles the seed only").toEqual(["Story395.Seed.cls"]);
   });
 });

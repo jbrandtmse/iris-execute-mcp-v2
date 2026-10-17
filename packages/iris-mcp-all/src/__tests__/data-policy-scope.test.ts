@@ -81,6 +81,7 @@ describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
     expect(declared.length, "a tool declares dataPolicy today").toBeGreaterThan(0);
     expect(governed).toEqual(declared);
     expect(governed).toEqual([
+      ["iris_message_body", undefined],
       ["iris_message_resend", ["preview"]],
       ["iris_message_search", ["body", "searchTable"]],
     ]);

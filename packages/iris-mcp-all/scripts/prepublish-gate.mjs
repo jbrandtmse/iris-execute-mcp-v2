@@ -182,6 +182,13 @@ const gateTestFiles = [
   // disposable namespace and database EXECMCPTMP394Q (its database files and directory too, and the Story394 classes inside it) and the
   // HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-39-4-qa-live-gate.test.ts",
+  // Story 39.5: `iris_message_body`, its data policy, the wire per policy (read back through a recording proxy), the audit file and the console
+  // log over real stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists, raw HTTP to the route, the DW-577
+  // size precheck against the length IRIS serializes, and IRIS's own HL7 parser as the oracle. Writes only the disposable namespaces and
+  // databases EXECMCPTMP395A, EXECMCPTMP395B and EXECMCPTMP395C (their database files and directories too, and the Story395 classes inside
+  // them; EXECMCPTMP395P, the Task 0 probe namespace, is only removed by name) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture,
+  // which it removes, asserting nothing is left. No production is started.
+  "src/__tests__/story-39-5-body-reader-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

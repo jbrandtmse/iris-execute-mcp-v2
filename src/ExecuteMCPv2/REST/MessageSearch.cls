@@ -677,12 +677,62 @@ ClassMethod BodyKind(pClassName As %String) As %String
     Quit tKind
 }
 
+/// The number of characters in the complete ER7 text of the <class>EnsLib.HL7.Message</class> body
+/// <var>pBodyId</var> of class <var>pBodyClass</var>, summed from the stored segment sizes
+/// (<method>EnsLib.HL7.Message:GetFullSize</method>) without serializing anything. A batch is counted with all
+/// of its nested children: a batch is a chain of parents (FHS, then BHS, then the messages), and
+/// <code>GetFullSize</code> skips the segments that only point at children, so each node found adds its own
+/// size and one fixed query (<code>ParentId</code> equal to the node's ID, or starting with the ID and a colon)
+/// then finds that node's children. The sum stops as soon as it is greater than <var>pLimit</var>, so the work
+/// is bounded by the limit and not by the size of the body. The segment sizes assume a one-character segment
+/// terminator, which is what an opened body serializes with (the terminator of the text a message was imported
+/// from is not stored), so the sum equals the length the serialization writes. Returns <code>0</code> on any
+/// failure, which makes the caller serialize and check the length itself.
+ClassMethod Hl7Size(pBodyClass As %String, pBodyId As %String, pLimit As %Integer) As %Integer
+{
+    Set tSum = 0
+    Try {
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tSC = tStmt.%Prepare("SELECT %ID FROM EnsLib_HL7.Message WHERE ParentId = ? OR ParentId %STARTSWITH ?")
+        If $$$ISERR(tSC) { Set tSum = 0 Quit }
+        Set tQueue(1) = pBodyId
+        Set tTail = 1
+        Set tHead = 0
+        While tHead < tTail {
+            Set tHead = tHead + 1
+            Set tId = tQueue(tHead)
+            If $Data(tSeen(tId)) { Continue }
+            Set tSeen(tId) = ""
+            If tHead = 1 {
+                Set tSum = tSum + $ClassMethod(pBodyClass, "GetFullSize", tId)
+            }
+            Else {
+                Set tSum = tSum + ##class(EnsLib.HL7.Message).GetFullSize(tId)
+            }
+            If tSum > pLimit { Quit }
+            Set tRS = tStmt.%Execute(tId, tId _ ":")
+            If tRS.%SQLCODE < 0 { Set tSum = 0 Quit }
+            While tRS.%Next() {
+                Set tTail = tTail + 1
+                Set tQueue(tTail) = tRS.%GetData(1)
+            }
+            If tRS.%SQLCODE < 0 { Set tSum = 0 Quit }
+        }
+    }
+    Catch {
+        Set tSum = 0
+    }
+    Quit tSum
+}
+
 /// The complete ER7 text of the <class>EnsLib.HL7.Message</class> body <var>pBodyId</var> of class
 /// <var>pBodyClass</var>, in <var>pText</var>: children included, unsanitized and never cut, which is what
 /// a redaction engine needs. Returns <code>""</code> when <var>pText</var> holds the whole text,
 /// <code>tooLarge</code> when the text is longer than <var>pMaxChars</var> characters (then
 /// <var>pText</var> is empty), or <code>unreadable</code> on any failure. A failure never carries
-/// exception text.
+/// exception text. The size is checked against the stored segment sizes (<method>Hl7Size</method>) after
+/// the body opens and before anything is serialized, so a body that is over the limit costs a sum and not
+/// a serialization; the length of the serialized text is checked again.
 ClassMethod Hl7Text(pBodyClass As %String, pBodyId As %String, pMaxChars As %Integer, Output pText As %String) As %String
 {
     Set pText = ""
@@ -691,6 +741,7 @@ ClassMethod Hl7Text(pBodyClass As %String, pBodyId As %String, pMaxChars As %Int
         Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
         If '$IsObject(tObj) { Quit }
         If 'tObj.%Extends("EnsLib.HL7.Message") { Quit }
+        If ..Hl7Size(pBodyClass, pBodyId, pMaxChars) > pMaxChars { Set tResult = "tooLarge" Quit }
         Set tStream = ##class(%Stream.TmpCharacter).%New()
         Set tSC = tObj.OutputToLibraryStream(tStream)
         If $$$ISERR(tSC) { Quit }

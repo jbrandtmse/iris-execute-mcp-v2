@@ -33,6 +33,7 @@ const classes = [
   { name: 'ExecuteMCPv2.REST.Interop.cls', path: 'src/ExecuteMCPv2/REST/Interop.cls' },
   { name: 'ExecuteMCPv2.REST.MessageResend.cls', path: 'src/ExecuteMCPv2/REST/MessageResend.cls' },
   { name: 'ExecuteMCPv2.REST.MessageSearch.cls', path: 'src/ExecuteMCPv2/REST/MessageSearch.cls' },
+  { name: 'ExecuteMCPv2.REST.MessageBody.cls', path: 'src/ExecuteMCPv2/REST/MessageBody.cls' },
   { name: 'ExecuteMCPv2.REST.Loc.cls', path: 'src/ExecuteMCPv2/REST/Loc.cls' },
   { name: 'ExecuteMCPv2.REST.Monitor.cls', path: 'src/ExecuteMCPv2/REST/Monitor.cls' },
   { name: 'ExecuteMCPv2.REST.Health.cls', path: 'src/ExecuteMCPv2/REST/Health.cls' },

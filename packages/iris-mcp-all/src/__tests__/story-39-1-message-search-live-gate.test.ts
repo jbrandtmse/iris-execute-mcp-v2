@@ -679,11 +679,11 @@ describe("Story 39.1 (updated by Story 39.4): searchTable is built, and a namesp
 // -- Visibility and governance --------------------------------------------------
 
 describe("Story 39.1: the tool is listed, its keys are enabled reads, and governance can disable one (AC-4)", () => {
-  it("is listed with the stated annotations; the interop server advertises 24 tools", async (testCtx) => {
+  it("is listed with the stated annotations; the interop server advertises 25 tools", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const tools = await interop.listTools();
 
-    expect(tools).toHaveLength(24);
+    expect(tools).toHaveLength(25);
     const listed = tools.find((tool) => tool.name === "iris_message_search");
     expect(listed?.annotations).toMatchObject({
       readOnlyHint: true,
@@ -694,7 +694,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     expect(listed?.inputSchema.required).toEqual(expect.arrayContaining(["action", "from"]));
   }, 120000);
 
-  it("all three keys are enabled under default configuration and under the read-only preset, which also lists core's 11 tools", async (testCtx) => {
+  it("all three keys are enabled under default configuration and under the read-only preset, which also lists core's 12 tools", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const keys = ["headers", "body", "searchTable"].map((action) => `iris_message_search:${action}`);
     for (const [label, session] of [["default", interop], ["read-only", readOnly]] as const) {
@@ -704,7 +704,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     }
 
     const coreTools = await readOnly.listTools();
-    expect(coreTools).toHaveLength(11);
+    expect(coreTools).toHaveLength(12);
     expect(coreTools.map((tool) => tool.name)).toContain("iris_message_search");
     const searched = succeeded(await search(readOnly));
     expect(ids(searched.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);

@@ -14,6 +14,7 @@ import {
   DATA_POLICIES,
   HL7_BODY_TEXT_MAX_CHARS,
   applyDataPolicies,
+  decideBodyPolicy,
   effectiveDataPolicy,
   isBodyKind,
   isRedactableBodyKind,
@@ -251,6 +252,45 @@ describe("the fixed block reasons", () => {
     expect(BLOCK_REASONS.hl7Unparseable("The text does not start with an MSH, FHS or BHS segment.")).toBe(
       "The HL7 v2 body could not be parsed (The text does not start with an MSH, FHS or BHS segment.), so the redact data policy withholds it.",
     );
+  });
+});
+
+describe("decideBodyPolicy (Story 39.5, AD-26): the policy's decision for one body", () => {
+  it("decides every kind x availability x policy combination", () => {
+    // The expected plan is written out per policy, not derived from the function, so a rule that moves fails here.
+    for (const kind of BODY_KINDS) {
+      for (const policy of DATA_POLICIES) {
+        const unavailable = decideBodyPolicy(kind, false, policy);
+        expect(unavailable, `${kind} unavailable under ${policy}`).toEqual({ outcome: "none" });
+
+        const available = decideBodyPolicy(kind, true, policy);
+        if (policy === "block") {
+          expect(available, `${kind} under block`).toEqual({ outcome: "blocked", reason: BLOCK_REASONS.blockPolicy() });
+        } else if (policy === "redact" && kind === "hl7v2") {
+          expect(available, "hl7v2 under redact").toEqual({ outcome: "redact" });
+        } else if (policy === "redact") {
+          expect(available, `${kind} under redact`).toEqual({
+            outcome: "blocked",
+            reason: BLOCK_REASONS.unredactableKind(kind),
+          });
+        } else {
+          expect(available, `${kind} under allow`).toEqual({ outcome: "none" });
+        }
+      }
+    }
+  });
+
+  it("decides an unavailable body before it looks at the policy (a block policy withholds nothing that is not there)", () => {
+    expect(decideBodyPolicy("stream", false, "block")).toEqual({ outcome: "none" });
+    expect(decideBodyPolicy("missing", false, "redact")).toEqual({ outcome: "none" });
+  });
+
+  it("names the kind in the redact reason and nothing else of the body", () => {
+    const plan = decideBodyPolicy("persistent", true, "redact");
+    expect(plan).toEqual({
+      outcome: "blocked",
+      reason: "A persistent body cannot be redacted reliably, so the redact data policy withholds it.",
+    });
   });
 });
 
