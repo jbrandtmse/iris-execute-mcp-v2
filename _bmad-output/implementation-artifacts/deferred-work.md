@@ -3086,6 +3086,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 39.1 implement 2026-10-16: passed alone and in the serial run; listings of a shared namespace can change between the two reads
 - 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=flake class (cf. DW-444): make the comparison tolerant of concurrent changes or compare a fixed filter
 - 2026-10-17T05:29:28Z occurrence=39-2-phi-data-policy
+- 2026-10-17T08:21:39Z occurrence=39-3-message-body-content-search
 
 ### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
