@@ -5358,6 +5358,7 @@ G35. New read tool `iris_message_body`.
   - `developer` and `core` include it (L-4; interop `core` 11 → 12 runtime);
   - interop 23 → 24.
 - **AC 39.5.5** — Live check on synthetic fixtures. Under `redact`, an assertion proves that no synthetic PHI value appears anywhere in the output (text or structured). Under `allow`, the value appears.
+- DW-577: `MessageSearch.Hl7Text` serializes the whole HL7 message before it compares the size with the cap. This story is its first consumer: check the size bound before full serialization, or stream with a cap, and pin it with a large synthetic body. (ledger; routed by harvest 2026-10-17)
 
 ### Story 39.6: Message Forensics Docs, Prompt and Capstone
 
