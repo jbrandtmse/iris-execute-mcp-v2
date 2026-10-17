@@ -514,7 +514,7 @@ development_status:
   39-2-phi-data-policy: done
   39-3-message-body-content-search: done
   39-4-search-table-lookup: done
-  39-5-message-body-reader: ready-for-dev
+  39-5-message-body-reader: in-progress
   39-6-message-forensics-docs-prompt-and-capstone: backlog
   epic-39-retrospective: optional
 
