@@ -33,18 +33,25 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  allText,
+  distEntry,
   inheritedEnv,
   openWireSession,
+  pollAuditEntries,
   resolveSdkEsmDir,
+  skipIfReason,
   staleDistReason,
-  type IrisTarget,
+  startRouteStub,
+  stubEnvelope,
+  stubTarget,
+  writeJson,
+  type RecordedRequest,
+  type RouteStub,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -62,7 +69,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const INTEROP_ENTRY = path.join(REPO_ROOT, "packages", "iris-interop-mcp", "dist", "index.js");
+const INTEROP_ENTRY = distEntry(REPO_ROOT, "iris-interop-mcp");
 const INTEROP_DIR = path.join(REPO_ROOT, "packages", "iris-interop-mcp");
 const BASELINE_PATH = path.join(__dirname, "fixtures", "story-39-2-preview-baseline.json");
 
@@ -102,69 +109,17 @@ function expectedOutcome(policy: "redact" | "block", index: number): Item {
 
 // -- The listener ----------------------------------------------------------------------------------------------
 
-interface Recorded {
-  method: string;
-  url: string;
-  body: string;
-}
-
-interface Stub {
-  port: number;
-  requests: Recorded[];
-  /** While false every request is answered 503, which is how the server starts without an IRIS. */
-  serving: boolean;
-  /** The reply of the preview route, built from the parsed request. */
-  reply: (request: Record<string, unknown>) => unknown;
-  close: () => Promise<void>;
-}
-
 /** The preview POSTs the listener has recorded. */
-const previewsOf = (stub: Stub): Recorded[] => stub.requests.filter((r) => r.method === "POST" && r.url === PREVIEW_ROUTE);
-
-async function startStub(): Promise<Stub> {
-  const stub: Stub = {
-    port: 0,
-    requests: [],
-    serving: false,
-    reply: () => ({}),
-    close: () => Promise.resolve(),
-  };
-  const server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
-      stub.requests.push({ method: req.method ?? "", url: req.url ?? "", body });
-      if (stub.serving && req.method === "HEAD" && req.url === "/api/atelier/") {
-        res.statusCode = 200;
-        res.end();
-        return;
-      }
-      if (stub.serving && req.method === "POST" && req.url === PREVIEW_ROUTE) {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(stub.reply(JSON.parse(body) as Record<string, unknown>)));
-        return;
-      }
-      res.statusCode = 503;
-      res.end();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  stub.port = (server.address() as AddressInfo).port;
-  stub.close = () => new Promise<void>((resolve) => server.close(() => resolve()));
-  return stub;
-}
+const previewsOf = (stub: RouteStub): RecordedRequest[] =>
+  stub.requests.filter((r) => r.method === "POST" && r.url === PREVIEW_ROUTE);
 
 /** The answer of the real route to `headerIds:[1..9]` before this story: the legacy shape, `bodySummary` and no `bodyKind`. */
 let legacyResult: { headers: Item[]; count: number };
 /** The tool's output for that answer before this story. */
 let toolCapture: { structuredContent: unknown; text: string };
 
-const envelope = (result: unknown): unknown => ({ status: { errors: [], summary: "" }, console: [], result });
-
 /** The legacy answer, as the old IRIS classes sent it (a version-skewed deployment). */
-const legacyReply = (): unknown => envelope(legacyResult);
+const legacyReply = (): unknown => stubEnvelope(legacyResult);
 
 /** What IRIS sends in `kind` mode: kind and availability, no body content. */
 function kindHeaders(): Item[] {
@@ -184,7 +139,7 @@ function hostileKindReply(): unknown {
     bodyTextOmitted: "tooLarge",
   }));
   headers.push({ id: 999, found: false, error: "Header 999 not found", bodySummary: `${SENTINEL}-NOT-FOUND`, bodyKind: "hl7v2", bodyAvailable: true });
-  return envelope({ headers, count: headers.length });
+  return stubEnvelope({ headers, count: headers.length });
 }
 
 // -- Sessions --------------------------------------------------------------------------------------------------
@@ -192,12 +147,8 @@ function hostileKindReply(): unknown {
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir = "";
-let stub: Stub;
+let stub: RouteStub;
 const opened: WireSession[] = [];
-
-function stubTarget(s: Stub): IrisTarget {
-  return { host: "127.0.0.1", port: String(s.port), username: "story392-qa", password: "not-a-real-password", namespace: "HSCUSTOM" };
-}
 
 /**
  * A session on the built interop server pointed at the listener, with `extraEnv`. The listener refuses
@@ -209,7 +160,7 @@ async function session(extraEnv: Record<string, string> = {}, onStderr?: (chunk:
   const options: WireSessionOptions = {
     sdkEsmDir: sdkEsmDir as string,
     entry: INTEROP_ENTRY,
-    target: stubTarget(stub),
+    target: stubTarget(stub.port, "story392-qa"),
     clientName: "story-39-2-qa-process",
     ...(onStderr ? { onStderr } : {}),
   };
@@ -218,17 +169,6 @@ async function session(extraEnv: Record<string, string> = {}, onStderr?: (chunk:
   stub.serving = true;
   return created;
 }
-
-let fileCounter = 0;
-function writeJson(name: string, document: unknown): string {
-  fileCounter += 1;
-  const file = path.join(fixtureDir, `${fileCounter}-${name}`);
-  writeFileSync(file, JSON.stringify(document), "utf8");
-  return file;
-}
-
-/** The text of every content block of a tool result, joined by newlines. */
-const textOf = (result: { content?: Array<{ text?: string }> }): string => (result.content ?? []).map((b) => b.text ?? "").join("\n");
 
 /** The preview of `headerIds` on the default profile, or on `profile`. */
 function preview(s: WireSession, profile?: string, headerIds: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9]): Promise<WireToolResult> {
@@ -266,7 +206,7 @@ beforeAll(async () => {
   toolCapture = baseline.tool[0] as { structuredContent: unknown; text: string };
   expect(legacyResult.headers, "the capture holds fixture pi").toHaveLength(9);
   expect(JSON.stringify(legacyResult), "the capture's stream summary is the sentinel's positive control").toContain(SENTINEL);
-  stub = await startStub();
+  stub = await startRouteStub(PREVIEW_ROUTE);
 });
 
 afterAll(async () => {
@@ -274,12 +214,6 @@ afterAll(async () => {
   if (stub) await stub.close();
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
-
-function skipIfNeeded(ctx: { skip: () => void }): boolean {
-  if (!skipReason) return false;
-  ctx.skip();
-  return true;
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Part 1a: the request the built server really sends
@@ -289,7 +223,7 @@ describe("Story 39.2 QA: the request the built server POSTs to the preview route
   const IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
   it("redact (no setting) and block send bodyDetail:kind and no text cap; allow sends today's body, byte for byte", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = legacyReply;
     for (const [label, env] of [
       ["redact", {}],
@@ -299,10 +233,10 @@ describe("Story 39.2 QA: the request the built server POSTs to the preview route
       const s = await session(env);
       const before = previewsOf(stub).length;
       const result = await preview(s);
-      expect(result.isError, `${label}: ${textOf(result)}`).toBeFalsy();
+      expect(result.isError, `${label}: ${allText(result)}`).toBeFalsy();
       const sent = previewsOf(stub).slice(before);
       expect(sent, `${label}: exactly one preview request`).toHaveLength(1);
-      const raw = (sent[0] as Recorded).body;
+      const raw = (sent[0] as RecordedRequest).body;
       if (label === "allow") {
         expect(raw, "allow: today's request exactly, no new field").toBe(JSON.stringify({ headerIds: IDS, namespace: NS }));
       } else {
@@ -313,7 +247,7 @@ describe("Story 39.2 QA: the request the built server POSTs to the preview route
   }, 60000);
 
   it("each profile sends the request of its own policy, over the same connection", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = legacyReply;
     const s = await session({ IRIS_PROFILES: JSON.stringify({ loose: { dataPolicy: "allow" }, strict: { dataPolicy: "BLOCK" } }) });
     for (const [profile, expected] of [
@@ -323,10 +257,10 @@ describe("Story 39.2 QA: the request the built server POSTs to the preview route
     ] as Array<[string | undefined, Item]>) {
       const before = previewsOf(stub).length;
       const result = await preview(s, profile);
-      expect(result.isError, `${String(profile)}: ${textOf(result)}`).toBeFalsy();
+      expect(result.isError, `${String(profile)}: ${allText(result)}`).toBeFalsy();
       const sent = previewsOf(stub).slice(before);
       expect(sent, String(profile)).toHaveLength(1);
-      expect(JSON.parse((sent[0] as Recorded).body), String(profile)).toEqual(expected);
+      expect(JSON.parse((sent[0] as RecordedRequest).body), String(profile)).toEqual(expected);
     }
   }, 60000);
 });
@@ -337,12 +271,12 @@ describe("Story 39.2 QA: the request the built server POSTs to the preview route
 
 describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries body content through (AC-3, AC-4, AC-5)", () => {
   it("allow shows the legacy reply as the pre-change capture, which holds the sentinel (the positive control)", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = legacyReply;
     const s = await session({ IRIS_DATA_POLICY: "allow" });
     const result = await preview(s);
     expect(result.isError).toBeFalsy();
-    expect({ structuredContent: result.structuredContent, text: textOf(result) }).toEqual({
+    expect({ structuredContent: result.structuredContent, text: allText(result) }).toEqual({
       structuredContent: toolCapture.structuredContent,
       text: toolCapture.text,
     });
@@ -354,7 +288,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
       const env: Record<string, string> = policy === "block" ? { IRIS_DATA_POLICY: "block" } : {};
 
       it("the legacy reply (bodySummary, no bodyKind) is withheld entirely, each found item with the unknown-kind reason", async (ctx) => {
-        if (skipIfNeeded(ctx)) return;
+        if (skipIfReason(skipReason, ctx)) return;
         stub.reply = legacyReply;
         const s = await session(env);
         const result = await preview(s);
@@ -369,7 +303,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
       }, 60000);
 
       it("a kind reply that still carries bodySummary, bodyText and bodyTextOmitted is mapped by kind alone", async (ctx) => {
-        if (skipIfNeeded(ctx)) return;
+        if (skipIfReason(skipReason, ctx)) return;
         stub.reply = hostileKindReply;
         const s = await session(env);
         const result = await preview(s);
@@ -400,7 +334,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
       }, 60000);
 
       it("a kind token outside the nine, in any form, is withheld as other; a non-boolean bodyAvailable hides the body", async (ctx) => {
-        if (skipIfNeeded(ctx)) return;
+        if (skipIfReason(skipReason, ctx)) return;
         const tokens: unknown[] = ["hl7v3", "HL7V2", "", "hl7v2 ", null, 5, ["hl7v2"], { kind: "hl7v2" }, "constructor"];
         stub.reply = () => {
           const headers = kindHeaders().map((header, index) => {
@@ -408,7 +342,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
             mutated.bodyKind = tokens[index];
             return mutated;
           });
-          return envelope({ headers, count: headers.length });
+          return stubEnvelope({ headers, count: headers.length });
         };
         const s = await session(env);
         const unknown = await preview(s);
@@ -421,7 +355,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
         const flags: unknown[] = ["true", 1, "yes", null, [], {}, "false", 0, "TRUE"];
         stub.reply = () => {
           const headers = kindHeaders().map((header, index) => ({ ...header, bodyKind: "hl7v2", bodyAvailable: flags[index], bodySummary: `${SENTINEL}-FLAG-${index + 1}` }));
-          return envelope({ headers, count: headers.length });
+          return stubEnvelope({ headers, count: headers.length });
         };
         const flagged = await preview(s);
         expect(JSON.stringify(flagged)).not.toContain(SENTINEL);
@@ -437,7 +371,7 @@ describe("Story 39.2 QA: a hostile or version-skewed IRIS reply never carries bo
 
 describe("Story 39.2 QA: neither the audit file nor the console log holds body content, whatever the reply (AC-5, AD-19)", () => {
   it("under each policy, with a hostile reply, at DEBUG, the entry carries the policy and the counts and nothing identifying", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileKindReply;
     const cases: Array<{ label: string; env: Record<string, string>; expected: Item }> = [
       { label: "redact", env: {}, expected: { policy: "redact", redacted: 4, blocked: 3 } },
@@ -458,15 +392,13 @@ describe("Story 39.2 QA: neither the audit file nor the console log holds body c
       expect(result.isError, row.label).toBeFalsy();
       if (row.label === "allow") expect(JSON.stringify(result), "the allow session's output holds the sentinel").toContain(SENTINEL);
 
-      const started = Date.now();
-      let entries: Item[] = [];
-      while (Date.now() - started < 5000) {
-        if (existsSync(file)) {
-          entries = readFileSync(file, "utf8").split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line) as Item);
-          if (entries.some((entry) => entry.tool === "iris_message_resend")) break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
+      const entries = await pollAuditEntries(file, {
+        tool: "iris_message_resend",
+        returnAll: true,
+        intervalMs: 20,
+        timeoutMs: 5000,
+        excerpt: 500,
+      });
       const entry = entries.find((candidate) => candidate.tool === "iris_message_resend");
       expect(entry, row.label).toMatchObject({ tool: "iris_message_resend", action: "preview", outcome: "ok", dataPolicy: row.expected });
       expect(readFileSync(file, "utf8"), `${row.label}: the audit file`).not.toContain(SENTINEL);
@@ -497,10 +429,10 @@ describe("Story 39.2 QA: the four channels in precedence order on the built proc
   }
 
   it("walks p and default down the layers, one layer at a time, each layer holding a different value in a different letter case", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     // Layer values differ between neighbours, so a swap of two layers changes the policy, not only its source.
     const file = (profiles: Record<string, string> | undefined, global: string | undefined): string =>
-      writeJson("governance.json", { dataPolicy: { ...(profiles ? { profiles } : {}), ...(global ? { global } : {}) } });
+      writeJson(fixtureDir, "governance.json", { dataPolicy: { ...(profiles ? { profiles } : {}), ...(global ? { global } : {}) } });
 
     const all = await roster({
       IRIS_PROFILES: JSON.stringify({ p: { dataPolicy: "Allow" } }),
@@ -539,15 +471,15 @@ describe("Story 39.2 QA: the four channels in precedence order on the built proc
   }, 120000);
 
   it("a Server Manager profile follows the same order without an IRIS_PROFILES entry", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const settings = writeJson("settings.json", {
+    if (skipIfReason(skipReason, ctx)) return;
+    const settings = writeJson(fixtureDir, "settings.json", {
       "intersystems.servers": {
         sm: { webServer: { scheme: "http", host: "127.0.0.1", port: stub.port }, username: "smuser", password: "smpw" },
       },
     });
     const sm = { IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: settings };
     const governance = (profiles: Record<string, string> | undefined, global?: string): string =>
-      writeJson("governance.json", { dataPolicy: { ...(profiles ? { profiles } : {}), ...(global ? { global } : {}) } });
+      writeJson(fixtureDir, "governance.json", { dataPolicy: { ...(profiles ? { profiles } : {}), ...(global ? { global } : {}) } });
 
     expect((await roster({ ...sm })).sm).toMatchObject({ dataPolicy: "redact", dataPolicySource: "default" });
     expect((await roster({ ...sm, IRIS_GOVERNANCE_FILE: governance({ sm: "BLOCK" }, "allow") })).sm).toMatchObject({
@@ -565,20 +497,20 @@ describe("Story 39.2 QA: the four channels in precedence order on the built proc
   }, 120000);
 
   it("the Server Manager profile's calls follow the policy the file gave it, and the default profile's follow its own", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = legacyReply;
-    const settings = writeJson("settings.json", {
+    const settings = writeJson(fixtureDir, "settings.json", {
       "intersystems.servers": {
         sm: { webServer: { scheme: "http", host: "127.0.0.1", port: stub.port }, username: "smuser", password: "smpw" },
       },
     });
-    const governanceFile = writeJson("governance.json", { dataPolicy: { profiles: { sm: "block" } } });
+    const governanceFile = writeJson(fixtureDir, "governance.json", { dataPolicy: { profiles: { sm: "block" } } });
     const s = await session({ IRIS_SERVER_MANAGER: "auto", IRIS_SM_SETTINGS_PATHS: settings, IRIS_GOVERNANCE_FILE: governanceFile });
 
     const before = previewsOf(stub).length;
     const blocked = await preview(s, "sm");
-    expect(blocked.isError, textOf(blocked)).toBeFalsy();
-    expect(JSON.parse((previewsOf(stub).slice(before)[0] as Recorded).body)).toEqual({
+    expect(blocked.isError, allText(blocked)).toBeFalsy();
+    expect(JSON.parse((previewsOf(stub).slice(before)[0] as RecordedRequest).body)).toEqual({
       headerIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
       namespace: NS,
       bodyDetail: "kind",
@@ -713,7 +645,7 @@ describe("Story 39.2 QA: redactHl7 of the built shared dist, in a fresh process,
   }, 90000);
 
   it("the child resolves @iris-mcp/shared as a consumer does, runs cleanly and prints one result per text", (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     expect(childRun?.stderr).toBe("");
     expect(childRun?.code).toBe(0);
     expect(output?.results).toHaveLength(cases.length + refusals.length);
@@ -721,7 +653,7 @@ describe("Story 39.2 QA: redactHl7 of the built shared dist, in a fresh process,
   });
 
   it("the shipped keep-list equals the reviewed table, segment for segment", (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     const shipped = output?.keep ?? {};
     expect(Object.keys(shipped).sort()).toEqual(Object.keys(SPEC_KEEP_TABLE).sort());
     for (const [name, fields] of Object.entries(SPEC_KEEP_TABLE)) {
@@ -730,7 +662,7 @@ describe("Story 39.2 QA: redactHl7 of the built shared dist, in a fresh process,
   });
 
   it("every reviewed, unreviewed and Z segment comes out exactly as the table prescribes, with no identifying value", (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     const results = output?.results ?? [];
     cases.forEach((c, index) => {
       const result = results[index] as ChildOutput["results"][number];
@@ -742,7 +674,7 @@ describe("Story 39.2 QA: redactHl7 of the built shared dist, in a fresh process,
   });
 
   it("a text that is not a message is refused with a fixed reason that holds no input, never passed through", (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     const results = output?.results ?? [];
     refusals.forEach((r, index) => {
       const result = results[cases.length + index] as ChildOutput["results"][number];

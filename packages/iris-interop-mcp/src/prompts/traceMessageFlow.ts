@@ -1,10 +1,11 @@
 /**
  * `trace-message-flow` prompt (Epic 25, Story 25.1 — spec
- * `03-skills-prompts-pack.md` §3).
+ * `03-skills-prompts-pack.md` §3; extended in Story 39.6).
  *
- * Walks `iris_production_messages` → `iris_message_diagram` →
- * `iris_production_logs` (for erroring items) to trace a single message's
- * flow through a production. Server: iris-interop-mcp.
+ * Walks `iris_production_messages` → `iris_message_search` (headers) →
+ * `iris_message_body` → `iris_message_diagram` → `iris_production_logs` (for
+ * erroring items) to trace a single message's flow through a production.
+ * The name, title and arguments are a stable contract. Server: iris-interop-mcp.
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
@@ -15,8 +16,8 @@ export const traceMessageFlowPrompt: PromptDefinition = {
   title: "Trace Message Flow",
   description:
     "Trace a message's flow through an Interoperability production using " +
-    "iris_production_messages, iris_message_diagram, and iris_production_logs for any " +
-    "erroring items.",
+    "iris_production_messages, iris_message_search, iris_message_body, iris_message_diagram, " +
+    "and iris_production_logs for any erroring items.",
   arguments: [
     {
       name: "sessionOrHeaderId",
@@ -44,10 +45,11 @@ Session or header ID to trace: \`${id}\`
 
 ${namespaceNote}
 
-1. Call \`iris_production_messages\` with \`sessionId: ${id}\` (traces every message in that session). If the result is empty or the ID does not look like a session ID, retry with \`headerId: ${id}\` instead — the ID may be a specific message header ID rather than a session ID.
-2. Review the returned message steps: source item, target item, message class, timestamp, and status for each hop.
-3. Call \`iris_message_diagram\` with \`sessionIds: [${id}]\` (use the session ID discovered in step 1, even if you started from a header ID) to render a Mermaid sequence diagram of the same flow — participants, sync vs async calls, request/response pairing, and \`[ERROR]\` flags on failed messages.
-4. For every step flagged as an error (in either the raw trace or the diagram's \`[ERROR]\` markers), call \`iris_production_logs\` filtered by \`itemName\` (the erroring config item) and/or \`type: "Error"\` to pull the detailed error log entries for that item around the same timeframe.
-5. Summarize the failure point: which item failed, what the error log says, and where in the flow (which hop) it occurred. Recommend next steps (e.g. \`iris_production_control\` action 'recover', or a data/config fix) but do NOT execute a recovery action without the user's confirmation.`;
+1. Call \`iris_production_messages\` with \`sessionId: ${id}\` (traces every message in that session). If the result is empty or the ID does not look like a session ID, retry with \`headerId: ${id}\` instead — the ID may be a specific message header ID rather than a session ID. Note the hops (source item, target item, message class, timestamp and status), the session ID, and the earliest and latest message times of the flow. If you started from a header ID, call it again with that session's \`sessionId\` so the hops and times cover the whole flow, and raise \`count\` (default 100, at most 10000) when the list may be cut off.
+2. Call \`iris_message_search\` with \`action: "headers"\`, \`sessionId\` set to the session ID from step 1, and \`from\` and \`to\` bracketing the flow's earliest and latest times in UTC ISO 8601 (for example \`2026-07-01T10:00:00Z\`), with \`to\` rounded up to the next whole second so a fractional second is not cut off. A search window spans at most 7 days: if the flow spans more, ask the user before searching it window by window, each window at most 7 days. The header rows give each message's \`id\`, status, \`isError\`, source and target item, and body class and body ID. When \`hasMore\` is true, pass \`nextCursor\` back as \`cursor\` with the same \`from\` and \`to\`. If the search is refused (for example because an operator restricted it), tell the user and go on with the hops of step 1; do not read the headers another way.
+3. Call \`iris_message_body\` with up to 20 header \`id\` values from step 2 that matter: the first request, and each erroring message with its response. Each body comes back rendered by kind, with its \`bodyPolicy\`. Under the default \`redact\` data policy an HL7 v2 body is shown with every field outside a reviewed keep-list replaced, and every other body is withheld with a reason. Under \`block\` every body is withheld. Report a withheld body's reason to the user, and never read it another way (for example through SQL, global or document tools).
+4. Call \`iris_message_diagram\` with \`sessionIds: [${id}]\` (use the session ID discovered in step 1, even if you started from a header ID) to render a Mermaid sequence diagram of the same flow — participants, sync vs async calls, request/response pairing, and \`[ERROR]\` flags on failed messages.
+5. For every step flagged as an error (in the header rows' \`isError\`, the raw trace or the diagram's \`[ERROR]\` markers), call \`iris_production_logs\` filtered by \`itemName\` (the erroring config item) and/or \`type: "Error"\` to pull the detailed error log entries for that item around the same timeframe.
+6. Summarize the failure point: which item failed, what the error log says, and where in the flow (which hop) it occurred. Recommend next steps (e.g. \`iris_production_control\` action 'recover', or a data/config fix) but do NOT execute a recovery action without the user's confirmation.`;
   },
 };

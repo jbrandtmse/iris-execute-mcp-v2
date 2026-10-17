@@ -47,14 +47,25 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  allText,
   assertDeployedBootstrapVersion,
-  executeMcpPost,
+  batchUnits,
+  distEntry,
+  fixtureDocumentNames,
+  irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
+  openAuditedSession,
   openWireSession,
+  postEnvelope,
   resolveSdkEsmDir,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
+  wellFormed,
   docFixtures,
+  type AuditedSession,
+  type EnvelopeAnswer,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -72,8 +83,8 @@ import { checkRedactedPositions, separatorCharacters } from "../../../shared/src
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
 
+const GATE_TAG = "story-39-5-qa-live-gate";
 const TARGET = irisTargetFromEnv();
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
 
@@ -99,18 +110,11 @@ let tempDir = "";
 function wireOptions(pkg: string, extra: Partial<WireSessionOptions> = {}): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-5-qa-live-gate",
     ...extra,
   };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-5-qa-live-gate: ${skipReason}`);
-  testCtx.skip();
 }
 
 // -- The ObjectScript fixtures, compiled inside the scratch namespace ------------------------------------------
@@ -370,13 +374,6 @@ const SHAPE_NAMES: string[] = [...SHAPES.map(([name]) => name), WIDE_SHAPE];
 
 // -- Seeding ----------------------------------------------------------------------------------------------------------
 
-/** A class method of the QA seed class in the scratch namespace, and its string result. */
-async function seedMethod(methodName: string, args: unknown[]): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: NS_Q, className: "Story395Q.Seed", methodName, args });
-  expect(result.isError, `Story395Q.Seed.${methodName}: ${textOf(result)}`).toBeFalsy();
-  return String((result.structuredContent as { returnValue?: unknown } | undefined)?.returnValue ?? "");
-}
-
 /** The header ID of each fixture, by name. */
 const HEADER = new Map<string, number>();
 /** The shapes IRIS refused to store. */
@@ -387,14 +384,14 @@ let headerCounter = 0;
 
 async function addHeader(name: string, bodyClass: string, bodyId: string): Promise<void> {
   headerCounter += 1;
-  const id = await seedMethod("AddHeader", [headerCounter, bodyClass, bodyId]);
+  const id = await irisClassMethod(dev, NS_Q, "Story395Q.Seed", "AddHeader", [headerCounter, bodyClass, bodyId]);
   expect(id, `the header of ${name}`).toMatch(/^\d+$/);
   HEADER.set(name, Number(id));
 }
 
 /** Save a body with `method`, then its header. A body IRIS refuses is reported to the caller as `false`. */
 async function seedBody(name: string, method: string, args: unknown[], bodyClass: string): Promise<boolean> {
-  const bodyId = await seedMethod(method, args);
+  const bodyId = await irisClassMethod(dev, NS_Q, "Story395Q.Seed", method, args);
   if (bodyId.startsWith("ERROR:")) return false;
   expect(bodyId, `the body of ${name}`).toMatch(/^\d+$/);
   await addHeader(name, bodyClass, bodyId);
@@ -402,7 +399,7 @@ async function seedBody(name: string, method: string, args: unknown[], bodyClass
 }
 
 async function seedSized(name: string, target: number, wide: boolean): Promise<void> {
-  const returned = JSON.parse(await seedMethod("SaveHl7Sized", [target, wide ? 1 : 0])) as { id: string; size: number };
+  const returned = JSON.parse(await irisClassMethod(dev, NS_Q, "Story395Q.Seed", "SaveHl7Sized", [target, wide ? 1 : 0])) as { id: string; size: number };
   expect(returned.size, `${name}: IRIS serializes the fixture to exactly ${target} characters (${String(returned.id).slice(0, 300)})`).toBe(target);
   SIZED.set(name, returned.size);
   await addHeader(name, "EnsLib.HL7.Message", String(returned.id));
@@ -435,35 +432,23 @@ async function seedAll(): Promise<void> {
 
 // -- Sessions ---------------------------------------------------------------------------------------------------------
 
-interface Probed {
-  session: WireSession;
-  stderr: () => string;
-  auditFile: string;
-}
-
 const opened: WireSession[] = [];
-const probedSessions: Probed[] = [];
+const probedSessions: AuditedSession[] = [];
 
-async function probedSession(label: string, extraEnv: Record<string, string> = {}): Promise<Probed> {
-  const auditFile = path.join(tempDir, `audit-${label}.jsonl`);
-  let stderr = "";
-  const session = await openWireSession(
-    wireOptions("iris-interop-mcp", {
-      onStderr: (chunk) => {
-        stderr += chunk;
-      },
-    }),
-    { IRIS_AUDIT_LOG: auditFile, IRIS_AUDIT_LOG_PARAMS: "true", LOG_LEVEL: "DEBUG", ...extraEnv },
+/** A session on the built interop server that writes `audit-<label>.jsonl`; `afterAll` checks its audit file and console log. */
+async function openTracked(label: string, extraEnv: Record<string, string> = {}): Promise<AuditedSession> {
+  const audited = await openAuditedSession(
+    { ...wireOptions("iris-interop-mcp"), auditFile: path.join(tempDir, `audit-${label}.jsonl`) },
+    extraEnv,
   );
-  opened.push(session);
-  const probed = { session, stderr: () => stderr, auditFile };
-  probedSessions.push(probed);
-  return probed;
+  opened.push(audited.session);
+  probedSessions.push(audited);
+  return audited;
 }
 
-let redactS: Probed;
-let allowS: Probed;
-let blockS: Probed;
+let redactS: AuditedSession;
+let allowS: AuditedSession;
+let blockS: AuditedSession;
 
 // -- Reading results --------------------------------------------------------------------------------------------------
 
@@ -477,17 +462,12 @@ interface BodyContent {
   dataPolicyClamped?: boolean;
 }
 
-const textOf = (result: WireToolResult): string => (result.content ?? []).map((block) => block.text ?? "").join("\n");
 const contentOf = (result: WireToolResult): BodyContent => result.structuredContent as unknown as BodyContent;
 
 function succeeded(result: WireToolResult): BodyContent {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, allText(result)).toBeFalsy();
   expect(result.content, "one text block").toHaveLength(1);
   return contentOf(result);
-}
-
-function wellFormed(text: string): boolean {
-  return (text as unknown as { isWellFormed: () => boolean }).isWellFormed();
 }
 
 /** The header ID of fixture `name`. */
@@ -507,11 +487,9 @@ function readBodies(session: WireSession, names: string[], args: Record<string, 
 const itemFor = (content: BodyContent, name: string): Item => content.items.find((item) => item.id === idOf(name)) as Item;
 
 /** The route, raw: the HTTP status, the text and the parsed envelope. The body names the scratch namespace. */
-async function route(body: Record<string, unknown>): Promise<{ status: number; text: string; errors: string[]; result: Record<string, unknown> }> {
+async function route(body: Record<string, unknown>): Promise<EnvelopeAnswer> {
   expect([NS_Q, NS_Z], "a route call names the scratch namespace").toContain(body.namespace);
-  const answer = await executeMcpPost(TARGET, BODY_ROUTE, body);
-  const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
-  return { status: answer.status, text: answer.text, errors: (parsed.status.errors ?? []).map((entry) => entry.error), result: parsed.result };
+  return postEnvelope(TARGET, BODY_ROUTE, body);
 }
 
 /** The raw route's item for fixture `name`, read with `bodyRead` and `bodyTextMaxChars`. */
@@ -576,22 +554,15 @@ beforeAll(async () => {
   }
   await seedAll();
 
-  redactS = await probedSession("redact");
-  allowS = await probedSession("allow", { IRIS_DATA_POLICY: "allow" });
-  blockS = await probedSession("block", { IRIS_DATA_POLICY: "block" });
+  redactS = await openTracked("redact");
+  allowS = await openTracked("allow", { IRIS_DATA_POLICY: "allow" });
+  blockS = await openTracked("block", { IRIS_DATA_POLICY: "block" });
 }, 600000);
 
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     await attempt("the audit files and the console logs", async () => {
       for (const probed of probedSessions) {
@@ -621,10 +592,7 @@ afterAll(async () => {
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     });
     await attempt("the fixture document listing", async () => {
-      for (const filter of ["Story391", "Story395"]) {
-        const listed = await dev.call("iris_doc_list", { filter, generated: true });
-        expect(listed.isError, `the ${filter} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter, names } of await fixtureDocumentNames(dev, ["Story391", "Story395"])) {
         expect(names, `no ${FIXTURE_DOC} or ${filter} document after the run`).toEqual([]);
       }
     });
@@ -639,7 +607,7 @@ afterAll(async () => {
 
 describe("Story 39.5 QA: the fixtures are measured, not assumed", () => {
   it("each sized HL7 v2 fixture is exactly its length in the text the route returns, and IRIS kept most of the shapes", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const [name, length] of [["hl7:65536", 65536], ["hl7:65537", 65537], ["hl7:wide65536", 65536]] as const) {
       const item = await rawItem(name, "hl7", 1048576);
       expect(String(item.bodyText).length, `${name}: the text the route returns`).toBe(length);
@@ -660,38 +628,11 @@ describe("Story 39.5 QA: the fixtures are measured, not assumed", () => {
 
 // -- Adversarial HL7 v2 shapes -------------------------------------------------------------------------------------
 
-/** The units of a batch that IRIS parses on their own: its FHS line, its BHS line, and each message. */
-function batchUnits(text: string): string[] {
-  const units: string[] = [];
-  let message: string[] = [];
-  const flush = (): void => {
-    if (message.length > 0) units.push(`${message.join("\r")}\r`);
-    message = [];
-  };
-  for (const line of text.split(/\r\n|\r|\n/)) {
-    if (line === "") continue;
-    const name = line.slice(0, 3);
-    if (name === "FHS" || name === "BHS") {
-      flush();
-      units.push(`${line}\r`);
-    } else if (name === "MSH") {
-      flush();
-      message.push(line);
-    } else if (name === "BTS" || name === "FTS") {
-      flush();
-    } else {
-      message.push(line);
-    }
-  }
-  flush();
-  return units;
-}
-
 describe("Story 39.5 QA: the HL7 v2 shapes IRIS stores, under redact, block and allow (AC-4; AD-26, Rule #36)", () => {
   const storedShapes = (): string[] => SHAPE_NAMES.filter((name) => !REFUSED_SHAPES.includes(name));
 
   it("redact: whatever IRIS kept, the result holds no identifying value; a shown text is redacted, a withheld one has a fixed reason, and the kept value survives where it was kept", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const names = storedShapes().map((name) => `shape:${name}`);
     const observed: string[] = [];
     // At most 20 headers a call.
@@ -701,7 +642,7 @@ describe("Story 39.5 QA: the HL7 v2 shapes IRIS stores, under redact, block and 
       const content = succeeded(result);
       const allow = succeeded(await readBodies(allowS.session, slice, { maxChars: 65536 }));
       expect(JSON.stringify(result), `redact: no identifying value, headers ${slice.join(" ")}`).not.toContain(MARK);
-      expect(textOf(result), "and none in the text").not.toContain(MARK);
+      expect(allText(result), "and none in the text").not.toContain(MARK);
       expect(content.count).toBe(slice.length);
       let redacted = 0;
       let withheld = 0;
@@ -734,7 +675,7 @@ describe("Story 39.5 QA: the HL7 v2 shapes IRIS stores, under redact, block and 
   }, 300000);
 
   it("block: the same bodies show no text, and the wire asked for the kind only", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const names = storedShapes().map((name) => `shape:${name}`).slice(0, 20);
     const result = await readBodies(blockS.session, names);
     const content = succeeded(result);
@@ -747,7 +688,7 @@ describe("Story 39.5 QA: the HL7 v2 shapes IRIS stores, under redact, block and 
   }, 120000);
 
   it("every redacted text is read by IRIS's own parser against its original: kept positions equal, every other position holds only *** and separators", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const names = storedShapes();
     const checked: string[] = [];
     const unparsed: string[] = [];
@@ -790,7 +731,7 @@ describe("Story 39.5 QA: the HL7 v2 shapes IRIS stores, under redact, block and 
 
 describe("Story 39.5 QA: the 65536-character limit of an HL7 v2 body, exactly (AC-2, AC-3; DW-577)", () => {
   it("redact: a body of 65536 characters is read whole and redacted, one of 65537 is withheld as too large, for ASCII and non-ASCII values", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await readBodies(redactS.session, ["hl7:65536", "hl7:wide65536", "hl7:65537"], { maxChars: 1048576 });
     const content = succeeded(result);
     for (const name of ["hl7:65536", "hl7:wide65536"]) {
@@ -809,7 +750,7 @@ describe("Story 39.5 QA: the 65536-character limit of an HL7 v2 body, exactly (A
   }, 120000);
 
   it("allow: the default maxChars reads a body of 65536 and cuts it to 10000; 65537 is too large until maxChars reaches 65537; the wide body is whole at 65536", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const first = succeeded(await readBodies(allowS.session, ["hl7:65536", "hl7:65537"]));
     expect(itemFor(first, "hl7:65536")).toMatchObject({ format: "er7", truncated: true });
     expect(String(itemFor(first, "hl7:65536").text), "cut to the default maxChars").toHaveLength(10000);
@@ -829,7 +770,7 @@ describe("Story 39.5 QA: the 65536-character limit of an HL7 v2 body, exactly (A
   }, 120000);
 
   it("the route: the cap is inclusive at 65536 characters (65536 reads, 65535 is tooLarge), for ASCII and non-ASCII values", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const name of ["hl7:65536", "hl7:wide65536"]) {
       const atCap = await rawItem(name, "hl7", 65536);
       expect(String(atCap.bodyText), `${name} at the cap`).toHaveLength(65536);
@@ -844,7 +785,7 @@ describe("Story 39.5 QA: the 65536-character limit of an HL7 v2 body, exactly (A
   }, 120000);
 
   it("20 headers that name the largest readable body are read inside a time budget, under redact and under allow", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const twenty = Array.from({ length: 20 }, () => "hl7:65536");
     const startedRedact = performance.now();
     const redact = succeeded(await readBodies(redactS.session, twenty));
@@ -872,7 +813,7 @@ describe("Story 39.5 QA: the 65536-character limit of an HL7 v2 body, exactly (A
 
 describe("Story 39.5 QA: maxChars and the stream reader, around the length of a stream (AC-2)", () => {
   it("a stream of 65536, 65537, 100000 or 100001 characters read with maxChars one below, at and one above its length: the text is its prefix and truncated says whether anything was left", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const length of STREAM_LENGTHS) {
       const name = `stream:${length}`;
       const full = pattern(length);
@@ -894,7 +835,7 @@ describe("Story 39.5 QA: maxChars and the stream reader, around the length of a 
   }, 180000);
 
   it("the route: a stream is read as a prefix of bodyTextMaxChars with bodyTextComplete false, whole with true, at the length and one below", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const full = pattern(65536);
     const whole = await rawItem("stream:65536", "all", 65536);
     expect(whole).toMatchObject({ bodyText: full, bodyTextComplete: true });
@@ -914,7 +855,7 @@ describe("Story 39.5 QA: maxChars and the stream reader, around the length of a 
 
 describe("Story 39.5 QA: non-ASCII and astral text through IRIS and the route (AC-2; Rule #34)", () => {
   it("allow: a stream, a string body, a JSON-adaptor body and a literal that hold e acute, a CJK character and an astral character come back exactly", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded(await readBodies(allowS.session, ["stream:wide", "string:wide", "json:wide", "literal:wide"]));
     expect(itemFor(content, "stream:wide")).toMatchObject({ format: "text", text: `${WIDE}-${"\u{1F600}".repeat(3)}`, truncated: false });
     const stringItem = itemFor(content, "string:wide");
@@ -933,7 +874,7 @@ describe("Story 39.5 QA: non-ASCII and astral text through IRIS and the route (A
   }, 120000);
 
   it("allow: a cut inside a surrogate pair, by maxChars, leaves no lone surrogate", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // The lead is e acute, a CJK character, an astral character (two UTF-16 units) and "-": 5 units, with a pair at
     // units 3 and 4. Three more pairs follow: 11 units in all.
     const lead = `${WIDE}-`;
@@ -957,7 +898,7 @@ describe("Story 39.5 QA: non-ASCII and astral text through IRIS and the route (A
   }, 120000);
 
   it("allow: IRIS's own cut at the read limit, inside a surrogate pair of a 70001-unit stream, leaves a prefix with no lone surrogate", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const emoji = "\u{1F600}";
     const full = `x${emoji.repeat(35000)}`;
     expect(full).toHaveLength(70001);
@@ -978,7 +919,7 @@ describe("Story 39.5 QA: non-ASCII and astral text through IRIS and the route (A
   }, 120000);
 
   it("redact: non-ASCII values are redacted and withheld the same way, with the kept non-ASCII value intact", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await readBodies(redactS.session, ["shape:nonAscii", "stream:wide", "string:wide", "json:wide", "literal:wide"]);
     const content = succeeded(result);
     expect(content.dataPolicy).toEqual({ policy: "redact", redacted: 1, blocked: 4 });
@@ -992,7 +933,7 @@ describe("Story 39.5 QA: non-ASCII and astral text through IRIS and the route (A
 
 describe("Story 39.5 QA: a body that cannot be read has a fixed text and no exception text (AC-1, AC-2; AD-19)", () => {
   it("a header with no body (empty class and ID) is none with its fixed reason, never withheld or counted, and the route says so with bodyId \"\" in every mode", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const noBody = "The message has no body: its header names no body class and no body ID.";
     for (const [label, probed] of [["redact", redactS], ["block", blockS], ["allow", allowS]] as const) {
       const content = succeeded(await readBodies(probed.session, ["literal:empty"]));
@@ -1009,7 +950,7 @@ describe("Story 39.5 QA: a body that cannot be read has a fixed text and no exce
   }, 120000);
 
   it("allow: a JSON export that throws, a class that throws on open and a container with no stream are not shown, and no identifying value or exception text is anywhere", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const names = ["throws:export", "throws:open", "container:empty"];
     const result = await readBodies(allowS.session, names);
     const content = succeeded(result);
@@ -1035,7 +976,7 @@ describe("Story 39.5 QA: a body that cannot be read has a fixed text and no exce
   }, 120000);
 
   it("redact and block: the same three bodies are withheld by kind and nothing leaks", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const names = ["throws:export", "throws:open", "container:empty"];
     const redact = await readBodies(redactS.session, names);
     const redactContent = succeeded(redact);
@@ -1071,7 +1012,7 @@ describe("Story 39.5 QA: the route reads least, over every fixture of the namesp
   }
 
   it("kind sends no text, no text-omitted token and no literal value, and the whole response holds no identifying value or exception text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const { items, text } = await sweep("kind", 65536);
     expect(text).not.toContain(MARK);
     expect(text).not.toContain("EXCEPTION");
@@ -1084,7 +1025,7 @@ describe("Story 39.5 QA: the route reads least, over every fixture of the namesp
   }, 120000);
 
   it("hl7 sends text for an HL7 v2 body only, and no other body's content or exception text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const { items, text } = await sweep("hl7", 65536);
     for (const item of items) {
       if (item.bodyKind !== "hl7v2") {
@@ -1106,7 +1047,7 @@ describe("Story 39.5 QA: the odd forms of the route's inputs (AC-1)", () => {
   const ONE = 1;
 
   it("headerIds: a value that is not a positive integer or a string of digits is refused, naming the parameter, with no namespace error and no read", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const refused: Array<[string, unknown[]]> = [
       ["a word", ["x"]],
       ["an empty string", [""]],
@@ -1136,7 +1077,7 @@ describe("Story 39.5 QA: the odd forms of the route's inputs (AC-1)", () => {
   }, 120000);
 
   it("bodyRead and bodyTextMaxChars: the forms outside the contract are refused naming the parameter; the boundary values and a null are accepted", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const refused: Array<[string, Record<string, unknown>, string]> = [
       ["bodyRead in capitals", { bodyRead: "KIND" }, "bodyRead"],
       ["bodyRead padded", { bodyRead: " hl7" }, "bodyRead"],
@@ -1173,7 +1114,7 @@ describe("Story 39.5 QA: the odd forms of the route's inputs (AC-1)", () => {
   }, 120000);
 
   it("a header that does not exist, between ones that do, is found: false with its own text, and a read of a missing one under every bodyRead holds no body", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const bodyRead of ["kind", "hl7", "all"]) {
       const answer = await route({ headerIds: [idOf("stream:65536"), 99999999, idOf("literal:wide")], namespace: NS_Q, bodyRead, bodyTextMaxChars: 100 });
       expect(answer.errors, bodyRead).toEqual([]);
@@ -1188,7 +1129,7 @@ describe("Story 39.5 QA: the odd forms of the route's inputs (AC-1)", () => {
 
 describe("Story 39.5 QA: the first built-server start", () => {
   it("deploys the bootstrap inside its 60 s budget", (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // eslint-disable-next-line no-console
     console.log(`[perf] story-39-5-qa: the first built-server start took ${firstStartMs} ms (budget 60000 ms)`);
     expect(firstStartMs).toBeLessThan(60000);

@@ -16,26 +16,29 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   connectionEnv,
+  distEntry,
   inheritedEnv,
   resolveSdkEsmDir,
+  skipIfReason,
   spawnAndWaitForExit,
   staleDistReason,
+  stubTarget,
+  withStub,
   withWireSession,
-  type IrisTarget,
+  writeJson,
+  type Stub503,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const INTEROP_ENTRY = path.join(REPO_ROOT, "packages", "iris-interop-mcp", "dist", "index.js");
+const INTEROP_ENTRY = distEntry(REPO_ROOT, "iris-interop-mcp");
 
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
 
@@ -49,57 +52,17 @@ let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir = "";
 
-interface Stub {
-  port: number;
-  requests: string[];
-  close: () => Promise<void>;
-}
-
-/** A local HTTP listener answering every request with 503 and recording `METHOD path` lines. */
-async function startStub(): Promise<Stub> {
-  const requests: string[] = [];
-  const server = http.createServer((req, res) => {
-    requests.push(`${req.method} ${req.url}`);
-    res.statusCode = 503;
-    res.end();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return {
-    port: (server.address() as AddressInfo).port,
-    requests,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
-function stubTarget(stub: Stub): IrisTarget {
-  return { host: "127.0.0.1", port: String(stub.port), username: "story392-gate", password: "not-a-real-password", namespace: "HSCUSTOM" };
-}
-
-async function withStub<T>(body: (stub: Stub) => Promise<T>): Promise<T> {
-  const stub = await startStub();
-  try {
-    return await body(stub);
-  } finally {
-    await stub.close();
-  }
-}
+/** The user name the server is told to connect with. */
+const STUB_USERNAME = "story392-gate";
 
 /** Spawn the built server pointed at `stub` with `extraEnv`, stdin closed, and wait for it to exit. */
-function runToExit(stub: Stub, extraEnv: Record<string, string>) {
+function runToExit(stub: Stub503, extraEnv: Record<string, string>) {
   return spawnAndWaitForExit(
     INTEROP_ENTRY,
     [],
-    { ...inheritedEnv(), ...connectionEnv(stubTarget(stub)), LOG_LEVEL: SERVER_LOG_LEVEL, ...extraEnv },
+    { ...inheritedEnv(), ...connectionEnv(stubTarget(stub.port, STUB_USERNAME)), LOG_LEVEL: SERVER_LOG_LEVEL, ...extraEnv },
     45000,
   );
-}
-
-let fileCounter = 0;
-function writeGovernanceFile(document: unknown): string {
-  fileCounter += 1;
-  const file = path.join(fixtureDir, `governance-${fileCounter}.json`);
-  writeFileSync(file, JSON.stringify(document), "utf8");
-  return file;
 }
 
 interface RosterEntry {
@@ -109,12 +72,12 @@ interface RosterEntry {
 }
 
 /** The roster `iris_server_profiles` reports, and the server's stderr, for the built server started with `extraEnv`. */
-async function report(stub: Stub, extraEnv: Record<string, string>): Promise<{ roster: Record<string, RosterEntry>; stderr: string }> {
+async function report(stub: Stub503, extraEnv: Record<string, string>): Promise<{ roster: Record<string, RosterEntry>; stderr: string }> {
   let stderr = "";
   const options: WireSessionOptions = {
     sdkEsmDir: sdkEsmDir as string,
     entry: INTEROP_ENTRY,
-    target: stubTarget(stub),
+    target: stubTarget(stub.port, STUB_USERNAME),
     clientName: "story-39-2-data-policy-startup",
     onStderr: (chunk) => {
       stderr += chunk;
@@ -152,15 +115,9 @@ afterAll(() => {
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
-function skipIfNeeded(ctx: { skip: () => void }): boolean {
-  if (!skipReason) return false;
-  ctx.skip();
-  return true;
-}
-
 describe("Story 39.2: a bad data-policy setting fails the built server's startup (AC-1, AD-8)", () => {
   it("IRIS_DATA_POLICY that is not a policy: exit 1, naming the variable, before any IRIS traffic", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       const result = await runToExit(stub, { IRIS_DATA_POLICY: "open" });
       expect(result.timedOut, result.stderr).toBe(false);
@@ -171,7 +128,7 @@ describe("Story 39.2: a bad data-policy setting fails the built server's startup
   });
 
   it("an IRIS_PROFILES entry whose dataPolicy is not a policy: exit 1, naming the profile and the field", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       const result = await runToExit(stub, { IRIS_PROFILES: JSON.stringify({ p: { dataPolicy: 3 } }) });
       expect(result.code, result.stderr).toBe(1);
@@ -189,9 +146,9 @@ describe("Story 39.2: a bad data-policy setting fails the built server's startup
   ];
   for (const row of FILE_ROWS) {
     it(`IRIS_GOVERNANCE_FILE with ${row.label}: exit 1, naming the key and the path, never the value`, async (ctx) => {
-      if (skipIfNeeded(ctx)) return;
+      if (skipIfReason(skipReason, ctx)) return;
       await withStub(async (stub) => {
-        const file = writeGovernanceFile(row.document);
+        const file = writeJson(fixtureDir, "governance.json", row.document);
         const result = await runToExit(stub, { IRIS_GOVERNANCE_FILE: file });
         expect(result.code, result.stderr).toBe(1);
         expect(result.stderr).toContain("IRIS_GOVERNANCE_FILE is invalid:");
@@ -204,7 +161,7 @@ describe("Story 39.2: a bad data-policy setting fails the built server's startup
   }
 
   it("IRIS_GOVERNANCE carrying a dataPolicy key: exit 1, pointing to the channels that can carry it", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       const result = await runToExit(stub, { IRIS_GOVERNANCE: JSON.stringify({ dataPolicy: {} }) });
       expect(result.code, result.stderr).toBe(1);
@@ -218,7 +175,7 @@ describe("Story 39.2: a bad data-policy setting fails the built server's startup
 
 describe("Story 39.2: valid data-policy settings start the built server and are reported (AC-1, AC-7)", () => {
   it("a server with no data-policy setting reports redact from default, and reached the listener", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       const { roster } = await report(stub, {});
       expect(roster.default).toMatchObject({ dataPolicy: "redact", dataPolicySource: "default" });
@@ -227,7 +184,7 @@ describe("Story 39.2: valid data-policy settings start the built server and are 
   });
 
   it("IRIS_DATA_POLICY in any letter case is reported; an empty one is unset", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       expect((await report(stub, { IRIS_DATA_POLICY: "BLOCK" })).roster.default).toMatchObject({
         dataPolicy: "block",
@@ -241,9 +198,9 @@ describe("Story 39.2: valid data-policy settings start the built server and are 
   });
 
   it("walks the precedence across IRIS_PROFILES, IRIS_DATA_POLICY and the governance file", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
-      const file = writeGovernanceFile({ dataPolicy: { global: "allow", profiles: { p: "allow" } } });
+      const file = writeJson(fixtureDir, "governance.json", { dataPolicy: { global: "allow", profiles: { p: "allow" } } });
       const all = await report(stub, {
         IRIS_PROFILES: JSON.stringify({ p: { dataPolicy: "block" } }),
         IRIS_DATA_POLICY: "allow",
@@ -259,7 +216,7 @@ describe("Story 39.2: valid data-policy settings start the built server and are 
   });
 
   it("never inherits the default entry's value", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
       const { roster } = await report(stub, { IRIS_PROFILES: JSON.stringify({ default: { dataPolicy: "allow" }, p: {} }) });
       expect(roster.default).toMatchObject({ dataPolicy: "allow", dataPolicySource: "IRIS_PROFILES" });
@@ -268,9 +225,9 @@ describe("Story 39.2: valid data-policy settings start the built server and are 
   });
 
   it("an unknown profile name under dataPolicy.profiles warns once and the server starts", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     await withStub(async (stub) => {
-      const file = writeGovernanceFile({ dataPolicy: { profiles: { ghost: "block" } } });
+      const file = writeJson(fixtureDir, "governance.json", { dataPolicy: { profiles: { ghost: "block" } } });
       const { roster, stderr } = await report(stub, { IRIS_GOVERNANCE_FILE: file });
       expect(roster.default).toMatchObject({ dataPolicy: "redact", dataPolicySource: "default" });
       const warnings = stderr.split("\n").filter((line) => line.includes("[WARN]") && line.includes("ghost") && line.includes("dataPolicy.profiles"));

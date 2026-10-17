@@ -285,8 +285,8 @@ describe("Story 38.6: the SQL operator variables are documented in the root READ
 });
 
 describe("Story 38.6: the edit-and-test-class prompt is documented where the prompts are listed", () => {
-  it("the root README heading counts 12 prompts and its table has the dev row", () => {
-    expect(rootReadme).toMatch(/^### The v1 pack . 12 prompts, grouped by owning server$/m);
+  it("the root README heading counts 13 prompts and its table has the dev row", () => {
+    expect(rootReadme).toMatch(/^### The v1 pack . 13 prompts, grouped by owning server$/m);
     const row = squash(lineStarting(rootReadme, "| `@iris-mcp/dev` | `edit-and-test-class` |"));
     expect(row).toContain("`iris_doc_edit:apply` is enabled by default");
     expect(row).toContain("dev `core` preset");
@@ -298,9 +298,9 @@ describe("Story 38.6: the edit-and-test-class prompt is documented where the pro
     expect(row).toContain("`className`, `change` and an optional `testClass`");
   });
 
-  it("tool_support.md counts 12 prompts with dev 5 and says the prompt adds no tool, key or default", () => {
+  it("tool_support.md counts 13 prompts with dev 5 and says the prompt adds no tool, key or default", () => {
     const flat = squash(toolSupport);
-    expect(flat).toContain("a pack of 12 **MCP prompts** (`ops` 2, `dev` 5, `interop` 3, `admin` 2; `data` none in v1)");
+    expect(flat).toContain("a pack of 13 **MCP prompts** (`ops` 2, `dev` 5, `interop` 4, `admin` 2; `data` none in v1)");
     expect(flat).toContain("`dev` gained `edit-and-test-class` in Story 38.6");
     expect(flat).toContain("adds no tool, key or default");
   });

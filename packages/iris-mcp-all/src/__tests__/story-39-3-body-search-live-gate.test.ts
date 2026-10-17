@@ -30,20 +30,28 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
+  distEntry,
   executeMcpPost,
+  firstText,
+  fixtureDocumentNames,
+  headerIds,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  pollAuditEntries,
+  postEnvelope,
   resolveSdkEsmDir,
   shippedBootstrapVersion,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -67,8 +75,9 @@ import { mulberry32 } from "../../../shared/src/__tests__/test-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
 const BASELINE_PATH = path.join(__dirname, "fixtures", "story-39-3-search-baseline.json");
+
+const GATE_TAG = "story-39-3-body-search-live-gate";
 
 const TARGET = irisTargetFromEnv();
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -101,18 +110,11 @@ let tempDir = "";
 function wireOptions(pkg: string, extra: Partial<WireSessionOptions> = {}): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-3-live-gate",
     ...extra,
   };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-3-body-search-live-gate: ${skipReason}`);
-  testCtx.skip();
 }
 
 /** Sessions the rows open, closed in `afterAll`. */
@@ -227,14 +229,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     for (const name of NAMESPACES) await attempt(`removing ${name}`, () => removeInteropNamespace(admin, dev, name));
     await attempt("the leftovers check", async () => {
@@ -245,10 +240,7 @@ afterAll(async () => {
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     });
     await attempt("the fixture document listing", async () => {
-      for (const filter of ["Story391", "Story393"]) {
-        const listed = await dev.call("iris_doc_list", { filter, generated: true });
-        expect(listed.isError, `the ${filter} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter, names } of await fixtureDocumentNames(dev, ["Story391", "Story393"])) {
         expect(names, `no ${FIXTURE_DOC} or ${filter} document after the run`).toEqual([]);
       }
     });
@@ -263,7 +255,7 @@ afterAll(async () => {
 
 describe("Story 39.3: the headers wire is unchanged (AD-15, AD-33)", () => {
   it.runIf(CAPTURE)("capture: replay the headers request list against A and C and write the baseline", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const deployed = await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
     expect(deployed, "the capture runs on the classes deployed before the body action").toBe(PRE_STORY_BOOTSTRAP_VERSION);
 
@@ -291,7 +283,7 @@ describe("Story 39.3: the headers wire is unchanged (AD-15, AD-33)", () => {
   }, 240000);
 
   it.skipIf(CAPTURE)("every headers request answers byte for byte as it did on the pre-story classes", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as Baseline;
 
     expect(baseline.capturedWithBootstrapVersion, "the capture was taken on the classes before this story").toBe(
@@ -326,9 +318,6 @@ const BODY_CLASS = "Story393.Body";
 /** The window W as the SQL the oracle uses: the stored form, both ends inclusive. */
 const WINDOW_SQL = "h.TimeCreated >= '2001-02-03 07:00:00' AND h.TimeCreated <= '2001-02-03 09:00:00'";
 
-const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
-const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
-
 /** The hand-written JOIN oracle (Rule #36) over window W: `bodyJoinOracle` of `header-row-oracle.ts`. */
 const joinOracle = (
   namespace: string,
@@ -348,7 +337,7 @@ type Structured = Record<string, unknown> & {
 
 /** The structured content of a successful body result, which must hold no body value. */
 function succeeded(result: WireToolResult): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, firstText(result)).toBeFalsy();
   expect(JSON.stringify(result), "a body result holds no body value").not.toContain(MARKER);
   return result.structuredContent as Structured;
 }
@@ -368,28 +357,6 @@ function bodySearch(session: WireSession, args: Record<string, unknown> = {}): P
 /** One filter. */
 const filter = (property: string, op: string, value?: string | number | boolean): Record<string, unknown> =>
   value === undefined ? { property, op } : { property, op, value };
-
-interface RouteAnswer {
-  status: number;
-  text: string;
-  errors: string[];
-  result: Record<string, unknown>;
-}
-
-/** POST `body` to the search route and parse the envelope. */
-async function route(body: Record<string, unknown>): Promise<RouteAnswer> {
-  const answer = await sendSearch(body);
-  const parsed = JSON.parse(answer.text) as {
-    status: { errors?: Array<{ error: string }> };
-    result: Record<string, unknown>;
-  };
-  return {
-    status: answer.status,
-    text: answer.text,
-    errors: (parsed.status.errors ?? []).map((entry) => entry.error),
-    result: parsed.result,
-  };
-}
 
 /** A body search of A over window W straight to the route. */
 const routeBody = (filters: unknown, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -457,9 +424,9 @@ const OPERATOR_CASES: OperatorCase[] = [
 describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equals a hand-written JOIN (AC-4, Rule #36)", () => {
   for (const operatorCase of OPERATOR_CASES) {
     it(operatorCase.name, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await joinOracle(NS_A, BODY_TABLE, BODY_CLASS, operatorCase.predicate);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(operatorCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(operatorCase.ids);
 
       const started = performance.now();
       const content = succeeded(await bodySearch(interop, { filters: operatorCase.filters }));
@@ -478,18 +445,18 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
   }
 
   it("never returns header 7, 8, 9 or 12 for a Story393.Body search, whatever the filter", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const seen = new Set<number>();
     for (const operatorCase of OPERATOR_CASES) {
-      for (const id of ids(succeeded(await bodySearch(interop, { filters: operatorCase.filters })).rows)) seen.add(id);
+      for (const id of headerIds(succeeded(await bodySearch(interop, { filters: operatorCase.filters })).rows)) seen.add(id);
     }
     expect([...seen].sort((a, b) => a - b), "only headers whose body is a Story393.Body row inside W").toEqual([1, 2, 3, 4, 5, 6, 10]);
   }, 120000);
 
   it("an HL7 body is searched through RawContent, and the row equals the oracle", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await joinOracle(NS_A, '"EnsLib_HL7"."Message"', "EnsLib.HL7.Message", "b.RawContent [ 'SYNTHPHI393-MRN'");
-    expect(ids(expected)).toEqual([11]);
+    expect(headerIds(expected)).toEqual([11]);
 
     const content = succeeded(
       await bodySearch(interop, { bodyClass: "EnsLib.HL7.Message", filters: [filter("RawContent", "contains", "SYNTHPHI393-MRN")] }),
@@ -499,14 +466,14 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
   }, 120000);
 
   it("a body property named like a header column (TimeCreated) is read from the body table, not the header table", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await joinOracle(
       NS_A,
       '"EnsLib_HL7"."Message"',
       "EnsLib.HL7.Message",
       "b.RawContent [ 'SYNTHPHI393-MRN' AND b.TimeCreated IS NOT NULL",
     );
-    expect(ids(expected)).toEqual([11]);
+    expect(headerIds(expected)).toEqual([11]);
 
     const content = succeeded(
       await bodySearch(interop, {
@@ -519,7 +486,7 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
   }, 120000);
 
   it("body filters combine with the header filters: target and errorOnly", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await joinOracle(
       NS_A,
       BODY_TABLE,
@@ -527,7 +494,7 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
       "b.Code = 'K2' AND b.Amount < 0",
       " AND h.TargetConfigName = 'Story393.Other' AND h.IsError = 1",
     );
-    expect(ids(expected)).toEqual([3]);
+    expect(headerIds(expected)).toEqual([3]);
 
     const content = succeeded(
       await bodySearch(interop, {
@@ -544,25 +511,25 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
   }, 120000);
 
   it("a body ID shared by two classes is never joined across them", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const other = succeeded(
       await bodySearch(interop, { bodyClass: "Story393.Other", filters: [filter("Code", "eq", "K1-alpha")] }),
     );
-    expect(ids(other.rows), "header 7 reads Story393.Other 1").toEqual([7]);
+    expect(headerIds(other.rows), "header 7 reads Story393.Other 1").toEqual([7]);
     expect(other.rows).toEqual(
       await joinOracle(NS_A, '"Story393"."Other"', "Story393.Other", "b.Code = 'K1-alpha'", ""),
     );
 
     const body = succeeded(await bodySearch(interop, { filters: [filter("Code", "eq", "K1-alpha")] }));
-    expect(ids(body.rows), "Story393.Body 1 is not Story393.Other 1").toEqual([1, 2, 10]);
-    expect(ids(body.rows)).not.toContain(7);
+    expect(headerIds(body.rows), "Story393.Body 1 is not Story393.Other 1").toEqual([1, 2, 10]);
+    expect(headerIds(body.rows)).not.toContain(7);
   }, 120000);
 
   // Amount ge -5 matches every body, so seven headers; the tie of headers 4 and 5 at 08:00:03 falls on a page boundary.
   it("pages of 2 join, in order, without a gap or a duplicate; the 4/5 tie breaks by ID; only a page with more carries nextCursor", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await joinOracle(NS_A, BODY_TABLE, BODY_CLASS, "b.Amount >= -5");
-    expect(ids(expected)).toEqual([1, 2, 3, 4, 5, 6, 10]);
+    expect(headerIds(expected)).toEqual([1, 2, 3, 4, 5, 6, 10]);
 
     const pages: Structured[] = [];
     let cursor: string | undefined;
@@ -574,7 +541,7 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
       cursor = page.nextCursor;
     }
 
-    expect(pages.map((page) => ids(page.rows))).toEqual([[1, 2], [3, 4], [5, 6], [10]]);
+    expect(pages.map((page) => headerIds(page.rows))).toEqual([[1, 2], [3, 4], [5, 6], [10]]);
     expect(pages.flatMap((page) => page.rows)).toEqual(expected);
     const last = pages[pages.length - 1] as Structured;
     expect(last.hasMore).toBe(false);
@@ -583,10 +550,10 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
   }, 120000);
 
   it("a page that is exactly full and has no more carries no nextCursor", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded(await bodySearch(interop, { filters: [filter("Amount", "ge", -5)], limit: 7 }));
 
-    expect(ids(content.rows)).toEqual([1, 2, 3, 4, 5, 6, 10]);
+    expect(headerIds(content.rows)).toEqual([1, 2, 3, 4, 5, 6, 10]);
     expect(content.hasMore).toBe(false);
     expect(content).not.toHaveProperty("nextCursor");
   }, 120000);
@@ -596,7 +563,7 @@ describe.skipIf(CAPTURE)("Story 39.3: each operator on each kind of property equ
 
 describe.skipIf(CAPTURE)("Story 39.3: a body search returns header rows and never a body value (AC-2)", () => {
   it("the matched bodies hold the marker (positive control), and neither the tool nor the route returns it", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const held = await atelierQuery(
       { ...TARGET, namespace: NS_A },
       `SELECT Exact FROM Story393.Body WHERE Exact [ '${MARKER}' AND ID IN (1, 3, 4, 5, 6)`,
@@ -605,10 +572,10 @@ describe.skipIf(CAPTURE)("Story 39.3: a body search returns header rows and neve
 
     const filters = [filter("Exact", "contains", MARKER)];
     const viaTool = await bodySearch(interop, { filters });
-    expect(ids(succeeded(viaTool).rows)).toEqual(headersOfBodies([1, 3, 4, 5, 6]));
+    expect(headerIds(succeeded(viaTool).rows)).toEqual(headersOfBodies([1, 3, 4, 5, 6]));
     expect(JSON.stringify(viaTool)).not.toContain(MARKER);
 
-    const viaRoute = await route(routeBody(filters));
+    const viaRoute = await postEnvelope(TARGET, ROUTE, routeBody(filters));
     expect(viaRoute.errors).toEqual([]);
     expect((viaRoute.result.rows as Array<{ id: number }>).map((row) => row.id)).toEqual(headersOfBodies([1, 3, 4, 5, 6]));
     expect(viaRoute.text, "the raw route answer").not.toContain(MARKER);
@@ -636,8 +603,8 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
   ];
   for (const [what, property] of REFUSED_PROPERTIES) {
     it(`route: ${what} (${property}) is refused naming filters[0].property`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(routeBody([filter(property, "eq", MARKER)]));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter(property, "eq", MARKER)]));
 
       expect(answer.status).toBe(200);
       expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
@@ -648,18 +615,18 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
   }
 
   it("route: a stream accepts only isNull and notNull; contains is refused naming filters[0].op", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const answer = await route(routeBody([filter("Note", "contains", MARKER)]));
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("Note", "contains", MARKER)]));
 
     expect(answer.errors[0]).toContain("filters[0].op");
     expect(answer.text).not.toContain(MARKER);
     expect(answer.result).toEqual({});
-    expect((await route(routeBody([filter("Note", "isNull")]))).errors, "isNull on the same stream is accepted").toEqual([]);
+    expect((await postEnvelope(TARGET, ROUTE, routeBody([filter("Note", "isNull")]))).errors, "isNull on the same stream is accepted").toEqual([]);
   }, 120000);
 
   it("a statement that fails while it runs gives the fixed text with its SQLCODE, never the value, over the route and the tool", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const answer = await route(routeBody([filter("Boom", "eq", MARKER)]));
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("Boom", "eq", MARKER)]));
 
     expect(answer.status).toBe(200);
     expect(answer.errors.length, answer.text).toBe(1);
@@ -669,21 +636,21 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
 
     const result = await bodySearch(interop, { filters: [filter("Boom", "eq", MARKER)] });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toMatch(/The body search failed with SQLCODE -?\d+\./);
+    expect(firstText(result)).toMatch(/The body search failed with SQLCODE -?\d+\./);
     expect(JSON.stringify(result)).not.toContain(MARKER);
   }, 120000);
 
   it("the tool refuses a property that does not exist with the IRIS text, never the value", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await bodySearch(interop, { filters: [filter("NoSuch", "eq", MARKER)] });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("filters[0].property");
+    expect(firstText(result)).toContain("filters[0].property");
     expect(JSON.stringify(result)).not.toContain(MARKER);
   }, 120000);
 
   it("the tool refuses filters on the headers action instead of ignoring them, and the missing body input", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const withFilters = await interop.call("iris_message_search", {
       action: "headers",
       namespace: NS_A,
@@ -692,14 +659,14 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
       filters: [filter("Code", "eq", MARKER)],
     });
     expect(withFilters.isError).toBe(true);
-    expect(textOf(withFilters)).toBe("'filters' applies only to the body and searchTable actions.");
+    expect(firstText(withFilters)).toBe("'filters' applies only to the body and searchTable actions.");
 
     const noClass = await interop.call("iris_message_search", { action: "body", namespace: NS_A, from: FROM, to: TO, filters: [filter("Code", "eq", "x")] });
     expect(noClass.isError).toBe(true);
-    expect(textOf(noClass)).toContain("'bodyClass'");
+    expect(firstText(noClass)).toContain("'bodyClass'");
     const noFilters = await bodySearch(interop, {});
     expect(noFilters.isError).toBe(true);
-    expect(textOf(noFilters)).toContain("'filters'");
+    expect(firstText(noFilters)).toContain("'filters'");
   }, 120000);
 
   const REFUSED_CLASSES: Array<[string, string]> = [
@@ -711,8 +678,8 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
   ];
   for (const [what, bodyClass] of REFUSED_CLASSES) {
     it(`route: ${what} (${bodyClass}) is refused naming bodyClass`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(routeBody([filter("Code", "eq", MARKER)], { bodyClass }));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("Code", "eq", MARKER)], { bodyClass }));
 
       expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
       expect(answer.errors[0]).toContain("'bodyClass'");
@@ -757,8 +724,8 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
   const valid = routeBody([ok], { namespace: NS_Z });
   for (const [what, overrides, token] of SHAPE_CASES) {
     it(`route: ${what} is refused naming ${token}, before the namespace is switched`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(Object.fromEntries(Object.entries({ ...valid, ...overrides }).filter(([, value]) => value !== undefined)));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, Object.fromEntries(Object.entries({ ...valid, ...overrides }).filter(([, value]) => value !== undefined)));
 
       expect(answer.status).toBe(200);
       expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
@@ -770,8 +737,8 @@ describe.skipIf(CAPTURE)("Story 39.3: a property or class that cannot be searche
   }
 
   it("route: the valid shape aimed at the same missing namespace fails at the switch (positive control for the rows above)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const answer = await route(valid);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const answer = await postEnvelope(TARGET, ROUTE, valid);
 
     expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
     expect(answer.errors[0], "the namespace switch error").toContain("<NAMESPACE>");
@@ -829,7 +796,7 @@ function fuzzText(random: () => number, marker: boolean): string {
 
 describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route directly (AC-3, Rule #59, AD-26)", () => {
   it("the searchable properties are the columns INFORMATION_SCHEMA lists (the property-kind table agrees with the dictionary)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const columns = (
       await atelierQuery(
         { ...TARGET, namespace: NS_A },
@@ -850,7 +817,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route d
   }, 120000);
 
   it("the positive control: a statement that calls the side-effect function does increment ^Story393Side", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await resetSide(dev, NS_A);
     expect(await sideCount(dev, NS_A)).toBe(0);
     await atelierQuery({ ...TARGET, namespace: NS_A }, "SELECT Story393.Side_Bump() AS n");
@@ -860,7 +827,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route d
   }, 120000);
 
   it("a seeded corpus over the property, op and value slots: 0 violations", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await resetSide(dev, NS_A);
     const random = mulberry32(393);
     const violations: string[] = [];
@@ -870,7 +837,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route d
     /** Send one filter and check the invariants every request must keep. */
     async function probe(slot: string, filterValue: Record<string, unknown>, expectedBodies: number[] | undefined, token: string): Promise<void> {
       requests += 1;
-      const answer = await route(routeBody([filterValue]));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filterValue]));
       const label = `${slot} ${JSON.stringify(filterValue).slice(0, 120)}`;
       if (answer.text.includes(MARKER)) violations.push(`${label}: the response echoes the marker`);
       if (answer.status !== 200) violations.push(`${label}: HTTP ${answer.status}`);
@@ -951,35 +918,35 @@ describe.skipIf(CAPTURE)("Story 39.3: the injection fuzz drives the REST route d
 
 describe.skipIf(CAPTURE)("Story 39.3: second namespace, not configured, unknown namespace (AC-4; Rules #34, #41)", () => {
   it("OnlyInA, OnlyInB and Renamed: each namespace equals its own oracle, they differ, and the other's property is refused", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const renamedInA = succeeded(await bodySearch(interop, { namespace: NS_A, filters: [filter("Renamed", "eq", "R-one")] }));
     const renamedInB = succeeded(await bodySearch(interop, { namespace: NS_B, filters: [filter("Renamed", "eq", "R-one")] }));
     expect(renamedInA.rows).toEqual(await joinOracle(NS_A, BODY_TABLE, BODY_CLASS, "b.RenamedField = 'R-one'"));
     expect(renamedInB.rows).toEqual(await joinOracle(NS_B, BODY_TABLE, BODY_CLASS, "b.RenamedB = 'R-one'"));
-    expect(ids(renamedInA.rows)).toEqual([1, 10]);
-    expect(ids(renamedInB.rows)).toEqual([1]);
+    expect(headerIds(renamedInA.rows)).toEqual([1, 10]);
+    expect(headerIds(renamedInB.rows)).toEqual([1]);
     expect(renamedInA.rows).not.toEqual(renamedInB.rows);
 
     const onlyInA = succeeded(await bodySearch(interop, { namespace: NS_A, filters: [filter("OnlyInA", "eq", "a1")] }));
     expect(onlyInA.rows).toEqual(await joinOracle(NS_A, BODY_TABLE, BODY_CLASS, "b.OnlyInA = 'a1'"));
-    expect(ids(onlyInA.rows)).toEqual([1, 10]);
+    expect(headerIds(onlyInA.rows)).toEqual([1, 10]);
     const onlyInB = succeeded(await bodySearch(interop, { namespace: NS_B, filters: [filter("OnlyInB", "eq", "b1")] }));
     expect(onlyInB.rows).toEqual(await joinOracle(NS_B, BODY_TABLE, BODY_CLASS, "b.OnlyInB = 'b1'"));
-    expect(ids(onlyInB.rows)).toEqual([1]);
+    expect(headerIds(onlyInB.rows)).toEqual([1]);
 
     const inBRefused = await bodySearch(interop, { namespace: NS_B, filters: [filter("OnlyInA", "eq", "a1")] });
     const inARefused = await bodySearch(interop, { namespace: NS_A, filters: [filter("OnlyInB", "eq", "b1")] });
     for (const refused of [inBRefused, inARefused]) {
       expect(refused.isError).toBe(true);
-      expect(textOf(refused)).toContain("filters[0].property");
+      expect(firstText(refused)).toContain("filters[0].property");
     }
   }, 120000);
 
   it("a namespace with no Interoperability mappings is notApplicable with the policy, not an error", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await bodySearch(interop, { namespace: NS_C, filters: [filter("Code", "eq", "x")] });
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
       action: "body",
       notApplicable: true,
@@ -989,18 +956,18 @@ describe.skipIf(CAPTURE)("Story 39.3: second namespace, not configured, unknown 
     });
     expect(String((result.structuredContent as { reason?: unknown }).reason)).toContain(NS_C);
 
-    const viaRoute = await route(routeBody([filter("Code", "eq", "x")], { namespace: NS_C }));
+    const viaRoute = await postEnvelope(TARGET, ROUTE, routeBody([filter("Code", "eq", "x")], { namespace: NS_C }));
     expect(viaRoute.errors).toEqual([]);
     expect(viaRoute.result).toMatchObject({ action: "body", interopEnabled: false, rows: [], hasMore: false });
   }, 120000);
 
   it("searchTable there is notApplicable for no Interoperability too: Interoperability is checked before the Search Table configuration (Story 39.4)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // C has no Ens_Config.SearchTableProp table, so a configuration read before the Interoperability check would be an SQL error.
     const lookup = { action: "searchTable", namespace: NS_C, from: FROM, to: TO, searchTableClass: "EnsLib.HL7.SearchTable", filters: [filter("PatientID", "eq", "x")] };
     const result = await interop.call("iris_message_search", lookup);
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
       action: "searchTable",
       notApplicable: true,
@@ -1010,20 +977,20 @@ describe.skipIf(CAPTURE)("Story 39.3: second namespace, not configured, unknown 
     });
     expect(String((result.structuredContent as { reason?: unknown }).reason)).toContain(NS_C);
 
-    const viaRoute = await route(lookup);
+    const viaRoute = await postEnvelope(TARGET, ROUTE, lookup);
     expect(viaRoute.errors, viaRoute.text).toEqual([]);
     expect(viaRoute.result).toMatchObject({ action: "searchTable", interopEnabled: false, rows: [], hasMore: false });
     expect(viaRoute.result, "the configuration is never read there").not.toHaveProperty("searchTablesConfigured");
   }, 120000);
 
   it("a namespace that does not exist, with a valid shape, is an error carrying the sanitized switch text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await bodySearch(interop, { namespace: NS_Z, filters: [filter("Code", "eq", "x")] });
 
     expect(result.isError).toBe(true);
     expect(result.structuredContent?.["code"]).toBeUndefined();
-    expect(textOf(result), "the namespace switch error").toContain("<NAMESPACE>");
-    expect(textOf(result)).not.toContain("^");
+    expect(firstText(result), "the namespace switch error").toContain("<NAMESPACE>");
+    expect(firstText(result)).not.toContain("^");
   }, 120000);
 });
 
@@ -1033,7 +1000,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
   const SEARCH = { filters: [filter("Code", "eq", "K1-alpha")] };
 
   it("under IRIS_DATA_POLICY=block the body action is refused, and no IRIS call is made (the same call at a missing namespace is refused, not a namespace error)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const blocked = await interopSession({ IRIS_DATA_POLICY: "block" });
 
     for (const namespace of [NS_A, NS_Z]) {
@@ -1044,11 +1011,11 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
 
     const headers = await blocked.call("iris_message_search", { action: "headers", namespace: NS_A, from: FROM, to: TO });
     expect(headers.isError, "headers is not under the policy").toBeFalsy();
-    expect(ids((headers.structuredContent as Structured).rows)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(headerIds((headers.structuredContent as Structured).rows)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   }, 120000);
 
   it("a profile with dataPolicy block is refused while the default profile of the same server runs body", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const session = await interopSession({ IRIS_PROFILES: JSON.stringify({ tight: { dataPolicy: "block" } }) });
 
     for (const namespace of [NS_A, NS_Z]) {
@@ -1063,29 +1030,29 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
       expect(refused.structuredContent, namespace).toEqual({ code: "DATA_POLICY_BLOCKED", action: "body", policy: "block" });
     }
     const ran = succeeded(await bodySearch(session, SEARCH));
-    expect(ids(ran.rows)).toEqual([1, 2, 10]);
+    expect(headerIds(ran.rows)).toEqual([1, 2, 10]);
     expect(ran.dataPolicy).toEqual({ policy: "redact", redacted: 0, blocked: 0 });
   }, 120000);
 
   it("redact and allow return the same rows, each naming its policy in dataPolicy and in one trailing line", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const allow = await interopSession({ IRIS_DATA_POLICY: "allow" });
     const expected = await joinOracle(NS_A, BODY_TABLE, BODY_CLASS, "b.Code = 'K1-alpha'");
-    expect(ids(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
+    expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
 
     for (const [policy, session] of [["redact", interop], ["allow", allow]] as const) {
       const result = await bodySearch(session, SEARCH);
       const content = succeeded(result);
       expect(content.rows, policy).toEqual(expected);
       expect(content.dataPolicy, policy).toEqual({ policy, redacted: 0, blocked: 0 });
-      const lines = textOf(result).split("\n");
+      const lines = firstText(result).split("\n");
       expect(lines.at(-1), policy).toBe(`Data policy ${policy}: header rows only; the body action returns no body content.`);
       expect(lines.filter((line) => line.startsWith("Data policy")), `one policy line (${policy})`).toHaveLength(1);
     }
   }, 120000);
 
   it("searchTable (built in Story 39.4) runs a valid lookup of A, which has no Search Table, as notApplicable with the policy", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await interop.call("iris_message_search", {
       action: "searchTable",
       namespace: NS_A,
@@ -1095,7 +1062,7 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
       filters: [filter("PatientID", "eq", "x")],
     });
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
       action: "searchTable",
       notApplicable: true,
@@ -1109,25 +1076,8 @@ describe.skipIf(CAPTURE)("Story 39.3: the data policy decides before any IRIS ca
 // -- The audit trail ------------------------------------------------------------
 
 describe.skipIf(CAPTURE)("Story 39.3: the audit trail redacts the filters and records the policy (AC-2, AC-5; AD-19)", () => {
-  /** Poll (bounded) until the audit file holds `count` entries of the search tool, then return them. */
-  async function searchEntries(file: string, count: number): Promise<Array<Record<string, unknown>>> {
-    const deadline = Date.now() + 10000;
-    let entries: Array<Record<string, unknown>> = [];
-    while (Date.now() < deadline) {
-      const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-      entries = text
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Record<string, unknown>)
-        .filter((entry) => entry["tool"] === "iris_message_search");
-      if (entries.length >= count) return entries;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error(`fewer than ${count} iris_message_search entries in ${file}: ${existsSync(file) ? readFileSync(file, "utf8").slice(0, 3000) : "no file"}`);
-  }
-
   it("records dataPolicy for redact, block and allow; logs filters as [REDACTED] under redact and block and as given under allow", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const search = { filters: [filter("Code", "eq", MARKER)] };
     const rows: Array<{ policy: string; env: Record<string, string>; outcome: string; redacted: boolean }> = [
       { policy: "redact", env: {}, outcome: "ok", redacted: true },
@@ -1147,9 +1097,9 @@ describe.skipIf(CAPTURE)("Story 39.3: the audit trail redacts the filters and re
       const invalid = await bodySearch(session, { filters: [filter("Code", `${MARKER}`, MARKER)] });
       // The MCP SDK rejects the invalid op before the call reaches the audited chokepoint, so only the first call has an entry.
       expect(invalid.isError, "a Zod-invalid op").toBe(true);
-      expect(textOf(invalid), "the invalid call names the path").toContain("op");
+      expect(firstText(invalid), "the invalid call names the path").toContain("op");
 
-      const entries = await searchEntries(file, 1);
+      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
       const [entry] = entries as [Record<string, unknown>];
       expect(entry, row.policy).toMatchObject({
         action: "body",

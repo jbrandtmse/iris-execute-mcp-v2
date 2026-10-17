@@ -37,12 +37,19 @@ import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
-  executeMcpPost,
+  distEntry,
+  firstText,
+  fixtureDocumentNames,
+  headerIds,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  postEnvelope,
   resolveSdkEsmDir,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
+  type EnvelopeAnswer,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -60,7 +67,7 @@ import { searchTableCondition, searchTableOracle } from "./header-row-oracle.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
+const GATE_TAG = "story-39-4-qa-live-gate";
 
 const TARGET = irisTargetFromEnv();
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -92,21 +99,12 @@ let interop: WireSession;
 function wireOptions(pkg: string): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-4-qa-live-gate",
   };
 }
 
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-4-qa-live-gate: ${skipReason}`);
-  testCtx.skip();
-}
-
-const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
-const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
 const filter = (property: string, op: string, value?: string | number | boolean): Record<string, unknown> =>
   value === undefined ? { property, op } : { property, op, value };
 
@@ -153,14 +151,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     await attempt(`removing ${NS_Q}`, () => removeInteropNamespace(admin, dev, NS_Q));
     await attempt("the leftovers check", async () => {
@@ -168,10 +159,7 @@ afterAll(async () => {
     });
     await attempt("removing the fixture class", () => removeFixtureClass(dev));
     await attempt("the fixture document listing", async () => {
-      for (const filterText of ["Story391", "Story393", "Story394"]) {
-        const listed = await dev.call("iris_doc_list", { filter: filterText, generated: true });
-        expect(listed.isError, `the ${filterText} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter: filterText, names } of await fixtureDocumentNames(dev, ["Story391", "Story393", "Story394"])) {
         expect(names, `no ${FIXTURE_DOC} or ${filterText} document after the run`).toEqual([]);
       }
     });
@@ -200,21 +188,14 @@ function lookup(args: Record<string, unknown>, namespace: string = NS_Q): Promis
 
 /** The structured content of a successful lookup, which must hold no Search Table value. */
 function succeeded(result: WireToolResult): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, firstText(result)).toBeFalsy();
   expect(JSON.stringify(result).toLowerCase(), "a lookup result holds no Search Table value").not.toContain(MARKER.toLowerCase());
   return result.structuredContent as Structured;
 }
 
-interface RouteAnswer {
-  status: number;
-  text: string;
-  errors: string[];
-  result: Record<string, unknown>;
-}
-
 /** POST a lookup of `namespace` over window W straight to the route and parse the envelope. */
-async function route(body: Record<string, unknown>, namespace: string = NS_Q): Promise<RouteAnswer> {
-  const answer = await executeMcpPost(TARGET, ROUTE, {
+function route(body: Record<string, unknown>, namespace: string = NS_Q): Promise<EnvelopeAnswer> {
+  return postEnvelope(TARGET, ROUTE, {
     action: "searchTable",
     namespace,
     from: FROM,
@@ -222,8 +203,6 @@ async function route(body: Record<string, unknown>, namespace: string = NS_Q): P
     searchTableClass: ST,
     ...body,
   });
-  const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
-  return { status: answer.status, text: answer.text, errors: (parsed.status.errors ?? []).map((entry) => entry.error), result: parsed.result };
 }
 
 /** One condition of the hand-written oracle: entries of `prop` satisfying `predicate` (stored form, alias `s`), or, with `negate`, none. */
@@ -248,7 +227,7 @@ function oracle(conditions: readonly Condition[], extra = ""): Promise<Array<Rec
 
 describe("Story 39.4 QA: a real Interoperability namespace with no Search Table property is notApplicable (AC-4; Rules #34, #41)", () => {
   it("HSCUSTOM follows an independent count of Ens_Config.SearchTableProp: none is notApplicable whatever the class, and no lookup is run there", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // The oracle: a read-only count in the product's own namespace, written by hand, never the code under test.
     const counted = await atelierQuery({ ...TARGET, namespace: NS_HOME }, "SELECT COUNT(*) AS N FROM Ens_Config.SearchTableProp");
     const configured = Number(counted[0]?.["N"] ?? Number.NaN);
@@ -258,7 +237,7 @@ describe("Story 39.4 QA: a real Interoperability namespace with no Search Table 
     if (configured === 0) {
       for (const searchTableClass of [ST, NO_SUCH_CLASS]) {
         const result = await lookup({ searchTableClass, filters }, NS_HOME);
-        expect(result.isError, `${searchTableClass}: ${textOf(result)}`).toBeFalsy();
+        expect(result.isError, `${searchTableClass}: ${firstText(result)}`).toBeFalsy();
         expect(result.structuredContent, searchTableClass).toMatchObject({
           action: "searchTable",
           notApplicable: true,
@@ -364,9 +343,9 @@ const AND_CASES: AndCase[] = [
 describe("Story 39.4 QA: filters combine with AND, each on its own entries, also on one multi-valued property (AC-4; Rule #36)", () => {
   for (const andCase of AND_CASES) {
     it(andCase.name, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(andCase.conditions);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(andCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(andCase.ids);
 
       const searchTableClass = andCase.filters.some((f) => f["property"] === "Story394Int") ? "Story394.SearchTable" : ST;
       const content = succeeded(await lookup({ searchTableClass, filters: andCase.filters }));
@@ -399,14 +378,14 @@ describe("Story 39.4 QA: every scope filter at once, beside a Search Table filte
   const entries: Condition[] = [{ prop: "PatientID", predicate: "s.PropValue <> ''" }];
 
   it("item, source, target, status and bodyClass together leave the Completed headers sent to Story394.Target (header 3 is an error to Story394.Other); a session ID narrows them to one", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await oracle(entries, SCOPE_SQL);
-    expect(ids(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 4, 5, 10]);
+    expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 4, 5, 10]);
     const content = succeeded(await lookup({ filters: notNull, ...SCOPE }));
     expect(content.rows).toEqual(expected);
 
     const narrowed = await oracle(entries, `${SCOPE_SQL} AND h.SessionId = 394010`);
-    expect(ids(narrowed)).toEqual([10]);
+    expect(headerIds(narrowed)).toEqual([10]);
     expect(succeeded(await lookup({ filters: notNull, ...SCOPE, sessionId: 394010 })).rows).toEqual(narrowed);
 
     // The same lookup, errorOnly: every scope filter still holds and header 3 is outside the target, so nothing is left.
@@ -414,7 +393,7 @@ describe("Story 39.4 QA: every scope filter at once, beside a Search Table filte
   }, 120000);
 
   it("each scope filter bound on its own: a value that matches nothing empties the result, and the matching one keeps exactly its headers", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const probes: Array<{ name: string; scope: Record<string, unknown>; sql: string; ids: number[] }> = [
       { name: "item that is neither source nor target", scope: { item: "Story394.Nope" }, sql: " AND (h.SourceConfigName = 'Story394.Nope' OR h.TargetConfigName = 'Story394.Nope')", ids: [] },
       { name: "item that is the target of header 3 only", scope: { item: "Story394.Other" }, sql: " AND (h.SourceConfigName = 'Story394.Other' OR h.TargetConfigName = 'Story394.Other')", ids: [3] },
@@ -427,16 +406,16 @@ describe("Story 39.4 QA: every scope filter at once, beside a Search Table filte
     ];
     for (const probe of probes) {
       const expected = await oracle(entries, probe.sql);
-      expect(ids(expected), `${probe.name}: the oracle selects the rows written by hand`).toEqual(probe.ids);
+      expect(headerIds(expected), `${probe.name}: the oracle selects the rows written by hand`).toEqual(probe.ids);
       const content = succeeded(await lookup({ filters: notNull, ...probe.scope }));
       expect(content.rows, probe.name).toEqual(expected);
     }
   }, 120000);
 
   it("pages of 2 under every scope filter join, in order, without a gap or a duplicate (header, Search Table and cursor parameters in one argument list)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await oracle(entries, SCOPE_SQL);
-    expect(ids(expected)).toEqual([1, 2, 4, 5, 10]);
+    expect(headerIds(expected)).toEqual([1, 2, 4, 5, 10]);
 
     const pages: Structured[] = [];
     let cursor: string | undefined;
@@ -448,7 +427,7 @@ describe("Story 39.4 QA: every scope filter at once, beside a Search Table filte
       cursor = page.nextCursor;
     }
 
-    expect(pages.map((page) => ids(page.rows))).toEqual([[1, 2], [4, 5], [10]]);
+    expect(pages.map((page) => headerIds(page.rows))).toEqual([[1, 2], [4, 5], [10]]);
     expect(pages.flatMap((page) => page.rows)).toEqual(expected);
     const last = pages[pages.length - 1] as Structured;
     expect(last.hasMore).toBe(false);

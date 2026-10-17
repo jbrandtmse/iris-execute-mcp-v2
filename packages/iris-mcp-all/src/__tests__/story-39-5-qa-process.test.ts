@@ -37,19 +37,26 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  openWireSession,
+  allText,
+  openAuditedSession,
+  pollAuditEntries,
   resolveSdkEsmDir,
+  routeRequests,
+  skipIfReason,
   staleDistReason,
-  type IrisTarget,
+  startRouteStub,
+  stubEnvelope,
+  stubTarget,
+  wellFormed,
+  type AuditedSession,
+  type RecordedRequest,
+  type RouteStub,
   type WireSession,
-  type WireSessionOptions,
 } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,9 +65,6 @@ const INTEROP_ENTRY = path.join(REPO_ROOT, "packages", "iris-interop-mcp", "dist
 const SHARED_ENTRY = path.join(REPO_ROOT, "packages", "shared", "dist", "index.js");
 
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
-
-/** A WARN or DEBUG line is not logged under LOG_LEVEL=ERROR, which a developer shell may set. */
-const SERVER_LOG_LEVEL = "DEBUG";
 
 /** Every identifying value of a hostile reply contains this; no output of a `redact` or `block` call may. */
 const MARK = "SYNTHPHI395QA";
@@ -101,11 +105,6 @@ const CLAMP_LINE = (requested: string, applied: string): string =>
 
 /** The keys an item of the result may hold (the spec's Output section) and the keys of the structured result. */
 const FOUND_KEYS = new Set(["id", "found", "bodyClassName", "bodyId", "bodyKind", "bodyPolicy", "format", "text", "truncated", "notShown"]);
-
-/** Whether `text` holds no lone surrogate half (String.prototype.isWellFormed, which the project's TS lib may not declare). */
-function wellFormed(text: string): boolean {
-  return (text as unknown as { isWellFormed: () => boolean }).isWellFormed();
-}
 
 /** CR, CRLF and a lone CR become LF; every other C0 control but TAB and LF, and DEL, becomes U+FFFD. Hand-written. */
 function sanitize(text: string): string {
@@ -192,65 +191,11 @@ function hostileItem(id: number): Item {
 
 const HOSTILE_IDS = Array.from({ length: 18 }, (_, index) => index + 1);
 
-/** The route's envelope around `result`. */
-const envelope = (result: unknown): unknown => ({ status: { errors: [], summary: "" }, console: [], result });
-
 /** A reply with the hostile items for the IDs the request names, whatever `bodyRead` it carries. */
 function hostileReply(request: Record<string, unknown>): unknown {
   const ids = (request.headerIds as Array<number | string>).map(Number);
   const items = ids.map((id) => hostileItem(id));
-  return envelope({ interopEnabled: true, items, count: items.length });
-}
-
-// -- The listener ------------------------------------------------------------------------------------------------
-
-interface Recorded {
-  method: string;
-  url: string;
-  body: string;
-}
-
-interface Stub {
-  port: number;
-  requests: Recorded[];
-  /** While false every request is answered 503, which is how the server starts without an IRIS. */
-  serving: boolean;
-  /** The reply of the body route, built from the parsed request. */
-  reply: (request: Record<string, unknown>) => unknown;
-  close: () => Promise<void>;
-}
-
-async function startStub(): Promise<Stub> {
-  const stub: Stub = { port: 0, requests: [], serving: false, reply: () => ({}), close: () => Promise.resolve() };
-  const server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
-      stub.requests.push({ method: req.method ?? "", url: req.url ?? "", body });
-      if (stub.serving && req.method === "HEAD" && req.url === "/api/atelier/") {
-        res.statusCode = 200;
-        res.end();
-        return;
-      }
-      if (stub.serving && req.method === "POST" && req.url === BODY_ROUTE) {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(stub.reply(JSON.parse(body) as Record<string, unknown>)));
-        return;
-      }
-      res.statusCode = 503;
-      res.end();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  stub.port = (server.address() as AddressInfo).port;
-  stub.close = () =>
-    new Promise<void>((resolve) => {
-      server.closeAllConnections();
-      server.close(() => resolve());
-    });
-  return stub;
+  return stubEnvelope({ interopEnabled: true, items, count: items.length });
 }
 
 // -- Sessions ----------------------------------------------------------------------------------------------------
@@ -258,22 +203,11 @@ async function startStub(): Promise<Stub> {
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir = "";
-let stub: Stub;
+let stub: RouteStub;
 const opened: WireSession[] = [];
 let engine: {
   redactHl7: (text: string) => { ok: true; text: string; redactedFields: number } | { ok: false; reason: string };
 };
-
-function stubTarget(s: Stub): IrisTarget {
-  return { host: "127.0.0.1", port: String(s.port), username: "story395-qa", password: "not-a-real-password", namespace: "HSCUSTOM" };
-}
-
-/** A session on the built interop server, with its audit file and the stderr it wrote. */
-interface Probed {
-  session: WireSession;
-  audit: string;
-  stderr: () => string;
-}
 
 let sessionCounter = 0;
 
@@ -281,29 +215,22 @@ let sessionCounter = 0;
  * A session on the built interop server pointed at the listener, at DEBUG, with an audit file that logs parameters,
  * and `extraEnv`. The listener refuses everything while the server starts and serves the body route afterwards.
  */
-async function probed(extraEnv: Record<string, string> = {}): Promise<Probed> {
+async function openOnStub(extraEnv: Record<string, string> = {}): Promise<AuditedSession> {
   sessionCounter += 1;
-  const audit = path.join(fixtureDir, `audit-${sessionCounter}.jsonl`);
-  let stderr = "";
   stub.serving = false;
-  const options: WireSessionOptions = {
-    sdkEsmDir: sdkEsmDir as string,
-    entry: INTEROP_ENTRY,
-    target: stubTarget(stub),
-    clientName: "story-39-5-qa-process",
-    onStderr: (chunk) => {
-      stderr += chunk;
+  const audited = await openAuditedSession(
+    {
+      sdkEsmDir: sdkEsmDir as string,
+      entry: INTEROP_ENTRY,
+      target: stubTarget(stub.port, "story395-qa"),
+      clientName: "story-39-5-qa-process",
+      auditFile: path.join(fixtureDir, `audit-${sessionCounter}.jsonl`),
     },
-  };
-  const created = await openWireSession(options, {
-    LOG_LEVEL: SERVER_LOG_LEVEL,
-    IRIS_AUDIT_LOG: audit,
-    IRIS_AUDIT_LOG_PARAMS: "true",
-    ...extraEnv,
-  });
-  opened.push(created);
+    extraEnv,
+  );
+  opened.push(audited.session);
   stub.serving = true;
-  return { session: created, audit, stderr: () => stderr };
+  return audited;
 }
 
 /** `iris_message_body` on NS through `session`. */
@@ -315,12 +242,7 @@ function read(
   return session.call("iris_message_body", { namespace: NS, headerIds, ...args });
 }
 
-/** The text of every content block of a tool result, joined by newlines. */
-const textOf = (result: { content?: Array<{ text?: string }> }): string => (result.content ?? []).map((b) => b.text ?? "").join("\n");
-
-/** The requests to the ExecuteMCPv2 routes, which only a tool handler makes (the server's own traffic is on /api/atelier/). */
-const routeRequests = (): Recorded[] => stub.requests.filter((r) => r.url.startsWith("/api/executemcp/"));
-const bodyRequests = (): Recorded[] => stub.requests.filter((r) => r.method === "POST" && r.url === BODY_ROUTE);
+const bodyRequests = (): RecordedRequest[] => stub.requests.filter((r) => r.method === "POST" && r.url === BODY_ROUTE);
 
 interface Structured {
   items: Item[];
@@ -334,7 +256,7 @@ interface Structured {
 
 /** A successful read: no error, one text block; returns the structured content. */
 function succeeded(result: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: Record<string, unknown> }): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, allText(result)).toBeFalsy();
   expect(result.content, "one text block").toHaveLength(1);
   return result.structuredContent as unknown as Structured;
 }
@@ -363,7 +285,7 @@ beforeAll(async () => {
   }
   engine = (await import(pathToFileURL(SHARED_ENTRY).href)) as typeof engine;
   fixtureDir = mkdtempSync(path.join(tmpdir(), "story-39-5-qa-"));
-  stub = await startStub();
+  stub = await startRouteStub(BODY_ROUTE);
 });
 
 afterAll(async () => {
@@ -372,31 +294,11 @@ afterAll(async () => {
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
-function skipIfNeeded(ctx: { skip: () => void }): boolean {
-  if (!skipReason) return false;
-  ctx.skip();
-  return true;
-}
-
-/** Poll (bounded) until the audit file holds `count` entries of the body tool, then return all its entries. */
-async function auditEntries(file: string, count: number): Promise<Item[]> {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const entries = existsSync(file)
-      ? readFileSync(file, "utf8")
-          .split("\n")
-          .filter((line) => line.trim() !== "")
-          .map((line) => JSON.parse(line) as Item)
-          .filter((entry) => entry.tool === "iris_message_body")
-      : [];
-    if (entries.length >= count) return entries;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error(`fewer than ${count} iris_message_body entries in ${file}: ${existsSync(file) ? readFileSync(file, "utf8").slice(0, 2000) : "no file"}`);
-}
+/** How the audit file is polled: the body tool's entries, every 20 ms, for at most 10 s (the caller adds `count`). */
+const AUDIT_POLL = { tool: "iris_message_body", intervalMs: 20, timeoutMs: 10000, excerpt: 2000 } as const;
 
 /** One more round trip, so every line the server wrote to stderr while it handled the calls has been read. */
-async function flush(s: Probed): Promise<void> {
+async function flush(s: AuditedSession): Promise<void> {
   await s.session.listTools();
 }
 
@@ -405,10 +307,10 @@ async function flush(s: Probed): Promise<void> {
 // ---------------------------------------------------------------------------------------------------------------
 
 describe("Story 39.5 QA: the request goes to IRIS with exactly four fields, and a caller cannot widen what IRIS reads (AC-3; AD-26, Rule #10)", () => {
-  const EMPTY = (): unknown => envelope({ interopEnabled: true, items: [], count: 0 });
+  const EMPTY = (): unknown => stubEnvelope({ interopEnabled: true, items: [], count: 0 });
 
   it("per policy and per maxChars: one POST of headerIds as given, the namespace, bodyRead and bodyTextMaxChars, and nothing else; block asks for the kind only", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = EMPTY;
     const ids: Array<number | string> = [1, "2", 30, "400"];
     const rows: Array<{ label: string; env: Record<string, string>; args: Record<string, unknown>; bodyRead: string; max: number }> = [
@@ -423,17 +325,17 @@ describe("Story 39.5 QA: the request goes to IRIS with exactly four fields, and 
       { label: "block, no maxChars", env: { IRIS_DATA_POLICY: "block" }, args: {}, bodyRead: "kind", max: 65536 },
       { label: "block, maxChars 1048576", env: { IRIS_DATA_POLICY: "block" }, args: { maxChars: 1048576 }, bodyRead: "kind", max: 65536 },
     ];
-    const sessions = new Map<string, Probed>();
+    const sessions = new Map<string, AuditedSession>();
     for (const row of rows) {
       const key = JSON.stringify(row.env);
-      const s = sessions.get(key) ?? (await probed(row.env));
+      const s = sessions.get(key) ?? (await openOnStub(row.env));
       sessions.set(key, s);
       const before = bodyRequests().length;
       const result = await read(s.session, ids, row.args);
-      expect(result.isError, `${row.label}: ${textOf(result)}`).toBeFalsy();
+      expect(result.isError, `${row.label}: ${allText(result)}`).toBeFalsy();
       const sent = bodyRequests().slice(before);
       expect(sent, `${row.label}: exactly one body request`).toHaveLength(1);
-      expect(JSON.parse((sent[0] as Recorded).body), row.label).toEqual({
+      expect(JSON.parse((sent[0] as RecordedRequest).body), row.label).toEqual({
         headerIds: ids,
         namespace: NS,
         bodyRead: row.bodyRead,
@@ -443,7 +345,7 @@ describe("Story 39.5 QA: the request goes to IRIS with exactly four fields, and 
   }, 180000);
 
   it("a dataPolicy only tightens, on the wire and in the result, from every operator policy; a looser one is reported once", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = EMPTY;
     const rows: Array<{ operator: string | undefined; caller: string; applied: string; bodyRead: string; clamped: boolean }> = [
       { operator: "allow", caller: "redact", applied: "redact", bodyRead: "hl7", clamped: false },
@@ -456,10 +358,10 @@ describe("Story 39.5 QA: the request goes to IRIS with exactly four fields, and 
       { operator: "block", caller: "redact", applied: "block", bodyRead: "kind", clamped: true },
       { operator: "block", caller: "block", applied: "block", bodyRead: "kind", clamped: false },
     ];
-    const sessions = new Map<string, Probed>();
+    const sessions = new Map<string, AuditedSession>();
     for (const row of rows) {
       const key = String(row.operator);
-      const s = sessions.get(key) ?? (await probed(row.operator === undefined ? {} : { IRIS_DATA_POLICY: row.operator }));
+      const s = sessions.get(key) ?? (await openOnStub(row.operator === undefined ? {} : { IRIS_DATA_POLICY: row.operator }));
       sessions.set(key, s);
       const label = `operator ${String(row.operator ?? "default redact")}, caller ${row.caller}`;
       const before = bodyRequests().length;
@@ -468,34 +370,34 @@ describe("Story 39.5 QA: the request goes to IRIS with exactly four fields, and 
       expect(content.dataPolicy, label).toEqual({ policy: row.applied, redacted: 0, blocked: 0 });
       if (row.clamped) {
         expect(content.dataPolicyClamped, label).toBe(true);
-        expect(textOf(result).split("\n").at(-1), label).toBe(CLAMP_LINE(row.caller, row.applied));
+        expect(allText(result).split("\n").at(-1), label).toBe(CLAMP_LINE(row.caller, row.applied));
       } else {
         expect(content, label).not.toHaveProperty("dataPolicyClamped");
-        expect(textOf(result), label).not.toContain("is looser than");
+        expect(allText(result), label).not.toContain("is looser than");
       }
       const sent = bodyRequests().slice(before);
       expect(sent, label).toHaveLength(1);
-      expect(JSON.parse((sent[0] as Recorded).body), label).toMatchObject({ bodyRead: row.bodyRead, bodyTextMaxChars: 65536 });
-      expect(JSON.parse((sent[0] as Recorded).body), `${label}: the caller's policy is not a wire field`).not.toHaveProperty("dataPolicy");
+      expect(JSON.parse((sent[0] as RecordedRequest).body), label).toMatchObject({ bodyRead: row.bodyRead, bodyTextMaxChars: 65536 });
+      expect(JSON.parse((sent[0] as RecordedRequest).body), `${label}: the caller's policy is not a wire field`).not.toHaveProperty("dataPolicy");
     }
   }, 180000);
 
   it("a caller that adds its own bodyRead, bodyTextMaxChars or bodyAvailable to the call does not change what IRIS is asked to read", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = EMPTY;
     for (const [env, bodyRead] of [
       [{}, "hl7"],
       [{ IRIS_DATA_POLICY: "block" }, "kind"],
     ] as Array<[Record<string, string>, string]>) {
-      const s = await probed(env);
+      const s = await openOnStub(env);
       const before = bodyRequests().length;
       const result = await read(s.session, [1], { bodyRead: "all", bodyTextMaxChars: 1048576, bodyAvailable: true, dataPolicy: "allow" });
       const sent = bodyRequests().slice(before);
       // The framework drops a field the schema does not name (it does not refuse the call), so the call is read
       // under the policy and the caller's own route fields are gone.
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, allText(result)).toBeFalsy();
       expect(sent, `${JSON.stringify(env)}: one request`).toHaveLength(1);
-      expect(JSON.parse((sent[0] as Recorded).body), JSON.stringify(env)).toEqual({
+      expect(JSON.parse((sent[0] as RecordedRequest).body), JSON.stringify(env)).toEqual({
         headerIds: [1],
         namespace: NS,
         bodyRead,
@@ -518,9 +420,9 @@ function redactedAdtLf(raw: string): string {
 
 describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD-19, AD-26)", () => {
   it("redact: HL7 v2 is shown only redacted, every other body is withheld with its fixed reason, an item holds only its keys, and no identifying value is anywhere", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileReply;
-    const s = await probed();
+    const s = await openOnStub();
 
     const result = await read(s.session, HOSTILE_IDS);
     const content = succeeded(result);
@@ -577,28 +479,28 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
     }
 
     // The wire: HL7 v2 only, and the whole output carries no identifying value of the hostile reply.
-    const sent = bodyRequests().at(-1) as Recorded;
+    const sent = bodyRequests().at(-1) as RecordedRequest;
     expect(JSON.parse(sent.body)).toEqual({ headerIds: HOSTILE_IDS, namespace: NS, bodyRead: "hl7", bodyTextMaxChars: 65536 });
     expect(JSON.stringify(result), "no identifying value in the result, content or structuredContent").not.toContain(MARK);
-    const lines = textOf(result).split("\n");
+    const lines = allText(result).split("\n");
     expect(lines.at(-1)).toBe("Data policy redact: 2 redacted, 13 withheld.");
     expect(lines, "the redacted heading line").toContain("#1 EnsLib.HL7.Message [hl7v2] redacted");
     expect(lines, "the withheld heading line").toContain("#3 %Stream.GlobalCharacter [stream] blocked");
 
     // The audit file and the console log (DEBUG): the policy and the counts, never a value.
-    const [entry] = await auditEntries(s.audit, 1);
+    const [entry] = await pollAuditEntries(s.auditFile, { ...AUDIT_POLL, count: 1 });
     expect(entry).toMatchObject({ tool: "iris_message_body", outcome: "ok", dataPolicy: { policy: "redact", redacted: 2, blocked: 13 } });
     expect(((entry as Item).params as Item).headerIds, "the header IDs are logged").toEqual(HOSTILE_IDS);
     await flush(s);
     expect(s.stderr().length, "the server wrote to stderr (LOG_LEVEL=DEBUG)").toBeGreaterThan(0);
-    expect(readFileSync(s.audit, "utf8"), "the audit file").not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8"), "the audit file").not.toContain(MARK);
     expect(s.stderr(), "the console log").not.toContain(MARK);
   }, 120000);
 
   it("block: no text and no format anywhere, every available body is withheld with the block reason, the literal value is not shown, and nothing leaks", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileReply;
-    const s = await probed({ IRIS_DATA_POLICY: "block" });
+    const s = await openOnStub({ IRIS_DATA_POLICY: "block" });
 
     const result = await read(s.session, HOSTILE_IDS);
     const content = succeeded(result);
@@ -620,23 +522,23 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
       for (const key of Object.keys(item)) expect(FOUND_KEYS.has(key), `item ${String(item.id)} has the key ${key}`).toBe(true);
     }
 
-    const sent = bodyRequests().at(-1) as Recorded;
+    const sent = bodyRequests().at(-1) as RecordedRequest;
     expect(JSON.parse(sent.body), "block asks IRIS for the kind only").toEqual({ headerIds: HOSTILE_IDS, namespace: NS, bodyRead: "kind", bodyTextMaxChars: 65536 });
     expect(JSON.stringify(result)).not.toContain(MARK);
-    expect(textOf(result).split("\n").at(-1)).toBe("Data policy block: 0 redacted, 15 withheld.");
+    expect(allText(result).split("\n").at(-1)).toBe("Data policy block: 0 redacted, 15 withheld.");
 
-    const [entry] = await auditEntries(s.audit, 1);
+    const [entry] = await pollAuditEntries(s.auditFile, { ...AUDIT_POLL, count: 1 });
     expect(entry).toMatchObject({ tool: "iris_message_body", outcome: "ok", dataPolicy: { policy: "block", redacted: 0, blocked: 15 } });
     await flush(s);
     expect(s.stderr().length).toBeGreaterThan(0);
-    expect(readFileSync(s.audit, "utf8")).not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8")).not.toContain(MARK);
     expect(s.stderr()).not.toContain(MARK);
   }, 120000);
 
   it("allow (the positive control): every renderable body is shown in its format, the rest have their reasons, and the audit file and the console log still hold no value", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileReply;
-    const s = await probed({ IRIS_DATA_POLICY: "allow" });
+    const s = await openOnStub({ IRIS_DATA_POLICY: "allow" });
 
     const result = await read(s.session, HOSTILE_IDS);
     const content = succeeded(result);
@@ -666,21 +568,21 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
     expect(JSON.stringify(result), "allow shows the values").toContain(MARK);
     expect(JSON.stringify(result), "and none of the extra fields a hostile reply carries").not.toMatch(/RAW-|DESCRIPTION-|ERRORSTATUS-|SUMMARY-|SEARCHTABLE-/);
 
-    const sent = bodyRequests().at(-1) as Recorded;
+    const sent = bodyRequests().at(-1) as RecordedRequest;
     expect(JSON.parse(sent.body)).toEqual({ headerIds: HOSTILE_IDS, namespace: NS, bodyRead: "all", bodyTextMaxChars: 65536 });
 
-    const [entry] = await auditEntries(s.audit, 1);
+    const [entry] = await pollAuditEntries(s.auditFile, { ...AUDIT_POLL, count: 1 });
     expect(entry).toMatchObject({ tool: "iris_message_body", outcome: "ok", dataPolicy: { policy: "allow", redacted: 0, blocked: 0 } });
     await flush(s);
     expect(s.stderr().length).toBeGreaterThan(0);
-    expect(readFileSync(s.audit, "utf8"), "the audit file holds no body value under allow").not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8"), "the audit file holds no body value under allow").not.toContain(MARK);
     expect(s.stderr(), "the console log holds no body value under allow").not.toContain(MARK);
   }, 120000);
 
   it("a policy per profile: the tight profile (block) and the default (redact) hold no value, the loose profile (allow) shows it, in one server", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileReply;
-    const s = await probed({ IRIS_PROFILES: JSON.stringify({ tight: { dataPolicy: "block" }, loose: { dataPolicy: "allow" } }) });
+    const s = await openOnStub({ IRIS_PROFILES: JSON.stringify({ tight: { dataPolicy: "block" }, loose: { dataPolicy: "allow" } }) });
 
     const tight = await s.session.callOn("tight", "iris_message_body", { namespace: NS, headerIds: [1, 3] });
     expect(succeeded(tight).dataPolicy).toEqual({ policy: "block", redacted: 0, blocked: 2 });
@@ -699,14 +601,14 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
     expect(JSON.stringify(unknown)).not.toContain(MARK);
 
     await flush(s);
-    expect(readFileSync(s.audit, "utf8")).not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8")).not.toContain(MARK);
     expect(s.stderr()).not.toContain(MARK);
   }, 120000);
 
   it("a call that tightens a loose profile is audited with the applied policy and its counts, and the loose result is the only one that shows a value", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = hostileReply;
-    const s = await probed({ IRIS_DATA_POLICY: "allow" });
+    const s = await openOnStub({ IRIS_DATA_POLICY: "allow" });
 
     const tightened = await read(s.session, [1, 3, 4], { dataPolicy: "redact", maxChars: 7101 });
     expect(succeeded(tightened).dataPolicy).toEqual({ policy: "redact", redacted: 1, blocked: 2 });
@@ -716,19 +618,19 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
     expect(succeeded(looseResult).dataPolicy).toEqual({ policy: "allow", redacted: 0, blocked: 0 });
     expect(JSON.stringify(looseResult)).toContain(MARK);
 
-    const entries = await auditEntries(s.audit, 2);
+    const entries = await pollAuditEntries(s.auditFile, { ...AUDIT_POLL, count: 2 });
     const own = (max: number): Item => entries.find((entry) => ((entry.params as Item | undefined) ?? {}).maxChars === max) as Item;
     expect(own(7101)).toMatchObject({ outcome: "ok", dataPolicy: { policy: "redact", redacted: 1, blocked: 2 } });
     expect(own(7102)).toMatchObject({ outcome: "ok", dataPolicy: { policy: "allow", redacted: 0, blocked: 0 } });
     await flush(s);
-    expect(readFileSync(s.audit, "utf8")).not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8")).not.toContain(MARK);
     expect(s.stderr()).not.toContain(MARK);
   }, 120000);
 
   it("a namespace without Interoperability is notApplicable with no items however many the reply carries, under every policy", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = () =>
-      envelope({
+      stubEnvelope({
         interopEnabled: false,
         items: [hostileItem(1), hostileItem(3)],
         count: 2,
@@ -739,7 +641,7 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
       [{ IRIS_DATA_POLICY: "allow" }, "allow"],
       [{ IRIS_DATA_POLICY: "block" }, "block"],
     ] as Array<[Record<string, string>, string]>) {
-      const s = await probed(env);
+      const s = await openOnStub(env);
       const result = await read(s.session, [1, 3]);
       const content = succeeded(result);
       expect(content.notApplicable, policy).toBe(true);
@@ -759,9 +661,9 @@ describe("Story 39.5 QA: a hostile reply under each policy (AC-3, AC-4, AC-7; AD
 
 describe("Story 39.5 QA: the bounds of the input (AC-1)", () => {
   it("a bad input is a validation error and sends no request, and each boundary value sends one", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    stub.reply = () => envelope({ interopEnabled: true, items: [], count: 0 });
-    const s = await probed();
+    if (skipIfReason(skipReason, ctx)) return;
+    stub.reply = () => stubEnvelope({ interopEnabled: true, items: [], count: 0 });
+    const s = await openOnStub();
     const twenty = Array.from({ length: 20 }, (_, index) => index + 1);
 
     const bad: Array<[string, Record<string, unknown>, string]> = [
@@ -796,13 +698,13 @@ describe("Story 39.5 QA: the bounds of the input (AC-1)", () => {
       ["dataPolicy a number", { headerIds: [1], dataPolicy: 1 }, "dataPolicy"],
       ["namespace a number", { headerIds: [1], namespace: 5 }, "namespace"],
     ];
-    const before = routeRequests().length;
+    const before = routeRequests(stub).length;
     for (const [label, args, field] of bad) {
       const result = await s.session.call("iris_message_body", { namespace: NS, ...args });
       expect(result.isError, label).toBe(true);
-      expect(textOf(result), label).toContain(field);
+      expect(allText(result), label).toContain(field);
     }
-    expect(routeRequests().slice(before), "no bad input reached a route").toEqual([]);
+    expect(routeRequests(stub).slice(before), "no bad input reached a route").toEqual([]);
 
     const good: Array<[string, Record<string, unknown>]> = [
       ["20 header IDs, numbers and strings", { headerIds: twenty.map((n, index) => (index % 2 === 0 ? n : String(n))) }],
@@ -812,21 +714,21 @@ describe("Story 39.5 QA: the bounds of the input (AC-1)", () => {
       ["dataPolicy block", { headerIds: [1], dataPolicy: "block" }],
     ];
     for (const [label, args] of good) {
-      const marker = routeRequests().length;
+      const marker = routeRequests(stub).length;
       const result = await s.session.call("iris_message_body", { namespace: NS, ...args });
-      expect(result.isError, `${label}: ${textOf(result)}`).toBeFalsy();
-      expect(routeRequests().slice(marker), `${label}: one request`).toHaveLength(1);
+      expect(result.isError, `${label}: ${allText(result)}`).toBeFalsy();
+      expect(routeRequests(stub).slice(marker), `${label}: one request`).toHaveLength(1);
     }
   }, 180000);
 });
 
 describe("Story 39.5 QA: maxChars is a cut of the redacted, sanitized text, at every length (AC-2, AC-3; AD-26)", () => {
   it("redact: at every maxChars the text is the first maxChars characters of the REDACTED text, truncated exactly when something was cut, and no identifying value ever appears", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const s = await probed();
+    if (skipIfReason(skipReason, ctx)) return;
+    const s = await openOnStub();
     for (const [label, raw] of [["CR", ADT], ["CRLF", ADT_CRLF]] as Array<[string, string]>) {
       stub.reply = (request) =>
-        envelope({
+        stubEnvelope({
           interopEnabled: true,
           items: (request.headerIds as number[]).map((id) => ({ ...hostileItem(label === "CR" ? 1 : 2), id: Number(id) })),
           count: (request.headerIds as number[]).length,
@@ -845,13 +747,13 @@ describe("Story 39.5 QA: maxChars is a cut of the redacted, sanitized text, at e
       }
     }
     await flush(s);
-    expect(readFileSync(s.audit, "utf8")).not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8")).not.toContain(MARK);
     expect(s.stderr()).not.toContain(MARK);
   }, 300000);
 
   it("allow: sanitization comes before the cut (CRLF is one character), the cut is exact at the text length and one short, and an astral character is never split", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const s = await probed({ IRIS_DATA_POLICY: "allow" });
+    if (skipIfReason(skipReason, ctx)) return;
+    const s = await openOnStub({ IRIS_DATA_POLICY: "allow" });
     const emoji = "\u{1F600}";
     const texts: Record<number, string> = {
       3: "a\r\nb", // sanitizes to "a\nb": 3 characters
@@ -862,7 +764,7 @@ describe("Story 39.5 QA: maxChars is a cut of the redacted, sanitized text, at e
       8: "y".repeat(1048577),
     };
     stub.reply = (request) =>
-      envelope({
+      stubEnvelope({
         interopEnabled: true,
         items: (request.headerIds as number[]).map((id) => ({
           id: Number(id),
@@ -904,10 +806,10 @@ describe("Story 39.5 QA: maxChars is a cut of the redacted, sanitized text, at e
   }, 180000);
 
   it("allow: a text IRIS reports as incomplete is truncated even when it is shorter than maxChars", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const s = await probed({ IRIS_DATA_POLICY: "allow" });
+    if (skipIfReason(skipReason, ctx)) return;
+    const s = await openOnStub({ IRIS_DATA_POLICY: "allow" });
     stub.reply = (request) =>
-      envelope({
+      stubEnvelope({
         interopEnabled: true,
         items: (request.headerIds as number[]).map((id) => ({
           id: Number(id),
@@ -961,11 +863,11 @@ describe("Story 39.5 QA: an HL7 v2 text of any shape is shown redacted or withhe
   ];
 
   it("every shape: no identifying value anywhere (result, audit file, console log); a redacted text is the engine's, sanitized; a withheld one has the fixed unparseable reason", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const s = await probed();
+    if (skipIfReason(skipReason, ctx)) return;
+    const s = await openOnStub();
     let current = "";
     stub.reply = (request) =>
-      envelope({
+      stubEnvelope({
         interopEnabled: true,
         items: (request.headerIds as number[]).map((id) => ({
           id: Number(id),
@@ -1003,16 +905,16 @@ describe("Story 39.5 QA: an HL7 v2 text of any shape is shown redacted or withhe
     expect(observed.some((line) => line.endsWith("redacted")), "the sweep redacts some shapes").toBe(true);
     expect(observed.some((line) => line.endsWith("withheld")), "and withholds others").toBe(true);
     await flush(s);
-    expect(readFileSync(s.audit, "utf8")).not.toContain(MARK);
+    expect(readFileSync(s.auditFile, "utf8")).not.toContain(MARK);
     expect(s.stderr()).not.toContain(MARK);
   }, 300000);
 
   it("a cut that lands inside a segment of any shape holds no identifying value either, at every length of the shortest redactable shapes", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    const s = await probed();
+    if (skipIfReason(skipReason, ctx)) return;
+    const s = await openOnStub();
     let current = "";
     stub.reply = (request) =>
-      envelope({
+      stubEnvelope({
         interopEnabled: true,
         items: (request.headerIds as number[]).map((id) => ({
           id: Number(id),

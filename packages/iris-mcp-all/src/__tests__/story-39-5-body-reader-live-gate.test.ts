@@ -29,19 +29,30 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  allText,
   assertDeployedBootstrapVersion,
   atelierQuery,
+  batchUnits,
+  distEntry,
   executeMcpPost,
+  fixtureDocumentNames,
+  irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
+  openAuditedSession,
   openWireSession,
+  pollAuditEntries,
+  postEnvelope,
   resolveSdkEsmDir,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
+  type AuditedSession,
   type IrisTarget,
   type WireSession,
   type WireSessionOptions,
@@ -63,8 +74,8 @@ import { checkRedactedPositions, separatorCharacters } from "../../../shared/src
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
 
+const GATE_TAG = "story-39-5-body-reader-live-gate";
 const TARGET = irisTargetFromEnv();
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
 
@@ -90,18 +101,11 @@ let tempDir = "";
 function wireOptions(pkg: string, extra: Partial<WireSessionOptions> = {}): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-5-live-gate",
     ...extra,
   };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-5-body-reader-live-gate: ${skipReason}`);
-  testCtx.skip();
 }
 
 /** Sessions the rows open, closed in `afterAll`. */
@@ -186,29 +190,17 @@ async function startRecordingProxy(upstream: IrisTarget): Promise<RecordingProxy
 
 let proxy: RecordingProxy;
 
-/** A session on the built interop server that talks to IRIS through the recording proxy. */
-interface ProxiedSession {
-  session: WireSession;
-  /** Everything the server wrote to stderr. */
-  stderr: () => string;
-  /** The audit file the server writes (`IRIS_AUDIT_LOG`). */
-  auditFile: string;
-}
-
-async function proxiedSession(label: string, extraEnv: Record<string, string> = {}): Promise<ProxiedSession> {
-  const auditFile = path.join(tempDir, `audit-${label}.jsonl`);
-  let stderr = "";
-  const session = await openWireSession(
-    wireOptions("iris-interop-mcp", {
-      target: { ...TARGET, host: "127.0.0.1", port: String(proxy.port) },
-      onStderr: (chunk) => {
-        stderr += chunk;
-      },
-    }),
-    { IRIS_AUDIT_LOG: auditFile, IRIS_AUDIT_LOG_PARAMS: "true", LOG_LEVEL: "DEBUG", ...extraEnv },
+/** A session on the built interop server that talks to IRIS through the recording proxy and writes `audit-<label>.jsonl`. */
+async function openThroughProxy(label: string, extraEnv: Record<string, string> = {}): Promise<AuditedSession> {
+  const audited = await openAuditedSession(
+    {
+      ...wireOptions("iris-interop-mcp", { target: { ...TARGET, host: "127.0.0.1", port: String(proxy.port) } }),
+      auditFile: path.join(tempDir, `audit-${label}.jsonl`),
+    },
+    extraEnv,
   );
-  opened.push(session);
-  return { session, stderr: () => stderr, auditFile };
+  opened.push(audited.session);
+  return audited;
 }
 
 /** A session on the built interop server that talks to IRIS directly. */
@@ -219,9 +211,9 @@ async function plainSession(extraEnv: Record<string, string> = {}): Promise<Wire
 }
 
 /** The three policy sessions: the default (redact), the operator's allow, and the operator's block. */
-let redactS: ProxiedSession;
-let allowS: ProxiedSession;
-let blockS: ProxiedSession;
+let redactS: AuditedSession;
+let allowS: AuditedSession;
+let blockS: AuditedSession;
 
 // -- Reading results ------------------------------------------------------
 
@@ -237,7 +229,6 @@ interface BodyContent {
   reason?: string;
 }
 
-const textOf = (result: WireToolResult): string => (result.content ?? []).map((block) => block.text ?? "").join("\n");
 const contentOf = (result: WireToolResult): BodyContent => result.structuredContent as unknown as BodyContent;
 const itemOf = (content: BodyContent, id: number): Item => content.items.find((item) => item.id === id) as Item;
 
@@ -250,7 +241,7 @@ function readBodies(session: WireSession, headerIds: Array<number | string> = ID
 
 /** A successful read: no error, one text block. */
 function succeeded(result: WireToolResult): BodyContent {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, allText(result)).toBeFalsy();
   expect(result.content, "one text block").toHaveLength(1);
   return contentOf(result);
 }
@@ -341,26 +332,12 @@ const NON_HL7_SENTINELS = [
   "SYNTHPHI-TAG",
 ];
 
-/** A class method of the deployed classes in `namespace`, and its string result. */
-async function irisMethod(namespace: string, className: string, methodName: string, args: unknown[]): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace, className, methodName, args });
-  expect(result.isError, `${className}.${methodName}: ${textOf(result)}`).toBeFalsy();
-  return String((result.structuredContent as { returnValue?: unknown } | undefined)?.returnValue ?? "");
-}
-
 /** The synthetic ER7 text `name` as the fixtures save it (CR-terminated). */
 async function fixtureText(name: string): Promise<string> {
-  return irisMethod(NS_A, "Story395.Seed", "Hl7Text", [name]);
+  return irisClassMethod(dev, NS_A, "Story395.Seed", "Hl7Text", [name]);
 }
 
 const lf = (text: string): string => text.replace(/\r\n|\r/g, "\n");
-
-/** The route, raw: the HTTP status, the text and the parsed envelope. */
-async function route(body: Record<string, unknown>): Promise<{ status: number; text: string; errors: string[]; result: Record<string, unknown> }> {
-  const answer = await executeMcpPost(TARGET, BODY_ROUTE, body);
-  const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
-  return { status: answer.status, text: answer.text, errors: (parsed.status.errors ?? []).map((entry) => entry.error), result: parsed.result };
-}
 
 // -- Setup and teardown ------------------------------------------------
 
@@ -406,22 +383,15 @@ beforeAll(async () => {
   }
 
   proxy = await startRecordingProxy(TARGET);
-  redactS = await proxiedSession("redact");
-  allowS = await proxiedSession("allow", { IRIS_DATA_POLICY: "allow" });
-  blockS = await proxiedSession("block", { IRIS_DATA_POLICY: "block" });
+  redactS = await openThroughProxy("redact");
+  allowS = await openThroughProxy("allow", { IRIS_DATA_POLICY: "allow" });
+  blockS = await openThroughProxy("block", { IRIS_DATA_POLICY: "block" });
 }, 300000);
 
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     for (const name of NAMESPACES) await attempt(`removing ${name}`, () => removeInteropNamespace(admin, dev, name));
     await attempt("the leftovers check", async () => {
@@ -432,10 +402,7 @@ afterAll(async () => {
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     });
     await attempt("the fixture document listing", async () => {
-      for (const filter of ["Story391", "Story395"]) {
-        const listed = await dev.call("iris_doc_list", { filter, generated: true });
-        expect(listed.isError, `the ${filter} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter, names } of await fixtureDocumentNames(dev, ["Story391", "Story395"])) {
         expect(names, `no ${FIXTURE_DOC} or ${filter} document after the run`).toEqual([]);
       }
     });
@@ -451,8 +418,8 @@ afterAll(async () => {
 
 describe("Story 39.5: headers are resolved in request order (AC-1)", () => {
   it("each class and ID equals the header oracle, each kind equals the kappa column, and the setup is the seed's own", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const seeded = await irisMethod(NS_A, "Story395.Seed", "Hl7Text", ["adt"]);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const seeded = await irisClassMethod(dev, NS_A, "Story395.Seed", "Hl7Text", ["adt"]);
     expect(seeded, "the fixture class is deployed and answers").toContain("SYNTHPHI-APP");
     expect(STORY395_IDS.a.headers).toBe(IDS_17.join(","));
 
@@ -472,7 +439,7 @@ describe("Story 39.5: headers are resolved in request order (AC-1)", () => {
   }, 120000);
 
   it("a header that does not exist is found: false with its own text, and a repeated ID is a repeated item", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded(await readBodies(redactS.session, [1, 999, 1]));
     expect(content.items.map((item) => item.id)).toEqual([1, 999, 1]);
     expect(content.items[1]).toEqual({ id: 999, found: false, error: "Header 999 not found" });
@@ -481,7 +448,7 @@ describe("Story 39.5: headers are resolved in request order (AC-1)", () => {
   }, 120000);
 
   it("a bad input is a validation error before any request (the tool's schema; the route is never called)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const rows: Array<[Record<string, unknown>, string]> = [
       [{ headerIds: [] }, "headerIds"],
       [{ headerIds: Array.from({ length: 21 }, (_, i) => i + 1) }, "headerIds"],
@@ -495,7 +462,7 @@ describe("Story 39.5: headers are resolved in request order (AC-1)", () => {
       for (const [args, field] of rows) {
         const result = await redactS.session.call("iris_message_body", { namespace: NS_A, ...args });
         expect(result.isError, JSON.stringify(args)).toBe(true);
-        expect(textOf(result), JSON.stringify(args)).toContain(field);
+        expect(allText(result), JSON.stringify(args)).toContain(field);
       }
     });
     expect(seen, "no row reached the route").toEqual([]);
@@ -506,12 +473,12 @@ describe("Story 39.5: headers are resolved in request order (AC-1)", () => {
 
 describe("Story 39.5: every kind renders as the renderer table says under allow (AC-2, Rule #56)", () => {
   it("the kappa allow column: the texts equal their recordings, the fixture's own texts and the dump rules", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const adt = await fixtureText("adt");
     const ack = await fixtureText("ack");
     const alt = await fixtureText("alt");
     const batchSmall = await fixtureText("batchSmall");
-    const streamText = await irisMethod(NS_A, FIXTURE_CLASS, "StreamText", []);
+    const streamText = await irisClassMethod(dev, NS_A, FIXTURE_CLASS, "StreamText", []);
     expect(streamText.length, "the stream fixture").toBe(1500);
 
     const content = succeeded(await readBodies(allowS.session));
@@ -557,7 +524,7 @@ describe("Story 39.5: every kind renders as the renderer table says under allow 
   }, 120000);
 
   it("a larger maxChars reads a longer HL7 v2 body whole, and the largest message is still too large", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const wire = await exchangesOf(async () => {
       const content = succeeded(await readBodies(allowS.session, IDS_17, { maxChars: 100000 }));
       const big = itemOf(content, 9);
@@ -579,7 +546,7 @@ describe("Story 39.5: every kind renders as the renderer table says under allow 
   }, 120000);
 
   it("maxChars cuts each shown text at maxChars with truncated: true, and a text that fits is whole", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const adt = lf(await fixtureText("adt"));
     const content = succeeded(await readBodies(allowS.session, IDS_17, { maxChars: 100 }));
     // The XML text is 72 characters, so it fits a cap of 100; the texts of 1, 3 and 12 are longer.
@@ -605,7 +572,7 @@ describe("Story 39.5: every kind renders as the renderer table says under allow 
 
 describe("Story 39.5: the policy per body under redact (the default), block and allow (AC-3, AC-4)", () => {
   it("redact: HL7 v2 is redacted whole, every other body is withheld, and the counts are 4 redacted and 10 withheld", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const started = performance.now();
     let content!: BodyContent;
     let result!: WireToolResult;
@@ -642,7 +609,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
     expect(String(itemOf(content, 1).text)).toContain("KEEPME-GLUCOSE");
     expect(String(itemOf(content, 8).text).startsWith("MSH#!@$%#")).toBe(true);
     expect(JSON.stringify(result), "no identifying value anywhere in the result, content and structuredContent").not.toContain("SYNTHPHI");
-    const lines = textOf(result).split("\n");
+    const lines = allText(result).split("\n");
     expect(lines[lines.length - 1]).toBe("Data policy redact: 4 redacted, 10 withheld.");
 
     // What the tool asked IRIS for, and what IRIS sent (least exposure: the route never read a non-HL7 body).
@@ -658,7 +625,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
   }, 120000);
 
   it("redaction runs on the complete text, before truncation: maxChars 5 keeps the first 5 characters of the REDACTED text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const whole = itemOf(succeeded(await readBodies(redactS.session, [1])), 1);
     const cut = itemOf(succeeded(await readBodies(redactS.session, [1], { maxChars: 5 })), 1);
     expect(cut.bodyPolicy).toEqual(whole.bodyPolicy);
@@ -670,7 +637,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
   }, 120000);
 
   it("block: no text anywhere, the counts are 0 and 14, and the tool asked IRIS for the kind only", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     let result!: WireToolResult;
     const wire = await exchangesOf(async () => {
       result = await readBodies(blockS.session);
@@ -696,7 +663,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
   }, 120000);
 
   it("allow: the wire reads every kind with the limit max(maxChars, 65536)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const wire = await exchangesOf(async () => {
       succeeded(await readBodies(allowS.session, [1, 3]));
     });
@@ -704,7 +671,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
   }, 120000);
 
   it("a caller dataPolicy only tightens: allow + redact is redact; redact + allow is redact, clamped; allow + block is block", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     let tightened!: WireToolResult;
     const first = await exchangesOf(async () => {
       tightened = await readBodies(allowS.session, IDS_17, { dataPolicy: "redact" });
@@ -720,7 +687,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
     });
     expect(succeeded(clamped).dataPolicy).toEqual({ policy: "redact", redacted: 4, blocked: 10 });
     expect(contentOf(clamped).dataPolicyClamped).toBe(true);
-    const lines = textOf(clamped).split("\n");
+    const lines = allText(clamped).split("\n");
     expect(lines[lines.length - 1]).toBe(CLAMP_LINE);
     expect(second[0]?.request).toMatchObject({ bodyRead: "hl7" });
     expect(JSON.stringify(clamped)).not.toContain("SYNTHPHI");
@@ -735,7 +702,7 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
   }, 120000);
 
   it("a policy per profile: the loose profile shows the values, the default profile does not", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const session = await plainSession({ IRIS_PROFILES: JSON.stringify({ loose: { dataPolicy: "allow" } }) });
     const loose = await session.callOn("loose", "iris_message_body", { namespace: NS_A, headerIds: IDS_17 });
     expect(succeeded(loose).dataPolicy).toEqual({ policy: "allow", redacted: 0, blocked: 0 });
@@ -749,36 +716,9 @@ describe("Story 39.5: the policy per body under redact (the default), block and 
 
 // -- The redaction against IRIS's own parser (Rule #36) ------------------------
 
-/** The units of a batch that IRIS parses on their own: its FHS line, its BHS line, and each message. */
-function batchUnits(text: string): string[] {
-  const units: string[] = [];
-  let message: string[] = [];
-  const flush = (): void => {
-    if (message.length > 0) units.push(`${message.join("\r")}\r`);
-    message = [];
-  };
-  for (const line of text.split(/\r\n|\r|\n/)) {
-    if (line === "") continue;
-    const name = line.slice(0, 3);
-    if (name === "FHS" || name === "BHS") {
-      flush();
-      units.push(`${line}\r`);
-    } else if (name === "MSH") {
-      flush();
-      message.push(line);
-    } else if (name === "BTS" || name === "FTS") {
-      flush();
-    } else {
-      message.push(line);
-    }
-  }
-  flush();
-  return units;
-}
-
 describe("Story 39.5: the redacted texts, parsed by IRIS before and after (AC-4, Rule #36)", () => {
   it("headers 1, 2, 8 and 15 keep IRIS's value at each kept position and hold only *** and separators at every other", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const engine = (await import(pathToFileURL(path.join(REPO_ROOT, "packages", "shared", "dist", "index.js")).href)) as {
       HL7_SAFE_HARBOR_FIELDS: ReadonlyArray<{ segment: string; field: number; category: string }>;
     };
@@ -817,25 +757,25 @@ describe("Story 39.5: the redacted texts, parsed by IRIS before and after (AC-4,
 
 describe("Story 39.5: the route reads least, and refuses before it switches namespace (AC-1, AC-3)", () => {
   it("kind reads no body; hl7 reads only HL7 v2 bodies; all reads every renderable kind", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const kind = await route({ headerIds: IDS_17, namespace: NS_A, bodyRead: "kind" });
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const kind = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: IDS_17, namespace: NS_A, bodyRead: "kind" });
     expect(kind.status).toBe(200);
     expect(kind.text).not.toContain("SYNTHPHI");
     expect(kind.text).not.toContain('"bodyText"');
-    const defaulted = await route({ headerIds: IDS_17, namespace: NS_A });
+    const defaulted = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: IDS_17, namespace: NS_A });
     expect(defaulted.text, "an absent bodyRead is kind").toBe(kind.text);
-    const nulled = await route({ headerIds: IDS_17, namespace: NS_A, bodyRead: null });
+    const nulled = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: IDS_17, namespace: NS_A, bodyRead: null });
     expect(nulled.text, "a null bodyRead is kind").toBe(kind.text);
     expect((kind.result.items as Item[]).find((item) => item.id === 7), "no bodyId for a literal header").not.toHaveProperty("bodyId");
 
-    const hl7 = await route({ headerIds: IDS_17, namespace: NS_A, bodyRead: "hl7" });
+    const hl7 = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: IDS_17, namespace: NS_A, bodyRead: "hl7" });
     const hl7Items = hl7.result.items as Item[];
     expect(hl7Items.filter((item) => "bodyText" in item).map((item) => item.id)).toEqual([1, 2, 8, 15]);
     expect(hl7Items.filter((item) => item.bodyTextOmitted === "tooLarge").map((item) => item.id)).toEqual([9, 13, 16]);
     expect(hl7Items.find((item) => item.id === 7)).not.toHaveProperty("bodyId");
     for (const sentinel of NON_HL7_SENTINELS) expect(hl7.text, sentinel).not.toContain(sentinel);
 
-    const all = await route({ headerIds: IDS_17, namespace: NS_A, bodyRead: "all", bodyTextMaxChars: 1048576 });
+    const all = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: IDS_17, namespace: NS_A, bodyRead: "all", bodyTextMaxChars: 1048576 });
     const allItems = all.result.items as Item[];
     expect(allItems.filter((item) => "bodyText" in item).map((item) => item.id)).toEqual([1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 15, 16]);
     expect(allItems.find((item) => item.id === 13)).toMatchObject({ bodyTextOmitted: "tooLarge" });
@@ -843,19 +783,19 @@ describe("Story 39.5: the route reads least, and refuses before it switches name
   }, 120000);
 
   it("the cap is inclusive: an HL7 v2 body of L characters fits a cap of L and does not fit L - 1", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const whole = (await route({ headerIds: [1], namespace: NS_A, bodyRead: "hl7" })).result.items as Item[];
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const whole = (await postEnvelope(TARGET, BODY_ROUTE, { headerIds: [1], namespace: NS_A, bodyRead: "hl7" })).result.items as Item[];
     const length = String(whole[0]?.bodyText).length;
     expect(length).toBeGreaterThan(100);
-    const atCap = (await route({ headerIds: [1], namespace: NS_A, bodyRead: "hl7", bodyTextMaxChars: length })).result.items as Item[];
+    const atCap = (await postEnvelope(TARGET, BODY_ROUTE, { headerIds: [1], namespace: NS_A, bodyRead: "hl7", bodyTextMaxChars: length })).result.items as Item[];
     expect(atCap[0]?.bodyText).toBe(whole[0]?.bodyText);
-    const under = (await route({ headerIds: [1], namespace: NS_A, bodyRead: "hl7", bodyTextMaxChars: length - 1 })).result.items as Item[];
+    const under = (await postEnvelope(TARGET, BODY_ROUTE, { headerIds: [1], namespace: NS_A, bodyRead: "hl7", bodyTextMaxChars: length - 1 })).result.items as Item[];
     expect(under[0]).toMatchObject({ bodyTextOmitted: "tooLarge" });
     expect(under[0]).not.toHaveProperty("bodyText");
   }, 120000);
 
   it("refuses a bad request, naming the parameter, with no namespace error: the checks run before the switch", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const ok = { headerIds: [1], namespace: NS_Z };
     const rows: Array<[Record<string, unknown>, string]> = [
       [{ namespace: NS_Z }, "headerIds"],
@@ -870,34 +810,34 @@ describe("Story 39.5: the route reads least, and refuses before it switches name
       [{ ...ok, bodyTextMaxChars: "x" }, "bodyTextMaxChars"],
     ];
     for (const [body, parameter] of rows) {
-      const answer = await route(body);
+      const answer = await postEnvelope(TARGET, BODY_ROUTE, body);
       expect(answer.errors.length, JSON.stringify(body)).toBeGreaterThan(0);
       expect(answer.errors[0], JSON.stringify(body)).toContain(parameter);
       expect(answer.text, `${JSON.stringify(body)}: validation came before the namespace switch`).not.toContain("NAMESPACE");
       expect(answer.result, JSON.stringify(body)).toEqual({});
     }
-    const hostile = await route({ ...ok, bodyRead: "ZZhostile'--OR 1=1" });
+    const hostile = await postEnvelope(TARGET, BODY_ROUTE, { ...ok, bodyRead: "ZZhostile'--OR 1=1" });
     expect(hostile.errors[0]).toContain("bodyRead");
     expect(hostile.text).not.toContain("ZZhostile");
   }, 120000);
 
   it("the limit is 20 headers: 20 are read, 21 are refused with the text of the limit of 20", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const twenty = Array.from({ length: 20 }, (_, index) => (index % 17) + 1);
-    const accepted = await route({ headerIds: twenty, namespace: NS_A });
+    const accepted = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: twenty, namespace: NS_A });
     expect(accepted.errors, "20 header IDs are accepted").toEqual([]);
     expect((accepted.result as { count?: number }).count, "one item per ID").toBe(20);
     expect(((accepted.result as { items: Item[] }).items).map((item) => item.id), "in request order, duplicates included").toEqual(twenty);
 
-    const refused = await route({ headerIds: [...twenty, 1], namespace: NS_A });
+    const refused = await postEnvelope(TARGET, BODY_ROUTE, { headerIds: [...twenty, 1], namespace: NS_A });
     expect(refused.errors.length, "21 header IDs are refused").toBeGreaterThan(0);
     expect(refused.errors[0]).toContain("Parameter 'headerIds' must contain between 1 and 20 header IDs (found 21)");
-    const missing = await route({ namespace: NS_A });
+    const missing = await postEnvelope(TARGET, BODY_ROUTE, { namespace: NS_A });
     expect(missing.errors[0]).toContain("Parameter 'headerIds' must be a non-empty array of 1-20 numeric header IDs");
   }, 120000);
 
   it("the resend preview keeps its own limit of 100 headers and its texts (ValidateHeaderIds at its default)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const preview = async (body: Record<string, unknown>): Promise<{ errors: string[]; result: Record<string, unknown> }> => {
       const answer = await executeMcpPost(TARGET, "/interop/message/resend/preview", body);
       const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
@@ -921,8 +861,8 @@ describe("Story 39.5: the route reads least, and refuses before it switches name
 
 describe("Story 39.5: Hl7Size equals the serialization, and a body over the cap costs a sum (DW-577, AC-6, Rule #59)", () => {
   it("on every HL7 fixture, the two batches included, the precheck equals the length OutputToLibraryStream writes", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const sizes = JSON.parse(await irisMethod(NS_A, "Story395.Seed", "Sizes", ["1,2,8,9,13,15,16"])) as Array<{
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const sizes = JSON.parse(await irisClassMethod(dev, NS_A, "Story395.Seed", "Sizes", ["1,2,8,9,13,15,16"])) as Array<{
       id: number;
       precheck: number;
       serialized: number;
@@ -937,8 +877,8 @@ describe("Story 39.5: Hl7Size equals the serialization, and a body over the cap 
   }, 120000);
 
   it("the sum stops at the first node that takes it past the limit: a batch is not sized to its end", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const sizes = JSON.parse(await irisMethod(NS_A, "Story395.Seed", "Sizes", ["15,16", 100])) as Array<{
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const sizes = JSON.parse(await irisClassMethod(dev, NS_A, "Story395.Seed", "Sizes", ["15,16", 100])) as Array<{
       id: number;
       precheck: number;
       serialized: number;
@@ -951,8 +891,8 @@ describe("Story 39.5: Hl7Size equals the serialization, and a body over the cap 
   }, 120000);
 
   it("Hl7Text answers tooLarge for the huge body in under a quarter of its serialization time", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const timing = JSON.parse(await irisMethod(NS_A, "Story395.Seed", "Timing", [13, 65536])) as {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const timing = JSON.parse(await irisClassMethod(dev, NS_A, "Story395.Seed", "Timing", [13, 65536])) as {
       result: string;
       hl7TextMs: number;
       serializeMs: number;
@@ -968,7 +908,7 @@ describe("Story 39.5: Hl7Size equals the serialization, and a body over the cap 
 
 describe("Story 39.5: other namespaces (AC-8, Rules #34 and #41)", () => {
   it("A and B give different bodies for headers 1 and 2, each from its own namespace", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const inA = succeeded(await readBodies(allowS.session, [1, 2]));
     const inB = succeeded(await allowS.session.call("iris_message_body", { namespace: NS_B, headerIds: [1, 2] }));
     expect(String(itemOf(inA, 1).text)).toContain("SYNTHPHI-MRN");
@@ -986,7 +926,7 @@ describe("Story 39.5: other namespaces (AC-8, Rules #34 and #41)", () => {
   }, 120000);
 
   it("a namespace with no Interoperability mappings answers notApplicable, with a reason, no items and the policy", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await redactS.session.call("iris_message_body", { namespace: NS_C, headerIds: [1] });
     expect(result.isError).toBeFalsy();
     const content = contentOf(result);
@@ -997,13 +937,13 @@ describe("Story 39.5: other namespaces (AC-8, Rules #34 and #41)", () => {
   }, 120000);
 
   it("a namespace that does not exist is an error with the sanitized switch text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await redactS.session.call("iris_message_body", { namespace: NS_Z, headerIds: [1] });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("Error reading message bodies with iris_message_body:");
-    expect(textOf(result)).toContain("NAMESPACE");
+    expect(allText(result)).toContain("Error reading message bodies with iris_message_body:");
+    expect(allText(result)).toContain("NAMESPACE");
     // SanitizeError strips the routine reference (+N^Routine) the switch failure carries.
-    expect(textOf(result), "no routine or global reference").not.toMatch(/\^[%A-Za-z]/);
+    expect(allText(result), "no routine or global reference").not.toMatch(/\^[%A-Za-z]/);
   }, 120000);
 });
 
@@ -1011,7 +951,7 @@ describe("Story 39.5: other namespaces (AC-8, Rules #34 and #41)", () => {
 
 describe("Story 39.5: the tool is a listed read, enabled by default, and governance can disable it (AC-5)", () => {
   it("is listed with truthful read-only annotations, and the interop server advertises 25 tools", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const tools = await redactS.session.listTools();
     expect(tools).toHaveLength(25);
     const listed = tools.find((tool) => tool.name === "iris_message_body");
@@ -1025,7 +965,7 @@ describe("Story 39.5: the tool is a listed read, enabled by default, and governa
   }, 120000);
 
   it("the key is enabled under default configuration and under the read-only preset, which still reads", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const readOnly = await plainSession({ IRIS_GOVERNANCE_PRESET: "read-only" });
     for (const [label, session] of [["default", redactS.session], ["read-only", readOnly]] as const) {
       const profiles = await session.raw("iris_server_profiles", {});
@@ -1036,8 +976,8 @@ describe("Story 39.5: the tool is a listed read, enabled by default, and governa
   }, 120000);
 
   it("an operator's disable denies the call with GOVERNANCE_DISABLED and sends no request to the route", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const governed = await proxiedSession("governed", { IRIS_GOVERNANCE: JSON.stringify({ global: { iris_message_body: false } }) });
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const governed = await openThroughProxy("governed", { IRIS_GOVERNANCE: JSON.stringify({ global: { iris_message_body: false } }) });
     let denied!: WireToolResult;
     const wire = await requestsOf(async () => {
       denied = await readBodies(governed.session, [1]);
@@ -1048,7 +988,7 @@ describe("Story 39.5: the tool is a listed read, enabled by default, and governa
   }, 120000);
 
   it("is visible next to iris_message_search in every preset, and core lists 12 tools", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const sizes: Record<string, number> = {};
     for (const preset of ["core", "developer", "full"]) {
       const session = await plainSession({ IRIS_TOOLS_PRESET: preset });
@@ -1061,26 +1001,10 @@ describe("Story 39.5: the tool is a listed read, enabled by default, and governa
   }, 120000);
 });
 
-/** Poll (bounded) until the audit file holds an entry of the tool that `isWanted` accepts, then return every entry. */
-async function auditEntries(file: string, isWanted: (entry: Item) => boolean): Promise<Item[]> {
-  const started = Date.now();
-  for (;;) {
-    if (existsSync(file)) {
-      const entries = readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Item);
-      if (entries.some((entry) => entry.tool === "iris_message_body" && isWanted(entry))) return entries;
-    }
-    if (Date.now() - started > 5000) throw new Error(`no audit entry in ${file}`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 describe("Story 39.5: the audit file and the console log (AC-7, AD-19)", () => {
   it("each entry records the policy and the response's counts and the header IDs, and no identifying value reaches the file or stderr under any policy", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const rows: Array<[string, ProxiedSession, { policy: string; redacted: number; blocked: number }]> = [
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const rows: Array<[string, AuditedSession, { policy: string; redacted: number; blocked: number }]> = [
       ["redact", redactS, { policy: "redact", redacted: 4, blocked: 10 }],
       ["block", blockS, { policy: "block", redacted: 0, blocked: 14 }],
       ["allow", allowS, { policy: "allow", redacted: 0, blocked: 0 }],
@@ -1093,7 +1017,15 @@ describe("Story 39.5: the audit file and the console log (AC-7, AD-19)", () => {
       if (label === "allow") expect(JSON.stringify(result), "the allow result holds the positive control").toContain("SYNTHPHI");
 
       const isOwn = (candidate: Item): boolean => (candidate.params as Item | undefined)?.maxChars === marker;
-      const entries = await auditEntries(session.auditFile, isOwn);
+      // Every entry of the file, once an iris_message_body entry that is this call's own exists.
+      const entries = await pollAuditEntries(session.auditFile, {
+        tool: "iris_message_body",
+        isWanted: isOwn,
+        returnAll: true,
+        intervalMs: 20,
+        timeoutMs: 5000,
+        excerpt: 2000,
+      });
       const entry = entries.find((candidate) => candidate.tool === "iris_message_body" && isOwn(candidate)) as Item;
       expect(entry, label).toMatchObject({ tool: "iris_message_body", outcome: "ok", dataPolicy: counts });
       expect((entry.params as Item).headerIds, `${label}: the header IDs are logged`).toEqual(IDS_17);
@@ -1110,7 +1042,7 @@ describe("Story 39.5: the audit file and the console log (AC-7, AD-19)", () => {
 
 describe("Story 39.5: the first built-server start", () => {
   it("deploys the bootstrap inside its 60 s budget", (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // eslint-disable-next-line no-console
     console.log(`[perf] story-39-5: the first built-server start took ${firstStartMs} ms (budget 60000 ms)`);
     expect(firstStartMs).toBeLessThan(60000);

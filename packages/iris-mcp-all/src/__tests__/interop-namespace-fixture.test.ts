@@ -12,12 +12,15 @@ import {
   STORY392_IDS,
   STORY395_DOCUMENTS,
   STORY395_IDS,
+  STORY396_DOCUMENTS,
+  STORY396_IDS,
   createInteropNamespace,
   hl7Fields,
   leftovers,
   removeInteropNamespace,
   seedBodies,
   seedBodyReader,
+  seedCapstone,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
 
@@ -55,6 +58,7 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(seedBodies(dev, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(hl7Fields(dev, name, "MSH|^~\\&|")).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedBodyReader(dev as never, name, "a")).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedCapstone(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
 
       expect(admin.call).not.toHaveBeenCalled();
       expect(dev.call).not.toHaveBeenCalled();
@@ -108,5 +112,37 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       );
     }
     expect(STORY395_DOCUMENTS.b.map(([doc]) => doc), "namespace B compiles the seed only").toEqual(["Story395.Seed.cls"]);
+  });
+
+  it("lets a scratch name through for the Story 39.6 capstone seed, which compiles the Search Table class first and then seeds with no arguments", async () => {
+    const seeder = stubSession(JSON.stringify(STORY396_IDS));
+    seeder.call.mockImplementation(async () => ({
+      isError: false,
+      content: [],
+      structuredContent: { returnValue: JSON.stringify(STORY396_IDS), success: true },
+    }));
+    await expect(seedCapstone(seeder as never, "EXECMCPTMP396A")).resolves.toBeUndefined();
+    const compiled = seeder.call.mock.calls
+      .filter(([tool]) => tool === "iris_doc_compile")
+      .map(([, args]) => (args as { doc: string }).doc);
+    expect(compiled, "the classes compiled, in order").toEqual(["Story394.SearchTable.cls", "Story396.Seed.cls"]);
+    expect(STORY396_DOCUMENTS.map(([doc]) => doc)).toEqual(compiled);
+    expect(seeder.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP396A", className: "Story396.Seed", methodName: "Seed", args: [] }),
+    );
+    expect(STORY396_IDS).toEqual({ headers: "1,2,3,4", hl7: "1,2,3" });
+  });
+
+  it("refuses a seed answer that is not the ID map, naming what it returned", async () => {
+    for (const answer of ["REFUSED: the namespace already holds message headers", '{"headers":"1,2","hl7":"1"}']) {
+      const seeder = stubSession(answer);
+      seeder.call.mockImplementation(async () => ({
+        isError: false,
+        content: [],
+        structuredContent: { returnValue: answer, success: true },
+      }));
+      await expect(seedCapstone(seeder as never, "EXECMCPTMP396A")).rejects.toThrow(/seeding the capstone fixture mu into EXECMCPTMP396A returned/);
+    }
   });
 });

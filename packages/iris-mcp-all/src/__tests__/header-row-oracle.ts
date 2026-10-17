@@ -45,6 +45,13 @@ export function isoOf(stored: string): string {
 /** A SQL string literal: single-quoted, with each quote doubled. */
 export const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
+/** Ignore case and white space: the statement index stores a statement upper-cased and tokenized. */
+export const squash = (text: string): string => text.replace(/\s+/g, "").toUpperCase();
+
+/** The twelve header columns the search route selects, written by hand. */
+export const HEADER_COLUMNS =
+  "h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId";
+
 /**
  * The hand-written JOIN oracle (Rule #36) of the body-search gates: the headers of `bodyClass` inside
  * `windowSql` whose body row in `table` satisfies `predicate`, in `TimeCreated, ID` order, as the tool

@@ -40,20 +40,28 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
+  distEntry,
   executeMcpPost,
+  firstText,
+  fixtureDocumentNames,
+  headerIds,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  pollAuditEntries,
+  postEnvelope,
   resolveSdkEsmDir,
   shippedBootstrapVersion,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -70,13 +78,13 @@ import {
   sideCount,
   sideDefined,
 } from "./interop-namespace-fixture.js";
-import { searchTableCondition, searchTableOracle } from "./header-row-oracle.js";
+import { HEADER_COLUMNS, searchTableCondition, searchTableOracle, squash } from "./header-row-oracle.js";
 import { fuzzText } from "./fuzz-corpus.js";
 import { mulberry32 } from "../../../shared/src/__tests__/test-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
+const GATE_TAG = "story-39-4-search-table-live-gate";
 const BASELINE_PATH = path.join(__dirname, "fixtures", "story-39-4-search-baseline.json");
 
 const TARGET = irisTargetFromEnv();
@@ -110,18 +118,11 @@ let tempDir = "";
 function wireOptions(pkg: string, extra: Partial<WireSessionOptions> = {}): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-4-live-gate",
     ...extra,
   };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-4-search-table-live-gate: ${skipReason}`);
-  testCtx.skip();
 }
 
 /** Sessions the rows open, closed in `afterAll`. */
@@ -253,14 +254,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     for (const name of NAMESPACES) await attempt(`removing ${name}`, () => removeInteropNamespace(admin, dev, name));
     await attempt("the leftovers check", async () => {
@@ -271,11 +265,8 @@ afterAll(async () => {
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     });
     await attempt("the fixture document listing", async () => {
-      for (const filter of ["Story391", "Story393", "Story394"]) {
-        const listed = await dev.call("iris_doc_list", { filter, generated: true });
-        expect(listed.isError, `the ${filter} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
-        expect(names, `no ${FIXTURE_DOC} or ${filter} document after the run`).toEqual([]);
+      for (const { filter: filterText, names } of await fixtureDocumentNames(dev, ["Story391", "Story393", "Story394"])) {
+        expect(names, `no ${FIXTURE_DOC} or ${filterText} document after the run`).toEqual([]);
       }
     });
   } finally {
@@ -289,7 +280,7 @@ afterAll(async () => {
 
 describe("Story 39.4: the headers and body wire is unchanged (AD-15, AD-33)", () => {
   it.runIf(CAPTURE)("capture: replay the request list against A and C and write the baseline", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const deployed = await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
     expect(deployed, "the capture runs on the classes deployed before the searchTable action").toBe(
       PRE_STORY_BOOTSTRAP_VERSION,
@@ -319,7 +310,7 @@ describe("Story 39.4: the headers and body wire is unchanged (AD-15, AD-33)", ()
   }, 240000);
 
   it.skipIf(CAPTURE)("every headers and body request answers byte for byte as it did on the pre-story classes", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as Baseline;
 
     expect(baseline.capturedWithBootstrapVersion, "the capture was taken on the classes before this story").toBe(
@@ -363,9 +354,6 @@ const WINDOW_SQL = "h.TimeCreated >= '2001-02-03 07:00:00' AND h.TimeCreated <= 
 /** The headers of W whose body is an `EnsLib.HL7.Message` (header 7 is a string, 9 a literal, 11 is outside W), by hand. */
 const HL7_HEADERS: readonly number[] = [1, 2, 3, 4, 5, 6, 8, 10];
 
-const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
-const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
-
 type Structured = Record<string, unknown> & {
   action: string;
   rows: Array<Record<string, unknown>>;
@@ -376,7 +364,7 @@ type Structured = Record<string, unknown> & {
 
 /** The structured content of a successful lookup, which holds no Search Table value, stored or given. */
 function succeeded(result: WireToolResult): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, firstText(result)).toBeFalsy();
   const text = JSON.stringify(result).toLowerCase();
   expect(text, "a lookup result holds no Search Table value").not.toContain(MARKER.toLowerCase());
   expect(text, "nor a value of an entry that was not asked for").not.toContain(KEEP.toLowerCase());
@@ -398,28 +386,6 @@ function tableSearch(session: WireSession, args: Record<string, unknown> = {}): 
 /** One filter. */
 const filter = (property: string, op: string, value?: string | number | boolean): Record<string, unknown> =>
   value === undefined ? { property, op } : { property, op, value };
-
-interface RouteAnswer {
-  status: number;
-  text: string;
-  errors: string[];
-  result: Record<string, unknown>;
-}
-
-/** POST `body` to the search route and parse the envelope. */
-async function route(body: Record<string, unknown>): Promise<RouteAnswer> {
-  const answer = await sendSearch(body);
-  const parsed = JSON.parse(answer.text) as {
-    status: { errors?: Array<{ error: string }> };
-    result: Record<string, unknown>;
-  };
-  return {
-    status: answer.status,
-    text: answer.text,
-    errors: (parsed.status.errors ?? []).map((entry) => entry.error),
-    result: parsed.result,
-  };
-}
 
 /** A Search Table lookup of A over W straight to the route. */
 const routeBody = (filters: unknown, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -449,7 +415,7 @@ const oracle = (
 
 describe.skipIf(CAPTURE)("Story 39.4: the synthetic message is found by its MRN (AC-4, G34)", () => {
   it("PatientID eq the MRN finds headers 1, 2 (second PID-3 repetition) and 10, equal to the oracle; 7 (ID collision) and 11 (outside W) never appear", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const held = await atelierQuery(
       { ...TARGET, namespace: NS_A },
       "SELECT s.DocId FROM EnsLib_HL7.SearchTable s WHERE s.PropValue [ 'synthphi394'",
@@ -469,7 +435,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the synthetic message is found by its MRN 
     ]);
 
     const expected = await oracle(NS_A, "PatientID", "s.PropValue = 'synthphi394-mrn-1'");
-    expect(ids(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
+    expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
 
     const started = performance.now();
     const content = succeeded(await tableSearch(interop, { filters: [filter("PatientID", "eq", "SYNTHPHI394-MRN-1")] }));
@@ -478,8 +444,8 @@ describe.skipIf(CAPTURE)("Story 39.4: the synthetic message is found by its MRN 
     console.log(`[PERF] story-39-4: first start ${firstStartMs} ms; one lookup of A over W ${Math.round(elapsed)} ms`);
 
     expect(content.rows, "every field of every row, in order").toEqual(expected);
-    expect(ids(content.rows)).not.toContain(7);
-    expect(ids(content.rows)).not.toContain(11);
+    expect(headerIds(content.rows)).not.toContain(7);
+    expect(headerIds(content.rows)).not.toContain(11);
     expect(content.action).toBe("searchTable");
     expect(content.hasMore).toBe(false);
     expect(content).not.toHaveProperty("nextCursor");
@@ -526,9 +492,9 @@ const OPERATOR_CASES: OperatorCase[] = [
 describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equals a hand-written IN / NOT IN oracle (AC-4, Rule #36)", () => {
   for (const operatorCase of OPERATOR_CASES) {
     it(operatorCase.name, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(NS_A, operatorCase.property, operatorCase.predicate, operatorCase.negate ?? false);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(operatorCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(operatorCase.ids);
 
       const content = succeeded(
         await tableSearch(interop, { searchTableClass: operatorCase.searchTableClass, filters: operatorCase.filters }),
@@ -543,10 +509,10 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
   }
 
   it("filters combine with AND, and with the header filters: MRN-1 and ORU_R01, then target and errorOnly", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const typeCondition = searchTableCondition(EXTENT_TABLE, CLASS_EXTENT, "MSHTypeName", "s.PropValue = 'oru_r01'");
     const expected = await oracle(NS_A, "PatientID", "s.PropValue = 'synthphi394-mrn-1'", false, ` AND ${typeCondition}`);
-    expect(ids(expected)).toEqual([2]);
+    expect(headerIds(expected)).toEqual([2]);
     const content = succeeded(
       await tableSearch(interop, { filters: [filter("PatientID", "eq", "SYNTHPHI394-MRN-1"), filter("MSHTypeName", "eq", "ORU_R01")] }),
     );
@@ -559,7 +525,7 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
       false,
       " AND h.TargetConfigName = 'Story394.Other' AND h.IsError = 1",
     );
-    expect(ids(onlyThree)).toEqual([3]);
+    expect(headerIds(onlyThree)).toEqual([3]);
     const headerFiltered = succeeded(
       await tableSearch(interop, {
         filters: [filter("PatientID", "startsWith", "synthphi394-mrn")],
@@ -577,12 +543,12 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
   }, 120000);
 
   it("bodyClass EnsLib.HL7.Message equals the lookup without it, a subclass replaces the document class; Ens.StringRequest and a class that does not exist are refused naming bodyClass", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const filters = [filter("PatientID", "notNull")];
     const without = succeeded(await tableSearch(interop, { filters }));
     const narrowed = succeeded(await tableSearch(interop, { filters, bodyClass: "EnsLib.HL7.Message" }));
     expect(narrowed.rows).toEqual(without.rows);
-    expect(ids(narrowed.rows)).toEqual([1, 2, 3, 4, 5, 10]);
+    expect(headerIds(narrowed.rows)).toEqual([1, 2, 3, 4, 5, 10]);
 
     // A strict subclass of the document class replaces it as the header class: no header carries that class.
     const subclass = succeeded(await tableSearch(interop, { filters, bodyClass: "Story394.SubMessage" }));
@@ -590,7 +556,7 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
     expect(subclass.hasMore).toBe(false);
 
     for (const bodyClass of ["Ens.StringRequest", "No.Such.Story394Class", "enslib.hl7.message"]) {
-      const answer = await route(routeBody([filter("PatientID", "notNull")], { bodyClass }));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("PatientID", "notNull")], { bodyClass }));
       expect(answer.errors.length, `${bodyClass}: ${answer.text}`).toBe(1);
       expect(answer.errors[0], bodyClass).toContain("'bodyClass'");
       expect(answer.errors[0], "the text may name the document class").toContain("EnsLib.HL7.Message");
@@ -598,15 +564,15 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
       expect(answer.result, `${bodyClass}: a refusal returns an empty result`).toEqual({});
       const viaTool = await tableSearch(interop, { filters, bodyClass });
       expect(viaTool.isError).toBe(true);
-      expect(textOf(viaTool)).toContain("bodyClass");
+      expect(firstText(viaTool)).toContain("bodyClass");
     }
   }, 120000);
 
   // Six indexed headers: 1, 2, 3, 4, 5 and 10; the tie of headers 4 and 5 at 08:00:03 falls on a page boundary.
   it("pages of 2 join, in order, without a gap or a duplicate; the 4/5 tie breaks by ID; only a page with more carries nextCursor", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const expected = await oracle(NS_A, "PatientID", "s.PropValue <> ''");
-    expect(ids(expected)).toEqual([1, 2, 3, 4, 5, 10]);
+    expect(headerIds(expected)).toEqual([1, 2, 3, 4, 5, 10]);
 
     const pages: Structured[] = [];
     let cursor: string | undefined;
@@ -618,7 +584,7 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
       cursor = page.nextCursor;
     }
 
-    expect(pages.map((page) => ids(page.rows))).toEqual([[1, 2], [3, 4], [5, 10]]);
+    expect(pages.map((page) => headerIds(page.rows))).toEqual([[1, 2], [3, 4], [5, 10]]);
     expect(pages.flatMap((page) => page.rows)).toEqual(expected);
     const last = pages[pages.length - 1] as Structured;
     expect(last.hasMore).toBe(false);
@@ -631,7 +597,7 @@ describe.skipIf(CAPTURE)("Story 39.4: each operator on each kind of property equ
 
 describe.skipIf(CAPTURE)("Story 39.4: a lookup returns header rows and never a Search Table value (AC-2)", () => {
   it("the matched entries hold the marker and the KEEPME value (positive control), and neither the tool nor the route returns either", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const held = await atelierQuery(
       { ...TARGET, namespace: NS_A },
       `SELECT s.PropValue FROM EnsLib_HL7.SearchTable s WHERE s.PropValue [ 'synthphi394' OR s.PropValue [ 'keepme394'`,
@@ -641,10 +607,10 @@ describe.skipIf(CAPTURE)("Story 39.4: a lookup returns header rows and never a S
 
     const filters = [filter("Story394Empty", "notNull")];
     const viaTool = await tableSearch(interop, { searchTableClass: ST4, filters });
-    expect(ids(succeeded(viaTool).rows), "the lookup matched the entry that holds the KEEPME value").toEqual([2]);
+    expect(headerIds(succeeded(viaTool).rows), "the lookup matched the entry that holds the KEEPME value").toEqual([2]);
     expect(JSON.stringify(viaTool).toLowerCase()).not.toContain("keepme394");
 
-    const viaRoute = await route(routeBody(filters, { searchTableClass: ST4 }));
+    const viaRoute = await postEnvelope(TARGET, ROUTE, routeBody(filters, { searchTableClass: ST4 }));
     expect(viaRoute.errors).toEqual([]);
     expect((viaRoute.result.rows as Array<{ id: number }>).map((row) => row.id)).toEqual([2]);
     expect(viaRoute.text.toLowerCase(), "the raw route answer").not.toContain("synthphi394");
@@ -673,8 +639,8 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
   ];
   for (const [what, property] of REFUSED_PROPERTIES) {
     it(`route: ${what} (${property}) is refused naming filters[0].property and listing the configured names`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(routeBody([filter(property, "eq", MARKER)]));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter(property, "eq", MARKER)]));
 
       expect(answer.status).toBe(200);
       expect(answer.errors.length, answer.text).toBe(1);
@@ -687,12 +653,12 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
   }
 
   it("route: the subclass lists its own seven names, and refuses a range or a substring on an Integer property naming filters[0].op", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const unknown = await route(routeBody([filter("NoSuch", "eq", MARKER)], { searchTableClass: ST4 }));
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const unknown = await postEnvelope(TARGET, ROUTE, routeBody([filter("NoSuch", "eq", MARKER)], { searchTableClass: ST4 }));
     for (const name of [...STOCK_NAMES, "Story394Int", "Story394Empty"]) expect(unknown.errors[0], `lists ${name}`).toContain(name);
 
     for (const [op, value] of [["gt", 5], ["contains", "7"], ["startsWith", "7"], ["lt", MARKER], ["ge", 5], ["le", 5]] as const) {
-      const answer = await route(routeBody([filter("Story394Int", op, value)], { searchTableClass: ST4 }));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("Story394Int", op, value)], { searchTableClass: ST4 }));
       expect(answer.errors.length, `${op}: ${answer.text}`).toBe(1);
       expect(answer.errors[0], op).toContain("filters[0].op");
       expect(answer.errors[0], op).toContain("Integer");
@@ -700,18 +666,18 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
       expect(answer.result).toEqual({});
     }
     for (const op of ["eq", "ne", "isNull", "notNull"]) {
-      const answer = await route(routeBody([op === "isNull" || op === "notNull" ? filter("Story394Int", op) : filter("Story394Int", op, 7)], { searchTableClass: ST4 }));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([op === "isNull" || op === "notNull" ? filter("Story394Int", op) : filter("Story394Int", op, 7)], { searchTableClass: ST4 }));
       expect(answer.errors, `${op} is allowed on an Integer property`).toEqual([]);
     }
   }, 120000);
 
   it("a value of 256 characters runs, and one of 257 is refused naming filters[0].value for every operator that takes a value (an index lookup by a long value would fail with SQLCODE -490)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const op of ["eq", "ne", "lt", "le", "gt", "ge", "contains", "startsWith"]) {
-      const accepted = await route(routeBody([filter("MSHControlID", op, "x".repeat(256))]));
+      const accepted = await postEnvelope(TARGET, ROUTE, routeBody([filter("MSHControlID", op, "x".repeat(256))]));
       expect(accepted.errors, `${op} with 256 characters`).toEqual([]);
 
-      const refused = await route(routeBody([filter("MSHControlID", op, `${MARKER}${"x".repeat(246)}`)]));
+      const refused = await postEnvelope(TARGET, ROUTE, routeBody([filter("MSHControlID", op, `${MARKER}${"x".repeat(246)}`)]));
       expect(refused.errors.length, `${op} with 257 characters: ${refused.text}`).toBe(1);
       expect(refused.errors[0], op).toContain("filters[0].value");
       expect(refused.errors[0], op).toContain("256 characters");
@@ -721,19 +687,19 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
     }
     // The length is a shape rule: it is checked before the property and the operator (the dictionary), as well as
     // before the namespace switch (the refused-shape rows aim it at a missing namespace).
-    const wrongProperty = await route(routeBody([filter("NoSuch", "eq", "x".repeat(300))]));
+    const wrongProperty = await postEnvelope(TARGET, ROUTE, routeBody([filter("NoSuch", "eq", "x".repeat(300))]));
     expect(wrongProperty.errors[0]).toContain("filters[0].value");
-    const wrongOp = await route(routeBody([filter("Story394Int", "gt", "x".repeat(300))], { searchTableClass: ST4 }));
+    const wrongOp = await postEnvelope(TARGET, ROUTE, routeBody([filter("Story394Int", "gt", "x".repeat(300))], { searchTableClass: ST4 }));
     expect(wrongOp.errors[0]).toContain("filters[0].value");
   }, 120000);
 
   it("the tool refuses a property that does not exist with the IRIS text, never the value", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await tableSearch(interop, { filters: [filter("NoSuch", "eq", MARKER)] });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("filters[0].property");
-    expect(textOf(result)).toContain("PatientID");
+    expect(firstText(result)).toContain("filters[0].property");
+    expect(firstText(result)).toContain("PatientID");
     expect(JSON.stringify(result)).not.toContain(MARKER);
   }, 120000);
 
@@ -748,8 +714,8 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
   ];
   for (const [what, searchTableClass] of REFUSED_CLASSES) {
     it(`route: ${what} (${searchTableClass}) is refused naming searchTableClass`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(routeBody([filter("PatientID", "eq", MARKER)], { searchTableClass }));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filter("PatientID", "eq", MARKER)], { searchTableClass }));
 
       expect(answer.errors.length, answer.text).toBe(1);
       expect(answer.errors[0]).toContain("'searchTableClass'");
@@ -798,8 +764,8 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
   const valid = routeBody([ok], { namespace: NS_Z });
   for (const [what, overrides, token] of SHAPE_CASES) {
     it(`route: ${what} is refused naming ${token}, before the namespace is switched`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
-      const answer = await route(Object.fromEntries(Object.entries({ ...valid, ...overrides }).filter(([, value]) => value !== undefined)));
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+      const answer = await postEnvelope(TARGET, ROUTE, Object.fromEntries(Object.entries({ ...valid, ...overrides }).filter(([, value]) => value !== undefined)));
 
       expect(answer.status).toBe(200);
       expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
@@ -811,8 +777,8 @@ describe.skipIf(CAPTURE)("Story 39.4: a property, class or shape that cannot be 
   }
 
   it("route: the valid shape aimed at the same missing namespace fails at the switch (positive control for the rows above)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
-    const answer = await route(valid);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const answer = await postEnvelope(TARGET, ROUTE, valid);
 
     expect(answer.errors.length, answer.text).toBeGreaterThanOrEqual(1);
     expect(answer.errors[0], "the namespace switch error").toContain("<NAMESPACE>");
@@ -873,7 +839,7 @@ function controlHeaders(op: string, value: string): number[] {
 
 describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route directly (AC-3, Rule #59, AD-26)", () => {
   it("the configured properties are the ones the fuzz expects (the oracle's own read of Ens_Config.SearchTableProp)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const rows = await atelierQuery(
       { ...TARGET, namespace: NS_A },
       `SELECT Name FROM Ens_Config.SearchTableProp WHERE ClassExtent = '${CLASS_EXTENT}' ORDER BY Name`,
@@ -882,7 +848,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
   }, 120000);
 
   it("the positive control: a statement that calls the side-effect function does increment ^Story393Side", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await resetSide(dev, NS_A);
     expect(await sideCount(dev, NS_A)).toBe(0);
     await atelierQuery({ ...TARGET, namespace: NS_A }, "SELECT Story393.Side_Bump() AS n");
@@ -892,7 +858,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
   }, 120000);
 
   it("a seeded corpus over the property, op and value slots: 0 violations", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await resetSide(dev, NS_A);
     const random = mulberry32(394);
     const violations: string[] = [];
@@ -902,7 +868,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
     /** Send one filter on `searchTableClass` and check the invariants every request must keep. */
     async function probe(slot: string, filterValue: Record<string, unknown>, expectedHeaders: readonly number[] | undefined, token: string, searchTableClass: string): Promise<void> {
       requests += 1;
-      const answer = await route(routeBody([filterValue], { searchTableClass }));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody([filterValue], { searchTableClass }));
       const label = `${slot} ${JSON.stringify(filterValue).slice(0, 120)}`;
       if (answer.text.toLowerCase().includes(MARKER.toLowerCase())) violations.push(`${label}: the response echoes the marker`);
       if (answer.status !== 200) violations.push(`${label}: HTTP ${answer.status}`);
@@ -996,7 +962,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the injection fuzz drives the REST route d
 
 describe.skipIf(CAPTURE)("Story 39.4: second namespace, not configured, unknown namespace (AC-4; Rules #34, #41)", () => {
   it("PropIds differ between the namespaces, and each namespace equals its own oracle for the same request", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const propId = async (namespace: string): Promise<number> => {
       const rows = await atelierQuery(
         { ...TARGET, namespace },
@@ -1013,20 +979,20 @@ describe.skipIf(CAPTURE)("Story 39.4: second namespace, not configured, unknown 
     const inBResult = succeeded(await tableSearch(interop, { namespace: NS_B, ...lookup }));
     expect(inAResult.rows).toEqual(await oracle(NS_A, "PatientID", "s.PropValue = 'synthphi394-mrn-1'"));
     expect(inBResult.rows).toEqual(await oracle(NS_B, "PatientID", "s.PropValue = 'synthphi394-mrn-1'"));
-    expect(ids(inAResult.rows)).toEqual([1, 2, 10]);
-    expect(ids(inBResult.rows)).toEqual([1]);
+    expect(headerIds(inAResult.rows)).toEqual([1, 2, 10]);
+    expect(headerIds(inBResult.rows)).toEqual([1]);
     expect(inAResult.rows).not.toEqual(inBResult.rows);
   }, 120000);
 
   it("each namespace's own subclass: AOnlyInB in B, Story394Int in A, and the other's class is refused", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const onlyInB = succeeded(await tableSearch(interop, { namespace: NS_B, searchTableClass: ST_B, filters: [filter("AOnlyInB", "notNull")] }));
     expect(onlyInB.rows).toEqual(await oracle(NS_B, "AOnlyInB", "s.PropValue <> ''"));
-    expect(ids(onlyInB.rows)).toEqual([1]);
+    expect(headerIds(onlyInB.rows)).toEqual([1]);
 
     const intInA = succeeded(await tableSearch(interop, { namespace: NS_A, searchTableClass: ST4, filters: [filter("Story394Int", "notNull")] }));
     expect(intInA.rows).toEqual(await oracle(NS_A, "Story394Int", "s.PropValue <> ''"));
-    expect(ids(intInA.rows)).toEqual([1, 2, 3, 10]);
+    expect(headerIds(intInA.rows)).toEqual([1, 2, 3, 10]);
 
     for (const [namespace, searchTableClass, filters] of [
       [NS_A, ST_B, [filter("AOnlyInB", "notNull")]],
@@ -1034,20 +1000,20 @@ describe.skipIf(CAPTURE)("Story 39.4: second namespace, not configured, unknown 
     ] as const) {
       const refused = await tableSearch(interop, { namespace, searchTableClass, filters });
       expect(refused.isError, `${searchTableClass} in ${namespace}`).toBe(true);
-      expect(textOf(refused)).toContain("searchTableClass");
+      expect(firstText(refused)).toContain("searchTableClass");
     }
     // The stock class does not know the subclass's property in B either.
     const stockInB = await tableSearch(interop, { namespace: NS_B, filters: [filter("AOnlyInB", "notNull")] });
     expect(stockInB.isError).toBe(true);
-    expect(textOf(stockInB)).toContain("filters[0].property");
+    expect(firstText(stockInB)).toContain("filters[0].property");
   }, 120000);
 
   it("a namespace with the Interoperability mappings and no Search Table is notApplicable with the policy, whatever the class; configuration is checked before the class", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const searchTableClass of [ST, "No.Such.Story394Class"]) {
       const result = await tableSearch(interop, { namespace: NS_C, searchTableClass, filters: [filter("PatientID", "eq", "x")] });
 
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, firstText(result)).toBeFalsy();
       expect(result.structuredContent, searchTableClass).toMatchObject({
         action: "searchTable",
         notApplicable: true,
@@ -1059,20 +1025,20 @@ describe.skipIf(CAPTURE)("Story 39.4: second namespace, not configured, unknown 
       expect(reason).toContain(`No Search Table is configured in namespace '${NS_C}'`);
       expect(reason).toContain("Ens.Config.SearchTableProp is empty");
 
-      const viaRoute = await route(routeBody([filter("PatientID", "eq", "x")], { namespace: NS_C, searchTableClass }));
+      const viaRoute = await postEnvelope(TARGET, ROUTE, routeBody([filter("PatientID", "eq", "x")], { namespace: NS_C, searchTableClass }));
       expect(viaRoute.errors, searchTableClass).toEqual([]);
       expect(viaRoute.result).toMatchObject({ action: "searchTable", interopEnabled: true, searchTablesConfigured: false, rows: [], hasMore: false });
     }
   }, 120000);
 
   it("a namespace that does not exist, with a valid shape, is an error carrying the sanitized switch text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await tableSearch(interop, { namespace: NS_Z, filters: [filter("PatientID", "eq", "x")] });
 
     expect(result.isError).toBe(true);
     expect((result.structuredContent as { code?: unknown } | undefined)?.code).toBeUndefined();
-    expect(textOf(result), "the namespace switch error").toContain("<NAMESPACE>");
-    expect(textOf(result)).not.toContain("^");
+    expect(firstText(result), "the namespace switch error").toContain("<NAMESPACE>");
+    expect(firstText(result)).not.toContain("^");
   }, 120000);
 });
 
@@ -1083,7 +1049,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the data policy decides before any IRIS ca
   const BLOCKED = { code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block" };
 
   it("under IRIS_DATA_POLICY=block searchTable is refused, and no IRIS call is made (the same call at a missing namespace is refused, not a namespace error)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const blocked = await interopSession({ IRIS_DATA_POLICY: "block" });
 
     for (const namespace of [NS_A, NS_Z]) {
@@ -1094,11 +1060,11 @@ describe.skipIf(CAPTURE)("Story 39.4: the data policy decides before any IRIS ca
 
     const headers = await blocked.call("iris_message_search", { action: "headers", namespace: NS_A, from: FROM, to: TO });
     expect(headers.isError, "headers is not under the policy").toBeFalsy();
-    expect(ids((headers.structuredContent as Structured).rows)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(headerIds((headers.structuredContent as Structured).rows)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   }, 120000);
 
   it("a profile with dataPolicy block is refused while the default profile of the same server runs searchTable", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const session = await interopSession({ IRIS_PROFILES: JSON.stringify({ tight: { dataPolicy: "block" } }) });
 
     for (const namespace of [NS_A, NS_Z]) {
@@ -1113,22 +1079,22 @@ describe.skipIf(CAPTURE)("Story 39.4: the data policy decides before any IRIS ca
       expect(refused.structuredContent, namespace).toEqual(BLOCKED);
     }
     const ran = succeeded(await tableSearch(session, SEARCH));
-    expect(ids(ran.rows)).toEqual([1, 2, 10]);
+    expect(headerIds(ran.rows)).toEqual([1, 2, 10]);
     expect(ran.dataPolicy).toEqual({ policy: "redact", redacted: 0, blocked: 0 });
   }, 120000);
 
   it("redact and allow return the same rows, each naming its policy in dataPolicy and in one trailing line", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const allow = await interopSession({ IRIS_DATA_POLICY: "allow" });
     const expected = await oracle(NS_A, "PatientID", "s.PropValue = 'synthphi394-mrn-1'");
-    expect(ids(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
+    expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual([1, 2, 10]);
 
     for (const [policy, session] of [["redact", interop], ["allow", allow]] as const) {
       const result = await tableSearch(session, SEARCH);
       const content = succeeded(result);
       expect(content.rows, policy).toEqual(expected);
       expect(content.dataPolicy, policy).toEqual({ policy, redacted: 0, blocked: 0 });
-      const lines = textOf(result).split("\n");
+      const lines = firstText(result).split("\n");
       expect(lines.at(-1), policy).toBe(
         `Data policy ${policy}: header rows only; the searchTable action returns no Search Table or body values.`,
       );
@@ -1140,25 +1106,8 @@ describe.skipIf(CAPTURE)("Story 39.4: the data policy decides before any IRIS ca
 // -- The audit trail ------------------------------------------------------------
 
 describe.skipIf(CAPTURE)("Story 39.4: the audit trail redacts the filters and records the policy (AC-2, AC-5; AD-19)", () => {
-  /** Poll (bounded) until the audit file holds `count` entries of the search tool, then return them. */
-  async function searchEntries(file: string, count: number): Promise<Array<Record<string, unknown>>> {
-    const deadline = Date.now() + 10000;
-    let entries: Array<Record<string, unknown>> = [];
-    while (Date.now() < deadline) {
-      const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-      entries = text
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Record<string, unknown>)
-        .filter((entry) => entry["tool"] === "iris_message_search");
-      if (entries.length >= count) return entries;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error(`fewer than ${count} iris_message_search entries in ${file}: ${existsSync(file) ? readFileSync(file, "utf8").slice(0, 3000) : "no file"}`);
-  }
-
   it("records dataPolicy for redact, block and allow; logs filters as [REDACTED] under redact and block and as given under allow", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const search = { filters: [filter("PatientID", "eq", `${MARKER}-MRN-1`)] };
     const rows: Array<{ policy: string; env: Record<string, string>; outcome: string; redacted: boolean }> = [
       { policy: "redact", env: {}, outcome: "ok", redacted: true },
@@ -1178,9 +1127,9 @@ describe.skipIf(CAPTURE)("Story 39.4: the audit trail redacts the filters and re
       const invalid = await tableSearch(session, { filters: [filter("PatientID", MARKER, MARKER)] });
       // The MCP SDK rejects the invalid op before the call reaches the audited chokepoint, so only the first call has an entry.
       expect(invalid.isError, "a Zod-invalid op").toBe(true);
-      expect(textOf(invalid), "the invalid call names the path").toContain("op");
+      expect(firstText(invalid), "the invalid call names the path").toContain("op");
 
-      const entries = await searchEntries(file, 1);
+      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
       const [entry] = entries as [Record<string, unknown>];
       expect(entry, row.policy).toMatchObject({
         action: "searchTable",
@@ -1205,13 +1154,6 @@ describe.skipIf(CAPTURE)("Story 39.4: the audit trail redacts the filters and re
 });
 
 // -- The plan -------------------------------------------------------------------
-
-/** Ignore case and white space: the statement index stores a statement upper-cased and tokenized. */
-const squash = (text: string): string => text.replace(/\s+/g, "").toUpperCase();
-
-/** The twelve header columns the route selects, written by hand. */
-const HEADER_COLUMNS =
-  "h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId";
 
 /**
  * What is wrong with a Search Table lookup statement as the statement index stores it and with its plan: the
@@ -1252,7 +1194,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
   ].join("\n");
 
   it("the checker can fail: a joined Search Table, a Search Table column, a scan by property, or the wrong order is reported", (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     expect(planProblems(GOOD_STATEMENT, GOOD_PLAN), "a well-formed statement and plan").toEqual([]);
     const ranged = "Read index map EnsLib_HL7.SearchTable(S0).indexDocId, using the given S0.DocId and S0.PropId, and looping on S0.PropValue (with a <> condition).";
     expect(planProblems(GOOD_STATEMENT, `Read master map Ens.MessageHeader(H).IDKEY, using the given idkey value.\n${ranged}`), "the range form").toEqual([]);
@@ -1267,7 +1209,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
   });
 
   it("after real calls, every route statement for the Search Table has the header-first plan, and each call's own statement is among them", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const calls: Array<{ name: string; filters: Array<Record<string, unknown>>; searchTableClass: string; extra?: Record<string, unknown>; fragment: string }> = [
       { name: "text eq", filters: [filter("PatientID", "eq", "x")], searchTableClass: ST, fragment: "AND s0.PropValue <> ? AND s0.PropValue = ?)" },
       { name: "contains", filters: [filter("PatientName", "contains", "x")], searchTableClass: ST, fragment: "AND s0.PropValue [ ?)" },
@@ -1278,7 +1220,7 @@ describe.skipIf(CAPTURE)("Story 39.4: the statements the route prepared read the
       { name: "a page after a cursor", filters: [filter("PatientID", "notNull")], searchTableClass: ST, extra: { afterTimeCreated: "2001-02-03 08:00:00", afterId: 1 }, fragment: "(h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))" },
     ];
     for (const call of calls) {
-      const answer = await route(routeBody(call.filters, { searchTableClass: call.searchTableClass, ...(call.extra ?? {}) }));
+      const answer = await postEnvelope(TARGET, ROUTE, routeBody(call.filters, { searchTableClass: call.searchTableClass, ...(call.extra ?? {}) }));
       expect(answer.errors, `${call.name}: ${answer.text}`).toEqual([]);
     }
 

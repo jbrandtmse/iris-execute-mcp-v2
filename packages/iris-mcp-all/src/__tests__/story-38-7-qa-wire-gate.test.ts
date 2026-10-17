@@ -44,11 +44,15 @@ import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierDocument,
+  docFixtures,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
   resolveSdkEsmDir,
   staleDistReason,
+  stemFixtures,
+  type DocFixtures,
+  type StemFixtures,
   type WireSession as Session,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
@@ -79,6 +83,10 @@ let admin: Session;
 let interop: Session;
 let scratch = "";
 
+/** The document helpers and the fixture oracle of `admin`, bound when called, so a teardown after a failed start-up still reaches the tools. */
+const docs = (): DocFixtures => docFixtures(admin);
+const fixtures = (): StemFixtures => stemFixtures(admin, STEM);
+
 /** The built dev server's session options. */
 function devOptions(): WireSessionOptions {
   return { sdkEsmDir: sdkEsmDir as string, entry: DEV_ENTRY, target: TARGET, clientName: "story-38-7-qa-wire-gate" };
@@ -89,12 +97,6 @@ const openSession = (): Promise<Session> => openWireSession(devOptions());
 /** The class text of a fixture. */
 function classText(className: string, superclass: string, marker: string): string {
   return [`Class ${className} Extends ${superclass}`, "{", "", `Property ${marker} As %String;`, "", "}"].join("\n");
-}
-
-async function fixtureDocuments(): Promise<string[]> {
-  const listed = await admin.call("iris_doc_list", { filter: STEM, generated: true });
-  expect(listed.isError, "the document listing").toBeFalsy();
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
 }
 
 async function removeFixtures(): Promise<void> {
@@ -110,15 +112,6 @@ async function stored(docName: string): Promise<boolean> {
     if (error instanceof Error && error.message.includes("HTTP 404")) return false;
     throw error;
   }
-}
-
-async function putFixture(className: string, superclass: string, marker: string, compile: boolean): Promise<void> {
-  const put = await admin.call("iris_doc_put", { name: `${className}.cls`, content: classText(className, superclass, marker) });
-  expect(put.isError, `creating ${className}: ${put.content?.[0]?.text}`).toBeFalsy();
-  if (!compile) return;
-  const compiled = await admin.call("iris_doc_compile", { doc: `${className}.cls` });
-  expect(compiled.isError, `compiling ${className}`).toBeFalsy();
-  expect(compiled.structuredContent, `compiling ${className}`).toMatchObject({ success: true });
 }
 
 beforeAll(async () => {
@@ -145,7 +138,7 @@ beforeAll(async () => {
   interop = await openWireSession({ ...devOptions(), entry: INTEROP_ENTRY, clientName: "story-38-7-qa-wire-gate-interop" });
   scratch = mkdtempSync(path.join(realpathSync(tmpdir()), "qa-story-387-wire-"));
   await removeFixtures();
-  expect(await fixtureDocuments(), "no QaStory387Wire document before the run").toEqual([]);
+  expect(await fixtures().documents(), "no QaStory387Wire document before the run").toEqual([]);
 }, 120000);
 
 afterAll(async () => {
@@ -153,7 +146,7 @@ afterAll(async () => {
   try {
     if (admin) {
       await removeFixtures();
-      expect(await fixtureDocuments(), "no QaStory387Wire document after the run").toEqual([]);
+      expect(await fixtures().documents(), "no QaStory387Wire document after the run").toEqual([]);
     }
   } finally {
     if (scratch) rmSync(scratch, { recursive: true, force: true });
@@ -168,7 +161,8 @@ describe("iris_production_manage delete on the real wire (Story 38.7, DW-533, AC
   it("a compiled class that is not a production is refused with the matrix text, and the class still exists", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     try {
-      await putFixture(PLAIN, "%RegisteredObject", "Alpha", true);
+      await docs().putDoc(`${PLAIN}.cls`, classText(PLAIN, "%RegisteredObject", "Alpha"));
+      await docs().compileDoc(`${PLAIN}.cls`);
       expect(await stored(`${PLAIN}.cls`), "precondition: the class exists").toBe(true);
 
       const result = await interop.call("iris_production_manage", { action: "delete", name: PLAIN });
@@ -188,7 +182,7 @@ describe("iris_production_manage delete on the real wire (Story 38.7, DW-533, AC
   it("a class saved but never compiled whose Super is Ens.Production is deleted: the result says deleted, and the class is gone", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     try {
-      await putFixture(DRAFT, "Ens.Production", "Beta", false);
+      await docs().putDoc(`${DRAFT}.cls`, classText(DRAFT, "Ens.Production", "Beta"));
       expect(await stored(`${DRAFT}.cls`), "precondition: the draft is stored").toBe(true);
 
       const result = await interop.call("iris_production_manage", { action: "delete", name: DRAFT });
@@ -207,7 +201,7 @@ describe("iris_production_manage delete on the real wire (Story 38.7, DW-533, AC
 
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toContain(`Production '${MISSING}' does not exist`);
-    expect(await fixtureDocuments(), "nothing was created").toEqual([]);
+    expect(await fixtures().documents(), "nothing was created").toEqual([]);
   }, 60000);
 });
 
@@ -267,7 +261,7 @@ describe("modifiedSince on the three document tools, as a client sees it (Story 
   it("iris_doc_list with modifiedSince empty lists a fixture exactly as with it absent", async (testCtx) => {
     if (skipReason) return testCtx.skip();
     try {
-      await putFixture(PLAIN, "%RegisteredObject", "Gamma", false);
+      await docs().putDoc(`${PLAIN}.cls`, classText(PLAIN, "%RegisteredObject", "Gamma"));
 
       const absent = await admin.call("iris_doc_list", { filter: `${STEM}Plain` });
       const empty = await admin.call("iris_doc_list", { filter: `${STEM}Plain`, modifiedSince: "" });
@@ -302,7 +296,7 @@ describe("iris_doc_get and iris_doc_load, as a client calls them (Story 38.7, DW
     if (skipReason) return testCtx.skip();
     const sourceRoot = mkdtempSync(path.join(scratch, "load-"));
     try {
-      await putFixture(LOADED, "%RegisteredObject", "Original", false);
+      await docs().putDoc(`${LOADED}.cls`, classText(LOADED, "%RegisteredObject", "Original"));
       const dir = path.join(sourceRoot, "ExecuteMCPv2", "Temp");
       mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, `${STEM}Loaded.cls`), `${classText(LOADED, "%RegisteredObject", "FromFile")}\n`, "utf8");

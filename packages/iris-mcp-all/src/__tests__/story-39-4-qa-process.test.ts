@@ -31,17 +31,24 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  allText,
   openWireSession,
+  pollAuditEntries,
   resolveSdkEsmDir,
+  routeRequests,
+  skipIfReason,
   staleDistReason,
-  type IrisTarget,
+  startRouteStub,
+  stubEnvelope,
+  stubTarget,
+  writeJson,
+  type RecordedRequest,
+  type RouteStub,
   type WireSession,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
@@ -102,55 +109,8 @@ const BLOCKED_TEXT =
 
 // -- The listener ----------------------------------------------------------------------------------------------
 
-interface Recorded {
-  method: string;
-  url: string;
-  body: string;
-}
-
-interface Stub {
-  port: number;
-  requests: Recorded[];
-  /** While false every request is answered 503, which is how the server starts without an IRIS. */
-  serving: boolean;
-  /** The reply of the search route, built from the parsed request. */
-  reply: (request: Record<string, unknown>) => unknown;
-  close: () => Promise<void>;
-}
-
 /** The search POSTs the listener has recorded. */
-const searchesOf = (s: Stub): Recorded[] => s.requests.filter((r) => r.method === "POST" && r.url === SEARCH_ROUTE);
-
-async function startStub(): Promise<Stub> {
-  const stub: Stub = { port: 0, requests: [], serving: false, reply: () => ({}), close: () => Promise.resolve() };
-  const server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
-      stub.requests.push({ method: req.method ?? "", url: req.url ?? "", body });
-      if (stub.serving && req.method === "HEAD" && req.url === "/api/atelier/") {
-        res.statusCode = 200;
-        res.end();
-        return;
-      }
-      if (stub.serving && req.method === "POST" && req.url === SEARCH_ROUTE) {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(stub.reply(JSON.parse(body) as Record<string, unknown>)));
-        return;
-      }
-      res.statusCode = 503;
-      res.end();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  stub.port = (server.address() as AddressInfo).port;
-  stub.close = () => new Promise<void>((resolve) => server.close(() => resolve()));
-  return stub;
-}
-
-const envelope = (result: unknown): unknown => ({ status: { errors: [], summary: "" }, console: [], result });
+const searchesOf = (s: RouteStub): RecordedRequest[] => s.requests.filter((r) => r.method === "POST" && r.url === SEARCH_ROUTE);
 
 /** A header row exactly as the route returns it. */
 const ROW: Item = {
@@ -184,11 +144,11 @@ const WINDOW = { from: "2001-02-03 07:00:00", to: "2001-02-03 09:00:00" };
 
 /** What a well-behaved route answers for a match: header rows only. */
 const WELL_BEHAVED = (): unknown =>
-  envelope({ action: "searchTable", limit: 100, ...WINDOW, interopEnabled: true, searchTablesConfigured: true, rows: [ROW], hasMore: false });
+  stubEnvelope({ action: "searchTable", limit: 100, ...WINDOW, interopEnabled: true, searchTablesConfigured: true, rows: [ROW], hasMore: false });
 
 /** A `headers` answer, for the sessions that also call the headers action. */
 const HEADERS_REPLY = (): unknown =>
-  envelope({ action: "headers", limit: 100, ...WINDOW, interopEnabled: true, rows: [ROW], hasMore: false });
+  stubEnvelope({ action: "headers", limit: 100, ...WINDOW, interopEnabled: true, rows: [ROW], hasMore: false });
 
 /**
  * A reply padded the way a version-skewed, patched or hostile IRIS could send it: Search Table and body
@@ -196,7 +156,7 @@ const HEADERS_REPLY = (): unknown =>
  * error text, a description), an echo of the filters, and extra result fields.
  */
 const PADDED = (): unknown =>
-  envelope({
+  stubEnvelope({
     action: "searchTable",
     limit: 100,
     ...WINDOW,
@@ -224,7 +184,7 @@ const PADDED = (): unknown =>
 
 /** A padded answer for a namespace with no Search Table property: rows the route would never send there. */
 const PADDED_NO_SEARCH_TABLE = (): unknown =>
-  envelope({
+  stubEnvelope({
     action: "searchTable",
     limit: 100,
     ...WINDOW,
@@ -237,7 +197,7 @@ const PADDED_NO_SEARCH_TABLE = (): unknown =>
 
 /** A padded answer for a namespace without Interoperability. */
 const PADDED_NO_INTEROP = (): unknown =>
-  envelope({
+  stubEnvelope({
     action: "searchTable",
     limit: 100,
     ...WINDOW,
@@ -252,12 +212,8 @@ const PADDED_NO_INTEROP = (): unknown =>
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir = "";
-let stub: Stub;
+let stub: RouteStub;
 const opened: WireSession[] = [];
-
-function stubTarget(s: Stub): IrisTarget {
-  return { host: "127.0.0.1", port: String(s.port), username: "story394-qa", password: "not-a-real-password", namespace: "HSCUSTOM" };
-}
 
 /**
  * A session on the built interop server pointed at the listener, with `extraEnv`. The listener refuses
@@ -269,7 +225,7 @@ async function session(extraEnv: Record<string, string> = {}, onStderr?: (chunk:
   const options: WireSessionOptions = {
     sdkEsmDir: sdkEsmDir as string,
     entry: INTEROP_ENTRY,
-    target: stubTarget(stub),
+    target: stubTarget(stub.port, "story394-qa"),
     clientName: "story-39-4-qa-process",
     ...(onStderr ? { onStderr } : {}),
   };
@@ -279,27 +235,10 @@ async function session(extraEnv: Record<string, string> = {}, onStderr?: (chunk:
   return created;
 }
 
-let fileCounter = 0;
-function writeJson(name: string, document: unknown): string {
-  fileCounter += 1;
-  const file = path.join(fixtureDir, `${fileCounter}-${name}`);
-  writeFileSync(file, JSON.stringify(document), "utf8");
-  return file;
-}
-
-/** The text of every content block of a tool result, joined by newlines. */
-const textOf = (result: { content?: Array<{ text?: string }> }): string => (result.content ?? []).map((b) => b.text ?? "").join("\n");
-
 const REFUSAL = { code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block" };
 
-/**
- * The requests to the ExecuteMCPv2 routes, which only a tool handler makes. The server's own connection checks and
- * bootstrap traffic go to /api/atelier/ on its own schedule, so they are not counted.
- */
-const routeRequests = (): Recorded[] => stub.requests.filter((r) => r.url.startsWith("/api/executemcp/"));
-
 /** How many route requests the listener has seen so far: a refusal must not change it. */
-const seen = (): number => routeRequests().length;
+const seen = (): number => routeRequests(stub).length;
 
 beforeAll(async () => {
   skipReason = staleDistReason(REPO_ROOT, "shared") ?? staleDistReason(REPO_ROOT, "iris-interop-mcp");
@@ -319,7 +258,7 @@ beforeAll(async () => {
     return;
   }
   fixtureDir = mkdtempSync(path.join(tmpdir(), "story-39-4-qa-"));
-  stub = await startStub();
+  stub = await startRouteStub(SEARCH_ROUTE);
 });
 
 afterAll(async () => {
@@ -328,19 +267,13 @@ afterAll(async () => {
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
-function skipIfNeeded(ctx: { skip: () => void }): boolean {
-  if (!skipReason) return false;
-  ctx.skip();
-  return true;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // block: refused before any request, whatever else is wrong with the call
 // ---------------------------------------------------------------------------------------------------------------
 
 describe("Story 39.4 QA: under block the searchTable action sends no route request (AC-2; AD-9, AD-26)", () => {
   it("IRIS_DATA_POLICY=block refuses every searchTable call with the same fixed refusal, before the input checks, and the listener sees no route request", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = WELL_BEHAVED;
     const s = await session({ IRIS_DATA_POLICY: "block" });
 
@@ -360,27 +293,27 @@ describe("Story 39.4 QA: under block the searchTable action sends no route reque
       expect(result.isError, label).toBe(true);
       expect(result.structuredContent, label).toEqual(REFUSAL);
       expect(JSON.stringify(result), `${label}: no filter value in the refusal`).not.toContain(FILTER_TOKEN);
-      texts.push(textOf(result));
+      texts.push(allText(result));
     }
     expect(new Set(texts).size, "the refusal text is fixed: it does not vary with the input").toBe(1);
     expect(texts[0], "the text is the spec's, which names the searchTable action").toBe(BLOCKED_TEXT);
-    expect(routeRequests().slice(before), "block made no request to a route").toEqual([]);
+    expect(routeRequests(stub).slice(before), "block made no request to a route").toEqual([]);
   }, 60000);
 
   it("the window and the misplaced-parameter checks come before the policy and are validation errors, and body keeps its own refusal: none sends a request", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     const s = await session({ IRIS_DATA_POLICY: "block" });
     const before = seen();
 
     const badFrom = await s.call("iris_message_search", { ...SEARCH, from: "yesterday" });
     expect(badFrom.isError).toBe(true);
     expect(badFrom.structuredContent?.["code"], "a bad window is a validation error, not a policy refusal").toBeUndefined();
-    expect(textOf(badFrom)).toContain("'from' must be an ISO 8601");
+    expect(allText(badFrom)).toContain("'from' must be an ISO 8601");
 
     const filtersOnHeaders = await s.call("iris_message_search", { action: "headers", namespace: NS, from: FROM, to: TO, filters: FILTERS });
     expect(filtersOnHeaders.isError).toBe(true);
     expect(filtersOnHeaders.structuredContent?.["code"]).toBeUndefined();
-    expect(textOf(filtersOnHeaders)).toBe("'filters' applies only to the body and searchTable actions.");
+    expect(allText(filtersOnHeaders)).toBe("'filters' applies only to the body and searchTable actions.");
 
     for (const action of ["headers", "body"]) {
       const misplaced = await s.call("iris_message_search", {
@@ -393,68 +326,68 @@ describe("Story 39.4 QA: under block the searchTable action sends no route reque
       });
       expect(misplaced.isError, action).toBe(true);
       expect(misplaced.structuredContent?.["code"], `${action}: a misplaced parameter is not a policy refusal`).toBeUndefined();
-      expect(textOf(misplaced), action).toBe("'searchTableClass' applies only to the searchTable action.");
+      expect(allText(misplaced), action).toBe("'searchTableClass' applies only to the searchTable action.");
     }
 
     const body = await s.call("iris_message_search", { action: "body", namespace: NS, from: FROM, to: TO, bodyClass: BODY_CLASS, filters: FILTERS });
     expect(body.structuredContent, "body keeps its own refusal, naming the body action").toEqual({ code: "DATA_POLICY_BLOCKED", action: "body", policy: "block" });
-    expect(textOf(body), "and its own text, not the searchTable one").not.toBe(BLOCKED_TEXT);
+    expect(allText(body), "and its own text, not the searchTable one").not.toBe(BLOCKED_TEXT);
 
-    expect(routeRequests().slice(before)).toEqual([]);
+    expect(routeRequests(stub).slice(before)).toEqual([]);
   }, 60000);
 
   it("headers on the same blocked session is not under the policy: it sends its request, with no searchTableClass or filters key and no dataPolicy in the result", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = HEADERS_REPLY;
     const s = await session({ IRIS_DATA_POLICY: "block" });
     const before = searchesOf(stub).length;
 
     const result = await s.call("iris_message_search", { action: "headers", namespace: NS, from: FROM, to: TO });
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, allText(result)).toBeFalsy();
     expect(result.structuredContent).not.toHaveProperty("dataPolicy");
     const sent = searchesOf(stub).slice(before);
     expect(sent, "the listener sees what is sent (the positive control for the zero counts above)").toHaveLength(1);
-    expect(JSON.parse((sent[0] as Recorded).body)).toEqual({ action: "headers", from: FROM, to: TO, limit: 100, namespace: NS });
+    expect(JSON.parse((sent[0] as RecordedRequest).body)).toEqual({ action: "headers", from: FROM, to: TO, limit: 100, namespace: NS });
   }, 60000);
 
   it("a block profile refuses while the default profile of the same server sends, and an unknown profile sends nothing", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = WELL_BEHAVED;
     const s = await session({ IRIS_PROFILES: JSON.stringify({ tight: { dataPolicy: "block" } }) });
 
     const before = seen();
     const refused = await s.callOn("tight", "iris_message_search", SEARCH);
     expect(refused.structuredContent).toEqual(REFUSAL);
-    expect(routeRequests().slice(before), "the tight profile sent nothing").toEqual([]);
+    expect(routeRequests(stub).slice(before), "the tight profile sent nothing").toEqual([]);
 
     const unknown = await s.callOn("nosuchprofile", "iris_message_search", SEARCH);
     expect(unknown.isError).toBe(true);
     expect(unknown.structuredContent?.["code"]).not.toBe("DATA_POLICY_BLOCKED");
     expect(JSON.stringify(unknown)).not.toContain(FILTER_TOKEN);
-    expect(routeRequests().slice(before), "an unknown profile sent nothing").toEqual([]);
+    expect(routeRequests(stub).slice(before), "an unknown profile sent nothing").toEqual([]);
 
     const searchesBefore = searchesOf(stub).length;
     const ran = await s.call("iris_message_search", SEARCH);
-    expect(ran.isError, textOf(ran)).toBeFalsy();
+    expect(ran.isError, allText(ran)).toBeFalsy();
     expect((ran.structuredContent as Item).dataPolicy).toEqual({ policy: "redact", redacted: 0, blocked: 0 });
     expect(searchesOf(stub).length - searchesBefore, "the default profile sent its request").toBe(1);
   }, 60000);
 
   it("the governance file decides too: a profile entry beats the file's global one, in either direction", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = WELL_BEHAVED;
-    const file = writeJson("governance.json", { dataPolicy: { profiles: { p: "BLOCK" }, global: "allow" } });
+    const file = writeJson(fixtureDir, "governance.json", { dataPolicy: { profiles: { p: "BLOCK" }, global: "allow" } });
     const s = await session({ IRIS_PROFILES: JSON.stringify({ p: {} }), IRIS_GOVERNANCE_FILE: file });
 
     const before = seen();
     const refused = await s.callOn("p", "iris_message_search", SEARCH);
     expect(refused.structuredContent, "p is block by the file's profiles entry").toEqual(REFUSAL);
-    expect(routeRequests().slice(before), "p sent nothing").toEqual([]);
+    expect(routeRequests(stub).slice(before), "p sent nothing").toEqual([]);
 
     const searchesBefore = searchesOf(stub).length;
     const ran = await s.call("iris_message_search", SEARCH);
-    expect(ran.isError, textOf(ran)).toBeFalsy();
+    expect(ran.isError, allText(ran)).toBeFalsy();
     expect((ran.structuredContent as Item).dataPolicy, "the default profile is allow by the file's global entry").toEqual({
       policy: "allow",
       redacted: 0,
@@ -462,11 +395,11 @@ describe("Story 39.4 QA: under block the searchTable action sends no route reque
     });
     expect(searchesOf(stub).length - searchesBefore, "the allow profile sent its request").toBe(1);
 
-    const globalBlock = writeJson("governance-global.json", { dataPolicy: { global: "block" } });
+    const globalBlock = writeJson(fixtureDir, "governance-global.json", { dataPolicy: { global: "block" } });
     const g = await session({ IRIS_GOVERNANCE_FILE: globalBlock });
     const mark = seen();
     expect((await g.call("iris_message_search", SEARCH)).structuredContent, "global block").toEqual(REFUSAL);
-    expect(routeRequests().slice(mark), "global block sent nothing").toEqual([]);
+    expect(routeRequests(stub).slice(mark), "global block sent nothing").toEqual([]);
   }, 60000);
 });
 
@@ -480,17 +413,17 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
     ["allow", { IRIS_DATA_POLICY: "allow" }],
   ] as Array<[string, Record<string, string>]>) {
     it(`${policy}: exactly one request with the caller's class, filters and window, and the 14 header-row fields of a padded reply, nothing else`, async (ctx) => {
-      if (skipIfNeeded(ctx)) return;
+      if (skipIfReason(skipReason, ctx)) return;
       stub.reply = PADDED;
       const s = await session(env);
       const before = searchesOf(stub).length;
 
       const result = await s.call("iris_message_search", SEARCH);
 
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, allText(result)).toBeFalsy();
       const sent = searchesOf(stub).slice(before);
       expect(sent, "exactly one search request").toHaveLength(1);
-      expect(JSON.parse((sent[0] as Recorded).body), "the wire body: the caller's fields, nothing added").toEqual(WIRE_BODY);
+      expect(JSON.parse((sent[0] as RecordedRequest).body), "the wire body: the caller's fields, nothing added").toEqual(WIRE_BODY);
 
       const structured = result.structuredContent as Item;
       expect(Object.keys(structured).sort(), "only the named result fields").toEqual(RESULT_FIELDS);
@@ -503,20 +436,20 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
       const everything = JSON.stringify(result);
       expect(everything, "no Search Table or body content from the padded reply, in text or structured output").not.toContain(SENTINEL);
       expect(everything, "no filter value echoed in text or structured output").not.toContain(FILTER_TOKEN);
-      const lines = textOf(result).split("\n");
+      const lines = allText(result).split("\n");
       expect(lines, "a heading, one row and the policy line").toHaveLength(3);
       expect(lines[0]).toBe("1 message header(s) from 2001-02-03T07:00:00.000Z to 2001-02-03T09:00:00.000Z.");
       expect(lines.at(-1)).toBe(`Data policy ${policy}: header rows only; the searchTable action returns no Search Table or body values.`);
     }, 60000);
 
     it(`${policy}: a namespace with no Search Table property is notApplicable with its reason and no rows, however many the reply carries`, async (ctx) => {
-      if (skipIfNeeded(ctx)) return;
+      if (skipIfReason(skipReason, ctx)) return;
       stub.reply = PADDED_NO_SEARCH_TABLE;
       const s = await session(env);
 
       const result = await s.call("iris_message_search", SEARCH);
 
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, allText(result)).toBeFalsy();
       const structured = result.structuredContent as Item;
       expect(Object.keys(structured).sort()).toEqual(NOT_APPLICABLE_FIELDS);
       expect(structured).toMatchObject({ action: "searchTable", notApplicable: true, rows: [], hasMore: false, dataPolicy: { policy, redacted: 0, blocked: 0 } });
@@ -524,19 +457,19 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
         `No Search Table is configured in namespace '${NS}': it has no Search Table properties (Ens.Config.SearchTableProp is empty), ` +
           "so there is nothing to look up. Compile or deploy a Search Table class there, or use the headers or body action.",
       );
-      expect(textOf(result).split("\n").at(-1)).toBe(`Data policy ${policy}: header rows only; the searchTable action returns no Search Table or body values.`);
+      expect(allText(result).split("\n").at(-1)).toBe(`Data policy ${policy}: header rows only; the searchTable action returns no Search Table or body values.`);
       expect(JSON.stringify(result)).not.toContain(SENTINEL);
       expect(JSON.stringify(result)).not.toContain(FILTER_TOKEN);
     }, 60000);
 
     it(`${policy}: a namespace without Interoperability is notApplicable with the 39.1 reason and no rows, however many the reply carries`, async (ctx) => {
-      if (skipIfNeeded(ctx)) return;
+      if (skipIfReason(skipReason, ctx)) return;
       stub.reply = PADDED_NO_INTEROP;
       const s = await session(env);
 
       const result = await s.call("iris_message_search", SEARCH);
 
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, allText(result)).toBeFalsy();
       const structured = result.structuredContent as Item;
       expect(Object.keys(structured).sort()).toEqual(NOT_APPLICABLE_FIELDS);
       expect(structured).toMatchObject({ action: "searchTable", notApplicable: true, rows: [], hasMore: false, dataPolicy: { policy, redacted: 0, blocked: 0 } });
@@ -547,18 +480,18 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
   }
 
   it("an empty page is a success that names the policy and says an index proves nothing about absence", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
-    stub.reply = () => envelope({ action: "searchTable", limit: 100, ...WINDOW, interopEnabled: true, searchTablesConfigured: true, rows: [], hasMore: false });
+    if (skipIfReason(skipReason, ctx)) return;
+    stub.reply = () => stubEnvelope({ action: "searchTable", limit: 100, ...WINDOW, interopEnabled: true, searchTablesConfigured: true, rows: [], hasMore: false });
     const s = await session();
 
     const result = await s.call("iris_message_search", SEARCH);
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, allText(result)).toBeFalsy();
     const structured = result.structuredContent as Item;
     expect(structured).toMatchObject({ action: "searchTable", rows: [], hasMore: false, dataPolicy: { policy: "redact", redacted: 0, blocked: 0 } });
     expect(structured).not.toHaveProperty("notApplicable");
     expect(structured).not.toHaveProperty("nextCursor");
-    expect(textOf(result)).toBe(
+    expect(allText(result)).toBe(
       "No message headers matched. A Search Table holds only the messages indexed when they were processed (or by BuildIndex), " +
         "so no match does not prove that no message holds the value.\n" +
         "Data policy redact: header rows only; the searchTable action returns no Search Table or body values.",
@@ -566,9 +499,9 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
   }, 60000);
 
   it("every scope filter, a value-free filter and a page after a cursor reach the wire as given, in one request each", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = () =>
-      envelope({
+      stubEnvelope({
         action: "searchTable",
         limit: 1,
         ...WINDOW,
@@ -628,21 +561,8 @@ describe("Story 39.4 QA: under redact and allow the lookup goes to IRIS as given
 // ---------------------------------------------------------------------------------------------------------------
 
 describe("Story 39.4 QA: neither the audit file nor the console log holds a Search Table value or, under redact and block, a filter value (AC-2, AC-5; AD-19)", () => {
-  /** Poll (bounded) until the audit file holds `count` entries of the search tool, then return all its entries. */
-  async function searchEntries(file: string, count: number): Promise<Item[]> {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const entries = existsSync(file)
-        ? readFileSync(file, "utf8").split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line) as Item).filter((entry) => entry.tool === "iris_message_search")
-        : [];
-      if (entries.length >= count) return entries;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    throw new Error(`fewer than ${count} iris_message_search entries in ${file}: ${existsSync(file) ? readFileSync(file, "utf8").slice(0, 2000) : "no file"}`);
-  }
-
   it("under each policy, with a padded reply, at DEBUG, the entry carries the policy, the filters are redacted or logged, no stored value is anywhere, and the headers entry of the same file has no dataPolicy", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = (request) => (request.action === "headers" ? HEADERS_REPLY() : PADDED());
     const cases: Array<{ label: string; env: Record<string, string>; outcome: string; filtersLogged: boolean }> = [
       { label: "redact", env: {}, outcome: "ok", filtersLogged: false },
@@ -660,7 +580,7 @@ describe("Story 39.4 QA: neither the audit file nor the console log holds a Sear
       const headers = await s.call("iris_message_search", { action: "headers", namespace: NS, from: FROM, to: TO });
       expect(headers.isError, `${row.label}: headers runs under every policy`).toBeFalsy();
 
-      const [entry, headersEntry] = await searchEntries(file, 2);
+      const [entry, headersEntry] = await pollAuditEntries(file, { tool: "iris_message_search", count: 2, intervalMs: 20, timeoutMs: 10000, excerpt: 2000 });
       expect(entry, row.label).toMatchObject({
         tool: "iris_message_search",
         action: "searchTable",
@@ -689,7 +609,7 @@ describe("Story 39.4 QA: neither the audit file nor the console log holds a Sear
   }, 180000);
 
   it("a call that names no profile the server has is audited with its filters redacted, and sends nothing", async (ctx) => {
-    if (skipIfNeeded(ctx)) return;
+    if (skipIfReason(skipReason, ctx)) return;
     stub.reply = PADDED;
     const file = path.join(fixtureDir, "audit-unresolved.jsonl");
     let stderr = "";
@@ -701,8 +621,8 @@ describe("Story 39.4 QA: neither the audit file nor the console log holds a Sear
     const result = await s.raw("iris_message_search", { ...SEARCH, server: "nosuchprofile" });
 
     expect(result.isError).toBe(true);
-    expect(routeRequests().slice(before), "an unresolved profile sent nothing").toEqual([]);
-    const [entry] = await searchEntries(file, 1);
+    expect(routeRequests(stub).slice(before), "an unresolved profile sent nothing").toEqual([]);
+    const [entry] = await pollAuditEntries(file, { tool: "iris_message_search", count: 1, intervalMs: 20, timeoutMs: 10000, excerpt: 2000 });
     expect(entry, "the entry").toMatchObject({ tool: "iris_message_search", action: "searchTable", outcome: "error" });
     expect(((entry as Item).params as Item).filters, "the profile did not resolve, so its policy is unknown and the filters are redacted").toBe("[REDACTED]");
     expect(entry).not.toHaveProperty("dataPolicy");

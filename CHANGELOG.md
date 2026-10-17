@@ -2,6 +2,80 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 39.6: Message forensics docs, prompt and capstone
+
+No tool, action, governance key, preset row, annotation, schema or environment variable is added, so no default state and
+no tool count moves: the suite stays at 109 package tools (114 advertised), the Interoperability `core` roster stays at
+12 runtime tools, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys) and `BOOTSTRAP_VERSION` stays
+`2fd17b50a024`. The prompt pack goes from 12 to 13 prompts (the Interoperability server from 3 to 4).
+
+### Added
+
+- **The `find-patient-messages` prompt (title "Find Patient Messages").** It finds a patient's messages by a Search Table
+  value, such as a medical record number. `patientId` is required; `from`, `to`, `searchTableClass` (default
+  `EnsLib.HL7.SearchTable`) and `namespace` are optional. It reads the profile's data policy with
+  `iris_server_profiles`, asks the user for the period when no `from` is given, searches with `iris_message_search`
+  (`searchTable`, `PatientID`) in windows of at most 7 days, lists the header rows, and reads bodies with
+  `iris_message_body` only when the user wants content. It calls reads only (both tools are enabled by default), its main
+  path is in the Interoperability `core` preset, a `dataPolicy` argument can only tighten the profile's policy, and a
+  withheld body or a refused lookup is reported, never read another way.
+- **The skill `skills/find-patient-messages/SKILL.md`**, generated from the prompt: the skills pack is 13 skills.
+- **A `tools/list` snapshot (DW-573).** `pnpm gen:tools-list-snapshot:check` compares the built servers with a committed
+  snapshot of 114 entries over the five servers and writes nothing; it exits 1 when a listed tool's title, description,
+  input schema or annotations changed or a listed tool vanished, and a tool that is not in the snapshot is reported and
+  allowed. `pnpm gen:tools-list-snapshot --force` regenerates it, and is the sanctioned step for a change to a listed
+  entry, an additive one included. The CLI refuses to run without a flag.
+
+### Changed
+
+- **`trace-message-flow` searches, reads and diagrams (AD-15).** Its description now names `iris_message_search`,
+  `iris_message_body`, `iris_message_diagram` and `iris_production_logs`, and its steps run in this order: the hops of
+  `iris_production_messages`; the header rows of `iris_message_search` (`headers`, in windows of at most 7 days); the
+  bodies that matter through `iris_message_body` under the PHI data policy, with a withheld body's reason reported and
+  the body never read another way; the diagram; and the logs of erroring items. Its name, title and arguments
+  (`sessionOrHeaderId` required, `namespace` optional) are unchanged, and a test pins them. Its generated skill is
+  regenerated.
+
+### Documentation
+
+- **Message forensics in the suite README.** A new subsection lists each `iris_message_search` action by its governance
+  key and `iris_message_body`, each a read, enabled by default (and still enabled under the `read-only` preset), with the
+  required window of at most 7 days, `limit` as an output cap only, paging, `notApplicable`, the effect of the data
+  policy on each, how to restrict a key, and the two prompts. The Integration engineer row, the audit paragraph (which
+  now names every governed tool and the declared PHI input `filters`), the prompts table (13 prompts, with the updated
+  `trace-message-flow` and the new `find-patient-messages`) and the Backward Compatibility list (the snapshot) are
+  updated.
+- **The Interoperability README.** The intro, the `core` paragraph, the `IRIS_DATA_POLICY` row (default `redact`), a new
+  PHI data policy section (the five channels in order, `iris_server_profiles` reporting `dataPolicy` and
+  `dataPolicySource`, tighten-only), the audit fields, the note that `headers` is outside the policy, the Prompts table
+  and a `DATA_POLICY_BLOCKED` row under Common Errors.
+- **Two Tool Examples in the Interoperability README.** A `searchTable` lookup of a medical record number and an
+  `iris_message_body` read under the default `redact` policy, each a read that is enabled by default. Their outputs were
+  captured from the built servers on a synthetic fixture namespace, with the values verbatim and the rest trimmed.
+- **`tool_support.md`, the client guides and the epic history.** `tool_support.md` has a Story 39.6 note and counts 13
+  prompts (the Interoperability server 4). The `IRIS_DATA_POLICY` row of the Claude Code, Claude Desktop and Cursor
+  guides also covers `iris_message_body` and the refusal of the `body` and `searchTable` actions under `block`.
+  `docs/epic-summary.md` drops "so far" from Epic 39's tool count.
+- **What the Epic 39 capstone shows.** The documents describe it as least exposure on synthetic messages: under the
+  default `redact`, no body PHI value and no search filter value leaves through a Search Table lookup, a body read,
+  the audit file or stderr. They make no claim of regulatory compliance.
+
+### Tests
+
+- **A capstone live gate, `epic39-capstone-gate.test.ts`, closes Epic 39.** It drives the built dev, admin and interop
+  servers over the SDK client on a disposable namespace of synthetic HL7 messages: it seeds the traffic, searches
+  the headers, finds a patient's messages by a Search Table value, and reads the bodies under `redact` and under `allow`.
+  Under `redact` no body PHI value and no search filter value appears in any result, in the audit file or on stderr
+  while the values the keep-list keeps survive; under `allow` the values appear. It compares the rows with a raw SQL
+  oracle, asserts that the deployed `BOOTSTRAP_VERSION` is the shipped one, and removes everything it created.
+- **`tools-list-snapshot.test.ts`** runs the snapshot comparison in the default suite, with unit rows for a changed,
+  a new and a vanished tool.
+- **The gates share their helpers (DW-561).** The helpers the live gates had each copied now live in one test module,
+  and a default-suite test fails when a gate declares one of them again.
+- **`story-39-6-doc-claims.test.ts`** pins the new documentation, the default state it gives at each point of use, this
+  section and the changeset, and scans the new text for a compliance claim. The prompt tests pin both prompts' step
+  order, their tools, and that neither carries a rule number or a repository path.
+
 ## [Pre-release — 2026-10-17] — Story 39.5: Message body reader
 
 One tool is added, `iris_message_body`: the suite goes from 108 to 109 package tools (113 to 114 advertised), the

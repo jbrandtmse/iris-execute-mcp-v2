@@ -40,6 +40,7 @@ const FOREIGN_PROMPT_NAMES = [
   "edit-and-test-class",
   "trace-message-flow",
   "recover-stuck-production",
+  "find-patient-messages",
 ];
 
 /**

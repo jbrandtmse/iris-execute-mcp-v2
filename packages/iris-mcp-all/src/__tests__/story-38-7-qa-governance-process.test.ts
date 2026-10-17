@@ -35,9 +35,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,8 +45,11 @@ import {
   resolveSdkEsmDir,
   spawnAndWaitForExit,
   staleDistReason,
+  stubTarget,
+  withStub,
   withWireSession,
-  type IrisTarget,
+  writeJson,
+  type Stub503,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
 
@@ -82,60 +83,22 @@ let interopSkipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let fixtureDir = "";
 
-interface Stub {
-  port: number;
-  requests: string[];
-  close: () => Promise<void>;
-}
-
-/** A local HTTP listener answering every request with 503 and recording `METHOD path` lines. */
-async function startStub(): Promise<Stub> {
-  const requests: string[] = [];
-  const server = http.createServer((req, res) => {
-    requests.push(`${req.method} ${req.url}`);
-    res.statusCode = 503;
-    res.end();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return {
-    port: (server.address() as AddressInfo).port,
-    requests,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
-/** The target a server is pointed at: the stub, with throwaway credentials. */
-function stubTarget(stub: Stub): IrisTarget {
-  return { host: "127.0.0.1", port: String(stub.port), username: "story387-qa", password: "not-a-real-password", namespace: "HSCUSTOM" };
-}
-
-/** Run `body` with a fresh stub, and always close it. */
-async function withStub<T>(body: (stub: Stub) => Promise<T>): Promise<T> {
-  const stub = await startStub();
-  try {
-    return await body(stub);
-  } finally {
-    await stub.close();
-  }
-}
+/** The username of the stub target; the stub answers 503 whatever the credentials. */
+const STUB_USERNAME = "story387-qa";
 
 /** Spawn the built server pointed at `stub` with `extraEnv`, stdin closed, and wait for it to exit. */
-function runToExit(stub: Stub, extraEnv: Record<string, string>) {
+function runToExit(stub: Stub503, extraEnv: Record<string, string>) {
   return spawnAndWaitForExit(
     DEV_ENTRY,
     [],
-    { ...inheritedEnv(), ...connectionEnv(stubTarget(stub)), LOG_LEVEL: SERVER_LOG_LEVEL, ...extraEnv },
+    { ...inheritedEnv(), ...connectionEnv(stubTarget(stub.port, STUB_USERNAME)), LOG_LEVEL: SERVER_LOG_LEVEL, ...extraEnv },
     45000,
   );
 }
 
 /** Write `document` as a governance file in the fixture directory and return its path. */
-let fileCounter = 0;
 function writeGovernanceFile(document: unknown): string {
-  fileCounter += 1;
-  const file = path.join(fixtureDir, `governance-${fileCounter}.json`);
-  writeFileSync(file, JSON.stringify(document), "utf8");
-  return file;
+  return writeJson(fixtureDir, "governance.json", document);
 }
 
 /**
@@ -143,7 +106,7 @@ function writeGovernanceFile(document: unknown): string {
  * server's stderr, for the built server at `entry` (the dev server by default) started with `extraEnv`.
  */
 async function governanceReport(
-  stub: Stub,
+  stub: Stub503,
   extraEnv: Record<string, string>,
   entry: string = DEV_ENTRY,
 ): Promise<{ policy: Record<string, boolean>; configSource: Record<string, string>; stderr: string; toolNames: string[] }> {
@@ -151,7 +114,7 @@ async function governanceReport(
   const options: WireSessionOptions = {
     sdkEsmDir: sdkEsmDir as string,
     entry,
-    target: stubTarget(stub),
+    target: stubTarget(stub.port, STUB_USERNAME),
     clientName: "story-38-7-qa-governance-process",
     onStderr: (chunk) => {
       stderr += chunk;

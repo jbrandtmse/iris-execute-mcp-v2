@@ -43,13 +43,21 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import {
   assertDeployedBootstrapVersion,
+  docFixtures,
+  governanceDenial,
+  governanceReport,
   inheritedEnv,
   irisTargetFromEnv,
   isIrisReachable,
+  lineNumber,
   openWireSession,
   resolveSdkEsmDir,
   staleDistReason,
+  stemFixtures,
+  storageRange,
   withWireSession,
+  type DocFixtures,
+  type StemFixtures,
   type WireSession as Session,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
@@ -78,6 +86,9 @@ const STORE_DOC = `${STORE_CLASS}.cls`;
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let admin: Session;
+/** The document helpers and the fixture oracles of `admin`, bound when called, so a teardown after a failed start-up still reaches the tools. */
+const docs = (): DocFixtures => docFixtures(admin);
+const fixtures = (): StemFixtures => stemFixtures(admin, FIXTURE_FILTER);
 
 /** The built dev server and the target, for the shared wire helpers. */
 function wireOptions(): WireSessionOptions {
@@ -128,49 +139,19 @@ async function readDoc(docName: string): Promise<StoredDoc> {
   return { ts: stored.ts, content: stored.content };
 }
 
-/** Remove a document; a document that is not there is not an error here. */
-async function removeDoc(docName: string): Promise<void> {
-  await admin.call("iris_doc_delete", { name: docName });
-}
-
-async function putDoc(docName: string, source: string): Promise<void> {
-  await removeDoc(docName);
-  const result = await admin.call("iris_doc_put", { name: docName, content: source });
-  expect(result.isError, `creating ${docName}: ${result.content?.[0]?.text}`).toBeFalsy();
-}
-
-async function compileDoc(docName: string): Promise<void> {
-  const result = await admin.call("iris_doc_compile", { doc: docName });
-  expect(result.isError, `compiling ${docName}`).toBeFalsy();
-  expect(result.structuredContent, `compiling ${docName}`).toMatchObject({ success: true });
-}
-
 /** A fresh Edit class, returned as stored. */
 async function freshEdit(): Promise<StoredDoc> {
-  await putDoc(EDIT_DOC, EDIT_SOURCE);
+  await docs().putDoc(EDIT_DOC, EDIT_SOURCE);
   return readDoc(EDIT_DOC);
 }
 
 /** A fresh, compiled Store class (its Storage generated), returned as stored. */
 async function freshStore(): Promise<StoredDoc> {
-  await putDoc(STORE_DOC, STORE_SOURCE);
-  await compileDoc(STORE_DOC);
+  await docs().putDoc(STORE_DOC, STORE_SOURCE);
+  await docs().compileDoc(STORE_DOC);
   const stored = await readDoc(STORE_DOC);
   expect(storageRange(stored.content), "the compile generated a Storage definition").not.toBeUndefined();
   return stored;
-}
-
-/** The 1-based number of the first stored line equal to `line`. */
-function lineNumber(content: string[], line: string): number {
-  const index = content.indexOf(line);
-  expect(index, `the stored document has the line ${JSON.stringify(line)}`).toBeGreaterThanOrEqual(0);
-  return index + 1;
-}
-
-/** The lines of the first Storage definition, from its `Storage <name>` line to its closing `}`. */
-function storageRange(content: string[]): { first: number; last: number } | undefined {
-  const start = content.findIndex((line) => /^Storage \S+$/.test(line));
-  return start < 0 ? undefined : { first: start + 1, last: content.indexOf("}", start) + 1 };
 }
 
 /** One valid replace of the Edit class's `Set` line, against `stored`. */
@@ -187,43 +168,11 @@ function deleteStorageEdit(stored: StoredDoc): Array<Record<string, unknown>> {
   return [{ op: "delete", startLine: first, endLine: last, expected: stored.content.slice(first - 1, last).join("\n") }];
 }
 
-function denial(action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { code: "GOVERNANCE_DISABLED", action, server: "default", ...extra };
-}
-
-/** The governance report of `iris_server_profiles`. */
-async function governanceReport(
-  session: Session,
-): Promise<{ policy: Record<string, boolean>; configSource: Record<string, string> }> {
-  const result = await session.raw("iris_server_profiles", {});
-  expect(result.isError).toBeFalsy();
-  const governance = (result.structuredContent as { governance: { policy: Record<string, boolean>; configSource: Record<string, string> } })
-    .governance;
-  return { policy: governance.policy, configSource: governance.configSource };
-}
-
 // -- Cleanup ---------------------------------------------------------
 
-async function fixtureDocuments(): Promise<string[]> {
-  const listed = await admin.call("iris_doc_list", { filter: FIXTURE_FILTER, generated: true });
-  expect(listed.isError, "the document listing").toBeFalsy();
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
-}
-
-async function fixtureGlobals(): Promise<string[]> {
-  const listed = await admin.call("iris_global_list", { filter: FIXTURE_FILTER });
-  expect(listed.isError, "the global listing").toBeFalsy();
-  return (listed.structuredContent as { globals: string[] }).globals;
-}
-
 async function removeFixtures(): Promise<void> {
-  for (const listed of await fixtureGlobals()) {
-    const name = listed.replace(/^\^/, "");
-    if (!name.startsWith("ExecuteMCPv") || !name.includes(FIXTURE_FILTER)) continue;
-    const killed = await admin.call("iris_global_kill", { global: name });
-    expect(killed.isError, `killing global ${name}`).toBeFalsy();
-  }
-  for (const docName of [EDIT_DOC, STORE_DOC]) await removeDoc(docName);
+  await fixtures().killGlobals();
+  for (const docName of [EDIT_DOC, STORE_DOC]) await docs().removeDoc(docName);
 }
 
 beforeAll(async () => {
@@ -245,16 +194,16 @@ beforeAll(async () => {
   admin = await openSession();
   await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
   await removeFixtures();
-  expect(await fixtureDocuments(), "no QaStory384Wire document before the run").toEqual([]);
-  expect(await fixtureGlobals(), "no QaStory384Wire global before the run").toEqual([]);
+  expect(await fixtures().documents(), "no QaStory384Wire document before the run").toEqual([]);
+  expect(await fixtures().globals(), "no QaStory384Wire global before the run").toEqual([]);
 }, 90000);
 
 afterAll(async () => {
   if (skipReason) return;
   try {
     await removeFixtures();
-    expect(await fixtureDocuments(), "no QaStory384Wire document after the run").toEqual([]);
-    expect(await fixtureGlobals(), "no QaStory384Wire global after the run").toEqual([]);
+    expect(await fixtures().documents(), "no QaStory384Wire document after the run").toEqual([]);
+    expect(await fixtures().globals(), "no QaStory384Wire global after the run").toEqual([]);
   } finally {
     await admin.close();
   }
@@ -359,7 +308,7 @@ describe("iris_doc_edit on the wire, default governance (Story 38.4, AC-4, AC-6)
     }
     expect(result.content?.[0]?.text).toContain("It is not compiled: run iris_doc_compile next.");
 
-    await compileDoc(EDIT_DOC);
+    await docs().compileDoc(EDIT_DOC);
   }, 120000);
 
   it("a stale expected text is STALE_CONTENT with the current text, and the stored lines and ts are unchanged", async (testCtx) => {
@@ -393,7 +342,7 @@ describe("iris_doc_edit on the wire, default governance (Story 38.4, AC-4, AC-6)
     const denied = await admin.call("iris_doc_edit", { action: "regenerateStorage", name: STORE_DOC, edits });
 
     expect(denied.isError).toBe(true);
-    expect(denied.structuredContent).toEqual(denial("iris_doc_edit:regenerateStorage"));
+    expect(denied.structuredContent).toEqual(governanceDenial("iris_doc_edit:regenerateStorage"));
     expect(denied.content?.[0]?.text).toBe(
       "action 'iris_doc_edit:regenerateStorage' is disabled by governance policy for server 'default'",
     );
@@ -425,7 +374,7 @@ describe("iris_doc_put disabled: the parent mechanism on the wire (Story 38.4, A
     await withSession(PARENT_OFF, async (session) => {
       const applied = await session.call("iris_doc_edit", { action: "apply", name: EDIT_DOC, edits: replaceSetLine(edit) });
       expect(applied.isError).toBe(true);
-      expect(applied.structuredContent).toEqual(denial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
+      expect(applied.structuredContent).toEqual(governanceDenial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
       expect(applied.content?.[0]?.text).toBe(
         "action 'iris_doc_edit:apply' is disabled by governance policy for server 'default' (inherited from 'iris_doc_put')",
       );
@@ -437,12 +386,12 @@ describe("iris_doc_put disabled: the parent mechanism on the wire (Story 38.4, A
       });
       expect(regenerated.isError).toBe(true);
       expect(regenerated.structuredContent).toEqual(
-        denial("iris_doc_edit:regenerateStorage", { inheritedFrom: "iris_doc_put" }),
+        governanceDenial("iris_doc_edit:regenerateStorage", { inheritedFrom: "iris_doc_put" }),
       );
 
       const put = await session.call("iris_doc_put", { name: EDIT_DOC, content: "Class X {}" });
       expect(put.isError).toBe(true);
-      expect(put.structuredContent).toEqual(denial("iris_doc_put"));
+      expect(put.structuredContent).toEqual(governanceDenial("iris_doc_put"));
 
       const { policy, configSource } = await governanceReport(session);
       expect(policy["iris_doc_edit:apply"]).toBe(false);
@@ -480,11 +429,11 @@ describe("iris_doc_put disabled: the parent mechanism on the wire (Story 38.4, A
         });
         expect(regenerated.isError).toBe(true);
         expect(regenerated.structuredContent).toEqual(
-          denial("iris_doc_edit:regenerateStorage", { inheritedFrom: "iris_doc_put" }),
+          governanceDenial("iris_doc_edit:regenerateStorage", { inheritedFrom: "iris_doc_put" }),
         );
 
         const put = await session.call("iris_doc_put", { name: EDIT_DOC, content: "Class X {}" });
-        expect(put.structuredContent).toEqual(denial("iris_doc_put"));
+        expect(put.structuredContent).toEqual(governanceDenial("iris_doc_put"));
 
         const { policy, configSource } = await governanceReport(session);
         expect(policy["iris_doc_edit:apply"]).toBe(true);
@@ -511,7 +460,7 @@ describe("iris_doc_put disabled: the parent mechanism on the wire (Story 38.4, A
 
       const applied = await session.call("iris_doc_edit", { action: "apply", name: EDIT_DOC, edits: replaceSetLine(edit) });
       expect(applied.isError).toBe(true);
-      expect(applied.structuredContent).toEqual(denial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
+      expect(applied.structuredContent).toEqual(governanceDenial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
     });
     expect(await readDoc(EDIT_DOC)).toEqual(edit);
 
@@ -581,7 +530,7 @@ describe("regenerateStorage enabled and the read-only preset, on the wire (Story
     const after = await readDoc(STORE_DOC);
     expect(storageRange(after.content), "the stored source has no Storage definition").toBeUndefined();
     expect(after.ts).not.toBe(before.ts);
-    await compileDoc(STORE_DOC);
+    await docs().compileDoc(STORE_DOC);
   }, 120000);
 
   it("the read-only preset denies apply with presetApplied; with iris_doc_put disabled as well, the denial names the parent and carries no presetApplied", async (testCtx) => {
@@ -591,7 +540,7 @@ describe("regenerateStorage enabled and the read-only preset, on the wire (Story
     await withSession({ IRIS_GOVERNANCE_PRESET: "read-only" }, async (session) => {
       const applied = await session.call("iris_doc_edit", { action: "apply", name: EDIT_DOC, edits: replaceSetLine(edit) });
       expect(applied.isError).toBe(true);
-      expect(applied.structuredContent).toEqual(denial("iris_doc_edit:apply", { presetApplied: "read-only" }));
+      expect(applied.structuredContent).toEqual(governanceDenial("iris_doc_edit:apply", { presetApplied: "read-only" }));
     });
 
     await withSession(
@@ -599,7 +548,7 @@ describe("regenerateStorage enabled and the read-only preset, on the wire (Story
       async (session) => {
         const applied = await session.call("iris_doc_edit", { action: "apply", name: EDIT_DOC, edits: replaceSetLine(edit) });
         expect(applied.isError).toBe(true);
-        expect(applied.structuredContent).toEqual(denial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
+        expect(applied.structuredContent).toEqual(governanceDenial("iris_doc_edit:apply", { inheritedFrom: "iris_doc_put" }));
       },
     );
 

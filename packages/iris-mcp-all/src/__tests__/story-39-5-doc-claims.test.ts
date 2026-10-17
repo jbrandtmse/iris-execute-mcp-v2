@@ -51,10 +51,9 @@ describe("Story 39.5: the CHANGELOG section and the changeset", () => {
       /^## \[Pre-release \u2014 2026-10-17\] \u2014 Story 39\.5: Message body reader$/.test(candidate.split("\n")[0] ?? ""),
     ) ?? "";
 
-  it("the CHANGELOG has the Story 39.5 section at the top, with Added, Changed and Tests headings", () => {
+  it("the CHANGELOG has the Story 39.5 section, with Added, Changed and Tests headings", () => {
     expect(section, "the CHANGELOG has the Story 39.5 section").not.toBe("");
     expect(section.split("\n").filter((line) => line.startsWith("### "))).toEqual(["### Added", "### Changed", "### Tests"]);
-    expect(sectionsOf(read("CHANGELOG.md"))[0], "the Story 39.5 section is the first").toBe(section);
   });
 
   it("states the new counts and that the baseline stays", () => {

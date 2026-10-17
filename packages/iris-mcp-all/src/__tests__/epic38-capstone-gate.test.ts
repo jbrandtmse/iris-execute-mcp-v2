@@ -47,13 +47,22 @@ import {
   assertDeployedBootstrapVersion,
   atelierDocument,
   atelierQuery,
+  atelierScalar,
+  docFixtures,
+  firstText,
   irisTargetFromEnv,
   isIrisReachable,
+  lineNumber,
   openWireSession,
   resolveSdkEsmDir,
+  skipTest,
   staleDistReason,
+  stemFixtures,
+  storageRange,
   withWireSession,
   type AtelierDocument,
+  type DocFixtures,
+  type StemFixtures,
   type WireSession as Session,
   type WireSessionOptions,
 } from "./process-gate-helpers.js";
@@ -67,6 +76,9 @@ const NS = TARGET.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
+
+/** The tag of the gate's `[SKIP]` line. */
+const GATE_TAG = "epic38-capstone-gate";
 
 const STEM = "QaStory386Cap";
 const EDIT_CLASS = `ExecuteMCPv2.Temp.${STEM}Edit`;
@@ -125,6 +137,9 @@ const ROWS_SOURCE = [
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let admin: Session;
+/** The document helpers and the fixture oracles of `admin`, bound when called, so a teardown after a failed start-up still reaches the tools. */
+const docs = (): DocFixtures => docFixtures(admin);
+const fixtures = (): StemFixtures => stemFixtures(admin, STEM);
 
 /** The built dev server and the target, for the shared wire helpers. */
 function wireOptions(): WireSessionOptions {
@@ -135,36 +150,11 @@ function wireOptions(): WireSessionOptions {
 const withSession = <T>(extraEnv: Record<string, string>, body: (session: Session) => Promise<T>): Promise<T> =>
   withWireSession(wireOptions(), extraEnv, body);
 
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] epic38-capstone-gate: ${skipReason}`);
-  testCtx.skip();
-}
-
 // -- Writing and reading the fixtures ----------------------------------
-
-/** Remove a document; a document that is not there is not an error here. */
-async function removeDoc(docName: string): Promise<void> {
-  await admin.call("iris_doc_delete", { name: docName });
-}
-
-/** Replace a document with `source`, through the tool under test's neighbour `iris_doc_put`. */
-async function putDoc(docName: string, source: string): Promise<void> {
-  await removeDoc(docName);
-  const result = await admin.call("iris_doc_put", { name: docName, content: source });
-  expect(result.isError, `creating ${docName}: ${result.content?.[0]?.text}`).toBeFalsy();
-}
-
-async function compileDoc(docName: string): Promise<void> {
-  const result = await admin.call("iris_doc_compile", { doc: docName });
-  expect(result.isError, `compiling ${docName}`).toBeFalsy();
-  expect(result.structuredContent, `compiling ${docName}`).toMatchObject({ success: true });
-}
 
 /** A fresh Edit class, returned as the raw Atelier route stores it. */
 async function freshEdit(): Promise<AtelierDocument> {
-  await putDoc(EDIT_DOC, EDIT_SOURCE);
+  await docs().putDoc(EDIT_DOC, EDIT_SOURCE);
   return atelierDocument(TARGET, EDIT_DOC);
 }
 
@@ -174,75 +164,45 @@ const tableRows = (): Promise<Array<Record<string, unknown>>> =>
 
 /** A fresh, compiled Rows class (its Storage generated) with the six seeded rows. */
 async function freshRows(): Promise<AtelierDocument> {
-  await putDoc(ROWS_DOC, ROWS_SOURCE);
-  await compileDoc(ROWS_DOC);
+  await docs().putDoc(ROWS_DOC, ROWS_SOURCE);
+  await docs().compileDoc(ROWS_DOC);
   const seeded = await admin.call("iris_execute_classmethod", { className: ROWS_CLASS, methodName: "Seed" });
   expect(seeded.isError, `seeding: ${seeded.content?.[0]?.text}`).toBeFalsy();
   expect((seeded.structuredContent as { returnValue: unknown }).returnValue).toBe("seeded");
   expect((await tableRows()).length, "the seeded rows").toBe(SEEDED_ROWS);
   const stored = await atelierDocument(TARGET, ROWS_DOC);
   expect(storageLines(stored.content), "the compile generated a Storage definition").not.toEqual([]);
-  expect(await fixtureDocuments(), "the document oracle sees the fixture").toContain(ROWS_DOC);
-  expect(await fixtureGlobals(), "the global oracle sees the data global").not.toEqual([]);
+  expect(await fixtures().documents(), "the document oracle sees the fixture").toContain(ROWS_DOC);
+  expect(await fixtures().globals(), "the global oracle sees the data global").not.toEqual([]);
   expect(await fixtureTables(), "the table oracle sees the fixture table").toBe(1);
   return stored;
 }
 
-/** The 1-based number of the first stored line equal to `line`. */
-function lineNumber(content: string[], line: string): number {
-  const index = content.indexOf(line);
-  expect(index, `the stored document has the line ${JSON.stringify(line)}`).toBeGreaterThanOrEqual(0);
-  return index + 1;
-}
-
 /** The lines of every Storage definition, from its `Storage <name>` line to its closing `}`. */
 function storageLines(content: string[]): string[] {
-  const start = content.findIndex((line) => /^Storage \S+$/.test(line));
-  return start < 0 ? [] : content.slice(start, content.indexOf("}", start) + 1);
-}
-
-/** The text of a successful tool result's first content block. */
-function textOf(result: { content?: Array<{ text?: string }> }): string {
-  return result.content?.[0]?.text ?? "";
+  const range = storageRange(content);
+  return range === undefined ? [] : content.slice(range.first - 1, range.last);
 }
 
 // -- Cleanup ---------------------------------------------------------
 
-async function fixtureDocuments(): Promise<string[]> {
-  const listed = await admin.call("iris_doc_list", { filter: STEM, generated: true });
-  expect(listed.isError, "the document listing").toBeFalsy();
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
-}
-
-async function fixtureGlobals(): Promise<string[]> {
-  const listed = await admin.call("iris_global_list", { filter: STEM });
-  expect(listed.isError, "the global listing").toBeFalsy();
-  return (listed.structuredContent as { globals: string[] }).globals;
-}
-
 async function fixtureTables(): Promise<number> {
-  const rows = await atelierQuery(
+  return atelierScalar(
     TARGET,
     `SELECT COUNT(*) AS N FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'ExecuteMCPv2_Temp' AND TABLE_NAME LIKE '${STEM}%'`,
   );
-  return Number(Object.values(rows[0] ?? {})[0]);
 }
 
 /** Remove everything the gate writes: the documents, then the data globals the persistent class left. */
 async function removeFixtures(): Promise<void> {
-  for (const docName of [EDIT_DOC, ROWS_DOC]) await removeDoc(docName);
-  for (const listed of await fixtureGlobals()) {
-    const name = listed.replace(/^\^/, "");
-    if (!name.startsWith("ExecuteMCPv") || !name.includes(STEM)) continue;
-    const killed = await admin.call("iris_global_kill", { global: name });
-    expect(killed.isError, `killing global ${name}`).toBeFalsy();
-  }
+  for (const docName of [EDIT_DOC, ROWS_DOC]) await docs().removeDoc(docName);
+  await fixtures().killGlobals();
 }
 
 /** Assert that nothing named `QaStory386Cap` is left: no document, no global, no table. */
 async function expectNoFixtures(when: string): Promise<void> {
-  expect(await fixtureDocuments(), `no ${STEM} document ${when}`).toEqual([]);
-  expect(await fixtureGlobals(), `no ${STEM} global ${when}`).toEqual([]);
+  expect(await fixtures().documents(), `no ${STEM} document ${when}`).toEqual([]);
+  expect(await fixtures().globals(), `no ${STEM} global ${when}`).toEqual([]);
   expect(await fixtureTables(), `no ${STEM} table ${when}`).toBe(0);
 }
 
@@ -283,7 +243,7 @@ afterAll(async () => {
 
 describe("Epic 38 capstone: ranged reads and guarded edits on the built dev server (legs 1-3)", () => {
   it("leg 1: a ranged read equals the matching slice of the stored document", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const stored = await freshEdit();
     const total = stored.content.length;
 
@@ -295,7 +255,7 @@ describe("Epic 38 capstone: ranged reads and guarded edits on the built dev serv
     ];
     for (const [startLine, endLine, clampedEnd] of ranges) {
       const result = await admin.call("iris_doc_get", { name: EDIT_DOC, startLine, endLine });
-      expect(result.isError, `lines ${startLine}-${endLine}: ${textOf(result)}`).toBeFalsy();
+      expect(result.isError, `lines ${startLine}-${endLine}: ${firstText(result)}`).toBeFalsy();
       expect(result.structuredContent, `lines ${startLine}-${endLine}`).toEqual({
         name: EDIT_DOC,
         ts: stored.ts,
@@ -311,7 +271,7 @@ describe("Epic 38 capstone: ranged reads and guarded edits on the built dev serv
   }, 120000);
 
   it("leg 2: an edit whose expected is built from a ranged read applies, the stored document holds the new text, and it compiles", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const before = await freshEdit();
     const setLine = lineNumber(before.content, "\tSet tSC = $$$OK");
     const endLine = setLine + 2;
@@ -327,18 +287,18 @@ describe("Epic 38 capstone: ranged reads and guarded edits on the built dev serv
       edits: [{ op: "replace", startLine: setLine, endLine, text: "\tSet tSC = 2\n\n\tQuit tSC\n", expected }],
     });
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({ name: EDIT_DOC, namespace: NS, changed: true });
     const after = await atelierDocument(TARGET, EDIT_DOC);
     expect(after.ts).not.toBe(before.ts);
     expect((result.structuredContent as { ts: string }).ts).toBe(after.ts);
     expect(after.content.slice(setLine - 1, endLine)).toEqual(["\tSet tSC = 2", "", "\tQuit tSC"]);
     expect(after.content.length).toBe(before.content.length);
-    await compileDoc(EDIT_DOC);
+    await docs().compileDoc(EDIT_DOC);
   }, 120000);
 
   it("leg 3: a stale edit of a range that ends in an empty line is STALE_CONTENT and changes nothing; the retry with current as expected applies (DW-552)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const before = await freshEdit();
     const setLine = lineNumber(before.content, "\tSet tSC = $$$OK");
     const endLine = setLine + 1;
@@ -368,7 +328,7 @@ describe("Epic 38 capstone: ranged reads and guarded edits on the built dev serv
       edits: [{ op: "replace", startLine: setLine, endLine, text: "\tSet tSC = 2\n", expected: current }],
     });
 
-    expect(retried.isError, textOf(retried)).toBeFalsy();
+    expect(retried.isError, firstText(retried)).toBeFalsy();
     expect(retried.structuredContent).toMatchObject({ name: EDIT_DOC, namespace: NS, changed: true });
     const after = await atelierDocument(TARGET, EDIT_DOC);
     expect(after.content.slice(setLine - 1, setLine + 1)).toEqual(["\tSet tSC = 2", "\tQuit tSC"]);
@@ -380,7 +340,7 @@ describe("Epic 38 capstone: ranged reads and guarded edits on the built dev serv
 
 describe("Epic 38 capstone: the Storage guard on iris_doc_put (leg 4)", () => {
   it("leg 4: a storage-dropping put on the seeded persistent class is STORAGE_DROPPED; the stored Storage block and the rows are unchanged", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const before = await freshRows();
     const rowsBefore = await tableRows();
 
@@ -407,13 +367,13 @@ describe("Epic 38 capstone: SQL safety on the built dev server (legs 5 and 6)", 
   const SELECT_ROWS = `SELECT ID, Name, Qty FROM ${TABLE} ORDER BY ID`;
 
   it("leg 5: under the read-only preset iris_sql_query returns the rows and refuses an UPDATE, and iris_sql_execute is denied", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await freshRows();
     const before = await tableRows();
 
     await withSession({ IRIS_GOVERNANCE_PRESET: "read-only" }, async (session) => {
       const read = await session.call("iris_sql_query", { query: SELECT_ROWS });
-      expect(read.isError, textOf(read)).toBeFalsy();
+      expect(read.isError, firstText(read)).toBeFalsy();
       const answer = read.structuredContent as { rows: unknown[][]; rowCount: number };
       expect(answer.rowCount).toBe(SEEDED_ROWS);
       expect(answer.rows.map((row) => row.map(String))).toEqual(
@@ -442,14 +402,14 @@ describe("Epic 38 capstone: SQL safety on the built dev server (legs 5 and 6)", 
   }, 120000);
 
   it("leg 6: with IRIS_SQL_MAX_ROWS_AFFECTED below the row count, a DELETE of every row is SQL_ROWS_AFFECTED_CAP and the rows are intact", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await freshRows();
     const before = await tableRows();
     expect(before.length).toBeGreaterThan(2);
 
     await withSession({ IRIS_SQL_MAX_ROWS_AFFECTED: "2" }, async (session) => {
       const result = await session.call("iris_sql_execute", { query: `DELETE FROM ${TABLE}` });
-      expect(result.isError, textOf(result)).toBe(true);
+      expect(result.isError, firstText(result)).toBe(true);
       expect(result.structuredContent).toEqual({
         code: "SQL_ROWS_AFFECTED_CAP",
         namespace: NS,

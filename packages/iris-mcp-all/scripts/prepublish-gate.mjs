@@ -201,6 +201,9 @@ const gateTestFiles = [
   // database EXECMCPTMP395Q (its database files and directory too, and the Story395Q classes inside it) and the HSCUSTOM class
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-39-5-qa-live-gate.test.ts",
+  // The Epic 39 capstone: search, then read, under the PHI data policy over real stdio JSON-RPC against the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists;
+  // writes only EXECMCPTMP396A (its database files too), Story396.* and Story394.SearchTable inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/epic39-capstone-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

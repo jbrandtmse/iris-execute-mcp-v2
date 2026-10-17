@@ -30,25 +30,32 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
+  distEntry,
   executeMcpPost,
+  firstText,
+  fixtureDocumentNames,
+  headerIds,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  pollAuditEntries,
   resolveSdkEsmDir,
   shippedBootstrapVersion,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
 } from "./process-gate-helpers.js";
-import { expectedRow, oracleColumns } from "./header-row-oracle.js";
+import { expectedRow, oracleColumns, sqlLiteral } from "./header-row-oracle.js";
 import {
   FIXTURE_CLASS,
   FIXTURE_DOC,
@@ -63,7 +70,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
+const GATE_TAG = "story-39-1-message-search-live-gate";
 const BASELINE_PATH = path.join(__dirname, "fixtures", "story-39-1-resend-baseline.json");
 
 const TARGET = irisTargetFromEnv();
@@ -96,14 +103,7 @@ let readOnly: WireSession;
 let firstStartMs = 0;
 
 function wireOptions(pkg: string): WireSessionOptions {
-  return { sdkEsmDir: sdkEsmDir as string, entry: entryOf(pkg), target: TARGET, clientName: "story-39-1-live-gate" };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-1-message-search-live-gate: ${skipReason}`);
-  testCtx.skip();
+  return { sdkEsmDir: sdkEsmDir as string, entry: distEntry(REPO_ROOT, pkg), target: TARGET, clientName: "story-39-1-live-gate" };
 }
 
 // -- The resendFiltered request list ---------------------------------
@@ -231,14 +231,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     for (const name of NAMESPACES) await attempt(`removing ${name}`, () => removeInteropNamespace(admin, dev, name));
     await attempt("the leftovers check", async () => {
@@ -246,10 +239,11 @@ afterAll(async () => {
     });
     await attempt("removing the fixture class", () => removeFixtureClass(dev));
     await attempt("the fixture document listing", async () => {
-      const listed = await dev.call("iris_doc_list", { filter: "Story391", generated: true });
-      expect(listed.isError, "the fixture document listing").toBeFalsy();
-      const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
-      expect(names, `no ${FIXTURE_DOC} or generated Story391 document after the run`).toEqual([]);
+      const listings = await fixtureDocumentNames(dev, ["Story391"]);
+      expect(
+        listings.flatMap((listing) => listing.names),
+        `no ${FIXTURE_DOC} or generated Story391 document after the run`,
+      ).toEqual([]);
     });
   } finally {
     // A session the setup never opened is undefined here; closing the others must still happen.
@@ -262,7 +256,7 @@ afterAll(async () => {
 
 describe("Story 39.1: the resendFiltered wire (AD-17, AD-33)", () => {
   it.runIf(CAPTURE)("capture: replay the resendFiltered request list against A and write the baseline", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const deployed = await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
     expect(deployed, "the capture runs on the classes deployed before the extraction").toBe(PRE_STORY_BOOTSTRAP_VERSION);
 
@@ -290,7 +284,7 @@ describe("Story 39.1: the resendFiltered wire (AD-17, AD-33)", () => {
   }, 240000);
 
   it("every resendFiltered request answers byte for byte as it did before the shared helper", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as Baseline;
 
     expect(baseline.capturedWithBootstrapVersion, "the capture was taken on the classes before this story").toBe(
@@ -327,9 +321,6 @@ async function oracle(ns: string, where: string): Promise<Array<Record<string, u
   return rows.map(expectedRow);
 }
 
-const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
-const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
-
 type Structured = Record<string, unknown> & { rows: Array<Record<string, unknown>>; hasMore: boolean; nextCursor?: string };
 
 /** Run a `headers` search against A through `session`, defaulting to the 2001 window. */
@@ -339,11 +330,9 @@ function search(session: WireSession, args: Record<string, unknown> = {}): Promi
 
 /** The structured content of a successful result. */
 function succeeded(result: WireToolResult): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, firstText(result)).toBeFalsy();
   return result.structuredContent as Structured;
 }
-
-const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
 
 interface FilterCase {
   name: string;
@@ -428,9 +417,9 @@ const FILTER_CASES: FilterCase[] = [
 describe("Story 39.1: iris_message_search headers equals a hand-written SQL oracle (AC-3)", () => {
   for (const filterCase of FILTER_CASES) {
     it(filterCase.name, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(NS_A, filterCase.where);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(filterCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(filterCase.ids);
 
       const started = performance.now();
       const content = succeeded(await search(interop, filterCase.args));
@@ -449,7 +438,7 @@ describe("Story 39.1: iris_message_search headers equals a hand-written SQL orac
   // 3 and 2 split the 11 matches into pages that end mid-result; 11 is a page that is exactly full and has no more.
   for (const limit of [3, 2, 11]) {
     it(`pages of ${limit} join, in order, without a gap or a duplicate; only a page with more carries nextCursor`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(NS_A, WINDOW_SQL);
       const pages: Structured[] = [];
       let cursor: string | undefined;
@@ -462,7 +451,7 @@ describe("Story 39.1: iris_message_search headers equals a hand-written SQL orac
       }
 
       expect(pages.flatMap((page) => page.rows)).toEqual(expected);
-      expect(ids(pages.flatMap((page) => page.rows))).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
+      expect(headerIds(pages.flatMap((page) => page.rows))).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
       expect(pages, "no page is empty and none is missing").toHaveLength(Math.ceil(11 / limit));
       for (const page of pages.slice(0, -1)) expect(page.rows).toHaveLength(limit);
       const last = pages[pages.length - 1] as Structured;
@@ -472,7 +461,7 @@ describe("Story 39.1: iris_message_search headers equals a hand-written SQL orac
   }
 
   it("sends to (now) and limit 100 when the caller omits them", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const hourAgo = new Date(Date.now() - 3600_000).toISOString().replace(/\.\d+Z$/, "Z");
     const content = succeeded(
       await interop.call("iris_message_search", { action: "headers", namespace: NS_A, from: hourAgo }),
@@ -485,26 +474,26 @@ describe("Story 39.1: iris_message_search headers equals a hand-written SQL orac
   }, 120000);
 
   it("accepts a window of no length and a window of exactly 7 days", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const instant = succeeded(await search(interop, { from: "2001-02-03T07:30:00Z", to: "2001-02-03T07:30:00Z" }));
     const instantOracle = await oracle(NS_A, "TimeCreated >= '2001-02-03 07:30:00' AND TimeCreated <= '2001-02-03 07:30:00'");
-    expect(ids(instantOracle), "the two headers created at that instant").toEqual([3, 4]);
+    expect(headerIds(instantOracle), "the two headers created at that instant").toEqual([3, 4]);
     expect(instant.rows).toEqual(instantOracle);
 
     const week = succeeded(await search(interop, { from: "2001-01-27T12:00:00Z", to: "2001-02-03T12:00:00Z" }));
     const weekOracle = await oracle(NS_A, "TimeCreated >= '2001-01-27 12:00:00' AND TimeCreated <= '2001-02-03 12:00:00'");
-    expect(ids(weekOracle), "every header up to noon").toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(headerIds(weekOracle), "every header up to noon").toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(week.rows).toEqual(weekOracle);
   }, 120000);
 
   it("reads an offset as the UTC instant it is", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded(
       await search(interop, { from: "2001-02-03T12:00:00+02:00", to: "2001-02-03T20:00:00+02:00" }),
     );
     const expected = await oracle(NS_A, "TimeCreated >= '2001-02-03 10:00:00' AND TimeCreated <= '2001-02-03 18:00:00'");
 
-    expect(ids(expected)).toEqual([7, 8, 9, 13, 10, 11]);
+    expect(headerIds(expected)).toEqual([7, 8, 9, 13, 10, 11]);
     expect(content.rows).toEqual(expected);
     expect(content["fromRaw"]).toBe("2001-02-03 10:00:00");
     expect(content["toRaw"]).toBe("2001-02-03 18:00:00");
@@ -513,38 +502,38 @@ describe("Story 39.1: iris_message_search headers equals a hand-written SQL orac
 
 describe("Story 39.1: second namespace and not-configured namespace (AC-5; rules #34, #36, #41)", () => {
   it("A and B each return their own rows, equal to their own oracle, and the two differ", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const inA = succeeded(await search(interop, { namespace: NS_A }));
     const inB = succeeded(await search(interop, { namespace: NS_B }));
 
     expect(inA.rows).toEqual(await oracle(NS_A, WINDOW_SQL));
     expect(inB.rows).toEqual(await oracle(NS_B, WINDOW_SQL));
-    expect(ids(inB.rows)).toEqual([1, 2, 3]);
+    expect(headerIds(inB.rows)).toEqual([1, 2, 3]);
     expect(inB.rows.map((row) => row["sourceItem"])).toEqual(["Story391.Alpha", "Story391.Omega", "Story391.Sigma"]);
     expect(inA.rows).not.toEqual(inB.rows);
 
     const itemInA = succeeded(await search(interop, { namespace: NS_A, item: "Story391.Alpha" }));
     const itemInB = succeeded(await search(interop, { namespace: NS_B, item: "Story391.Alpha" }));
-    expect(ids(itemInA.rows)).toEqual([2, 3, 4, 7, 9, 13, 10, 11]);
-    expect(ids(itemInB.rows)).toEqual([1, 2]);
+    expect(headerIds(itemInA.rows)).toEqual([2, 3, 4, 7, 9, 13, 10, 11]);
+    expect(headerIds(itemInB.rows)).toEqual([1, 2]);
   }, 120000);
 
   it("a namespace with no Interoperability mappings is notApplicable, not an error", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, { namespace: NS_C });
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({ action: "headers", notApplicable: true, rows: [], hasMore: false });
     expect(String((result.structuredContent as { reason?: unknown }).reason)).toContain(NS_C);
   }, 120000);
 
   it("a namespace that does not exist is an error carrying the sanitized switch text", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, { namespace: "EXECMCPTMP391Z" });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).not.toBe("");
-    expect(textOf(result)).not.toContain("^");
+    expect(firstText(result)).not.toBe("");
+    expect(firstText(result)).not.toContain("^");
   }, 120000);
 });
 
@@ -565,12 +554,12 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   ];
   for (const [name, args, parameter] of TOOL_CASES) {
     it(`tool: ${name}`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const result = await search(interop, args);
 
       expect(result.isError).toBe(true);
-      expect(textOf(result)).toContain(parameter);
-      expect(textOf(result)).not.toContain(HOSTILE);
+      expect(firstText(result)).toContain(parameter);
+      expect(firstText(result)).not.toContain(HOSTILE);
     }, 120000);
   }
 
@@ -605,7 +594,7 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   ];
   for (const [name, body, parameter] of ROUTE_CASES) {
     it(`route: ${name}`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const answer = await executeMcpPost(TARGET, ROUTE, body);
 
       expect(answer.status).toBe(200);
@@ -618,7 +607,7 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   }
 
   it("route: leaving out to and limit answers with now, to the millisecond, and 100 (namespace C holds no headers to read)", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const answer = await executeMcpPost(TARGET, ROUTE, {
       action: "headers",
       namespace: NS_C,
@@ -638,10 +627,10 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   }, 120000);
 
   it("the fixture class refuses a name that is not a scratch namespace, and runs nothing", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const call = async (methodName: string, args: unknown[], namespace: string): Promise<string> => {
       const result = await dev.call("iris_execute_classmethod", { namespace, className: FIXTURE_CLASS, methodName, args });
-      expect(result.isError, textOf(result)).toBeFalsy();
+      expect(result.isError, firstText(result)).toBeFalsy();
       return String((result.structuredContent as { returnValue?: unknown }).returnValue ?? "");
     };
 
@@ -661,10 +650,10 @@ const SEARCH_TABLE_LOOKUP = {
 
 describe("Story 39.1 (updated by Story 39.4): searchTable is built, and a namespace with no Search Table is notApplicable (AC-6)", () => {
   it("a valid lookup of A, which has no Search Table property, is notApplicable and not NOT_IMPLEMENTED", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, SEARCH_TABLE_LOOKUP);
 
-    expect(result.isError, textOf(result)).toBeFalsy();
+    expect(result.isError, firstText(result)).toBeFalsy();
     expect(result.structuredContent).toMatchObject({
       action: "searchTable",
       notApplicable: true,
@@ -680,7 +669,7 @@ describe("Story 39.1 (updated by Story 39.4): searchTable is built, and a namesp
 
 describe("Story 39.1: the tool is listed, its keys are enabled reads, and governance can disable one (AC-4)", () => {
   it("is listed with the stated annotations; the interop server advertises 25 tools", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const tools = await interop.listTools();
 
     expect(tools).toHaveLength(25);
@@ -695,7 +684,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
   }, 120000);
 
   it("all three keys are enabled under default configuration and under the read-only preset, which also lists core's 12 tools", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const keys = ["headers", "body", "searchTable"].map((action) => `iris_message_search:${action}`);
     for (const [label, session] of [["default", interop], ["read-only", readOnly]] as const) {
       const profiles = await session.raw("iris_server_profiles", {});
@@ -707,11 +696,11 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     expect(coreTools).toHaveLength(12);
     expect(coreTools.map((tool) => tool.name)).toContain("iris_message_search");
     const searched = succeeded(await search(readOnly));
-    expect(ids(searched.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
+    expect(headerIds(searched.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
   }, 120000);
 
   it("an operator's disable of headers denies it, and searchTable still runs", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const denied = await search(governed);
     expect(denied.isError).toBe(true);
     expect(denied.structuredContent).toEqual({
@@ -721,7 +710,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     });
 
     const ran = await search(governed, SEARCH_TABLE_LOOKUP);
-    expect(ran.isError, textOf(ran)).toBeFalsy();
+    expect(ran.isError, firstText(ran)).toBeFalsy();
     expect(ran.structuredContent).toMatchObject({ action: "searchTable", notApplicable: true });
   }, 120000);
 });
@@ -760,9 +749,9 @@ describe("Story 39.1 (QA): every status label reaches the status code it names (
   ];
   for (const [label, code, expectedIds] of STATUS_CASES) {
     it(`status ${label} is status code ${code}`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(NS_A, `${WINDOW_SQL} AND Status = ${code}`);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(expectedIds);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(expectedIds);
 
       const content = succeeded(await search(interop, { status: label }));
 
@@ -771,7 +760,7 @@ describe("Story 39.1 (QA): every status label reaches the status code it names (
   }
 
   it("route: the label Error names status code 8, as Errored does", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const answer = await executeMcpPost(TARGET, "/interop/message/search", {
       action: "headers",
       namespace: NS_A,
@@ -788,22 +777,22 @@ describe("Story 39.1 (QA): every status label reaches the status code it names (
 
 describe("Story 39.1 (QA): values at the edge of what is allowed are accepted (AC-3)", () => {
   it("limit 1 and limit 500 are both accepted; 500 holds every match in one page", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const one = succeeded(await search(interop, { limit: 1 }));
-    expect(ids(one.rows)).toEqual([2]);
+    expect(headerIds(one.rows)).toEqual([2]);
     expect(one.limit).toBe(1);
     expect(one.hasMore).toBe(true);
     expect(typeof one.nextCursor).toBe("string");
 
     const most = succeeded(await search(interop, { limit: 500 }));
     expect(most.limit).toBe(500);
-    expect(ids(most.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
+    expect(headerIds(most.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
     expect(most.hasMore).toBe(false);
     expect(most).not.toHaveProperty("nextCursor");
   }, 120000);
 
   it("errorOnly false is no filter at all: every header in the window, not only the flagged ones", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded(await search(interop, { errorOnly: false }));
 
     expect(content.rows).toEqual(await oracle(NS_A, WINDOW_SQL));
@@ -811,7 +800,7 @@ describe("Story 39.1 (QA): values at the edge of what is allowed are accepted (A
   }, 120000);
 
   it("names of exactly 128 characters and a body class of exactly 220 are accepted, and match nothing", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const name = `Story391.${"x".repeat(119)}`;
     const bodyClass = `Story391.Body.${"y".repeat(206)}`;
     expect(name).toHaveLength(128);
@@ -825,18 +814,18 @@ describe("Story 39.1 (QA): values at the edge of what is allowed are accepted (A
   }, 120000);
 
   it("a session ID at the largest safe integer matches nothing; one beyond range is refused naming sessionId", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const largest = succeeded(await search(interop, { sessionId: Number.MAX_SAFE_INTEGER }));
     expect(largest.rows).toEqual([]);
 
     const beyond = await search(interop, { sessionId: 1e21 });
-    expect(beyond.isError, textOf(beyond)).toBe(true);
-    expect(textOf(beyond)).toContain("sessionId");
-    expect(textOf(beyond)).not.toMatch(/SQLCODE|SQL error|<SYNTAX>/i);
+    expect(beyond.isError, firstText(beyond)).toBe(true);
+    expect(firstText(beyond)).toContain("sessionId");
+    expect(firstText(beyond)).not.toMatch(/SQLCODE|SQL error|<SYNTAX>/i);
   }, 120000);
 
   it("the ends of the calendar IRIS can hold are searched without an error", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const window of [
       { from: "1841-01-01T00:00:00Z", to: "1841-01-02T00:00:00Z" },
       { from: "2000-02-29T00:00:00Z", to: "2000-02-29T23:59:59Z" },
@@ -873,9 +862,9 @@ describe("Story 39.1 (QA): the cursor and the filters work together (AC-3)", () 
   ];
   for (const pagedCase of PAGED_CASES) {
     it(`filtered pages join without a gap or a duplicate: ${pagedCase.name}`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await oracle(NS_A, pagedCase.where);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(pagedCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(pagedCase.ids);
 
       const pages = await pagesOf(pagedCase.args);
 
@@ -886,13 +875,13 @@ describe("Story 39.1 (QA): the cursor and the filters work together (AC-3)", () 
   }
 
   it("a cursor written by hand resumes after its (time, id) exactly, between two headers with the same time", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const tied = "2001-02-03 07:30:00";
     const expected = await oracle(
       NS_A,
       `${WINDOW_SQL} AND (TimeCreated > '${tied}' OR (TimeCreated = '${tied}' AND ID > 3))`,
     );
-    expect(ids(expected), "everything after header 3, so header 4 (same time, higher ID) is the first").toEqual([4, 5, 6, 7, 8, 9, 13, 10, 11]);
+    expect(headerIds(expected), "everything after header 3, so header 4 (same time, higher ID) is the first").toEqual([4, 5, 6, 7, 8, 9, 13, 10, 11]);
 
     const content = succeeded(await search(interop, { cursor: handWrittenCursor(tied, 3) }));
 
@@ -900,10 +889,10 @@ describe("Story 39.1 (QA): the cursor and the filters work together (AC-3)", () 
   }, 120000);
 
   it("a cursor never widens the window: one that points before from still starts at from, and one past the last row is empty", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const early = succeeded(await search(interop, { cursor: handWrittenCursor("2001-02-03 00:00:00", 1) }));
     expect(early.rows).toEqual(await oracle(NS_A, WINDOW_SQL));
-    expect(ids(early.rows)[0], "header 1 (05:59:59) is before from, so the window still starts at header 2").toBe(2);
+    expect(headerIds(early.rows)[0], "header 1 (05:59:59) is before from, so the window still starts at header 2").toBe(2);
 
     const late = succeeded(await search(interop, { cursor: handWrittenCursor("2001-02-03 18:00:00", 11) }));
     expect(late.rows).toEqual([]);
@@ -913,20 +902,20 @@ describe("Story 39.1 (QA): the cursor and the filters work together (AC-3)", () 
 
 describe("Story 39.1 (QA): the window limits and hostile values, through the built server (AD-20, AD-26)", () => {
   it("tool: a window one second over 7 days is refused, naming the limit", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, { from: "2001-01-27T00:00:00Z", to: "2001-02-03T00:00:01Z" });
 
-    expect(result.isError, textOf(result)).toBe(true);
-    expect(textOf(result)).toContain("7 days");
+    expect(result.isError, firstText(result)).toBe(true);
+    expect(firstText(result)).toContain("7 days");
     expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
   }, 120000);
 
   it("tool: a window that ends before it starts is refused, naming the order", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, { from: TO, to: FROM });
 
-    expect(result.isError, textOf(result)).toBe(true);
-    expect(textOf(result)).toContain("earlier");
+    expect(result.isError, firstText(result)).toBe(true);
+    expect(firstText(result)).toContain("earlier");
     expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
   }, 120000);
 
@@ -947,7 +936,7 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
   ];
   for (const [what, value] of EXOTIC_NAMES) {
     it(`${what} in a name is a name: a clean empty result, not an error`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       for (const field of ["item", "source", "target", "bodyClass"]) {
         const result = await search(interop, { [field]: value });
         const content = succeeded(result);
@@ -958,7 +947,7 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
   }
 
   it("blanks and tabs after a name are ignored, as the column's collation ignores them: the rows equal the same SQL equality", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // Observed with the oracle first (rule #36): the %String name columns compare with trailing blanks and tabs
     // removed (so these are the rows of `source = 'Story391.Alpha'`, written by hand from the seed) but not a
     // trailing line break, which makes a different name.
@@ -970,7 +959,7 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
     ];
     for (const [trailing, expectedIds] of TRAILING) {
       const expected = await oracle(NS_A, `${WINDOW_SQL} AND SourceConfigName = ${sqlLiteral(`Story391.Alpha${trailing}`)}`);
-      expect(ids(expected), `the oracle for ${JSON.stringify(trailing)}`).toEqual(expectedIds);
+      expect(headerIds(expected), `the oracle for ${JSON.stringify(trailing)}`).toEqual(expectedIds);
 
       const content = succeeded(await search(interop, { source: `Story391.Alpha${trailing}` }));
 
@@ -979,18 +968,18 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
   }, 120000);
 
   it("a hostile namespace is refused as a namespace, with no SQL anywhere in the answer", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const result = await search(interop, { namespace: "EXECMCPTMP391A' OR 1=1--" });
 
-    expect(result.isError, textOf(result)).toBe(true);
-    expect(textOf(result)).not.toMatch(/SQLCODE|SQL error|SELECT|Ens\.MessageHeader/i);
+    expect(result.isError, firstText(result)).toBe(true);
+    expect(firstText(result)).not.toMatch(/SQLCODE|SQL error|SELECT|Ens\.MessageHeader/i);
     expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
   }, 120000);
 });
 
 describe("Story 39.1 (QA): the audit trail of the built server names the action and the outcome (AC-6)", () => {
   it("records headers as ok, and body and searchTable (each a validation refusal) as error, with each action named", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const dir = mkdtempSync(path.join(tmpdir(), "story-39-1-audit-"));
     const auditPath = path.join(dir, "audit.log");
     const audited = await openWireSession(wireOptions("iris-interop-mcp"), { IRIS_AUDIT_LOG: auditPath });
@@ -1000,26 +989,21 @@ describe("Story 39.1 (QA): the audit trail of the built server names the action 
       const noInput = await audited.call("iris_message_search", { action: "body", namespace: NS_B, from: FROM, to: TO });
       expect(noInput.isError).toBe(true);
       expect(noInput.structuredContent).toBeUndefined();
-      expect(textOf(noInput)).toContain("'bodyClass'");
+      expect(firstText(noInput)).toContain("'bodyClass'");
       // searchTable without its searchTableClass is refused by the tool's own validation too, so its outcome is error.
       const noClass = await audited.call("iris_message_search", { action: "searchTable", namespace: NS_B, from: FROM, to: TO });
       expect(noClass.isError).toBe(true);
       expect(noClass.structuredContent).toBeUndefined();
-      expect(textOf(noClass)).toContain("'searchTableClass'");
+      expect(firstText(noClass)).toContain("'searchTableClass'");
 
       // The child process writes the log on its own schedule: wait, bounded, for the three entries.
-      const deadline = Date.now() + 10000;
-      let searches: Array<Record<string, unknown>> = [];
-      while (Date.now() < deadline) {
-        const text = existsSync(auditPath) ? readFileSync(auditPath, "utf8") : "";
-        searches = text
-          .split("\n")
-          .filter((line) => line.trim() !== "")
-          .map((line) => JSON.parse(line) as Record<string, unknown>)
-          .filter((entry) => entry["tool"] === "iris_message_search");
-        if (searches.length >= 3) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      const searches = await pollAuditEntries(auditPath, {
+        tool: "iris_message_search",
+        count: 3,
+        intervalMs: 50,
+        timeoutMs: 10000,
+        excerpt: 500,
+      });
 
       expect(searches.map((entry) => [entry["action"], entry["outcome"]])).toEqual([
         ["headers", "ok"],

@@ -2,9 +2,10 @@
 title: 'Story 39.6: Message Forensics Docs, Prompt and Capstone'
 type: 'feature'
 created: '2026-10-17'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '32fb063dae90b3ef2d31b0d2b28e0917aeea3302'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -306,6 +307,62 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-10-17 — Review pass
+- verdicts: 48 findings — high 0, medium 6, low 36, false 6, maybe-false 0
+- findings:
+  - Blind Hunter:
+    - `[low]` `[patch]` B1 literal non-ASCII in code (a U+FFFF in the serializer regex, an em dash, arrow and emoji in a test string) — verified at `tools-list-snapshot-core.mjs` and `tools-list-snapshot.test.ts`; both now use `￿` and `— → 😀` escapes. Box-drawing characters in comments follow the sibling scripts and stay.
+    - `[low]` `[patch]` B2 docs do not say the diagram and the logs sit outside the data policy — verified: the forensics subsection was silent and the scope table lists both as residual; one sentence added to the README pointing at the scope table. The prompts are unchanged (the flows are the Design Notes', and both tools were already in the prompt).
+    - `[low]` `[patch]` B3 refusal handling narrower than the docs claim — verified: only the `block` read of step 1 was covered; refusal sentences added to `find-patient-messages` steps 3 and 5 and `trace-message-flow` step 2, pinned in the interop `prompts.test.ts`.
+    - `[low]` `[patch]` B4 `patientId` written raw into the JSON example — verified; the value is now `JSON.stringify(patientId)` (identical text for a plain value) and a hostile-value row parses the rendered example.
+    - `[low]` `[reject]` B5 `REDACTED_TEXT_SHOWN` scope — the scan is directed by the spec's Scans bullet and passes; the hazard is a future wording, a cosmetic title, and the fix would edit the shared pattern file.
+    - `[low]` `[patch]` B6 README intro overstates the prompts — verified; rewritten to say what each prompt walks and that `resend-failed-messages` covers the preview.
+    - `[low]` `[patch]` B7 documented capstone claim wider than the legs — the CHANGELOG and `tool_support.md` now say "a Search Table lookup, a body read, the audit file or stderr"; the stderr control is V4.
+    - `[low]` `[reject]` B8 `--force` re-pins unrelated drift, `ENTRY_FLOOR`, `capturedAt` — by design: decision #29 makes any change to a listed entry a `--force` regenerate with a CHANGELOG line, `--force` prints every re-pinned or vanished entry, `capturedAt` is in Task 5's header, and the floor is deliberate friction.
+    - `[low]` `[patch]` B9 history narrated in a helper header comment — reworded to the contract.
+  - Edge Case Hunter:
+    - `[low]` `[patch]` E1 header-ID start gives a one-instant window — verified (`headerId` returns one message); step 1 now re-reads by `sessionId`.
+    - `[low]` `[patch]` E2 default `count` 100 can cut the flow's latest time — step 1 now says to raise `count` when the list may be cut off.
+    - `[low]` `[patch]` E3 `to` in whole seconds drops a fractional last message — verified (`TimeCreated <= ?`); step 2 rounds `to` up to the next whole second.
+    - `[low]` `[reject]` E4 both lookups empty — the old flow had the same gap, it needs a new branch, and the reachable case (a wrong ID) already shows as an empty result to the agent.
+    - `[low]` `[patch]` E5 duplicate session IDs for the diagram — "distinct" added to step 6.
+    - `[low]` `[patch]` E6 namespace note covers `iris_server_profiles`, which takes none — the note now excepts it, pinned.
+    - `[low]` `[patch]` E7 quote, backslash, newline in `patientId` — grouped with B4 (backticks in code spans stay: low, and the argument is the user's own input).
+    - `[low]` `[reject]` E8 `to` without `from` dropped — the prompt asks the user for the period anyway; the fix adds a branch.
+    - `[low]` `[patch]` E9 refusal at any step — grouped with B3.
+    - `[medium]` `[patch]` E10 `trace-message-flow` splits a longer flow into windows without asking — verified against the frozen boundary "the agent asks the user for a longer period" (the Design Notes flow said "split"); step 2 now asks first.
+    - `[low]` `[patch]` E11 literal non-ASCII bytes — grouped with B1.
+    - `[low]` `[patch]` E12 stderr read once with no settle — `listTools()` round trip added before the read.
+    - `[low]` `[reject]` E13 half-written audit line aborts the poll — the helper moved the originals' `JSON.parse` verbatim; no flake observed in 19 armed runs.
+    - `[low]` `[reject]` E14 stub crashes on a non-JSON body — only the gates' own JSON reaches it, as in the originals.
+    - `[low]` `[reject]` E15 opaque error for a reply without `status` — test infrastructure that fails loudly; the originals had the same shape.
+    - `[low]` `[reject]` E16 `isWellFormed` needs Node 20 — Node 18 and 19 are end of life; the gates already used it.
+    - `[low]` `[patch]` E17 importer regex misses single quotes or a missing `.js` — broadened and pinned.
+    - `[low]` `[reject]` E18 SDK or zod hoisted away from `packages/shared/node_modules` — pnpm's layout is the repo's package manager; the capture fails loudly.
+  - Verification Gap Reviewer:
+    - `[medium]` `[patch]` V1 live "added" row cannot fail on the committed tree — verified (`added` is empty, so the loop never ran); the row now compares `added` with an independently computed set, mutation-verified.
+    - `[medium]` `[patch]` V2 guard cannot see a nested `entries` function — verified; `FUNCTION_NEVER_LOCAL` added (local `const entries =` stays legal), mutation-verified on the 39-2 gate.
+    - `[medium]` `[patch]` V3 `postEnvelope` and `atelierScalar` have no logic test — stub-backed rows added (the vacuous `atelierScalar` row replaced), mutation-verified; `openAuditedSession` stays covered by the armed capstone and 39-5 audit-file assertions, which fail without `IRIS_AUDIT_LOG`.
+    - `[medium]` `[patch]` V4 stderr surface has no positive control — the leak detector was shown to fire on stderr by a mutation that writes the body to stderr (leg 4 red naming the stderr), and a settle point was added.
+    - `[low]` `[patch]` V5 pinning tests without a mutation line — the mutation lines were written and run (list under Results).
+    - `[low]` `[patch]` V6 root scripts unpinned — a `package.json` row added, mutation-verified.
+    - `[low]` `[patch]` O1 literal non-ASCII — grouped with B1.
+    - `[false]` `[reject]` O2 two armed gate files race on `Story391Fixture` — the package runs its files one at a time (`fileParallelism: false`, pinned by `epic38-gate-guards`) and the prepublish gate passes `--no-file-parallelism`.
+    - `[low]` `[patch]` O3 raw `patientId` — grouped with B4.
+  - Intent Alignment Auditor:
+    - `[false]` `[reject]` IA1 prompt tests exercise the rendered string, not an agent — AC-2 is stated at the real `prompts/list` and `prompts/get` handler, which the tests drive.
+    - `[medium]` `[patch]` IA2 window rule differs between the two prompts — grouped with E10.
+    - `[false]` `[reject]` IA3 leg 5 changes configuration on another server; the red proof is outside the diff — the allow leg is the specified positive control, and the red proof is recorded under Results.
+    - `[low]` `[reject]` IA4 the 39-1 guard regex wants exactly one line before the version assert — pre-existing, not in this diff; the capstone satisfies it.
+    - `[false]` `[reject]` IA5 the snapshot is built in process from the working tree — the Design Notes specify `McpServerBase` construction plus `fetchAllTools`.
+    - `[low]` `[reject]` IA6 the helper-copy guard only sees named copies in importing files — the spec's Task 2 defines the guard that way.
+    - `[false]` `[reject]` IA7 `squash` and `HEADER_COLUMNS` live in `header-row-oracle.ts` — the Promotion table says so.
+    - `[low]` `[reject]` IA8 small behavior differences in moved gates (delete-first put, `Error` for `expect`) — no pass or fail condition changed; recorded under Results.
+    - `[false]` `[reject]` IA9 `[SKIP]` text assembled in `skipTest` — the gate guards pin the printed line and pass.
+    - `[low]` `[reject]` IA10 README examples not re-captured — captured from the built server at implement time; the capstone pins the same text.
+    - `[low]` `[reject]` IA11 other READMEs untouched — the Docs table R1 to R16 is the enumeration of record, and no stale prompt count remains (searched).
+    - `[low]` `[patch]` IA12 literal non-ASCII — grouped with B1.
+
 ## Design Notes
 
 **Orchestrator decisions: DECIDED at the spec gate, 2026-10-17, both as recommended (#28: the capstone seeds synthetic fixtures directly and starts no production; #29: any change to a listed tools/list entry, additive included, needs a `--force` regenerate and a CHANGELOG line).** The planning text follows:
@@ -490,13 +547,51 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 
 **Epic-close records** (written by the implement stage): `BOOTSTRAP_VERSION` for the epic, `089f8f0a62b2` → `2fd17b50a024`. Tools 107/112 at the epic start → 109/114 (`iris_message_search` in 39.1 and `iris_message_body` in 39.5; verify against git). Prompts 12 → 13. Baseline `1e62c5ad5bf7`/141. Snapshot: 114 entries, with its SDK and zod versions.
 
+**Results (implement stage, 2026-10-17).**
+- **Epic-close records, verified.** `git show da9b9d5^:README.md` reads "107 tools" and `BOOTSTRAP_VERSION` `089f8f0a62b2`; the tree reads 109 package tools (114 advertised), `2fd17b50a024` (`pnpm gen:bootstrap` leaves a zero-line diff), baseline `1e62c5ad5bf7`/141 (`pnpm gen:governance-baseline:check` OK, 210 live keys, 69 post-foundation, file untouched), prompts 12 → 13 (interop 3 → 4), 13 skills.
+- **Snapshot.** `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json`: `entryCount` 114 (dev 32, admin 27, interop 25, ops 22, data 8), `sdkVersion` 1.29.0, `zodVersion` 4.3.6. `pnpm gen:tools-list-snapshot:check` exits 0; with no flag the CLI exits 2 and writes nothing.
+- **Armed gates, one per call, none skipped** (the `it.runIf(CAPTURE)` capture rows of 39.1 to 39.4 stay off by design): epic38 capstone 6, 38-4 wire 10, 38-5 wire 28, 38-7 wire 10, 38-7 governance process 44, 39-1 103, 39-2 live 17, 39-2 startup 13, 39-2 QA process 17, 39-3 live 93, 39-3 QA live 31, 39-3 QA process 12, 39-4 live 84, 39-4 QA live 9, 39-4 QA process 15, 39-5 live 30, 39-5 QA live 23, 39-5 QA process 15, epic39 capstone 5 (`[PERF]`: first start 190 to 227 ms, header search 46 to 58 ms, lookup 13 to 131 ms, body read 12 to 77 ms). The whole `@iris-mcp/all` suite, armed, in four calls: 255, 257, 512 and 349 tests, 74 files, all passed.
+- **Packages.** build, test, lint and type-check: shared (2051 tests), dev (1419), admin (498), interop (642), ops (350), data (165), client-config (514). Lint has 0 errors. The dev package's full parallel run fails `doc-type-description-live-gate` ("iris_package_list ... `*/cls`: expected 12656 to be 12654", a document count read twice on the shared instance while other dev live tests write documents); the file passes alone and the whole package passes with `--no-file-parallelism` (1419 of 1419). Dev source changed only in `prompts.test.ts`.
+- **Other commands.** `check-epics-sync.mjs` prints OK; `pnpm measure:tools-payload` equals the README rows (`docs-visibility-roster-sync` passes); `gen:skills`, `gen:skills:check` and `validate:prompts` are clean (13 skills, 26 sources, 110 tool names). `iris_namespace_list`, `iris_database_list` and `iris_doc_list` (HSCUSTOM, `Story396` and `ExecuteMCPv2.Temp.`, generated included) show nothing left.
+- **Kept variants** (the guard's `KEPT_VARIANTS`, each with its reason in `gate-helper-copies.test.ts`): `story-38-7-qa-governance-process` `governanceReport` (opens its own session and captures stderr); the `route` wrappers of the 39-3, 39-4 and 39-5 QA live gates (their own request and assertions, calling `postEnvelope`); `story-38-0-qa-process` `startStub` (a caller-chosen status). Also local by design: `wireOptions`/`session` one-liners; the `succeeded` variants; `sendSearch` in the 39-3 and 39-4 gates (raw status and text for the byte-identity rows); the thin session wrappers `openThroughProxy` (39-5), `openTracked` (39-5 QA) and `openOnStub` (39-5 QA process), which bind file-local state around `openAuditedSession`; the inline `[SKIP]` log of the QA process gates' `beforeAll`; the bare `testCtx.skip()` calls of the 38-4 wire gate; 39-1's nested `call`.
+- **Mutations** (each applied, observed red, reverted byte-identical, and interop or dev rebuilt where the dist was touched):
+  - mutation: R2 row `iris_message_search:searchTable` "a read, enabled by default" -> "a read" -> `story-39-6-doc-claims` (the searchTable row test)
+  - mutation: R11 searchTable example loses "enabled by default" -> `story-39-6-doc-claims` (the searchTable example test)
+  - mutation: `trace-message-flow` steps 3 and 4 swapped (interop rebuilt) -> `prompt-safety-invariants` ("trace-message-flow runs messages, header search, body read, diagram, logs and the summary, in that order")
+  - mutation: "(Rule #38)" added to `find-patient-messages` step 7 (interop rebuilt) -> `prompt-safety-invariants` ("carries no internal rule number and no repository path")
+  - mutation: `applyBodyReaderPolicy` redact branch returns `raw.bodyText` unredacted (`message-body.ts:250`), interop rebuilt -> `epic39-capstone-gate` leg 4 red ("SYNTHPHI leaked ... expected ['the body result'] to deeply equal []"), legs 1, 2, 3 and 5 green. Guarded path: SDK `Client` -> built interop dist over stdio -> `iris_message_body` -> `applyBodyReaderPolicy` -> `redactHl7`. A second mutation, `redactPhiInputs` disabled in the spawned server only, turned leg 4 red naming `the audit file`.
+  - mutation: `function entryOf(` appended to `story-39-5-qa-process.test.ts` -> `gate-helper-copies` ("story-39-5-qa-process.test.ts: entryOf")
+  - mutation: one character appended to the `iris_doc_get` description (`packages/iris-dev-mcp/src/tools/doc.ts:169`), dev rebuilt -> `tools-list-snapshot` (3 tests) and `pnpm gen:tools-list-snapshot:check` exit 1, naming `iris-dev-mcp iris_doc_get.description differs at $.description (character 811)`
+  - mutation: `sessionOrHeaderId` `required: true` -> `false` -> interop `prompts.test.ts` ("keeps its name, title and arguments exactly as first published")
+- **Review-pass mutations** (each applied, observed red, reverted byte-identical with `git status --short` and `git diff --stat` unchanged, and interop rebuilt where its dist was touched):
+  - mutation: a nested `async function entries(file)` pasted into the describe of `story-39-2-data-policy-live-gate.test.ts` -> `gate-helper-copies` ("story-39-2-data-policy-live-gate.test.ts: entries")
+  - mutation: `compareSnapshot` lists a tool as added when the snapshot HAS it (condition inverted) -> `tools-list-snapshot` (4 tests, the live row "reports exactly the live tools the snapshot does not list as added" among them, although the live `added` is empty)
+  - mutation: `skipTest` drops the tag from its `[SKIP]` line -> `process-gate-helpers` (the skipTest row)
+  - mutation: `postEnvelope` returns `errors: []` -> `process-gate-helpers` (the postEnvelope row)
+  - mutation: `atelierScalar` reads the second column instead of the first -> `process-gate-helpers` (the atelierScalar row)
+  - mutation: `annotations` removed from `ENTRY_FIELDS` of the snapshot core (the module the CLI and the test share) -> `tools-list-snapshot` (the annotation drift row and the pinned-fields row)
+  - mutation: the root script `gen:tools-list-snapshot:check` loses `--check` -> `tools-list-snapshot` (the package.json scripts row)
+  - mutation: `find-patient-messages` writes the filters value as `"${patientId}"` without `JSON.stringify` -> interop `prompts.test.ts` (the hostile-identifier row)
+  - mutation: `STORY396_IDS.hl7` `"1,2,3"` -> `"1,2"` -> `interop-namespace-fixture.test.ts` (the capstone seed row); the capstone's leg 1 pins the same map
+  - mutation: `skills/find-patient-messages/SKILL.md` deleted -> `skills-generated-frontmatter` and `pnpm gen:skills:check` (drift reported)
+  - mutation: `process.stderr.write(raw.bodyText)` before the redaction in `applyBodyReaderPolicy`, interop rebuilt -> `epic39-capstone-gate` leg 4 red naming `the server's stderr` and nothing else (legs 1, 2, 3 and 5 green). Guarded path: SDK `Client` -> built interop dist over stdio -> `iris_message_body` -> server stderr -> the sweep of leg 4.
+- **Re-run after the review patches** (the `(loop)` lines and then the `(once)` lines, in the foreground, one gate per call): the interop build and `prompts.test.ts` (21 tests); dev (9), admin (4) and ops (3) `prompts.test.ts`; `gen:skills`, `gen:skills:check` and `validate:prompts` clean; `gen:tools-list-snapshot:check` OK (114 entries); the 19-file default-suite batch (468 tests); `story-39-1-gate-guards` (32) and `epic38-gate-guards` (11); the armed capstone (5, none skipped). Then every moved gate armed, one per call, none skipped apart from the `it.runIf(CAPTURE)` capture rows: epic38 capstone 6, 38-4 wire 10, 38-5 wire 28, 38-7 wire 10, 38-7 governance process 44, 39-1 103 (1 capture row skipped), 39-2 live 17 (1), 39-2 startup 13, 39-2 QA process 17, 39-3 live 93 (1), 39-3 QA live 31, 39-3 QA process 12, 39-4 live 84 (1), 39-4 QA live 9, 39-4 QA process 15, 39-5 live 30, 39-5 QA live 23, 39-5 QA process 15. The other 55 files of `@iris-mcp/all`, armed, in two calls: 27 files with 243 tests and 28 files with 569 tests. Packages (build, test, lint, type-check): shared 2051, dev 1419, admin 498, interop 646, ops 350, data 165, client-config 514 tests; lint has 0 errors (shared reports 1 warning). `pnpm gen:bootstrap` leaves a zero-line diff (`2fd17b50a024`), `pnpm gen:governance-baseline:check` is OK (141 frozen keys, the file untouched), `check-epics-sync.mjs` prints OK, and `pnpm measure:tools-payload` equals the README rows. After the armed runs, `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP396A`, and `iris_doc_list` (HSCUSTOM, `Story396` and `ExecuteMCPv2.Temp.`, generated included) is empty.
+- **Decisions applied from the plan** (I1 to I5 held as written). Where a gate's local copy differed from the export in pass/fail terms, the copy stayed (above); the exported stub's `close()` also calls `closeAllConnections()`, and `pollAuditEntries` reads once more at its deadline; neither changes a verdict.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-**Plan stage (2026-10-17).** The spec was planned against the READY FOR DEVELOPMENT standard and halted after planning, as the invocation asked.
-- **Ledger inbox:** DW-561 and DW-573 are both addressed (Design Notes, Ledger inbox).
-- **Orchestrator decisions needed:** two, both under Design Notes:
-  - whether "generated" traffic requires a production (recommended: no, seeded fixture μ);
-  - snapshot strictness (recommended: every change to a listed entry needs a `--force` regenerate).
+**Implement and review (2026-10-17).**
+- **Summary.** `trace-message-flow` now searches, reads and diagrams (name, title and arguments unchanged and pinned), and the interop prompt `find-patient-messages` is added (13 prompts, 13 generated skills). The default-suite capstone `epic39-capstone-gate.test.ts` drives the built dev, admin and interop servers over the SDK client on `EXECMCPTMP396A` (seeded fixture mu, no production), checks the deployed `BOOTSTRAP_VERSION` first, and is proven red by disabling redaction and by writing the body to stderr. DW-561: the duplicated gate helpers are exports of `process-gate-helpers.ts` and 18 gates use them, with `gate-helper-copies.test.ts` as the guard. DW-573: a 114-entry `tools/list` snapshot (SDK 1.29.0, zod 4.3.6) with a shared core, a CLI (`--check`, `--force`) and a default-suite test. Docs R1 to R16, the CHANGELOG section, the changeset (`@iris-mcp/interop` minor) and `docs/epic-summary.md` are done.
+- **Files changed.**
+  - Prompts: `packages/iris-interop-mcp/src/prompts/traceMessageFlow.ts` (flow and description), `findPatientMessages.ts` (new), `prompts/index.ts`; `skills/` regenerated through `pnpm gen:skills`.
+  - Capstone and fixture: `epic39-capstone-gate.test.ts` (new), `interop-namespace-fixture.ts` (`Story396.Seed`, `seedCapstone`), `prepublish-gate.mjs`, `story-39-1-gate-guards.test.ts`.
+  - DW-561: `process-gate-helpers.ts` (+ `process-gate-helpers.test.ts`), `header-row-oracle.ts`, `gate-helper-copies.test.ts` (new) and 18 gate files.
+  - DW-573: `scripts/lib/tools-list-snapshot-core.mjs`, `scripts/gen-tools-list-snapshot.mjs`, `fixtures/tools-list-snapshot.json`, `tools-list-snapshot.test.ts`, two root `package.json` scripts.
+  - Docs and counts: README, interop README, `tool_support.md`, three client guides, `CHANGELOG.md`, `docs/epic-summary.md`, the changeset, `story-39-6-doc-claims.test.ts`, and the repinned prompt-count tests of interop, dev, admin, ops and `iris-mcp-all`.
+- **Review.** Four layers, 48 findings: high 0, medium 6, low 36, false 6. 28 findings were patched (6 medium and 22 low; the 5 medium entries were the window rule of `trace-message-flow`, the vacuous live "added" row, the nested-`entries` blind spot of the helper-copy guard, the untested `postEnvelope` and `atelierScalar`, and the stderr leak control). 20 were rejected (14 low, 6 false) with their reason in the triage log. Nothing was deferred (`deferred: []`).
+- **Follow-up review recommendation: true.** Patched entries by verdict: high 0, medium 5. The specific unverified risk: the prompt-text clauses added after the layers ran (the `trace-message-flow` step 1 and 2 clauses, the `find-patient-messages` refusal and namespace sentences) are pinned by string tests only and were not re-read by an independent layer.
+- **Verification.** See Verification, Results: the `(loop)` and `(once)` commands all pass after the last patch, every moved gate and the capstone armed with none skipped apart from the by-design capture rows, the instance holds nothing of ours afterwards, and `BOOTSTRAP_VERSION` is `2fd17b50a024` (the epic: `089f8f0a62b2` to `2fd17b50a024`).
+- **Residual risks.** The dev package's full parallel run can fail `doc-type-description-live-gate` on a document count read twice on the shared instance (passes alone and with `--no-file-parallelism`; not part of this change). Moved gates differ from their copies in failure wording (`Error` where `expect` failed), in the stub's `close()` and in the audit poll's final read, which Results lists; none changes a verdict.

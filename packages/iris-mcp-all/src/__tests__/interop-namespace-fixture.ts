@@ -34,6 +34,12 @@
  * seed that saves seventeen bodies of every kind with their headers), which `seedBodyReader` compiles INSIDE a
  * scratch namespace; the seed class also measures `Hl7Size` against the serialization.
  *
+ * Story 39.6 adds the `STORY396_*` seed source (`Story396.Seed`: three indexed HL7 v2 messages and four
+ * Completed Request headers over three sessions, fixture mu), which `seedCapstone` compiles INSIDE a scratch
+ * namespace together with the `Story394.SearchTable` class it indexes with. Every identifying value contains
+ * `SYNTHPHI396` and appears only in PID-3 and OBX-5; the values that must survive redaction contain
+ * `KEEPME396`.
+ *
  * Shared by Stories 39.1 to 39.6.
  */
 
@@ -1372,6 +1378,111 @@ export async function seedBodyReader(dev: WireSession, name: string, set: "a" | 
     { className: "Story395.Seed", args: [set] },
     STORY395_IDS[set],
     `the body-reader set ${set}`,
+  );
+}
+
+/**
+ * Story 39.6 capstone fixture mu. It is compiled INSIDE a scratch namespace (never in HSCUSTOM) together with
+ * `Story394.SearchTable`, which indexes each message, so the database file that `removeInteropNamespace`
+ * deletes takes both away. Three untyped HL7 v2 messages (MSH, then `PID|1||<mrn>`, then an OBX whose code
+ * `KEEPME396-CODE^KEEPME396-TEXT^L` survives redaction and whose value `SYNTHPHI396-NOTE` does not) and four
+ * Completed Request headers, all created on 2001-02-03 UTC:
+ *
+ * | header | session | source to target | message | PID-3 | time |
+ * |---|---|---|---|---|---|
+ * | 1 | 396001 | Story396.Service to Story396.Router | 1 (ADT^A01) | SYNTHPHI396-MRN-P | 12:00:01 |
+ * | 2 | 396001 | Story396.Router to Story396.Operation | 1 | SYNTHPHI396-MRN-P | 12:00:02 |
+ * | 3 | 396002 | Story396.Service to Story396.Router | 2 (ADT^A08) | SYNTHPHI396-MRN-P | 12:00:03 |
+ * | 4 | 396003 | Story396.Service to Story396.Router | 3 (ADT^A01) | SYNTHPHI396-MRN-Q | 12:00:04 |
+ */
+export const STORY396_SEED_SOURCE = String.raw`Class Story396.Seed
+{
+
+/// Seed fixture mu into the current namespace, which must be an empty EXECMCPTMP396 scratch namespace.
+/// Returns the JSON ID map {"headers":"1,2,3,4","hl7":"1,2,3"}, or the first error text.
+ClassMethod Seed() As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP396"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP396 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    Set tM = ""
+    Set tM = tM_$ListBuild(..Save("SYNTHPHI396-MRN-P", "ADT^A01", "Story396-CTL-1"))
+    Set tM = tM_$ListBuild(..Save("SYNTHPHI396-MRN-P", "ADT^A08", "Story396-CTL-2"))
+    Set tM = tM_$ListBuild(..Save("SYNTHPHI396-MRN-Q", "ADT^A01", "Story396-CTL-3"))
+    Set tError = ..FirstError(tM, 3)
+    If tError '= "" { Quit tError }
+    Set tH = ""
+    Set tH = tH_$ListBuild(..AddHeader(1, "Story396.Service", "Story396.Router", $List(tM, 1), "2001-02-03 12:00:01"))
+    Set tH = tH_$ListBuild(..AddHeader(1, "Story396.Router", "Story396.Operation", $List(tM, 1), "2001-02-03 12:00:02"))
+    Set tH = tH_$ListBuild(..AddHeader(2, "Story396.Service", "Story396.Router", $List(tM, 2), "2001-02-03 12:00:03"))
+    Set tH = tH_$ListBuild(..AddHeader(3, "Story396.Service", "Story396.Router", $List(tM, 3), "2001-02-03 12:00:04"))
+    Set tError = ..FirstError(tH, 4)
+    If tError '= "" { Quit tError }
+    Quit {"headers":($ListToString(tH)),"hl7":($ListToString(tM))}.%ToJSON()
+}
+
+/// The first ERROR: text among the first pCount items of the list pList, or "".
+ClassMethod FirstError(pList As %List, pCount As %Integer) As %String
+{
+    Set tError = ""
+    For tI = 1:1:pCount {
+        If $Extract($List(pList, tI), 1, 6) = "ERROR:" {
+            Set tError = $List(pList, tI)
+            Quit
+        }
+    }
+    Quit tError
+}
+
+/// Save one Completed Request header: session 396000 plus pSession, a body of class EnsLib.HL7.Message.
+ClassMethod AddHeader(pSession As %Integer, pSource As %String, pTarget As %String, pBodyId As %String, pTime As %String) As %String
+{
+    Quit ##class(ExecuteMCPv2.Temp.Story391Fixture).Add(396000 + pSession, 1, 9, 0, pSource, pTarget, "EnsLib.HL7.Message", pBodyId, pTime)
+}
+
+/// Save one untyped HL7 message (segments MSH, PID, OBX, CR terminators) and index it with
+/// Story394.SearchTable. Returns the message ID or the error text.
+ClassMethod Save(pMrn As %String, pType As %String, pControl As %String) As %String
+{
+    Set tCR = $Char(13)
+    Set tText = "MSH|^~\&|Story396-APP|Story396-FAC|||20010203120000||"_pType_"|"_pControl_"|P|2.5.1"_tCR
+    Set tText = tText_"PID|1||"_pMrn_tCR
+    Set tText = tText_"OBX|1|TX|KEEPME396-CODE^KEEPME396-TEXT^L||SYNTHPHI396-NOTE"_tCR
+    Set tId = ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveHl7(tText)
+    If $Extract(tId, 1, 6) = "ERROR:" { Quit tId }
+    Set tSC = $ClassMethod("Story394.SearchTable", "IndexDoc", ##class(EnsLib.HL7.Message).%OpenId(tId))
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tId
+}
+
+}
+`;
+
+/** The Story396 documents compiled into a scratch namespace, in compile order. */
+export const STORY396_DOCUMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["Story394.SearchTable.cls", STORY394_SEARCH_TABLE_SOURCE],
+  ["Story396.Seed.cls", STORY396_SEED_SOURCE],
+];
+
+/** What `Story396.Seed.Seed` returns: four headers over three HL7 messages, numbered from 1 in a fresh namespace. */
+export const STORY396_IDS = { headers: "1,2,3,4", hl7: "1,2,3" } as const;
+
+/**
+ * Put and compile the `Story396` seed and the `Story394.SearchTable` class into the scratch namespace
+ * `name`, then seed fixture mu (the Search Table entries are made with `IndexDoc`; no production runs) and
+ * check the IDs it received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, empty `EXECMCPTMP396<capital letter>` namespace.
+ */
+export async function seedCapstone(dev: WireSession, name: string): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY396_DOCUMENTS,
+    { className: "Story396.Seed", args: [] },
+    STORY396_IDS,
+    "the capstone fixture mu",
   );
 }
 

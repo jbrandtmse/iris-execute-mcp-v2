@@ -35,13 +35,20 @@ import { fileURLToPath } from "node:url";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
+  distEntry,
   docFixtures,
-  executeMcpPost,
+  firstText,
+  fixtureDocumentNames,
+  headerIds,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  postEnvelope,
   resolveSdkEsmDir,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
+  type EnvelopeAnswer,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -54,11 +61,11 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
-import { bodyJoinOracle } from "./header-row-oracle.js";
+import { HEADER_COLUMNS, bodyJoinOracle, squash } from "./header-row-oracle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
+const GATE_TAG = "story-39-3-qa-live-gate";
 
 const TARGET = irisTargetFromEnv();
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -153,21 +160,12 @@ let interop: WireSession;
 function wireOptions(pkg: string): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-3-qa-live-gate",
   };
 }
 
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-3-qa-live-gate: ${skipReason}`);
-  testCtx.skip();
-}
-
-const textOf = (result: WireToolResult): string => result.content?.[0]?.text ?? "";
-const ids = (rows: Array<Record<string, unknown>>): number[] => rows.map((row) => Number(row["id"]));
 const filter = (property: string, op: string, value?: string | number | boolean): Record<string, unknown> =>
   value === undefined ? { property, op } : { property, op, value };
 
@@ -220,7 +218,7 @@ beforeAll(async () => {
     methodName: "Seed",
     args: [],
   });
-  expect(seeded.isError, textOf(seeded)).toBeFalsy();
+  expect(seeded.isError, firstText(seeded)).toBeFalsy();
   expect(JSON.parse(String((seeded.structuredContent as { returnValue?: unknown }).returnValue ?? ""))).toEqual({
     headers: "1,2,3,4",
     body: "1,2,3,4",
@@ -235,14 +233,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     await attempt(`removing ${NS_Q}`, () => removeInteropNamespace(admin, dev, NS_Q));
     await attempt("the leftovers check", async () => {
@@ -250,10 +241,7 @@ afterAll(async () => {
     });
     await attempt("removing the fixture class", () => removeFixtureClass(dev));
     await attempt("the fixture document listing", async () => {
-      for (const filterText of ["Story391", "Story393"]) {
-        const listed = await dev.call("iris_doc_list", { filter: filterText, generated: true });
-        expect(listed.isError, `the ${filterText} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter: filterText, names } of await fixtureDocumentNames(dev, ["Story391", "Story393"])) {
         expect(names, `no ${FIXTURE_DOC} or ${filterText} document after the run`).toEqual([]);
       }
     });
@@ -283,7 +271,7 @@ function bodySearch(filters: Array<Record<string, unknown>>, args: Record<string
 
 /** The structured content of a successful body result, which must hold no body value. */
 function succeeded(result: WireToolResult): Structured {
-  expect(result.isError, textOf(result)).toBeFalsy();
+  expect(result.isError, firstText(result)).toBeFalsy();
   expect(JSON.stringify(result), "a body result holds no body value").not.toContain(MARKER);
   return result.structuredContent as Structured;
 }
@@ -292,15 +280,9 @@ function succeeded(result: WireToolResult): Structured {
 const joinOracle = (predicate: string): Promise<Array<Record<string, unknown>>> =>
   bodyJoinOracle(TARGET, NS_Q, BODY_TABLE, BODY_CLASS, WINDOW_SQL, predicate);
 
-interface RouteAnswer {
-  text: string;
-  errors: string[];
-  result: Record<string, unknown>;
-}
-
-/** POST a body search of the fixture straight to the route and parse the envelope. */
-async function route(filters: unknown, extra: Record<string, unknown> = {}): Promise<RouteAnswer> {
-  const answer = await executeMcpPost(TARGET, ROUTE, {
+/** POST a body search of the fixture straight to the route, assert HTTP 200, and parse the envelope. */
+async function route(filters: unknown, extra: Record<string, unknown> = {}): Promise<EnvelopeAnswer> {
+  const answer = await postEnvelope(TARGET, ROUTE, {
     action: "body",
     namespace: NS_Q,
     from: FROM,
@@ -310,8 +292,7 @@ async function route(filters: unknown, extra: Record<string, unknown> = {}): Pro
     ...extra,
   });
   expect(answer.status).toBe(200);
-  const parsed = JSON.parse(answer.text) as { status: { errors?: Array<{ error: string }> }; result: Record<string, unknown> };
-  return { text: answer.text, errors: (parsed.status.errors ?? []).map((entry) => entry.error), result: parsed.result };
+  return answer;
 }
 
 // -- Value forms -----------------------------------------------------------------
@@ -357,7 +338,7 @@ const VALUE_CASES: ValueCase[] = [
 
 describe("Story 39.3 QA: the value forms of date, time, timestamp and number properties equal a hand-written JOIN (Rules #34, #36, #59)", () => {
   it("the fixture holds the day numbers and seconds the cases are written against", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const rows = await atelierQuery(QTARGET, "SELECT ID, OnDate, AtTime FROM Story393.QaBody ORDER BY ID");
     expect(rows.map((row) => [row["ID"], row["OnDate"], row["AtTime"]])).toEqual([
       [1, "58473", "28800"],
@@ -369,9 +350,9 @@ describe("Story 39.3 QA: the value forms of date, time, timestamp and number pro
 
   for (const valueCase of VALUE_CASES) {
     it(valueCase.name, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const expected = await joinOracle(valueCase.predicate);
-      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(valueCase.ids);
+      expect(headerIds(expected), "the oracle selects the rows written by hand").toEqual(valueCase.ids);
 
       const content = succeeded(await bodySearch(valueCase.filters));
 
@@ -381,14 +362,14 @@ describe("Story 39.3 QA: the value forms of date, time, timestamp and number pro
   }
 
   it("the three ISO forms that match nothing are each paired with a control that matches, so an empty answer is not a dead search", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const empty = VALUE_CASES.filter((valueCase) => valueCase.ids.length === 0);
     expect(empty.map((valueCase) => valueCase.filters[0]?.["property"])).toEqual(["OnDate", "AtTime", "Seen"]);
     for (const emptyCase of empty) {
       const property = emptyCase.filters[0]?.["property"];
       const control = VALUE_CASES.find((valueCase) => valueCase.ids.length > 0 && valueCase.filters[0]?.["property"] === property);
       expect(control, `a control for ${String(property)}`).toBeDefined();
-      expect(ids(succeeded(await bodySearch((control as ValueCase).filters)).rows).length, `the control for ${String(property)}`).toBeGreaterThan(0);
+      expect(headerIds(succeeded(await bodySearch((control as ValueCase).filters)).rows).length, `the control for ${String(property)}`).toBeGreaterThan(0);
     }
   }, 120000);
 });
@@ -405,20 +386,20 @@ describe("Story 39.3 QA: a stream accepts isNull and notNull only, whatever its 
 
   for (const stream of STREAMS) {
     it(`${stream.property} (${stream.kind}): notNull and isNull equal the JOIN`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       const without = [1, 2, 3, 4].filter((id) => !stream.withData.includes(id));
       for (const [op, sqlOp, expectedIds] of [
         ["notNull", "IS NOT NULL", stream.withData],
         ["isNull", "IS NULL", without],
       ] as const) {
         const expected = await joinOracle(`b.${stream.property} ${sqlOp}`);
-        expect(ids(expected), `${op}: the oracle selects the rows written by hand`).toEqual(expectedIds);
+        expect(headerIds(expected), `${op}: the oracle selects the rows written by hand`).toEqual(expectedIds);
         expect(succeeded(await bodySearch([filter(stream.property, op)])).rows, op).toEqual(expected);
       }
     }, 120000);
 
     it(`${stream.property}: the engine itself refuses a comparison on it, and the route refuses all eight other operators naming filters[0].op`, async (testCtx) => {
-      if (skipReason) return skip(testCtx);
+      if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
       // The refusal is not arbitrary: the engine answers SQLCODE -313 for a stream operand (Task 0 (e) for the character stream).
       for (const sql of [
         `SELECT ID FROM Story393.QaBody WHERE ${stream.property} = 'x'`,
@@ -435,20 +416,13 @@ describe("Story 39.3 QA: a stream accepts isNull and notNull only, whatever its 
       }
       const tool = await bodySearch([filter(stream.property, "contains", MARKER)]);
       expect(tool.isError).toBe(true);
-      expect(textOf(tool)).toContain("filters[0].op");
+      expect(firstText(tool)).toContain("filters[0].op");
       expect(JSON.stringify(tool)).not.toContain(MARKER);
     }, 120000);
   }
 });
 
 // -- The plan ----------------------------------------------------------------------
-
-/** Ignore case and white space: the statement index stores a statement upper-cased and tokenized. */
-const squash = (text: string): string => text.replace(/\s+/g, "").toUpperCase();
-
-/** The twelve header columns the route selects, written by hand. */
-const HEADER_COLUMNS =
-  "h.ID, h.SessionId, h.Type, h.Status, h.IsError, h.SourceConfigName, h.TargetConfigName, h.MessageBodyClassName, h.MessageBodyId, h.TimeCreated, h.TimeProcessed, h.CorrespondingMessageId";
 
 /**
  * What is wrong with a body-search statement as the statement index stores it and with its plan: the select list
@@ -499,7 +473,7 @@ describe("Story 39.3 QA: the statements the route prepared read the headers firs
   ];
 
   it("the checker can fail: a statement that selects a body column, or does not read the headers first, is reported", (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const good = squash(`SELECT TOP ? ${HEADER_COLUMNS} FROM %INORDER Ens.MessageHeader h, ${BODY_TABLE} b WHERE h.MessageBodyId = b.%ID AND b."Label" = ?`);
     const goodPlan = "Read master map Ens.MessageHeader(H).IDKEY, using the given idkey value.\nRead master map Story393.QaBody(B).IDKEY, using the given idkey value.";
     expect(planProblems(good, goodPlan), "a well-formed statement and plan").toEqual([]);
@@ -515,7 +489,7 @@ describe("Story 39.3 QA: the statements the route prepared read the headers firs
   });
 
   it("after real calls, every route statement for the body table has the header-first plan, and each call's own statement is among them", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const call of CALLS) {
       const answer = await route(call.filters, call.extra ?? {});
       expect(answer.errors, `${call.name}: ${answer.text}`).toEqual([]);

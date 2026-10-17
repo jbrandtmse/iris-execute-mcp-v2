@@ -28,21 +28,28 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  allText,
   assertDeployedBootstrapVersion,
   atelierQuery,
+  distEntry,
   docFixtures,
   executeMcpPost,
+  fixtureDocumentNames,
+  irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  pollAuditEntries,
   resolveSdkEsmDir,
   shippedBootstrapVersion,
+  skipTest,
   staleDistReason,
+  teardownRecorder,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
@@ -67,7 +74,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const entryOf = (pkg: string): string => path.join(REPO_ROOT, "packages", pkg, "dist", "index.js");
+const GATE_TAG = "story-39-2-data-policy-live-gate";
 const BASELINE_PATH = path.join(__dirname, "fixtures", "story-39-2-preview-baseline.json");
 
 const TARGET = irisTargetFromEnv();
@@ -95,18 +102,11 @@ let tempDir = "";
 function wireOptions(pkg: string, extra: Partial<WireSessionOptions> = {}): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
-    entry: entryOf(pkg),
+    entry: distEntry(REPO_ROOT, pkg),
     target: TARGET,
     clientName: "story-39-2-live-gate",
     ...extra,
   };
-}
-
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }): void {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] story-39-2-data-policy-live-gate: ${skipReason}`);
-  testCtx.skip();
 }
 
 /** Sessions the rows open, closed in `afterAll`. */
@@ -123,11 +123,6 @@ async function interopSession(
   const session = await openWireSession(wireOptions("iris-interop-mcp", onStderr ? { onStderr } : {}), extraEnv);
   opened.push(session);
   return session;
-}
-
-/** The text of every content block of a tool result, joined by newlines. */
-function textOf(result: { content?: Array<{ text?: string }> }): string {
-  return (result.content ?? []).map((block) => block.text ?? "").join("\n");
 }
 
 const PI_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -174,14 +169,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (skipReason) return;
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
-  const problems: string[] = [];
-  const attempt = async (what: string, step: () => Promise<void>): Promise<void> => {
-    try {
-      await step();
-    } catch (error) {
-      problems.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  const { problems, attempt } = teardownRecorder();
   try {
     await attempt("stopping the production", async () => {
       if (!productionStarted) return;
@@ -198,10 +186,7 @@ afterAll(async () => {
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     });
     await attempt("the fixture document listing", async () => {
-      for (const filter of ["Story391", "Story392"]) {
-        const listed = await dev.call("iris_doc_list", { filter, generated: true });
-        expect(listed.isError, `the ${filter} document listing`).toBeFalsy();
-        const names = (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+      for (const { filter, names } of await fixtureDocumentNames(dev, ["Story391", "Story392"])) {
         expect(names, `no ${FIXTURE_DOC} or generated ${filter} document after the run`).toEqual([]);
       }
     });
@@ -250,7 +235,7 @@ const TOOL_CASES: Array<{ name: string; args: Record<string, unknown> }> = [
 
 describe("Story 39.2: the pre-change preview capture (AD-15, AD-33)", () => {
   it.runIf(CAPTURE)("capture: the legacy REST preview and the tool preview, before the change", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const deployed = await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
     expect(deployed, "the capture runs on the classes deployed before this story").toBe(PRE_STORY_BOOTSTRAP_VERSION);
 
@@ -269,7 +254,7 @@ describe("Story 39.2: the pre-change preview capture (AD-15, AD-33)", () => {
     for (const toolCase of TOOL_CASES) {
       const result = await interop.call("iris_message_resend", toolCase.args);
       expect(result.isError, toolCase.name).toBeFalsy();
-      tool.push({ ...toolCase, structuredContent: result.structuredContent, text: textOf(result) });
+      tool.push({ ...toolCase, structuredContent: result.structuredContent, text: allText(result) });
     }
     const baseline: PreviewBaseline = {
       capturedWithBootstrapVersion: deployed,
@@ -310,7 +295,7 @@ const kindReason = (kind: string): string => `A ${kind} body cannot be redacted 
 // Not in a capture run: there the shipped build is the one the capture is taken on.
 describe.skipIf(CAPTURE)("Story 39.2: the baseline predates this story (AD-15)", () => {
   it("was captured on the classes before the change, which differ from the shipped ones", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const baseline = readBaseline();
     expect(baseline.capturedWithBootstrapVersion, "the capture was taken on the classes before this story").toBe(PRE_STORY_BOOTSTRAP_VERSION);
     expect(baseline.capturedWithBootstrapVersion, "the gate runs on a different build than the capture").not.toBe(
@@ -323,7 +308,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the baseline predates this story (AD-15)",
 
 describe.skipIf(CAPTURE)("Story 39.2: the preview under redact, block and allow (AC-3, AC-4, AC-7)", () => {
   it("redact (the default, no data-policy setting): HL7 keeps today's class note, the others are withheld with a reason", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const started = performance.now();
     const result = await preview(interop);
     const elapsedMs = Math.round(performance.now() - started);
@@ -361,7 +346,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview under redact, block and allow 
     }
 
     expect((result.structuredContent as { dataPolicy: unknown }).dataPolicy).toEqual({ policy: "redact", redacted: 4, blocked: 3 });
-    const lines = textOf(result).split("\n");
+    const lines = allText(result).split("\n");
     expect(lines[lines.length - 1]).toBe("Data policy redact: 4 redacted, 3 withheld.");
     expect(result.content, "one text block").toHaveLength(1);
     const serialized = JSON.stringify(result);
@@ -370,7 +355,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview under redact, block and allow 
   }, 120000);
 
   it("block: every readable body is withheld, a body that cannot be read is none, and IRIS sends no body content", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const block = await interopSession({ IRIS_DATA_POLICY: "block" });
     const result = await preview(block);
     expect(result.isError).toBeFalsy();
@@ -385,13 +370,13 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview under redact, block and allow 
   }, 120000);
 
   it("allow: the result equals the capture taken before the change, and the stream summary is the positive control", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const allow = await interopSession({ IRIS_DATA_POLICY: "allow" });
     const baseline = readBaseline();
     for (const captured of baseline.tool) {
       const result = await allow.call("iris_message_resend", captured.args);
       expect(result.isError, captured.name).toBeFalsy();
-      expect({ structuredContent: result.structuredContent, text: textOf(result) }, captured.name).toEqual({
+      expect({ structuredContent: result.structuredContent, text: allText(result) }, captured.name).toEqual({
         structuredContent: captured.structuredContent,
         text: captured.text,
       });
@@ -403,7 +388,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview under redact, block and allow 
   }, 120000);
 
   it("iris_server_profiles reports the policy and its source", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const reported = await interop.raw("iris_server_profiles", {});
     const roster = (reported.structuredContent as { profiles: Array<Item> }).profiles;
     expect(roster.find((entry) => entry.name === "default")).toMatchObject({ dataPolicy: "redact", dataPolicySource: "default" });
@@ -423,7 +408,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
   };
 
   it("a request without the new fields answers byte for byte as the capture", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const captured of readBaseline().rest) {
       const answer = await post(captured.body);
       expect({ status: answer.status, text: answer.text }, captured.name).toEqual({ status: captured.status, text: captured.text });
@@ -431,7 +416,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
   }, 120000);
 
   it("bodyDetail kind: kind and availability for every found item, and no body content in the raw response", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const answer = await post({ headerIds: PI_IDS, namespace: NS_A, bodyDetail: "kind" });
     expect(answer.status).toBe(200);
     expect(answer.text).not.toContain("SYNTHPHI");
@@ -444,7 +429,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
   }, 120000);
 
   it("bodyDetail text: a body over the cap is omitted, one under it is complete, and the default cap is 65536", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const capped = resultOf((await post({ headerIds: [1], namespace: NS_A, bodyDetail: "text", bodyTextMaxChars: 100 })).text).headers;
     expect(capped[0]).toMatchObject({ bodyKind: "hl7v2", bodyAvailable: true, bodyTextOmitted: "tooLarge" });
     expect("bodyText" in (capped[0] as Item)).toBe(false);
@@ -473,7 +458,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
   }, 120000);
 
   it("refuses a bad bodyDetail or bodyTextMaxChars, naming the parameter and never the value, before the namespace switch", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const rows: Array<{ body: Record<string, unknown>; text: string; value: string }> = [
       { body: { bodyDetail: "raw" }, text: "bodyDetail", value: "raw" },
       { body: { bodyDetail: "text", bodyTextMaxChars: 0 }, text: "bodyTextMaxChars", value: "" },
@@ -493,15 +478,8 @@ describe.skipIf(CAPTURE)("Story 39.2: the preview route (AD-33, AD-15)", () => {
 });
 
 describe.skipIf(CAPTURE)("Story 39.2: the IRIS-side classifier and body checks, called directly (AC-3)", () => {
-  /** Call a class method of the deployed REST classes in A and return its result as text. */
-  async function irisMethod(className: string, methodName: string, args: unknown[]): Promise<string> {
-    const result = await dev.call("iris_execute_classmethod", { namespace: NS_A, className, methodName, args });
-    expect(result.isError, `${className}.${methodName}: ${textOf(result)}`).toBeFalsy();
-    return String((result.structuredContent as { returnValue?: unknown } | undefined)?.returnValue ?? "");
-  }
-
   it("BodyKind names the kinds fixture pi has no body of; BodyAvailable and Hl7Text refuse a body that does not open", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const search = "ExecuteMCPv2.REST.MessageSearch";
     const resend = "ExecuteMCPv2.REST.MessageResend";
     const kinds: Array<[string, string]> = [
@@ -509,12 +487,12 @@ describe.skipIf(CAPTURE)("Story 39.2: the IRIS-side classifier and body checks, 
       ["EnsLib.EDI.X12.Document", "vdoc"],
       ["%Library.DynamicObject", "other"],
     ];
-    for (const [className, kind] of kinds) expect(await irisMethod(search, "BodyKind", [className]), className).toBe(kind);
+    for (const [className, kind] of kinds) expect(await irisClassMethod(dev, NS_A, search, "BodyKind", [className]), className).toBe(kind);
     // No body is read: -1 is never the ID of a stored object, and the other class does not exist.
-    expect(await irisMethod(resend, "BodyAvailable", ["Ens.StringRequest", -1, 1]), "a body whose ID does not open").toBe("0");
-    expect(await irisMethod(resend, "BodyAvailable", ["No.Such.Story392Class", "1", 1]), "a class whose open throws").toBe("0");
-    expect(await irisMethod(search, "Hl7Text", ["No.Such.Story392Class", "1", 1000]), "a class that does not exist").toBe("unreadable");
-    expect(await irisMethod(search, "Hl7Text", ["EnsLib.HL7.Message", "NoSuchStory392Id", 1000]), "an HL7 ID that does not open").toBe(
+    expect(await irisClassMethod(dev, NS_A, resend, "BodyAvailable", ["Ens.StringRequest", -1, 1]), "a body whose ID does not open").toBe("0");
+    expect(await irisClassMethod(dev, NS_A, resend, "BodyAvailable", ["No.Such.Story392Class", "1", 1]), "a class whose open throws").toBe("0");
+    expect(await irisClassMethod(dev, NS_A, search, "Hl7Text", ["No.Such.Story392Class", "1", 1000]), "a class that does not exist").toBe("unreadable");
+    expect(await irisClassMethod(dev, NS_A, search, "Hl7Text", ["EnsLib.HL7.Message", "NoSuchStory392Id", 1000]), "an HL7 ID that does not open").toBe(
       "unreadable",
     );
   }, 120000);
@@ -522,7 +500,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the IRIS-side classifier and body checks, 
 
 describe.skipIf(CAPTURE)("Story 39.2: a policy per profile (AC-7)", () => {
   it("a profile with its own value is not changed by the file's global value, and discovery reports both", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const file = path.join(tempDir, "governance-block.json");
     writeFileSync(file, JSON.stringify({ dataPolicy: { global: "block" } }));
     const session = await interopSession({
@@ -533,7 +511,7 @@ describe.skipIf(CAPTURE)("Story 39.2: a policy per profile (AC-7)", () => {
     const captured = baseline.tool[0] as ToolCapture;
 
     const loose = await preview(session, PI_IDS, "loose");
-    expect({ structuredContent: loose.structuredContent, text: textOf(loose) }, "loose is the allow capture").toEqual({
+    expect({ structuredContent: loose.structuredContent, text: allText(loose) }, "loose is the allow capture").toEqual({
       structuredContent: captured.structuredContent,
       text: captured.text,
     });
@@ -551,22 +529,8 @@ describe.skipIf(CAPTURE)("Story 39.2: a policy per profile (AC-7)", () => {
 });
 
 describe.skipIf(CAPTURE)("Story 39.2: the audit log and the console log (AC-5, AD-19)", () => {
-  /** Poll (bounded) until the audit file holds a tool-call entry, then return every JSON line. */
-  async function entries(file: string): Promise<Array<Item>> {
-    const started = Date.now();
-    for (;;) {
-      if (existsSync(file)) {
-        const lines = readFileSync(file, "utf8").split("\n").filter((line) => line.trim() !== "");
-        const parsed = lines.map((line) => JSON.parse(line) as Item);
-        if (parsed.some((entry) => entry.tool === "iris_message_resend")) return parsed;
-      }
-      if (Date.now() - started > 5000) throw new Error(`no audit entry in ${file}`);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-
   it("records the policy and the counts under redact and allow, and neither the file nor stderr holds an identifying value", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     for (const row of [
       { policy: undefined, expected: { policy: "redact", redacted: 4, blocked: 3 } },
       { policy: "allow", expected: { policy: "allow", redacted: 0, blocked: 0 } },
@@ -591,7 +555,14 @@ describe.skipIf(CAPTURE)("Story 39.2: the audit log and the console log (AC-5, A
         expect(JSON.stringify(result), "the allow session's response holds the positive control").toContain("SYNTHPHI");
       }
 
-      const audit = await entries(file);
+      // Poll (bounded) until the audit file holds a tool-call entry, then take every JSON line.
+      const audit = await pollAuditEntries(file, {
+        tool: "iris_message_resend",
+        returnAll: true,
+        intervalMs: 20,
+        timeoutMs: 5000,
+        excerpt: 500,
+      });
       const entry = audit.find((candidate) => candidate.tool === "iris_message_resend") as Item;
       expect(entry, label).toMatchObject({ tool: "iris_message_resend", action: "preview", outcome: "ok", dataPolicy: row.expected });
       const raw = readFileSync(file, "utf8");
@@ -606,7 +577,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the audit log and the console log (AC-5, A
 
 describe.skipIf(CAPTURE)("Story 39.2: the redaction engine, parsed by IRIS before and after (AC-2, Rule #36)", () => {
   it("every non-batch fixture keeps IRIS's value at each kept position and holds only *** and separators at every other", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const engine = (await import(pathToFileURL(path.join(REPO_ROOT, "packages", "shared", "dist", "index.js")).href)) as {
       redactHl7: (text: string) => { ok: boolean; text?: string; redactedFields?: number; reason?: string };
       HL7_SAFE_HARBOR_FIELDS: ReadonlyArray<{ segment: string; field: number; category: string }>;
@@ -641,7 +612,7 @@ describe.skipIf(CAPTURE)("Story 39.2: the redaction engine, parsed by IRIS befor
 
 describe.skipIf(CAPTURE)("Story 39.2 QA: the complete text IRIS returns goes through the engine and IRIS parses the result alike (AC-2, AD-26; Rule #36)", () => {
   it("headers 1, 2 and 8 (ADT, ACK, non-default separators): redacted without an identifying value, positions as IRIS reads them", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const engine = (await import(pathToFileURL(path.join(REPO_ROOT, "packages", "shared", "dist", "index.js")).href)) as {
       redactHl7: (text: string) => { ok: boolean; text?: string; redactedFields?: number; reason?: string };
     };
@@ -672,7 +643,7 @@ describe.skipIf(CAPTURE)("Story 39.2 QA: the complete text IRIS returns goes thr
   }, 120000);
 
   it("a header that does not exist carries no body field and counts as neither redacted nor withheld, under redact and block", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const baselineLine = (readBaseline().tool[1] as ToolCapture).text.split("\n")[1];
     expect(baselineLine, "the capture's line for the missing header").toContain("NOT FOUND");
     const block = await interopSession({ IRIS_DATA_POLICY: "block" });
@@ -686,7 +657,7 @@ describe.skipIf(CAPTURE)("Story 39.2 QA: the complete text IRIS returns goes thr
       expect(missing, label).toMatchObject({ id: 999, found: false });
       for (const key of ["bodySummary", "bodyKind", "bodyPolicy", "bodyAvailable", "bodyText"]) expect(key in missing, `${label}: ${key}`).toBe(false);
       expect((result.structuredContent as { dataPolicy: unknown }).dataPolicy, label).toEqual({ policy, redacted: 0, blocked: 1 });
-      expect(textOf(result).split("\n")[1], `${label}: the per-item error line is today's`).toBe(baselineLine);
+      expect(allText(result).split("\n")[1], `${label}: the per-item error line is today's`).toBe(baselineLine);
       expect(JSON.stringify(result), label).not.toContain("SYNTHPHI");
     }
   }, 120000);
@@ -696,7 +667,7 @@ describe.skipIf(CAPTURE)("Story 39.2 QA: the complete text IRIS returns goes thr
 
 describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture leaves nothing behind (DW-570, AC-8)", () => {
   it("resends the three messages of rho in TimeCreated order, then the production, its processes and its state are gone", async (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const docs = docFixtures(dev, NS_A);
     await docs.putDoc("Story392.Operation.cls", STORY392_OPERATION_SOURCE);
     await docs.putDoc("Story392.Production.cls", STORY392_PRODUCTION_SOURCE);
@@ -707,7 +678,7 @@ describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture lea
     // must stop it then too (a forced stop of a production that never started only adds a teardown note).
     productionStarted = true;
     const started = await interop.call("iris_production_control", { action: "start", name: "Story392.Production", namespace: NS_A });
-    expect(started.isError, textOf(started)).toBeFalsy();
+    expect(started.isError, allText(started)).toBeFalsy();
 
     const answer = await executeMcpPost(TARGET, "/interop/message/resend", {
       action: "resendFiltered",
@@ -746,7 +717,7 @@ describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture lea
     expect(running.some((entry) => entry.startsWith("^%SYS(")), "the check sees an Ensemble subscript for A while the production runs").toBe(true);
 
     const stopped = await interop.call("iris_production_control", { action: "stop", force: true, namespace: NS_A });
-    expect(stopped.isError, textOf(stopped)).toBeFalsy();
+    expect(stopped.isError, allText(stopped)).toBeFalsy();
     productionStarted = false;
     const residue =(await leftovers(dev, [NS_A])).filter((entry) => entry.startsWith("process ") || entry.startsWith("^%SYS("));
     expect(residue, "no process runs in A and no Ensemble state remains for it").toEqual([]);
@@ -755,7 +726,7 @@ describe.skipIf(CAPTURE)("Story 39.2: resendFiltered resends and the fixture lea
 
 describe.skipIf(CAPTURE)("Story 39.2: the first built-server start", () => {
   it("deploys the bootstrap inside its 60 s budget", (testCtx) => {
-    if (skipReason) return skip(testCtx);
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     // eslint-disable-next-line no-console
     console.log(`[perf] story-39-2: the first built-server start took ${firstStartMs} ms (budget 60000 ms)`);
     expect(firstStartMs).toBeLessThan(60000);

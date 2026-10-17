@@ -44,6 +44,7 @@ const FOREIGN_PROMPT_NAMES = [
   "run-external-backup",
   "trace-message-flow",
   "recover-stuck-production",
+  "find-patient-messages",
   "provision-project-environment",
   "audit-security-posture",
 ];

@@ -477,3 +477,120 @@ describe("edit-and-test-class and deploy-and-test-class - the in-place edit loop
     );
   });
 });
+
+describe("trace-message-flow and find-patient-messages - the message forensic loop (Story 39.6)", () => {
+  const TRACE_ARGS = { sessionOrHeaderId: "7", namespace: "USER" };
+  const FIND_ARGS = {
+    patientId: "X",
+    from: "2001-02-03T00:00:00Z",
+    to: "2001-02-04T00:00:00Z",
+    searchTableClass: "EnsLib.HL7.SearchTable",
+    namespace: "USER",
+  };
+
+  /** Every rendering of the two prompts: all arguments given, optional ones omitted, and the skill form. */
+  async function renderings(): Promise<Array<{ label: string; name: string; body: string }>> {
+    const trace = (await findPrompt("trace-message-flow")).prompt;
+    const find = (await findPrompt("find-patient-messages")).prompt;
+    return [
+      { label: "trace-message-flow (all arguments)", name: "trace-message-flow", body: trace.build(TRACE_ARGS) },
+      { label: "trace-message-flow (namespace omitted)", name: "trace-message-flow", body: trace.build({ sessionOrHeaderId: "7" }) },
+      { label: "trace-message-flow (skill form)", name: "trace-message-flow", body: trace.build({}) },
+      { label: "find-patient-messages (all arguments)", name: "find-patient-messages", body: find.build(FIND_ARGS) },
+      { label: "find-patient-messages (patientId only)", name: "find-patient-messages", body: find.build({ patientId: "X" }) },
+      { label: "find-patient-messages (skill form)", name: "find-patient-messages", body: find.build({}) },
+    ];
+  }
+
+  /** Assert each marker is present and the markers appear in the given order. */
+  function expectOrdered(label: string, body: string, markers: string[]): void {
+    const at = markers.map((marker) => body.indexOf(marker));
+    markers.forEach((marker, i) => expect(at[i], `${label}: "${marker}" not found`).toBeGreaterThan(-1));
+    expect([...at].sort((a, b) => a - b), label).toEqual(at);
+  }
+
+  it("both prompts belong to the interop package", async () => {
+    expect((await findPrompt("trace-message-flow")).pkg).toBe("iris-interop-mcp");
+    expect((await findPrompt("find-patient-messages")).pkg).toBe("iris-interop-mcp");
+  });
+
+  it("trace-message-flow runs messages, header search, body read, diagram, logs and the summary, in that order", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "trace-message-flow") continue;
+      expectOrdered(label, body, [
+        "1. Call `iris_production_messages`",
+        "2. Call `iris_message_search`",
+        "3. Call `iris_message_body`",
+        "4. Call `iris_message_diagram`",
+        "5. For every step flagged as an error",
+        "`iris_production_logs`",
+        "6. Summarize the failure point",
+      ]);
+    }
+  });
+
+  it("find-patient-messages checks the policy, fixes the window, searches the Search Table, lists, reads, diagrams and reports, in that order", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "find-patient-messages") continue;
+      expectOrdered(label, body, [
+        "1. Call `iris_server_profiles`",
+        "2. Fix the search window",
+        '3. Call `iris_message_search` with `action: "searchTable"`',
+        "4. List the matching rows",
+        "5. Only when the user wants the content, call `iris_message_body`",
+        "6. Optionally call `iris_message_diagram`",
+        "7. Report the messages found",
+      ]);
+    }
+  });
+
+  it("find-patient-messages pins the block refusal, the 7-day window, the no-other-route rule and tighten-only dataPolicy", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "find-patient-messages") continue;
+      expect(body, label).toContain('`action: "searchTable"`');
+      expect(body, label).toContain("`DATA_POLICY_BLOCKED`");
+      expect(body, label).toContain("Do not look the patient up another way");
+      expect(body, label).toContain("at most 7 days");
+      expect(body, label).toContain("never search without a window");
+      expect(body, label).toContain("never read a withheld body another way");
+      expect(body, label).toContain("can only tighten the profile's policy");
+      expect(body, label).toContain("`dataPolicyClamped`");
+      expect(body, label).toContain("`notApplicable`");
+      expect(body, label).toContain("does not prove that no message holds the value");
+    }
+  });
+
+  it("neither prompt tells the agent to loosen the policy or to read a withheld body another way", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/dataPolicy"?\s*[:=]\s*"?allow/i);
+      expect(body, label).not.toMatch(/set\s+`?dataPolicy`?\s+to\s+`?allow/i);
+      expect(body, label).not.toMatch(/IRIS_DATA_POLICY/);
+      expect(body, label).toContain("another way");
+    }
+  });
+
+  it("every iris_* token of both prompts is an interop core tool or iris_server_profiles", async () => {
+    const presets = (await import(
+      pathToFileURL(resolve(root, "packages/iris-interop-mcp/dist/tools/presets.js")).href
+    )) as { toolPresets: { core: { include: string[] } } };
+    const allowed = new Set([...presets.toolPresets.core.include, "iris_server_profiles"]);
+    expect(allowed.has("iris_message_body")).toBe(true);
+    expect(allowed.has("iris_message_search")).toBe(true);
+
+    for (const { label, body } of await renderings()) {
+      const tokens = [...new Set(body.match(/\biris_[a-z_]+/g) ?? [])];
+      expect(tokens.length, label).toBeGreaterThan(0);
+      expect(
+        tokens.filter((token) => !allowed.has(token)),
+        label,
+      ).toEqual([]);
+    }
+  });
+
+  it("carries no internal rule number and no repository path", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/Rule #\d/);
+      expect(body, label).not.toMatch(/iris-execute-mcp-v2|packages\/|_bmad|\.claude|node_modules|research\/|deferred-work|spec-\d/);
+    }
+  });
+});
