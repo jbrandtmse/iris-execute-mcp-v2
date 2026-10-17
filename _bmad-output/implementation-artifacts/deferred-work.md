@@ -3090,6 +3090,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T05:29:28Z occurrence=39-2-phi-data-policy
 - 2026-10-17T08:21:39Z occurrence=39-3-message-body-content-search
 - 2026-10-17T11:24:38Z occurrence=39-4-search-table-lookup
+- 2026-10-17T14:26:14Z occurrence=39-5-message-body-reader
 
 ### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
