@@ -1,0 +1,502 @@
+---
+title: 'Story 39.6: Message Forensics Docs, Prompt and Capstone'
+type: 'feature'
+created: '2026-10-17'
+status: 'ready-for-dev'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/.claude/rules/project-rules.md'
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+warnings:
+  - oversized
+deferred: []
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** Epic 39 shipped message search (`headers`, `body`, `searchTable`), the PHI data policy and the body reader, each with only minimal docs (Rule #43). Several gaps remain:
+- No prompt teaches the forensic loop of search, read and diagram: `trace-message-flow` predates both new tools.
+- No prompt finds a patient's messages by a Search Table value.
+- No single gate proves the whole loop end to end under the policy.
+- The live gates carry their own copies of the same helpers, and the capstone would be the next copy (DW-561).
+- No test pins that existing tools' `tools/list` entries stay unchanged (DW-573).
+
+**Approach:**
+- Enrich every doc surface with the epic's tools, modes, policy configuration and default states (Docs table in Design Notes).
+- Update `trace-message-flow` to search, read and diagram, keeping its name, title and arguments unchanged. Add the interop prompt `find-patient-messages`. Regenerate the skills.
+- Close the epic with one default-suite capstone, `epic39-capstone-gate.test.ts`. It drives the built servers over the real MCP SDK client against the disposable namespace `EXECMCPTMP396A`. It first asserts that the deployed `BOOTSTRAP_VERSION` equals the shipped one, and is proven red by disabling redaction.
+- Promote the duplicated gate helpers into `process-gate-helpers.ts` and move every gate onto them (DW-561).
+- Pin every current `tools/list` entry in a generated snapshot with a `--check` mode (DW-573).
+
+## Boundaries & Constraints
+
+**Always:**
+- **Docs (AC 39.6.1).** Each Docs-table item states its default state on every surface listed for it (Rules #30/#43), names the operator controls that affect it, and keeps every pinned sentence of 39.0–39.5 intact.
+  - **`CHANGELOG.md`.** A new top section `## [Pre-release — 2026-10-17] — Story 39.6: Message forensics docs, prompt and capstone`, with `### Added`, `### Changed`, `### Documentation` and `### Tests`. It holds no `(full|core|developer) N/N/N/N/N` string and quotes no other story's section title.
+  - **Changeset.** `.changeset/story-39-6-message-forensics-docs-prompt-and-capstone.md` with exactly `"@iris-mcp/interop": minor`.
+- **`trace-message-flow` (AC 39.6.2).**
+  - **Unchanged.** `name`, `title` and `arguments` stay byte-identical: `sessionOrHeaderId` (required) and `namespace` (optional), with the same descriptions.
+  - **Changed** (sanctioned by AC 39.6.2; recorded under CHANGELOG "Changed"):
+    - `description` names `iris_message_search`, `iris_message_body`, `iris_message_diagram` and `iris_production_logs`;
+    - `build()` becomes the flow in Design Notes, Prompts, in order.
+- **`find-patient-messages` (AC 39.6.2)** is a new interop `PromptDefinition`, registered last in `prompts/index.ts`, with the title "Find Patient Messages".
+  - **Arguments.** `patientId` is required; `from`, `to`, `searchTableClass` and `namespace` are optional.
+  - **Body.** The flow in Design Notes, Prompts.
+- **Both prompts.**
+  - Every `iris_*` token is a tool in interop `core` or `iris_server_profiles`.
+  - They name no internal rule number and no repository path (AD-28).
+  - They never tell the agent to loosen the policy, or to read a withheld body or a refused lookup any other way.
+  - They never sweep: every search has a window of at most 7 days, and the agent asks the user for a longer period.
+- **Skills.** `skills/` changes only through `pnpm gen:skills`; `gen:skills:check` and `validate:prompts` are clean.
+- **Capstone (AC 39.6.3, Rules #21/#59).** One file, `packages/iris-mcp-all/src/__tests__/epic39-capstone-gate.test.ts`, in the default suite.
+  - **Arming.**
+    - It has its own `process.env.IRIS_REQUIRE_LIVE ===` comparison.
+    - It checks dist freshness with the literal 39.x lines: `skipReason = staleDistReason(REPO_ROOT, "shared");` and the `for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= …` line.
+    - Unarmed, it skips with `[SKIP] epic39-capstone-gate: <reason>`. Armed, it throws `IRIS_REQUIRE_LIVE is set, so the Epic 39 capstone live gate may not be skipped: <reason>`.
+  - **Version check.** `dev = await openWireSession(...)` is followed, at most one line later, by `await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);`, before any `describe` runs.
+  - **Rosters.** It is listed in `prepublish-gate.mjs` `gateTestFiles` and in `story-39-1-gate-guards.test.ts` `GATES` (`story: "Epic 39 capstone"`).
+  - **What it drives.** The built dev, admin and interop dists, through the SDK `Client` over stdio. Every call names `server:"default"` and an explicit namespace. The independent oracle is raw Atelier SQL: `header-row-oracle.ts` `oracleColumns`/`expectedRow`/`searchTableOracle`.
+- **Fixture μ** is synthetic and lives only in the mapping-only interop namespace `EXECMCPTMP396A`.
+  - It uses the classes `Story396.Seed` and the reused `Story394.SearchTable`, compiled there, and the HSCUSTOM fixture class `ExecuteMCPv2.Temp.Story391Fixture`.
+  - No production is started.
+  - Identifying values contain `SYNTHPHI396` and appear only in PID-3 and OBX-5. Surviving values contain `KEEPME396`, in OBX-3. Times fall on 2001-02-03 UTC.
+  - **Lifecycle.** `beforeAll` removes leftovers and asserts none, then creates and seeds the namespace and runs a positive leftovers control. `afterAll` guards each teardown step separately: the namespace, `leftovers`, the fixture class, the temp dir, and an `iris_doc_list` (HSCUSTOM, generated included) showing no `Story391Fixture` or `Story396` document.
+- **DW-561.**
+  - **What moves.** Every family in the Design Notes Promotion table becomes one export of `process-gate-helpers.ts`, and every listed copy is replaced by a call to it.
+  - **What stays local.** A copy is replaced only where it is behaviorally identical: the same pass/fail condition, the same `[SKIP]`/"may not be skipped" text, and the same timing constants (passed as arguments). A variant with a different contract stays local and is listed in the table with its reason.
+  - **Guarded literals.** Every gate keeps literally, in its own file:
+    - its `REQUIRE_LIVE` comparison;
+    - its dist-freshness lines;
+    - its `admin =`/`dev = await open…Session(` line with the version assert right after it;
+    - its skip tag and its armed text (the `epic38-gate-guards`, `story-39-1-gate-guards` and `live-gate-roster` pins).
+  - **Results.** Every moved gate's assertions are unchanged and it passes armed. A new default-suite guard, `gate-helper-copies.test.ts`, fails when a gate re-declares a replaced name.
+- **DW-573.**
+  - **Where.** One core module, `scripts/lib/tools-list-snapshot-core.mjs`, is shared by the CLI `scripts/gen-tools-list-snapshot.mjs` and the default-suite test `packages/iris-mcp-all/src/__tests__/tools-list-snapshot.test.ts` (Rule #45, AD-2).
+  - **The capture.** The real `tools/list` of all five built servers (`McpServerBase` construction plus `fetchAllTools`, with `IRIS_TOOLS_*` scrubbed, i.e. preset `full`) is written to `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json`.
+  - **The CLI.** It refuses without a flag. `--check` writes nothing and exits 0 or 1. `--force` writes. A stale dist exits 2 with "rebuild".
+  - **The check is one-directional.** Every snapshot entry must still be listed, and its `title`, `description`, `inputSchema` and `annotations` (and `outputSchema` when present) must deep-equal after a sorted-key canonicalization. A live tool absent from the snapshot is reported and allowed.
+- **Counts.** Tools stay 109 package / 114 advertised. Interop `core` stays 12 runtime. Prompts go 12 → 13 (interop 3 → 4). The baseline stays `1e62c5ad5bf7`/141. `BOOTSTRAP_VERSION` stays `2fd17b50a024` (the epic: `089f8f0a62b2` → `2fd17b50a024`).
+- **Source text.** Source is ASCII, with escapes for anything else (Rule 14). Comments state the contract. Every live run names its target with the six `IRIS_*` variables and `IRIS_REQUIRE_LIVE=1`.
+
+**Never:**
+- **Tools.** No tool, action, key, preset row, `TOOL_PAIRS` entry, annotation, schema or description change. No new environment variable.
+- **IRIS side.** No ObjectScript change. No change to the scope table rows or their date.
+- **Generated and protected files.** No hand edit under `skills/`, of `bootstrap-classes.ts` or of `governance-baseline.ts`. Never run the bare governance-baseline generator. Never edit the snapshot by hand.
+- **Shared instance.** Never start a production anywhere. Never call `EnableNamespace`. Never read HSCUSTOM's or another project's messages. Fixtures are synthetic only.
+- **Docs.** No claim of regulatory compliance. No new `####` heading inside the interop `#### iris_message_search` or `#### iris_message_body` subsection. No `` `interop` `` followed by a number in `tool_support.md` before its prompt-pack line. The "What it governs today." paragraph is not split.
+- **Owned elsewhere.** Do not fix DW-569, DW-571, DW-572, DW-576, DW-578 or DW-583.
+- **Release.** No `changeset version` and no publish. No `pregen` turbo hook.
+
+## I/O & Edge-Case Matrix
+
+**Fixture μ** (`EXECMCPTMP396A`, `Story396.Seed.Seed()`). Every header is a Request, Completed, with no error. Each HL7 v2 message is MSH (no `SYNTHPHI`), then `PID|1||<mrn>`, then `OBX|1|TX|KEEPME396-CODE^KEEPME396-TEXT^L||SYNTHPHI396-NOTE`, with CR terminators. Each message is indexed with `$ClassMethod("Story394.SearchTable","IndexDoc",msg)`.
+
+| H | Session | Source → target | Body | PID-3 | `TimeCreated` |
+|---|---|---|---|---|---|
+| 1 | 396001 | `Story396.Service` → `Story396.Router` | M1 `ADT^A01` | `SYNTHPHI396-MRN-P` | 2001-02-03 12:00:01 |
+| 2 | 396001 | `Story396.Router` → `Story396.Operation` | M1 | (same body) | 12:00:02 |
+| 3 | 396002 | `Story396.Service` → `Story396.Router` | M2 `ADT^A08` | `SYNTHPHI396-MRN-P` | 12:00:03 |
+| 4 | 396003 | `Story396.Service` → `Story396.Router` | M3 `ADT^A01` | `SYNTHPHI396-MRN-Q` | 12:00:04 |
+
+`Seed` returns `{"headers":"1,2,3,4","hl7":"1,2,3"}`. W is 2001-02-03T11:59:00Z to 12:01:00Z.
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|---|---|---|---|
+| Leg 1, traffic generated | after `beforeAll` | The oracle sees headers 1–4 with the table's bodies. `EnsLib_HL7.SearchTable` holds `synthphi396` (positive control). A second `Seed()` in A is refused, because A already holds headers | refusal text |
+| Leg 2, header search | default session; `headers`, W; then `sessionId: 396001` | Rows equal `expectedRow` of the oracle, in order: 1–4, then 1 and 2. `JSON.stringify(result)` holds no `SYNTHPHI` | none |
+| Leg 3, Search Table lookup | default session; `searchTable`, W, `searchTableClass:"EnsLib.HL7.SearchTable"`, `[{property:"PatientID", op:"eq", value:"SYNTHPHI396-MRN-P"}]` | Rows 1, 2 and 3 equal `searchTableOracle` (`s.PropValue = 'synthphi396-mrn-p'`), and 4 never appears. `dataPolicy {redact,0,0}`. The result holds no `SYNTHPHI` (no echo) | none |
+| Leg 4, read under `redact` | the audited default session (`IRIS_AUDIT_LOG`, `IRIS_AUDIT_LOG_PARAMS=true`, `LOG_LEVEL=DEBUG`): the leg-3 lookup, then `iris_message_body` with its row IDs | 3 items in order, each `bodyKind:"hl7v2"`, `bodyPolicy.outcome:"redacted"`, `format:"er7"`, and a `text` containing `KEEPME396-CODE`; `dataPolicy {redact,3,0}`. Neither result's JSON, nor the audit file, nor stderr holds `SYNTHPHI`. The lookup's audit entry logs `filters` as `"[REDACTED]"` | none |
+| Leg 5, read under `allow` | a session with `IRIS_DATA_POLICY=allow`; the same chain | Each `text` contains `SYNTHPHI396-MRN-P`, `SYNTHPHI396-NOTE` and `KEEPME396-CODE`; `bodyPolicy.outcome:"none"`; `dataPolicy {allow,0,0}` (positive control for leg 4) | none |
+| Red proof (Rule #59) | `applyBodyReaderPolicy`'s `redact` branch returns `raw.bodyText` unredacted; interop rebuilt | Leg 4 fails on `SYNTHPHI`, and leg 5 stays green. The guarded path: SDK `Client` → built interop dist over stdio → `iris_message_body` → `applyBodyReaderPolicy` → `redactHl7` | test failure |
+| Capstone, unarmed / armed | a closed port (`story-39-1-gate-guards` nested run) | Every test skips with the tag; armed, it fails with "Epic 39 capstone live gate may not be skipped" | skip / failure |
+| `trace-message-flow` get | `{sessionOrHeaderId:"7"}` (namespace omitted, Rule #46); then with `namespace` | One user message, its steps in order: `iris_production_messages`, `iris_message_search` `headers`, `iris_message_body`, `iris_message_diagram`, `iris_production_logs`. The `prompts/list` entry's `name`, `title` and `arguments` equal today's literal | none |
+| `find-patient-messages` get | `{patientId:"X"}` only; then all five arguments | Each step in order. With no `from`, it tells the agent to ask the user for the period. With `searchTableClass` omitted, it uses `EnsLib.HL7.SearchTable` | none |
+| Skills | `pnpm gen:skills` | `skills/find-patient-messages/SKILL.md`, a regenerated `trace-message-flow`, and README rows; `--check` and `validate:prompts` clean | `--check` exits 1 on drift |
+| Snapshot, match | built dists, `pnpm gen:tools-list-snapshot:check` and the test | OK. 114 entries over 5 servers. `iris_server_profiles` is identical on all five | none |
+| Snapshot, drift | one character appended to one tool's description, package rebuilt | The test and `--check` fail, naming `<pkg> <tool>.description` and the first differing path | exit 1 / failure |
+| Snapshot, new or vanished tool | core compare on synthetic inputs | A new tool is reported and passes; a vanished one fails, naming it. An empty snapshot, or one missing a package, fails | failure |
+| Snapshot, stale dist or no flag | a `src` file newer than its dist; the CLI with no flag | Exit 2 with "rebuild"; refuses and writes nothing | exit 2 / refusal |
+| Helper copies guard | a gate re-declares a replaced name (`function entryOf(`) | `gate-helper-copies.test.ts` fails, naming the file and the name; kept variants pass | failure |
+
+</intent-contract>
+
+## Code Map
+
+**Prompts**
+- `packages/iris-interop-mcp/src/prompts/traceMessageFlow.ts`: `name`/`title` :14-15, description :16-19, arguments :20-32, `build()` :33-52 (steps :47-51). Helpers `argOrPlaceholder as arg` and `isArgProvided` come from `@iris-mcp/shared` (`prompt-helpers.ts:20,29`).
+- `packages/iris-interop-mcp/src/prompts/index.ts:12-21`: append `findPatientMessagesPrompt` last. The new file is `findPatientMessages.ts` (camelCase, the directory's convention). The sibling to follow is `recoverStuckProduction.ts` / `resendFailedMessages.ts`.
+- `packages/shared/src/tool-types.ts:176-228`: `PromptArgumentDefinition` and `PromptDefinition`. There is no skill or preset field (Epic 41).
+- Interop core (`packages/iris-interop-mcp/src/tools/presets.ts:32-44`) includes `iris_production_messages`, `_logs`, `iris_message_search`, `iris_message_body` and `iris_message_diagram`.
+- Facts the prompt text relies on:
+  - **`searchTable`** (`message-search.ts:372-420`): `from` is required, at most 7 days; `searchTableClass` is required; the `EnsLib.HL7.SearchTable` property `PatientID` covers PID-2, every PID-3 repetition and PID-4. Values ignore case. No match does not prove absence. An unknown property's error lists the class's properties (`MessageSearch.cls:600`). `notApplicable` appears when no Search Table is configured (`message-search.ts:674`). `DATA_POLICY_BLOCKED` comes under `block` (:578-585).
+  - **`iris_message_body`** (`message-body.ts:301-357`): 1–20 `headerIds`; `dataPolicy` is tighten-only.
+  - **`iris_message_diagram`** (`diagram.ts:68-72`): `sessionIds` 1–20.
+  - **Logging.** Prompt rendering is neither logged nor audited (`server-base.ts:1029-1150` `registerPrompt` has no logger or audit call), so a `patientId` argument reaches only the model.
+- Pins that move:
+  - **Interop.** `packages/iris-interop-mcp/src/__tests__/prompts.test.ts`: `OWN_PROMPT_NAMES` :34 (3 → 4) and title :91. Harness: `callRequest` :54-71, `makeRealServer` :73-81. Model for a `build()` test: :127-150.
+  - **Other packages.** `FOREIGN_PROMPT_NAMES` in dev `prompts.test.ts:42-49`, admin :34-43 and ops :30-39: add `find-patient-messages`.
+  - **`iris-mcp-all`:**
+    - `docs-prompt-sync.test.ts` `EXPECTED_COUNTS` :48-53 (interop 4) and comment :22;
+    - `validate-prompts.test.ts` :67 and :81 (13);
+    - `skills-generated-frontmatter.test.ts` :10, :41-54 (13 names) and :117;
+    - `story-38-6-doc-claims.test.ts` :289 (the heading becomes "13 prompts") and :303 (the pack sentence becomes 13 prompts, with interop 4 and the other counts unchanged).
+  - **AD-28 checks.** `prompt-safety-invariants.test.ts` :41-48 has `findPrompt`. The core-only check is at :430-448, and it reads the dev `dist/tools/presets.js`. The no-rule/no-path check is at :450-455, and it covers only the two dev prompts (:344-354). Add an interop `describe` on the same pattern.
+- `scripts/gen-skills.mjs` (:55-70, writes `skills/<name>/SKILL.md` and the `skills/README.md` row; a `|` in a description breaks the table) and `scripts/validate-prompts.mjs` (`iris_*` tokens only) both load `packages/<pkg>/dist/prompts/index.js`, so rebuild interop first. Root `package.json:18-20`.
+
+**Capstone and fixture**
+- `packages/iris-mcp-all/src/__tests__/interop-namespace-fixture.ts` (1419 lines):
+  - **Reused unchanged:** `createInteropNamespace` :414, `removeInteropNamespace` :455, `putFixtureClass` :390, `removeFixtureClass` :401, `leftovers` :1414, `STORY394_SEARCH_TABLE_SOURCE` :848, and the private `putCompileSeed` :1011. `Story391Fixture.Add` :79 (`pSession, pType, pStatus, pIsError, pSource, pTarget, pBodyClass, pBodyId, pTime`) and `SaveHl7` :245 are unguarded.
+  - **The precedent:** `Story394.Seed.Save` :965-978 (build the text, `SaveHl7`, then `IndexDoc`) and `STORY394_DOCUMENTS` :984.
+  - **Add after `seedBodyReader` :1366:** `STORY396_SEED_SOURCE`, `STORY396_DOCUMENTS` (`Story394.SearchTable.cls`, then `Story396.Seed.cls`), `STORY396_IDS` and `seedCapstone(dev, name)`.
+- Templates:
+  - `story-39-5-body-reader-live-gate.test.ts`: `beforeAll` :367-412, `afterAll` :414-448, `proxiedSession` :198, the redact sweep :644, the allow control :554.
+  - `story-39-4-search-table-live-gate.test.ts`: `tableSearch` :387, the MRN row :450-484 (`searchTableOracle`, `EXTENT_TABLE`, `CLASS_EXTENT`, `WINDOW_SQL`).
+  - `epic38-capstone-gate.test.ts:1-41` is the header model.
+- **The mutation point:** `packages/iris-interop-mcp/src/tools/message-body.ts:250` `const result = redactHl7(raw.bodyText);` in `applyBodyReaderPolicy` :201 (redact branch :248-257), which builds to `dist/tools/message-body.js:156`.
+- `packages/iris-mcp-all/scripts/prepublish-gate.mjs` `gateTestFiles` :105-204 (22 entries; add one with its two-line comment) and `vitestArgs` :211 (`--no-file-parallelism`, unchanged). `story-39-1-gate-guards.test.ts:33-41` `GATES`: add the capstone. Its header comment :2-5 lists only 6 of the 7 gates; correct it to 8. `live-gate-roster.test.ts:28-35` greps `process\.env\.IRIS_REQUIRE_LIVE\s*===`.
+
+**DW-561** (inventory taken 2026-10-17; the table is in Design Notes)
+- `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts` (470 lines) has the existing exports :20-455, including `docFixtures` :389, which throws `Error` and has no vitest import (:6-11).
+- Its unit tests:
+  - `bootstrap-version-check.test.ts:73-128` covers it directly.
+  - `interop-namespace-fixture.test.ts:92-110` covers `docFixtures` through a `call`-only stub session, so every promoted helper reached that way keeps using `session.call` and `{doc}`.
+- Guard pins that must keep holding:
+  - `epic38-gate-guards.test.ts`: :140-141 (`[SKIP] epic38-capstone-gate:`, `/6 skipped/`), :149, :176-178, :191 (`admin = await open\w*Session\(…\);\n\s*await assertDeployedBootstrapVersion`) and :193;
+  - `story-39-1-gate-guards.test.ts`: :108, :117, :126-128 and :135-137;
+  - `story-38-6-doc-claims.test.ts:372`.
+
+**DW-573**
+- Reuse:
+  - `scripts/lib/measure-tools-payload-core.mjs`: `callRequest` :17-27, `fetchAllTools` :30-40, and the env save/restore pattern of `measureOne` :53-84;
+  - `scripts/lib/tool-catalog.mjs` `SERVER_PACKAGES` :27-33;
+  - `scripts/lib/dist-freshness.mjs` `checkDistFresh` :164 (the `epic35-defect-gate.test.ts:169` usage);
+  - the pattern: `scripts/gen-governance-baseline.mjs` (`--check` :182-255, the refusal with no flag :260-278, `--force` :283-350).
+- Entry shape:
+  - `server-base.ts:1156-1197` `registerTool`, with `server` injected (:131-171). The SDK (1.29.0, `mcp.js:67-99`) adds `execution` (SDK-owned; excluded) and `_meta` (undefined).
+  - No tool declares `outputSchema`. No description is dynamic.
+  - Zod 4.3.6 is used through `toJSONSchema`.
+- `measure-tools-payload.test.ts:40-66` shows that constructing a server needs no IRIS.
+- `startup-env.setup.ts` already clears `IRIS_TOOLS_*` in vitest; the CLI scrubs them itself.
+- Precedent fixtures with provenance fields: `packages/iris-mcp-all/src/__tests__/fixtures/story-39-*-baseline.json`.
+
+**Docs** (current text verified at plan time)
+- **Root `README.md`:**
+  - the "Which Server" Integration engineer row :34;
+  - `### Agent code editing (Epic 38)` :469-487 (insert the new subsection before `### Worked example` :488);
+  - `### Backward Compatibility` :598-611;
+  - `## PHI data policy` :701-727 (`markdownSection` reads to the next `---`; the "What it governs today." paragraph :721 is pinned at its start);
+  - the audit paragraph `**The data policy in the log.**` (about :743; it reads "(today the `preview` action of `iris_message_resend`)", which is stale);
+  - the prompts heading :761 and table :763-776 (`trace-message-flow` :772).
+- **`packages/iris-interop-mcp/README.md` (972 lines):**
+  - the intro :3, the config env table :27-35, and the core paragraph's prompt list :45;
+  - Audit Logging :49-51;
+  - `#### iris_message_search` :200-245 and `#### iris_message_body` :247-271, each sliced to the next `####`;
+  - Prompts :369-377, Tool Examples :383 (the `<details>`/`<summary>` format), and Common Errors :942-957 (no `DATA_POLICY_BLOCKED` yet).
+- **`tool_support.md`:** the story notes :201-209 (add the 39.6 note after :209), the scope heading :384 (unchanged), and the prompt-pack line :434. `docs-prompt-sync` reads the first `` `interop` N `` and `pack of N **MCP prompts**`.
+- **Client config:** the `IRIS_DATA_POLICY` rows of `docs/client-config/claude-code.md:282`, `claude-desktop.md:249` and `cursor.md:280` describe the resend preview only.
+- `docs/epic-summary.md:3` ("Epic 39 has added two so far").
+- **`CHANGELOG.md`:** the top is :5 (Story 39.5). `story-39-5-doc-claims.test.ts:57` asserts that 39.5 is the first section: relax it to "present" (the 38.x/39.x precedent).
+- **Scans:** `doc-claims-patterns.ts` `CLAIMS` and `REDACTED_TEXT_SHOWN` reject "compliant", "de-identified data" and verb + "redacted HL7/body/text". Write "an HL7 v2 body redacted by …".
+
+## Tasks & Acceptance
+
+**Execution** (in dependency order; build each touched package before running tests that read its dist):
+
+1. `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`: add the Promotion-table exports. Each export carries a contract-only doc comment. An `expect`-based helper may import `expect` from vitest. Then `process-gate-helpers.test.ts` (new; data-free; default suite) unit-tests the pure ones: `distEntry`, `skipTest`'s log line, `teardownRecorder`, `firstText`/`allText`, `headerIds`, `lineNumber`, `storageRange`, `stubEnvelope`, `pollAuditEntries` on a temp file, and `startRouteStub` round-trip. -- AC-4.
+2. Every gate in the Promotion table: replace each listed copy with the promoted call, keep every assertion and every guarded literal, and delete the dead local code. Then `gate-helper-copies.test.ts` (new; default suite; no IRIS) scans every `*.test.ts` that imports `./process-gate-helpers.js`. It fails on a top-level `function <name>(` / `const <name> =` declaration of any name in the table's "Replaces" column, except the table's kept variants (an allow-list keyed by file and name, each entry carrying its reason). -- AC-4.
+3. `interop-namespace-fixture.ts`: add `STORY396_SEED_SOURCE` (`Story396.Seed`), `STORY396_DOCUMENTS`, `STORY396_IDS = {headers:"1,2,3,4", hl7:"1,2,3"}` and `seedCapstone(dev, name)` through `putCompileSeed`.
+   - `Seed()` is guarded to `$NAMESPACE ? 1"EXECMCPTMP396"1U` and refuses a namespace that already holds headers.
+   - It builds μ with a `Save(pMrn, pType, pControl)` on the `Story394.Seed.Save` pattern, then `Story391Fixture.Add(396000 + session, 1, 9, 0, source, target, "EnsLib.HL7.Message", id, "2001-02-03 12:00:0n")`.
+   - It returns the ID map. -- AC-3.
+4. `packages/iris-mcp-all/src/__tests__/epic39-capstone-gate.test.ts` (new):
+   - **Header** (on the `epic38-capstone-gate.test.ts:1-41` model): the five legs, the path each drives, the fixture and the namespace, and the arming.
+   - **`beforeAll`**, in this order:
+     1. the arming;
+     2. `dev = await openWireSession(...)`, then `assertDeployedBootstrapVersion`;
+     3. `admin`;
+     4. `putFixtureClass`;
+     5. remove `EXECMCPTMP396A`, then assert no leftovers;
+     6. `createInteropNamespace(..., {interop:true})` and `seedCapstone`;
+     7. the positive leftovers control;
+     8. the sessions: the default `redact` session with audit (`openAuditedSession`), and `allow`.
+   - **Legs** 1–5 as in the matrix. Each leg runs the loop from the seeded fixture up to its own step, so no leg depends on another leg's state.
+   - **Budgets:** the first start under 60 s; each search and each body read under 2 s (`[PERF]` log).
+   - **`afterAll`:** `teardownRecorder`.
+   - **Rosters:** add the file to `prepublish-gate.mjs` `gateTestFiles` (comment: drives built dev/admin/interop; writes `EXECMCPTMP396A`, `Story396.*` and `Story394.SearchTable` inside it, and `ExecuteMCPv2.Temp.Story391Fixture`). Add it to `story-39-1-gate-guards.test.ts` `GATES`. -- AC-3, AC-7.
+5. `scripts/lib/tools-list-snapshot-core.mjs` (new; pure). It exports:
+   - `captureToolsList(root)`: per `SERVER_PACKAGES`, construct `McpServerBase` from the dists under `full`, then `fetchAllTools`, and map to `{title, description, inputSchema, annotations[, outputSchema]}`;
+   - `canonicalize`;
+   - `compareSnapshot(snapshot, live)`, which returns `{problems: string[], added: string[]}`, one line per vanished tool or per differing field with its first differing JSON path;
+   - `assertSnapshotShape`, which rejects an empty snapshot or one missing a package.
+
+   `scripts/gen-tools-list-snapshot.mjs` (new; the CLI header states the contract and when `--force` is legitimate):
+   - no flag: refuses, exit 2;
+   - `--check`: exit 0 or 1, and lists `added`;
+   - `--force`: writes `{comment, capturedAt, sdkVersion, zodVersion, entryCount, servers}`, sorted, 2-space JSON plus a newline;
+   - a stale dist: exit 2 with "rebuild".
+
+   Root `package.json` gets `"gen:tools-list-snapshot"` and `"gen:tools-list-snapshot:check"`. -- AC-5.
+6. After the final rebuild of every package, run `pnpm gen:tools-list-snapshot --force` once to write `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json` (114 entries). Never edit it by hand. -- AC-5.
+7. `packages/iris-mcp-all/src/__tests__/tools-list-snapshot.test.ts` (new; default suite; no IRIS). It imports the core and asserts:
+   - stale dists fail with the rebuild reason;
+   - `compareSnapshot(committed, captureToolsList())` has no problems;
+   - `iris_server_profiles` is identical on all five servers;
+   - unit rows for drift, new, vanished and empty/missing-package snapshots, on synthetic inputs. -- AC-5.
+8. `packages/iris-interop-mcp/src/prompts/traceMessageFlow.ts` and `findPatientMessages.ts` (new), and `prompts/index.ts`: write the Design Notes flows. Descriptions hold no `|`. -- AC-2.
+9. Prompt tests:
+   - **Interop `prompts.test.ts`:** 4 owned names and the title. Add `prompts/get` rows for both prompts, with optional arguments omitted and given (Rule #46). Pin the `trace-message-flow` `prompts/list` entry's `name`, `title` and `arguments` against today's literal (AD-15).
+   - **`FOREIGN_PROMPT_NAMES`** in dev, admin and ops: add the new name.
+   - **`prompt-safety-invariants.test.ts`:** a new interop `describe`. It pins the step order of both prompts. It checks that every `iris_*` token is in interop `core` (interop `dist/tools/presets.js`) or is `iris_server_profiles`, and that neither prompt matches `/Rule #\d/` or the repository-path pattern. For `find-patient-messages` it pins `searchTable`, `DATA_POLICY_BLOCKED`, "7 days", the instruction not to read a withheld body another way, and that `dataPolicy` only tightens; it also checks that no `dataPolicy: "allow"` instruction appears.
+   - **Counts:** `docs-prompt-sync`, `validate-prompts` and `skills-generated-frontmatter`. -- AC-2.
+10. `skills/**`: run `pnpm gen:skills` after building interop, then `gen:skills:check` and `validate:prompts`. -- AC-2.
+11. Docs: every row of the Docs table (Design Notes). Repin `story-38-6-doc-claims.test.ts:289,303` to the new prompt counts, and relax `story-39-5-doc-claims.test.ts:57`. -- AC-1.
+12. `CHANGELOG.md` top section, `.changeset/story-39-6-message-forensics-docs-prompt-and-capstone.md` and `docs/epic-summary.md:3` (drop "so far"). -- AC-1.
+13. `packages/iris-mcp-all/src/__tests__/story-39-6-doc-claims.test.ts` (new; no IRIS) pins:
+    - each Docs-table row, by its anchor, with its default-state phrase;
+    - the CHANGELOG section by exact title and its four headings;
+    - the changeset bump map;
+    - that the new text claims no compliance (`CLAIMS`, `REDACTED_TEXT_SHOWN`). -- AC-1.
+14. This spec's `## Verification`: record the commands' results, every `mutation:` line, the kept-variant list, the snapshot's `entryCount` and versions, and the epic-close records. -- AC-8.
+
+**Acceptance Criteria:**
+- **AC-1 (39.6.1; Rules #30/#43; AD-26 compliance).** Given the finished docs, when `story-39-6-doc-claims.test.ts` and every existing doc-claims test run, then:
+  - each Docs-table item states its default state on every surface listed for it;
+  - the CHANGELOG has the 39.6 top section with its four headings;
+  - the changeset bumps exactly `@iris-mcp/interop` minor;
+  - no scanned text claims compliance.
+- **AC-2 (39.6.2; AD-28, AD-7).** Given the built interop server, when a real request handler lists and gets both prompts, with optional arguments omitted and given, then:
+  - each renders its Design Notes flow in order;
+  - every `iris_*` token is an interop `core` tool or `iris_server_profiles`;
+  - neither carries an internal rule number or repository path;
+  - `pnpm gen:skills` regenerates 13 skills, and `gen:skills:check` and `validate:prompts` pass clean.
+- **AC-3 (39.6.3; Rules #21/#59; AD-26, AD-19).** Given the armed capstone on fixture μ, when it runs on the built servers, then:
+  - legs 1–5 give the matrix outcomes;
+  - under `redact`, no `SYNTHPHI` value appears in any result, in the audit file or on stderr, while `KEEPME396` survives;
+  - under `allow`, the values appear;
+  - afterwards nothing named `EXECMCPTMP396A`, `Story396` or `Story391Fixture` remains;
+  - disabling redaction in `applyBodyReaderPolicy` and rebuilding interop turns leg 4 red on the named path.
+- **AC-4 (DW-561).** Given the Promotion table, when the default suite and every moved gate run armed, then:
+  - every gate passes with its assertions unchanged;
+  - `epic38-gate-guards`, `story-39-1-gate-guards` and `live-gate-roster` pass;
+  - the capstone declares no local copy of a promoted helper;
+  - re-declaring a replaced name in any gate turns `gate-helper-copies.test.ts` red.
+- **AC-5 (DW-573; AD-15, AD-2).** Given the committed snapshot of 114 entries, when `tools-list-snapshot.test.ts` and `pnpm gen:tools-list-snapshot:check` run on the built dists, then:
+  - both pass;
+  - a changed description, schema or annotation of any listed tool fails both, naming the package, tool and field;
+  - a vanished tool fails;
+  - a new tool passes and is reported.
+- **AC-6 (back-compat; AD-15, AD-5, AD-14).** Given the finished tree, when the Verification commands and the existing count, roster and contract pins run, then:
+  - the tool counts (109/114), every preset roster, `TOOL_PAIRS`, the governance baseline (`1e62c5ad5bf7`/141), `BOOTSTRAP_VERSION` `2fd17b50a024` (`gen:bootstrap` idempotent) and the README payload rows (equal to `pnpm measure:tools-payload`) are unchanged;
+  - `trace-message-flow`'s `name`, `title` and `arguments` equal today's.
+- **AC-7 (Integration; Rules 1/2).**
+  - Given the promoted helpers, when the capstone and every moved gate consume them against the real instance, then each passes armed.
+  - Given the new prompt, when `gen:skills` consumes the built prompt catalog, then it writes `skills/find-patient-messages/SKILL.md`.
+  - Given the snapshot core, when both the CLI and the vitest test consume it, then they agree on the same tree.
+- **AC-8 (gates and records).** Given the finished tree, when the Verification commands run, then:
+  - every per-package build, test, lint and type-check passes;
+  - `:check` exits 0;
+  - `check-epics-sync.mjs` prints OK;
+  - nothing is left on the instance;
+  - the epic-close records are written.
+
+## Spec Change Log
+
+## Review Triage Log
+
+## Design Notes
+
+**Orchestrator decisions: DECIDED at the spec gate, 2026-10-17, both as recommended (#28: the capstone seeds synthetic fixtures directly and starts no production; #29: any change to a listed tools/list entry, additive included, needs a `--force` regenerate and a CHANGELOG line).** The planning text follows:
+- **"Generated" traffic.** Orchestrator decision needed: does AC 39.6.3 step 1 ("synthetic HL7 traffic is generated in the disposable namespace") require running a production? — recommended: no; the capstone generates μ with its own seed class (direct `Ens.MessageHeader` saves, `SaveHl7`, `IndexDoc`), because:
+  - every Epic 39 gate generates its messages this way (`interop-namespace-fixture.ts:1063` "no production runs");
+  - the epic's fixture constraints (2001-02-03 UTC times, synthetic values, disposable namespace) hold only for seeded headers;
+  - `IndexDoc` is the same method an HL7 service's `SearchTableClass` setting calls;
+  - a production-driven run (the 39.2 precedent, `story-39-2-data-policy-live-gate.test.ts:708-752`) would add a production start on the shared instance, real-time timestamps and a business service with no adapter, for header fields that 39.1 already pins against the SQL oracle.
+
+  The alternative: a `Story396.Production` started in `EXECMCPTMP396A`, fed through `Ens.Director.CreateBusinessService`, with real-time windows.
+- **Snapshot strictness.** Orchestrator decision needed: does the DW-573 pin allow an additive change (a new optional property) to a listed entry without a regenerate? — recommended: no; every change to a listed entry, an additive one included, needs a `--force` regenerate in the story that makes it, with a CHANGELOG line. Reasons:
+  - AD-15 permits "pinning the full new shape in the story that adds them", and the regenerate diff is then the reviewable record;
+  - a superset rule would let a renamed-and-re-added property or a loosened annotation slip through.
+
+  Known consequence: an SDK or zod upgrade (Epic 43, AD-32) moves every entry and needs one recorded regenerate. The header's `sdkVersion`/`zodVersion` make that cause visible.
+
+**Plan-time interpretations** (apply and report):
+- **I1.** Updating `trace-message-flow` changes its description and body (sanctioned by AC 39.6.2) but not its argument contract, so no AD-15 question arises; a pin proves it.
+- **I2.** The capstone joins `story-39-1-gate-guards` (the 39.x gate shape), so its armed text reads "Epic 39 capstone live gate may not be skipped".
+- **I3.** The capstone has no `block` leg: AC 39.6.3 lists five legs, and `block` is pinned by the 39.3, 39.4 and 39.5 gates.
+- **I4.** No ObjectScript changes, so no OS `%UnitTest` class runs, and `Story394.SearchTable` is reused for its compile-time `SearchTableProp` population (spec-39-4) rather than copied.
+- **I5.** The prompt-pack count moves 12 → 13 on every surface. The tool counts, rosters and payload rows do not move.
+
+**Prompts.** Write them in plain imperative steps, with no rule numbers and no paths.
+- **`trace-message-flow`:**
+  1. `iris_production_messages` with `sessionId: <id>`, retrying with `headerId` (as today), to get the hops, the session ID and the earliest and latest times.
+  2. `iris_message_search` `action:"headers"` with that `sessionId`, and `from`/`to` bracketing those times in UTC ISO 8601 (at most 7 days; split a longer session), for the header rows (`id`, status, `isError`, source and target, body class and ID). Page with `nextCursor` and the same `from`/`to`.
+  3. `iris_message_body` with up to 20 header IDs that matter (the first request, each erroring message and its response), for bodies rendered by kind, each with its `bodyPolicy`. Under the default `redact`, an HL7 v2 body is shown with fields outside a reviewed keep-list replaced, and every other body is withheld with a reason. Under `block`, every body is withheld. Report a withheld body's reason, and never read it another way (for example through SQL, global or document tools).
+  4. `iris_message_diagram` with `sessionIds: [<session>]` (as today's step 3).
+  5. `iris_production_logs` for erroring items (as today's step 4).
+  6. The summary, with no recovery without the user's confirmation (as today's step 5).
+
+  The namespace note is kept.
+- **`find-patient-messages`** (title "Find Patient Messages"). The description reads "Find a patient's Interoperability messages by a Search Table value, such as a medical record number, with iris_message_search, then read their bodies with iris_message_body under the PHI data policy."
+
+  The arguments:
+  - `patientId` (required): the identifier to look up;
+  - `from`: the start of the window, ISO 8601 UTC;
+  - `to`: the end of the window (default: now);
+  - `searchTableClass`: the default is `EnsLib.HL7.SearchTable`;
+  - `namespace`.
+
+  The steps:
+  1. `iris_server_profiles`: read the profile's `dataPolicy`. Under `block`, the lookup is refused with `DATA_POLICY_BLOCKED` and every body is withheld, so stop and tell the user, and do not look the patient up another way.
+  2. The window: with no `from`, ask the user for the period. Each search spans at most 7 days, and the agent asks before searching a longer period window by window.
+  3. `iris_message_search` `action:"searchTable"` with `searchTableClass`, `filters: [{property: "PatientID", op: "eq", value: <patientId>}]`, `from` and `to`, paged with `nextCursor`. `PatientID` covers PID-2, every PID-3 repetition and PID-4. An unknown-property error lists the class's properties: pick the identifier and retry. `notApplicable` means no Search Table is configured, so tell the user. No match does not prove that there is no message, because only indexed messages match.
+  4. List the rows (`id`, time, source to target, status, `sessionId`); rows hold no body values.
+  5. Only when the user wants content: `iris_message_body` with up to 20 IDs per call, under the policy as in `trace-message-flow` step 3. `dataPolicy` can only tighten (for example `block`); a looser value is ignored and reported as `dataPolicyClamped`.
+  6. Optionally, `iris_message_diagram` with the rows' `sessionId`s (at most 20).
+  7. The report: the messages, the result's data-policy line, and each withheld body's reason. Repeat no identifying value from a body beyond what the user gave, and never read a withheld body another way.
+
+**Promotion table (DW-561).** The new exports of `process-gate-helpers.ts`, and the copies each replaces. Line numbers are from the 2026-10-17 inventory; verify each copy's body before replacing it.
+
+Short names, all in `packages/iris-mcp-all/src/__tests__/`:
+- `epic38 capstone` is `epic38-capstone-gate.test.ts`. `38-4` is `story-38-4-qa-doc-edit-wire-gate.test.ts`, `38-5` is `story-38-5-qa-sql-wire-gate.test.ts` and `38-7 wire` is `story-38-7-qa-wire-gate.test.ts`. `38-7 governance process` is `story-38-7-qa-governance-process.test.ts`.
+- `39-N` is the story's main gate: `story-39-1-message-search-live-gate`, `story-39-2-data-policy-live-gate`, `story-39-3-body-search-live-gate`, `story-39-4-search-table-live-gate` and `story-39-5-body-reader-live-gate` (each `.test.ts`).
+- `39-N QA` is `story-39-N-qa-live-gate.test.ts`, and `39-N QA process` is `story-39-N-qa-process.test.ts`.
+- `39-2 startup` is `story-39-2-data-policy-startup.test.ts`.
+
+| Export | Replaces |
+|---|---|
+| `distEntry(repoRoot, pkg)` | `entryOf`: 39-1 :66, 39-2 :70, 39-3 :70, 39-3 QA :61, 39-4 :79, 39-4 QA :63, 39-5 :66, 39-5 QA :75 |
+| `skipTest(tag, reason, ctx)`: logs `[SKIP] <tag>: <reason>`, then skips | `skip`: epic38 capstone :139, 39-1 :103, 39-2 :106, 39-3 :112, 39-3 QA :163, 39-4 :121, 39-4 QA :102, 39-5 :101, 39-5 QA :110 |
+| `skipIfReason(reason, ctx)` | `skipIfNeeded`: 39-2/3/4/5 QA process, 39-2 startup :155 |
+| `teardownRecorder()` gives `{problems, attempt}`; `fixtureDocumentNames(session, filters)` | `attempt` and the document-listing loops in the 8 Epic 39 gates' `afterAll` (each keeps its own `expect` label) |
+| `stemFixtures(session, stem)` gives `{documents, globals, killGlobals}` | `fixtureDocuments`/`fixtureGlobals`/the kill loop: epic38 capstone :211/:217/:232, 38-4 :207/:213/:219, 38-5 :197/:203/:210, 38-7 wire :94 (each keeps its own `removeFixtures` order) |
+| `lineNumber`, `storageRange`, `atelierScalar(target, query)` | epic38 capstone :192/:199/:227, 38-4 :164/:171, 38-5 `scalar` :135 |
+| `governanceReport(session)`, `governanceDenial(action, extra)` | 38-4 :195/:190, 38-5 :310/:300 |
+| `docFixtures` (existing) | `removeDoc`/`putDoc`/`compileDoc`: epic38 capstone :148-164, 38-4 :132-147, 38-5 :193 and the inline put at :260-264, 38-7 wire `putFixture` :115 |
+| `postEnvelope(target, path, body)` | `route`: 39-3 :380, 39-4 :410, 39-5 :359 (the QA `route` wrappers at 39-3 QA :302, 39-4 QA :216 and 39-5 QA :510 keep their extra expect and call it) |
+| `firstText`, `allText`, `headerIds` | `textOf` (first block: epic38, 39-1, 39-3, 39-3 QA, 39-4, 39-4 QA; joined: 39-2, 39-5, 39-5 QA and the QA process gates); `ids` (×5) |
+| `irisClassMethod(session, ns, className, methodName, args)` | 39-2 `irisMethod` :497, 39-5 :345, 39-5 QA `seedMethod` :374 |
+| `openAuditedSession(options, extraEnv)` gives `{session, stderr(), auditFile}` | 39-5 `proxiedSession` :198, 39-5 QA `probedSession` :447, 39-5 QA process `probed` :284 |
+| `pollAuditEntries(file, {tool?, count?, isWanted?, intervalMs, timeoutMs, excerpt})` | `searchEntries`: 39-3 :1113, 39-4 :1144, 39-3 QA process :491, 39-4 QA process :632; `auditEntries`: 39-5 :1065, 39-5 QA process :382; 39-2 `entries` :555 (each call passes its current constants) |
+| `startRouteStub(route)`, `start503Stub()`, `stubTarget(port, username)`, `stubEnvelope`, `routeRequests`, `writeJson`, `withStub` | `startStub`/`envelope`/`stubTarget`/`routeRequests`/`writeJson`/`withStub` in the 39-2/3/4/5 QA process gates, 38-7 governance process :92-145 and 39-2 startup :59-88 |
+| `batchUnits`, `wellFormed`; `sqlLiteral`/`squash`/`HEADER_COLUMNS` move to `header-row-oracle.ts` | 39-5 :753 and 39-5 QA :664; 39-5 QA :489 and 39-5 QA process :106; 39-1 :330, 39-3 QA :447/:450, 39-4 :1210 |
+
+**Kept local, with reasons** (the guard's allow-list):
+- each gate's `wireOptions`/`openSession`/`interopSession`/`plainSession` one-liners, which bind file-local `sdkEsmDir` and `TARGET`;
+- the six `succeeded` variants, whose forbidden values and labels differ;
+- 38-7 governance process `governanceReport` :145, which opens its own session and captures stderr (a different contract);
+- 38-7 wire `stored` :105, which has one user;
+- the expected-text constants of the 39-5 gates, which are data, not helpers.
+
+**Extend, don't copy (Rule 2).**
+- **Extended:** `process-gate-helpers.ts`, `docFixtures`, `header-row-oracle.ts`, `interop-namespace-fixture.ts` (`putCompileSeed`, `Story391Fixture`, `STORY394_SEARCH_TABLE_SOURCE`), `measure-tools-payload-core.mjs` `fetchAllTools`, `tool-catalog.mjs` `SERVER_PACKAGES`, `dist-freshness.mjs`, the governance-baseline CLI shape, `GATES` and `gateTestFiles`.
+- **New, with reasons:**
+  - `Story396.Seed`: μ is a session-shaped four-header set. `Story394.Seed` is guarded to its own namespaces and seeds 39.4's eleven-header matrix.
+  - `findPatientMessages.ts`: a new prompt.
+  - `tools-list-snapshot-core.mjs`: no module captures entry content today.
+
+**Integration (Rules 1/2).**
+- **Integration ACs:** AC-7, and the capstone legs against the real instance.
+- **Consumes:**
+  - 39.1–39.5: `iris_message_search` (all three actions), `iris_message_body`, `applyBodyReaderPolicy`/`redactHl7`, the audit `dataPolicy` and `phiInputs` plumbing, `interop-namespace-fixture.ts`, `header-row-oracle.ts`, the gate helpers and `assertDeployedBootstrapVersion`;
+  - Epic 30: `measure-tools-payload-core.mjs`.
+- **Consumed-by:**
+  - this story's capstone and moved gates (the promoted helpers);
+  - every later gate, starting with the Epic 40 capstone;
+  - every later story's default suite (the snapshot);
+  - Epic 41's skills pack (the two prompts);
+  - Epic 43, AD-32 (the SDK migration regenerates the snapshot).
+
+**Ledger inbox (Rule 17):**
+- **DW-561:** addressed by Tasks 1–2 and 4, AC-4, AC-7 and the helper-copies matrix row.
+- **DW-573:** addressed by Tasks 5–7, AC-5 and the four snapshot matrix rows.
+
+**Governing ADs.**
+- **AD-26:** the capstone proves that under `redact` no body PHI and no echoed filter value leaves through search or read; the docs make no compliance claim; least exposure is described truthfully.
+- **AD-28:** prompts are authored once, skills are generated, there are no internal references, and every tool name is real.
+- **AD-15:** the `tools/list` snapshot, the unchanged `trace-message-flow` contract, and no tool change.
+- **AD-19:** no PHI in the audit file or on stderr, and `filters` logged `[REDACTED]`.
+- **AD-7:** the prompts' main path is in `core`, and no preset changes.
+- **AD-9:** tighten-only, documented.
+- **AD-20:** every prompt search is windowed; the output cap is not presented as timeout protection.
+- **AD-2:** the cross-package checks live in `iris-mcp-all`/`scripts`, with one core for the CLI and the test.
+- **AD-14:** no bootstrap change, `gen:bootstrap` idempotent. **AD-5:** `:check` only. **AD-29:** a minor changeset, no publish.
+- **Conventions:** Live gates, Live testing on a shared instance, Configuration variables (documented with defaults), Error text (no echo), Logging.
+
+**Docs table** (Rule #30; every row states the default state at its point of use):
+
+| # | Surface | Item |
+|---|---|---|
+| R1 | README :34 | Integration engineer: "search and read messages under the PHI data policy" |
+| R2 | README, new `### Message forensics (Epic 39)` after :487 | The loop (search, read, diagram, resend preview). Each `iris_message_search` action, with what it takes, its key `iris_message_search:<action>` and "a read, enabled by default". `iris_message_body` (a read, enabled by default). The required window of at most 7 days, `limit` as an output cap only, and paging. `notApplicable`. Policy per action, with a link. Restricting a key (`{"global":{"iris_message_search:body":false}}`). The two prompts |
+| R3 | README audit paragraph | Names the governed set (`iris_message_body`, the `body`/`searchTable` actions, the `preview` action) and the declared PHI input (`filters`). Keeps the pinned JSON and "The declaration decides…" |
+| R4 | README prompts | `13 prompts`, the new `trace-message-flow` text, and a `find-patient-messages` row (main path in interop `core`; reads only; withheld bodies stay withheld) |
+| R5 | README Backward Compatibility | A bullet: the `tools/list` snapshot pins every listed entry, and a sanctioned change regenerates it |
+| R6 | Interop README :3, :45 | Intro mentions message search and body reading; the core paragraph lists the new prompt |
+| R7 | Interop README env table :27-35 | An `IRIS_DATA_POLICY` row: default `redact`, the values, the effect on this server's tools |
+| R8 | Interop README, new `### PHI data policy (IRIS_DATA_POLICY)` after Audit Logging | The five channels in order, `iris_server_profiles` reporting, tighten-only, and the compliance sentence |
+| R9 | Interop README Audit Logging :51 | The `dataPolicy` field and the redaction of PHI inputs |
+| R10 | Interop README `#### iris_message_search` | One sentence: `headers` is outside the policy, and a header with no body class carries its literal body as the body ID (restrict `iris_message_search:headers`) |
+| R11 | Interop README Tool Examples | `<details>` for a `searchTable` lookup and for a `redact` body read. The outputs are captured from the built server on fixture μ, values verbatim, trimmed with `…` |
+| R12 | Interop README Common Errors | A `DATA_POLICY_BLOCKED` row |
+| R13 | Interop README Prompts | The new row and the updated `trace-message-flow` row |
+| R14 | `tool_support.md` | A Story 39.6 note after :209 (prompts, capstone, snapshot, helpers; no tool, key or count change); the :434 line reads 13 prompts with `interop` 4, and "`interop` gained `find-patient-messages` in Story 39.6" |
+| R15 | Client config ×3 | The `IRIS_DATA_POLICY` row also covers `iris_message_body` and the `block` refusal of `body`/`searchTable` |
+| R16 | `docs/epic-summary.md:3` | "so far" removed |
+
+## Verification
+
+Every command runs from `/Users/jbrandt/git/iris-execute-mcp-v2`, in the foreground, with `timeout: 600000`, one package per call.
+- `ENV` is `IRIS_HOST=localhost IRIS_PORT=52773 IRIS_NAMESPACE=HSCUSTOM IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_HTTPS=false IRIS_REQUIRE_LIVE=1`.
+- Every MCP call names `server:"default"` and the namespace `HSCUSTOM` or `EXECMCPTMP396A`.
+
+**Shared surfaces:** these change, and other tests assert on them.
+- The prompt names and counts: interop/dev/admin/ops `prompts.test.ts`, `docs-prompt-sync`, `validate-prompts`, `skills-generated-frontmatter`, the `story-38-6-doc-claims` pins and `prompt-safety-invariants`.
+- `skills/`.
+- The CHANGELOG's first section (`story-39-5-doc-claims`).
+- The README prompt heading and the `tool_support.md` prompt line.
+- `gateTestFiles` and `GATES` (`live-gate-roster`, the gate guards).
+- The `process-gate-helpers.ts` exports (`bootstrap-version-check`, the `interop-namespace-fixture.test.ts` stub harness) and every gate file in the Promotion table.
+- The `interop-namespace-fixture.ts` exports.
+- The root `package.json` scripts.
+- The new snapshot, which every later story's suite reads.
+
+Standing criterion: every test added or changed passes on a fresh environment, in either order.
+- The capstone creates and removes all its own state: `EXECMCPTMP396A`, `Story396.Seed` and `Story394.SearchTable` inside it, `ExecuteMCPv2.Temp.Story391Fixture` in HSCUSTOM, and its temp dir. Each moved gate keeps its own disposable fixtures, unchanged.
+- No OS `%UnitTest` class changes, so none runs.
+
+**Commands:**
+- `(loop)` `pnpm --filter @iris-mcp/interop build && pnpm --filter @iris-mcp/interop exec vitest run src/__tests__/prompts.test.ts` -- expected: pass.
+- `(loop)` `pnpm --filter @iris-mcp/dev exec vitest run src/__tests__/prompts.test.ts`, then the same for `@iris-mcp/admin` and `@iris-mcp/ops`, one call each -- expected: pass.
+- `(loop)` `pnpm gen:skills && pnpm gen:skills:check && pnpm validate:prompts` -- expected: clean, 13 skills.
+- `(loop)` `pnpm gen:tools-list-snapshot:check` -- expected: OK, exit 0.
+- `(loop)` `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/tools-list-snapshot.test.ts src/__tests__/process-gate-helpers.test.ts src/__tests__/gate-helper-copies.test.ts src/__tests__/story-39-6-doc-claims.test.ts src/__tests__/story-39-5-doc-claims.test.ts src/__tests__/story-39-4-doc-claims.test.ts src/__tests__/story-39-3-doc-claims.test.ts src/__tests__/story-39-2-doc-claims.test.ts src/__tests__/story-39-1-doc-claims.test.ts src/__tests__/story-39-0-doc-claims.test.ts src/__tests__/story-38-6-doc-claims.test.ts src/__tests__/docs-prompt-sync.test.ts src/__tests__/validate-prompts.test.ts src/__tests__/skills-generated-frontmatter.test.ts src/__tests__/prompt-safety-invariants.test.ts src/__tests__/live-gate-roster.test.ts src/__tests__/bootstrap-version-check.test.ts src/__tests__/interop-namespace-fixture.test.ts src/__tests__/docs-visibility-roster-sync.test.ts` -- expected: pass.
+- `(loop)` `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-gate-guards.test.ts`, then `src/__tests__/epic38-gate-guards.test.ts`, one call each -- expected: pass.
+- `(loop)` `ENV pnpm --filter @iris-mcp/all exec vitest run src/__tests__/epic39-capstone-gate.test.ts` -- expected: every test passes, none skipped, nothing left.
+- `(once)` Each moved gate armed, one per call: `ENV pnpm --filter @iris-mcp/all exec vitest run src/__tests__/<gate>`, for every file in the Promotion table (the capstone and QA live gates, the Epic 38 wire gates, and the process gates) -- expected: pass, none skipped.
+- `(once)` For each of shared, dev, admin, interop, ops, data and client-config, one command each: `build`, `test`, `lint` and `type-check`. Then `ENV pnpm --filter @iris-mcp/all test` -- expected: green.
+- `(once)` `pnpm gen:bootstrap` (expected: no diff), `pnpm gen:governance-baseline:check` (expected: exit 0, `1e62c5ad5bf7`/141), `node scripts/check-epics-sync.mjs` (expected: OK) and `pnpm measure:tools-payload` (expected: equal to the README rows) -- one call each.
+- `(once)` After every armed run: `leftovers` for `EXECMCPTMP396A` is `[]`; `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP396A`; and `iris_doc_list` (HSCUSTOM, `Story396` and `ExecuteMCPv2.Temp.`, generated included) is empty.
+
+**Planned mutations (Rule 19).** For each one: apply it, observe red, revert, rebuild any dist it touched, and confirm that `git status --short` and `git diff --stat` are unchanged. Record each as `mutation: <change> -> <test that went red>`.
+- AC-1: remove the default-state phrase from R2 → `story-39-6-doc-claims`.
+- AC-2: swap `trace-message-flow` steps 3 and 4 → `prompt-safety-invariants`; add "Rule #38" to `find-patient-messages` → the AD-28 check.
+- AC-3: `applyBodyReaderPolicy` returns `raw.bodyText` under `redact`, interop rebuilt → capstone leg 4 (record the path).
+- AC-4: re-declare `function entryOf(` in one gate → `gate-helper-copies`.
+- AC-5: append one character to the `iris_doc_get` description, dev rebuilt → `tools-list-snapshot` and `:check` exit 1.
+- AC-6: flip `sessionOrHeaderId` `required` → the interop `prompts.test.ts` contract pin.
+
+**Epic-close records** (written by the implement stage): `BOOTSTRAP_VERSION` for the epic, `089f8f0a62b2` → `2fd17b50a024`. Tools 107/112 at the epic start → 109/114 (`iris_message_search` in 39.1 and `iris_message_body` in 39.5; verify against git). Prompts 12 → 13. Baseline `1e62c5ad5bf7`/141. Snapshot: 114 entries, with its SDK and zod versions.
+
+## Auto Run Result
+
+Status: ready-for-dev
+Blocking condition: none
+
+**Plan stage (2026-10-17).** The spec was planned against the READY FOR DEVELOPMENT standard and halted after planning, as the invocation asked.
+- **Ledger inbox:** DW-561 and DW-573 are both addressed (Design Notes, Ledger inbox).
+- **Orchestrator decisions needed:** two, both under Design Notes:
+  - whether "generated" traffic requires a production (recommended: no, seeded fixture μ);
+  - snapshot strictness (recommended: every change to a listed entry needs a `--force` regenerate).
