@@ -3175,23 +3175,27 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 39.7 plan source read 2026-10-17 (Ens.DataType.LogType values 1-6); unverified live
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe, then fix Type and the UTC cutoff
+- 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
 
 ### DW-585: iris_production_logs type filter probably matches nothing: the EventLog handler binds the display name (Error) to Type = ? in logical select mode, but Type is an integer (Ens.DataType.LogType)
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 39.7 plan source read 2026-10-17; needs a probe before any fix
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe with synthetic Event Log rows in a disposable namespace, then map display name to logical value
+- 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
 
 ### DW-586: Under block, iris_message_diagram leaves a per-session generation failure text (Generation failed for session N: <text> in warnings[] and the Mermaid %% line) unchanged; only the Correlator Error on message texts are rewritten
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 39.7 implement review 2026-10-17 (unverified whether <text> can carry message content)
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe what <text> can carry; withhold under block if message-derived
 - 2026-10-17T21:35:25Z occurrence=39-7-epic-39-burn-down
+- 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
 
 ### DW-587: Under block, the trace-message-flow prompt and its generated skill give no rule for withheld Event Log and diagram error text: steps 5-6 ask what the error log says, with no report-the-reason, never-read-it-another-way line like step 3 has for bodies
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: traceMessageFlow.ts steps 4-6 unchanged by 39.7 vs step 3 body rule; the 39.7 Docs table omits the prompt (Rule 56); 39.6 CHANGELOG treats a prompt-body change as AD-15 sanctioned
 - 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: add the block rule to steps 4-5 (AD-15 prompt-body change, regenerate skills) or accept
 - 2026-10-17T21:41:21Z note=decided=orchestrator(Lead-away) decision 36: fix the trace-message-flow prompt text (sanctioned AD-15 prompt change) in the Epic 40 X.0 story
+- 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: decision 36 applied; fix the prompt text in Story 40.0 (DW bullet in its epics.md block)
 
 ### DW-588: DW-572 residual: iris_message_resend filtered mode (resendFiltered) keeps the history-wide Status/Source/Target bitmap plan on an untuned Ens.MessageHeader, because decision 30 left its statements unchanged
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: med | footprint: out-of-footprint

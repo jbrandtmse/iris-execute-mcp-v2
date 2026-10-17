@@ -5404,6 +5404,15 @@ The Epic 39 burn-down story was chartered at the epic's burn-down gate on 2026-1
 - performance profiling;
 - G25 (INT-offset mapping as a standalone tool).
 
+### Story 40.0: Epic 39 Deferred Cleanup
+
+This is the `/epic-cycle` retro-review gate story, inserted on 2026-10-17 during the unattended run. Epic 39 has no retrospective; the Lead directed a skip. Epic 39's burn-down story (39.7) left four ledger entries for this gate, and this story handles all four. Every other non-terminal entry is already owned by a named later story.
+
+- DW-584: the `iris_metrics_interop` 24-hour error count (`Monitor.cls`) counts Event Log rows with `Type = 3`, which is Warning (Error is 2 in `Ens.DataType.LogType`), and compares a local `$Horolog` cutoff with the UTC `TimeLogged`. Probe first with synthetic Event Log rows in a disposable namespace, then count errors against a UTC cutoff. Pin both against a live oracle (Rule #36).
+- DW-585: the `iris_production_logs` `type` filter probably matches nothing. The EventLog handler binds the display name (`Error`) to `Type = ?` in logical select mode, but `Type` is stored as an integer. Probe with synthetic rows in a disposable namespace. If confirmed, map each display name to its logical value and pin every type; if the filter works, close with evidence.
+- DW-586: under `block`, `iris_message_diagram` passes the per-session `Generation failed for session N: <text>` text through unchanged, in `warnings[]` and in the Mermaid `%%` line. Only the Correlator error texts are rewritten today. Probe what `<text>` can carry; if it can carry message-derived content, withhold it under `block` the same way.
+- DW-587 (decided by the orchestrator, decision #36): under `block`, the `trace-message-flow` prompt gives agents no rule for withheld Event Log and diagram error text. Give the steps that ask what the error log and the diagram say the same report-the-reason, never-read-it-another-way rule that step 3 has for bodies. This is a sanctioned AD-15 prompt-body change: regenerate anything generated from the prompt and record it in the CHANGELOG.
+
 ### Story 40.1: Line Coverage Probe and Engine
 
 This story ships per-routine INT-line coverage, with a complete response shape. 40.2 owns class-source mapping, aggregation, Cobertura and targets (Rule #52).
