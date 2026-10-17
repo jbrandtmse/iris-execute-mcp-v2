@@ -305,6 +305,11 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - the `@1` pin (D3) and the Node 22 floor (D4);
     - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3);
     - the `IRIS_NAMESPACE` default moving from `HSCUSTOM` to `USER` (the documented value, which exists on every IRIS instance), in `config.ts` and the VS Code launcher, recorded under CHANGELOG "Changed" (DW-469, Story 38.0). The orchestrator decided this under the Lead's delegation for the unattended run of 2026-10-15; see `orchestrator-decisions-wave-6.md` #5.
+    - **Story 39.7** (orchestrator decisions #30–#35, made under the same delegation):
+      - every non-2xx Atelier response is now an error, even when its error list is empty (DW-569). `iris_doc_search` with an empty query becomes an error; `iris_macro_info` with no document keeps its documented empty result;
+      - `iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block`;
+      - `iris_message_body` renders character-stream bodies under `allow`;
+      - the message-search statements carry an index hint, which changes the plan only, never results.
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -465,7 +470,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - `iris_server_profiles` reports `dataPolicy` and `dataPolicySource`.
     - Body kind comes from `MessageSearch.BodyKind`. Only `hl7v2` is redactable, by a fail-closed keep-list (`hl7-redaction.ts`): a field nobody reviewed is redacted, never kept.
     - **Least exposure by default.** Under `redact`, no surface shows more body text than it did before this policy existed. The resend preview keeps its HL7 class-name note and withholds non-HL7 bodies with a reason. The engine's first body-text consumer is `iris_message_body` (Story 39.5).
-    - In 39.2 the policy governs the resend preview only. `iris_production_logs` and `iris_message_diagram` are residual, and ledgered for the Epic 39 burn-down.
+    - In 39.2 the policy governed the resend preview only.
+    - Since Story 39.7, `iris_production_logs` (Event Log `Text`) and `iris_message_diagram` (the Correlator's `Error on message …` texts) are governed under `block` only: their message-derived text is withheld with a fixed reason. Under `redact` and `allow` they are byte-identical to before and stay documented residuals, because free log text cannot be redacted reliably and content sniffing is forbidden (decision #31).
+    - Under `allow`, `iris_message_body` renders character-stream property bodies (for example `HS.Message.XMLMessage` `ContentStream`) within `maxChars`. They are withheld under `redact` and kind-only under `block` (decision #32).
     - The scope as of 2026-10-16 is recorded in `tool_support.md`.
   - **What redaction may read.** Redaction runs only on the complete, unsanitized body. Truncation and sanitization come after redaction, in TypeScript.
     - Body kind comes from the body class, through one shared classifier owned by Story 39.2, never from sniffing content.
