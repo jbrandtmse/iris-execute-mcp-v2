@@ -3165,3 +3165,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: irislib/HS/Message/XMLMessage.cls:1,13 (%Persistent + %XML.Adaptor, payload in ContentStream); MessageBody.cls PropertyDump stream branch; Design Notes dump rules (spec-bound)
 - 2026-10-17T15:49:37Z status=decision-pending owner=burndown by=cr note=decide: under allow, render a character-stream property's text (to maxChars) for persistent bodies, or a HealthShare renderer
 - 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 32: render character-stream body content under allow only, bounded by maxChars; redact withholds; block kind-only
+
+### DW-584: iris_metrics_interop 24-hour error count (Monitor.cls:579) counts Event Log Type=3 (Warning; Error is 2) and compares a local $Horolog cutoff with UTC TimeLogged
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 39.7 plan source read 2026-10-17 (Ens.DataType.LogType values 1-6); unverified live
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe, then fix Type and the UTC cutoff
+
+### DW-585: iris_production_logs type filter probably matches nothing: the EventLog handler binds the display name (Error) to Type = ? in logical select mode, but Type is an integer (Ens.DataType.LogType)
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 39.7 plan source read 2026-10-17; needs a probe before any fix
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe with synthetic Event Log rows in a disposable namespace, then map display name to logical value
+
+### DW-586: Under block, iris_message_diagram leaves a per-session generation failure text (Generation failed for session N: <text> in warnings[] and the Mermaid %% line) unchanged; only the Correlator Error on message texts are rewritten
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 39.7 implement review 2026-10-17 (unverified whether <text> can carry message content)
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe what <text> can carry; withhold under block if message-derived
