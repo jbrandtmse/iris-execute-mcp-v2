@@ -126,3 +126,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T18:23:43Z	Story 39.6	ledger_adjudicated	owned=2 resolved=2 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-17T18:24:12Z	Story 39.6	smoke_complete	method=armed_capstone_built_servers_sdk+prompt_wire+snapshot result=pass iterations=1 defects_caught=0 checks=5_capstone+13_prompts+28_snapshot evidence=epic39-capstone-gate,story-39-6-qa-forensics-prompts-sdk-wire,tools-list-snapshot model=claude-opus-5-5
 2026-10-17T18:30:11Z	Story 39.6	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1944 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
+2026-10-17T18:30:14Z	Story 39.6	committed	sha=4aee18e code_sha=2a751a4 build_sha=c158b73 submodules= ci=none run=none branch=epic39 pushed=origin/epic39 verified=merge-base amendments=spec-39-6:change_log_note
+2026-10-17T18:30:14Z	Story 39.6	story_cycle	plan_to_commit_min=155 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
