@@ -43,3 +43,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T03:14:04Z	Epic 39	ledger_routed_planned	story=39-6-message-forensics-docs-prompt-and-capstone entries=1 excess=0 by=cr dw=DW-573
 2026-10-17T03:14:04Z	Story 39.1	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-17T03:14:43Z	Story 39.1	smoke_complete	method=armed_live_gate_built_interop_stdio+rest result=pass iterations=1 defects_caught=0 checks=104_pass_1_skip teardown=no_EXECMCPTMP_namespace_or_database_left evidence=story-39-1-message-search-live-gate model=claude-opus-5-5
+2026-10-17T03:15:32Z	Story 39.1	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=622 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
