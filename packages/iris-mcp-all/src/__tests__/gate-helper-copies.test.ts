@@ -28,6 +28,7 @@ const REPLACED_NAMES = [
   "scalar",
   "governanceReport",
   "governanceDenial",
+  "denial",
   "removeDoc",
   "putDoc",
   "compileDoc",

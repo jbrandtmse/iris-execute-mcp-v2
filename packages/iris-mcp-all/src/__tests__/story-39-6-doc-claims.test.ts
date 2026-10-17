@@ -265,7 +265,7 @@ describe("Story 39.6: the root README states the loop, the prompts and the snaps
       expect(trace, tool).toContain(tool);
     }
     expect(trace).toContain("Its name, title and arguments are unchanged.");
-    expect(trace).toContain("Every tool it calls is in the interop `core` preset, and each is a read that is enabled by default.");
+    expect(trace).toContain("Every tool it calls is in the interop `core` preset, and each is a read that is enabled by default, except the recovery it may recommend (`iris_production_control` action `recover`, a write that is enabled by default), which it never runs without the user's confirmation.");
     expect(trace).toContain("a withheld body's reason is reported, never read another way");
     const find = lineStarting(rootReadme, "| `@iris-mcp/interop` | `find-patient-messages` |");
     expect(find, "the find-patient-messages row").not.toBe("");
@@ -359,7 +359,7 @@ describe("Story 39.6: the interop README states the policy configuration, the au
       expect(trace, tool).toContain(tool);
     }
     expect(trace).toContain("Its name, title and arguments are unchanged (`sessionOrHeaderId` required, `namespace` optional).");
-    expect(trace).toContain("Every tool it calls is in the `core` preset, and each is a read that is enabled by default.");
+    expect(trace).toContain("Every tool it calls is in the `core` preset, and each is a read that is enabled by default, except the recovery it may recommend (`iris_production_control` action `recover`, a write that is enabled by default), which it never runs without the user's confirmation.");
     const find = lineStarting(interopReadme, "| `find-patient-messages` |");
     expect(find, "the find-patient-messages row").not.toBe("");
     expect(find).toContain("(`patientId` required; `from`, `to`, `searchTableClass` and `namespace` optional)");

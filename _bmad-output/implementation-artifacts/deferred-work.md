@@ -3028,6 +3028,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T01:15:30Z note=39.1 adds a session-parameterized docFixtures(session) to process-gate-helpers.ts instead of a fifth copy; 39.6 moves the Epic 38 gates onto it
 - 2026-10-17T12:06:54Z occurrence=39-4-search-table-lookup
 - 2026-10-17T12:06:54Z note=39.4 copies route/succeeded/skip/searchEntries (39.4 gate, 39.4 QA live gate) and startStub/session (39.4 QA process)
+- 2026-10-17T18:23:43Z status=resolved-by:39-6-message-forensics-docs-prompt-and-capstone by=adjudication note=one promoted set of gate helpers in process-gate-helpers.ts; 18 gates migrated; gate-helper-copies.test.ts guards re-declaration (incl. denial); every gate armed green; build c158b73
 
 ### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3103,6 +3104,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: no tool-definition snapshot in any package; docs-visibility-roster-sync compares counts; the 39.1 triage log cited gen:governance-baseline:check, which checks keys only
 - 2026-10-17T03:11:29Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=cr note=the Epic 39 capstone pins every pre-existing interop tools/list entry (snapshot or per-tool hash) so a change goes red
+- 2026-10-17T18:23:43Z status=resolved-by:39-6-message-forensics-docs-prompt-and-capstone by=adjudication note=114-entry tools/list snapshot fixture + shared core + CLI (--check / --force) + default-suite test; drift and vanished tools fail, new tools reported; build c158b73
 
 ### DW-574: message-search.ts adds a fifth local toStructured copy (message-resend.ts:162, execute.ts, sqlAnalyze.ts, docdb.ts) instead of one shared helper
 - source: spec-39-1-message-header-search.md | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -3119,6 +3121,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md (decision 26) | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 39.2 plan: TCPOutboundAdapter.cls:68,72, Parser.cls:262,287 (logs); Parser.cls:223,280, Correlator.cls:194-198 (diagram); AD-15 sanctioned only the preview change in 39.2
 - 2026-10-17T03:55:04Z status=routed owner=burndown by=lead note=Epic 39 burn-down: bring both under dataPolicy (a sanctioned AD-15 change, orchestrator decision 26) or document as residual with an operator switch
+- 2026-10-17T18:21:28Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
 
 ### DW-577: MessageSearch Hl7Text serializes the whole HL7 message before comparing its size with the cap (a large body is fully materialized first)
 - source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md | severity: med | fix-risk: med | footprint: in-epic

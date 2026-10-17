@@ -70,8 +70,9 @@ no tool count moves: the suite stays at 109 package tools (114 advertised), the 
   oracle, asserts that the deployed `BOOTSTRAP_VERSION` is the shipped one, and removes everything it created.
 - **`tools-list-snapshot.test.ts`** runs the snapshot comparison in the default suite, with unit rows for a changed,
   a new and a vanished tool.
-- **The gates share their helpers (DW-561).** The helpers the live gates had each copied now live in one test module,
-  and a default-suite test fails when a gate declares one of them again.
+- **The gates share their helpers (DW-561).** The helpers the live gates had each copied now live in the shared test
+  modules (`process-gate-helpers.ts`, and `header-row-oracle.ts` for the SQL strings; a copy whose contract differs stays
+  in its gate and is listed in the guard with its reason), and a default-suite test fails when a gate declares one of them again.
 - **`story-39-6-doc-claims.test.ts`** pins the new documentation, the default state it gives at each point of use, this
   section and the changeset, and scans the new text for a compliance claim. The prompt tests pin both prompts' step
   order, their tools, and that neither carries a rule number or a repository path.

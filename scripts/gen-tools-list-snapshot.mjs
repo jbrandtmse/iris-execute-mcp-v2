@@ -133,10 +133,14 @@ function runForce(live) {
 
   if (existsSync(snapshotPath)) {
     try {
-      const { problems } = compareSnapshot(readSnapshot(root), live);
+      const { problems, added } = compareSnapshot(readSnapshot(root), live);
       if (problems.length > 0) {
         out(`Re-pinning ${problems.length} changed or vanished entr${problems.length === 1 ? 'y' : 'ies'}:`);
         for (const line of problems) out(`  - ${line}`);
+      }
+      if (added.length > 0) {
+        out(`Pinning ${added.length} new tool${added.length === 1 ? '' : 's'}:`);
+        for (const line of added) out(`  + ${line}`);
       }
     } catch {
       out('No readable previous snapshot to compare with.');

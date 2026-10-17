@@ -1,6 +1,7 @@
 /**
- * Stories 39.1, 39.3, 39.4, 39.5 and the Epic 39 capstone -- the arming guard of the live message-forensics
+ * Stories 39.1 to 39.5 and the Epic 39 capstone -- the arming guard of the live message-forensics
  * gates listed in `GATES` (`story-39-1-message-search-live-gate.test.ts`,
+ * `story-39-2-data-policy-live-gate.test.ts`,
  * `story-39-3-body-search-live-gate.test.ts`, `story-39-3-qa-live-gate.test.ts`,
  * `story-39-4-search-table-live-gate.test.ts`, `story-39-4-qa-live-gate.test.ts`,
  * `story-39-5-body-reader-live-gate.test.ts`, `story-39-5-qa-live-gate.test.ts` and
@@ -12,12 +13,13 @@
  * environment would pass with every row skipped. Each case runs the gate file in its own vitest process, so
  * the real `beforeAll` branches execute. A source-order check pins that the gate derives its skip reason from
  * the freshness of every dist it drives before its first built-server session, and checks the deployed
- * `BOOTSTRAP_VERSION` before any test.
+ * `BOOTSTRAP_VERSION` before any test. A completeness check pins that every gate of this directory carrying
+ * the 39.x dist-freshness line is listed in `GATES`, so a gate cannot drop out of this guard unnoticed.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -33,6 +35,7 @@ const DRIVEN_PACKAGES = ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"];
 /** The gates this guard covers, each with the tag its skip line carries and the story its failure names. */
 const GATES = [
   { file: "story-39-1-message-search-live-gate.test.ts", tag: "story-39-1-message-search-live-gate", story: "Story 39.1" },
+  { file: "story-39-2-data-policy-live-gate.test.ts", tag: "story-39-2-data-policy-live-gate", story: "Story 39.2" },
   { file: "story-39-3-body-search-live-gate.test.ts", tag: "story-39-3-body-search-live-gate", story: "Story 39.3" },
   { file: "story-39-3-qa-live-gate.test.ts", tag: "story-39-3-qa-live-gate", story: "Story 39.3 QA" },
   { file: "story-39-4-search-table-live-gate.test.ts", tag: "story-39-4-search-table-live-gate", story: "Story 39.4" },
@@ -136,8 +139,21 @@ describe.each(GATES)("$story: the live gate refuses a stale dist and checks the 
   it("calls assertDeployedBootstrapVersion right after its first session opens, ahead of every describe", () => {
     expect(source).toMatch(/dev = await openWireSession\([^\n]*\);\n[^\n]*\n\s*await assertDeployedBootstrapVersion\(REPO_ROOT, TARGET\);/);
     const check = source.indexOf("await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);");
-    const firstSuite = source.search(/^describe\(/m);
+    const firstSuite = source.search(/^describe(?:\.skipIf\([^)]*\))?\(/m);
     expect(firstSuite, "the gate has a describe").toBeGreaterThan(-1);
     expect(check).toBeLessThan(firstSuite);
+  });
+});
+
+describe("GATES lists every gate of this directory that carries the 39.x dist-freshness line", () => {
+  it("no such gate is missing from GATES, and every GATES file carries the line", () => {
+    const freshness = 'for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);';
+    const self = path.basename(fileURLToPath(import.meta.url));
+    const carriers = readdirSync(__dirname)
+      .filter((name) => name.endsWith(".test.ts") && name !== self)
+      .filter((name) => readFileSync(path.join(__dirname, name), "utf8").includes(freshness))
+      .sort();
+    expect(carriers.length, "the scan finds the gates at all").toBeGreaterThan(5);
+    expect(carriers).toEqual(GATES.map((gate) => gate.file).sort());
   });
 });

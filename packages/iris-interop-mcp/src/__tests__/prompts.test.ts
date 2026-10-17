@@ -196,7 +196,7 @@ function expectInOrder(text: string, markers: string[]): void {
   expect([...at].sort((a, b) => a - b)).toEqual(at);
 }
 
-describe("trace-message-flow — contract and flow (Story 39.6)", () => {
+describe("trace-message-flow \u2014 contract and flow (Story 39.6)", () => {
   it("keeps its name, title and arguments exactly as first published", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
@@ -246,6 +246,14 @@ describe("trace-message-flow — contract and flow (Story 39.6)", () => {
     expect(text).toContain("if the flow spans more, ask the user before searching it window by window, each window at most 7 days.");
     expect(text).not.toContain("split a longer session");
     expect(text).toContain("If the search is refused (for example because an operator restricted it), tell the user and go on with the hops of step 1; do not read the headers another way.");
+    expect(text).toContain("the times of step 1 are already UTC, written without a zone, so add the `T` and the `Z` and do not convert them");
+  });
+
+  it("reads bodies from the header rows or, after a refused search, the hops; reports a refused read; repeats no identifying value", async () => {
+    const text = await getPromptText("trace-message-flow", { sessionOrHeaderId: "7" });
+    expect(text).toContain("with up to 20 header `id` values per call that matter, taken from step 2 (or from the hops of step 1 when the search was refused)");
+    expect(text).toContain("If the read is refused (for example because an operator restricted it), tell the user and go on; do not read the bodies another way.");
+    expect(text).toContain("repeating no identifying value from a body, a log entry or the diagram beyond what the user gave");
   });
 
   it("prompts/get with the namespace given passes it on every call", async () => {
@@ -255,7 +263,7 @@ describe("trace-message-flow — contract and flow (Story 39.6)", () => {
   });
 });
 
-describe("find-patient-messages — contract and flow (Story 39.6)", () => {
+describe("find-patient-messages \u2014 contract and flow (Story 39.6)", () => {
   it("is an interop prompt titled Find Patient Messages with one required argument", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
@@ -329,6 +337,7 @@ describe("find-patient-messages — contract and flow (Story 39.6)", () => {
     expect(example, "the filters example is on one line").toBeDefined();
     expect(JSON.parse(example as string)).toEqual([{ property: "PatientID", op: "eq", value: hostile }]);
     expect(findPatientMessagesPrompt.build({ patientId: "X" })).toContain('"value": "X"}]');
+    expect(findPatientMessagesPrompt.build({ patientId: "X", searchTableClass: 'My"Table' })).toContain('`searchTableClass: "My\\"Table"`');
   });
 
   it("tells the agent to report a refusal and not to get the data another way, at the search and at the read", () => {

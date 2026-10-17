@@ -28,7 +28,8 @@
  *     audit entry of the lookup logs `filters` as `[REDACTED]`. Path: SDK `Client` -> built interop dist over
  *     stdio -> `iris_message_body` -> `applyBodyReaderPolicy` -> `redactHl7`.
  *  5. Under `IRIS_DATA_POLICY=allow` the same chain shows the values, which is the positive control for
- *     leg 4: the same detector that reads clean there fires here, on the result and on the audit file.
+ *     leg 4: the same detector that reads clean there fires here, on the result and on the audit file. The
+ *     body-only value (OBX-5) still reaches neither the audit file nor the server's stderr.
  *
  * Before any leg, `beforeAll` asserts that the deployed `ExecuteMCPv2` classes carry the
  * `BOOTSTRAP_VERSION` of the built shared dist, once the first built-server session has connected (the
@@ -115,6 +116,8 @@ const MRN_P = "SYNTHPHI396-MRN-P";
 const MRN_Q = "SYNTHPHI396-MRN-Q";
 /** The value that survives redaction (OBX-3). */
 const KEEP_CODE = "KEEPME396-CODE";
+/** The identifying value only the bodies hold (OBX-5): no filter ever carries it. */
+const BODY_ONLY = "SYNTHPHI396-NOTE";
 
 const SEARCH_TABLE = "EnsLib.HL7.SearchTable";
 /** The extent table of every `EnsLib.HL7.SearchTable` subclass, and its class extent in `Ens_Config.SearchTableProp`. */
@@ -548,7 +551,7 @@ describe("Epic 39 capstone: search, then read, under the PHI data policy on the 
       expect(item["bodyPolicy"], `item ${id}`).toEqual({ outcome: "none" });
       const text = String(item["text"]);
       expect(text, `item ${id}: the identifier`).toContain(MRN_P);
-      expect(text, `item ${id}: the value`).toContain("SYNTHPHI396-NOTE");
+      expect(text, `item ${id}: the value`).toContain(BODY_ONLY);
       expect(text, `item ${id}: the kept code`).toContain(KEEP_CODE);
       expect(bodyText(item), `item ${id}: the text is the seed's own`).toBe(er7Text(index));
     }
@@ -573,5 +576,12 @@ describe("Epic 39 capstone: search, then read, under the PHI data policy on the 
       leakedSurfaces({ "the audit file": readFileSync(allowS.auditFile, "utf8") }),
       "the allow audit file holds the positive control",
     ).toEqual(["the audit file"]);
+
+    // Under allow too, body content reaches neither the audit file nor the console log: the logged value above is
+    // the caller's filter, and OBX-5 is a value only the bodies hold.
+    await allowS.session.listTools();
+    expect(allowS.stderr().length, "the allow server wrote to stderr at LOG_LEVEL=DEBUG").toBeGreaterThan(0);
+    expect(readFileSync(allowS.auditFile, "utf8"), "the allow audit file holds no body-only value").not.toContain(BODY_ONLY);
+    expect(allowS.stderr(), "the allow server's stderr holds no body-only value").not.toContain(BODY_ONLY);
   }, 120000);
 });
