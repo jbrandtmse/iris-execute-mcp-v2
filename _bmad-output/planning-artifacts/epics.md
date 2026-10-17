@@ -5301,6 +5301,8 @@ G50. A framework policy that the body-touching stories consume. This story owns 
   - Record the policy's scope (spine AD-26): which surfaces it governs, and that generic SQL, global and document tools are a documented residual exposure unless this story brings them in.
 
   *(Amended 2026-10-14 by the spine reconcile.)*
+- DW-570: `iris_message_resend` `resendFiltered`'s executing path (the ID fetch after guard f) is run by no test. Only `MessageResendLiveTest` reaches it, and that test starts a production in HSCUSTOM. This story owns `MessageResend.cls`: drive the path in the disposable mapping-only namespace with a synthetic production, never in HSCUSTOM. (ledger; routed by the lead 2026-10-16)
+- DW-575: `MessageSearch.TypeLabel` copies a line of `MessageResend.PreviewOne`, which Story 39.1's spec forbade changing. Unify them here (Rule 2), since this story owns `PreviewOne` under the PHI policy. (ledger; routed by cr 2026-10-16)
 
 ### Story 39.3: Message Body Content Search
 
@@ -5372,6 +5374,7 @@ G35. New read tool `iris_message_body`.
 
   It is proven red by disabling redaction (Rule #59).
 - DW-561: the Epic 38 live gates (the 38.4, 38.5 and 38.7 wire gates and the Epic 38 capstone) each carry their own fixture helpers (`putDoc`, `compileDoc`, `fixtureDocuments`, `removeFixtures`, `governanceReport`, `startStub`, and others). Its reopen condition has fired. This capstone would be the fifth copy, so promote one set into `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts` and move the existing gates onto it. (ledger; routed by the lead 2026-10-16)
+- DW-573: no test pins that the `tools/list` entries of pre-existing tools (description, schema, annotations) stay unchanged when an epic adds tools (AD-15). The README payload sync compares tool counts only. Add one snapshot-style pin, captured from the built servers, as part of this epic's close-out. (ledger; routed by cr 2026-10-16)
 
 ## Epic 40: Developer Test Depth (added 2026-10-14)
 

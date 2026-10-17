@@ -166,13 +166,16 @@ Method PostSearch(pBody As %DynamicObject, Output pHttpStatus As %Integer, Outpu
     Quit tSC
 }
 
-/// A request body that is valid but for what a row changes: <code>headers</code> over one day of 2001.
+/// A request body that is valid but for what a row changes: <code>headers</code> over one day of 2001,
+/// aimed at a namespace that does not exist, so a guard that stopped refusing fails on the namespace
+/// switch instead of reading this namespace's headers.
 Method ValidBody() As %DynamicObject
 {
     Set tBody = {}
     Do tBody.%Set("action", "headers")
     Do tBody.%Set("from", "2001-02-03T00:00:00Z")
     Do tBody.%Set("to", "2001-02-04T00:00:00Z")
+    Do tBody.%Set("namespace", "EXECMCPTMP391Z")
     Quit tBody
 }
 
@@ -194,7 +197,7 @@ Method AssertRefused(pBody As %DynamicObject, pToken As %String, pHostile As %St
         Do $$$AssertTrue(tText '[ pHostile, pLabel _ ": the error does not echo the value sent")
     }
     Set tIter = tEnv.%Get("result").%GetIterator()
-    Do $$$AssertTrue('tIter.%GetNext(.tKey, .tValue), pLabel _ ": the result is empty, so nothing was read")
+    Do $$$AssertTrue('tIter.%GetNext(.tKey, .tValue), pLabel _ ": the result is empty")
 }
 
 /// Every direct-REST refusal row: the text names the parameter and never the hostile value.

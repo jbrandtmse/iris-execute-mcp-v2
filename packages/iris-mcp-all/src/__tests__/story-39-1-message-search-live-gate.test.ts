@@ -30,7 +30,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -628,6 +629,15 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
     ["a sessionId that is not an integer", { ...valid, sessionId: HOSTILE }, "sessionId"],
     ["an afterId that is not an integer", { ...valid, afterTimeCreated: "2001-02-03 08:00:00", afterId: HOSTILE }, "afterId"],
     ["an afterId without afterTimeCreated", { ...valid, afterId: 5 }, "afterId"],
+    ["an afterTimeCreated without afterId", { ...valid, afterTimeCreated: "2001-02-03 08:00:00" }, "afterTimeCreated"],
+    ["an unparseable afterTimeCreated", { ...valid, afterTimeCreated: HOSTILE, afterId: 5 }, "afterTimeCreated"],
+    ["a missing from", { action: "headers", namespace: NS_A, to: TO }, "from"],
+    ["an item of 129 characters", { ...valid, item: "x".repeat(129) }, "item"],
+    ["a source of 129 characters", { ...valid, source: "x".repeat(129) }, "source"],
+    ["a target of 129 characters", { ...valid, target: "x".repeat(129) }, "target"],
+    ["a bodyClass of 221 characters", { ...valid, bodyClass: "x".repeat(221) }, "bodyClass"],
+    ["a source that is not a string", { ...valid, source: 5 }, "source"],
+    ["an errorOnly that is not a boolean", { ...valid, errorOnly: "yes" }, "errorOnly"],
     ["a bad from, sent with a namespace that cannot be switched to", { ...valid, from: HOSTILE, namespace: "EXECMCPTMP391Z" }, "from"],
   ];
   for (const [name, body, parameter] of ROUTE_CASES) {
@@ -640,7 +650,7 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
       expect(envelope.status.errors.length, answer.text).toBeGreaterThanOrEqual(1);
       expect(envelope.status.errors[0]?.error).toContain(parameter);
       expect(answer.text).not.toContain(HOSTILE);
-      expect(envelope.result, "a refusal reads and returns nothing").toEqual({});
+      expect(envelope.result, "a refusal returns an empty result").toEqual({});
     }, 120000);
   }
 
@@ -737,5 +747,306 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
 
     const body = await search(governed, { action: "body" });
     expect(body.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "body" });
+  }, 120000);
+});
+
+// -- QA additions: edges the rows above leave open ---------------------------------
+
+/** Search through `interop`, page after page, until a page has no more; every page is returned. */
+async function pagesOf(args: Record<string, unknown>): Promise<Structured[]> {
+  const pages: Structured[] = [];
+  let cursor: string | undefined;
+  for (let guard = 0; guard < 20; guard += 1) {
+    const page = succeeded(await search(interop, { ...args, ...(cursor === undefined ? {} : { cursor }) }));
+    pages.push(page);
+    if (!page.hasMore) break;
+    expect(typeof page.nextCursor, `page ${pages.length} has more, so it carries nextCursor`).toBe("string");
+    cursor = page.nextCursor;
+  }
+  return pages;
+}
+
+/** A cursor written by hand in the documented shape (base64url JSON `{t, id}`), not by the tool's encoder. */
+const handWrittenCursor = (t: string, id: number): string =>
+  Buffer.from(JSON.stringify({ t, id }), "utf8").toString("base64url");
+
+describe("Story 39.1 (QA): every status label reaches the status code it names (AC-3)", () => {
+  // The expected IDs are written by hand from the seed: the headers inside the window by status code.
+  const STATUS_CASES: Array<[string, number, number[]]> = [
+    ["Created", 1, []],
+    ["Queued", 2, [7]],
+    ["Delivered", 3, [5, 13]],
+    ["Discarded", 4, []],
+    ["Suspended", 5, [8]],
+    ["Deferred", 6, []],
+    ["Aborted", 7, []],
+    ["Completed", 9, [2, 6, 11]],
+  ];
+  for (const [label, code, expectedIds] of STATUS_CASES) {
+    it(`status ${label} is status code ${code}`, async (testCtx) => {
+      if (skipReason) return skip(testCtx);
+      const expected = await oracle(NS_A, `${WINDOW_SQL} AND Status = ${code}`);
+      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(expectedIds);
+
+      const content = succeeded(await search(interop, { status: label }));
+
+      expect(content.rows).toEqual(expected);
+    }, 120000);
+  }
+
+  it("route: the label Error names status code 8, as Errored does", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const answer = await executeMcpPost(TARGET, "/interop/message/search", {
+      action: "headers",
+      namespace: NS_A,
+      from: FROM,
+      to: TO,
+      status: "Error",
+    });
+
+    const envelope = JSON.parse(answer.text) as { status: { errors?: unknown[] }; result: { rows: Array<{ id: number }> } };
+    expect(envelope.status.errors ?? [], answer.text).toHaveLength(0);
+    expect(envelope.result.rows.map((row) => row.id)).toEqual([3, 4, 9, 10]);
+  }, 120000);
+});
+
+describe("Story 39.1 (QA): values at the edge of what is allowed are accepted (AC-3)", () => {
+  it("limit 1 and limit 500 are both accepted; 500 holds every match in one page", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const one = succeeded(await search(interop, { limit: 1 }));
+    expect(ids(one.rows)).toEqual([2]);
+    expect(one.limit).toBe(1);
+    expect(one.hasMore).toBe(true);
+    expect(typeof one.nextCursor).toBe("string");
+
+    const most = succeeded(await search(interop, { limit: 500 }));
+    expect(most.limit).toBe(500);
+    expect(ids(most.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
+    expect(most.hasMore).toBe(false);
+    expect(most).not.toHaveProperty("nextCursor");
+  }, 120000);
+
+  it("errorOnly false is no filter at all: every header in the window, not only the flagged ones", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const content = succeeded(await search(interop, { errorOnly: false }));
+
+    expect(content.rows).toEqual(await oracle(NS_A, WINDOW_SQL));
+    expect(content.rows.some((row) => row["isError"] === false), "the unflagged headers are there").toBe(true);
+  }, 120000);
+
+  it("names of exactly 128 characters and a body class of exactly 220 are accepted, and match nothing", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const name = `Story391.${"x".repeat(119)}`;
+    const bodyClass = `Story391.Body.${"y".repeat(206)}`;
+    expect(name).toHaveLength(128);
+    expect(bodyClass).toHaveLength(220);
+
+    for (const args of [{ item: name }, { source: name }, { target: name }, { bodyClass }]) {
+      const content = succeeded(await search(interop, args));
+      expect(content.rows, JSON.stringify(Object.keys(args))).toEqual([]);
+      expect(content.hasMore).toBe(false);
+    }
+  }, 120000);
+
+  it("a session ID at the largest safe integer matches nothing; one beyond range is refused naming sessionId", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const largest = succeeded(await search(interop, { sessionId: Number.MAX_SAFE_INTEGER }));
+    expect(largest.rows).toEqual([]);
+
+    const beyond = await search(interop, { sessionId: 1e21 });
+    expect(beyond.isError, textOf(beyond)).toBe(true);
+    expect(textOf(beyond)).toContain("sessionId");
+    expect(textOf(beyond)).not.toMatch(/SQLCODE|SQL error|<SYNTAX>/i);
+  }, 120000);
+
+  it("the ends of the calendar IRIS can hold are searched without an error", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    for (const window of [
+      { from: "1841-01-01T00:00:00Z", to: "1841-01-02T00:00:00Z" },
+      { from: "2000-02-29T00:00:00Z", to: "2000-02-29T23:59:59Z" },
+      { from: "9999-12-30T00:00:00Z", to: "9999-12-31T23:59:59.999Z" },
+    ]) {
+      const content = succeeded(await search(interop, window));
+      expect(content.rows, JSON.stringify(window)).toEqual([]);
+      expect(content.hasMore).toBe(false);
+    }
+  }, 120000);
+});
+
+describe("Story 39.1 (QA): the cursor and the filters work together (AC-3)", () => {
+  const ALPHA_NAME = sqlLiteral("Story391.Alpha");
+  const PAGED_CASES: Array<{ name: string; args: Record<string, unknown>; where: string; ids: number[] }> = [
+    {
+      name: "item and errorOnly, one row per page (the page boundary falls between the two headers with the same time)",
+      args: { item: "Story391.Alpha", errorOnly: true, limit: 1 },
+      where: `${WINDOW_SQL} AND (SourceConfigName = ${ALPHA_NAME} OR TargetConfigName = ${ALPHA_NAME}) AND IsError = 1`,
+      ids: [3, 4, 9, 10],
+    },
+    {
+      name: "bodyClass, pages of 2",
+      args: { bodyClass: "Story391.Body.A", limit: 2 },
+      where: `${WINDOW_SQL} AND MessageBodyClassName = 'Story391.Body.A'`,
+      ids: [2, 5, 6, 9, 13],
+    },
+    {
+      name: "status Completed, pages of 2",
+      args: { status: "Completed", limit: 2 },
+      where: `${WINDOW_SQL} AND Status = 9`,
+      ids: [2, 6, 11],
+    },
+  ];
+  for (const pagedCase of PAGED_CASES) {
+    it(`filtered pages join without a gap or a duplicate: ${pagedCase.name}`, async (testCtx) => {
+      if (skipReason) return skip(testCtx);
+      const expected = await oracle(NS_A, pagedCase.where);
+      expect(ids(expected), "the oracle selects the rows written by hand").toEqual(pagedCase.ids);
+
+      const pages = await pagesOf(pagedCase.args);
+
+      expect(pages.flatMap((page) => page.rows)).toEqual(expected);
+      expect(pages, "the page count follows from the limit").toHaveLength(Math.ceil(pagedCase.ids.length / Number(pagedCase.args["limit"])));
+      expect(pages[pages.length - 1]).not.toHaveProperty("nextCursor");
+    }, 120000);
+  }
+
+  it("a cursor written by hand resumes after its (time, id) exactly, between two headers with the same time", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const tied = "2001-02-03 07:30:00";
+    const expected = await oracle(
+      NS_A,
+      `${WINDOW_SQL} AND (TimeCreated > '${tied}' OR (TimeCreated = '${tied}' AND ID > 3))`,
+    );
+    expect(ids(expected), "everything after header 3, so header 4 (same time, higher ID) is the first").toEqual([4, 5, 6, 7, 8, 9, 13, 10, 11]);
+
+    const content = succeeded(await search(interop, { cursor: handWrittenCursor(tied, 3) }));
+
+    expect(content.rows).toEqual(expected);
+  }, 120000);
+
+  it("a cursor never widens the window: one that points before from still starts at from, and one past the last row is empty", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const early = succeeded(await search(interop, { cursor: handWrittenCursor("2001-02-03 00:00:00", 1) }));
+    expect(early.rows).toEqual(await oracle(NS_A, WINDOW_SQL));
+    expect(ids(early.rows)[0], "header 1 (05:59:59) is before from, so the window still starts at header 2").toBe(2);
+
+    const late = succeeded(await search(interop, { cursor: handWrittenCursor("2001-02-03 18:00:00", 11) }));
+    expect(late.rows).toEqual([]);
+    expect(late.hasMore).toBe(false);
+  }, 120000);
+});
+
+describe("Story 39.1 (QA): the window limits and hostile values, through the built server (AD-20, AD-26)", () => {
+  it("tool: a window one second over 7 days is refused, naming the limit", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const result = await search(interop, { from: "2001-01-27T00:00:00Z", to: "2001-02-03T00:00:01Z" });
+
+    expect(result.isError, textOf(result)).toBe(true);
+    expect(textOf(result)).toContain("7 days");
+    expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
+  }, 120000);
+
+  it("tool: a window that ends before it starts is refused, naming the order", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const result = await search(interop, { from: TO, to: FROM });
+
+    expect(result.isError, textOf(result)).toBe(true);
+    expect(textOf(result)).toContain("earlier");
+    expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
+  }, 120000);
+
+  // Characters that mean something to JSON, to SQL, to a pattern matcher or to a terminal; each is only a name
+  // that no header carries, so each search succeeds and matches nothing.
+  const EXOTIC_NAMES: Array<[string, string]> = [
+    ["a double quote", 'Story391.Alpha"'],
+    ["a backslash", "Story391.Alpha\\"],
+    ["a backslash before a quote", "\\' OR 1=1 --"],
+    ["a line break", "Story391.Alpha\nStory391.Beta"],
+    ["a tab inside the name", "Story391.\tAlpha"],
+    ["a leading space", " Story391.Alpha"],
+    ["accented, CJK and emoji text", "Story391.Älpha日本語😀"],
+    ["brackets and a pattern class", "[Story391.Alpha]"],
+    ["a statement terminator and a comment", "Story391.Alpha; DROP TABLE Ens.MessageHeader /* */"],
+    ["a trailing wildcard", "Story391.%"],
+    ["a single-character wildcard", "Story391.Alph_"],
+  ];
+  for (const [what, value] of EXOTIC_NAMES) {
+    it(`${what} in a name is a name: a clean empty result, not an error`, async (testCtx) => {
+      if (skipReason) return skip(testCtx);
+      for (const field of ["item", "source", "target", "bodyClass"]) {
+        const result = await search(interop, { [field]: value });
+        const content = succeeded(result);
+        expect(content.rows, `${field} = ${JSON.stringify(value)}`).toEqual([]);
+        expect(content.hasMore).toBe(false);
+      }
+    }, 120000);
+  }
+
+  it("blanks and tabs after a name are ignored, as the column's collation ignores them: the rows equal the same SQL equality", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    // Observed with the oracle first (rule #36): the %String name columns compare with trailing blanks and tabs
+    // removed (so these are the rows of `source = 'Story391.Alpha'`, written by hand from the seed) but not a
+    // trailing line break, which makes a different name.
+    const TRAILING: Array<[string, number[]]> = [
+      [" ", [3, 4, 13, 10, 11]],
+      ["\t", [3, 4, 13, 10, 11]],
+      [" \t ", [3, 4, 13, 10, 11]],
+      ["\n", []],
+    ];
+    for (const [trailing, expectedIds] of TRAILING) {
+      const expected = await oracle(NS_A, `${WINDOW_SQL} AND SourceConfigName = ${sqlLiteral(`Story391.Alpha${trailing}`)}`);
+      expect(ids(expected), `the oracle for ${JSON.stringify(trailing)}`).toEqual(expectedIds);
+
+      const content = succeeded(await search(interop, { source: `Story391.Alpha${trailing}` }));
+
+      expect(content.rows, JSON.stringify(trailing)).toEqual(expected);
+    }
+  }, 120000);
+
+  it("a hostile namespace is refused as a namespace, with no SQL anywhere in the answer", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const result = await search(interop, { namespace: "EXECMCPTMP391A' OR 1=1--" });
+
+    expect(result.isError, textOf(result)).toBe(true);
+    expect(textOf(result)).not.toMatch(/SQLCODE|SQL error|SELECT|Ens\.MessageHeader/i);
+    expect(result.structuredContent?.["rows"], "a refusal returns no rows").toBeUndefined();
+  }, 120000);
+});
+
+describe("Story 39.1 (QA): the audit trail of the built server names the action and the outcome (AC-6)", () => {
+  it("records headers as ok, and body and searchTable as error, with each action named", async (testCtx) => {
+    if (skipReason) return skip(testCtx);
+    const dir = mkdtempSync(path.join(tmpdir(), "story-39-1-audit-"));
+    const auditPath = path.join(dir, "audit.log");
+    const audited = await openWireSession(wireOptions("iris-interop-mcp"), { IRIS_AUDIT_LOG: auditPath });
+    try {
+      expect(succeeded(await audited.call("iris_message_search", { action: "headers", namespace: NS_B, from: FROM, to: TO })).rows).toHaveLength(3);
+      for (const action of ["body", "searchTable"]) {
+        const refused = await audited.call("iris_message_search", { action, namespace: NS_B, from: FROM, to: TO });
+        expect(refused.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action });
+      }
+
+      // The child process writes the log on its own schedule: wait, bounded, for the three entries.
+      const deadline = Date.now() + 10000;
+      let searches: Array<Record<string, unknown>> = [];
+      while (Date.now() < deadline) {
+        const text = existsSync(auditPath) ? readFileSync(auditPath, "utf8") : "";
+        searches = text
+          .split("\n")
+          .filter((line) => line.trim() !== "")
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((entry) => entry["tool"] === "iris_message_search");
+        if (searches.length >= 3) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      expect(searches.map((entry) => [entry["action"], entry["outcome"]])).toEqual([
+        ["headers", "ok"],
+        ["body", "error"],
+        ["searchTable", "error"],
+      ]);
+    } finally {
+      await audited.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 120000);
 });

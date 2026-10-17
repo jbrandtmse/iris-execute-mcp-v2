@@ -3078,8 +3078,29 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 39.1 review 2026-10-16; the statement is built like the dry-run sample statement the replay runs; a break fails safe (resends nothing)
 - 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=Epic 39 burn-down: drive it inside the disposable mapping-only namespace (its own Ens.Runtime) with a synthetic production, never HSCUSTOM
+- 2026-10-17T03:13:38Z status=routed owner=39-2-phi-data-policy by=lead note=39.2 owns MessageResend.cls (resend preview under the PHI policy); drive the executing path in the disposable mapping-only namespace with a synthetic production, never HSCUSTOM; DW bullet in 39.2
 
 ### DW-571: flake: doc-type-description-live-gate.test.ts (dev) failed once in a parallel turbo run; it compares two live listings of the shared HSCUSTOM
 - source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 39.1 implement 2026-10-16: passed alone and in the serial run; listings of a shared namespace can change between the two reads
 - 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=flake class (cf. DW-444): make the comparison tolerant of concurrent changes or compare a fixed filter
+
+### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
+- source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
+- evidence: EXPLAIN in HSCUSTOM: item+status -> Status INTERSECT (Source UNION Target) bitmaps, master map read per id, TimeCreated tested per row, cost 19075; window only -> TimeCreated index range, cost 103.84; resendFiltered COUNT shares the WHERE
+- 2026-10-17T03:11:26Z status=escalated owner=burndown by=cr note=decide the plan strategy (index hint vs TuneTable guidance) with a large-data probe; revisit the add-filters doc advice
+
+### DW-573: AD-15/AC-7: no test pins that pre-existing tools/list entries (description, schema, annotations) stay unchanged; the README payload sync compares tool counts only
+- source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: no tool-definition snapshot in any package; docs-visibility-roster-sync compares counts; the 39.1 triage log cited gen:governance-baseline:check, which checks keys only
+- 2026-10-17T03:11:29Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=cr note=the Epic 39 capstone pins every pre-existing interop tools/list entry (snapshot or per-tool hash) so a change goes red
+
+### DW-574: message-search.ts adds a fifth local toStructured copy (message-resend.ts:162, execute.ts, sqlAnalyze.ts, docdb.ts) instead of one shared helper
+- source: spec-39-1-message-header-search.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: Rule 2 (cr 39.1): identical 5-line helper; spec Task 11 froze message-resend.ts beyond the STATUS_LABELS export; the project keeps a local copy per tool module
+- 2026-10-17T03:11:31Z status=wontfix-accepted owner=39-1-message-header-search by=cr note=reopen_if=the toStructured contract changes (more than one copy must be edited) or a sixth copy is added
+
+### DW-575: MessageSearch.TypeLabel duplicates the MessageType $Select inside MessageResend PreviewOne (MessageResend.cls:229)
+- source: spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: Rule 2 (cr 39.1): spec-forced copy; PreviewOne is frozen in 39.1 (Never list) and the spec change log names 39.2 as the story that moves it onto TypeLabel
+- 2026-10-17T03:11:34Z status=routed owner=39-2-phi-data-policy by=cr note=when 39.2 edits PreviewOne, call ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType) instead of its own $Select

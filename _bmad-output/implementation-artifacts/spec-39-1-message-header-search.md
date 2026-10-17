@@ -324,6 +324,37 @@ The fixture **β** (namespace B) is 3 headers with different items and sessions.
   - `GOVERNANCE_BASELINE` stays `1e62c5ad5bf7`/141;
   - every count and doc pin in the Code Map list holds.
 
+### Review Findings
+
+Code review, 2026-10-16. Tier `full-opus`; all four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor). 26 rows became 13 entries (high 0, medium 3, low 10): 9 patched, 4 ledgered, and 11 rows rejected. One entry is the reviewer's own Rule 2 check.
+
+- [x] [Review][Patch] The new route's direct-REST guards had no default-suite row. A missing `from`, an over-length `item`/`source`/`target`/`bodyClass`, a non-string name, a non-boolean `errorOnly` and an unparseable `afterTimeCreated` were pinned only by the manually run OS class, and `afterTimeCreated` without `afterId` by nothing (medium; Verification Gap). Added 9 `ROUTE_CASES` rows; the armed gate passes 104. [packages/iris-mcp-all/src/__tests__/story-39-1-message-search-live-gate.test.ts:632]
+- [x] [Review][Patch] AC-4's clause "the docs state the default state" had a pin but no `mutation:` line (low; Verification Gap, Acceptance Auditor). The mutation is recorded under Verification. AC-7's frozen-baseline clause is pinned by `pnpm gen:governance-baseline:check`, which reports OK. [packages/iris-mcp-all/src/__tests__/story-39-1-doc-claims.test.ts:119]
+- [x] [Review][Patch] The interop README said `body`/`searchTable` refuse "once the window is valid", but only the `from`/`to` parse runs first (low; Blind Hunter, Acceptance Auditor). Reworded. The tool description's "(with a valid window)" is left as it is: it is true, and changing it would move the payload rows. [packages/iris-interop-mcp/README.md:221]
+- [x] [Review][Patch] The name filters also ignore trailing blanks and tabs, as QA observed (low; Blind Hunter). Decided: the interop README, which is the option reference, says so. The tool description and the CHANGELOG need not, because the behavior only ever matches the intended name. [packages/iris-interop-mcp/README.md:221]
+- [x] [Review][Patch] Two refusal labels claimed "nothing was read", which `result:{}` or absent `rows` cannot observe (low; Verification Gap). Relabeled. Validate-before-read stays pinned by the row "a bad from, sent with a namespace that cannot be switched to". [story-39-1-message-search-live-gate.test.ts:653, :1011; src/ExecuteMCPv2/Tests/MessageSearchTest.cls:200]
+- [x] [Review][Patch] The changeset still called the `resendFiltered` wire "unchanged", without the replayed-path scope the CHANGELOG uses (low; Acceptance Auditor). [.changeset/story-39-1-message-header-search.md:13]
+- [x] [Review][Patch] The README documented an `errorOnly` default of `false`, which the tool never sends (Rule #10; low; Acceptance Auditor). It now shows `—`, as every other filter does. [packages/iris-interop-mcp/README.md:216]
+- [x] [Review][Patch] The `MessageSearchTest` refusal bodies named no namespace, so a regressed guard would have queried HSCUSTOM (low; Acceptance Auditor). `ValidBody()` now targets `EXECMCPTMP391Z`; the class passes 5 of 5. [src/ExecuteMCPv2/Tests/MessageSearchTest.cls:172]
+- [x] [Review][Patch] The root README said `presets.ts` is "kept in lockstep" with feature-spec 11 §2.5, whose table lacks four tools (low; Blind Hunter). Reworded: `presets.ts` is the authoritative table. [README.md:673]
+- [x] [Review][Defer] DW-572 (escalated, burndown). On the untuned `Ens.MessageHeader`, a name or status filter makes IRIS intersect the bitmaps over the whole history and test `TimeCreated` row by row (EXPLAIN cost 19075, against 103.84 for the window alone), so the window does not bound that scan (medium; Blind Hunter). Fix-risk is high: a plan hint trades against the shape of the data, and inside `HeaderWhere` it would also move `resendFiltered`'s tie order. [src/ExecuteMCPv2/REST/MessageSearch.cls:322]
+- [x] [Review][Defer] DW-573 (routed, 39-6). No test in the project pins that pre-existing `tools/list` entries are unchanged (AC-7's first clause), because the payload sync compares counts only. The Review Triage Log's "held by `gen:governance-baseline:check`" names a check of keys, not entries (medium; Acceptance Auditor). [packages/iris-mcp-all/src/__tests__/docs-visibility-roster-sync.test.ts:170]
+- [x] [Review][Defer] DW-574 (wontfix-accepted). A fifth local `toStructured` copy (Rule 2, weak reason). [packages/iris-interop-mcp/src/tools/message-search.ts:251]
+- [x] [Review][Defer] DW-575 (routed, 39-2). `TypeLabel` duplicates `PreviewOne`'s `$Select`. It is a copy the spec forces, and 39.2 unifies it (Rule 2). [src/ExecuteMCPv2/REST/MessageResend.cls:229]
+
+Relayed to the lead, because harvest dispositions are the lead's (Rule 15 (c)): DW-571 is a LOW owned by `burndown`, which Rule 15 forbids, and DW-570 has footprint `in-epic` with owner `burndown`, although 39-2 owns `MessageResend.cls`.
+
+**Rejected** (11 rows):
+- Blind Hunter: the performance budget is "logged, never asserted". False: the spine asks a story to check its budget, and Verification records the check. The scaling point is DW-572.
+- Blind Hunter: the DW-571 and DW-570 dispositions (2 rows). These are lead bookkeeping, relayed above. The full-path `source` part is false, because the grammar's source is the spec file.
+- Blind Hunter: the fixture's name guards disagree. False: `Seed` refuses with a text that names the 391 rule, and `seedHeaders` documents it.
+- Blind Hunter and Edge Case Hunter: Windows path separators (2 rows). Low: this IRIS uses Unix paths, and on Windows the teardown fails loudly. reopen_if the gate runs against a Windows IRIS.
+- Edge Case Hunter: a `%Next` fetch error ends a page early. Low: no realistic fetch error occurs on a local read, more than 30 handlers use the same form, and the fix adds a branch.
+- Edge Case Hunter: non-canonical direct-REST timestamps. Low: only a direct caller can send them, because the tool sends canonical UTC, and the resend path does the same.
+- Edge Case Hunter: an empty-string filter applies no filter. Low: this is the documented `HeaderWhere` contract, adjudicated in the review pass.
+- Edge Case Hunter: the default `to` comes from the host clock. Spec-bound (Rule #10 and the Boundaries).
+- Acceptance Auditor: AC-2 says the WHERE comes "only from `HeaderWhere`". False: Task 5 prescribes the keyset clause, which is fixed text with bound values.
+
 ## Spec Change Log
 
 Implement pass, 2026-10-17. No Code Map claim proved wrong at Task 0. Amendments applied in place, none changing intent:
@@ -563,6 +594,41 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - mutation: the CHANGELOG's `BOOTSTRAP_VERSION` edited -> `story-39-1-doc-claims.test.ts` `states the BOOTSTRAP_VERSION move ...`
 - mutation: `MessageSearch` removed from the `gen-bootstrap.mjs` roster and regenerated -> `bootstrap.test.ts` (6 rows, among them `should contain exactly 31 classes`)
 - mutation: `messageSearchTool` removed from the interop tools array -> `index.test.ts` and `presets.test.ts` (6 rows)
+
+**QA pass (2026-10-16) (QA).** Gap analysis against the I/O matrix and AC-3, AC-5, AC-6: the implement and review passes left these without a pinning row, so they were added to `packages/iris-mcp-all/src/__tests__/story-39-1-message-search-live-gate.test.ts` (modified, `(QA)`; the gate was already listed in `scripts/prepublish-gate.mjs`, so no roster change): 35 rows through the BUILT interop server and raw HTTP, against the disposable namespaces A and B only (never a production, never HSCUSTOM's messages).
+- Every status label reaches its code through the tool (8 rows, hand-written IDs from the seed; Errored was already covered), and the label `Error` is accepted over direct REST.
+- Edge values accepted: `limit` 1 and 500, `errorOnly:false` (no filter), names of exactly 128 characters and a body class of exactly 220, `sessionId` at `Number.MAX_SAFE_INTEGER` (and 1e21 refused naming `sessionId`), and the calendar ends (1841, a leap day, 9999).
+- Cursor with filters: filtered pages join to the oracle (item+errorOnly at one row per page, which splits the two headers with the same time; bodyClass; status), a cursor written by hand resumes after `(time, id)` exactly, and a cursor never widens the window below `from`.
+- Tool-level window refusals through the built server (over 7 days by one second; negative), the `IrisApiError` mapping over the real wire.
+- Exotic values (double quote, backslash, backslash-quote, line break, tab, leading space, accented/CJK/emoji text, brackets, statement terminator and comment, trailing and single-character wildcards) as `item`, `source`, `target` and `bodyClass`: a clean empty result, never an error; a hostile `namespace` is refused with no SQL in the answer.
+- Whitespace after a name (observed with the oracle first): trailing blanks and tabs are ignored by the `%String` collation (the rows equal the same SQL equality), a trailing line break is not.
+- AC-6 audit through the built dist: a spawned interop server with `IRIS_AUDIT_LOG` records `headers`/`ok`, `body`/`error`, `searchTable`/`error`.
+
+Commands: the armed gate (`ENV pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-1-message-search-live-gate.test.ts`) 95 passed, 1 skipped (the capture row); `MessageSearchTest` 5 of 5; `story-39-1-gate-guards`, `live-gate-roster`, `interop-namespace-fixture`, `story-39-1-doc-claims` 33 passed; eslint on the gate file clean; the gate file type-checks (the one `tsc` error is the pre-existing missing declaration for `dist-freshness.mjs` in `process-gate-helpers.ts`). The shared and leaf dists were rebuilt from clean (`rm -rf dist tsconfig.tsbuildinfo`) because the tree's `src/` mtimes were newer than the dists and `tsc` emits nothing for unchanged content. Step L6 after the last run: `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP391*` name, and `iris_doc_list` (HSCUSTOM, `Story391` and `ExecuteMCPv2.Temp.`, generated included) is empty.
+
+Mutations (Rule 19). Each applied, observed red, reverted; `shasum` of `MessageSearch.cls` and `message-search.ts` equal to the pre-mutation snapshot after each revert, the class reloaded from the reverted source and `interop` clean-rebuilt after the TS pair; `git status --short` showed only the gate file.
+- mutation: `Delivered` remapped to code 2 after `StatusLabelToCode` -> `status Delivered is status code 3`
+- mutation: the label `Error` mapped to 0 (refused) -> `route: the label Error names status code 8, as Errored does`
+- mutation: `tErrorOnly` set to 1 whenever the key is present -> `errorOnly false is no filter at all ...`
+- mutation: `MAXLIMIT` 499 -> `limit 1 and limit 500 are both accepted ...` (every pre-existing row stayed green, so this edge had no other pin)
+- mutation: `ReadString` `>` changed to `>=` -> `names of exactly 128 characters and a body class of exactly 220 are accepted ...`
+- mutation: `fromNorm` left out of the filters when a cursor is given -> `a cursor never widens the window ...`
+- mutation: the keyset clause `ID > ?` changed to `ID >= ?` -> `a cursor written by hand resumes after its (time, id) exactly ...` and the three `filtered pages join ...` rows (also the pre-existing paging rows)
+- mutation: the `item` fragment built by interpolation instead of binding -> `a backslash before a quote in a name is a name ...` (also the pre-existing odd-name rows and the byte-identity row)
+- mutation: a window starting in year 9999 refused -> `the ends of the calendar IRIS can hold are searched without an error`
+- mutation: `ReadInteger` length guard 18 changed to 15 -> `a session ID at the largest safe integer matches nothing ...`
+- mutation: `%EXACT(SourceConfigName) = ?` for `source` -> `blanks and tabs after a name are ignored ...` (also the pre-existing case row)
+- mutation: the `IrisApiError` branch of `message-search.ts` returns `isError:false` -> `tool: a window one second over 7 days is refused ...`, `tool: a window that ends before it starts is refused ...` and `a hostile namespace is refused as a namespace ...`
+- mutation: the `body`/`searchTable` refusal replaced by a plain success (interop rebuilt) -> `the audit trail of the built server names the action and the outcome` (also the pre-existing `NOT_IMPLEMENTED` rows)
+
+**Code-review pass (2026-10-16).**
+- Doc and roster tests: `story-39-1-doc-claims`, `docs-visibility-roster-sync`, `docs-prompt-sync`, `story-38-6-doc-claims`, `live-gate-roster` and `tool-visibility-snapshot-drift`, 81 passed.
+- eslint on the gate file: clean.
+- `MessageSearchTest`, reloaded: 5 of 5.
+- The armed gate: 104 passed and 1 skipped (the capture row). `[PERF]`: bootstrap start 180 ms; one `headers` call on A 52 ms.
+- Afterwards, `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP391*` name.
+- `pnpm gen:governance-baseline:check`: OK. It is the pin for AC-7's frozen-baseline clause; the frozen file is never mutated.
+- mutation: the Story 39.1 note in `tool_support.md` says "**disabled by default**" -> `story-39-1-doc-claims.test.ts` `the Story 39.1 note says all three keys are reads, enabled by default, and how to restrict one` (AC-4, the docs state the default state). Reverted; `shasum` identical.
 
 **Residual risks.** (1) The executing path of `resendFiltered` is unverified here (deferred, frontmatter). (2) `%SelectMode = 0` cannot be shown to matter on an instance whose `$ZTIMEZONE` is 0; the line is explicit and pinned only by review. (3) The cursor at stored trailing-zero times is proven on the synthetic fixture only. (4) The review-pass patches (about 250 lines of test code and one IRIS expression) were verified by the mutations above but not re-reviewed by the adversarial layers.
 

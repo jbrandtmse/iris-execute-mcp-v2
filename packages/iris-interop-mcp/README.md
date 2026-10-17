@@ -213,12 +213,12 @@ Searches `Ens.MessageHeader` without enabling any write. The `action` enum is fi
 | `status` | — | `Created`, `Queued`, `Delivered`, `Discarded`, `Suspended`, `Deferred`, `Aborted`, `Errored` or `Completed`; rows report `Errored` as `Error` |
 | `sessionId` | — | A positive integer session ID |
 | `bodyClass` | — | Message body class name |
-| `errorOnly` | `false` | Only messages whose `IsError` flag is set (not the same as status `Error`) |
+| `errorOnly` | — | Only messages whose `IsError` flag is set (not the same as status `Error`) |
 | `limit` | `100` | Rows per page, 1 to 500. An **output cap**, not timeout protection: the window is scanned in full, so a wide window on a busy namespace can approach the ~60 s Web Gateway timeout — narrow the window or add filters |
 | `cursor` | — | The `nextCursor` of the previous page. Only a page with `hasMore: true` carries one |
 | `namespace` | server default | Target namespace |
 
-Every filter is an equality match, not a pattern (`%` and `_` are ordinary characters), bound as a parameter on the IRIS side. The item, source, target and body-class names compare without regard to case, as `Ens.MessageHeader` stores them. When you page a window close to 7 days wide, pass the same `from` and `to` on every page: an omitted `to` is recomputed as now on each call. `body` and `searchTable` return `NOT_IMPLEMENTED` once the window is valid. A namespace without Interoperability returns `notApplicable: true` with a `reason`, not an error.
+Every filter is an equality match, not a pattern (`%` and `_` are ordinary characters), bound as a parameter on the IRIS side. The item, source, target and body-class names compare the way `Ens.MessageHeader` stores them: without regard to case, and ignoring trailing blanks and tabs (a trailing line break still counts). When you page a window close to 7 days wide, pass the same `from` and `to` on every page: an omitted `to` is recomputed as now on each call. `body` and `searchTable` return `NOT_IMPLEMENTED` once `from` and `to` parse; only `headers` checks the 7-day bound. A namespace without Interoperability returns `notApplicable: true` with a `reason`, not an error.
 
 #### `iris_message_resend` — Resend / Replay Messages
 
