@@ -3073,3 +3073,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-0-epic-38-deferred-cleanup.md (QA 2026-10-16) | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: QA 39.0: http-client.ts ~395 maps a 400 with status.errors=[] to a resolved empty result; live GET docnames/CLS/cls -> 400, tool -> {items:[]}
 - 2026-10-17T00:14:32Z status=routed owner=burndown by=qa note=for the Epic 39 burn-down: a non-2xx response is an error even when status.errors is empty; pin with the live 400 pair from doc-type-description-live-gate
+
+### DW-570: iris_message_resend resendFiltered executing path (the ID fetch after guard f) is exercised by no test: only MessageResendLiveTest reaches it and it starts a production in HSCUSTOM (forbidden on the shared instance)
+- source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 39.1 review 2026-10-16; the statement is built like the dry-run sample statement the replay runs; a break fails safe (resends nothing)
+- 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=Epic 39 burn-down: drive it inside the disposable mapping-only namespace (its own Ens.Runtime) with a synthetic production, never HSCUSTOM
+
+### DW-571: flake: doc-type-description-live-gate.test.ts (dev) failed once in a parallel turbo run; it compares two live listings of the shared HSCUSTOM
+- source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 39.1 implement 2026-10-16: passed alone and in the serial run; listings of a shared namespace can change between the two reads
+- 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=flake class (cf. DW-444): make the comparison tolerant of concurrent changes or compare a fixed filter
