@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "6dcdd238c792";
+export const BOOTSTRAP_VERSION = "d440a659ba1e";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "6dcdd238c792";
+Parameter BOOTSTRAPVERSION = "d440a659ba1e";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -11940,6 +11940,13 @@ ClassMethod DefaultSettingsManage() As %Status
 Class ExecuteMCPv2.REST.MessageResend Extends ExecuteMCPv2.REST.Base
 {
 
+/// The most characters a preview's <code>bodyTextMaxChars</code> may name.
+Parameter BODYTEXTMAX As %Integer = 1048576;
+
+/// The cap, in characters, that <code>text</code> mode applies when the request names no
+/// <code>bodyTextMaxChars</code>.
+Parameter BODYTEXTDEFAULT As %Integer = 65536;
+
 /// Map a case-insensitive <code>Ens.DataType.MessageStatus</code> display label
 /// (e.g. <code>"Errored"</code>) to its numeric code. Accepts both the DISPLAYLIST
 /// spelling ("Error") and the tool contract's spelling ("Errored") for the error
@@ -12116,10 +12123,71 @@ ClassMethod BodySummary(pBodyClass As %String, pBodyId As %String, pBodyClassExi
     Quit tSummary
 }
 
+/// Whether the body of a header can be opened: the same test <method>BodySummary</method> applies before
+/// it reads anything. Never throws.
+ClassMethod BodyAvailable(pBodyClass As %String, pBodyId As %String, pBodyClassExists As %Boolean) As %Boolean
+{
+    Set tAvailable = 0
+    Try {
+        If (pBodyClass = "") || (pBodyId = "") || 'pBodyClassExists { Quit }
+        Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
+        Set tAvailable = $IsObject(tObj)
+    } Catch {
+        Set tAvailable = 0
+    }
+    Quit tAvailable
+}
+
+/// Add the body detail of the <code>kind</code> and <code>text</code> modes to the preview item
+/// <var>pItem</var>: <code>bodyKind</code> (<method>ExecuteMCPv2.REST.MessageSearch:BodyKind</method>)
+/// and <code>bodyAvailable</code> always, and, in <code>text</code> mode for an available HL7 v2 body,
+/// either <code>bodyText</code> (the complete ER7 text) or <code>bodyTextOmitted</code>
+/// (<code>tooLarge</code> or <code>unreadable</code>). It never adds <code>bodySummary</code>.
+ClassMethod SetBodyDetail(pItem As %DynamicObject, pBodyDetail As %String, pMaxChars As %Integer, pBodyClass As %String, pBodyId As %String, pBodyClassExists As %Boolean)
+{
+    Set tKind = ##class(ExecuteMCPv2.REST.MessageSearch).BodyKind(pBodyClass)
+    Set tAvailable = ..BodyAvailable(pBodyClass, pBodyId, pBodyClassExists)
+    Do pItem.%Set("bodyKind", tKind)
+    Do pItem.%Set("bodyAvailable", tAvailable, "boolean")
+    If (pBodyDetail = "text") && tAvailable && (tKind = "hl7v2") {
+        Set tOmitted = ##class(ExecuteMCPv2.REST.MessageSearch).Hl7Text(pBodyClass, pBodyId, pMaxChars, .tText)
+        If tOmitted = "" { Do pItem.%Set("bodyText", tText) }
+        Else { Do pItem.%Set("bodyTextOmitted", tOmitted) }
+    }
+}
+
+/// Read the optional <code>bodyDetail</code> (<code>kind</code> or <code>text</code>) and
+/// <code>bodyTextMaxChars</code> (an integer from 1 to <parameter>BODYTEXTMAX</parameter>) of a preview
+/// request. <var>pDetail</var> is <code>""</code> when <code>bodyDetail</code> is absent or null, which
+/// keeps today's response. <var>pMaxChars</var> is the cap for <code>text</code> mode, defaulting to
+/// <parameter>BODYTEXTDEFAULT</parameter>. The error texts name the parameter and never its value.
+ClassMethod ReadBodyDetail(pBody As %DynamicObject, Output pDetail As %String, Output pMaxChars As %Integer) As %Status
+{
+    Set pDetail = ""
+    Set pMaxChars = 0
+    If pBody.%IsDefined("bodyDetail") && (pBody.%GetTypeOf("bodyDetail") '= "null") {
+        Set tDetail = pBody.%Get("bodyDetail")
+        If (pBody.%GetTypeOf("bodyDetail") '= "string") || ((tDetail '= "kind") && (tDetail '= "text")) {
+            Quit $$$ERROR($$$GeneralError, "bodyDetail must be kind or text.")
+        }
+        Set pDetail = tDetail
+    }
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).ReadInteger(pBody, "bodyTextMaxChars", "", 1, ..#BODYTEXTMAX, .tMax)
+    If $$$ISERR(tSC) {
+        Quit $$$ERROR($$$GeneralError, "bodyTextMaxChars must be an integer from 1 to " _ ..#BODYTEXTMAX _ ".")
+    }
+    If pDetail = "text" { Set pMaxChars = $Select(tMax = "": ..#BODYTEXTDEFAULT, 1: tMax) }
+    Quit $$$OK
+}
+
 /// Build the preview payload for one header ID. Never throws (all failure
 /// paths are captured as <code>{id, found:false, error}</code>) — the caller
 /// still wraps this in a per-message Try/Catch as defense-in-depth.
-ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
+/// <p><var>pBodyDetail</var> <code>""</code> returns the legacy payload with <code>bodySummary</code>.
+/// <code>kind</code> and <code>text</code> return <code>bodyKind</code> and <code>bodyAvailable</code>
+/// instead of <code>bodySummary</code> (see <method>SetBodyDetail</method>); <var>pMaxChars</var> is the
+/// <code>text</code> cap.</p>
+ClassMethod PreviewOne(pId As %Integer, pBodyDetail As %String = "", pMaxChars As %Integer = 0) As %DynamicObject
 {
     Set tItem = {}
     Try {
@@ -12148,7 +12216,7 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
         Do tItem.%Set("id", pId, "number")
         Do tItem.%Set("found", 1, "boolean")
         Do tItem.%Set("sessionId", +tRS.SessionId, "number")
-        Do tItem.%Set("type", $Select(tType=1:"Request", tType=2:"Response", tType=3:"Terminate", 1:"Unknown"))
+        Do tItem.%Set("type", ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType))
         Do tItem.%Set("sourceItem", tRS.SourceConfigName)
         Do tItem.%Set("targetItem", tRS.TargetConfigName)
         Do tItem.%Set("status", ..StatusCodeToLabel(tStatusCode))
@@ -12158,7 +12226,12 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
         Do tItem.%Set("bodyClassName", tBodyClass)
         Do tItem.%Set("bodyClassExists", tBodyClassExists, "boolean")
         If tRS.CorrespondingMessageId '= "" { Do tItem.%Set("correspondingMessageId", +tRS.CorrespondingMessageId, "number") }
-        Do tItem.%Set("bodySummary", ..BodySummary(tBodyClass, tRS.MessageBodyId, tBodyClassExists))
+        If pBodyDetail = "" {
+            Do tItem.%Set("bodySummary", ..BodySummary(tBodyClass, tRS.MessageBodyId, tBodyClassExists))
+        }
+        Else {
+            Do ..SetBodyDetail(tItem, pBodyDetail, pMaxChars, tBodyClass, tRS.MessageBodyId, tBodyClassExists)
+        }
 
         Set tVerdict = ..Verdict(tType, tStatusCode, tIsError, tBodyClass, tBodyClassExists)
         Do tItem.%Set("verdict", $ListGet(tVerdict, 1))
@@ -12177,6 +12250,10 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
 /// Per header: id, session, source/target item, status, time, body classname
 /// (+ existence check), body summary, and a resendability verdict + reason.
 /// Never mutates.
+/// <p>Optional <code>bodyDetail</code> (<code>kind</code> or <code>text</code>) and
+/// <code>bodyTextMaxChars</code> are validated before the namespace switch and replace the body summary
+/// with the body kind and availability (and, for <code>text</code>, a complete HL7 v2 body text); see
+/// <method>PreviewOne</method>. A request without them gets today's response.</p>
 ClassMethod MessageResendPreview() As %Status
 {
     Set tSC = $$$OK
@@ -12196,6 +12273,9 @@ ClassMethod MessageResendPreview() As %Status
         Set tSC = ..ValidateHeaderIds(tHeaderIdsArr, .tIds)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+        Set tSC = ..ReadBodyDetail(tBody, .tBodyDetail, .tMaxChars)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
         Set tNamespace = tBody.%Get("namespace")
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
@@ -12207,7 +12287,7 @@ ClassMethod MessageResendPreview() As %Status
         For i=1:1:tCount {
             Set tId = tIds(i)
             Try {
-                Set tHeaderItem = ..PreviewOne(tId)
+                Set tHeaderItem = ..PreviewOne(tId, tBodyDetail, tMaxChars)
             } Catch exInner {
                 Set tHeaderItem = {}
                 Do tHeaderItem.%Set("id", tId, "number")
@@ -12660,6 +12740,64 @@ ClassMethod HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Ou
 ClassMethod TypeLabel(pType As %Integer) As %String
 {
     Quit $Select(pType = 1: "Request", pType = 2: "Response", pType = 3: "Terminate", 1: "Unknown")
+}
+
+/// The kind of a message body, from its class alone and never from its content. The first test that
+/// holds decides, in this order: an empty class name is <code>literal</code> (the header's body ID is
+/// the value); a class that is not compiled is <code>missing</code>; <class>EnsLib.HL7.Message</class> is
+/// <code>hl7v2</code>; <class>EnsLib.EDI.XML.Document</class> is <code>xmlvdoc</code>;
+/// <class>Ens.VDoc.Interface</class> is <code>vdoc</code>; <class>%Stream.Object</class> is
+/// <code>stream</code>; <class>Ens.StreamContainer</class> is <code>streamContainer</code>;
+/// <class>%Library.Persistent</class> is <code>persistent</code>; anything else is <code>other</code>.
+/// A class that cannot be tested at all is <code>other</code>, the kind that is never redactable.
+ClassMethod BodyKind(pClassName As %String) As %String
+{
+    Set tKind = "other"
+    Try {
+        If pClassName = "" { Set tKind = "literal" Quit }
+        If '##class(%Dictionary.CompiledClass).%ExistsId(pClassName) { Set tKind = "missing" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.HL7.Message") { Set tKind = "hl7v2" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.EDI.XML.Document") { Set tKind = "xmlvdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.VDoc.Interface") { Set tKind = "vdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Stream.Object") { Set tKind = "stream" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.StreamContainer") { Set tKind = "streamContainer" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Library.Persistent") { Set tKind = "persistent" Quit }
+    } Catch {
+        Set tKind = "other"
+    }
+    Quit tKind
+}
+
+/// The complete ER7 text of the <class>EnsLib.HL7.Message</class> body <var>pBodyId</var> of class
+/// <var>pBodyClass</var>, in <var>pText</var>: children included, unsanitized and never cut, which is what
+/// a redaction engine needs. Returns <code>""</code> when <var>pText</var> holds the whole text,
+/// <code>tooLarge</code> when the text is longer than <var>pMaxChars</var> characters (then
+/// <var>pText</var> is empty), or <code>unreadable</code> on any failure. A failure never carries
+/// exception text.
+ClassMethod Hl7Text(pBodyClass As %String, pBodyId As %String, pMaxChars As %Integer, Output pText As %String) As %String
+{
+    Set pText = ""
+    Set tResult = "unreadable"
+    Try {
+        Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
+        If '$IsObject(tObj) { Quit }
+        If 'tObj.%Extends("EnsLib.HL7.Message") { Quit }
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tSC = tObj.OutputToLibraryStream(tStream)
+        If $$$ISERR(tSC) { Quit }
+        Set tSize = tStream.Size
+        If tSize > pMaxChars { Set tResult = "tooLarge" Quit }
+        Do tStream.Rewind()
+        Set tText = ""
+        While 'tStream.AtEnd { Set tText = tText _ tStream.Read(32000) }
+        If $Length(tText) '= tSize { Quit }
+        Set pText = tText
+        Set tResult = ""
+    } Catch {
+        Set pText = ""
+        Set tResult = "unreadable"
+    }
+    Quit tResult
 }
 
 /// Build the header row for the current row of <var>pRS</var>, a result of a SELECT of

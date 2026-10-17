@@ -198,6 +198,8 @@ their Zod schemas but silently dropped them server-side.
 > **Epic 35 (2026-08-19) — `iris_production_item` composite-key correctness (Story 35.1) + `iris_interop_rest` contract notes (Story 35.5/35.8).** `Ens.Config.Item` is keyed by the composite `(production, name)` pair, not `name` alone: `get` and `set` accept an optional `production` to disambiguate an item name that exists in more than one production (omitted ⇒ `get` resolves the first matching row and, since Story 38.0, reports its `production` in the response; `set` defaults to the namespace's active production), and `set`/`remove` remain reachable for items whose host class no longer resolves to a business type (a two-arg `NameExists` + item-list fallback keeps them repairable). `set` now persists durably (`%Save()` + `SaveToClass` dual-write — the production class XData is the source of truth; the SQL extent is a re-synced cache). `iris_interop_rest`'s `name` is an ObjectScript **package name** (e.g. `MyApi`, `MyCompany.MyApi`) — URL-path values like `/myapi` are rejected by IRIS `$ZNAME` validation; `delete` removes the application registration (spec + dispatch) but the generated `.impl` implementation class is **preserved by design** (IRIS `%REST.API.DeleteApplication` — the impl class carries user-written endpoint code; delete it separately if unwanted). **No tool or action key moved** (Rule #31); `iris_production_item:set` stays a pre-governance baseline key (**enabled by default**) and `:add`/`:remove` stay **default-disabled** writes, exactly as the Epic 17 note above states — verified mechanically against the default seed 2026-08-19.
 >
 > **Story 39.1 (2026-10-16) — governance defaults:** added `iris_message_search` (interop 22 → 23) — a read-only search of `Ens.MessageHeader` over the new route `POST /interop/message/search`. Its `action` enum is fixed: `headers` searches the headers of a required window (`from` required, `to` defaulting to now, at most 7 days; filters `item`, `source`, `target`, `status`, `sessionId`, `bodyClass`, `errorOnly`; keyset-paged, `limit` 100 by default and 500 at most) and returns header rows only, never body content, `ErrorStatus` or `Description`; `body` and `searchTable` answer with the `NOT_IMPLEMENTED` refusal until their stories land. All three keys are truthfully `read` and are **enabled by default** (and stay enabled under the `read-only` preset); an operator can restrict one with `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_message_search:headers":false}}`. The tool is in the interop `core` and `developer` presets. The filters-to-WHERE translation moved out of `iris_message_resend`'s `resendFiltered` into one shared helper (`ExecuteMCPv2.REST.MessageSearch.HeaderWhere`); the `resendFiltered` dry-run and refusal wire is byte-identical to a capture taken before the move (the path that resends needs a running production and is covered by `MessageResendLiveTest` only). New class `ExecuteMCPv2.REST.MessageSearch.cls` (bootstrap 30 → 31 classes, `BOOTSTRAP_VERSION` `089f8f0a62b2` → `6dcdd238c792`).
+>
+> **Story 39.2 (2026-10-16) — PHI data policy:** the `iris_message_resend` preview's body summary is now under a per-profile `dataPolicy` (`block`, `redact` or `allow`; default `redact`; set with `IRIS_DATA_POLICY`, an `IRIS_PROFILES` entry's `dataPolicy` or the governance file's `dataPolicy` section; reported by `iris_server_profiles`). Under the default `redact`, an HL7 v2 body keeps today's class-name note and every other body (a stream included) is withheld with a reason; `allow` returns today's output exactly. **No tool, action or governance key is added, so no default state and no tool count moves** (`preview` stays an enabled-by-default read). The scope of the policy over every tool of the suite is the [PHI data policy scope](#phi-data-policy-scope-as-of-2026-10-16) table below. The preview route gained the optional request fields `bodyDetail` and `bodyTextMaxChars` (additive); `BOOTSTRAP_VERSION` `6dcdd238c792` → `d440a659ba1e` (still 31 classes).
 
 ---
 
@@ -369,6 +371,49 @@ These tools are provided by the shared framework (`@iris-mcp/shared` `server-bas
 > **Epic 19 (2026-06-18) — governance defaults:** added the framework tool `iris_server_profiles`. It is governance-classified `read` and therefore **enabled by default** (a `read` classification is still required for every new key — `assertGovernanceClassification` throws on an unclassified non-baseline key — but reads resolve enabled; an operator may still disable it explicitly via `IRIS_GOVERNANCE`). It is a new non-baseline key, so the frozen governance baseline (`1e62c5ad5bf7`) is unchanged.
 >
 > **Epic 31 (2026-07-25) — Server Manager connections:** `iris_server_profiles`' roster entries gained two optional FIELDS (not a new action, no tool-count change, Rule #31) — `source` (`"env"` or `"server-manager"`, where a profile's connection fields came from) and `sourceFile` (the settings file, for a `"server-manager"`-sourced profile only). Both are attribution-only and never included when unset. No new governance key; the frozen baseline (`1e62c5ad5bf7`, 141 keys) is unchanged. See [Server Manager connections](README.md#server-manager-connections-optional).
+
+---
+
+## PHI data policy scope (as of 2026-10-16)
+
+The PHI data policy (`dataPolicy`: `block`, `redact` or `allow`, default `redact`; see [PHI data policy](README.md#phi-data-policy) in the suite README) governs the output of a tool that returns message-body or body-derived data. This table classifies every tool of the suite, exhaustive as of 2026-10-16, as **governed** (the tool declares `dataPolicy`, so the policy applies), **residual** (the tool can return body or body-derived text but is not under the policy; an operator restricts it through its governance key or tool visibility) or **not applicable**. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+| Tool | Scope | Why |
+|---|---|---|
+| `iris_message_resend` | governed | The `preview` action's body summary is the one body-derived output. Under `redact` an HL7 v2 body shows only its class name and every other body is withheld with a reason; `block` withholds every body; `allow` is unchanged. `resend` and `resendFiltered` return status texts only. |
+| `iris_sql_execute` | residual | Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or `IRIS_SQL_READ_ONLY`. |
+| `iris_sql_query` | residual | Runs caller-supplied SELECTs, which can select message-body columns. |
+| `iris_sql_analyze` | residual | Returns plans and statistics for caller-supplied SQL, which can echo literals. |
+| `iris_global_get` | residual | Reads any global node, message bodies included. |
+| `iris_execute_command` | residual | Runs caller code whose output is unrestricted. |
+| `iris_execute_classmethod` | residual | Calls any class method, whose result and output are unrestricted. |
+| `iris_execute_tests` | residual | Returns the text of unit-test results, which can quote data. |
+| `iris_test_status` | residual | Returns the text of unit-test results, which can quote data. |
+| `iris_doc_get` | residual | Returns the source of a document, which can hold message text. |
+| `iris_doc_search` | residual | Returns matching lines of document source, which can hold message text. |
+| `iris_doc_convert` | residual | Returns document source, which can hold message text. |
+| `iris_doc_xml_export` | residual | Returns document source as XML, which can hold message text. |
+| `iris_doc_export` | residual | Writes document source to local files, which can hold message text. |
+| `iris_doc_edit` | residual | Returns a unified diff and numbered excerpts of the edited document, which can hold message text. |
+| `iris_routine_intermediate` | residual | Returns the compiled intermediate code of a routine, which can hold message text. |
+| `iris_lookup_manage` | residual | Returns and sets lookup table values, which can hold identifying data. |
+| `iris_lookup_transfer` | residual | Exports whole lookup tables, values included. |
+| `iris_production_messages` | residual | Returns header columns; for a header with no body class the body ID is the literal body value. |
+| `iris_message_search` | residual | The `headers` action returns header columns, and for a header with no body class the body ID is the literal body value; the `body` and `searchTable` actions arrive in Stories 39.3 and 39.4 and are governed from then on. |
+| `iris_env_diff` | residual | Compares configuration values across profiles, lookup values included. |
+| `iris_env_promote` | residual | Copies configuration values across profiles, lookup values included. |
+| `iris_production_logs` | residual | The Event Log text of an adapter or a parser can carry segment text. |
+| `iris_message_diagram` | residual | A header's sanitized `ErrorStatus`, which parser errors fill with segment text, appears in the diagram. |
+| `iris_transform_test` | residual | Returns the output of a transformation run on a caller-supplied message. |
+| `iris_docdb_document` | residual | Returns the content of DocDB documents. |
+| `iris_docdb_find` | residual | Returns the content of DocDB documents that match. |
+| `iris_analytics_mdx` | residual | Returns the result data of an MDX query. |
+| `iris_audit_manage` | residual | Returns audit configuration and event data, whose descriptions can carry request text. |
+| `iris_audit_events` | residual | Returns audit events, whose descriptions can carry request text. |
+
+Every other tool is not applicable: it returns no body or body-derived text. That includes the `resend` and `resendFiltered` actions of `iris_message_resend` (status texts). A header's `ErrorStatus` and `Description` are reachable only through the residual tools above; the governed forensics tools keep excluding both. A header with no body class is the one header column that holds a body value: its body ID is the literal body, which is why `iris_message_search` and `iris_production_messages` are residual.
+
+A restriction on a residual tool is the tool's own governance key (`IRIS_GOVERNANCE`, `IRIS_GOVERNANCE_FILE`) or the tool-visibility presets, not the data policy. The data policy changes the default output of the resend preview (the one sanctioned change of this story); it adds no tool, no action and no tool count.
 
 ---
 

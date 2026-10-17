@@ -47,6 +47,38 @@ export {
 export { REFUSAL_CODES, refusalResult } from "./refusals.js";
 export type { RefusalCode, RefusalResult } from "./refusals.js";
 export {
+  DATA_POLICIES,
+  DEFAULT_DATA_POLICY,
+  DATA_POLICY_ENV_VAR,
+  BODY_KINDS,
+  BLOCK_REASONS,
+  HL7_BODY_TEXT_MAX_CHARS,
+  isBodyKind,
+  isRedactableBodyKind,
+  parseDataPolicyValue,
+  parseOperatorDataPolicy,
+  resolveDataPolicy,
+  applyDataPolicies,
+  effectiveDataPolicy,
+  tightenDataPolicy,
+} from "./data-policy.js";
+export type {
+  DataPolicy,
+  DataPolicySource,
+  DataPolicyCarrier,
+  DataPolicySummary,
+  BodyKind,
+  BodyPolicyOutcome,
+} from "./data-policy.js";
+export {
+  HL7_REDACTION_REVIEW,
+  HL7_KEEP_FIELDS,
+  HL7_SAFE_HARBOR_FIELDS,
+  HL7_REDACTED_VALUE,
+  redactHl7,
+} from "./hl7-redaction.js";
+export type { Hl7RedactionResult, Hl7SafeHarborField } from "./hl7-redaction.js";
+export {
   isClassDocument,
   storageDefinitionNames,
   droppedStorageDefinitions,

@@ -87,6 +87,17 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`, and `iris_doc_get`/`iris_doc_edit` since Story 38.4) that every preset must keep together-in or together-out.
 - **`ToolPresetName`** / **`ToolPresetRoster`** / **`ToolPresetRosters`** / **`ToolVisibilityConfig`** (types) -- Preset name union and the per-package `include`/`exclude` roster shapes wired via `McpServerBaseOptions.toolPresets`.
 
+### PHI Data Policy
+
+`data-policy.ts` and `hl7-redaction.ts` implement the per-profile PHI data policy described in the suite's [PHI data policy](../../README.md#phi-data-policy) section: `block`, `redact` (the default) or `allow`, resolved at startup from the `IRIS_PROFILES` entry, `IRIS_DATA_POLICY`, the governance file's `dataPolicy` section, then `redact`. `McpServerBase` applies it to every profile, so a handler reads the policy that applies to the call as `ctx.config.dataPolicy`; the roster of `iris_server_profiles` reports `dataPolicy` and `dataPolicySource`. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+- **`parseOperatorDataPolicy()`** / **`resolveDataPolicy()`** / **`applyDataPolicies()`** / **`effectiveDataPolicy()`** -- Read `IRIS_DATA_POLICY` (fails fast on a malformed value), resolve one profile or a whole registry, and read the effective policy of a config. A value on the `default` entry is never inherited by another profile.
+- **`tightenDataPolicy()`** -- A caller can only tighten the operator's policy; the result says when a looser request was clamped.
+- **`BODY_KINDS`** / **`isRedactableBodyKind()`** / **`BLOCK_REASONS`** -- The nine body kinds `ExecuteMCPv2.REST.MessageSearch.BodyKind` returns (only `hl7v2` is redactable) and the fixed texts that say why a body is withheld.
+- **`redactHl7()`** -- Fail-closed ER7 redaction: keeps only the fields of `HL7_KEEP_FIELDS` and redacts every other field of every segment, preserving segment order, terminators and separators. It refuses a text it cannot read and never throws. No tool shows its output yet.
+- **`ToolDefinition.dataPolicy`** (`actions`, `phiInputs`) -- Declares that a tool is under the policy and which of its inputs carry PHI; `McpServerBase` checks the declaration at registration, and the audit log redacts the declared inputs under `redact` and `block`.
+- **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
+
 ---
 
 ## Server Manager Connections & the `iris-mcp-credentials` CLI

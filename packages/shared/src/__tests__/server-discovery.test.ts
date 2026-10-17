@@ -223,6 +223,9 @@ describe("Story 19.0 — profile roster + password redaction (AC 19.0.2)", () =>
       timeout: expect.any(Number),
       // Story 31.3, AC 31.3.2: the reserved default is always "env"-sourced.
       source: "env",
+      // Story 39.2: a server with no data-policy configuration reports the safe default and where it came from.
+      dataPolicy: "redact",
+      dataPolicySource: "default",
     });
   });
 

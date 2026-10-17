@@ -5,6 +5,8 @@
  * a validated {@link IrisConnectionConfig} object.
  */
 
+import type { DataPolicy, DataPolicySource } from "./data-policy.js";
+
 /** Configuration required to connect to an IRIS instance over HTTP. */
 export interface IrisConnectionConfig {
   /** Hostname or IP of the IRIS server. */
@@ -74,6 +76,16 @@ export interface IrisConnectionConfig {
    * unchanged (today's behavior).
    */
   testTimeoutMs?: number;
+  /**
+   * The PHI data policy of this connection's profile (Story 39.2): `block`, `redact` or `allow`.
+   * {@link loadConfig} never sets it. The profile registry carries the resolved value of every
+   * profile (see `data-policy.ts`), so a call's `ctx.config.dataPolicy` is the policy that applies to
+   * it. Absent on a hand-built config, which counts as `redact`. A value is never inherited from the
+   * `default` profile.
+   */
+  dataPolicy?: DataPolicy;
+  /** The channel that supplied {@link dataPolicy}. */
+  dataPolicySource?: DataPolicySource;
 }
 
 /**

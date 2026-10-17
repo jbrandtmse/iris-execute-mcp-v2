@@ -16,6 +16,12 @@
  * Seeded data is synthetic: `Story391` item names and message times on 2001-02-03 UTC, so a query that
  * is misrouted to a real namespace cannot match real traffic.
  *
+ * Story 39.2 adds `SeedBodies` (headers whose bodies are of every kind: HL7 v2, stream, string,
+ * stream container, a missing class and a literal), `Hl7Fields` (what IRIS's own HL7 parser reads in
+ * a text), the production fixture sources `STORY392_*` (an operation and a production, started only in a
+ * disposable namespace), and a `Leftovers` that also reports any `^%SYS("Ensemble",*,<ns>)` subscript and
+ * any process running in a scratch namespace.
+ *
  * Shared by Stories 39.1 to 39.6.
  */
 
@@ -118,6 +124,151 @@ ClassMethod SeedBeta() As %String
     Quit tIds
 }
 
+/// Seed the Story 39.2 body set pSet ("story392") into the current namespace, which must be an empty
+/// EXECMCPTMP392 scratch namespace: fixture pi (headers 1 to 9, one body of every kind) and fixture rho
+/// (headers 10 to 12, three string bodies). Returns the JSON ID map {"pi":"1,...,9","rho":"10,11,12"}.
+ClassMethod SeedBodies(pSet As %String) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP392"1U { Quit "REFUSED: SeedBodies runs only in a namespace named EXECMCPTMP392 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If pSet '= "story392" { Quit "REFUSED: the set must be story392" }
+    Set tBodies = ""
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7(..Hl7Text("adt"))))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7(..Hl7Text("ack"))))
+    Set tBodies = tBodies_$ListBuild($ListBuild("%Stream.GlobalCharacter", ..SaveStream(..StreamText())))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Ens.StringRequest", ..SaveString("SYNTHPHI-STRING")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Ens.StreamContainer", ..SaveContainer("SYNTHPHI-CONTAINER")))
+    Set tBodies = tBodies_$ListBuild($ListBuild("Story392.Body.Missing", "1"))
+    Set tBodies = tBodies_$ListBuild($ListBuild("", "SYNTHPHI-LITERAL"))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7(..Hl7Text("alt"))))
+    Set tBodies = tBodies_$ListBuild($ListBuild("EnsLib.HL7.Message", ..SaveHl7(..Hl7Text("big"))))
+    Set tPi = ""
+    For tI = 1:1:9 {
+        Set tBody = $List(tBodies, tI)
+        If $Extract($List(tBody, 2), 1, 6) = "ERROR:" { Quit }
+        Set tId = ..Add(392000 + tI, 1, 8, 1, "Story392.Source", "Story392.Hl7Target", $List(tBody, 1), $List(tBody, 2), "2001-02-03 09:00:0"_tI)
+        If $Extract(tId, 1, 6) = "ERROR:" { Quit }
+        Set tPi = tPi_$Select(tPi = "": "", 1: ",")_tId
+    }
+    If $Length(tPi, ",") '= 9 { Quit "FAILED: pi bodies: "_tPi_" "_$Get(tBody)_" "_$Get(tId) }
+    Set tRho = ""
+    For tI = 1:1:3 {
+        Set tBodyId = ..SaveString("SYNTHPHI-RHO-"_tI)
+        If $Extract(tBodyId, 1, 6) = "ERROR:" { Quit }
+        Set tId = ..Add(392100 + tI, 1, 8, 1, "Story392.Source", "Story392.Target", "Ens.StringRequest", tBodyId, "2001-02-03 10:00:0"_tI)
+        If $Extract(tId, 1, 6) = "ERROR:" { Quit }
+        Set tRho = tRho_$Select(tRho = "": "", 1: ",")_tId
+    }
+    If $Length(tRho, ",") '= 3 { Quit "FAILED: rho bodies: "_tRho_" "_$Get(tBodyId)_" "_$Get(tId) }
+    Quit {"pi":(tPi),"rho":(tRho)}.%ToJSON()
+}
+
+/// The segments of the ER7 text pText, parsed in memory by EnsLib.HL7.Message (nothing is saved), as
+/// JSON [{"name":"PID","fields":["1","",...]}]. Field k of a segment is element k of "fields", and
+/// MSH-1 is the field separator, so the numbering is the HL7 one. Runs only in an EXECMCPTMP392 namespace.
+ClassMethod Hl7Fields(pText As %String) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP392"1U { Quit "REFUSED: Hl7Fields runs only in a namespace named EXECMCPTMP392 followed by one capital letter" }
+    Set tMsg = ##class(EnsLib.HL7.Message).ImportFromString(pText, .tSC)
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Set tList = []
+    For tI = 1:1:tMsg.SegCount {
+        Set tSeg = tMsg.GetSegmentAt(tI)
+        Set tFields = []
+        For tN = 1:1:tSeg.Count { Do tFields.%Push(tSeg.GetValueAt(tN)) }
+        Do tList.%Push({"name":(tSeg.Name),"fields":(tFields)})
+    }
+    Quit tList.%ToJSON()
+}
+
+/// The synthetic ER7 text pName ("adt", "ack", "alt" or "big"), with CR segment terminators.
+ClassMethod Hl7Text(pName As %String) As %String
+{
+    Set tCR = $Char(13)
+    If pName = "adt" {
+        Set tText = "MSH|^~\&|SYNTHPHI-APP|SYNTHPHI-FAC|||20010203090001||ADT^A01^ADT_A01|SYNTHPHI-CTL1|P|2.5.1"_tCR
+        Set tText = tText_"EVN|A01|20010203090001|||SYNTHPHI-OPERATOR"_tCR
+        Set tText = tText_"PID|1||SYNTHPHI-MRN^^^SYNTHPHI-AA~SYNTHPHI-MRN2^^^SYNTHPHI-AB||SYNTHPHI-LAST^SYNTHPHI-FIRST\T\X&SYNTHPHI-SUB~SYNTHPHI-ALIAS^SYNTHPHI-A||19010101|F|||SYNTHPHI-STREET\S\1^^SYNTHPHI-CITY^ZZ^00000~SYNTHPHI-STREET2^^SYNTHPHI-CITY2^ZZ^00001||SYNTHPHI-PHONE"_tCR
+        Set tText = tText_"NK1|1|SYNTHPHI-KIN^SYNTHPHI-KINF|SPO^Spouse|SYNTHPHI-NKADDR||SYNTHPHI-NKPHONE|C"_tCR
+        Set tText = tText_"PV1|1|I|SYNTHPHI-WARD^101^A|R|||SYNTHPHI-DOC^SYNTHPHI-DOCF|||||||||||E|SYNTHPHI-VISIT"_tCR
+        Set tText = tText_"GT1|1||SYNTHPHI-GUAR^SYNTHPHI-GUARF"_tCR
+        Set tText = tText_"IN1|1||SYNTHPHI-PLAN|SYNTHPHI-INSCO"_tCR
+        Set tText = tText_"OBX|1|TX|GLU^KEEPME-GLUCOSE^L||SYNTHPHI-free text \F\ with \T\ escapes|mg/dL|||||F"_tCR
+        Set tText = tText_"NTE|1|L|SYNTHPHI-comment"_tCR
+        Set tText = tText_"ZPI|SYNTHPHI-Z||x"_tCR
+        Quit tText
+    }
+    If pName = "ack" {
+        Set tText = "MSH|^~\&|SYNTHPHI-APP|SYNTHPHI-FAC|||20010203090002||ACK^A01^ACK|SYNTHPHI-CTL2|P|2.5.1"_tCR
+        Set tText = tText_"MSA|AA|SYNTHPHI-CTL1"_tCR
+        Set tText = tText_"ERR||PID^1|101^Required field missing^HL70357|E"_tCR
+        Quit tText
+    }
+    If pName = "alt" {
+        Set tText = "MSH#!@$%#SYNTHPHI-APP#SYNTHPHI-FAC###20010203090008##ADT!A01!ADT_A01#SYNTHPHI-CTL8#P#2.5.1"_tCR
+        Set tText = tText_"PID#1##SYNTHPHI-MRN!!!SYNTHPHI-AA@SYNTHPHI-MRN2##SYNTHPHI-LAST!SYNTHPHI-FIRST%X##19010101#F"_tCR
+        Quit tText
+    }
+    If pName = "big" {
+        Set tBig = ""
+        For tI = 1:1:5400 { Set tBig = tBig_"SYNTHPHI-BIG " }
+        Set tText = "MSH|^~\&|SYNTHPHI-APP|SYNTHPHI-FAC|||20010203090009||ORU^R01^ORU_R01|SYNTHPHI-CTL9|P|2.5.1"_tCR
+        Set tText = tText_"PID|1||SYNTHPHI-MRN9||SYNTHPHI-LAST9^SYNTHPHI-FIRST9"_tCR
+        Set tText = tText_"OBX|1|TX|NOTE^KEEPME-NOTE^L||"_$Extract(tBig, 1, 70000)_"|||||F"_tCR
+        Quit tText
+    }
+    Quit ""
+}
+
+/// The 1500-character stream text, with CR, LF and tab.
+ClassMethod StreamText() As %String
+{
+    Set tText = ""
+    For tI = 1:1:100 { Set tText = tText_"SYNTHPHI-S"_tI_$Char(13, 10, 9)_"x" }
+    Quit $Extract(tText, 1, 1500)
+}
+
+/// Save pText as an unsent EnsLib.HL7.Message and return its ID, or the error text.
+ClassMethod SaveHl7(pText As %String) As %String
+{
+    Set tMsg = ##class(EnsLib.HL7.Message).ImportFromString(pText, .tSC)
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Set tSC = tMsg.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tMsg.%Id()
+}
+
+/// Save pText as a %Stream.GlobalCharacter and return its ID, or the error text.
+ClassMethod SaveStream(pText As %String) As %String
+{
+    Set tStream = ##class(%Stream.GlobalCharacter).%New()
+    Set tSC = tStream.Write(pText)
+    If $System.Status.IsOK(tSC) { Set tSC = tStream.%Save() }
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tStream.%Id()
+}
+
+/// Save pText as an Ens.StringRequest and return its ID, or the error text.
+ClassMethod SaveString(pText As %String) As %String
+{
+    Set tBody = ##class(Ens.StringRequest).%New(pText)
+    Set tSC = tBody.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tBody.%Id()
+}
+
+/// Save pText inside an Ens.StreamContainer and return its ID, or the error text.
+ClassMethod SaveContainer(pText As %String) As %String
+{
+    Set tStream = ##class(%Stream.GlobalCharacter).%New()
+    Set tSC = tStream.Write(pText)
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Set tBody = ##class(Ens.StreamContainer).%New(tStream)
+    Set tSC = tBody.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tBody.%Id()
+}
+
 /// Delete the database file and directory of the scratch database pName, after its configuration
 /// entry is gone. Refuses any name that is not EXECMCPTMP<digits><capital letter>.
 ClassMethod RemoveDatabaseFiles(pName As %String) As %String
@@ -163,6 +314,14 @@ ClassMethod Leftovers(pNames As %String) As %String
             If ##class(%File).DirectoryExists(tDir) { Do tList.%Push("directory "_tDir) }
             If ##class(Security.Applications).Exists("/csp/"_$ZConvert(tName, "L")) { Do tList.%Push("application /csp/"_$ZConvert(tName, "L")) }
             If ##class(Security.Resources).Exists("%DB_"_tName) { Do tList.%Push("resource %DB_"_tName) }
+            Set tS1 = ""
+            For {
+                Set tS1 = $Order(^%SYS("Ensemble", tS1))
+                Quit:tS1=""
+                If $Data(^%SYS("Ensemble", tS1, tName)) { Do tList.%Push("^%SYS(""Ensemble"","""_tS1_""","""_tName_""")") }
+            }
+            Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Pid FROM %SYS.ProcessQuery WHERE NameSpace = ?", tName)
+            While tRS.%Next() { Do tList.%Push("process "_tRS.%Get("Pid")_" in "_tName) }
         }
     } Catch ex {
         Do tList.%Push("EXCEPTION "_ex.DisplayString())
@@ -317,9 +476,104 @@ export async function seedHeaders(dev: ToolSession, name: string, set: SeedSet):
   }
 }
 
+/** The header IDs `seedBodies` returns: fixture pi (nine bodies) and fixture rho (three string bodies). */
+export const STORY392_IDS = { pi: "1,2,3,4,5,6,7,8,9", rho: "10,11,12" } as const;
+
+/**
+ * Seed the Story 39.2 body fixtures into the empty namespace `name`, and check the IDs they received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled `EXECMCPTMP392<capital letter>` namespace.
+ */
+export async function seedBodies(dev: ToolSession, name: string): Promise<void> {
+  assertFixtureName(name);
+  const content = await callChecked(
+    dev,
+    "iris_execute_classmethod",
+    { namespace: name, className: FIXTURE_CLASS, methodName: "SeedBodies", args: ["story392"] },
+    `seeding the body fixtures into ${name}`,
+  );
+  const returned = String(content.returnValue ?? "");
+  let ids: unknown;
+  try {
+    ids = JSON.parse(returned);
+  } catch {
+    throw new Error(`seeding the body fixtures into ${name} returned ${JSON.stringify(returned)}`);
+  }
+  if (JSON.stringify(ids) !== JSON.stringify(STORY392_IDS)) {
+    throw new Error(`seeding the body fixtures into ${name} returned ${JSON.stringify(returned)}`);
+  }
+}
+
+/** One segment as IRIS's own HL7 parser reads it: `fields[k - 1]` is field `k`, and MSH-1 is the separator. */
+export interface Hl7ParsedSegment {
+  name: string;
+  fields: string[];
+}
+
+/**
+ * The segments of the ER7 `text` as `EnsLib.HL7.Message` parses them in namespace `name`: an oracle for
+ * the redaction engine that does not share its code. Nothing is saved.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled `EXECMCPTMP392<capital letter>` namespace.
+ * @param text - Complete ER7 text.
+ */
+export async function hl7Fields(dev: ToolSession, name: string, text: string): Promise<Hl7ParsedSegment[]> {
+  assertFixtureName(name);
+  const content = await callChecked(
+    dev,
+    "iris_execute_classmethod",
+    { namespace: name, className: FIXTURE_CLASS, methodName: "Hl7Fields", args: [text] },
+    `parsing HL7 text in ${name}`,
+  );
+  const returned = String(content.returnValue ?? "");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(returned);
+  } catch {
+    throw new Error(`parsing HL7 text in ${name} returned ${JSON.stringify(returned.slice(0, 80))}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`parsing HL7 text in ${name} returned a non-array`);
+  return parsed as Hl7ParsedSegment[];
+}
+
+/**
+ * Production fixture sources (Story 39.2, DW-570): an operation that accepts every message, and a
+ * production that runs it as the enabled item `Story392.Target` with one job. The gate puts them into its
+ * own scratch namespace and starts the production there.
+ */
+export const STORY392_OPERATION_SOURCE = String.raw`Class Story392.Operation Extends Ens.BusinessOperation
+{
+
+Method OnMessage(pRequest As %Library.Persistent, Output pResponse As %Library.Persistent) As %Status
+{
+    Quit $$$OK
+}
+
+}
+`;
+
+export const STORY392_PRODUCTION_SOURCE = String.raw`Class Story392.Production Extends Ens.Production
+{
+
+XData ProductionDefinition
+{
+<Production Name="Story392.Production" LogGeneralTraceEvents="false">
+  <Description></Description>
+  <ActorPoolSize>1</ActorPoolSize>
+  <Item Name="Story392.Target" Category="" ClassName="Story392.Operation" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
+  </Item>
+</Production>
+}
+
+}
+`;
+
 /**
  * Everything that remains of the namespaces in `names`: the namespace, database configuration,
- * mappings, database, directory, `/csp/<ns>` application and `%DB_<ns>` resource. Empty when nothing
+ * mappings, database, directory, `/csp/<ns>` application, `%DB_<ns>` resource, any
+ * `^%SYS("Ensemble",*,<ns>)` subscript and any process running in the namespace. Empty when nothing
  * is left. The fixture class must be compiled in HSCUSTOM.
  *
  * @param dev - A session on a built iris-dev-mcp server.

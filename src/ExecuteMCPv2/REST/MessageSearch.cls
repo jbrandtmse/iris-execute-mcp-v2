@@ -108,6 +108,64 @@ ClassMethod TypeLabel(pType As %Integer) As %String
     Quit $Select(pType = 1: "Request", pType = 2: "Response", pType = 3: "Terminate", 1: "Unknown")
 }
 
+/// The kind of a message body, from its class alone and never from its content. The first test that
+/// holds decides, in this order: an empty class name is <code>literal</code> (the header's body ID is
+/// the value); a class that is not compiled is <code>missing</code>; <class>EnsLib.HL7.Message</class> is
+/// <code>hl7v2</code>; <class>EnsLib.EDI.XML.Document</class> is <code>xmlvdoc</code>;
+/// <class>Ens.VDoc.Interface</class> is <code>vdoc</code>; <class>%Stream.Object</class> is
+/// <code>stream</code>; <class>Ens.StreamContainer</class> is <code>streamContainer</code>;
+/// <class>%Library.Persistent</class> is <code>persistent</code>; anything else is <code>other</code>.
+/// A class that cannot be tested at all is <code>other</code>, the kind that is never redactable.
+ClassMethod BodyKind(pClassName As %String) As %String
+{
+    Set tKind = "other"
+    Try {
+        If pClassName = "" { Set tKind = "literal" Quit }
+        If '##class(%Dictionary.CompiledClass).%ExistsId(pClassName) { Set tKind = "missing" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.HL7.Message") { Set tKind = "hl7v2" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.EDI.XML.Document") { Set tKind = "xmlvdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.VDoc.Interface") { Set tKind = "vdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Stream.Object") { Set tKind = "stream" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.StreamContainer") { Set tKind = "streamContainer" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Library.Persistent") { Set tKind = "persistent" Quit }
+    } Catch {
+        Set tKind = "other"
+    }
+    Quit tKind
+}
+
+/// The complete ER7 text of the <class>EnsLib.HL7.Message</class> body <var>pBodyId</var> of class
+/// <var>pBodyClass</var>, in <var>pText</var>: children included, unsanitized and never cut, which is what
+/// a redaction engine needs. Returns <code>""</code> when <var>pText</var> holds the whole text,
+/// <code>tooLarge</code> when the text is longer than <var>pMaxChars</var> characters (then
+/// <var>pText</var> is empty), or <code>unreadable</code> on any failure. A failure never carries
+/// exception text.
+ClassMethod Hl7Text(pBodyClass As %String, pBodyId As %String, pMaxChars As %Integer, Output pText As %String) As %String
+{
+    Set pText = ""
+    Set tResult = "unreadable"
+    Try {
+        Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
+        If '$IsObject(tObj) { Quit }
+        If 'tObj.%Extends("EnsLib.HL7.Message") { Quit }
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tSC = tObj.OutputToLibraryStream(tStream)
+        If $$$ISERR(tSC) { Quit }
+        Set tSize = tStream.Size
+        If tSize > pMaxChars { Set tResult = "tooLarge" Quit }
+        Do tStream.Rewind()
+        Set tText = ""
+        While 'tStream.AtEnd { Set tText = tText _ tStream.Read(32000) }
+        If $Length(tText) '= tSize { Quit }
+        Set pText = tText
+        Set tResult = ""
+    } Catch {
+        Set pText = ""
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
 /// Build the header row for the current row of <var>pRS</var>, a result of a SELECT of
 /// <parameter>COLUMNS</parameter>. Times are the stored UTC strings: converting them is the caller's
 /// job. The row never carries <code>ErrorStatus</code> or <code>Description</code>.

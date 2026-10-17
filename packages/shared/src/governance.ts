@@ -54,6 +54,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { parseDataPolicyValue, type DataPolicy } from "./data-policy.js";
 import type { ToolDefinition } from "./tool-types.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 
@@ -86,6 +87,15 @@ export interface GovernanceConfig {
   global?: GovernanceLayer;
   /** Per-profile overrides: profile name → that profile's key overrides. */
   profiles?: Record<string, GovernanceLayer>;
+  /**
+   * The PHI data policy section (Story 39.2): `{"global": "<policy>", "profiles": {"<name>":
+   * "<policy>"}}`, both members optional. It is read only from `IRIS_GOVERNANCE_FILE`; `IRIS_GOVERNANCE`
+   * rejects the key. It is not a governance layer: it holds policy names, never keys.
+   */
+  dataPolicy?: {
+    global?: DataPolicy;
+    profiles?: Record<string, DataPolicy>;
+  };
 }
 
 /**
@@ -322,7 +332,7 @@ export function parseGovernanceConfig(
     throw governanceError(`could not parse JSON (${reason}).`);
   }
 
-  return parseGovernanceRoot(parsed, governanceError);
+  return parseGovernanceRoot(parsed, governanceError, "env");
 }
 
 /** The documented governance document shape, as the unrecognized-key error names it. */
@@ -354,6 +364,7 @@ function looksLikeGovernance(key: string, value: unknown): boolean {
 function parseGovernanceRoot(
   parsed: unknown,
   fail: (detail: string) => Error,
+  channel: "env" | "file",
 ): GovernanceConfig {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw fail(
@@ -366,6 +377,16 @@ function parseGovernanceRoot(
 
   for (const [key, value] of Object.entries(root)) {
     if (key === "global" || key === "profiles") continue;
+    if (key === "dataPolicy") {
+      // Story 39.2: the data policy is not a governance layer. The file carries it; the env channel
+      // names the channels that can.
+      if (channel === "env") {
+        throw fail(
+          '"dataPolicy" is read only from IRIS_GOVERNANCE_FILE. Set IRIS_DATA_POLICY for every profile, or "dataPolicy" on an IRIS_PROFILES entry for one.',
+        );
+      }
+      continue;
+    }
     if (looksLikeGovernance(key, value)) {
       throw fail(
         `"${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape ${GOVERNANCE_SHAPE}: put the key under "global" to apply it to every profile, or under "profiles" for one profile.`,
@@ -406,7 +427,65 @@ function parseGovernanceRoot(
     config.profiles = profiles;
   }
 
+  if (channel === "file" && root.dataPolicy !== undefined) {
+    config.dataPolicy = parseDataPolicySection(root.dataPolicy, fail);
+  }
+
   return config;
+}
+
+/** The detail of a data-policy value error: it names the key and never the value. */
+function dataPolicyValueError(label: string, fail: (detail: string) => Error): Error {
+  return fail(`"${label}" must be "block", "redact" or "allow".`);
+}
+
+/**
+ * Validate the governance file's `dataPolicy` section (Story 39.2): an object with the optional
+ * members `global` (a policy) and `profiles` (a profile name to a policy). Every error names the key
+ * and never echoes a value.
+ */
+function parseDataPolicySection(
+  raw: unknown,
+  fail: (detail: string) => Error,
+): NonNullable<GovernanceConfig["dataPolicy"]> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw fail(
+      '"dataPolicy" must be a JSON object, e.g. {"global":"redact","profiles":{"<profile>":"allow"}}.',
+    );
+  }
+  const section = raw as Record<string, unknown>;
+  for (const key of Object.keys(section)) {
+    if (key !== "global" && key !== "profiles") {
+      throw fail(`"dataPolicy.${key}" is not a recognized key. Use "global" and "profiles".`);
+    }
+  }
+  const result: NonNullable<GovernanceConfig["dataPolicy"]> = {};
+  if (section.global !== undefined) {
+    const policy = parseDataPolicyValue(section.global);
+    if (policy === undefined) throw dataPolicyValueError("dataPolicy.global", fail);
+    result.global = policy;
+  }
+  if (section.profiles !== undefined) {
+    if (
+      section.profiles === null ||
+      typeof section.profiles !== "object" ||
+      Array.isArray(section.profiles)
+    ) {
+      throw fail('"dataPolicy.profiles" must be a JSON object mapping a profile name to a policy.');
+    }
+    const profiles: Record<string, DataPolicy> = Object.create(null) as Record<string, DataPolicy>;
+    for (const [name, value] of Object.entries(section.profiles as Record<string, unknown>)) {
+      if (name === "") throw fail('"dataPolicy.profiles": profile names must be non-empty strings.');
+      if (RESERVED_KEYS.has(name)) {
+        throw fail(`"dataPolicy.profiles": "${name}" is a reserved key and cannot be used as a profile name.`);
+      }
+      const policy = parseDataPolicyValue(value);
+      if (policy === undefined) throw dataPolicyValueError(`dataPolicy.profiles.${name}`, fail);
+      profiles[name] = policy;
+    }
+    result.profiles = profiles;
+  }
+  return result;
 }
 
 /**
@@ -422,13 +501,29 @@ export function unknownProfileWarnings(
   source: string,
   configuredProfiles: readonly string[],
 ): string[] {
-  if (config?.profiles === undefined) return [];
-  return Object.keys(config.profiles)
-    .filter((name) => !configuredProfiles.includes(name))
-    .map(
-      (name) =>
-        `${source}: profile "${name}" under "profiles" is not a configured profile, so its overrides apply to no connection. Check the name against the configured profiles: ${configuredProfiles.join(", ")}.`,
+  const warnings: string[] = [];
+  if (config?.profiles !== undefined) {
+    warnings.push(
+      ...Object.keys(config.profiles)
+        .filter((name) => !configuredProfiles.includes(name))
+        .map(
+          (name) =>
+            `${source}: profile "${name}" under "profiles" is not a configured profile, so its overrides apply to no connection. Check the name against the configured profiles: ${configuredProfiles.join(", ")}.`,
+        ),
     );
+  }
+  // Story 39.2: the file's data policy section names profiles the same way.
+  if (config?.dataPolicy?.profiles !== undefined) {
+    warnings.push(
+      ...Object.keys(config.dataPolicy.profiles)
+        .filter((name) => !configuredProfiles.includes(name))
+        .map(
+          (name) =>
+            `${source}: profile "${name}" under "dataPolicy.profiles" is not a configured profile, so its data policy applies to no connection. Check the name against the configured profiles: ${configuredProfiles.join(", ")}.`,
+        ),
+    );
+  }
+  return warnings;
 }
 
 /**
@@ -596,7 +691,7 @@ export function parseGovernanceFileText(text: string, path: string): GovernanceC
     throw fail(`could not parse JSON (${reason}).`);
   }
 
-  return parseGovernanceRoot(parsed, fail);
+  return parseGovernanceRoot(parsed, fail, "file");
 }
 
 /**
@@ -748,6 +843,49 @@ export function buildDefaultEnabledWrites(
     }
   }
   return set;
+}
+
+/**
+ * Fail fast (Story 39.2, AD-19) when a tool's {@link ToolDefinition.dataPolicy} declaration does not
+ * match the tool: an `actions` entry that is not a member of the tool's `action` enum, or a
+ * `phiInputs` entry that is not a key of its input schema (`server` included, which the framework
+ * adds). The error names the tool. A tool with no declaration contributes nothing.
+ */
+export function assertDataPolicyDeclarations(tools: Iterable<ToolDefinition>): void {
+  for (const tool of tools) {
+    const declared = tool.dataPolicy;
+    if (declared === undefined) continue;
+    if (declared.actions !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options = unwrapActionOptions((tool.inputSchema as any)?.shape?.action);
+      const known = Array.isArray(options) ? options.map(String) : [];
+      const unknown = declared.actions.filter((action) => !known.includes(action));
+      if (unknown.length > 0) {
+        throw new Error(
+          `Tool "${tool.name}" declares dataPolicy actions ${JSON.stringify(unknown)} that are not actions of the tool. ` +
+            `List only values of the tool's \`action\` enum.`,
+        );
+      }
+    }
+    if (declared.phiInputs !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const shape = ((tool.inputSchema as any)?.shape ?? {}) as Record<string, unknown>;
+      if (declared.phiInputs.includes("server")) {
+        throw new Error(
+          `Tool "${tool.name}" declares dataPolicy phiInputs "server", which is the framework's profile parameter, not a tool input.`,
+        );
+      }
+      const absent = declared.phiInputs.filter(
+        (key) => !Object.prototype.hasOwnProperty.call(shape, key),
+      );
+      if (absent.length > 0) {
+        throw new Error(
+          `Tool "${tool.name}" declares dataPolicy phiInputs ${JSON.stringify(absent)} that are not inputs of the tool. ` +
+            `List only keys of the tool's input schema.`,
+        );
+      }
+    }
+  }
 }
 
 /**

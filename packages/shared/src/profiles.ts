@@ -32,6 +32,7 @@
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
+import { parseDataPolicyValue, type DataPolicy } from "./data-policy.js";
 import { IrisHttpClient } from "./http-client.js";
 import { logger } from "./logger.js";
 import { parseServerManagerMode, resolveServerManagerProfiles } from "./server-manager-source.js";
@@ -161,6 +162,11 @@ export interface ProfileOverride {
   namespace?: unknown;
   https?: unknown;
   timeout?: unknown;
+  /**
+   * The profile's PHI data policy (Story 39.2): `block`, `redact` or `allow`, in any letter case. It
+   * belongs to this entry alone and is never inherited from `base`.
+   */
+  dataPolicy?: unknown;
 }
 
 /** Recompute the base URL from connection parts (mirrors {@link loadConfig}). */
@@ -343,6 +349,19 @@ export function mergeProfile(
     timeout = t;
   }
 
+  // dataPolicy (Story 39.2): a safety control, so it is read from the override only and never
+  // inherited from `base` (AD-9). The text names the field and never echoes the value.
+  let dataPolicy: DataPolicy | undefined;
+  if (override.dataPolicy !== undefined) {
+    dataPolicy = parseDataPolicyValue(override.dataPolicy);
+    if (dataPolicy === undefined) {
+      throw profilesError(
+        `profile "${name}": "dataPolicy" must be "block", "redact" or "allow".`,
+        sourceLabel,
+      );
+    }
+  }
+
   return {
     name,
     host,
@@ -388,6 +407,7 @@ export function mergeProfile(
     // for every profile this function builds.
     source,
     ...(pathPrefix !== undefined ? { pathPrefix } : {}),
+    ...(dataPolicy !== undefined ? { dataPolicy, dataPolicySource: "IRIS_PROFILES" as const } : {}),
   };
 }
 

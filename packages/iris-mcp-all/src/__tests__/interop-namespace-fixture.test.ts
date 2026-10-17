@@ -9,9 +9,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
+  STORY392_IDS,
   createInteropNamespace,
+  hl7Fields,
   leftovers,
   removeInteropNamespace,
+  seedBodies,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
 
@@ -46,6 +49,8 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(createInteropNamespace(admin, dev, name, { interop: true })).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedHeaders(dev, name, "alpha")).rejects.toThrow(/not a fixture namespace name/);
       await expect(leftovers(dev, [name])).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedBodies(dev, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(hl7Fields(dev, name, "MSH|^~\\&|")).rejects.toThrow(/not a fixture namespace name/);
 
       expect(admin.call).not.toHaveBeenCalled();
       expect(dev.call).not.toHaveBeenCalled();
@@ -61,6 +66,22 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     expect(dev.call).toHaveBeenCalledWith(
       "iris_execute_classmethod",
       expect.objectContaining({ methodName: "Leftovers", args: ["EXECMCPTMP391A,EXECMCPTMP39200B"] }),
+    );
+  });
+
+  it("lets a scratch name through for the Story 39.2 body seed and HL7 parse, too", async () => {
+    const seeder = stubSession(JSON.stringify(STORY392_IDS));
+    await expect(seedBodies(seeder, "EXECMCPTMP392A")).resolves.toBeUndefined();
+    expect(seeder.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP392A", methodName: "SeedBodies", args: ["story392"] }),
+    );
+
+    const parser = stubSession("[]");
+    await expect(hl7Fields(parser, "EXECMCPTMP392A", "MSH|^~\\&|")).resolves.toEqual([]);
+    expect(parser.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP392A", methodName: "Hl7Fields" }),
     );
   });
 });

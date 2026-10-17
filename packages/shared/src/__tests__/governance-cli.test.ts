@@ -797,3 +797,60 @@ describe("32-4-R1 — VALUED_OPTIONS single-sourcing pin", () => {
     expect(source).not.toMatch(/const valuedOptions = new Set\(/);
   });
 });
+
+// -- Story 39.2: the file's dataPolicy section ---------------------------
+
+describe("Story 39.2: the governance file's dataPolicy section", () => {
+  const DATA_POLICY = { global: "redact", profiles: { prod: "block", dev: "allow" } };
+  const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
+
+  it("validate accepts a file with a dataPolicy section, and does not count it as a layer", async () => {
+    writeGovernance({ global: { iris_doc_put: false }, dataPolicy: DATA_POLICY });
+    const { deps, stdout } = baseDeps();
+    const code = await runCli(["validate", "--file", file], deps);
+    expect(code).toBe(0);
+    expect(stdout.text).toContain("is a valid governance file (1 global key(s), 0 profile(s))");
+  });
+
+  it("validate rejects a malformed dataPolicy section with the loader's text, naming the key and not the value", async () => {
+    writeGovernance({ dataPolicy: { global: "SYNTHPHI-open" } });
+    const { deps, stderr } = baseDeps();
+    const code = await runCli(["validate", "--file", file], deps);
+    expect(code).toBe(1);
+    expect(stderr.text).toContain('"dataPolicy.global" must be "block", "redact" or "allow".');
+    expect(stderr.text).not.toContain("SYNTHPHI");
+  });
+
+  it("set keeps the dataPolicy section byte for byte, in its place, and the written file still validates", async () => {
+    const section = JSON.stringify(DATA_POLICY, null, 2).split("\n").join("\n  ");
+    writeGovernance(`{\n  "global": {\n    "iris_doc_put": true\n  },\n  "dataPolicy": ${section}\n}\n`);
+    const { deps } = baseDeps();
+    const code = await runCli(["set", "iris_sql_execute", "false", "--file", file], deps);
+    expect(code).toBe(0);
+    const written = readFileSync(file, "utf8");
+    expect(written).toContain(`"dataPolicy": ${section}`);
+    expect(JSON.parse(written)).toEqual({
+      global: { iris_doc_put: true, iris_sql_execute: false },
+      dataPolicy: DATA_POLICY,
+    });
+    expect(Object.keys(JSON.parse(written) as object)).toEqual(["global", "dataPolicy"]);
+    const again = baseDeps();
+    expect(await runCli(["validate", "--file", file], again.deps)).toBe(0);
+  });
+
+  it("unset keeps the dataPolicy section too", async () => {
+    writeGovernance({ global: { iris_doc_put: true }, dataPolicy: DATA_POLICY });
+    const unset = baseDeps();
+    expect(await runCli(["unset", "iris_doc_put", "--file", file], unset.deps)).toBe(0);
+    expect((JSON.parse(readFileSync(file, "utf8")) as { dataPolicy: unknown }).dataPolicy).toEqual(DATA_POLICY);
+  });
+
+  it("check accepts the file: the dataPolicy section is not a key", async () => {
+    writeGovernance({ global: { iris_doc_put: false }, dataPolicy: DATA_POLICY });
+    const { deps, stdout, stderr } = baseDeps();
+    const code = await runCli(["check", "--file", file, "--root", repoRoot], deps);
+    expect(stderr.text).toBe("");
+    expect(code).toBe(0);
+    expect(stdout.text).toContain("OK: all 1 key(s) in IRIS_GOVERNANCE_FILE");
+  }, 60_000);
+});

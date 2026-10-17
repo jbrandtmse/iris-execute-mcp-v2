@@ -137,6 +137,15 @@ const gateTestFiles = [
   // EXECMCPTMP391A, EXECMCPTMP391B and EXECMCPTMP391C (their database files and directories too) and the HSCUSTOM class
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-39-1-message-search-live-gate.test.ts",
+  // Story 39.2: the PHI data policy over the `iris_message_resend` preview, `iris_server_profiles` and the audit log over real stdio JSON-RPC
+  // against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists, raw HTTP to the preview and `resendFiltered` routes, and IRIS's
+  // own HL7 parser as the oracle. Writes only the disposable namespace and database EXECMCPTMP392A (its database files and directory too), the
+  // production Story392.Production started and stopped inside it, and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes,
+  // asserting nothing is left.
+  "src/__tests__/story-39-2-data-policy-live-gate.test.ts",
+  // Story 39.2: a bad data-policy setting fails the BUILT iris-interop-mcp dist's startup, and valid ones are reported, against a local
+  // listener that records requests; no IRIS instance is contacted.
+  "src/__tests__/story-39-2-data-policy-startup.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

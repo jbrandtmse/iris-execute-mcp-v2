@@ -146,6 +146,25 @@ export interface ToolDefinition {
    * declaring a parent, the governance policy is byte-for-byte unchanged.
    */
   parent?: string;
+  /**
+   * The PHI data policy declaration of a tool that returns message-body data (Story 39.2, AD-19 and
+   * AD-26). A tool without it is outside the data policy: it is either residual or not applicable, as
+   * `tool_support.md` records.
+   *
+   * - `actions` lists the `action` values the policy governs. Absent, the policy governs every call.
+   *   Each one must be a member of the tool's `action` enum.
+   * - `phiInputs` lists the top-level input keys that carry PHI (a search value, a body filter value).
+   *   The audit log redacts those values under the `redact` and `block` policies and for an unresolved
+   *   profile. Each key must exist in the tool's input schema, and `server` is never one. This is a
+   *   declaration about the schema; the audit log never decides by matching parameter names.
+   *
+   * `McpServerBase` validates both lists at registration and throws, naming the tool, on a
+   * mismatch.
+   */
+  dataPolicy?: {
+    actions?: readonly string[];
+    phiInputs?: readonly string[];
+  };
   /** Async handler invoked when the tool is called. */
   handler: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }

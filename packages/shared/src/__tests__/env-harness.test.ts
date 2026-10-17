@@ -16,14 +16,15 @@ import {
   scrubStartupEnv,
 } from "./startup-env.js";
 
-// The roster as the Story 39.0 spec fixes it (exhaustive as of 2026-10-16), copied by hand: the behavior rows below
-// run over THESE names, so removing a name from `startup-env.ts` makes them fail instead of silently shrinking.
+// The roster as the Story 39.0 spec fixes it (exhaustive as of 2026-10-16), plus the Story 39.2 operator variable
+// IRIS_DATA_POLICY, copied by hand: the behavior rows below run over THESE names, so removing a name from
+// `startup-env.ts` makes them fail instead of silently shrinking.
 const STARTUP_NAMES = [
   "IRIS_PROFILES", "IRIS_TIMEOUT", "IRIS_ACCEPT_LANGUAGE", "IRIS_GOVERNANCE", "IRIS_GOVERNANCE_FILE",
   "IRIS_GOVERNANCE_PRESET", "IRIS_TOOLS_PRESET", "IRIS_TOOLS_DISABLE", "IRIS_TOOLS_ENABLE", "IRIS_SERVER_MANAGER",
   "IRIS_SM_SERVERS", "IRIS_SM_SETTINGS_PATHS", "IRIS_SM_WORKSPACE", "IRIS_CREDENTIAL_HELPER", "IRIS_SQL_MAX_ROWS",
-  "IRIS_SQL_TIMEOUT", "IRIS_SQL_READ_ONLY", "IRIS_SQL_MAX_ROWS_AFFECTED", "IRIS_TEST_TIMEOUT", "IRIS_AUDIT_LOG",
-  "IRIS_AUDIT_LOG_MAX_MB", "IRIS_AUDIT_LOG_PARAMS", "LOG_LEVEL", "MCP_TRANSPORT",
+  "IRIS_SQL_TIMEOUT", "IRIS_SQL_READ_ONLY", "IRIS_SQL_MAX_ROWS_AFFECTED", "IRIS_TEST_TIMEOUT", "IRIS_DATA_POLICY",
+  "IRIS_AUDIT_LOG", "IRIS_AUDIT_LOG_MAX_MB", "IRIS_AUDIT_LOG_PARAMS", "LOG_LEVEL", "MCP_TRANSPORT",
 ];
 const CONNECTION_NAMES = ["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE", "IRIS_HTTPS"];
 const PLATFORM_NAMES = ["HOME", "APPDATA", "XDG_CONFIG_HOME"];
@@ -68,11 +69,11 @@ function expectHostileRestored(): void {
 }
 
 describe("the variable rosters", () => {
-  it("name the spec's 24 startup, 6 connection and 3 platform variables, with no name in two lists", () => {
+  it("name the 25 startup, 6 connection and 3 platform variables, with no name in two lists", () => {
     expect([...STARTUP_ENV_VARS].sort()).toEqual([...STARTUP_NAMES].sort());
     expect([...CONNECTION_ENV_VARS].sort()).toEqual([...CONNECTION_NAMES].sort());
     expect([...PLATFORM_ENV_VARS].sort()).toEqual([...PLATFORM_NAMES].sort());
-    expect(STARTUP_NAMES).toHaveLength(24);
+    expect(STARTUP_NAMES).toHaveLength(25);
     const all = [...STARTUP_NAMES, ...CONNECTION_NAMES, ...PLATFORM_NAMES];
     expect(new Set(all).size).toBe(all.length);
   });

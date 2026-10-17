@@ -2,6 +2,60 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 39.2: PHI data policy
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). One existing output changes by
+default, as the Project Lead sanctioned (L-2): the `iris_message_resend` preview. `IRIS_DATA_POLICY=allow` restores it
+exactly.
+
+### Changed
+
+- **The `iris_message_resend` preview shows less of a message body by default.** Under the new default data policy
+  `redact`, the body summary of a stream body (the first ~1 KB of text) and of every other non-HL7 body is withheld, with
+  `bodySummary: ""` and a reason in the item's `bodyPolicy`; an HL7 v2 body keeps today's class-name note,
+  `(non-stream body; class=EnsLib.HL7.Message)`, and no HL7 body text is requested from IRIS or shown. Each found item
+  gains `bodyKind` and `bodyPolicy`, and the result gains `dataPolicy: {policy, redacted, blocked}` and one trailing
+  text line. A header with no readable body (a missing class, a literal body, a body that does not open) has the outcome
+  `none`. With the policy set to `allow`, the request and the result are today's, with none of the new fields; `block`
+  withholds every body. This is the one sanctioned AD-15 change of the story; it is named here with the story.
+- **`BOOTSTRAP_VERSION` moves `6dcdd238c792` to `d440a659ba1e`**; the bootstrap still embeds 31 classes. The preview route
+  accepts the optional request fields `bodyDetail` (`kind` or `text`) and `bodyTextMaxChars` (1 to 1048576), validated
+  before the namespace switch; a request without them gets today's response. `MessageResend.PreviewOne` takes its type
+  label from `MessageSearch.TypeLabel` (DW-575), with the same output.
+
+### Added
+
+- **A per-profile PHI data policy: `block`, `redact` or `allow`, default `redact`.** It resolves for each profile, taking
+  the first value found: the `dataPolicy` field of the profile's `IRIS_PROFILES` entry, the new operator variable
+  `IRIS_DATA_POLICY`, the governance file's `dataPolicy.profiles.<name>`, its `dataPolicy.global`, then `redact`. A value
+  on the `default` entry applies to `default` only. `IRIS_GOVERNANCE` rejects a `dataPolicy` key and names the right
+  channels; a malformed value fails startup naming the channel; an unknown profile name under `dataPolicy.profiles` only
+  warns. `iris_server_profiles` reports `dataPolicy` and `dataPolicySource` for every profile. A call can only tighten the
+  operator's policy (`tightenDataPolicy`); no tool takes a policy parameter yet.
+- **The audit log records the policy.** An entry for a governed call carries `dataPolicy: {policy, redacted, blocked}`
+  (counts only), `outcome` keeps `ok`, `error` and `denied`, and a tool declares its PHI-bearing inputs on its
+  `ToolDefinition` (`dataPolicy.phiInputs`): under `IRIS_AUDIT_LOG_PARAMS` those values are written as `"[REDACTED]"`
+  under `redact`, under `block` and for an unknown profile. Message-body content never reaches the audit file or the
+  console log.
+- **An HL7 v2 (ER7) redaction engine in `@iris-mcp/shared` (`redactHl7`), with no tool consumer until Story 39.5.** It is
+  fail-closed: it keeps a reviewed list of non-identifying fields per segment and redacts every other field, every field
+  of a segment nobody reviewed and every field of a Z-segment, preserving segment order, terminators and separators. The
+  list and a separate Safe Harbor inventory (45 CFR 164.514(b)(2)(i), reviewed 2026-10-16) are tested to be disjoint. The
+  new IRIS-side classifier `MessageSearch.BodyKind` decides a body's kind from its class alone.
+- **The refusal code `DATA_POLICY_BLOCKED`** joins the catalog, for the tools of Stories 39.3 and 39.4.
+- **A classification of every tool of the suite** (109 names) as governed, residual or not applicable, as of 2026-10-16,
+  in `tool_support.md`: only the resend preview is governed; `iris_sql_execute`, `iris_global_get`,
+  `iris_production_logs`, `iris_message_diagram` and the other residual tools can still return body-derived text and are
+  restricted through their governance keys.
+- The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+### Tests
+
+- **A live gate on a disposable namespace** drives the built interop server through `redact`, `block`, `allow`, a
+  profile of its own and the audit log, and checks the preview against a capture taken before the change. It also covers
+  the executing path of `resendFiltered` (DW-570) against a production started and stopped in the scratch namespace.
+
 ## [Pre-release — 2026-10-16] — Story 39.1: Message header search
 
 One tool is added, `iris_message_search`: the interop server goes from 22 to 23 package tools (24 advertised) and the
