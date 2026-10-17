@@ -3104,3 +3104,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: Rule 2 (cr 39.1): spec-forced copy; PreviewOne is frozen in 39.1 (Never list) and the spec change log names 39.2 as the story that moves it onto TypeLabel
 - 2026-10-17T03:11:34Z status=routed owner=39-2-phi-data-policy by=cr note=when 39.2 edits PreviewOne, call ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType) instead of its own $Select
+
+### DW-576: PHI data policy does not yet govern iris_production_logs (Text can carry segment text) or iris_message_diagram (sanitized ErrorStatus filled by parser errors with segment text); under the default redact they still show it
+- source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md (decision 26) | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 39.2 plan: TCPOutboundAdapter.cls:68,72, Parser.cls:262,287 (logs); Parser.cls:223,280, Correlator.cls:194-198 (diagram); AD-15 sanctioned only the preview change in 39.2
+- 2026-10-17T03:55:04Z status=routed owner=burndown by=lead note=Epic 39 burn-down: bring both under dataPolicy (a sanctioned AD-15 change, orchestrator decision 26) or document as residual with an operator switch

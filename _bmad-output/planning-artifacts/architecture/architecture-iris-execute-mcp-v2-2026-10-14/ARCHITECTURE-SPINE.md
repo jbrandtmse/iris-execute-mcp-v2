@@ -459,6 +459,14 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - Values are always passed as parameters.
     - Fuzz tests drive the REST route directly.
   - **The policy.** A per-profile `dataPolicy` (`block`, `redact` or `allow`; default `redact`) applies to every body-derived output. It is never inherited from the `default` entry (AD-9).
+  - **Configuration** (Story 39.2, orchestrator decisions #23–#26, 2026-10-16).
+    - `dataPolicy` resolves per profile at startup, taking the first value found: the profile's `IRIS_PROFILES` `dataPolicy`, then `IRIS_DATA_POLICY`, then the governance file's `dataPolicy.profiles.<name>`, then its `dataPolicy.global`, then `redact`.
+    - `IRIS_GOVERNANCE` does not carry it. A malformed value fails startup naming its channel. An unknown profile name only warns.
+    - `iris_server_profiles` reports `dataPolicy` and `dataPolicySource`.
+    - Body kind comes from `MessageSearch.BodyKind`. Only `hl7v2` is redactable, by a fail-closed keep-list (`hl7-redaction.ts`): a field nobody reviewed is redacted, never kept.
+    - **Least exposure by default.** Under `redact`, no surface shows more body text than it did before this policy existed. The resend preview keeps its HL7 class-name note and withholds non-HL7 bodies with a reason. The engine's first body-text consumer is `iris_message_body` (Story 39.5).
+    - In 39.2 the policy governs the resend preview only. `iris_production_logs` and `iris_message_diagram` are residual, and ledgered for the Epic 39 burn-down.
+    - The scope as of 2026-10-16 is recorded in `tool_support.md`.
   - **What redaction may read.** Redaction runs only on the complete, unsanitized body. Truncation and sanitization come after redaction, in TypeScript.
     - Body kind comes from the body class, through one shared classifier owned by Story 39.2, never from sniffing content.
     - Under `redact`, a body type the engine cannot redact reliably is blocked, and so is any surface that can supply only a pre-truncated or pre-sanitized body.
