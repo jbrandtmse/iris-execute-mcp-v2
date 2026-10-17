@@ -26,3 +26,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-17T00:47:22Z	Story 39.0	cr_complete	spawn_at=2026-10-17T00:14:32Z model=claude-opus-5-5 resolved=8 fixed_at_source=8 deferred=1 dismissed=13 high=0 med=5 low=4 rows=24 unresolved_high_med=1 review_outcome=CLEAN failed_layers=none review_tier=full-opus new_dw=none occurrences=DW-506 status=done clarifications=0 closing_sections_present=true cycle_iteration=1
 2026-10-17T00:47:22Z	Story 39.0	ledger_adjudicated	owned=3 resolved=3 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-17T00:47:22Z	Story 39.0	smoke_complete	method=cli_built_governance_check+built_dev_process result=pass iterations=1 defects_caught=0 checks=3 evidence=inline:valid_doc_exit0,typo_doc_exit1,dead_key_one_WARN_no_fatal model=claude-opus-5-5
+2026-10-17T00:48:25Z	Story 39.0	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1034 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
