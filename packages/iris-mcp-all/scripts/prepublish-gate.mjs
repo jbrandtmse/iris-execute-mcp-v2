@@ -132,6 +132,86 @@ const gateTestFiles = [
   // `iris_doc_get` soft error and `ignoreConflict: false` over real stdio JSON-RPC against the BUILT iris-interop-mcp and iris-dev-mcp dists:
   // writes only the disposable ExecuteMCPv2.Temp.QaStory387WirePlain.cls (compiled), ...Draft.cls (never compiled) and ...Loaded.cls documents.
   "src/__tests__/story-38-7-qa-wire-gate.test.ts",
+  // Story 39.1: `iris_message_search` `headers` and the `resendFiltered` wire over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, and raw HTTP to the route. Writes only the disposable namespaces and databases
+  // EXECMCPTMP391A, EXECMCPTMP391B and EXECMCPTMP391C (their database files and directories too) and the HSCUSTOM class
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-1-message-search-live-gate.test.ts",
+  // Story 39.2: the PHI data policy over the `iris_message_resend` preview, `iris_server_profiles` and the audit log over real stdio JSON-RPC
+  // against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists, raw HTTP to the preview and `resendFiltered` routes, and IRIS's
+  // own HL7 parser as the oracle. Writes only the disposable namespace and database EXECMCPTMP392A (its database files and directory too), the
+  // production Story392.Production started and stopped inside it, and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes,
+  // asserting nothing is left.
+  "src/__tests__/story-39-2-data-policy-live-gate.test.ts",
+  // Story 39.2: a bad data-policy setting fails the BUILT iris-interop-mcp dist's startup, and valid ones are reported, against a local
+  // listener that records requests; no IRIS instance is contacted.
+  "src/__tests__/story-39-2-data-policy-startup.test.ts",
+  // Story 39.2 QA: the BUILT iris-interop-mcp dist against a local listener that records requests and replies as a hostile or version-skewed IRIS
+  // (the wire body per policy, no body content in the result, the audit file or stderr, the four channels in order), and `redactHl7` of the BUILT
+  // shared dist in a fresh Node process against the reviewed keep-list table; no IRIS instance is contacted.
+  "src/__tests__/story-39-2-qa-process.test.ts",
+  // Story 39.3: `iris_message_search` `body`, its data policy and audit rows over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, and the injection fuzz over raw HTTP to the route, with a hand-written JOIN as the oracle. Writes
+  // only the disposable namespaces and databases EXECMCPTMP393A, EXECMCPTMP393B and EXECMCPTMP393C (their database files and directories
+  // too, and the Story393 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes,
+  // asserting nothing is left.
+  "src/__tests__/story-39-3-body-search-live-gate.test.ts",
+  // Story 39.3 QA: `iris_message_search` `body` on the BUILT iris-interop-mcp dist against a local listener that records requests and replies
+  // as a padded or version-skewed IRIS (block sends no route request, the wire body of redact and allow, header rows only, the audit file
+  // and the console log); no IRIS instance is contacted.
+  "src/__tests__/story-39-3-qa-process.test.ts",
+  // Story 39.3 QA: the value forms of date, time, timestamp and number properties, the three kinds of stream, and the statements the route
+  // prepared (read back from INFORMATION_SCHEMA.STATEMENTS) over real stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and
+  // iris-admin-mcp dists and raw HTTP to the route. Writes only the disposable namespace and database EXECMCPTMP393Q (its database files and
+  // directory too) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-3-qa-live-gate.test.ts",
+  // Story 39.4: `iris_message_search` `searchTable`, its data policy and audit rows over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, the injection fuzz over raw HTTP to the route, and the plan of the statements the route prepared
+  // (read back from INFORMATION_SCHEMA.STATEMENTS), with a hand-written IN / NOT IN oracle over the search table. Writes only the disposable
+  // namespaces and databases EXECMCPTMP394A, EXECMCPTMP394B and EXECMCPTMP394C (their database files and directories too, and the Story393.Side
+  // and Story394 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting
+  // nothing is left.
+  "src/__tests__/story-39-4-search-table-live-gate.test.ts",
+  // Story 39.4 QA: `iris_message_search` `searchTable` on the BUILT iris-interop-mcp dist against a local listener that records requests and
+  // replies as a padded or version-skewed IRIS (block sends no route request, the wire body of redact and allow with every scope filter and
+  // the cursor, header rows only, both notApplicable answers, the audit file and the console log); no IRIS instance is contacted.
+  "src/__tests__/story-39-4-qa-process.test.ts",
+  // Story 39.4 QA: a lookup in HSCUSTOM (a real Interoperability namespace with no Search Table property, read-only: a row count and lookups
+  // that read no message), filters that combine with AND on one multi-valued property, and every scope filter at once with paging, over real
+  // stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists and raw HTTP to the route. Writes only the
+  // disposable namespace and database EXECMCPTMP394Q (its database files and directory too, and the Story394 classes inside it) and the
+  // HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-4-qa-live-gate.test.ts",
+  // Story 39.5: `iris_message_body`, its data policy, the wire per policy (read back through a recording proxy), the audit file and the console
+  // log over real stdio JSON-RPC against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists, raw HTTP to the route, the DW-577
+  // size precheck against the length IRIS serializes, and IRIS's own HL7 parser as the oracle. Writes only the disposable namespaces and
+  // databases EXECMCPTMP395A, EXECMCPTMP395B and EXECMCPTMP395C (their database files and directories too, and the Story395 classes inside
+  // them; EXECMCPTMP395P, the Task 0 probe namespace, is only removed by name) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture,
+  // which it removes, asserting nothing is left. No production is started.
+  "src/__tests__/story-39-5-body-reader-live-gate.test.ts",
+  // Story 39.5 QA: `iris_message_body` on the BUILT iris-interop-mcp dist against a local listener that records requests and replies as a hostile or
+  // version-skewed IRIS (the wire of redact, allow and block, a caller that cannot widen the read, a text and an extra field for every kind of
+  // body, the bounds of the input, the cut at every maxChars, the HL7 v2 shapes a hostile IRIS could send, the audit file and the console log);
+  // no IRIS instance is contacted.
+  "src/__tests__/story-39-5-qa-process.test.ts",
+  // Story 39.5 QA: the HL7 v2 shapes IRIS stores (a BOM, LF and CRLF ends, a split line, escapes, other separators, control characters, a batch,
+  // non-ASCII values), the 65536-character read limit exactly, the stream reader around its length, astral text and IRIS's own cut inside a
+  // surrogate pair, bodies whose class throws, 20 headers of the largest body, and the odd forms of the route's inputs, over real stdio JSON-RPC
+  // against the BUILT iris-interop-mcp, iris-dev-mcp and iris-admin-mcp dists and raw HTTP to the route. Writes only the disposable namespace and
+  // database EXECMCPTMP395Q (its database files and directory too, and the Story395Q classes inside it) and the HSCUSTOM class
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-39-5-qa-live-gate.test.ts",
+  // The Epic 39 capstone: search, then read, under the PHI data policy over real stdio JSON-RPC against the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists;
+  // writes only EXECMCPTMP396A (its database files too), Story396.* and Story394.SearchTable inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/epic39-capstone-gate.test.ts",
+  // Story 39.7: the Epic 39 burn-down on the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists over real stdio JSON-RPC.
+  // Writes EXECMCPTMP397A (its database files too), Story397.* inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-39-7-burn-down-live-gate.test.ts",
+  // Story 39.7 QA: DW-569 (a 400, 404 or 500 with an empty error list is isError, a 2xx answer is unchanged, `iris_macro_info` keeps its empty result for
+  // no document) on the BUILT dev, admin, ops, data and interop dists, and DW-576 (`iris_production_logs` and `iris_message_diagram` under redact, allow and
+  // block: the result, a failed read, the audit file and the console log) on the BUILT interop dist, against a local listener that answers the startup
+  // handshake and records requests; no IRIS instance is contacted.
+  "src/__tests__/story-39-7-qa-process.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

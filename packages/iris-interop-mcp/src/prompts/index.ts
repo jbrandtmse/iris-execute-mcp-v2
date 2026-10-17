@@ -12,10 +12,12 @@ import type { PromptDefinition } from "@iris-mcp/shared";
 import { traceMessageFlowPrompt } from "./traceMessageFlow.js";
 import { recoverStuckProductionPrompt } from "./recoverStuckProduction.js";
 import { resendFailedMessagesPrompt } from "./resendFailedMessages.js";
+import { findPatientMessagesPrompt } from "./findPatientMessages.js";
 
 /** All prompt definitions registered by the iris-interop-mcp server. */
 export const prompts: PromptDefinition[] = [
   traceMessageFlowPrompt,
   recoverStuckProductionPrompt,
   resendFailedMessagesPrompt,
+  findPatientMessagesPrompt,
 ];

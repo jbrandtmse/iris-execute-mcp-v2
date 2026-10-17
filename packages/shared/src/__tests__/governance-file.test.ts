@@ -30,6 +30,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import {
   SERVER_DISCOVERY_TOOL_NAME,
@@ -806,63 +807,14 @@ function setDefaultEnv(): void {
   process.env.IRIS_NAMESPACE = "DEFAULTNS";
 }
 
-const GOVERNANCE_ENV_VARS = [
-  "IRIS_USERNAME",
-  "IRIS_PASSWORD",
-  "IRIS_HOST",
-  "IRIS_NAMESPACE",
-  "IRIS_PROFILES",
-  "IRIS_GOVERNANCE",
-  "IRIS_GOVERNANCE_FILE",
-  "IRIS_GOVERNANCE_PRESET",
-  "IRIS_TOOLS_PRESET",
-  "IRIS_TOOLS_DISABLE",
-  "IRIS_TOOLS_ENABLE",
-] as const;
-
-/** Shared environment save/restore for hermetic runs. */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv: Record<string, string | undefined> = {};
-  for (const k of GOVERNANCE_ENV_VARS) savedEnv[k] = process.env[k];
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const k of GOVERNANCE_ENV_VARS) delete process.env[k];
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 describe("Integration AC 32.0.3 — the file reaches the gate, the resource, and the discovery view", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

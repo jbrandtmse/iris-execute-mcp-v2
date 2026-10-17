@@ -42,10 +42,12 @@ type ToolDefinition = import("../tool-types.js").ToolDefinition;
 describe("the refusal-code catalog (Story 38.3, AC-9)", () => {
   const entries = Object.entries(REFUSAL_CODES);
 
-  it("holds exactly the codes the suite returns today, and the two Story 38.5 adds", () => {
+  it("holds exactly the codes the suite returns today, the two Story 38.5 adds, NOT_IMPLEMENTED (Story 39.1) and DATA_POLICY_BLOCKED (Story 39.2)", () => {
     expect(Object.keys(REFUSAL_CODES).sort()).toEqual([
+      "DATA_POLICY_BLOCKED",
       "DOCUMENT_CONFLICT",
       "GOVERNANCE_DISABLED",
+      "NOT_IMPLEMENTED",
       "SQL_READ_ONLY",
       "SQL_ROWS_AFFECTED_CAP",
       "STALE_CONTENT",

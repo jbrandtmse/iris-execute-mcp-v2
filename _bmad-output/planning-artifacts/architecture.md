@@ -513,7 +513,7 @@ Added via `sprint-change-proposal-2026-10-14-competitive-skills-distribution.md`
 - A per-profile PHI data policy (`block`, `redact` or `allow`; default `redact`, L-2) governs every output derived from a body, the existing resend preview included.
 - Under `redact`, any body type the engine cannot redact reliably is blocked, never passed through.
 
-Story 39.2 records the configuration precedence here.
+Configuration precedence (Story 39.2): the profile's `IRIS_PROFILES` `dataPolicy`, then `IRIS_DATA_POLICY`, then the governance file's `dataPolicy.profiles.<name>`, then its `dataPolicy.global`, then `redact` (spine AD-26).
 
 **N5 — Instance-wide monitors on a shared instance are refuse-if-busy and always-release.** This covers `%Monitor.System.LineByLine` coverage sessions and TestProduction production control. A run never stops a session or production it did not start, and always releases its own, including after a timeout or error (Epic 40).
 

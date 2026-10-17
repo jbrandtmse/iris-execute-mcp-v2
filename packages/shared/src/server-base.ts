@@ -67,7 +67,17 @@ import {
   presetSeed,
   hasExplicitOverride,
   unknownProfileWarnings,
+  governanceKeysByTool,
+  unmatchedGovernanceKeys,
+  assertDataPolicyDeclarations,
 } from "./governance.js";
+import {
+  applyDataPolicies,
+  effectiveDataPolicy,
+  parseDataPolicyValue,
+  parseOperatorDataPolicy,
+} from "./data-policy.js";
+import type { DataPolicy, DataPolicySummary } from "./data-policy.js";
 import { GOVERNANCE_BASELINE } from "./governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
 import { REFUSAL_CODES, refusalResult } from "./refusals.js";
@@ -816,6 +826,9 @@ export class McpServerBase {
     assertGovernanceClassification(this.governedKeys, this.mutatesLookup);
     // A `parent` must name a baseline key or a registered key (Story 38.4).
     assertParentKeysKnown(this.parentKeys, this.governedKeys);
+    // A `dataPolicy` declaration must match its tool's actions and inputs (Story 39.2). A hidden
+    // tool is checked too, so a bad declaration cannot wait for a preset change to surface.
+    assertDataPolicyDeclarations([...this.options.tools, ...this.tools.values()]);
   }
 
   // ── Advisory governance resource (D6) ──────────────────────────────
@@ -1670,7 +1683,8 @@ export class McpServerBase {
 
     const profileName = this.deriveAuditProfileName(argsRecord);
     const outcome = this.deriveAuditOutcome(result);
-    const profileSource = this.profiles?.get(profileName)?.source;
+    const resolvedProfile = this.profiles?.get(profileName);
+    const profileSource = resolvedProfile?.source;
     const entryInput: AuditEntryInput = {
       tool: tool.name,
       action: this.deriveAuditAction(tool, argsRecord),
@@ -1681,8 +1695,12 @@ export class McpServerBase {
       paramKeys: argsRecord
         ? Object.keys(argsRecord).filter((key) => key !== "server")
         : [],
-      params: argsRecord,
+      params: this.redactPhiInputs(tool, argsRecord, resolvedProfile),
     };
+    // Story 39.2 (AD-19): what the PHI data policy did over a governed call. Counts only; the
+    // field never carries body content.
+    const dataPolicy = this.deriveAuditDataPolicy(tool, argsRecord, resolvedProfile, result);
+    if (dataPolicy !== undefined) entryInput.dataPolicy = dataPolicy;
     // Story 31.3, AC 31.3.2: attribution ONLY — read straight from the
     // already-resolved profile's `source` field (same in-memory registry
     // lookup `deriveAuditNamespace` uses below), never fed into any
@@ -1703,6 +1721,57 @@ export class McpServerBase {
       }
     }
     auditLogger.log(entryInput);
+  }
+
+  /**
+   * The audit `params` object: `argsRecord`, with the value of every input the tool declares in
+   * `dataPolicy.phiInputs` replaced by `"[REDACTED]"` unless the call's profile resolved and its
+   * policy is `allow`. The declaration decides, never the parameter's name. The input is not
+   * mutated, and `paramKeys` still lists every key.
+   */
+  private redactPhiInputs(
+    tool: ToolDefinition,
+    argsRecord: Record<string, unknown> | undefined,
+    profile: IrisProfile | undefined,
+  ): Record<string, unknown> | undefined {
+    const phiInputs = tool.dataPolicy?.phiInputs;
+    if (argsRecord === undefined || phiInputs === undefined || phiInputs.length === 0) return argsRecord;
+    if (profile !== undefined && effectiveDataPolicy(profile) === "allow") return argsRecord;
+    const redacted: Record<string, unknown> = { ...argsRecord };
+    for (const key of phiInputs) {
+      if (Object.prototype.hasOwnProperty.call(redacted, key)) redacted[key] = "[REDACTED]";
+    }
+    return redacted;
+  }
+
+  /**
+   * The `dataPolicy` audit field of a call, or `undefined` when it does not apply: the tool declares
+   * no `dataPolicy`, or the call's action is not one it lists, or the profile did not resolve.
+   * `policy` is the response's own `structuredContent.dataPolicy.policy` when that is a valid
+   * policy, else the profile's effective policy; each count is the response's when it is a
+   * non-negative integer, else 0.
+   */
+  private deriveAuditDataPolicy(
+    tool: ToolDefinition,
+    argsRecord: Record<string, unknown> | undefined,
+    profile: IrisProfile | undefined,
+    result: CallToolResult,
+  ): DataPolicySummary | undefined {
+    const declared = tool.dataPolicy;
+    if (declared === undefined || profile === undefined) return undefined;
+    if (declared.actions !== undefined) {
+      const action = this.deriveAuditAction(tool, argsRecord);
+      if (action === null || !declared.actions.includes(action)) return undefined;
+    }
+    const reported = (result.structuredContent as Record<string, unknown> | undefined)?.dataPolicy;
+    const fields =
+      reported !== null && typeof reported === "object" && !Array.isArray(reported)
+        ? (reported as Record<string, unknown>)
+        : {};
+    const policy: DataPolicy = parseDataPolicyValue(fields.policy) ?? effectiveDataPolicy(profile);
+    const count = (value: unknown): number =>
+      typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+    return { policy, redacted: count(fields.redacted), blocked: count(fields.blocked) };
   }
 
   /** `rawArgs.server` when present, else the reserved default profile name. */
@@ -1848,6 +1917,9 @@ export class McpServerBase {
    * spec's cascade deliberately does not contain.
    */
   addTools(tools: ToolDefinition[]): void {
+    // A `dataPolicy` declaration is checked for every added tool, hidden ones included: the registry
+    // check in assertGovernanceClassified never sees a tool that config hides.
+    assertDataPolicyDeclarations(tools);
     let registeredCount = 0;
     for (const tool of tools) {
       if (this.isToolVisible(tool.name)) {
@@ -2030,16 +2102,34 @@ export class McpServerBase {
     // pre-existing IRIS_GOVERNANCE setting.
     this.governanceFileConfig = loadGovernanceFile();
 
+    // Resolve every profile's PHI data policy (Story 39.2; AD-9, AD-26): the profile's
+    // IRIS_PROFILES entry, then IRIS_DATA_POLICY, then the governance file's dataPolicy section, then
+    // `redact`. A malformed IRIS_DATA_POLICY fails fast here, naming the variable. The registry holds
+    // the resolved value of every profile from here on, so `ctx.config.dataPolicy` and the discovery
+    // roster read the policy that applies.
+    applyDataPolicies(this.profiles, parseOperatorDataPolicy(), this.governanceFileConfig);
+
     // A profile name under "profiles" that no configured profile carries only
     // warns (Story 38.7, DW-554): the parsers have no profile registry, and one
     // policy document may serve clients with different IRIS_PROFILES.
+    //
+    // A key inside a layer that names a tool this server registers (hidden tools
+    // included: `this.options.tools` holds every package tool, `this.tools` the
+    // visible ones plus the framework tool) but is none of that tool's keys also only
+    // warns (Story 39.0, DW-565). A key whose tool this server does not register stays
+    // silent: the same document serves the other servers, and a newer server may add
+    // keys. `iris-mcp-governance check` reports keys no server of the suite has.
     const configuredProfiles = [...this.profiles.keys()];
+    const governanceFileSource = `IRIS_GOVERNANCE_FILE (path: ${process.env.IRIS_GOVERNANCE_FILE})`;
+    const registeredKeys = governanceKeysByTool([...this.options.tools, ...this.tools.values()]);
     for (const warning of [
       ...unknownProfileWarnings(this.governanceConfig, "IRIS_GOVERNANCE", configuredProfiles),
-      ...unknownProfileWarnings(
-        this.governanceFileConfig,
-        `IRIS_GOVERNANCE_FILE (path: ${process.env.IRIS_GOVERNANCE_FILE})`,
-        configuredProfiles,
+      ...unknownProfileWarnings(this.governanceFileConfig, governanceFileSource, configuredProfiles),
+      ...unmatchedGovernanceKeys(this.governanceConfig, "IRIS_GOVERNANCE", registeredKeys, "server").map(
+        (finding) => finding.message,
+      ),
+      ...unmatchedGovernanceKeys(this.governanceFileConfig, governanceFileSource, registeredKeys, "server").map(
+        (finding) => finding.message,
       ),
     ]) {
       logger.warn(warning);

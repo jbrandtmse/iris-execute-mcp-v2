@@ -119,6 +119,12 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/message/resend" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResend" />
   <Route Url="/interop/message/resend/preview" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResendPreview" />
 
+  <!-- Epic 39 (Story 39.1): Interoperability message header search -->
+  <Route Url="/interop/message/search" Method="POST" Call="ExecuteMCPv2.REST.MessageSearch:MessageSearch" />
+
+  <!-- Epic 39 (Story 39.5): Interoperability message body reader -->
+  <Route Url="/interop/message/body" Method="POST" Call="ExecuteMCPv2.REST.MessageBody:MessageBody" />
+
   <!-- Epic 5: Credentials and Lookup Tables -->
   <Route Url="/interop/credential" Method="GET" Call="ExecuteMCPv2.REST.Interop:CredentialList" />
   <Route Url="/interop/credential" Method="POST" Call="ExecuteMCPv2.REST.Interop:CredentialManage" />

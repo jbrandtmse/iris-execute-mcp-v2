@@ -8,8 +8,9 @@
  * `new McpServerBase({...})`), using the package's OWN real tools — not a
  * synthetic fixture. Mirrors `packages/iris-dev-mcp/src/__tests__/presets.e2e.test.ts`
  * (see that file for the full end-to-end wire-level coverage, including
- * `tools/list`/`tools/call` and the `TOOL_PAIRS` proof; interop-mcp owns no
- * `TOOL_PAIRS` member so that seam does not apply here).
+ * `tools/list`/`tools/call` and the `TOOL_PAIRS` proof; interop-mcp owns one
+ * pair, `iris_message_search` / `iris_message_body` (Story 39.5), which the
+ * last block here proves through the real construction).
  *
  * No live IRIS: every test constructs but never `start()`s the server.
  * Discoverable by the default `pnpm turbo run test` suite.
@@ -69,7 +70,7 @@ describe("E2E — iris-interop-mcp real McpServerBase construction with the wire
     expect(server.getToolNames()).not.toContain("iris_credential_manage");
   });
 
-  it("IRIS_TOOLS_PRESET=developer yields exactly developer.include (all 22) + iris_server_profiles", () => {
+  it("IRIS_TOOLS_PRESET=developer yields exactly developer.include (all 24) + iris_server_profiles", () => {
     clearVisibilityEnv();
     process.env.IRIS_TOOLS_PRESET = "developer";
     const server = new McpServerBase({
@@ -108,5 +109,37 @@ describe("E2E — iris-interop-mcp real McpServerBase construction with the wire
     expect(withRoster.getToolNames().sort()).toEqual(
       withoutRoster.getToolNames().sort(),
     );
+  });
+});
+
+describe("E2E — TOOL_PAIRS co-visibility (iris_message_search / iris_message_body), through real construction", () => {
+  for (const preset of ["core", "developer", "full"] as const) {
+    it(`IRIS_TOOLS_PRESET=${preset} shows BOTH pair members: the forensic loop is never left half-visible`, () => {
+      clearVisibilityEnv();
+      process.env.IRIS_TOOLS_PRESET = preset;
+      const server = new McpServerBase({
+        name: "@iris-mcp/interop",
+        version: "0.0.0",
+        tools,
+        toolPresets,
+      });
+
+      const names = server.getToolNames();
+      expect(names).toContain("iris_message_search");
+      expect(names).toContain("iris_message_body");
+    });
+  }
+
+  it("core lists 12 tools: the 11 package tools of the roster plus iris_server_profiles", () => {
+    clearVisibilityEnv();
+    process.env.IRIS_TOOLS_PRESET = "core";
+    const server = new McpServerBase({
+      name: "@iris-mcp/interop",
+      version: "0.0.0",
+      tools,
+      toolPresets,
+    });
+
+    expect(server.getToolNames()).toHaveLength(12);
   });
 });

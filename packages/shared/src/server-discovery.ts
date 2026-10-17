@@ -42,6 +42,7 @@ import type {
   MutationClass,
   ParentKeys,
 } from "./governance.js";
+import { effectiveDataPolicy, type DataPolicy, type DataPolicySource } from "./data-policy.js";
 import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -113,6 +114,16 @@ export interface ProfileRosterEntry {
    * field exists to convey. See {@link import("./profiles.js").IrisProfile.sourceFile}.
    */
   sourceFile?: string;
+  /**
+   * The profile's effective PHI data policy (Story 39.2): `block`, `redact` or `allow`. A profile
+   * that no channel names reports `redact`.
+   */
+  dataPolicy: DataPolicy;
+  /**
+   * The channel that supplied {@link dataPolicy}: `IRIS_PROFILES`, `IRIS_DATA_POLICY`,
+   * `IRIS_GOVERNANCE_FILE:profiles`, `IRIS_GOVERNANCE_FILE:global` or `default`.
+   */
+  dataPolicySource: DataPolicySource;
 }
 
 /**
@@ -202,6 +213,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     timeout: profile.timeout,
     ...(profile.source !== undefined ? { source: profile.source } : {}),
     ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
+    dataPolicy: effectiveDataPolicy(profile),
+    dataPolicySource: profile.dataPolicySource ?? "default",
   };
 }
 
@@ -405,7 +418,9 @@ export const serverDiscoveryTool: ToolDefinition = {
     "Returns: (1) a profile roster with non-secret connection metadata " +
     "(name, host, port, username, namespace, https, baseUrl, timeout, source " +
     "[\"env\" or \"server-manager\"], sourceFile [the settings file, for " +
-    "server-manager-sourced profiles only]; the password is NEVER included); " +
+    "server-manager-sourced profiles only], dataPolicy [\"block\", \"redact\" or " +
+    "\"allow\": what the profile shows of message bodies], dataPolicySource [the " +
+    "channel that set it]; the password is NEVER included); " +
     "and (2) the effective enabled/disabled action " +
     "map for a selected profile (optional `profile` arg; defaults to the " +
     "`default` profile), or for every profile when `allProfiles: true`. " +

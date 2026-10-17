@@ -24,7 +24,9 @@
  *   the five server packages' registered keys derived from built dist ∪ the
  *   framework discovery tool, with the REAL mutates/default-enabled
  *   classifications — the render `iris_server_profiles` computes on a running
- *   server over its own registered subset).
+ *   server over its own registered subset), `check` (Story 39.0: every key of
+ *   `IRIS_GOVERNANCE` and the file against that universe; a key that matches
+ *   nothing has no effect on any server and exits 1).
  * - `preset` is guidance-only: the preset is sourced EXCLUSIVELY from the
  *   `IRIS_GOVERNANCE_PRESET` environment variable by the servers, so writing
  *   it into the file would be inert-and-confusing. The command prints the
@@ -97,12 +99,14 @@ import {
   assertParentKeysKnown,
   getEffectivePolicy,
   getEffectiveConfigSources,
+  unmatchedGovernanceKeys,
   RESERVED_KEYS,
   type GovernanceConfig,
   type GovernanceConfigSource,
   type GovernanceLayer,
   type MutationClass,
   type ParentKeys,
+  type UnmatchedGovernanceKey,
 } from "../governance.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { BASELINE_ACTION_CLASSIFICATIONS } from "../baseline-classifications.js";
@@ -578,28 +582,41 @@ Commands:
       packages' built dist must be locatable: --root <path> (a monorepo
       root, or a directory containing the package folders) wins; otherwise
       the CLI auto-detects from its own install location.
+  check [--file <path>] [--root <path>] [--json]
+      Check every key in the IRIS_GOVERNANCE environment variable and in the
+      resolved file against the suite's full key universe (the keys
+      "universe" lists). A key that is none of them has no effect on any
+      server: a typo such as iris_doc_putt, a bare name for a per-action
+      tool, or an action a tool does not have. One line per such key; exit 1
+      when there is one. A server only warns at startup about these keys for
+      the tools it registers, so "check" is the suite-wide check. Needs the
+      same built dist as "universe" (--root works the same way).
 
 Options:
   --file <path>       Governance file path (see resolution order above).
   --profile <name>    Profile layer for get/set/unset/effective/universe.
-  --root <path>       Package-dist location for "universe" (see above).
+  --root <path>       Package-dist location for "universe" and "check" (see above).
   --json              Machine-readable output on read commands
-                      (validate, get, effective, diff, universe).
+                      (validate, get, effective, diff, universe, check).
   -h, --help          Show this help and exit.
   --                  End of options: every later argument is positional.
 
 Exit codes:
   0   success
   1   operational failure (file unreadable/invalid per the server loader,
-      a key not set for "unset")
+      a key not set for "unset", a key that matches no governance key for
+      "check")
   2   usage or input error (unknown command/option, missing or extra
-      argument, invalid key/value, no governance file resolvable)
+      argument, invalid key/value, no governance file resolvable, no
+      governance document for "check")
 
 --json output contract: an OPERATIONAL outcome (exit 0 or 1) on a read command
 always writes exactly one JSON object to stdout — on failure it is
-{"ok": false, "error": "..."} for "validate" and carries an "error" field for
-"get". Usage errors (exit 2) are always plain text on stderr, since the flags
-themselves were not understood. Human-readable failures always go to stderr.
+{"ok": false, "error": "..."} for "validate" and "check" (when "check" finds a
+dead key it is {"ok": false, ..., "unmatched": [...]}) and carries an "error"
+field for "get". Usage errors (exit 2) are always plain text on stderr, since
+the flags themselves were not understood. Human-readable failures always go
+to stderr.
 
 Caveat — post-foundation keys: the full governance-key universe is the frozen
 baseline plus each server's registered tool keys, which "validate"/"get"/"set"/
@@ -1271,6 +1288,83 @@ interface UniversePackageOut {
   tools: UniverseToolOut[];
 }
 
+/** The suite's governance-key universe as derived from the packages' built dist (shared by `universe` and `check`). */
+interface UniverseCatalog {
+  /** The directory that contains the package folders, as resolved from `--root` or the CLI's own location. */
+  containerDir: string;
+  /** The raw built tool surface of each server package. */
+  loaded: LoadedPackage[];
+  /** Each package-or-framework key, with the `package/tool` that produced it. */
+  originByKey: Map<string, string>;
+  /** Per package, each tool and its derived keys. */
+  packagesOut: UniversePackageOut[];
+  /** Every package tool plus the framework discovery tool. */
+  allTools: ToolDefinition[];
+  /** The framework discovery tool's keys. */
+  frameworkKeys: string[];
+  /** The frozen baseline, the package keys and the framework keys, as one sorted list. */
+  sortedKeys: string[];
+}
+
+/**
+ * Load the registered half of the universe from built dist and derive its keys the
+ * iris-mcp-all way (`SERVER_PACKAGES` + `deriveKeysForTool`), with the baseline
+ * generator's cross-package duplicate guard: one key produced by two tools is a
+ * build-integrity error, never a silent merge.
+ *
+ * @param root - The `--root` value (`undefined` auto-detects from the CLI's own location).
+ * @throws {Error} When a package's dist cannot be located or imported, or a key is duplicated.
+ */
+async function loadUniverseCatalog(root: string | undefined, deps: ResolvedDeps): Promise<UniverseCatalog> {
+  const containerDir = resolveContainerDir(root);
+  const loaded = await deps.loadPackageTools(containerDir);
+
+  const originByKey = new Map<string, string>();
+  const packagesOut: UniversePackageOut[] = [];
+  const allTools: ToolDefinition[] = [];
+  for (const { pkg, tools } of loaded) {
+    const toolOut: UniverseToolOut[] = [];
+    for (const tool of tools) {
+      const keys = deriveKeysForTool(tool, pkg);
+      for (const key of keys) {
+        const origin = `${pkg}/${tool.name}`;
+        const prior = originByKey.get(key);
+        if (prior !== undefined && prior !== origin) {
+          throw new Error(
+            `universe: duplicate governance key "${key}" \u2014 produced by ${prior} and again by ${origin}. ` +
+              `Tool names (and tool:action keys) must be unique across all server packages.`,
+          );
+        }
+        originByKey.set(key, origin);
+      }
+      toolOut.push({ name: tool.name, keys });
+    }
+    packagesOut.push({ pkg, tools: toolOut });
+    allTools.push(...tools);
+  }
+  // The framework discovery tool is registered centrally on every server
+  // (Epic 19, decision E1): it is in NO package's tools array, so add it
+  // explicitly, derived with the SAME helper. The derived keys are reused
+  // for the JSON output so the two can never drift apart (32.2
+  // review: the guard derived while the output hardcoded).
+  const frameworkKeys = deriveKeysForTool(serverDiscoveryTool, "framework");
+  for (const key of frameworkKeys) {
+    const prior = originByKey.get(key);
+    if (prior !== undefined) {
+      throw new Error(
+        `universe: duplicate governance key "${key}" \u2014 produced by ${prior} and again by ` +
+          `framework/${SERVER_DISCOVERY_TOOL_NAME}. The framework tool name is reserved.`,
+      );
+    }
+    originByKey.set(key, `framework/${SERVER_DISCOVERY_TOOL_NAME}`);
+  }
+  allTools.push(serverDiscoveryTool);
+
+  const universe = new Set<string>(GOVERNANCE_BASELINE);
+  for (const key of originByKey.keys()) universe.add(key);
+  return { containerDir, loaded, originByKey, packagesOut, allTools, frameworkKeys, sortedKeys: [...universe].sort() };
+}
+
 async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> {
   const parsed = parseArgs(args, ["--json"], ["--file", "--profile", "--root"]);
   if (parsed.error) {
@@ -1319,67 +1413,13 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
   }
 
   // Load the registered half of the universe from built dist.
-  const containerDir = resolveContainerDir(parsed.options.get("--root"));
-  let loaded: LoadedPackage[];
+  let catalog: UniverseCatalog;
   try {
-    loaded = await deps.loadPackageTools(containerDir);
+    catalog = await loadUniverseCatalog(parsed.options.get("--root"), deps);
   } catch (e: unknown) {
     return failOperational(errorMessage(e));
   }
-
-  // Derive keys the iris-mcp-all way (SERVER_PACKAGES + deriveKeysForTool),
-  // with the baseline generator's cross-package duplicate guard: one key
-  // produced by two tools is a build-integrity error, never a silent merge.
-  const originByKey = new Map<string, string>();
-  const packagesOut: UniversePackageOut[] = [];
-  const allTools: ToolDefinition[] = [];
-  const deriveError = (e: unknown): number => failOperational(errorMessage(e));
-  let frameworkKeys: string[];
-  try {
-    for (const { pkg, tools } of loaded) {
-      const toolOut: UniverseToolOut[] = [];
-      for (const tool of tools) {
-        const keys = deriveKeysForTool(tool, pkg);
-        for (const key of keys) {
-          const origin = `${pkg}/${tool.name}`;
-          const prior = originByKey.get(key);
-          if (prior !== undefined && prior !== origin) {
-            throw new Error(
-              `universe: duplicate governance key "${key}" — produced by ${prior} and again by ${origin}. ` +
-                `Tool names (and tool:action keys) must be unique across all server packages.`,
-            );
-          }
-          originByKey.set(key, origin);
-        }
-        toolOut.push({ name: tool.name, keys });
-      }
-      packagesOut.push({ pkg, tools: toolOut });
-      allTools.push(...tools);
-    }
-    // The framework discovery tool is registered centrally on every server
-    // (Epic 19, decision E1) — it is in NO package's tools array, so add it
-    // explicitly, derived with the SAME helper. The derived keys are reused
-    // for the JSON output below so the two can never drift apart (32.2
-    // review: the guard derived while the output hardcoded).
-    frameworkKeys = deriveKeysForTool(serverDiscoveryTool, "framework");
-    for (const key of frameworkKeys) {
-      const prior = originByKey.get(key);
-      if (prior !== undefined) {
-        throw new Error(
-          `universe: duplicate governance key "${key}" — produced by ${prior} and again by ` +
-            `framework/${SERVER_DISCOVERY_TOOL_NAME}. The framework tool name is reserved.`,
-        );
-      }
-      originByKey.set(key, `framework/${SERVER_DISCOVERY_TOOL_NAME}`);
-    }
-    allTools.push(serverDiscoveryTool);
-  } catch (e: unknown) {
-    return deriveError(e);
-  }
-
-  const universe = new Set<string>(GOVERNANCE_BASELINE);
-  for (const key of originByKey.keys()) universe.add(key);
-  const sortedKeys = [...universe].sort();
+  const { containerDir, loaded, originByKey, packagesOut, allTools, frameworkKeys, sortedKeys } = catalog;
 
   // The REAL classifications — what a running server computes (as opposed to
   // `effective`'s empty lookup, which is why post-foundation write keys seed
@@ -1489,6 +1529,112 @@ async function cmdUniverse(args: string[], deps: ResolvedDeps): Promise<number> 
   return 0;
 }
 
+// ====================================================================
+// `check`: governance keys that name nothing (Story 39.0, DW-565). A key inside
+// a layer that is none of the suite's keys is accepted by every server and does
+// nothing. A server can only prove that for a tool it registers (it warns at
+// startup); this command checks every key against the whole universe.
+// ====================================================================
+
+const CHECK_USAGE = "iris-mcp-governance check [--file <path>] [--root <path>] [--json]";
+
+/** The number of keys in all layers of `config`. */
+function countLayerKeys(config: GovernanceConfig): number {
+  const global = config.global === undefined ? 0 : Object.keys(config.global).length;
+  return Object.values(config.profiles ?? {}).reduce((count, layer) => count + Object.keys(layer).length, global);
+}
+
+async function cmdCheck(args: string[], deps: ResolvedDeps): Promise<number> {
+  const parsed = parseArgs(args, ["--json"], ["--file", "--root"]);
+  if (parsed.error) {
+    deps.stderr.write(`Error: ${parsed.error}\n\nUsage: ${CHECK_USAGE}\n`);
+    return 2;
+  }
+  if (parsed.positional.length !== 0) {
+    deps.stderr.write(`Error: "check" takes no arguments.\n\nUsage: ${CHECK_USAGE}\n`);
+    return 2;
+  }
+  const root = parsed.options.get("--root");
+  if (root !== undefined && root === "") {
+    deps.stderr.write(`Error: --root requires a non-empty path.\n\nUsage: ${CHECK_USAGE}\n`);
+    return 2;
+  }
+  const wantJson = parsed.flags.has("--json");
+  const file = resolveFilePath(parsed, deps.env);
+  const envDocument = deps.env.IRIS_GOVERNANCE;
+  const hasEnvDocument = envDocument !== undefined && envDocument !== "";
+  if (file === undefined && !hasEnvDocument) {
+    deps.stderr.write(
+      `Error: "check" needs a governance document: pass --file <path>, or set IRIS_GOVERNANCE_FILE or IRIS_GOVERNANCE.\n\nUsage: ${CHECK_USAGE}\n`,
+    );
+    return 2;
+  }
+
+  const failOperational = (message: string): number => {
+    deps.stderr.write(`Error: ${message}\n`);
+    if (wantJson) deps.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
+    return 1;
+  };
+
+  // The documents, parsed by the servers' own loaders (their exact error text), environment first.
+  const documents: Array<{ source: string; config: GovernanceConfig }> = [];
+  try {
+    if (hasEnvDocument) documents.push({ source: "IRIS_GOVERNANCE", config: parseGovernanceConfig(deps.env) });
+    if (file !== undefined) {
+      documents.push({ source: `IRIS_GOVERNANCE_FILE (path: ${file})`, config: loadFileOrThrow(file) });
+    }
+  } catch (e: unknown) {
+    return failOperational(errorMessage(e));
+  }
+
+  let catalog: UniverseCatalog;
+  try {
+    catalog = await loadUniverseCatalog(root, deps);
+  } catch (e: unknown) {
+    return failOperational(errorMessage(e));
+  }
+  const keysByTool = new Map<string, readonly string[]>();
+  for (const pkgOut of catalog.packagesOut) {
+    for (const tool of pkgOut.tools) keysByTool.set(tool.name, tool.keys);
+  }
+  keysByTool.set(SERVER_DISCOVERY_TOOL_NAME, catalog.frameworkKeys);
+  const universeKeys = new Set(catalog.sortedKeys);
+
+  let checked = 0;
+  const unmatched: UnmatchedGovernanceKey[] = [];
+  for (const { source, config } of documents) {
+    checked += countLayerKeys(config);
+    // A key the universe lists is never reported, even one whose tool no package carries (a baseline-only key).
+    unmatched.push(
+      ...unmatchedGovernanceKeys(config, source, keysByTool, "suite").filter((finding) => !universeKeys.has(finding.key)),
+    );
+  }
+
+  const sources = documents.map((document) => document.source);
+  const sourcesText = sources.join(" and ");
+  if (wantJson) {
+    deps.stdout.write(
+      `${JSON.stringify({
+        ok: unmatched.length === 0,
+        sources,
+        checked,
+        universeKeys: universeKeys.size,
+        universeSource: catalog.containerDir,
+        unmatched,
+      })}\n`,
+    );
+  }
+  if (unmatched.length === 0) {
+    if (!wantJson) {
+      deps.stdout.write(`OK: all ${checked} key(s) in ${sourcesText} match the suite's ${universeKeys.size} governance keys.\n`);
+    }
+    return 0;
+  }
+  for (const finding of unmatched) deps.stderr.write(`${finding.message}\n`);
+  deps.stderr.write(`Error: ${unmatched.length} of ${checked} key(s) in ${sourcesText} have no effect on any server.\n`);
+  return 1;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Entry point.
 // ════════════════════════════════════════════════════════════════════
@@ -1562,9 +1708,11 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
       return cmdDiff(rest, resolved);
     case "universe":
       return cmdUniverse(rest, resolved);
+    case "check":
+      return cmdCheck(rest, resolved);
     default:
       resolved.stderr.write(
-        `Error: unknown command "${command}". Valid commands: validate, get, set, unset, preset, effective, diff, universe.\n\n${HELP_TEXT}`,
+        `Error: unknown command "${command}". Valid commands: validate, get, set, unset, preset, effective, diff, universe, check.\n\n${HELP_TEXT}`,
       );
       return 2;
   }

@@ -2,6 +2,478 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 39.7: Epic 39 burn-down
+
+Five ledger entries are fixed (DW-569, DW-571, DW-572, DW-576 and DW-583). No tool, action, governance key, preset row,
+annotation, input schema or environment variable is added, so no default state and no tool count moves: the suite stays
+at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the Interoperability `core` roster stays at
+12 runtime tools, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves
+from `2fd17b50a024` to `7d12cd8b3a1e`, because `MessageSearch.cls` and `MessageBody.cls` changed.
+
+### Changed
+
+- **Every non-2xx answer from IRIS is an error (DW-569).** The shared HTTP client used to treat an HTTP 400 with an empty
+  error list as an empty success, so a rejected request (`iris_doc_list` with category `CLS` and type `cls`, or an empty
+  `iris_doc_search` query) looked like a legitimate empty result. It now throws `IrisApiError` for every non-2xx
+  response; a 2xx response is handled exactly as before. Sanctioned change (AD-15): `iris_doc_search` with an empty
+  `query`, or with an empty `files` list (`files: ""`; an omitted `files` still sends the documented default), was
+  `{matches: []}` and is now an error naming HTTP 400. Sanctioned change (AD-15): a document listing Atelier rejects
+  (category `CLS` with any type, or category `RTN` with a type that is not a routine type, such as `cls`) was an empty
+  result in `iris_doc_list`, `iris_package_list` and `iris_doc_export` and is now an error naming HTTP 400. Sanctioned
+  change (AD-15): outside Atelier, `iris_rest_manage` `get` of a spec-first application whose specification IRIS cannot
+  read (the Mgmnt API answers HTTP 400 with only a `msg`) returned a result with no specification and is now an error
+  naming HTTP 400. `iris_macro_info` with no `document` keeps its
+  documented empty result, `{name, definition: {}, location: {}}`, byte for byte. A second path relied on the old
+  rule: Atelier refuses a document name with no document type (`iris_doc_get` of `ExecuteMCPv2.Utils`) with HTTP 400, an
+  empty error list and the reason only in `result.status`. `iris_doc_get`, `iris_doc_put`, `iris_doc_edit` (its read) and
+  `iris_doc_load` read that answer through the new shared `atelierDocRequest`, so each keeps reporting IRIS's reason
+  (`ERROR #16006: Document '...' name is invalid`) exactly as before; every other failure still throws. Sanctioned
+  change (AD-15): the tools that do not read that reason now report the refusal as an error naming HTTP 400, where they
+  returned an empty or status-only result: `iris_doc_export`, `iris_doc_convert` and `iris_routine_intermediate` with a
+  document name Atelier refuses, and `iris_macro_info` with a non-empty `document` that Atelier refuses (a name with no
+  document type), as Atelier does for an empty one.
+- **`iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block` (DW-576).** Both are
+  reads, enabled by default. Under the `block` PHI data policy each Event Log entry loses `text` and gains
+  `textPolicy {outcome: "blocked", reason}`, and each error warning of a diagram keeps its `Error on message <id>: `
+  prefix while the rest, in `warnings[]` and in every Mermaid `%% Error on message <id>: ` line, becomes a fixed reason;
+  the result carries `dataPolicy {policy: "block", redacted: 0, blocked: <n>}`, which the audit entry records. Under
+  `redact` and `allow` both tools are byte-identical to before, with no `dataPolicy` key. Under every policy the audit
+  entry of a call to either tool now records `dataPolicy`: the counts above under `block`, and the profile's policy
+  with 0 counts under `redact` and `allow`. The scope rows of both tools are now governed, under `block` only.
+- **`iris_message_body` shows the text of a character stream under `allow` (DW-583).** The property dump of a
+  persistent body shows a character stream (such as the `ContentStream` of `HS.Message.XMLMessage`) as
+  `{stream, size, text}`, read within one shared budget of `maxChars` characters, with `truncated` true exactly when
+  cut. A binary stream stays `{stream, size}`; `redact` withholds the body and `block` returns the kind only, so neither
+  reads it out of IRIS.
+- **The header reads of `iris_message_search` carry an index hint (DW-572).** The `headers`, `body` and `searchTable`
+  statements read `Ens.MessageHeader` with `%IGNOREINDEX` on its `Status`, `SourceConfigName` and `TargetConfigName`
+  bitmap indexes, so on an untuned table an item, status or source filter reads the `TimeCreated` window instead of
+  intersecting history-wide bitmaps, and a body class filter is intersected with a bitmap of the window's `TimeCreated`
+  range. It changes the plan only: the rows and their order are unchanged. The `limit` text
+  now says a filter narrows the rows returned, not the window scanned.
+- **The `tools/list` snapshot re-pins four entries.** The descriptions of `iris_production_logs`,
+  `iris_message_diagram`, `iris_message_body` and `iris_message_search` changed (`pnpm gen:tools-list-snapshot --force`,
+  the sanctioned step). No other entry moves.
+- **`BOOTSTRAP_VERSION` moves from `2fd17b50a024` to `7d12cd8b3a1e`** (`pnpm gen:bootstrap`, idempotent on a second run).
+
+### Fixed
+
+- **DW-571:** the `iris_package_list` row of `doc-type-description-live-gate.test.ts` no longer compares the counts of
+  two reads of the shared HSCUSTOM, which concurrent writes made flaky. It compares the request it sent with the wire
+  read's request, and `totalDocs` with the document count of the very envelope the handler received.
+
+### Documentation
+
+- **The data policy.** The suite README, the Interoperability README, `tool_support.md` and the three client guides
+  state that `iris_production_logs` and `iris_message_diagram` (both reads, enabled by default) are governed under
+  `block` only, that `iris_message_body` shows character-stream text under `allow`, and that the audit list names both
+  tools. `tool_support.md` has a Story 39.7 note and two governed scope rows (the table's date stays 2026-10-16).
+- **`iris_message_search`** says a filter narrows the rows returned, not the window scanned (suite README,
+  Interoperability README and the tool description).
+
+### Tests
+
+- **`story-39-7-burn-down-live-gate.test.ts`** drives the built dev, admin and interop servers over the SDK client on a
+  disposable namespace with `Story397.*` fixtures (an `HS.Message.XMLMessage`, two stream bodies, four headers and two
+  Event Log rows): the 400 pair and the unchanged 2xx rows, the header statements and their plans, logs and diagram under
+  every policy with the audit entries, and the stream bodies. It is listed in the prepublish roster and the arming guard.
+- **`story-39-7-qa-process.test.ts`** drives the built dev, admin, ops, data and interop dists over real stdio against
+  a local listener, with no IRIS: a 400, 404 or 500 with an empty error list is an error for a tool of each package
+  while a 2xx answer is unchanged, `iris_macro_info` keeps its empty result for no document, and `iris_production_logs`
+  and `iris_message_diagram` run under every policy, with a failed read, the audit file and the console log. It is
+  listed in the prepublish roster.
+- **`story-39-7-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
+- **Unit and OS tests** pin the client's non-2xx rule (`http-client.test.ts`), the `iris_macro_info` fallback, the two
+  new block reasons, the block and the unchanged redact and allow outputs of both tools (`logs-diagram-policy.test.ts`),
+  `HeaderStatement` and the existence of the three hinted indexes (`MessageSearchTest`), and the stream dump
+  (`MessageBodyTest.TestPropertyDumpStreams`). `headerPlanProblems` is the shared plan checker, and the 39.3 and 39.4
+  gates' statement literals gain the hint. The 39.5 gate's header 12 row now expects the stream's text.
+
+## [Pre-release — 2026-10-17] — Story 39.6: Message forensics docs, prompt and capstone
+
+No tool, action, governance key, preset row, annotation, schema or environment variable is added, so no default state and
+no tool count moves: the suite stays at 109 package tools (114 advertised), the Interoperability `core` roster stays at
+12 runtime tools, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys) and `BOOTSTRAP_VERSION` stays
+`2fd17b50a024`. The prompt pack goes from 12 to 13 prompts (the Interoperability server from 3 to 4).
+
+### Added
+
+- **The `find-patient-messages` prompt (title "Find Patient Messages").** It finds a patient's messages by a Search Table
+  value, such as a medical record number. `patientId` is required; `from`, `to`, `searchTableClass` (default
+  `EnsLib.HL7.SearchTable`) and `namespace` are optional. It reads the profile's data policy with
+  `iris_server_profiles`, asks the user for the period when no `from` is given, searches with `iris_message_search`
+  (`searchTable`, `PatientID`) in windows of at most 7 days, lists the header rows, and reads bodies with
+  `iris_message_body` only when the user wants content. It calls reads only (both tools are enabled by default), its main
+  path is in the Interoperability `core` preset, a `dataPolicy` argument can only tighten the profile's policy, and a
+  withheld body or a refused lookup is reported, never read another way.
+- **The skill `skills/find-patient-messages/SKILL.md`**, generated from the prompt: the skills pack is 13 skills.
+- **A `tools/list` snapshot (DW-573).** `pnpm gen:tools-list-snapshot:check` compares the built servers with a committed
+  snapshot of 114 entries over the five servers and writes nothing; it exits 1 when a listed tool's title, description,
+  input schema or annotations changed or a listed tool vanished, and a tool that is not in the snapshot is reported and
+  allowed. `pnpm gen:tools-list-snapshot --force` regenerates it, and is the sanctioned step for a change to a listed
+  entry, an additive one included. The CLI refuses to run without a flag.
+
+### Changed
+
+- **`trace-message-flow` searches, reads and diagrams (AD-15).** Its description now names `iris_message_search`,
+  `iris_message_body`, `iris_message_diagram` and `iris_production_logs`, and its steps run in this order: the hops of
+  `iris_production_messages`; the header rows of `iris_message_search` (`headers`, in windows of at most 7 days); the
+  bodies that matter through `iris_message_body` under the PHI data policy, with a withheld body's reason reported and
+  the body never read another way; the diagram; and the logs of erroring items. Its name, title and arguments
+  (`sessionOrHeaderId` required, `namespace` optional) are unchanged, and a test pins them. Its generated skill is
+  regenerated.
+
+### Documentation
+
+- **Message forensics in the suite README.** A new subsection lists each `iris_message_search` action by its governance
+  key and `iris_message_body`, each a read, enabled by default (and still enabled under the `read-only` preset), with the
+  required window of at most 7 days, `limit` as an output cap only, paging, `notApplicable`, the effect of the data
+  policy on each, how to restrict a key, and the two prompts. The Integration engineer row, the audit paragraph (which
+  now names every governed tool and the declared PHI input `filters`), the prompts table (13 prompts, with the updated
+  `trace-message-flow` and the new `find-patient-messages`) and the Backward Compatibility list (the snapshot) are
+  updated.
+- **The Interoperability README.** The intro, the `core` paragraph, the `IRIS_DATA_POLICY` row (default `redact`), a new
+  PHI data policy section (the five channels in order, `iris_server_profiles` reporting `dataPolicy` and
+  `dataPolicySource`, tighten-only), the audit fields, the note that `headers` is outside the policy, the Prompts table
+  and a `DATA_POLICY_BLOCKED` row under Common Errors.
+- **Two Tool Examples in the Interoperability README.** A `searchTable` lookup of a medical record number and an
+  `iris_message_body` read under the default `redact` policy, each a read that is enabled by default. Their outputs were
+  captured from the built servers on a synthetic fixture namespace, with the values verbatim and the rest trimmed.
+- **`tool_support.md`, the client guides and the epic history.** `tool_support.md` has a Story 39.6 note and counts 13
+  prompts (the Interoperability server 4). The `IRIS_DATA_POLICY` row of the Claude Code, Claude Desktop and Cursor
+  guides also covers `iris_message_body` and the refusal of the `body` and `searchTable` actions under `block`.
+  `docs/epic-summary.md` drops "so far" from Epic 39's tool count.
+- **What the Epic 39 capstone shows.** The documents describe it as least exposure on synthetic messages: under the
+  default `redact`, no body PHI value and no search filter value leaves through a Search Table lookup, a body read,
+  the audit file or stderr. They make no claim of regulatory compliance.
+
+### Tests
+
+- **A capstone live gate, `epic39-capstone-gate.test.ts`, closes Epic 39.** It drives the built dev, admin and interop
+  servers over the SDK client on a disposable namespace of synthetic HL7 messages: it seeds the traffic, searches
+  the headers, finds a patient's messages by a Search Table value, and reads the bodies under `redact` and under `allow`.
+  Under `redact` no body PHI value and no search filter value appears in any result, in the audit file or on stderr
+  while the values the keep-list keeps survive; under `allow` the values appear. It compares the rows with a raw SQL
+  oracle, asserts that the deployed `BOOTSTRAP_VERSION` is the shipped one, and removes everything it created.
+- **`tools-list-snapshot.test.ts`** runs the snapshot comparison in the default suite, with unit rows for a changed,
+  a new and a vanished tool.
+- **The gates share their helpers (DW-561).** The helpers the live gates had each copied now live in the shared test
+  modules (`process-gate-helpers.ts`, and `header-row-oracle.ts` for the SQL strings; a copy whose contract differs stays
+  in its gate and is listed in the guard with its reason), and a default-suite test fails when a gate declares one of them again.
+- **`story-39-6-doc-claims.test.ts`** pins the new documentation, the default state it gives at each point of use, this
+  section and the changeset, and scans the new text for a compliance claim. The prompt tests pin both prompts' step
+  order, their tools, and that neither carries a rule number or a repository path.
+
+## [Pre-release — 2026-10-17] — Story 39.5: Message body reader
+
+One tool is added, `iris_message_body`: the suite goes from 108 to 109 package tools (113 to 114 advertised), the
+Interoperability server from 23 to 24 package tools (24 to 25 advertised), its `core` roster from 11 to 12 runtime tools,
+and its `developer` roster to 25. The frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys).
+
+### Added
+
+- **`iris_message_body` reads message bodies by header ID.** It takes 1 to 20 `headerIds`, an optional `maxChars` (1 to
+  1048576, default 10000), an optional `dataPolicy` and an optional `namespace`, and returns one item per ID in request
+  order, duplicates included: the body class and ID, the body kind and the body rendered by kind. An HL7 v2 body is shown
+  as ER7 text, an XML virtual document as XML, a persistent object as JSON (`%JSONExportToStream` when its class extends
+  `%JSON.Adaptor`, otherwise a dump of its public properties), a stream or stream container as text, and a header with
+  no body class as its literal value. Any other body is shown as its class and ID with a reason. Each shown text is cut
+  at `maxChars` with `truncated`; an HL7 v2 body is read only whole, and a larger `maxChars` reads a longer one under
+  `allow`. A header that does not exist is `{id, found: false, error: "Header <id> not found"}`. It is a read, enabled by
+  default (one governance key, `iris_message_body`; `{"global":{"iris_message_body":false}}` restricts it), and it stays
+  enabled under the `read-only` preset.
+- **A new route, `POST /interop/message/body`, served by the new bootstrapped class `ExecuteMCPv2.REST.MessageBody`.**
+  The request names which bodies IRIS may read (`bodyRead`: `kind`, `hl7` or `all`) and a text limit
+  (`bodyTextMaxChars`), so a body the policy withholds never leaves IRIS. Every check of the request runs before the
+  namespace switch and names the parameter.
+- **It is the first consumer of body text under the PHI data policy.** Under `redact` (the default) IRIS returns the
+  text of HL7 v2 bodies only, and the text goes complete and unsanitized through the redaction engine before it is sanitized and cut;
+  every other body, and an HL7 v2 body over 65536 characters, is withheld with a reason. `block` withholds every body and
+  IRIS returns the text of none; `allow` shows bodies as stored. A call's `dataPolicy` can only tighten the profile's policy, and a
+  looser one is reported as `dataPolicyClamped: true`. Each body carries `bodyPolicy` and the result carries
+  `dataPolicy: {policy, redacted, blocked}`. The tool declares `dataPolicy`, so every audit entry carries the policy and
+  the counts, and body text never reaches the audit file or the console log.
+- **`decideBodyPolicy` and `BodyPolicyPlan` in `@iris-mcp/shared`**: the policy's decision for one body, shared by the
+  resend preview and the body reader.
+- **A third pair in `TOOL_PAIRS`**: `iris_message_search` and `iris_message_body` are always visible together, in the
+  `core` and `developer` presets.
+- **The PHI data policy scope table lists `iris_message_body` as governed.**
+
+### Changed
+
+- **`Hl7Text` refuses a body over the cap before it serializes it (DW-577).** The new `MessageSearch.Hl7Size` sums the
+  stored segment sizes of the message and of every nested batch child, stops once the sum passes the cap, and returns 0
+  on failure; the existing check of the serialized length stays, and the outcomes of every body that fits are unchanged.
+- **`MessageResend.ValidateHeaderIds` takes a maximum**, `pMax`, 100 by default; with the default its texts are
+  byte-identical, and the body route passes 20.
+- **The resend preview decides through `decideBodyPolicy`**; its output is unchanged.
+- **`BOOTSTRAP_VERSION` moves `b6ec56073e29` to `2fd17b50a024`**, and the bootstrap embeds 32 classes instead of 31.
+- **Counts.** The interop README and `tool_support.md` count 24 tools, the suite README 109 tools, and the roster tables
+  and the measured `tools/list` payload table are re-measured.
+
+### Tests
+
+- A live gate reads a fixture of seventeen bodies of every kind through the built interop server, under `redact`,
+  `block` and `allow`, with a recording proxy that keeps what the tool asked IRIS for and what IRIS sent; it checks the
+  XML and JSON texts against recordings, the dump rules, the redacted HL7 texts against IRIS's own parser, a second
+  namespace and a namespace with no Interoperability, the route's refusals, the audit file and the console log, and that
+  `Hl7Size` equals the length IRIS serializes on every HL7 fixture (two batches included) and answers in under a quarter
+  of the serialization time. `ExecuteMCPv2.Tests.MessageBodyTest` covers the renderers.
+
+## [Pre-release — 2026-10-17] — Story 39.4: Search Table lookup
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `iris_message_search:searchTable`
+was declared in Story 39.1 and now works; it is a read, enabled by default, and is under the PHI data policy (default
+`redact`) like `body`.
+
+### Added
+
+- **The `searchTable` action of `iris_message_search` finds messages by an indexed Search Table value.** It takes a
+  required `searchTableClass`, the exact name of a compiled virtual-document Search Table class such as
+  `EnsLib.HL7.SearchTable`, and `filters`: 1 to 10 conditions combined with AND, each `{property, op, value}`, with the
+  operators and value rules of `body`; a value is at most 256 characters, which is all a Search Table stores. An HL7
+  medical record number is `PatientID eq <MRN>`. It takes the scope options of `headers` (the required window of at
+  most 7 days, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, the cursor and `namespace`) and
+  an optional `bodyClass` that narrows the document class, and returns the same header rows, paged by the same cursor,
+  never a Search Table or body value. The result also carries `dataPolicy: {policy, redacted: 0, blocked: 0}`. A
+  message matches a value operator when it has at least one non-empty entry that satisfies it; `ne` matches when it has
+  no entry equal to the value, and `isNull` and `notNull` test for the absence and presence of a non-empty entry. A
+  value is normalized as the Search Table stores it for the property's type, an Integer, Numeric or Boolean property
+  accepts only `eq`, `ne`, `isNull` and `notNull`, and a `String:CaseSensitive` property compares exactly.
+- **No caller text becomes SQL.** The IRIS handler resolves each property, through IRIS's own `getPropsList`, to the
+  integer PropId of its `Ens.Config.SearchTableProp` row and binds it, maps each operator from a closed list, takes the
+  table from the class dictionary and binds every value and the page size as parameters. A class that is not a compiled,
+  persistent Search Table subclass with a document class is refused (a custom Search Table, an abstract base, a document
+  class, a name that is not exact), and so is a property the class does not define; that refusal lists the class's
+  configured property names. Every refusal names the parameter, such as `filters[1].property`, and never the value, and
+  every shape rule runs before the namespace switch. A namespace with no Search Table property answers `notApplicable`.
+- **`searchTable` is under the PHI data policy.** Under `block` it is refused with
+  `{code: "DATA_POLICY_BLOCKED", action: "searchTable", policy: "block"}` before any IRIS call; under `redact` and
+  `allow` it runs. `filters`, already a declared PHI input, is written as `"[REDACTED]"` in the audit log under `redact`
+  and `block`.
+
+### Changed
+
+- **The tool's `dataPolicy.actions` becomes `["body", "searchTable"]`**, so a `searchTable` audit entry carries the
+  additive `dataPolicy` field as a `body` entry does.
+- **The search route's `action` text lists all three actions.** A request with an unknown action is refused with
+  `Parameter 'action' must be one of: headers, body, searchTable`.
+- **`filters` on the `headers` action is refused naming both actions**: `'filters' applies only to the body and
+  searchTable actions.` And `searchTableClass` is refused on `headers` and `body`, on the tool and on the route, instead
+  of being ignored.
+- **`searchTable` no longer answers `NOT_IMPLEMENTED`**, and no tool returns that code now; it stays in the catalog.
+- **The PHI data policy scope table lists `iris_message_search` as governed for `body` and `searchTable`.**
+- **`BOOTSTRAP_VERSION` moves `f7b0868c95d0` to `b6ec56073e29`**; the bootstrap still embeds 31 classes.
+  `MessageSearch.BodyFilterShape` and `BodyTable` gain optional parameters, and `BodyStatement` can emit a statement
+  with no joined table; with their defaults they emit exactly the text they did before. Every `headers` and `body`
+  request in the capture list answers byte for byte as it did, pinned by a capture taken on `f7b0868c95d0`; the
+  requests changed above (the route's `action` text, `filters` on `headers`, `searchTableClass` on `headers` or `body`)
+  are the exceptions. `resendFiltered` is unchanged.
+
+### Tests
+
+- An injection fuzz drives the search route directly against disposable namespaces, with write-shaped payloads (a
+  statement that calls a function incrementing a global), a side-effect oracle, a TypeScript oracle for results and an
+  echo oracle; a hand-written `IN` / `NOT IN` query over the search table is the oracle for every operator on every
+  kind of property, a synthetic HL7 message is found by its medical record number, a second namespace with different
+  PropIds and a namespace with no Search Table are searched too, the plan of every statement the route prepared is read
+  back from the statement index, and the audit file, the console log and every response are checked for a marker.
+  `ExecuteMCPv2.Tests.MessageSearchTableTest` covers the statement builders over system classes.
+
+## [Pre-release — 2026-10-16] — Story 39.3: Message body content search
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `iris_message_search:body`
+was declared in Story 39.1 and now works; it is a read, enabled by default, and is the first action to return
+`DATA_POLICY_BLOCKED` under the PHI data policy (default `redact`).
+
+### Added
+
+- **The `body` action of `iris_message_search` finds messages by what their bodies hold.** It takes a required
+  `bodyClass`, the exact name of a persistent body class (only headers of exactly that class match), and `filters`: 1 to
+  10 conditions combined with AND, each `{property, op, value}`. `property` is the exact, case-sensitive name of one
+  property of the class; `op` is `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `isNull` or `notNull`;
+  `value` is a string of 1 to 1024 characters, a number or a boolean. It takes the scope options of `headers` (the
+  required window of at most 7 days, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, the cursor
+  and `namespace`) and returns the same header rows, paged by the same cursor, never a body value. The result also
+  carries `dataPolicy: {policy, redacted: 0, blocked: 0}`.
+- **No caller text becomes SQL.** The IRIS handler resolves each property through the class dictionary to its compiled
+  `SqlFieldName` and writes it as a delimited identifier, maps each operator from a closed list to a fixed fragment,
+  takes the body table from the dictionary, and binds every value and the page size as parameters. A property with no
+  column is refused (a list or array collection, an embedded object, a relationship, a multidimensional property, a
+  transient or calculated property that is not SQL-computed), and a stream property accepts only `isNull` and
+  `notNull`. Every refusal names the parameter, such as `filters[2].op`, and never the value, and every shape rule runs
+  before the namespace switch.
+- **`DATA_POLICY_BLOCKED` is returned for the first time.** Under the `block` data policy, set per profile, the `body`
+  action is refused with `{code: "DATA_POLICY_BLOCKED", action: "body", policy: "block"}` before any IRIS call. Under
+  `redact` and `allow` it runs. `filters` is a declared PHI input, so under `IRIS_AUDIT_LOG_PARAMS` the audit log writes
+  it as `"[REDACTED]"` under `redact` and `block`.
+
+### Changed
+
+- **The search route's `action` text lists both actions.** A request with an unknown action is refused with
+  `Parameter 'action' must be one of: headers, body`.
+- **`filters` on the `headers` action is refused, on the tool and on the route**, instead of being ignored: a dropped
+  filter would return unfiltered results. Before this release the key did not exist, and the tool's schema stripped it.
+- **`searchTable` still answers `NOT_IMPLEMENTED`, now with `availableActions: ["headers","body"]`.** Its message
+  follows them: "Use the 'headers' or 'body' action." (it was "Use the 'headers' action.").
+- **`BOOTSTRAP_VERSION` moves `d440a659ba1e` to `f7b0868c95d0`**; the bootstrap still embeds 31 classes.
+  `MessageSearch.HeaderWhere` takes an optional alias for a joined statement and, with none, emits exactly the text it
+  did before; a `headers` request answers byte for byte as it did, pinned by a capture taken on `d440a659ba1e`.
+  `resendFiltered` is unchanged.
+
+### Tests
+
+- An injection fuzz drives the search route directly against disposable namespaces, with write-shaped payloads
+  (a statement that calls a function incrementing a global), a side-effect oracle, a TypeScript oracle for results and
+  an echo oracle; a hand-written JOIN is the oracle for every operator on every kind of property, a second namespace
+  with a different body class and a namespace without Interoperability are searched too, and the audit file, the
+  console log and every response are checked for a body marker. `ExecuteMCPv2.Tests.MessageBodySearchTest` covers the
+  statement builders over system classes.
+
+## [Pre-release — 2026-10-16] — Story 39.2: PHI data policy
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). One existing output changes by
+default, as the Project Lead sanctioned (L-2): the `iris_message_resend` preview. `IRIS_DATA_POLICY=allow` restores it
+exactly.
+
+### Changed
+
+- **The `iris_message_resend` preview shows less of a message body by default.** Under the new default data policy
+  `redact`, the body summary of a stream body (the first ~1 KB of text) and of every other non-HL7 body is withheld, with
+  `bodySummary: ""` and a reason in the item's `bodyPolicy`; an HL7 v2 body keeps today's class-name note,
+  `(non-stream body; class=EnsLib.HL7.Message)`, and no HL7 body text is requested from IRIS or shown. Each found item
+  gains `bodyKind` and `bodyPolicy`, and the result gains `dataPolicy: {policy, redacted, blocked}` and one trailing
+  text line. A header with no readable body (a missing class, a literal body, a body that does not open) has the outcome
+  `none`. With the policy set to `allow`, the request and the result are today's, with none of the new fields; `block`
+  withholds every body. This is the one sanctioned AD-15 change of the story; it is named here with the story.
+- **`BOOTSTRAP_VERSION` moves `6dcdd238c792` to `d440a659ba1e`**; the bootstrap still embeds 31 classes. The preview route
+  accepts the optional request fields `bodyDetail` (`kind` or `text`) and `bodyTextMaxChars` (1 to 1048576), validated
+  before the namespace switch; a request without them gets today's response. `MessageResend.PreviewOne` takes its type
+  label from `MessageSearch.TypeLabel` (DW-575), with the same output.
+
+### Added
+
+- **A per-profile PHI data policy: `block`, `redact` or `allow`, default `redact`.** It resolves for each profile, taking
+  the first value found: the `dataPolicy` field of the profile's `IRIS_PROFILES` entry, the new operator variable
+  `IRIS_DATA_POLICY`, the governance file's `dataPolicy.profiles.<name>`, its `dataPolicy.global`, then `redact`. A value
+  on the `default` entry applies to `default` only. `IRIS_GOVERNANCE` rejects a `dataPolicy` key and names the right
+  channels; a malformed value fails startup naming the channel; an unknown profile name under `dataPolicy.profiles` only
+  warns. `iris_server_profiles` reports `dataPolicy` and `dataPolicySource` for every profile. A call can only tighten the
+  operator's policy (`tightenDataPolicy`); no tool takes a policy parameter yet.
+- **The audit log records the policy.** An entry for a governed call carries `dataPolicy: {policy, redacted, blocked}`
+  (counts only), `outcome` keeps `ok`, `error` and `denied`, and a tool declares its PHI-bearing inputs on its
+  `ToolDefinition` (`dataPolicy.phiInputs`): under `IRIS_AUDIT_LOG_PARAMS` those values are written as `"[REDACTED]"`
+  under `redact`, under `block` and for an unknown profile. Message-body content never reaches the audit file or the
+  console log.
+- **An HL7 v2 (ER7) redaction engine in `@iris-mcp/shared` (`redactHl7`), with no tool consumer until Story 39.5.** It is
+  fail-closed: it keeps a reviewed list of non-identifying fields per segment and redacts every other field, every field
+  of a segment nobody reviewed and every field of a Z-segment, preserving segment order, terminators and separators. It
+  refuses a text holding a line whose name is not a reviewed segment, an HL7 v2 segment of versions 2.1 to 2.8.2 or a
+  Z-segment (such as a line a raw line feed splits off a free-text field), and a name alone of an unreviewed segment. The
+  list and a separate Safe Harbor inventory (45 CFR 164.514(b)(2)(i), reviewed 2026-10-16) are tested to be disjoint. The
+  new IRIS-side classifier `MessageSearch.BodyKind` decides a body's kind from its class alone.
+- **The refusal code `DATA_POLICY_BLOCKED`** joins the catalog, for the tools of Stories 39.3 and 39.4.
+- **A classification of every tool of the suite** (109 names) as governed, residual or not applicable, as of 2026-10-16,
+  in `tool_support.md`: only the resend preview is governed; `iris_sql_execute`, `iris_global_get`,
+  `iris_production_logs`, `iris_message_diagram` and the other residual tools can still return body-derived text and are
+  restricted through their governance keys.
+- The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+### Tests
+
+- **A live gate on a disposable namespace** drives the built interop server through `redact`, `block`, `allow`, a
+  profile of its own and the audit log, and checks the preview against a capture taken before the change. It also covers
+  the executing path of `resendFiltered` (DW-570) against a production started and stopped in the scratch namespace.
+
+## [Pre-release — 2026-10-16] — Story 39.1: Message header search
+
+One tool is added, `iris_message_search`: the interop server goes from 22 to 23 package tools (24 advertised) and the
+suite from 107 to 108 package tools (113 advertised). Its three governance keys, `iris_message_search:headers`, `:body`
+and `:searchTable`, are reads and are enabled by default. The frozen governance baseline stays at hash `1e62c5ad5bf7`
+(141 keys). No existing route changes except `resendFiltered`, whose dry runs and refusals a live gate replays byte for
+byte against a capture taken before the change.
+
+### Added
+
+- **`iris_message_search` (interop, read-only).** It searches message headers without enabling a write, which until now
+  needed the dry run of `iris_message_resend` `resendFiltered`, a default-disabled write. The `action` enum is fixed:
+  `headers` returns paged header rows for a window you must name (`from` required, `to` defaulting to now, at most 7
+  days; no whole-namespace mode), filtered by `item` (source or target), `source`, `target`, `status`, `sessionId`,
+  `bodyClass` and `errorOnly`; `body` and `searchTable` return the new `NOT_IMPLEMENTED` refusal, with no IRIS call, until
+  Stories 39.3 and 39.4. A row never carries body content, `ErrorStatus` or `Description`. Times go in as ISO 8601 with
+  `Z` or an offset (a time with no zone is refused) and come out as UTC ISO 8601 with a `...Raw` sibling. Results are
+  ordered by `TimeCreated` then `ID` and paged by a keyset cursor: `limit` is 100 by default and 500 at most, an output
+  cap and not timeout protection, and only a page with `hasMore: true` carries `nextCursor`. A namespace without
+  Interoperability returns `notApplicable: true` with a `reason`. Every filter is matched by equality and bound as a
+  parameter; the item, source, target and body-class names compare without regard to case, as `Ens.MessageHeader` stores
+  them. New route `POST /interop/message/search` and handler `ExecuteMCPv2.REST.MessageSearch`.
+- **The refusal code `NOT_IMPLEMENTED`** joins the catalog in `@iris-mcp/shared`: the requested action is declared but
+  not available in this version.
+
+### Changed
+
+- **The interop `core` preset gains `iris_message_search`** (10 to 11 runtime tools) and `developer` includes it (23 to
+  24); `iris_message_search` is the entry of the search, read and diagram loop, and the read-only way to find messages
+  while resend stays disabled.
+- **`resendFiltered` builds its WHERE clause from the shared helper `MessageSearch.HeaderWhere`.** Its guards, error
+  texts, statement shapes and response are unchanged; a live gate replays 20 requests (dry runs and guard refusals)
+  against a capture taken before the extraction and compares the raw response bodies. The path that resends, which needs
+  a running production, is exercised by `MessageResendLiveTest` only, and this story does not run it.
+- **`BOOTSTRAP_VERSION` moves `089f8f0a62b2` to `6dcdd238c792`** and the bootstrap embeds 31 classes instead of 30.
+
+### Tests
+
+- **A disposable-namespace harness for live Interoperability gates.** `interop-namespace-fixture.ts` creates and removes
+  scratch namespaces with their databases, maps `Ens` and `EnsLib` to ENSLIB so `Ens.MessageHeader` works, seeds
+  synthetic headers dated 2001-02-03 UTC, and reports anything left behind. The new gate checks every row of the search
+  against a hand-written SQL oracle in two namespaces and the not-configured case, and replays the `resendFiltered`
+  requests byte for byte.
+
+## [Pre-release — 2026-10-16] — Story 39.0: Epic 38 deferred cleanup
+
+No tool, action, governance key, preset row or prompt is added or removed, and no count moves: the dev server stays at
+31 package tools (32 advertised), the suite at 107 package tools (112 advertised), and there are 12 prompts. The frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays `089f8f0a62b2` (no IRIS-side
+class changes). A valid governance document starts a server, and runs every `iris-mcp-governance` command, exactly as
+before.
+
+### Added
+
+- **A governance key that names nothing is reported (DW-565).** A key inside `global` or a profile that is none of a
+  tool's keys used to be accepted silently and did nothing: a typo such as `iris_doc_putt`, a bare name for a per-action
+  tool (`{"global": {"iris_doc_edit": false}}` leaves the default-enabled `iris_doc_edit:apply` enabled), an action on a
+  single-operation tool (`iris_doc_put:apply`) or an action the tool does not have. Each server now logs one `[WARN]` per
+  such key for a tool it registers (a tool hidden by a visibility preset counts as registered), in `IRIS_GOVERNANCE` and
+  in the file `IRIS_GOVERNANCE_FILE` names. The message names the key, the layer and the keys to use instead, and never
+  the value. The server still starts, and the effective policy is unchanged. A key whose tool the server does not
+  register logs nothing, because one document serves all five servers: that includes a misspelled tool name such as
+  `iris_doc_putt`, which only `check` reports. The new `iris-mcp-governance check [--file <path>]
+  [--root <path>] [--json]` command checks every key in `IRIS_GOVERNANCE` and in the resolved file against the whole
+  suite's key universe (the keys `universe` lists) and exits 1, with one message per key, when a key matches nothing.
+  `check` is a command of the `iris-mcp-governance` bin, not an MCP tool.
+
+### Fixed
+
+- **The `type` description of `iris_doc_list`, `iris_package_list` and `iris_doc_export` no longer offers `'cls'` for
+  category CLS (DW-567).** Atelier answers category CLS with any type but `*` with HTTP 400. The three tools now share
+  one description: RTN takes `mac`, `int`, `inc`, `bas`, `mvi` or `mvb`, or a comma list such as `mac,inc`; CLS takes no
+  type filter; with category `*`, `cls` lists only classes. This is a description change only: no tool refuses a
+  category-and-type pair on the client side. The README's `tools/list` payload rows for `@iris-mcp/dev` are re-measured.
+
+### Tests
+
+- **One environment harness for the default test runs (DW-543).** The `makeEnvHarness` test helper had been copied into 43
+  test files, and the copies cleared different subsets of the variables a server reads at startup, so a developer shell
+  with `IRIS_GOVERNANCE`, `IRIS_TOOLS_PRESET` or `LOG_LEVEL` set turned dozens of test files red across six packages.
+  There is now one harness and one setup scrub under `packages/shared/src/__tests__/` (never published), the
+  `vitest.config.ts` of shared, dev, admin, interop, ops, data and `@iris-mcp/all` runs the scrub before each test file
+  (client-config's default run was already green under a hostile shell, so its config is unchanged), all 43 copies use
+  the harness, and a roster test in `@iris-mcp/all` fails, naming the variable, when source reads a variable the roster
+  does not list.
+
 ## [Pre-release — 2026-10-16] — Story 38.7: Epic 38 burn-down
 
 No tool, action, key or preset row is added or removed, and no tool, prompt or governance-baseline count moves. Each
@@ -1037,9 +1509,10 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
-`iris_doc_get` / `iris_doc_edit` are a second pair). Roster summary (runtime
-tool counts, as of Story 38.5): `full` 32/27/23/22/8 (dev/admin/interop/ops/data), `core`
-15/13/10/10/8, `developer` 32/11/23/10/8 — every `core` server lands at about 13 runtime tools, a
+`iris_doc_get` / `iris_doc_edit` are a second pair, and as of Story 39.5 `iris_message_search` /
+`iris_message_body` are a third). Roster summary (runtime
+tool counts, as of Story 39.5): `full` 32/27/25/22/8 (dev/admin/interop/ops/data), `core`
+15/13/12/10/8, `developer` 32/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
 guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under

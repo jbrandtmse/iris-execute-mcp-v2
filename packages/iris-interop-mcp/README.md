@@ -1,6 +1,6 @@
 # @iris-mcp/interop
 
-**IRIS Interoperability MCP Server** -- Ensemble/Health Connect production lifecycle, credentials, lookup tables, business rules, data transformations, and REST API management via the Model Context Protocol.
+**IRIS Interoperability MCP Server** -- Ensemble/Health Connect production lifecycle, credentials, lookup tables, business rules, data transformations, REST API management, and message forensics (searching message headers and bodies and reading message bodies under the PHI data policy, all reads that are enabled by default) via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -33,6 +33,7 @@ All servers use the same environment variables:
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
 | `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also selects a message table per worker process independently of this header, so localized prefixes can still appear — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
+| `IRIS_DATA_POLICY` | *(unset — `redact`)* | **Optional.** `block`, `redact` or `allow` (case-insensitive): the PHI data policy for every profile that no `IRIS_PROFILES` entry sets. Default **`redact`**: `iris_message_body` shows an HL7 v2 body redacted by a reviewed keep-list and withholds every other body, the `preview` action of `iris_message_resend` shows an HL7 v2 body only as its class name and withholds every other body with a reason, and the `body` and `searchTable` actions of `iris_message_search` run and return header rows only. `allow` shows bodies as stored; `block` withholds every body and refuses the `body` and `searchTable` actions, and withholds the Event Log text of `iris_production_logs` and the error text of `iris_message_diagram`. Every one of these is a read, enabled by default. Per profile and in the governance file: see [PHI data policy](#phi-data-policy-iris_data_policy). A malformed value fails startup naming the channel. |
 
 ### Multiple servers & the `server` parameter
 
@@ -42,13 +43,31 @@ Optionally, set `IRIS_GOVERNANCE_FILE` to the path of a JSON file of the same sh
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **10-tool runtime roster** (9 package tools + `iris_server_profiles`) — the troubleshoot-a-production loop: status/summary/control, item config, logs/queues/messages, trace diagram, resend. `iris_production_control` stays visible under `core` so the `recover`-first MCP guidance holds under every preset. `IRIS_TOOLS_PRESET=developer` keeps all **23 runtime tools** (22 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets). (This server's registered prompts — `recover-stuck-production`, `resend-failed-messages`, `trace-message-flow` — only call tools that stay visible under `core`, so no prompt-pack limitation applies here.)
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **12-tool runtime roster** (11 package tools + `iris_server_profiles`) — the troubleshoot-a-production loop: status/summary/control, item config, logs/queues/messages, message search, message body, trace diagram, resend. `iris_production_control` stays visible under `core` so the `recover`-first MCP guidance holds under every preset. `IRIS_TOOLS_PRESET=developer` keeps all **25 runtime tools** (24 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets). (This server's registered prompts — `recover-stuck-production`, `resend-failed-messages`, `trace-message-flow` and `find-patient-messages` (Story 39.6; it searches for a patient's messages and reads their bodies) — only call tools that stay visible under `core`, so no prompt-pack limitation applies here.)
 
 ---
 
 ### Audit Logging (`IRIS_AUDIT_LOG`)
 
 For regulated deployments, set `IRIS_AUDIT_LOG=/path/to/audit.jsonl` to record **every MCP tool call this server handles** — success, error, or governance denial — as one secrets-free JSON line (session, sequence, tool, action, outcome, redacted parameter keys). It is **off by default** (unset ⇒ a mechanical no-op, zero filesystem writes) and framework-wide — the same interceptor covers every tool on this server, including the double-gated `iris_message_resend`. `IRIS_AUDIT_LOG_MAX_MB` (default `50`) sets the single-generation rotation size; `IRIS_AUDIT_LOG_PARAMS=true` additionally records (redacted) parameter *values*. Because it is server-side **configuration** — not a governed tool action — an AI client cannot disable its own audit trail; only an operator with server-environment access can. Full record shape, redaction rules, and how it differs from IRIS's own security-audit tools: [Compliance & Auditability](../../README.md#compliance--auditability).
+
+A call to a tool under the PHI data policy (`iris_message_body`, the `body` and `searchTable` actions of `iris_message_search`, and the `preview` action of `iris_message_resend`) also records `dataPolicy` (`{policy, redacted, blocked}`: the policy in force and counts, never body content). So does a call to `iris_production_logs` or `iris_message_diagram`, which are governed under `block`: the entry holds the number of Event Log entries or error warnings withheld under `block`, and 0 counts under `redact` and `allow`. With `IRIS_AUDIT_LOG_PARAMS=true`, the PHI inputs a tool declares (the `filters` of `iris_message_search`) are written as `"[REDACTED]"` under `redact` and `block`, and are logged only under `allow`. Message-body content never reaches the audit file or the console log, under any policy.
+
+### PHI data policy (`IRIS_DATA_POLICY`)
+
+An Interoperability message body can hold protected health information. A per-profile **data policy** controls what this server's tools show of one: `block` withholds every body, `redact` (the **default**) shows an HL7 v2 body redacted by a reviewed keep-list and withholds every other body, and `allow` shows bodies as stored. It governs `iris_message_body`, the `body` and `searchTable` actions of `iris_message_search` (refused under `block`, header rows only otherwise) and the `preview` action of `iris_message_resend`; every one of them is a read, **enabled by default**, so the policy changes what they show and adds no action and no governance key. The `headers` action of `iris_message_search` is outside the policy. `iris_message_diagram` and `iris_production_logs`, both in this server's `core` preset and both reads, enabled by default, are under it only under `block`, which withholds a diagram's error text and each Event Log entry's text with a reason; under `redact` and `allow` they show that text unchanged, because a diagram's error text or an Event Log line can carry segment text that cannot be redacted reliably (see the scope table in [tool_support.md](../../tool_support.md)); where that is not acceptable, restrict them with their governance keys. A field the keep-list keeps still holds what the sender put in it, so a redacted text reduces exposure and is not proof that it holds no identifying value.
+
+**Where to set it.** The first value found wins, for each profile:
+
+1. the `dataPolicy` field of the profile's `IRIS_PROFILES` entry;
+2. the `IRIS_DATA_POLICY` environment variable;
+3. the governance file's `dataPolicy.profiles.<name>` (`IRIS_GOVERNANCE_FILE`);
+4. the governance file's `dataPolicy.global`;
+5. `redact`.
+
+`iris_server_profiles` reports each profile's `dataPolicy` and `dataPolicySource` (`IRIS_PROFILES`, `IRIS_DATA_POLICY`, `IRIS_GOVERNANCE_FILE:profiles`, `IRIS_GOVERNANCE_FILE:global` or `default`), so an agent can read the policy before it searches. A call can only tighten the policy, never loosen it: `iris_message_body` takes an optional `dataPolicy` parameter, and a looser value is ignored and reported as `dataPolicyClamped: true`. A malformed value fails startup naming the channel. Full model, the scope over every tool of the suite and the audit fields: [PHI data policy](../../README.md#phi-data-policy).
+
+The data policy reduces exposure of message-body data; it is not a compliance certification.
 
 ### Server Manager connections (`IRIS_SERVER_MANAGER`)
 
@@ -157,6 +176,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_production_queues` | Queue status for all production items | `namespace?` | readOnly, idempotent |
 | `iris_production_messages` | Trace message flow by session or header ID | `sessionId?`, `headerId?`, `count?`, `namespace?` | readOnly, idempotent |
 | `iris_message_diagram` | Mermaid sequence diagram from a message-trace session (Visual Trace as renderable text) | `sessionIds`, `labelMode?`, `maxRows?`, `dedup?`, `namespace?` | readOnly, idempotent |
+| `iris_message_search` | Search message headers in a required window of at most 7 days (`headers`), or by what the bodies hold (`body`: structured filters), or by an indexed Search Table value such as an HL7 medical record number (`searchTable`: structured filters over a Search Table class); `body` and `searchTable` are under the PHI data policy: enabled by default, refused under `block` | `action`, `from`, `to?`, `item?`, `source?`, `target?`, `status?`, `sessionId?`, `bodyClass?`, `searchTableClass?`, `filters?`, `errorOnly?`, `limit?`, `cursor?`, `namespace?` | readOnly, idempotent |
+| `iris_message_body` | Read the bodies of 1 to 20 messages by header ID, rendered by kind (HL7 v2 as ER7, XML, JSON, text); a read, enabled by default, under the PHI data policy: `redact` shows an HL7 v2 body redacted and withholds every other body | `headerIds`, `maxChars?`, `dataPolicy?`, `namespace?` | readOnly, idempotent |
 | `iris_message_resend` | Resend/replay Interoperability messages (`preview` read; `resend`/`resendFiltered` writes) | `action`, `headerIds?`, `item?`, `status?`, `from?`, `to?`, `maxMessages?`, `dryRun?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
 
@@ -165,6 +186,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 Generates one Mermaid `sequenceDiagram` per requested session — the Management Portal's Visual Trace as renderable text. Config items become participants, `Invocation` maps to arrow style (sync `->>` for Inproc, async `-->>` for Queue), requests are correlated to their responses, errored messages are flagged with an ` [ERROR]` label suffix plus a sanitized `%%` comment, and each diagram opens with a session-metadata header. Two compression tiers keep large traces readable: contiguous identical request/response **pairs** and contiguous identical multi-hop **episodes** each collapse into `loop N times` blocks (episode loops nest pair loops). Anomalies (unpaired messages, correlation conflicts, unknown invocations, errors) surface both as `%%` comments and in the structured `warnings[]` array — generation never fails a call. Use [`iris_production_messages`](#production-monitoring-tools) when you want the raw message rows instead.
 
 > **Governance default:** `iris_message_diagram` is a pure **read** (`mutates: "read"`) and is **enabled by default** under `IRIS_GOVERNANCE`.
+
+> **PHI data policy:** under `block`, each error warning keeps its `Error on message <id>: ` prefix and the rest of its text, in `warnings[]` and in its `%%` line, becomes a fixed reason; the result then carries `dataPolicy`. Under `redact` (the default) and `allow` the diagram is shown unchanged. See [PHI data policy](#phi-data-policy-iris_data_policy).
 
 **Options:**
 
@@ -195,11 +218,86 @@ MyApp.Service.FileIn->>MyApp.Process.Router: MyApp.Msg.Order [ERROR]
 %% Error on message 90412: connection refused
 ```
 
+#### `iris_message_search` — Search Message Headers and Bodies
+
+Searches `Ens.MessageHeader` without enabling any write. The `action` enum is fixed: `headers` searches the headers of a required window, `body` searches them by what their message bodies hold (below), and `searchTable` finds them by an indexed Search Table value (below). Rows come back oldest first as header rows only — `id`, `sessionId`, `type`, `status`, `isError`, `sourceItem`, `targetItem`, `bodyClassName`, `bodyId`, UTC ISO 8601 `timeCreated` and `timeProcessed` (each with a `...Raw` sibling that keeps the stored value, and `""` when empty), and `correspondingMessageId` (`null` when none). A row never carries message body content, `ErrorStatus` or `Description`.
+
+> **Governance default:** all three actions (`headers`, `body`, `searchTable`) are pure **reads** (`mutates: "read"`) and are **enabled by default** under `IRIS_GOVERNANCE`, including under the `read-only` preset. Restrict one with, for example, `{"global": {"iris_message_search:headers": false}}`. The tool is in the `core` and `developer` visibility presets. The `body` and `searchTable` actions are also under the PHI data policy (see **Body search** and **Search Table lookup** below): they are refused under `block`. The `headers` action is outside the policy: it returns no Search Table or body value, with one exception, a header with no body class, whose body ID is the literal body. Where header rows are not acceptable, restrict `iris_message_search:headers` with its governance key (a read, enabled by default).
+
+**Options (`headers`):**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `from` | *(required)* | Window start: ISO 8601 with `Z` or an offset (a time with no zone is refused) |
+| `to` | now | Window end, in the same form. The window may span at most **7 days**; there is no whole-namespace mode |
+| `item` | — | Config item name; matches the source or the target |
+| `source`, `target` | — | Source or target config item name |
+| `status` | — | `Created`, `Queued`, `Delivered`, `Discarded`, `Suspended`, `Deferred`, `Aborted`, `Errored` or `Completed`; rows report `Errored` as `Error` |
+| `sessionId` | — | A positive integer session ID |
+| `bodyClass` | — | Message body class name |
+| `errorOnly` | — | Only messages whose `IsError` flag is set (not the same as status `Error`) |
+| `limit` | `100` | Rows per page, 1 to 500. An **output cap**, not timeout protection: the window is scanned in full, so a wide window on a busy namespace can approach the ~60 s Web Gateway timeout — narrow the window: a filter narrows the rows returned, not the window scanned |
+| `cursor` | — | The `nextCursor` of the previous page. Only a page with `hasMore: true` carries one |
+| `namespace` | server default | Target namespace |
+
+Every filter is an equality match, not a pattern (`%` and `_` are ordinary characters), bound as a parameter on the IRIS side. The item, source, target and body-class names compare the way `Ens.MessageHeader` stores them: without regard to case, and ignoring trailing blanks and tabs (a trailing line break still counts). When you page a window close to 7 days wide, pass the same `from` and `to` on every page: an omitted `to` is recomputed as now on each call. All three actions check the 7-day bound. A namespace without Interoperability returns `notApplicable: true` with a `reason`, not an error. The `headers` action refuses a `filters` key rather than ignoring it, and `searchTableClass` is refused on `headers` and `body`.
+
+**Body search (`body`):** returns the same header rows for the headers whose message body satisfies structured conditions. It takes the scope options above (`from`, `to`, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, `cursor`, `namespace`) plus two required ones. It reads the headers in the window first and each body by its ID, so a body filter does not reduce the work (narrow the window instead), and it never returns a body value.
+
+| Option | Description |
+|--------|-------------|
+| `bodyClass` | **Required.** The exact name of a persistent body class with an SQL table in the namespace (for example `Ens.StringRequest` or `EnsLib.HL7.Message`). Only headers of exactly that class match, so a subclass's bodies are not included |
+| `filters` | **Required.** 1 to 10 conditions combined with AND, each `{property, op, value}`. `property` is the exact, case-sensitive name of one property of `bodyClass` (not an SQL column name, not a dotted path). `op` is `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `isNull` or `notNull`. `value` is a string of 1 to 1024 characters, a number or a boolean; leave it out for `isNull` and `notNull` |
+
+`eq`, `ne`, `lt`, `le`, `gt`, `ge` and `startsWith` compare by the property's collation, so a default string property ignores case, while `contains` is a case-sensitive substring test (`%` and `_` are ordinary characters); `ne` never matches a null value. Values are compared in IRIS logical form: a date property takes its day number and a time property its seconds since midnight, not a formatted string; a timestamp property takes its stored text, such as `2001-02-03 08:00:00`, not an ISO 8601 `T` form; a number is sent in IRIS canonical form (`0.5` becomes `.5`), so give a text property a string. A header whose body no longer exists never matches. On `EnsLib.HL7.Message`, `RawContent` holds only the first 10,000 characters of the message, so a search on it does not see later text (a large message with an embedded report, for example). A stream property accepts only `isNull` and `notNull`. A property that has no column is refused: a list or array collection, an embedded (serial) object, a relationship, a multidimensional property, and a transient or calculated property that is not SQL-computed. The property, the operator and the table are resolved from the class dictionary on the IRIS side and every value is bound as a parameter, so nothing a caller sends becomes SQL text; a refusal names the parameter (for example `filters[2].op`) and never the value.
+
+> **Data policy:** the `body` action is under the PHI data policy (`IRIS_DATA_POLICY`, set per profile; default `redact`) and is a read, **enabled by default**. Under `block` it is refused with `DATA_POLICY_BLOCKED` and no IRIS call, because a body search reveals what the bodies hold; use `headers`, or ask the operator for a looser policy for the profile. Under `redact` and `allow` it runs, the result carries `dataPolicy` (`{policy, redacted: 0, blocked: 0}`) and one trailing line names the policy; which headers match still shows what the bodies hold, so where that is not acceptable use `block` or restrict `iris_message_search:body` with its governance key. And the audit log (`IRIS_AUDIT_LOG_PARAMS`) writes `filters` as `"[REDACTED]"` under `redact` and `block`. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+**Search Table lookup (`searchTable`):** returns the same header rows for the headers whose message has the Search Table entries that structured conditions ask for, such as the HL7 messages of one medical record number. It takes the scope options above (`from`, `to`, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, `cursor`, `namespace`) plus the options below, reads the headers in the window first and probes the Search Table by each header's body ID (so a Search Table filter does not reduce the work: narrow the window instead), and never returns a Search Table or body value. It is a read, **enabled by default**.
+
+| Option | Description |
+|--------|-------------|
+| `searchTableClass` | **Required.** The exact name of a compiled virtual-document Search Table class in the namespace, such as `EnsLib.HL7.SearchTable`. A custom Search Table (an `Ens.CustomSearchTable` subclass, which has no configured properties), an abstract base, a document class and a name that is not an exact, compiled class are refused |
+| `filters` | **Required.** 1 to 10 conditions combined with AND, each `{property, op, value}`, with the operators and value rules of `body` (a value is at most 256 characters here: the Search Table stores no more). `property` is the exact, case-sensitive name of a property that the class defines or inherits from its Search Table superclasses; an unknown one is refused with an error that lists the class's configured property names |
+| `bodyClass` | Optional. The exact name of a compiled class that is, or extends, the Search Table's document class; it replaces that class as the header class to match |
+
+`EnsLib.HL7.SearchTable` has `MSHTypeName` (MSH-9 as `ADT_A01`), `MSHControlID` (MSH-10), `PatientID` (PID-2, every PID-3 repetition and PID-4: use it for a medical record number), `PatientName` (PID-5) and `PatientAcct` (PID-18). A message matches `eq`, `lt`, `le`, `gt`, `ge`, `contains` or `startsWith` when it has at least one non-empty entry for the property whose stored value satisfies it, so a multi-valued property matches on any of its values. `ne` matches when the message has no entry equal to the value (not when some entry differs), a message that was never indexed included, `isNull` when it has no non-empty entry (a message that was never indexed included) and `notNull` when it has at least one. Values are normalized as the Search Table stores them: a default property ignores case (give the value in any case), a `String:CaseSensitive` property such as `MSHControlID` compares exactly, an Integer, Numeric or Boolean property accepts only `eq`, `ne`, `isNull` and `notNull` with its value normalized (`0007` is `7`), and a `|` is stored as `+`. Only headers of the Search Table's document class match (`EnsLib.HL7.Message` for `EnsLib.HL7.SearchTable`), because its entries are keyed by that class's IDs. A Search Table holds only the messages indexed when they were processed (or rebuilt with `BuildIndex`), so no match does not prove that no message holds the value. A namespace with no Search Table property returns `notApplicable: true` with a `reason`, checked before the class. The class, the properties (as PropIds), the operators and the table are resolved on the IRIS side and every value is bound as a parameter, so nothing a caller sends becomes SQL text; a refusal names the parameter (for example `filters[1].property`) and never the value.
+
+> **Data policy:** the `searchTable` action is under the PHI data policy (`IRIS_DATA_POLICY`, set per profile; default `redact`) and is a read, **enabled by default**. Under `block` it is refused with `DATA_POLICY_BLOCKED` and no IRIS call, because a Search Table lookup reveals values taken from message bodies; use `headers`, or ask the operator for a looser policy for the profile. Under `redact` and `allow` it runs, the result carries `dataPolicy` (`{policy, redacted: 0, blocked: 0}`) and one trailing line names the policy; which headers match still shows what the bodies hold, so where that is not acceptable use `block` or restrict `iris_message_search:searchTable` with its governance key. And the audit log (`IRIS_AUDIT_LOG_PARAMS`) writes `filters` as `"[REDACTED]"` under `redact` and `block`. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+#### `iris_message_body` — Read Message Bodies
+
+Reads the bodies of 1 to 20 messages by header ID, such as the `id` values `iris_message_search` returns: use it after a search to see what a message carried. It is a read (`mutates: "read"`) and **enabled by default** under `IRIS_GOVERNANCE`, including under the `read-only` preset; it is one governance key, which an operator restricts with `{"global": {"iris_message_body": false}}`. It is in the `core` and `developer` visibility presets, and always visible together with `iris_message_search`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `headerIds` | *(required)* | 1 to 20 header IDs, each a positive integer or a string of digits. The items come back in request order, one per ID, duplicates included; a header that does not exist is `{id, found: false, error: "Header <id> not found"}` |
+| `maxChars` | `10000` | The most characters of text shown per body, 1 to 1048576. An **output cap** on the text the tool returns: a longer text is cut, with `truncated: true`, never between the two halves of a surrogate pair. An XML body is serialized whole before it is cut, and so is a JSON export, but a character stream in a property dump is read only up to the read limit |
+| `dataPolicy` | — | `block`, `redact` or `allow`. It can only **tighten** the profile's policy: a looser value is ignored and the result says so (`dataPolicyClamped: true` and one trailing line) |
+| `namespace` | server default | Target namespace |
+
+Each body is rendered by its kind, which comes from the body class and never from its content:
+
+| Body | Shown as | `format` |
+|------|----------|----------|
+| HL7 v2 (`EnsLib.HL7.Message`) | The complete ER7 text; a batch with all its children | `er7` |
+| XML virtual document (`EnsLib.EDI.XML.Document`) | The XML text | `xml` |
+| Another persistent object | JSON: the `%JSONExportToStream` output when its class extends `%JSON.Adaptor`, otherwise a dump of its public properties (a character stream shows its text and a binary stream its class and size; a list or array is its count; private, internal, calculated, transient and multidimensional properties are left out) | `json` |
+| Stream or stream container | The stream's text | `text` |
+| A header with no body class | The header's body ID, which is the value; a header with no body ID either has no body, and is not shown (`bodyPolicy` `none`, with that reason) | `text` |
+| Anything else (X12, EDIFACT or another virtual document, a class that is not compiled, a body that no longer opens) | Not shown: `notShown` gives the reason | none |
+
+An HL7 v2 body is **read only whole**: IRIS never cuts one, so a body longer than 65536 characters is not shown, with the reason (a body that IRIS reads whole is still cut at `maxChars` like any other text). Under `allow`, a larger `maxChars` (at most 1048576) raises that limit and reads a longer one whole; a body longer than 1048576 characters is never shown. Each found item is `{id, found: true, bodyClassName, bodyId, bodyKind, bodyPolicy}` plus either `format`, `text` and `truncated`, or `notShown`. A text is sanitized after redaction and before the cut: CRLF and a lone CR become LF (an ER7 segment is one line), and every other C0 control character except TAB and LF, and DEL, becomes U+FFFD. A namespace without Interoperability returns `notApplicable: true` with a `reason`, not an error.
+
+> **Data policy:** the tool is under the PHI data policy (`IRIS_DATA_POLICY`, set per profile; default `redact`), and the request names which bodies IRIS may read at all. Under `redact` IRIS returns the text of HL7 v2 bodies only, and the tool applies a reviewed keep-list to the complete text: every field that is not on the list is replaced by `***`, and a text the engine cannot read is withheld. Every other body, and an HL7 v2 body over 65536 characters, is withheld with a reason in `notShown`, and no other body's content leaves IRIS. Under `block` every body is withheld and IRIS returns the text of none (IRIS opens each body only to report whether it can be read). Under `allow` each body is shown as stored. Each body carries `bodyPolicy` (`redacted`, `blocked` or `none`), and the result carries `dataPolicy` (`{policy, redacted, blocked}`) and a trailing line `Data policy <policy>: <n> redacted, <n> withheld.` Neither the audit log nor the console log holds body text under any policy. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
 #### `iris_message_resend` — Resend / Replay Messages
 
 Resends messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API (the same call the Management Portal's "Resend" button uses). Three actions:
 
-- **`preview`** (read) — per header ID (1–100): id, session, source/target item, status, time, body classname (+ existence check), a first-~1KB body summary, and a resendability verdict + reason (a Request-type `Status=Error` header is the correct retry target; a Response-type error header is flagged as likely a no-op). Never mutates.
+- **`preview`** (read) — per header ID (1–100): id, session, source/target item, status, time, body classname (+ existence check), a first-~1KB body summary under the operator's data policy, and a resendability verdict + reason (a Request-type `Status=Error` header is the correct retry target; a Response-type error header is flagged as likely a no-op). Never mutates.
+
+  > **Data policy:** the body summary follows the profile's `dataPolicy` (`IRIS_DATA_POLICY`, an `IRIS_PROFILES` entry's `dataPolicy`, or the governance file; default **`redact`**). Under `redact` an HL7 v2 body shows only its class name (`(non-stream body; class=EnsLib.HL7.Message)`) and every other body, a stream included, is withheld with a reason (`bodySummary` is `""`); `block` withholds every body; `allow` returns the summary as before, field for field. A header with no readable body (a missing class, a literal body, a body that does not open) reports `bodyPolicy: {outcome: "none"}`. Under `redact` and `block` each found item carries `bodyKind` and `bodyPolicy`, and the result carries `dataPolicy: {policy, redacted, blocked}`; under `allow` none of these fields appears. `iris_server_profiles` reports each profile's `dataPolicy`. See the suite README's [PHI data policy](../../README.md#phi-data-policy). The data policy reduces exposure of message-body data; it is not a compliance certification.
 - **`resend`** (write) — resend up to 100 explicit `headerIds` directly. Per-header result `{originalId, newHeaderId?, ok, error?}`; a bad header does not abort the batch.
 - **`resendFiltered`** (write) — resend messages matching `item` (required — matches source or target config item) + `status` (default `'Errored'`) + a `from`/`to` time window (required `from`, max 7 days). **Dry-run-first**: `dryRun` defaults to `true` and returns only the match count + a first-20 sample, resending NOTHING; executing requires **both** `dryRun:false` AND `confirm:true`, otherwise the call is refused with no changes made. `maxMessages` caps the batch (default 100, hard cap 500) — a match count over the cap is refused (not truncated-and-executed).
 
@@ -295,9 +393,10 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 
 | Prompt | Description |
 |---|---|
-| `trace-message-flow` | Traces a message's flow through a production using `iris_production_messages`, `iris_message_diagram`, and `iris_production_logs` for any erroring items. |
+| `trace-message-flow` | Traces a message's flow through a production: `iris_production_messages` for the hops, `iris_message_search` (`headers`, in a window of at most 7 days) for the header rows, `iris_message_body` for the bodies that matter under the PHI data policy (a withheld body's reason is reported, never read another way), `iris_message_diagram` for the sequence diagram, and `iris_production_logs` for any erroring items. Its name, title and arguments are unchanged (`sessionOrHeaderId` required, `namespace` optional). Every tool it calls is in the `core` preset, and each is a read that is enabled by default, except the recovery it may recommend (`iris_production_control` action `recover`, a write that is enabled by default), which it never runs without the user's confirmation. |
 | `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
 | `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
+| `find-patient-messages` | Finds a patient's messages by a Search Table value such as a medical record number (`patientId` required; `from`, `to`, `searchTableClass` and `namespace` optional). It reads the profile's data policy with `iris_server_profiles`, asks for a window of at most 7 days, looks the patient up with `iris_message_search` (`searchTable`, `PatientID`), lists the header rows, and reads bodies with `iris_message_body` only when the user wants content, under the PHI data policy. Its main path is in the `core` preset. It reads only: `iris_message_search:searchTable` and `iris_message_body` are reads, enabled by default. A withheld body stays withheld: the prompt never loosens the policy and never reads a body another way. |
 
 Also installable as [Agent Skills](../../skills/README.md).
 
@@ -609,6 +708,81 @@ Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` 
 </details>
 
 <details>
+<summary><strong>iris_message_search</strong> -- Find a patient's messages by a Search Table value</summary>
+
+The `searchTable` action finds the messages whose indexed Search Table entry equals a value, here a medical record number (`PatientID` covers PID-2, every PID-3 repetition and PID-4 of `EnsLib.HL7.SearchTable`). It is a read, enabled by default, and under the PHI data policy: the default `redact` runs it and `block` refuses it with `DATA_POLICY_BLOCKED`. `from` is required and the window spans at most 7 days. The result holds header rows only, with no Search Table value and no body text. The output below was captured from the built server on a synthetic fixture namespace under the default `redact` policy.
+
+**Input:**
+```json
+{
+  "action": "searchTable",
+  "namespace": "EXECMCPTMP396A",
+  "from": "2001-02-03T11:59:00Z",
+  "to": "2001-02-03T12:01:00Z",
+  "searchTableClass": "EnsLib.HL7.SearchTable",
+  "filters": [{ "property": "PatientID", "op": "eq", "value": "SYNTHPHI396-MRN-P" }]
+}
+```
+
+**Output** (`structuredContent`, trimmed):
+```json
+{
+  "action": "searchTable",
+  "rows": [
+    { "id": 1, "sessionId": 396001, "type": "Request", "status": "Completed", "isError": false, "sourceItem": "Story396.Service", "targetItem": "Story396.Router", "bodyClassName": "EnsLib.HL7.Message", "bodyId": "1", "timeCreated": "2001-02-03T12:00:01.000Z", "timeCreatedRaw": "2001-02-03 12:00:01", "timeProcessed": "", "timeProcessedRaw": "", "correspondingMessageId": null },
+    { "id": 2, "sessionId": 396001, "type": "Request", "status": "Completed", "isError": false, "sourceItem": "Story396.Router", "targetItem": "Story396.Operation", "bodyClassName": "EnsLib.HL7.Message", "bodyId": "1", "…": "…" },
+    { "id": 3, "sessionId": 396002, "type": "Request", "status": "Completed", "isError": false, "sourceItem": "Story396.Service", "targetItem": "Story396.Router", "bodyClassName": "EnsLib.HL7.Message", "bodyId": "2", "…": "…" }
+  ],
+  "hasMore": false,
+  "limit": 100,
+  "from": "2001-02-03T11:59:00.000Z",
+  "fromRaw": "2001-02-03 11:59:00",
+  "to": "2001-02-03T12:01:00.000Z",
+  "toRaw": "2001-02-03 12:01:00",
+  "dataPolicy": { "policy": "redact", "redacted": 0, "blocked": 0 }
+}
+```
+</details>
+
+<details>
+<summary><strong>iris_message_body</strong> -- Read message bodies under the redact policy</summary>
+
+Reads the bodies of the messages `iris_message_search` found, by header ID. It is a read, enabled by default, and under the PHI data policy. Under the default `redact` an HL7 v2 body is shown only after a reviewed keep-list redaction: a field nobody reviewed is replaced by `***`. Every other kind of body is withheld with a reason in `notShown`, and the content of a withheld body is never read out of IRIS. The output below was captured from the built server on a synthetic fixture namespace; the code `KEEPME396-CODE` is a field the keep-list keeps, and the identifying values were replaced.
+
+**Input:**
+```json
+{
+  "namespace": "EXECMCPTMP396A",
+  "headerIds": [1, 2, 3]
+}
+```
+
+**Output** (`structuredContent`, trimmed):
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "found": true,
+      "bodyClassName": "EnsLib.HL7.Message",
+      "bodyId": "1",
+      "bodyKind": "hl7v2",
+      "bodyPolicy": { "outcome": "redacted", "redactedFields": 6 },
+      "format": "er7",
+      "text": "MSH|^~\\&|***|***|||***||ADT^A01|***|P|2.5.1\nPID|1||***\nOBX|1|TX|KEEPME396-CODE^KEEPME396-TEXT^L||***\n",
+      "truncated": false
+    },
+    { "id": 2, "found": true, "…": "…" },
+    { "id": 3, "found": true, "…": "…" }
+  ],
+  "count": 3,
+  "maxChars": 10000,
+  "dataPolicy": { "policy": "redact", "redacted": 3, "blocked": 0 }
+}
+```
+</details>
+
+<details>
 <summary><strong>iris_production_adapters</strong> -- List adapters</summary>
 
 **Input:**
@@ -848,7 +1022,7 @@ The response falls back to a best-effort reflection over the target's public non
 
 ## Namespace Scoping
 
-All 22 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
+All 24 interoperability tools operate in the context of a specific IRIS namespace. Productions, credentials, lookup tables, rules, and transforms are all namespace-scoped resources.
 
 **Tools that accept the `namespace` parameter** (all except `iris_production_summary`):
 - All production lifecycle, item, monitoring, and diagram tools
@@ -877,6 +1051,7 @@ All 22 interoperability tools operate in the context of a specific IRIS namespac
 | `Host class 'X' does not exist or is not compiled` | `iris_production_item` `add` with a `className` that is not a compiled class (surrounding whitespace is trimmed before this check) | Compile the host class first, or correct the `className` |
 | `Config item 'X' already exists in production 'Y'` | `iris_production_item` `add` with a duplicate item name in the target production | Use a unique `itemName`, or `remove` the existing item first |
 | `at least one of sessionId or headerId is required` | Missing filter for message trace | Provide either `sessionId` or `headerId` |
+| `DATA_POLICY_BLOCKED` | The `body` or `searchTable` action of `iris_message_search` (both reads, enabled by default) was called under the `block` data policy, which refuses a search that reveals what the bodies hold. No IRIS call was made and nothing changed. `iris_message_body` is not refused under `block`: it withholds every body with a reason | Use the `headers` action, or ask the operator for a looser `IRIS_DATA_POLICY` for the profile. A call cannot loosen the policy |
 | `Custom REST endpoint not found` | Bootstrap has not completed | The server auto-bootstraps on first connection; save the web app via SMP if 404 persists |
 
 ### Error Response Format

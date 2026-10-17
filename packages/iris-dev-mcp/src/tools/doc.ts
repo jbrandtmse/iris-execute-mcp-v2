@@ -11,6 +11,7 @@
  */
 
 import {
+  atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
   documentLines,
@@ -289,7 +290,8 @@ export const docGetTool: ToolDefinition = {
     const path = atelierPath(ctx.atelierVersion, ns, `doc/${encodedName}`) + (qs ? `?${qs}` : "");
 
     try {
-      const response = await ctx.http.get(path);
+      // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
+      const response = await atelierDocRequest(() => ctx.http.get(path));
       if (hasRange) {
         return readLineRange(name, ns, response.result as DocGetResult | undefined, startLine, endLine);
       }
@@ -432,14 +434,15 @@ export const docPutTool: ToolDefinition = {
     const guardsStorage = isClassDocument(name) && allowStorageRegeneration !== true;
 
     let response: AtelierEnvelope;
+    // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
     if (ignoreConflict && !guardsStorage) {
-      response = await ctx.http.put(ignoreConflictPath, body);
+      response = await atelierDocRequest(() => ctx.http.put(ignoreConflictPath, body));
     } else {
       // The first request carries no version token. A new document is created by it. For an existing
       // document Atelier refuses it with HTTP 409 and writes nothing, and the refusal carries the
       // document as it is now: the guard's read, and the version the save is checked against.
       try {
-        response = await ctx.http.put(path, body);
+        response = await atelierDocRequest(() => ctx.http.put(path, body));
       } catch (error: unknown) {
         const current = currentDocument(error);
         if (current === undefined) throw error;
@@ -600,6 +603,19 @@ export const MODIFIED_SINCE_DESCRIPTION =
   "and changes nothing; compare the ts of the documents iris_doc_list returns instead.";
 
 /**
+ * The description of the `type` parameter of `iris_doc_list`, `iris_package_list` and `iris_doc_export`.
+ * Every example is a value Atelier's `docnames/<category>/<type>` route accepts: RTN takes the routine
+ * extensions or a comma list of them, CLS answers HTTP 400 to any type but `*`, and category `*` takes
+ * any extension.
+ */
+export const DOC_TYPE_DESCRIPTION =
+  "Document type filter within the category: the file extension without the dot. " +
+  "RTN takes 'mac', 'int', 'inc', 'bas', 'mvi' or 'mvb', or a comma list such as 'mac,inc'. " +
+  "CLS takes no type filter (leave it unset). " +
+  "With category '*', 'cls' lists only classes. " +
+  "Default: all types within the chosen category.";
+
+/**
  * The refusal for a non-empty `modifiedSince` on `iris_doc_list`, `iris_doc_export` and `iris_package_list`
  * (`verb` is what the tool did not do: listed, exported or counted). It is an argument error: `isError: true`,
  * no structured code, and no request is sent, because Atelier's change list works from an opaque per-database
@@ -632,14 +648,7 @@ export const docListTool: ToolDefinition = {
         "types (e.g., BPL, DTL, custom studio document classes). * = all " +
         "categories (default).",
       ),
-    type: z
-      .string()
-      .optional()
-      .describe(
-        "Document type filter within category — the file extension without " +
-        "the dot (e.g., 'cls' for CLS, 'mac' or 'inc' for RTN). Default: all " +
-        "types within the chosen category.",
-      ),
+    type: z.string().optional().describe(DOC_TYPE_DESCRIPTION),
     filter: z
       .string()
       .optional()

@@ -12,6 +12,7 @@
 import { readFileSync, globSync } from "node:fs";
 import * as path from "node:path";
 import {
+  atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
   IrisApiError,
@@ -472,7 +473,8 @@ export const docLoadTool: ToolDefinition = {
         const body = { enc: false, content: lines };
         let putResponse: AtelierEnvelope;
         try {
-          putResponse = await ctx.http.put(apiPath, body);
+          // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
+          putResponse = await atelierDocRequest(() => ctx.http.put(apiPath, body));
         } catch (putError: unknown) {
           // With ignoreConflict false, Atelier answers a put to an existing document with a 409 that
           // carries its current version and writes nothing; the save is then repeated once, checked

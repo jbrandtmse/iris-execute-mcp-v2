@@ -1,0 +1,214 @@
+{
+  "capturedWithBootstrapVersion": "f7b0868c95d0",
+  "irisVersion": "IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026 09:59:12 EDT",
+  "capturedAt": "2026-10-17T09:54:13.411Z",
+  "command": "STORY_39_4_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-4-search-table-live-gate.test.ts -t capture",
+  "cases": [
+    {
+      "name": "A headers: window alone",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":394001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":394002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":3,\"sessionId\":394003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Other\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":394004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":5,\"sessionId\":394005,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"5\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":6,\"sessionId\":394006,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"6\",\"timeCreated\":\"2001-02-03 08:00:05\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":7,\"sessionId\":394007,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"Ens.StringRequest\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:06\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":8,\"sessionId\":394008,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"999\",\"timeCreated\":\"2001-02-03 08:00:07\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":9,\"sessionId\":394009,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:08\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":394010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A headers: bodyClass",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "EnsLib.HL7.Message"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":394001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":394002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":3,\"sessionId\":394003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Other\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":394004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":5,\"sessionId\":394005,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"5\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":6,\"sessionId\":394006,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"6\",\"timeCreated\":\"2001-02-03 08:00:05\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":8,\"sessionId\":394008,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"999\",\"timeCreated\":\"2001-02-03 08:00:07\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":394010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A headers: target",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "target": "Story394.Other"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":394003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Other\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A headers: errorOnly",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "errorOnly": true
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":394003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Other\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A headers: limit 2, page 1",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 2
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":2,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":394001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":394002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":true}}"
+    },
+    {
+      "name": "A headers: limit 2, page 2",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 2,
+        "afterTimeCreated": "2001-02-03 08:00:01",
+        "afterId": 2
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":2,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":394003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Other\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":394004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":true}}"
+    },
+    {
+      "name": "A headers: no from",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Required parameter 'from' is missing or empty\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Required parameter &#39;from&#39; is missing or empty\"]}],\"summary\":\"ERROR #5001: Required parameter &#39;from&#39; is missing or empty\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A headers: window over 7 days",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-01-27T00:00:00Z",
+        "to": "2001-02-03T00:00:01Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: The 'from'/'to' window exceeds the maximum of 7 days; narrow the range and retry\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"The &#39;from&#39;/&#39;to&#39; window exceeds the maximum of 7 days; narrow the range and retry\"]}],\"summary\":\"ERROR #5001: The &#39;from&#39;/&#39;to&#39; window exceeds the maximum of 7 days; narrow the range and retry\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A headers: limit 0",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 0
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'limit' must be an integer from 1 to 500\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;limit&#39; must be an integer from 1 to 500\"]}],\"summary\":\"ERROR #5001: Parameter &#39;limit&#39; must be an integer from 1 to 500\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A body: RawContent contains the marker",
+      "body": {
+        "action": "body",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "EnsLib.HL7.Message",
+        "filters": [
+          {
+            "property": "RawContent",
+            "op": "contains",
+            "value": "SYNTHPHI394-MRN-1"
+          }
+        ]
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"body\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":394001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":394002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":394010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story394.Source\",\"targetItem\":\"Story394.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A body: a class that does not exist",
+      "body": {
+        "action": "body",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "No.Such.Story394Class",
+        "filters": [
+          {
+            "property": "RawContent",
+            "op": "contains",
+            "value": "SYNTHPHI394-MRN-1"
+          }
+        ]
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'bodyClass' must name a compiled persistent class with an SQL table in this namespace\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;bodyClass&#39; must name a compiled persistent class with an SQL table in this namespace\"]}],\"summary\":\"ERROR #5001: Parameter &#39;bodyClass&#39; must name a compiled persistent class with an SQL table in this namespace\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A body: filters empty",
+      "body": {
+        "action": "body",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "EnsLib.HL7.Message",
+        "filters": []
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'filters' must hold from 1 to 10 filters\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;filters&#39; must hold from 1 to 10 filters\"]}],\"summary\":\"ERROR #5001: Parameter &#39;filters&#39; must hold from 1 to 10 filters\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A body: a property that does not exist",
+      "body": {
+        "action": "body",
+        "namespace": "EXECMCPTMP394A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "EnsLib.HL7.Message",
+        "filters": [
+          {
+            "property": "Nope",
+            "op": "eq",
+            "value": "x"
+          }
+        ]
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'filters[0].property' is not a searchable property of the body class\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;filters[0].property&#39; is not a searchable property of the body class\"]}],\"summary\":\"ERROR #5001: Parameter &#39;filters[0].property&#39; is not a searchable property of the body class\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "C headers: window alone",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP394C",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[],\"hasMore\":false}}"
+    },
+    {
+      "name": "C body: RawContent contains the marker",
+      "body": {
+        "action": "body",
+        "namespace": "EXECMCPTMP394C",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "EnsLib.HL7.Message",
+        "filters": [
+          {
+            "property": "RawContent",
+            "op": "contains",
+            "value": "SYNTHPHI394-MRN-1"
+          }
+        ]
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"body\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[],\"hasMore\":false}}"
+    }
+  ]
+}

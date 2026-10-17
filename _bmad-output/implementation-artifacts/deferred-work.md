@@ -2676,6 +2676,11 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Pre-existing since the subpaths were added; found by an exports-vs-tarball check; before the first publish drop the subpaths via publishConfig.exports or move them to a dev-only mechanism
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=Pre-existing since the subpaths were added; found by an exports-vs-tarball check
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=pre-publish fix table (decision-record-2026-10-14)
+- 2026-10-16T19:38:36Z occurrence=39-0-epic-38-deferred-cleanup
+- 2026-10-16T19:38:37Z note=39.0 plan 2026-10-16: dist/test-helpers/integration-config.* also ships in the shared tarball today (the inverse direction); Story 42.1 AC 42.1.3 should cover it
+- 2026-10-16T23:53:09Z occurrence=39-0-epic-38-deferred-cleanup
+- 2026-10-16T23:53:09Z note=39.0 implement: AC-7 pack-content gate deferred here; npm pack must list no __tests__/env-harness/startup-env path and no dist/test-helpers (Story 42.1 AC 42.1.3)
+- 2026-10-17T00:45:43Z occurrence=39-0-epic-38-deferred-cleanup
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2906,6 +2911,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-15T17:11:58Z status=wontfix-accepted owner=38-2-line-range-document-read by=cr note=reopen_if=a second test result is found to depend on an env var that its makeEnvHarness copy leaves set
 - 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
 - 2026-10-16T18:57:09Z status=routed owner=burndown by=lead note=reopen_if fired at the 38.7 review (governance-enforcement env harness read ambient IRIS_GOVERNANCE_FILE/PRESET/SERVER_MANAGER); for the Epic 39 X.0 gate: one shared startup-env scrub for test harnesses
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-4..7: one shared env harness + startup-env setupFiles scrub; 43 copies migrated with identical test counts; every default suite green under hostile variables; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-544: iris_doc_load uploads each file with ignoreConflict on by default and has no Storage check, so a file whose class text has no Storage block replaces the stored class and drops its Storage definitions
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3017,6 +3024,11 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:13:57Z status=wontfix-accepted owner=38-6-editing-and-sql-safety-docs-prompt-and-capstone by=harvest note=reopen_if=a fourth live gate (e.g. the Epic 39 or 40 capstone) copies the fixture helpers -- then promote them into process-gate-helpers.ts in that story
 - 2026-10-16T18:53:44Z occurrence=38-7-epic-38-burn-down
 - 2026-10-16T18:57:09Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=lead note=reopen_if fired at the 38.7 review (fourth gate with its own fixture helpers); the Epic 39 capstone would be the fifth copy -- promote one set there; DW bullet in 39.6
+- 2026-10-17T01:15:30Z occurrence=39-1-message-header-search
+- 2026-10-17T01:15:30Z note=39.1 adds a session-parameterized docFixtures(session) to process-gate-helpers.ts instead of a fifth copy; 39.6 moves the Epic 38 gates onto it
+- 2026-10-17T12:06:54Z occurrence=39-4-search-table-lookup
+- 2026-10-17T12:06:54Z note=39.4 copies route/succeeded/skip/searchEntries (39.4 gate, 39.4 QA live gate) and startStub/session (39.4 QA process)
+- 2026-10-17T18:23:43Z status=resolved-by:39-6-message-forensics-docs-prompt-and-capstone by=adjudication note=one promoted set of gate helpers in process-gate-helpers.ts; 18 gates migrated; gate-helper-copies.test.ts guards re-declaration (incl. denial); every gate armed green; build c158b73
 
 ### DW-562: The default @iris-mcp/all suite (vitest run, file-parallel) runs the three bootstrapping live gates (38.4, 38.5, Epic 38 capstone) at once; on a stale instance one gate's version check or legs can overlap a sibling server's redeploy and compile
 - source: spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3040,6 +3052,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 38.7 plan probe 2026-10-16; one governance document is shared by all five servers, so each server alone cannot tell another server's key from a typo -- a fix needs the cross-server key universe (iris-mcp-governance universe / deriveKeysForTool)
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=overflow from the Epic 38 burn-down story: for the Epic 39 X.0 gate (warn on a key matching no tool in the suite universe)
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-1..3: startup WARN per provably-dead key (never fails) + iris-mcp-governance check exits 1 on suite-unknown keys; built-process + built-CLI gates; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-566: IRIS_GOVERNANCE / IRIS_GOVERNANCE_FILE JSON-parse errors embed V8's message, which can quote a snippet of the input, although governance.ts:106 and :406 say contents are never echoed
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3050,8 +3064,137 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 38.7 plan probe 2026-10-16, IRIS 2026.2 Atelier v8
 - 2026-10-16T17:57:29Z status=routed owner=burndown by=harvest note=two-way-door doc fix (<=5 lines + a pin); overflow for the Epic 39 X.0 gate
+- 2026-10-16T19:05:21Z owner=39-0-epic-38-deferred-cleanup by=x0 note=Epic 39 X.0 gate: fix in Story 39.0 (DW bullet in its epics.md block)
+- 2026-10-17T00:46:58Z status=resolved-by:39-0-epic-38-deferred-cleanup by=adjudication note=AC-8: shared type description, every example live-validated 200 against Atelier; old CLS/cls pair pinned as 400; build 628a817, mutation-verified (spec-39-0 Verification)
 
 ### DW-568: iris_production_manage delete passes its production-class check for a library production class (IsProductionClass of Ens.Production answers 1), so only a read-only ENSLIB stops a delete of a built-in base class
 - source: spec-38-7-epic-38-burn-down.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: 38.7 QA observation; cr probe 2026-10-16: HSCUSTOM %Dictionary.CompiledClass holds Ens.Production and Ens.Enterprise.Production; iris_database_check ENSLIB readOnly true; the same delete was possible before 38.7 (DW-533 narrowed it to production classes)
 - 2026-10-16T18:53:39Z status=wontfix-theoretical owner=38-7-epic-38-burn-down by=cr note=real if ENSLIB is mounted read-write and a delete names a library production class; then refuse a class whose source db is not the namespace routine db
+
+### DW-569: The shared IrisHttpClient turns an HTTP 400 whose Atelier error list is empty into an empty SUCCESS (e.g. iris_doc_list type 'cls' on category CLS returned {items:[]} instead of an error) -- an error response reported as success
+- source: spec-39-0-epic-38-deferred-cleanup.md (QA 2026-10-16) | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: QA 39.0: http-client.ts ~395 maps a 400 with status.errors=[] to a resolved empty result; live GET docnames/CLS/cls -> 400, tool -> {items:[]}
+- 2026-10-17T00:14:32Z status=routed owner=burndown by=qa note=for the Epic 39 burn-down: a non-2xx response is an error even when status.errors is empty; pin with the live 400 pair from doc-type-description-live-gate
+- 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
+- 2026-10-17T21:38:00Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=every non-2xx Atelier response is an IrisApiError (iris_macro_info no-document fallback kept); built-server process test across five packages; newly erroring inputs named in the CHANGELOG; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
+
+### DW-570: iris_message_resend resendFiltered executing path (the ID fetch after guard f) is exercised by no test: only MessageResendLiveTest reaches it and it starts a production in HSCUSTOM (forbidden on the shared instance)
+- source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 39.1 review 2026-10-16; the statement is built like the dry-run sample statement the replay runs; a break fails safe (resends nothing)
+- 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=Epic 39 burn-down: drive it inside the disposable mapping-only namespace (its own Ens.Runtime) with a synthetic production, never HSCUSTOM
+- 2026-10-17T03:13:38Z status=routed owner=39-2-phi-data-policy by=lead note=39.2 owns MessageResend.cls (resend preview under the PHI policy); drive the executing path in the disposable mapping-only namespace with a synthetic production, never HSCUSTOM; DW bullet in 39.2
+- 2026-10-17T06:24:31Z status=resolved-by:39-2-phi-data-policy by=adjudication note=resendFiltered executing path driven live in the disposable mapping-only namespace with a synthetic production (probe showed clean start/stop; never HSCUSTOM), verified against SQL; build 549bbad
+
+### DW-571: flake: doc-type-description-live-gate.test.ts (dev) failed once in a parallel turbo run; it compares two live listings of the shared HSCUSTOM
+- source: _bmad-output/implementation-artifacts/spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 39.1 implement 2026-10-16: passed alone and in the serial run; listings of a shared namespace can change between the two reads
+- 2026-10-17T02:34:38Z status=routed owner=burndown by=harvest note=flake class (cf. DW-444): make the comparison tolerant of concurrent changes or compare a fixed filter
+- 2026-10-17T05:29:28Z occurrence=39-2-phi-data-policy
+- 2026-10-17T08:21:39Z occurrence=39-3-message-body-content-search
+- 2026-10-17T11:24:38Z occurrence=39-4-search-table-lookup
+- 2026-10-17T14:26:14Z occurrence=39-5-message-body-reader
+- 2026-10-17T17:42:27Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
+- 2026-10-17T18:31:11Z status=routed owner=39-7-epic-39-burn-down by=burndown note=chartered into the Epic 39 burn-down story
+- 2026-10-17T21:38:00Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=the iris_package_list row compares its own request and envelope; 3/3 green under churn vs old row red in 2/5; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
+
+### DW-572: iris_message_search headers: on an untuned Ens.MessageHeader the 7-day window does not bound the scan when a name or status filter is set (bitmap plan over the whole history)
+- source: spec-39-1-message-header-search.md | severity: med | fix-risk: high | footprint: in-story
+- evidence: EXPLAIN in HSCUSTOM: item+status -> Status INTERSECT (Source UNION Target) bitmaps, master map read per id, TimeCreated tested per row, cost 19075; window only -> TimeCreated index range, cost 103.84; resendFiltered COUNT shares the WHERE
+- 2026-10-17T03:11:26Z status=escalated owner=burndown by=cr note=decide the plan strategy (index hint vs TuneTable guidance) with a large-data probe; revisit the add-filters doc advice
+- 2026-10-17T09:11:02Z occurrence=39-3-message-body-content-search
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 30: bound the search statement plan only (index hint), EXPLAIN before/after; resendFiltered unchanged
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=index hint on the headers/body/searchTable statements; plan rows from INFORMATION_SCHEMA.STATEMENTS read the TimeCreated range; hint red-proven with ignored index names; resendFiltered untouched (residual DW-588); build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
+
+### DW-573: AD-15/AC-7: no test pins that pre-existing tools/list entries (description, schema, annotations) stay unchanged; the README payload sync compares tool counts only
+- source: spec-39-1-message-header-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: no tool-definition snapshot in any package; docs-visibility-roster-sync compares counts; the 39.1 triage log cited gen:governance-baseline:check, which checks keys only
+- 2026-10-17T03:11:29Z status=routed owner=39-6-message-forensics-docs-prompt-and-capstone by=cr note=the Epic 39 capstone pins every pre-existing interop tools/list entry (snapshot or per-tool hash) so a change goes red
+- 2026-10-17T18:23:43Z status=resolved-by:39-6-message-forensics-docs-prompt-and-capstone by=adjudication note=114-entry tools/list snapshot fixture + shared core + CLI (--check / --force) + default-suite test; drift and vanished tools fail, new tools reported; build c158b73
+
+### DW-574: message-search.ts adds a fifth local toStructured copy (message-resend.ts:162, execute.ts, sqlAnalyze.ts, docdb.ts) instead of one shared helper
+- source: spec-39-1-message-header-search.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: Rule 2 (cr 39.1): identical 5-line helper; spec Task 11 froze message-resend.ts beyond the STATUS_LABELS export; the project keeps a local copy per tool module
+- 2026-10-17T03:11:31Z status=wontfix-accepted owner=39-1-message-header-search by=cr note=reopen_if=the toStructured contract changes (more than one copy must be edited) or a sixth copy is added
+
+### DW-575: MessageSearch.TypeLabel duplicates the MessageType $Select inside MessageResend PreviewOne (MessageResend.cls:229)
+- source: spec-39-1-message-header-search.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: Rule 2 (cr 39.1): spec-forced copy; PreviewOne is frozen in 39.1 (Never list) and the spec change log names 39.2 as the story that moves it onto TypeLabel
+- 2026-10-17T03:11:34Z status=routed owner=39-2-phi-data-policy by=cr note=when 39.2 edits PreviewOne, call ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType) instead of its own $Select
+- 2026-10-17T06:24:31Z status=resolved-by:39-2-phi-data-policy by=adjudication note=PreviewOne calls MessageSearch.TypeLabel; the duplicate removed; build 549bbad
+
+### DW-576: PHI data policy does not yet govern iris_production_logs (Text can carry segment text) or iris_message_diagram (sanitized ErrorStatus filled by parser errors with segment text); under the default redact they still show it
+- source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md (decision 26) | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 39.2 plan: TCPOutboundAdapter.cls:68,72, Parser.cls:262,287 (logs); Parser.cls:223,280, Correlator.cls:194-198 (diagram); AD-15 sanctioned only the preview change in 39.2
+- 2026-10-17T03:55:04Z status=routed owner=burndown by=lead note=Epic 39 burn-down: bring both under dataPolicy (a sanctioned AD-15 change, orchestrator decision 26) or document as residual with an operator switch
+- 2026-10-17T18:21:28Z occurrence=39-6-message-forensics-docs-prompt-and-capstone
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=burndown note=decision 31: under block withhold message-derived text of iris_production_logs/iris_message_diagram; redact/allow unchanged and documented residual
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=under block iris_production_logs and iris_message_diagram withhold message-derived text with fixed reasons; redact/allow byte-identical; built interop process test; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
+
+### DW-577: MessageSearch Hl7Text serializes the whole HL7 message before comparing its size with the cap (a large body is fully materialized first)
+- source: _bmad-output/implementation-artifacts/spec-39-2-phi-data-policy.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 39.2 implement review 2026-10-16 (unverified; no tool reaches Hl7Text yet; Story 39.5 is its first consumer)
+- 2026-10-17T05:29:28Z status=routed owner=39-5-message-body-reader by=harvest note=39.5: check the size bound before full serialization, or stream with a cap; pin with a large synthetic body
+- 2026-10-17T06:22:00Z occurrence=39-2-phi-data-policy
+- 2026-10-17T15:52:37Z status=resolved-by:39-5-message-body-reader by=adjudication note=AC-6: Hl7Size precheck sums stored segment sizes (and batch children) and refuses tooLarge before Hl7Text serializes; timing row on a 2,000,000+ char body + exact-size row, mutation-verified; build 5e02f47
+
+### DW-578: redactHl7 keeps a line split off a free-text field by a raw LF when it starts with a known HL7 or Z-segment name and the field separator (the name, and a reviewed segment's kept positions)
+- source: spec-39-2-phi-data-policy.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: CR probe on the patched built dist: NTE-3 split before 'ZOE|x' gives ZOE|***; before 'PID|v|...|w' keeps PID-1/PID-8; unknown names (LEE, DOE|) now refuse
+- 2026-10-17T06:22:00Z status=wontfix-accepted owner=39-2-phi-data-policy by=cr note=reopen_if=a 39.5 live sample shows a split-off line kept by name; a fix needs DocType structure validation
+
+### DW-579: A tools/call the MCP SDK rejects as schema-invalid never reaches handleToolCall, so it is never audited (AD-3 step 1 Zod validation; AD-19 one entry per call)
+- source: spec-39-3-message-body-content-search.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
+- 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move
+- 2026-10-17T18:31:10Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=merge_gate note=decided=orchestrator(Lead-away) decision 33: the SDK v2 call-path rewrite audits schema-invalid calls (one entry, outcome error, no argument values); DW bullet in 43.1
+
+### DW-580: iris_message_search searchTable matches only headers whose body class is exactly the Search Table's DOCCLASS; indexed bodies of a DOCCLASS subclass are left out unless bodyClass names that subclass
+- source: spec-39-4-search-table-lookup.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: MessageSearch.cls:996-1004 binds DOCCLASS via HeaderWhere; IRIS IndexDoc accepts %Extends(DOCCLASS), and Ens.SearchTableBase.SearchHeader and EnsPortal/MsgFilter/Assistant.cls:1502-1511 match subclasses
+- 2026-10-17T12:07:01Z status=by-design owner=39-4-search-table-lookup by=cr note=spec I7/Boundaries; documented in the description; reopen by spec amendment to match subclasses (Ens.IsASub) as SearchHeader does
+
+### DW-581: No test drives MessageSearch.SearchTablesConfigured to a SQL failure, so a regression that answers notApplicable for a failed configuration read would stay green
+- source: spec-39-4-search-table-lookup.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: no test references the error path; forcing a failure in an Interoperability namespace needs a privilege-limited user (no security changes on the shared instance) or a test seam
+- 2026-10-17T12:07:03Z status=wontfix-accepted owner=39-4-search-table-lookup by=cr note=reopen_if=SearchTablesConfigured changes, or a namespace with SearchTableProp rows answers notApplicable
+
+### DW-582: AD-12's recorded IRIS-side exceptions do not name Search Table value normalization (MessageSearch.SearchTableValue mirrors Ens.VDoc.SearchTableGenerator's stored form)
+- source: spec-39-4-search-table-lookup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: spec I4 places it under AD-12 (PropType read in the same handler, one round trip); the spine's AD-12 exception list names identifier and operator validation only
+- 2026-10-17T12:07:06Z status=wontfix-accepted owner=39-4-search-table-lookup by=cr note=reopen_if=another handler adds IRIS-side value normalization, or a review files AD-12 against SearchTableValue
+
+### DW-583: iris_message_body under allow cannot show the content of a persistent body held in a character-stream property (HS.Message.XMLMessage ContentStream): the dump rules give its class and size only
+- source: spec-39-5-message-body-reader.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: irislib/HS/Message/XMLMessage.cls:1,13 (%Persistent + %XML.Adaptor, payload in ContentStream); MessageBody.cls PropertyDump stream branch; Design Notes dump rules (spec-bound)
+- 2026-10-17T15:49:37Z status=decision-pending owner=burndown by=cr note=decide: under allow, render a character-stream property's text (to maxChars) for persistent bodies, or a HealthShare renderer
+- 2026-10-17T18:31:10Z status=routed owner=39-7-epic-39-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 32: render character-stream body content under allow only, bounded by maxChars; redact withholds; block kind-only
+- 2026-10-17T21:38:01Z status=resolved-by:39-7-epic-39-burn-down by=adjudication note=PropertyDump renders character-stream text under allow within one shared maxChars budget; redact withholds; block kind-only; live gate with an HS.Message.XMLMessage body; build 2e307d4 + review patches; mutation-verified (spec-39-7 Verification)
+
+### DW-584: iris_metrics_interop 24-hour error count (Monitor.cls:579) counts Event Log Type=3 (Warning; Error is 2) and compares a local $Horolog cutoff with UTC TimeLogged
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 39.7 plan source read 2026-10-17 (Ens.DataType.LogType values 1-6); unverified live
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe, then fix Type and the UTC cutoff
+
+### DW-585: iris_production_logs type filter probably matches nothing: the EventLog handler binds the display name (Error) to Type = ? in logical select mode, but Type is an integer (Ens.DataType.LogType)
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 39.7 plan source read 2026-10-17; needs a probe before any fix
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe with synthetic Event Log rows in a disposable namespace, then map display name to logical value
+
+### DW-586: Under block, iris_message_diagram leaves a per-session generation failure text (Generation failed for session N: <text> in warnings[] and the Mermaid %% line) unchanged; only the Correlator Error on message texts are rewritten
+- source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 39.7 implement review 2026-10-17 (unverified whether <text> can carry message content)
+- 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe what <text> can carry; withhold under block if message-derived
+- 2026-10-17T21:35:25Z occurrence=39-7-epic-39-burn-down
+
+### DW-587: Under block, the trace-message-flow prompt and its generated skill give no rule for withheld Event Log and diagram error text: steps 5-6 ask what the error log says, with no report-the-reason, never-read-it-another-way line like step 3 has for bodies
+- source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: traceMessageFlow.ts steps 4-6 unchanged by 39.7 vs step 3 body rule; the 39.7 Docs table omits the prompt (Rule 56); 39.6 CHANGELOG treats a prompt-body change as AD-15 sanctioned
+- 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: add the block rule to steps 4-5 (AD-15 prompt-body change, regenerate skills) or accept
+- 2026-10-17T21:41:21Z note=decided=orchestrator(Lead-away) decision 36: fix the trace-message-flow prompt text (sanctioned AD-15 prompt change) in the Epic 40 X.0 story
+
+### DW-588: DW-572 residual: iris_message_resend filtered mode (resendFiltered) keeps the history-wide Status/Source/Target bitmap plan on an untuned Ens.MessageHeader, because decision 30 left its statements unchanged
+- source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: DW-572 evidence: resendFiltered COUNT shares the WHERE; decision 30: resendFiltered stays unchanged; MessageResend.cls not in the 39.7 diff; nothing carries the residual once DW-572 resolves
+- 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: HEADERHINT in resendFiltered (its pins move) or a tuning note; filtered resend is a default-disabled write
+- 2026-10-17T21:41:21Z status=wontfix-accepted by=merge_gate note=decided=orchestrator(Lead-away) decision 37: reopen_if=an operator enables iris_message_resend resendFiltered and a dry run on a large Ens.MessageHeader exceeds the Web Gateway timeout, or a measured EXPLAIN on a tuned table shows the hint changes no results -- then add the same index hint to resendFiltered with its byte-identity pin re-captured

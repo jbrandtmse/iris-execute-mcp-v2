@@ -34,6 +34,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 
 // A successful, no-op bootstrap result (REST service already current). Mirrors
@@ -176,63 +177,11 @@ function makeMultiActionTool(
   };
 }
 
-/**
- * Shared environment save/restore so each describe block runs hermetically and
- * never leaks IRIS_* / IRIS_PROFILES / IRIS_GOVERNANCE into sibling suites.
- */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-    IRIS_GOVERNANCE_FILE: process.env.IRIS_GOVERNANCE_FILE,
-    IRIS_GOVERNANCE_PRESET: process.env.IRIS_GOVERNANCE_PRESET,
-    IRIS_SERVER_MANAGER: process.env.IRIS_SERVER_MANAGER,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Clear inherited governance/profiles; each test sets what it needs.
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-    delete process.env.IRIS_GOVERNANCE_FILE;
-    delete process.env.IRIS_GOVERNANCE_PRESET;
-    delete process.env.IRIS_SERVER_MANAGER;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 /** Stage the default profile's startup HEAD (health) + GET (version) responses. */
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
@@ -253,7 +202,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — denied action returns a structured error (handler + connection untouched)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -350,7 +299,7 @@ describe("Story 14.4 — denied action returns a structured error (handler + con
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — a profile can re-enable a globally/seed-disabled action", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -447,7 +396,7 @@ describe("Story 14.4 — a profile can re-enable a globally/seed-disabled action
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — back-compat gate: empty IRIS_GOVERNANCE is a pure pass-through", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -526,7 +475,7 @@ describe("Story 14.4 — back-compat gate: empty IRIS_GOVERNANCE is a pure pass-
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — gate ordering: profile resolution precedes enforcement", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -600,7 +549,7 @@ describe("Story 14.4 — gate ordering: profile resolution precedes enforcement"
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — governance key computation aligns with GOVERNANCE_BASELINE (D4)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -687,7 +636,7 @@ describe("Story 14.4 — governance key computation aligns with GOVERNANCE_BASEL
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — call-time enforcement keeps every tool advertised (AC 14.4.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -726,7 +675,7 @@ describe("Story 14.4 — call-time enforcement keeps every tool advertised (AC 1
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — malformed IRIS_GOVERNANCE fails fast at start() (D7)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -758,7 +707,7 @@ describe("Story 14.4 — malformed IRIS_GOVERNANCE fails fast at start() (D7)", 
 // ====================================================================
 
 describe("Story 38.7: start() and the governance document shape (DW-554)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -847,7 +796,7 @@ describe("Story 38.7: start() and the governance document shape (DW-554)", () =>
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — a constructed-but-not-started server has a safe empty policy", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

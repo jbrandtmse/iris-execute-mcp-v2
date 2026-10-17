@@ -907,6 +907,101 @@ describe("IrisHttpClient", () => {
       client.destroy();
     });
 
+    // Story 39.7 (DW-569): every non-2xx response is an error, including an
+    // HTTP 400 whose envelope carries an empty `status.errors` list.
+    it.each([400, 404, 409, 500])(
+      "throws IrisApiError on HTTP %i with an empty error list, carrying statusCode, errors, originalUrl and result",
+      async (status) => {
+        const client = new IrisHttpClient(makeConfig());
+        const body = atelierResponse({ marker: `result-${status}` });
+        fetchMock.mockResolvedValueOnce(mockResponse(body, { status }));
+
+        let caught: unknown;
+        try {
+          await client.get("/api/atelier/v8/HSCUSTOM/action/search");
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(IrisApiError);
+        const apiErr = caught as IrisApiError;
+        expect(apiErr.statusCode).toBe(status);
+        expect(apiErr.errors).toEqual([]);
+        expect(apiErr.originalUrl).toBe("/api/atelier/v8/HSCUSTOM/action/search");
+        expect(apiErr.result).toEqual({ marker: `result-${status}` });
+        expect(apiErr.message).toBe(
+          `IRIS returned HTTP ${status} for GET /api/atelier/v8/HSCUSTOM/action/search. Check the request parameters and try again.`,
+        );
+
+        client.destroy();
+      },
+    );
+
+    it("throws on a POST that answers HTTP 400 with an empty error list", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      // Prime the session and CSRF token so the POST below is the second fetch.
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({}), {
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+          headers: { "X-CSRF-Token": "token-xyz" },
+        }),
+      );
+      await client.get("/api/init");
+      fetchMock.mockResolvedValueOnce(mockResponse(atelierResponse({}), { status: 400 }));
+
+      await expect(
+        client.post("/api/atelier/v8/HSCUSTOM/action/getmacrodefinition", {
+          docname: "",
+        }),
+      ).rejects.toMatchObject({ name: "IrisApiError", statusCode: 400, errors: [] });
+      expect(fetchMock.mock.calls).toHaveLength(2);
+
+      client.destroy();
+    });
+
+    it.each([200, 201])(
+      "resolves HTTP %i with an empty error list to the parsed envelope",
+      async (status) => {
+        const client = new IrisHttpClient(makeConfig());
+        const body = atelierResponse({ content: [] });
+        fetchMock.mockResolvedValueOnce(mockResponse(body, { status }));
+
+        await expect(client.get("/api/test")).resolves.toEqual(body);
+
+        client.destroy();
+      },
+    );
+
+    it("resolves HTTP 202 with a Location header and an empty error list, adding the job location", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({}), {
+          status: 202,
+          headers: { Location: "/api/atelier/v8/HSCUSTOM/work/42" },
+        }),
+      );
+
+      await expect(client.get("/api/test")).resolves.toEqual(
+        atelierResponse({ location: "/api/atelier/v8/HSCUSTOM/work/42" }),
+      );
+
+      client.destroy();
+    });
+
+    it("still throws on HTTP 200 whose envelope carries errors", async () => {
+      const client = new IrisHttpClient(makeConfig());
+      fetchMock.mockResolvedValueOnce(
+        mockResponse(atelierResponse({}, [{ code: 7, msg: "Boom" }]), { status: 200 }),
+      );
+
+      await expect(client.get("/api/test")).rejects.toMatchObject({
+        name: "IrisApiError",
+        statusCode: 200,
+        errors: [{ code: 7, msg: "Boom" }],
+      });
+
+      client.destroy();
+    });
+
     it("should throw IrisConnectionError on network failures", async () => {
       const config = makeConfig();
       const client = new IrisHttpClient(config);

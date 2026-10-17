@@ -29,9 +29,37 @@ import { McpServerBase } from "@iris-mcp/shared";
 import { tools } from "../tools/index.js";
 import { prompts } from "../prompts/index.js";
 import { recoverStuckProductionPrompt } from "../prompts/recoverStuckProduction.js";
+import { traceMessageFlowPrompt } from "../prompts/traceMessageFlow.js";
+import { findPatientMessagesPrompt } from "../prompts/findPatientMessages.js";
 
-/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1 + Story 26.3. */
-const OWN_PROMPT_NAMES = ["trace-message-flow", "recover-stuck-production", "resend-failed-messages"];
+/** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1, Story 26.3 and Story 39.6. */
+const OWN_PROMPT_NAMES = [
+  "trace-message-flow",
+  "recover-stuck-production",
+  "resend-failed-messages",
+  "find-patient-messages",
+];
+
+/**
+ * The `trace-message-flow` name, title and arguments as first published
+ * (Story 25.1). Its description and body may change; this contract may not (AD-15).
+ */
+const TRACE_MESSAGE_FLOW_CONTRACT = {
+  name: "trace-message-flow",
+  title: "Trace Message Flow",
+  arguments: [
+    {
+      name: "sessionOrHeaderId",
+      description: "A session ID (traces every message in the session) or a specific message header ID.",
+      required: true,
+    },
+    {
+      name: "namespace",
+      description: "Target namespace (default: the server's configured namespace).",
+      required: false,
+    },
+  ],
+};
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
@@ -88,7 +116,7 @@ describe("iris-interop-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () 
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 3 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 4 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();
@@ -146,5 +174,180 @@ describe("recover-stuck-production build() — CR 25.1-4 empty-string alignment"
     });
     expect(result).toContain('Target namespace: "USER"');
     expect(result).toContain("Production: `My.Production`.");
+  });
+});
+
+// ── Story 39.6: trace-message-flow and find-patient-messages ─────────────
+
+/** `prompts/get` through the real SDK dispatch; `arguments` is left out of the request when `args` is undefined. */
+async function getPromptText(name: string, args?: Record<string, string>): Promise<string> {
+  const server = makeRealServer();
+  const params = args === undefined ? { name } : { name, arguments: args };
+  const result = await callRequest(server, "prompts/get", params);
+  expect(result.messages).toHaveLength(1);
+  expect(result.messages[0].role).toBe("user");
+  return result.messages[0].content.text as string;
+}
+
+/** Index of each marker in `text`, asserting every one is present and the order is ascending. */
+function expectInOrder(text: string, markers: string[]): void {
+  const at = markers.map((marker) => text.indexOf(marker));
+  markers.forEach((marker, i) => expect(at[i], `"${marker}" missing`).toBeGreaterThan(-1));
+  expect([...at].sort((a, b) => a - b)).toEqual(at);
+}
+
+describe("trace-message-flow \u2014 contract and flow (Story 39.6)", () => {
+  it("keeps its name, title and arguments exactly as first published", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const entry = (
+      result.prompts as Array<{ name: string; title: string; arguments: unknown[] }>
+    ).find((p) => p.name === "trace-message-flow");
+    expect({ name: entry?.name, title: entry?.title, arguments: entry?.arguments }).toEqual(
+      TRACE_MESSAGE_FLOW_CONTRACT,
+    );
+  });
+
+  it("names the search, read, diagram and log tools in its description", () => {
+    for (const tool of [
+      "iris_production_messages",
+      "iris_message_search",
+      "iris_message_body",
+      "iris_message_diagram",
+      "iris_production_logs",
+    ]) {
+      expect(traceMessageFlowPrompt.description).toContain(tool);
+    }
+    expect(traceMessageFlowPrompt.description).not.toContain("|");
+  });
+
+  it("prompts/get with the optional namespace omitted renders the flow in order, on the default namespace", async () => {
+    const text = await getPromptText("trace-message-flow", { sessionOrHeaderId: "7" });
+    expect(text).toContain("Session or header ID to trace: `7`");
+    expect(text).toContain("No namespace specified");
+    expectInOrder(text, [
+      "1. Call `iris_production_messages`",
+      "2. Call `iris_message_search`",
+      "3. Call `iris_message_body`",
+      "4. Call `iris_message_diagram`",
+      "5. For every step flagged as an error",
+      "`iris_production_logs`",
+      "6. Summarize the failure point",
+    ]);
+    expect(text).toContain('`action: "headers"`');
+    expect(text).toContain("at most 7 days");
+    expect(text).toContain("never read it another way");
+  });
+
+  it("brackets the whole flow and never sweeps: a header start re-reads the session, `to` rounds up, a longer flow asks the user, a refusal is reported", async () => {
+    const text = await getPromptText("trace-message-flow", { sessionOrHeaderId: "7" });
+    expect(text).toContain("If you started from a header ID, call it again with that session's `sessionId`");
+    expect(text).toContain("with `to` rounded up to the next whole second");
+    expect(text).toContain("if the flow spans more, ask the user before searching it window by window, each window at most 7 days.");
+    expect(text).not.toContain("split a longer session");
+    expect(text).toContain("If the search is refused (for example because an operator restricted it), tell the user and go on with the hops of step 1; do not read the headers another way.");
+    expect(text).toContain("the times of step 1 are already UTC, written without a zone, so add the `T` and the `Z` and do not convert them");
+  });
+
+  it("reads bodies from the header rows or, after a refused search, the hops; reports a refused read; repeats no identifying value", async () => {
+    const text = await getPromptText("trace-message-flow", { sessionOrHeaderId: "7" });
+    expect(text).toContain("with up to 20 header `id` values per call that matter, taken from step 2 (or from the hops of step 1 when the search was refused)");
+    expect(text).toContain("If the read is refused (for example because an operator restricted it), tell the user and go on; do not read the bodies another way.");
+    expect(text).toContain("repeating no identifying value from a body, a log entry or the diagram beyond what the user gave");
+  });
+
+  it("prompts/get with the namespace given passes it on every call", async () => {
+    const text = await getPromptText("trace-message-flow", { sessionOrHeaderId: "7", namespace: "USER" });
+    expect(text).toContain('Target namespace: "USER"');
+    expect(text).not.toContain("No namespace specified");
+  });
+});
+
+describe("find-patient-messages \u2014 contract and flow (Story 39.6)", () => {
+  it("is an interop prompt titled Find Patient Messages with one required argument", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const entry = (
+      result.prompts as Array<{
+        name: string;
+        title: string;
+        arguments: Array<{ name: string; required: boolean }>;
+      }>
+    ).find((p) => p.name === "find-patient-messages");
+    expect(entry?.title).toBe("Find Patient Messages");
+    expect(entry?.arguments.map((a) => [a.name, a.required])).toEqual([
+      ["patientId", true],
+      ["from", false],
+      ["to", false],
+      ["searchTableClass", false],
+      ["namespace", false],
+    ]);
+    expect(findPatientMessagesPrompt.description).not.toContain("|");
+  });
+
+  it("is registered last", () => {
+    expect(prompts[prompts.length - 1]).toBe(findPatientMessagesPrompt);
+  });
+
+  it("prompts/get with only patientId asks the user for the period and uses the default Search Table class", async () => {
+    const text = await getPromptText("find-patient-messages", { patientId: "X" });
+    expect(text).toContain("Patient identifier: `X`");
+    expect(text).toContain("No start time was given");
+    expect(text).toContain("ask the user for the period");
+    expect(text).toContain('searchTableClass: "EnsLib.HL7.SearchTable"');
+    expect(text).toContain("No namespace specified");
+    expectInOrder(text, [
+      "1. Call `iris_server_profiles`",
+      "2. Fix the search window",
+      '3. Call `iris_message_search` with `action: "searchTable"`',
+      "4. List the matching rows",
+      "5. Only when the user wants the content, call `iris_message_body`",
+      "6. Optionally call `iris_message_diagram`",
+      "7. Report the messages found",
+    ]);
+  });
+
+  it("prompts/get with all five arguments renders each of them", async () => {
+    const text = await getPromptText("find-patient-messages", {
+      patientId: "X",
+      from: "2001-02-03T00:00:00Z",
+      to: "2001-02-04T00:00:00Z",
+      searchTableClass: "Custom.SearchTable",
+      namespace: "USER",
+    });
+    expect(text).toContain("Search window: from `2001-02-03T00:00:00Z` to `2001-02-04T00:00:00Z`.");
+    expect(text).toContain('searchTableClass: "Custom.SearchTable"');
+    expect(text).toContain('Target namespace: "USER"');
+    expect(text).not.toContain("No start time was given");
+    expect(text).not.toContain('searchTableClass: "EnsLib.HL7.SearchTable"');
+  });
+
+  it("an omitted to reads as now, and an empty-string optional renders like an omitted one", () => {
+    const fromOnly = findPatientMessagesPrompt.build({ patientId: "X", from: "2001-02-03T00:00:00Z" });
+    expect(fromOnly).toContain("Search window: from `2001-02-03T00:00:00Z` to now.");
+    expect(findPatientMessagesPrompt.build({ patientId: "X", from: "", searchTableClass: "" })).toBe(
+      findPatientMessagesPrompt.build({ patientId: "X" }),
+    );
+  });
+
+  it("renders the patient identifier as a JSON string in the filters example, whatever characters it holds", () => {
+    const hostile = 'A"B\\C\nD';
+    const text = findPatientMessagesPrompt.build({ patientId: hostile });
+    const example = /filters: (\[.*\])`/.exec(text)?.[1];
+    expect(example, "the filters example is on one line").toBeDefined();
+    expect(JSON.parse(example as string)).toEqual([{ property: "PatientID", op: "eq", value: hostile }]);
+    expect(findPatientMessagesPrompt.build({ patientId: "X" })).toContain('"value": "X"}]');
+    expect(findPatientMessagesPrompt.build({ patientId: "X", searchTableClass: 'My"Table' })).toContain('`searchTableClass: "My\\"Table"`');
+  });
+
+  it("tells the agent to report a refusal and not to get the data another way, at the search and at the read", () => {
+    const text = findPatientMessagesPrompt.build({ patientId: "X" });
+    expect(text).toContain("A refusal (`DATA_POLICY_BLOCKED`, or an action an operator disabled) ends the lookup: tell the user, and do not look the patient up another way.");
+    expect(text).toContain("A refusal here is reported the same way.");
+  });
+
+  it("keeps iris_server_profiles out of the namespace note, because that tool takes no namespace", () => {
+    const named = findPatientMessagesPrompt.build({ patientId: "X", namespace: "USER" });
+    expect(named).toContain('pass `namespace: "USER"` on every tool call below except `iris_server_profiles`, which takes none.');
   });
 });

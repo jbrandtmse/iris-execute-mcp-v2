@@ -25,6 +25,10 @@ export const REFUSAL_CODES = {
   SQL_READ_ONLY: "SQL_READ_ONLY",
   /** A rows-affected cap refused a statement, before it ran or by rolling it back. */
   SQL_ROWS_AFFECTED_CAP: "SQL_ROWS_AFFECTED_CAP",
+  /** The requested action is declared but not available in this version. */
+  NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
+  /** A data policy withheld the requested body data. */
+  DATA_POLICY_BLOCKED: "DATA_POLICY_BLOCKED",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

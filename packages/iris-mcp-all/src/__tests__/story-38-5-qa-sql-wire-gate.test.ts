@@ -61,7 +61,11 @@ import { spawnSync } from "node:child_process";
 import {
   assertDeployedBootstrapVersion,
   atelierQuery,
+  atelierScalar,
   connectionEnv,
+  docFixtures,
+  governanceDenial,
+  governanceReport,
   inheritedEnv,
   irisTargetFromEnv,
   isIrisReachable,
@@ -69,8 +73,11 @@ import {
   resolveSdkEsmDir,
   spawnAndWaitForExit,
   staleDistReason,
+  stemFixtures,
   withWireSession,
   type AtelierRow,
+  type DocFixtures,
+  type StemFixtures,
   type WireSession as Session,
   type WireSessionOptions,
   type WireToolResult,
@@ -109,6 +116,9 @@ let distSkipReason: string | undefined;
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
 let admin: Session;
+/** The document helpers and the fixture oracles of `admin`, bound when called, so a teardown after a failed start-up still reaches the tools. */
+const docs = (): DocFixtures => docFixtures(admin);
+const fixtures = (): StemFixtures => stemFixtures(admin, STEM);
 
 /** The built dev server and the target, for the shared wire helpers. */
 function wireOptions(): WireSessionOptions {
@@ -132,14 +142,10 @@ const atelier = (query: string): Promise<Row[]> => atelierQuery(TARGET, query);
 /** The fixture table as stored: every row, in ID order. */
 const tableRows = (): Promise<Row[]> => atelier(`SELECT ID, Name, Qty FROM ${T} ORDER BY ID`);
 
-async function scalar(query: string): Promise<number> {
-  const rows = await atelier(query);
-  return Number(Object.values(rows[0] ?? {})[0]);
-}
-
-const rowTotal = (): Promise<number> => scalar(`SELECT COUNT(*) AS N FROM ${T}`);
+const rowTotal = (): Promise<number> => atelierScalar(TARGET, `SELECT COUNT(*) AS N FROM ${T}`);
 const ddlTableCount = (): Promise<number> =>
-  scalar(
+  atelierScalar(
+    TARGET,
     `SELECT COUNT(*) AS N FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'ExecuteMCPv2_Temp' AND TABLE_NAME = '${STEM}Ddl'`,
   );
 
@@ -190,34 +196,13 @@ const SOURCE = [
   "}",
 ].join("\n");
 
-async function removeDoc(docName: string): Promise<void> {
-  await admin.call("iris_doc_delete", { name: docName });
-}
-
-async function fixtureDocuments(): Promise<string[]> {
-  const listed = await admin.call("iris_doc_list", { filter: STEM, generated: true });
-  expect(listed.isError, "the document listing").toBeFalsy();
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
-}
-
-async function fixtureGlobals(): Promise<string[]> {
-  const listed = await admin.call("iris_global_list", { filter: STEM });
-  expect(listed.isError, "the global listing").toBeFalsy();
-  return (listed.structuredContent as { globals: string[] }).globals;
-}
-
 /** Remove everything the gate writes: the data and marker globals, a stray DDL table, then the documents. */
 async function removeFixtures(): Promise<void> {
-  for (const listed of await fixtureGlobals()) {
-    const name = listed.replace(/^\^/, "");
-    if (!name.startsWith("ExecuteMCPv") || !name.includes(STEM)) continue;
-    const killed = await admin.call("iris_global_kill", { global: name });
-    expect(killed.isError, `killing global ${name}`).toBeFalsy();
-  }
-  if ((await fixtureDocuments()).includes(DDL_DOC)) {
+  await fixtures().killGlobals();
+  if ((await fixtures().documents()).includes(DDL_DOC)) {
     await admin.call("iris_sql_execute", { query: `DROP TABLE IF EXISTS ${DDL_TABLE}` });
   }
-  for (const docName of [DOC, DDL_DOC]) await removeDoc(docName);
+  for (const docName of [DOC, DDL_DOC]) await docs().removeDoc(docName);
 }
 
 /** The six seeded rows, `row1`..`row6` with Qty 1..6, and an empty marker. */
@@ -251,22 +236,19 @@ beforeAll(async () => {
   admin = await openSession();
   await assertDeployedBootstrapVersion(REPO_ROOT, TARGET);
   await removeFixtures();
-  expect(await fixtureDocuments(), "no QaStory385Wire document before the run").toEqual([]);
-  expect(await fixtureGlobals(), "no QaStory385Wire global before the run").toEqual([]);
+  expect(await fixtures().documents(), "no QaStory385Wire document before the run").toEqual([]);
+  expect(await fixtures().globals(), "no QaStory385Wire global before the run").toEqual([]);
 
-  const put = await admin.call("iris_doc_put", { name: DOC, content: SOURCE });
-  expect(put.isError, `creating ${DOC}: ${put.content?.[0]?.text}`).toBeFalsy();
-  const compiled = await admin.call("iris_doc_compile", { doc: DOC });
-  expect(compiled.isError, `compiling ${DOC}`).toBeFalsy();
-  expect(compiled.structuredContent, `compiling ${DOC}`).toMatchObject({ success: true });
+  await docs().putDoc(DOC, SOURCE);
+  await docs().compileDoc(DOC);
 }, 120000);
 
 afterAll(async () => {
   if (skipReason) return;
   try {
     await removeFixtures();
-    expect(await fixtureDocuments(), "no QaStory385Wire document after the run").toEqual([]);
-    expect(await fixtureGlobals(), "no QaStory385Wire global after the run").toEqual([]);
+    expect(await fixtures().documents(), "no QaStory385Wire document after the run").toEqual([]);
+    expect(await fixtures().globals(), "no QaStory385Wire global after the run").toEqual([]);
   } finally {
     await admin.close();
   }
@@ -297,24 +279,9 @@ function capNotRunOperatorText(typeName: string, cap: number): string {
   );
 }
 
-function denial(action: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { code: "GOVERNANCE_DISABLED", action, server: "default", ...extra };
-}
-
 /** The text content parsed as JSON (a successful SQL result's text block is its structured content). */
 function textJson(result: WireToolResult): unknown {
   return JSON.parse(result.content?.[0]?.text ?? "null");
-}
-
-/** The governance report of `iris_server_profiles`. */
-async function governanceReport(
-  session: Session,
-): Promise<{ policy: Record<string, boolean>; configSource: Record<string, string> }> {
-  const result = await session.raw("iris_server_profiles", {});
-  expect(result.isError).toBeFalsy();
-  const governance = (result.structuredContent as { governance: { policy: Record<string, boolean>; configSource: Record<string, string> } })
-    .governance;
-  return { policy: governance.policy, configSource: governance.configSource };
 }
 
 // -- The tools as a client sees them ---------------------------------
@@ -408,7 +375,7 @@ describe("the SQL tools on the wire, no SQL variable set (Story 38.5, AC-4, AC-5
     if (skipReason) return testCtx.skip();
     await seed();
     const where = `Qty > 2`;
-    const expected = await scalar(`SELECT COUNT(*) AS N FROM ${T} WHERE ${where}`);
+    const expected = await atelierScalar(TARGET, `SELECT COUNT(*) AS N FROM ${T} WHERE ${where}`);
     expect(expected).toBe(4);
 
     for (const tool of ["iris_sql_query", "iris_sql_execute"]) {
@@ -534,7 +501,7 @@ describe("IRIS_SQL_READ_ONLY on the wire (Story 38.5, AC-2)", () => {
       expect(result.structuredContent).toEqual({ columns: [], rows: [], rowCount: 0, rowsAffected: 1 });
     });
 
-    expect(await scalar(`SELECT Qty AS N FROM ${T} WHERE Name = 'row1'`)).toBe(50);
+    expect(await atelierScalar(TARGET, `SELECT Qty AS N FROM ${T} WHERE Name = 'row1'`)).toBe(50);
   }, 60000);
 
   it("iris_sql_query refuses every non-query as the tool's own read-only, whatever the operator set", async (testCtx) => {
@@ -633,7 +600,7 @@ describe("IRIS_SQL_MAX_ROWS_AFFECTED on the wire (Story 38.5, AC-3)", () => {
     });
 
     expect(await rowTotal()).toBe(SEEDED_ROWS - 1);
-    expect(await scalar(`SELECT COUNT(*) AS N FROM ${T} WHERE Name = 'row1'`)).toBe(0);
+    expect(await atelierScalar(TARGET, `SELECT COUNT(*) AS N FROM ${T} WHERE Name = 'row1'`)).toBe(0);
   }, 120000);
 
   it("a caller's smaller cap wins, a cap of 0 included; the refusal names the parameter as the source", async (testCtx) => {
@@ -784,7 +751,7 @@ describe("iris_sql_query under governance, on the wire (Story 38.5, AC-6)", () =
 
       const denied = await session.call("iris_sql_execute", { query: ROW_SELECT });
       expect(denied.isError).toBe(true);
-      expect(denied.structuredContent).toEqual(denial("iris_sql_execute", { presetApplied: "read-only" }));
+      expect(denied.structuredContent).toEqual(governanceDenial("iris_sql_execute", { presetApplied: "read-only" }));
       expect(denied.content?.[0]?.text).toBe("action 'iris_sql_execute' is disabled by governance policy for server 'default'");
 
       // Governance lets the query tool in; the statement-level guard still refuses a write.
@@ -808,14 +775,14 @@ describe("iris_sql_query under governance, on the wire (Story 38.5, AC-6)", () =
     await withSession({ IRIS_GOVERNANCE: JSON.stringify({ global: { iris_sql_execute: false } }) }, async (session) => {
       const query = await session.call("iris_sql_query", { query: ROW_SELECT });
       expect(query.isError).toBe(true);
-      expect(query.structuredContent).toEqual(denial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
+      expect(query.structuredContent).toEqual(governanceDenial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
       expect(query.content?.[0]?.text).toBe(
         "action 'iris_sql_query' is disabled by governance policy for server 'default' (inherited from 'iris_sql_execute')",
       );
 
       const execute = await session.call("iris_sql_execute", { query: ROW_SELECT });
       expect(execute.isError).toBe(true);
-      expect(execute.structuredContent).toEqual(denial("iris_sql_execute"));
+      expect(execute.structuredContent).toEqual(governanceDenial("iris_sql_execute"));
 
       const { policy, configSource } = await governanceReport(session);
       expect(policy["iris_sql_query"]).toBe(false);
@@ -843,7 +810,7 @@ describe("iris_sql_query under governance, on the wire (Story 38.5, AC-6)", () =
         expect((query.structuredContent as { rowCount: number }).rowCount).toBe(SEEDED_ROWS);
 
         const execute = await session.call("iris_sql_execute", { query: ROW_SELECT });
-        expect(execute.structuredContent).toEqual(denial("iris_sql_execute"));
+        expect(execute.structuredContent).toEqual(governanceDenial("iris_sql_execute"));
 
         const { policy, configSource } = await governanceReport(session);
         expect(policy["iris_sql_query"]).toBe(true);
@@ -861,7 +828,7 @@ describe("iris_sql_query under governance, on the wire (Story 38.5, AC-6)", () =
       async (session) => {
         const query = await session.call("iris_sql_query", { query: ROW_SELECT });
         expect(query.isError).toBe(true);
-        expect(query.structuredContent).toEqual(denial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
+        expect(query.structuredContent).toEqual(governanceDenial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
       },
     );
   }, 60000);
@@ -886,7 +853,7 @@ describe("iris_sql_query under governance, on the wire (Story 38.5, AC-6)", () =
         await withSession({ IRIS_GOVERNANCE_FILE: file }, async (session) => {
           const query = await session.call("iris_sql_query", { query: ROW_SELECT });
           expect(query.isError, layer).toBe(true);
-          expect(query.structuredContent, layer).toEqual(denial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
+          expect(query.structuredContent, layer).toEqual(governanceDenial("iris_sql_query", { inheritedFrom: "iris_sql_execute" }));
           const { configSource } = await governanceReport(session);
           expect(configSource["iris_sql_query"], layer).toBe("parent");
         });

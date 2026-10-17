@@ -156,7 +156,9 @@ Method TestWindowDaysComputation() As %Status
 
 /// ValidateHeaderIds: a valid 1-100 numeric array passes; an empty array, an
 /// over-100 array, and a non-numeric entry are each rejected with a descriptive
-/// status naming 'headerIds'.
+/// status naming 'headerIds'. The texts at the default limit of 100 are the ones
+/// the callers have always seen, and a limit named by the caller (20) moves both
+/// the bound and the numbers in the texts.
 Method TestValidateHeaderIdsGuard() As %Status
 {
     Set tOk = ["82546", "82557"]
@@ -169,11 +171,34 @@ Method TestValidateHeaderIdsGuard() As %Status
     Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tEmpty, .tIdsEmpty)
     Do $$$AssertStatusNotOK(tSC, "An empty array is rejected")
     Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "headerIds", "Empty-array rejection names 'headerIds'")
+    Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "Parameter 'headerIds' must contain between 1 and 100 header IDs (found 0)", "Empty-array text at the default limit")
 
     Set tTooMany = []
     For i=1:1:101 { Do tTooMany.%Push(i) }
     Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tTooMany, .tIdsMany)
     Do $$$AssertStatusNotOK(tSC, "A 101-entry array is rejected")
+    Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "Parameter 'headerIds' must contain between 1 and 100 header IDs (found 101)", "Over-limit text at the default limit")
+
+    Set tAtLimit = []
+    For i=1:1:100 { Do tAtLimit.%Push(i) }
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tAtLimit, .tIdsAt)
+    Do $$$AssertStatusOK(tSC, "A 100-entry array is accepted at the default limit")
+    Do $$$AssertEquals(tIdsAt(0), 100, "All 100 IDs captured")
+
+    Set tTwenty = []
+    For i=1:1:20 { Do tTwenty.%Push(i) }
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tTwenty, .tIds20, 20)
+    Do $$$AssertStatusOK(tSC, "A 20-entry array is accepted at the limit of 20")
+    Do $$$AssertEquals(tIds20(0), 20, "All 20 IDs captured")
+    Do $$$AssertEquals(tIds20(20), 20, "The last ID is captured numerically")
+    Do tTwenty.%Push(21)
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tTwenty, .tIds21, 20)
+    Do $$$AssertStatusNotOK(tSC, "A 21-entry array is rejected at the limit of 20")
+    Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "Parameter 'headerIds' must contain between 1 and 20 header IDs (found 21)", "Over-limit text at the limit of 20")
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds("", .tIdsU20, 20)
+    Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "Parameter 'headerIds' must be a non-empty array of 1-20 numeric header IDs", "Non-array text at the limit of 20")
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds("", .tIdsU100)
+    Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "Parameter 'headerIds' must be a non-empty array of 1-100 numeric header IDs", "Non-array text at the default limit")
 
     Set tBad = ["82546", "notanumber"]
     Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tBad, .tIdsBad)

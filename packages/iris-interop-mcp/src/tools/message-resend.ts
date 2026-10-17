@@ -38,14 +38,25 @@
  * string is preserved in a sibling `*Raw` field (Rule #11 spirit).
  */
 
-import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  BLOCK_REASONS,
+  IrisApiError,
+  decideBodyPolicy,
+  effectiveDataPolicy,
+  isBodyKind,
+  type BodyKind,
+  type BodyPolicyOutcome,
+  type DataPolicy,
+  type DataPolicySummary,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
 
 /** `Ens.DataType.MessageStatus` display labels accepted by `resendFiltered`'s `status` filter. */
-const STATUS_LABELS = [
+export const STATUS_LABELS = [
   "Created",
   "Queued",
   "Delivered",
@@ -62,7 +73,7 @@ const STATUS_LABELS = [
  * integer (CR 26.1-3 — the TS layer rejects a JSON object / non-numeric
  * string before the request ever reaches IRIS).
  */
-const headerIdSchema = z.union([
+export const headerIdSchema = z.union([
   // `/^[1-9]\d*$/` (not `/^\d+$/`) keeps the string arm symmetric with the
   // number arm's `.positive()`: rejects "0" and leading-zero strings like
   // "007" (which IRIS would otherwise silently coerce to header 7 on the
@@ -89,6 +100,15 @@ interface PreviewHeaderRaw {
   bodyClassExists?: boolean;
   correspondingMessageId?: number;
   bodySummary?: string;
+  /** Under `redact` and `block`: the body class's kind (`ExecuteMCPv2.REST.MessageSearch.BodyKind`). */
+  bodyKind?: string;
+  /** Under `redact` and `block`: whether IRIS could open the body. IRIS sends it; the tool never returns it. */
+  bodyAvailable?: boolean;
+  /** Body text fields the tool never reads and never returns. */
+  bodyText?: string;
+  bodyTextOmitted?: string;
+  /** Under `redact` and `block`: what the data policy did to this item's body. */
+  bodyPolicy?: BodyPolicyOutcome;
   verdict?: string;
   reason?: string;
 }
@@ -209,6 +229,83 @@ function mapSampleRow(row: SampleRowRaw): SampleRowRaw & { timeCreatedRaw?: stri
   return mapped;
 }
 
+/**
+ * The header fields a governed preview item takes from IRIS: every field `PreviewOne` returns that is
+ * not body data. Any other field, one a later version of the IRIS classes might add included, is dropped.
+ */
+const PREVIEW_HEADER_FIELDS: ReadonlySet<string> = new Set<keyof PreviewHeaderRaw>([
+  "id",
+  "found",
+  "error",
+  "sessionId",
+  "type",
+  "sourceItem",
+  "targetItem",
+  "status",
+  "isError",
+  "timeCreated",
+  "timeProcessed",
+  "bodyClassName",
+  "bodyClassExists",
+  "correspondingMessageId",
+  "verdict",
+  "reason",
+]);
+
+/**
+ * Apply the PHI data policy (`redact` or `block`) to the headers of a preview that asked IRIS for
+ * `bodyDetail: "kind"`. IRIS sends no body content in that mode, and this function never reads what a
+ * response might still carry: each item keeps only the {@link PREVIEW_HEADER_FIELDS} and the function
+ * builds `bodySummary` itself, so a response of the legacy shape (a `bodySummary` of body text and no
+ * `bodyKind`), or one with a field this version does not know, cannot pass body content through.
+ *
+ * Each FOUND header is mapped by the first rule that holds:
+ *  1. a `bodyKind` that is not one of the nine tokens (a missing one included): withheld, as kind `other`;
+ *  2. to 4. the shared `decideBodyPolicy` decides (it is the one place these rules live):
+ *     `bodyAvailable` is not `true` (no readable body): outcome `none`, `bodySummary` `""`;
+ *     policy `block`: withheld, `bodySummary` `""`;
+ *     policy `redact`: an `hl7v2` body is `redacted` with `bodySummary` the class note
+ *     `(non-stream body; class=<bodyClassName>)` (no body text is requested or shown); any other kind
+ *     is withheld with `bodySummary` `""`.
+ * Then `bodyKind` and `bodyPolicy` are set. A header that was not found carries no body fields.
+ *
+ * @returns The mapped headers and what the policy did over them.
+ */
+export function applyPreviewBodyPolicy(
+  headers: readonly PreviewHeaderRaw[],
+  policy: Exclude<DataPolicy, "allow">,
+): { headers: PreviewHeaderRaw[]; summary: DataPolicySummary } {
+  let redacted = 0;
+  let blocked = 0;
+  const mapped = headers.map((raw): PreviewHeaderRaw => {
+    const copy = Object.fromEntries(
+      Object.entries(raw).filter(([key]) => PREVIEW_HEADER_FIELDS.has(key)),
+    ) as PreviewHeaderRaw;
+    if (raw.found !== true) return copy;
+    let kind: BodyKind = "other";
+    let bodyPolicy: BodyPolicyOutcome;
+    let bodySummary = "";
+    if (!isBodyKind(raw.bodyKind)) {
+      bodyPolicy = { outcome: "blocked", reason: BLOCK_REASONS.unredactableKind("other") };
+    } else {
+      kind = raw.bodyKind;
+      const plan = decideBodyPolicy(kind, raw.bodyAvailable === true, policy);
+      if (plan.outcome === "redact") {
+        bodyPolicy = { outcome: "redacted", redactedFields: 0 };
+        bodySummary = `(non-stream body; class=${raw.bodyClassName ?? ""})`;
+      } else if (plan.outcome === "blocked") {
+        bodyPolicy = { outcome: "blocked", reason: plan.reason };
+      } else {
+        bodyPolicy = { outcome: "none" };
+      }
+    }
+    if (bodyPolicy.outcome === "redacted") redacted += 1;
+    if (bodyPolicy.outcome === "blocked") blocked += 1;
+    return { ...copy, bodySummary, bodyKind: kind, bodyPolicy };
+  });
+  return { headers: mapped, summary: { policy, redacted, blocked } };
+}
+
 function renderPreviewLine(h: PreviewHeaderRaw): string {
   if (!h.found) return `#${h.id}: NOT FOUND — ${h.error ?? "unknown error"}`;
   const flags: string[] = [];
@@ -249,7 +346,11 @@ export const messageResendTool: ToolDefinition = {
     "Ens.MessageHeader:ResendDuplicatedMessage API. Actions:\n\n" +
     "- **preview** (read, enabled by default): per header ID (1-100) — id, " +
     "session, source/target item, status, time, body classname (+ existence " +
-    "check), a first-~1KB body summary, and a resendability verdict + reason " +
+    "check), a first-~1KB body summary under the operator's data policy " +
+    "(`IRIS_DATA_POLICY`, set per profile; default `redact`: an HL7 v2 body " +
+    "shows only its class name, every other body is withheld with a reason; " +
+    "`block` withholds every body; `allow` shows the summary unchanged), " +
+    "and a resendability verdict + reason " +
     "(Request-type Status=Error headers are the correct retry target; " +
     "Response-type error headers are flagged as likely a no-op). Never mutates.\n" +
     "- **resend** (write, DEFAULT-DISABLED): resend up to 100 explicit " +
@@ -360,6 +461,9 @@ export const messageResendTool: ToolDefinition = {
     resend: "write",
     resendFiltered: "write",
   },
+  // The PHI data policy governs the preview's body summary (Story 39.2, AD-26). `resend` and
+  // `resendFiltered` return status texts only.
+  dataPolicy: { actions: ["preview"] },
   handler: async (args, ctx) => {
     const input = args as {
       action: "preview" | "resend" | "resendFiltered";
@@ -392,20 +496,46 @@ export const messageResendTool: ToolDefinition = {
             "'headerIds' is required for action 'preview' (1-100 numeric header IDs).",
           );
         }
-        const body = { headerIds: input.headerIds, namespace: ns };
+        // The data policy (Story 39.2). `allow` is today's request and today's result; `redact` and
+        // `block` ask IRIS for the body kind only, and the result carries only the header fields, the
+        // policy's own fields and the count, whatever IRIS returned (an older class that ignores
+        // `bodyDetail` still sends a `bodySummary`, which is dropped here).
+        const policy = effectiveDataPolicy(ctx.config);
+        if (policy === "allow") {
+          const body = { headerIds: input.headerIds, namespace: ns };
+          const response = await ctx.http.post<PreviewResult>(
+            `${BASE_URL}/interop/message/resend/preview`,
+            body,
+          );
+          const result = response.result;
+          const headers = (result.headers ?? []).map(mapPreviewHeader);
+          const text =
+            headers.length > 0
+              ? headers.map(renderPreviewLine).join("\n")
+              : "No headers found.";
+          return {
+            content: [{ type: "text" as const, text }],
+            structuredContent: toStructured({ ...result, headers }),
+          };
+        }
         const response = await ctx.http.post<PreviewResult>(
           `${BASE_URL}/interop/message/resend/preview`,
-          body,
+          { headerIds: input.headerIds, namespace: ns, bodyDetail: "kind" },
         );
         const result = response.result;
-        const headers = (result.headers ?? []).map(mapPreviewHeader);
-        const text =
-          headers.length > 0
-            ? headers.map(renderPreviewLine).join("\n")
-            : "No headers found.";
+        const governed = applyPreviewBodyPolicy(result.headers ?? [], policy);
+        const headers = governed.headers.map(mapPreviewHeader);
+        const { policy: applied, redacted, blocked } = governed.summary;
+        const lines =
+          headers.length > 0 ? headers.map(renderPreviewLine) : ["No headers found."];
+        lines.push(`Data policy ${applied}: ${redacted} redacted, ${blocked} withheld.`);
         return {
-          content: [{ type: "text" as const, text }],
-          structuredContent: toStructured({ ...result, headers }),
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: toStructured({
+            headers,
+            ...(result.count !== undefined ? { count: result.count } : {}),
+            dataPolicy: governed.summary,
+          }),
         };
       }
 

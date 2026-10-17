@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 30 production classes as string literals, keyed by their
+ * Contains all 32 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "089f8f0a62b2";
+export const BOOTSTRAP_VERSION = "7d12cd8b3a1e";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "089f8f0a62b2";
+Parameter BOOTSTRAPVERSION = "7d12cd8b3a1e";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -11940,6 +11940,13 @@ ClassMethod DefaultSettingsManage() As %Status
 Class ExecuteMCPv2.REST.MessageResend Extends ExecuteMCPv2.REST.Base
 {
 
+/// The most characters a preview's <code>bodyTextMaxChars</code> may name.
+Parameter BODYTEXTMAX As %Integer = 1048576;
+
+/// The cap, in characters, that <code>text</code> mode applies when the request names no
+/// <code>bodyTextMaxChars</code>.
+Parameter BODYTEXTDEFAULT As %Integer = 65536;
+
 /// Map a case-insensitive <code>Ens.DataType.MessageStatus</code> display label
 /// (e.g. <code>"Errored"</code>) to its numeric code. Accepts both the DISPLAYLIST
 /// spelling ("Error") and the tool contract's spelling ("Errored") for the error
@@ -12008,24 +12015,24 @@ ClassMethod WindowDays(pFromNorm As %String, pToNorm As %String, Output pDays As
     Quit tSC
 }
 
-/// Validate a <code>headerIds</code> JSON array: must be an array of 1-100
-/// entries, each a numeric (positive-integer-string) header ID. On success,
-/// <var>pIds</var> is populated <code>pIds(0)=count</code>, <code>pIds(i)=+id</code>
-/// for <code>i=1..count</code>. Returns the first validation failure as a
+/// Validate a <code>headerIds</code> JSON array: must be an array of 1-<var>pMax</var>
+/// entries (100 unless the caller names another limit), each a numeric (positive-integer-string)
+/// header ID. On success, <var>pIds</var> is populated <code>pIds(0)=count</code>,
+/// <code>pIds(i)=+id</code> for <code>i=1..count</code>. Returns the first validation failure as a
 /// descriptive <var>%Status</var> — input hygiene guard (a), Rule #29 spirit.
-ClassMethod ValidateHeaderIds(pArr As %DynamicArray, Output pIds) As %Status
+ClassMethod ValidateHeaderIds(pArr As %DynamicArray, Output pIds, pMax As %Integer = 100) As %Status
 {
     Set tSC = $$$OK
     Kill pIds
     Set pIds(0) = 0
     Try {
         If '$IsObject(pArr) {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must be a non-empty array of 1-100 numeric header IDs")
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must be a non-empty array of 1-"_pMax_" numeric header IDs")
             Quit
         }
         Set tCount = pArr.%Size()
-        If (tCount < 1) || (tCount > 100) {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must contain between 1 and 100 header IDs (found "_tCount_")")
+        If (tCount < 1) || (tCount > pMax) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'headerIds' must contain between 1 and "_pMax_" header IDs (found "_tCount_")")
             Quit
         }
         Set tIter = pArr.%GetIterator()
@@ -12116,10 +12123,71 @@ ClassMethod BodySummary(pBodyClass As %String, pBodyId As %String, pBodyClassExi
     Quit tSummary
 }
 
+/// Whether the body of a header can be opened: the same test <method>BodySummary</method> applies before
+/// it reads anything. Never throws.
+ClassMethod BodyAvailable(pBodyClass As %String, pBodyId As %String, pBodyClassExists As %Boolean) As %Boolean
+{
+    Set tAvailable = 0
+    Try {
+        If (pBodyClass = "") || (pBodyId = "") || 'pBodyClassExists { Quit }
+        Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
+        Set tAvailable = $IsObject(tObj)
+    } Catch {
+        Set tAvailable = 0
+    }
+    Quit tAvailable
+}
+
+/// Add the body detail of the <code>kind</code> and <code>text</code> modes to the preview item
+/// <var>pItem</var>: <code>bodyKind</code> (<method>ExecuteMCPv2.REST.MessageSearch:BodyKind</method>)
+/// and <code>bodyAvailable</code> always, and, in <code>text</code> mode for an available HL7 v2 body,
+/// either <code>bodyText</code> (the complete ER7 text) or <code>bodyTextOmitted</code>
+/// (<code>tooLarge</code> or <code>unreadable</code>). It never adds <code>bodySummary</code>.
+ClassMethod SetBodyDetail(pItem As %DynamicObject, pBodyDetail As %String, pMaxChars As %Integer, pBodyClass As %String, pBodyId As %String, pBodyClassExists As %Boolean)
+{
+    Set tKind = ##class(ExecuteMCPv2.REST.MessageSearch).BodyKind(pBodyClass)
+    Set tAvailable = ..BodyAvailable(pBodyClass, pBodyId, pBodyClassExists)
+    Do pItem.%Set("bodyKind", tKind)
+    Do pItem.%Set("bodyAvailable", tAvailable, "boolean")
+    If (pBodyDetail = "text") && tAvailable && (tKind = "hl7v2") {
+        Set tOmitted = ##class(ExecuteMCPv2.REST.MessageSearch).Hl7Text(pBodyClass, pBodyId, pMaxChars, .tText)
+        If tOmitted = "" { Do pItem.%Set("bodyText", tText) }
+        Else { Do pItem.%Set("bodyTextOmitted", tOmitted) }
+    }
+}
+
+/// Read the optional <code>bodyDetail</code> (<code>kind</code> or <code>text</code>) and
+/// <code>bodyTextMaxChars</code> (an integer from 1 to <parameter>BODYTEXTMAX</parameter>) of a preview
+/// request. <var>pDetail</var> is <code>""</code> when <code>bodyDetail</code> is absent or null, which
+/// keeps today's response. <var>pMaxChars</var> is the cap for <code>text</code> mode, defaulting to
+/// <parameter>BODYTEXTDEFAULT</parameter>. The error texts name the parameter and never its value.
+ClassMethod ReadBodyDetail(pBody As %DynamicObject, Output pDetail As %String, Output pMaxChars As %Integer) As %Status
+{
+    Set pDetail = ""
+    Set pMaxChars = 0
+    If pBody.%IsDefined("bodyDetail") && (pBody.%GetTypeOf("bodyDetail") '= "null") {
+        Set tDetail = pBody.%Get("bodyDetail")
+        If (pBody.%GetTypeOf("bodyDetail") '= "string") || ((tDetail '= "kind") && (tDetail '= "text")) {
+            Quit $$$ERROR($$$GeneralError, "bodyDetail must be kind or text.")
+        }
+        Set pDetail = tDetail
+    }
+    Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).ReadInteger(pBody, "bodyTextMaxChars", "", 1, ..#BODYTEXTMAX, .tMax)
+    If $$$ISERR(tSC) {
+        Quit $$$ERROR($$$GeneralError, "bodyTextMaxChars must be an integer from 1 to " _ ..#BODYTEXTMAX _ ".")
+    }
+    If pDetail = "text" { Set pMaxChars = $Select(tMax = "": ..#BODYTEXTDEFAULT, 1: tMax) }
+    Quit $$$OK
+}
+
 /// Build the preview payload for one header ID. Never throws (all failure
 /// paths are captured as <code>{id, found:false, error}</code>) — the caller
 /// still wraps this in a per-message Try/Catch as defense-in-depth.
-ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
+/// <p><var>pBodyDetail</var> <code>""</code> returns the legacy payload with <code>bodySummary</code>.
+/// <code>kind</code> and <code>text</code> return <code>bodyKind</code> and <code>bodyAvailable</code>
+/// instead of <code>bodySummary</code> (see <method>SetBodyDetail</method>); <var>pMaxChars</var> is the
+/// <code>text</code> cap.</p>
+ClassMethod PreviewOne(pId As %Integer, pBodyDetail As %String = "", pMaxChars As %Integer = 0) As %DynamicObject
 {
     Set tItem = {}
     Try {
@@ -12148,7 +12216,7 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
         Do tItem.%Set("id", pId, "number")
         Do tItem.%Set("found", 1, "boolean")
         Do tItem.%Set("sessionId", +tRS.SessionId, "number")
-        Do tItem.%Set("type", $Select(tType=1:"Request", tType=2:"Response", tType=3:"Terminate", 1:"Unknown"))
+        Do tItem.%Set("type", ##class(ExecuteMCPv2.REST.MessageSearch).TypeLabel(tType))
         Do tItem.%Set("sourceItem", tRS.SourceConfigName)
         Do tItem.%Set("targetItem", tRS.TargetConfigName)
         Do tItem.%Set("status", ..StatusCodeToLabel(tStatusCode))
@@ -12158,7 +12226,12 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
         Do tItem.%Set("bodyClassName", tBodyClass)
         Do tItem.%Set("bodyClassExists", tBodyClassExists, "boolean")
         If tRS.CorrespondingMessageId '= "" { Do tItem.%Set("correspondingMessageId", +tRS.CorrespondingMessageId, "number") }
-        Do tItem.%Set("bodySummary", ..BodySummary(tBodyClass, tRS.MessageBodyId, tBodyClassExists))
+        If pBodyDetail = "" {
+            Do tItem.%Set("bodySummary", ..BodySummary(tBodyClass, tRS.MessageBodyId, tBodyClassExists))
+        }
+        Else {
+            Do ..SetBodyDetail(tItem, pBodyDetail, pMaxChars, tBodyClass, tRS.MessageBodyId, tBodyClassExists)
+        }
 
         Set tVerdict = ..Verdict(tType, tStatusCode, tIsError, tBodyClass, tBodyClassExists)
         Do tItem.%Set("verdict", $ListGet(tVerdict, 1))
@@ -12177,6 +12250,10 @@ ClassMethod PreviewOne(pId As %Integer) As %DynamicObject
 /// Per header: id, session, source/target item, status, time, body classname
 /// (+ existence check), body summary, and a resendability verdict + reason.
 /// Never mutates.
+/// <p>Optional <code>bodyDetail</code> (<code>kind</code> or <code>text</code>) and
+/// <code>bodyTextMaxChars</code> are validated before the namespace switch and replace the body summary
+/// with the body kind and availability (and, for <code>text</code>, a complete HL7 v2 body text); see
+/// <method>PreviewOne</method>. A request without them gets today's response.</p>
 ClassMethod MessageResendPreview() As %Status
 {
     Set tSC = $$$OK
@@ -12196,6 +12273,9 @@ ClassMethod MessageResendPreview() As %Status
         Set tSC = ..ValidateHeaderIds(tHeaderIdsArr, .tIds)
         If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
 
+        Set tSC = ..ReadBodyDetail(tBody, .tBodyDetail, .tMaxChars)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
         Set tNamespace = tBody.%Get("namespace")
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
@@ -12207,7 +12287,7 @@ ClassMethod MessageResendPreview() As %Status
         For i=1:1:tCount {
             Set tId = tIds(i)
             Try {
-                Set tHeaderItem = ..PreviewOne(tId)
+                Set tHeaderItem = ..PreviewOne(tId, tBodyDetail, tMaxChars)
             } Catch exInner {
                 Set tHeaderItem = {}
                 Do tHeaderItem.%Set("id", tId, "number")
@@ -12438,14 +12518,24 @@ ClassMethod MessageResend() As %Status
                 Quit
             }
 
+            ; --- The match filter (item = source OR target; status; window) as one WHERE clause,
+            ; translated by the shared header-search helper ---
+            Set tFilters = {}
+            Do tFilters.%Set("item", tItemName)
+            Do tFilters.%Set("statusCode", tStatusCode)
+            Do tFilters.%Set("fromNorm", tFromNorm)
+            Do tFilters.%Set("toNorm", tToNorm)
+            Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).HeaderWhere(tFilters, .tWhere, .tParams)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
             If tNamespace '= "" {
                 Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
                 If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
             }
 
-            ; --- Enumerate matches (item = source OR target; status; window) ---
-            Set tCountSQL = "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ?"
-            Set tCountRS = ##class(%SQL.Statement).%ExecDirect(, tCountSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+            ; --- Enumerate matches ---
+            Set tCountSQL = "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE " _ tWhere
+            Set tCountRS = ##class(%SQL.Statement).%ExecDirect(, tCountSQL, tParams...)
             If '$IsObject(tCountRS) || (tCountRS.%SQLCODE < 0) {
                 Set $NAMESPACE = tOrigNS
                 Set tMsg = $Select('$IsObject(tCountRS): "SQL execution failed", 1: "SQL error: " _ tCountRS.%Message)
@@ -12476,8 +12566,8 @@ ClassMethod MessageResend() As %Status
                     Quit
                 }
 
-                Set tFetchSQL = "SELECT TOP " _ tMaxMessages _ " ID FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ? ORDER BY TimeCreated"
-                Set tFetchRS = ##class(%SQL.Statement).%ExecDirect(, tFetchSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+                Set tFetchSQL = "SELECT TOP " _ tMaxMessages _ " ID FROM Ens.MessageHeader WHERE " _ tWhere _ " ORDER BY TimeCreated"
+                Set tFetchRS = ##class(%SQL.Statement).%ExecDirect(, tFetchSQL, tParams...)
                 Set tIds(0) = 0
                 If $IsObject(tFetchRS) && (tFetchRS.%SQLCODE >= 0) {
                     Set tN = 0
@@ -12499,8 +12589,8 @@ ClassMethod MessageResend() As %Status
             }
             Else {
                 ; --- Dry run: count + first-20 sample, resends nothing ---
-                Set tSampleSQL = "SELECT TOP 20 ID, SourceConfigName, TargetConfigName, Status, TimeCreated, SessionId FROM Ens.MessageHeader WHERE (SourceConfigName = ? OR TargetConfigName = ?) AND Status = ? AND TimeCreated >= ? AND TimeCreated <= ? ORDER BY TimeCreated"
-                Set tSampleRS = ##class(%SQL.Statement).%ExecDirect(, tSampleSQL, tItemName, tItemName, tStatusCode, tFromNorm, tToNorm)
+                Set tSampleSQL = "SELECT TOP 20 ID, SourceConfigName, TargetConfigName, Status, TimeCreated, SessionId FROM Ens.MessageHeader WHERE " _ tWhere _ " ORDER BY TimeCreated"
+                Set tSampleRS = ##class(%SQL.Statement).%ExecDirect(, tSampleSQL, tParams...)
                 Set tSample = []
                 If $IsObject(tSampleRS) && (tSampleRS.%SQLCODE >= 0) {
                     While tSampleRS.%Next() {
@@ -12534,6 +12624,1601 @@ ClassMethod MessageResend() As %Status
         Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.REST.MessageSearch.cls",
+    `/// REST handler for searching Interoperability messages (Stories 39.1, 39.3 and 39.4).
+/// <p><method>MessageSearch</method> is a read-only route, <code>POST /interop/message/search</code>.
+/// Its <code>action</code> body field selects the operation: <code>headers</code>, <code>body</code> and
+/// <code>searchTable</code>. All three filter <code>Ens.MessageHeader</code> by a required time window plus
+/// optional item, source, target, status, session, body class and error flag, and return header rows (never
+/// body data, <code>ErrorStatus</code> or <code>Description</code>) in <code>TimeCreated, ID</code> order,
+/// one page at a time, with a keyset cursor taken from the last row of the previous page.</p>
+/// <p>The <code>body</code> action also takes a required <code>bodyClass</code> and a list of structured
+/// <code>filters</code>, <code>{property, op, value}</code>, and keeps the headers whose body, read by its
+/// ID in the table of that class, satisfies every one of them. Nothing a caller sends becomes SQL text:
+/// <method>BodyFilterWhere</method> writes a property as its compiled <code>SqlFieldName</code>, in
+/// double quotes, <method>BodyOpSql</method> maps an operator from a closed list to a fixed fragment,
+/// <method>BodyTable</method> takes the table name from the class dictionary, and every value is a
+/// parameter. The shape of the filters is checked by <method>BodyFilterShape</method> before the namespace
+/// is switched.</p>
+/// <p>The <code>searchTable</code> action takes a required <code>searchTableClass</code>, the exact name of
+/// a compiled virtual-document Search Table class, the same <code>filters</code>, and an optional
+/// <code>bodyClass</code> that narrows the document class. It keeps the headers of that document class
+/// whose body ID has the Search Table entries every filter asks for. A property is resolved by
+/// <method>SearchTableFilterWhere</method> to the integer PropId of its <code>Ens.Config.SearchTableProp</code>
+/// row and is bound, never written; an operator is written only by <method>SearchTableClause</method> from
+/// a closed table; a value is normalized as the Search Table stores it
+/// (<method>SearchTableValue</method>) and bound; the table name comes from the class dictionary.</p>
+/// <p><method>HeaderWhere</method> is the one place a set of header filters becomes a WHERE clause. It is
+/// shared by this handler and by <class>ExecuteMCPv2.REST.MessageResend</class>'s
+/// <code>resendFiltered</code>. It owns only that translation: each caller keeps its own required
+/// filters, window, caps and its choice between refusing and truncating. It emits fixed column names
+/// and <code>?</code> markers only; every caller value travels in the parameter array.</p>
+/// <p>The statements run in Logical select mode (<code>%SelectMode=0</code>), so
+/// <code>TimeCreated</code>, an <code>Ens.DataType.UTC</code> column, is read and compared as the UTC
+/// string it is stored as, whatever select mode the process defaults to.</p>
+Class ExecuteMCPv2.REST.MessageSearch Extends ExecuteMCPv2.REST.Base
+{
+
+/// The most rows one page returns.
+Parameter MAXLIMIT As %Integer = 500;
+
+/// The rows one page returns when the request names no <code>limit</code>.
+Parameter DEFAULTLIMIT As %Integer = 100;
+
+/// The longest window, in days, between <code>from</code> and <code>to</code>.
+Parameter MAXWINDOWDAYS As %Integer = 7;
+
+/// The most filters one body or Search Table search takes.
+Parameter MAXBODYFILTERS As %Integer = 10;
+
+/// The longest string value of one body filter, in characters.
+Parameter MAXFILTERVALUE As %Integer = 1024;
+
+/// The longest value of one Search Table filter, in characters: a Search Table stores at most this many
+/// characters of a value (<code>PropValue</code> is truncated), so a longer one can never equal a stored
+/// value, and an index lookup by one past about 440 characters fails in IRIS with SQLCODE -490.
+Parameter MAXSEARCHTABLEVALUE As %Integer = 256;
+
+/// The columns every header row is read from, in the order <method>HeaderRow</method> uses them.
+/// <code>ErrorStatus</code> and <code>Description</code> are deliberately absent.
+Parameter COLUMNS As %String = "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId";
+
+/// The index hint every header read of a search carries, placed right after <code>FROM</code> (and after
+/// <code>%INORDER</code> where the statement has it). It names the three bitmap indexes of
+/// <class>Ens.MessageHeader</class> on <code>Status</code>, <code>SourceConfigName</code> and
+/// <code>TargetConfigName</code>, so the optimizer reads the <code>TimeCreated</code> index map over the
+/// window instead of intersecting history-wide bitmaps. It changes the plan only, never the rows or their
+/// order. An index name that does not exist is ignored silently, so a test pins that all three exist.
+Parameter HEADERHINT As %String = "%IGNOREINDEX Ens.MessageHeader.Status,Ens.MessageHeader.SourceConfigName,Ens.MessageHeader.TargetConfigName";
+
+/// Translate header filters into a WHERE clause body and its parameters.
+/// <p><var>pFilters</var> may hold: <code>item</code> (source OR target), <code>source</code>,
+/// <code>target</code>, <code>statusCode</code>, <code>fromNorm</code> (inclusive lower bound),
+/// <code>toNorm</code> (inclusive upper bound), <code>sessionId</code>, <code>bodyClass</code> and
+/// <code>errorOnly</code>. A key that is absent or empty adds no fragment. The fragments always appear in
+/// the order <code>item</code>, <code>source</code>, <code>target</code>, <code>statusCode</code>,
+/// <code>fromNorm</code>, <code>toNorm</code>, <code>sessionId</code>, <code>bodyClass</code>,
+/// <code>errorOnly</code>, joined with <code>" AND "</code>.</p>
+/// <p><var>pAlias</var> is the alias of the header table in the statement the clause joins; with one,
+/// every column is written <code>alias.column</code>. With none the text is exactly what it was before
+/// the alias existed.</p>
+/// <p><var>pWhere</var> is the clause body without the <code>WHERE</code> keyword, or <code>""</code>
+/// when no filter is set. <var>pParams</var> is the parameter count, with <code>pParams(i)</code> holding
+/// the i-th value in the order of the <code>?</code> markers, so a caller passes it as
+/// <code>pParams...</code>. This method never validates a value and never sees a cap.</p>
+ClassMethod HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Output pParams, pAlias As %String = "") As %Status
+{
+    Set tSC = $$$OK
+    Set pWhere = ""
+    Kill pParams
+    Set pParams = 0
+    Try {
+        Set tQ = $Select(pAlias = "": "", 1: pAlias _ ".")
+        Set tFragments = ""
+        Set tItem = pFilters.%Get("item")
+        If tItem '= "" {
+            Set tFragments = tFragments _ $ListBuild("(" _ tQ _ "SourceConfigName = ? OR " _ tQ _ "TargetConfigName = ?)")
+            Set pParams = pParams + 1, pParams(pParams) = tItem
+            Set pParams = pParams + 1, pParams(pParams) = tItem
+        }
+        Set tSource = pFilters.%Get("source")
+        If tSource '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "SourceConfigName = ?")
+            Set pParams = pParams + 1, pParams(pParams) = tSource
+        }
+        Set tTarget = pFilters.%Get("target")
+        If tTarget '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TargetConfigName = ?")
+            Set pParams = pParams + 1, pParams(pParams) = tTarget
+        }
+        Set tStatusCode = pFilters.%Get("statusCode")
+        If tStatusCode '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "Status = ?")
+            Set pParams = pParams + 1, pParams(pParams) = tStatusCode
+        }
+        Set tFromNorm = pFilters.%Get("fromNorm")
+        If tFromNorm '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TimeCreated >= ?")
+            Set pParams = pParams + 1, pParams(pParams) = tFromNorm
+        }
+        Set tToNorm = pFilters.%Get("toNorm")
+        If tToNorm '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TimeCreated <= ?")
+            Set pParams = pParams + 1, pParams(pParams) = tToNorm
+        }
+        Set tSessionId = pFilters.%Get("sessionId")
+        If tSessionId '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "SessionId = ?")
+            Set pParams = pParams + 1, pParams(pParams) = tSessionId
+        }
+        Set tBodyClass = pFilters.%Get("bodyClass")
+        If tBodyClass '= "" {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "MessageBodyClassName = ?")
+            Set pParams = pParams + 1, pParams(pParams) = tBodyClass
+        }
+        If +pFilters.%Get("errorOnly") {
+            Set tFragments = tFragments _ $ListBuild(tQ _ "IsError = 1")
+        }
+        For tI = 1:1:$ListLength(tFragments) {
+            Set pWhere = pWhere _ $Select(tI > 1: " AND ", 1: "") _ $List(tFragments, tI)
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// The select list of <parameter>COLUMNS</parameter> with every column written <code>pAlias.column</code>,
+/// so a statement that joins another table cannot read a column of the wrong table. The result column
+/// names stay the bare ones, which is what <method>HeaderRow</method> reads.
+ClassMethod AliasedColumns(pAlias As %String) As %String
+{
+    Set tList = ""
+    Set tColumns = ..#COLUMNS
+    For tI = 1:1:$Length(tColumns, ",") {
+        Set tList = tList _ $Select(tI > 1: ", ", 1: "") _ pAlias _ "." _ $ZStrip($Piece(tColumns, ",", tI), "<>W")
+    }
+    Quit tList
+}
+
+/// The SQL fragment of the body filter operator <var>pOp</var>, written after the quoted column, or
+/// <code>""</code> for anything that is not one of the ten operators. This is the only place an operator
+/// becomes SQL text, and it never returns any part of its argument. The match is exact: the operators are
+/// lower case and <code>EQ</code>, <code>=</code> and <code>like</code> are not operators.
+/// <p><code>eq</code>, <code>ne</code>, <code>lt</code>, <code>le</code>, <code>gt</code> and
+/// <code>ge</code> compare by the column's collation, so a default string column ignores case;
+/// <code>contains</code> is the case-sensitive substring operator; <code>startsWith</code> is
+/// <code>%STARTSWITH</code>; <code>isNull</code> and <code>notNull</code> take no value.</p>
+ClassMethod BodyOpSql(pOp As %String) As %String
+{
+    Quit $Case(pOp, "eq": "= ?", "ne": "<> ?", "lt": "< ?", "le": "<= ?", "gt": "> ?", "ge": ">= ?", "contains": "[ ?", "startsWith": "%STARTSWITH ?", "isNull": "IS NULL", "notNull": "IS NOT NULL", : "")
+}
+
+/// Check the shape of the body filters <var>pFilters</var> (the request's <code>filters</code> value) and
+/// return a refusal status naming the parameter path, <code>filters</code> or
+/// <code>filters[i].property</code>, <code>.op</code>, <code>.value</code>, with <code>i</code> counted
+/// from 0. No text names a value. It touches no namespace and no dictionary, so a caller runs it before it
+/// switches namespace. <var>pAction</var> is the action whose input is checked (<code>body</code> or
+/// <code>searchTable</code>); it only names that action in the text of a missing <code>filters</code>.
+/// <p>The value must be a non-empty array of at most <parameter>MAXBODYFILTERS</parameter> objects, each
+/// holding only <code>property</code>, <code>op</code> and <code>value</code>. A <code>property</code> is
+/// 1 to 128 letters and digits starting with a letter. An <code>op</code> is one that
+/// <method>BodyOpSql</method> knows. A <code>value</code> is required unless the operator is
+/// <code>isNull</code> or <code>notNull</code>, where it must be absent or null; otherwise it is a string of
+/// 1 to <parameter>MAXFILTERVALUE</parameter> characters, a finite number or a boolean.</p>
+ClassMethod BodyFilterShape(pFilters As %RawString, pAction As %String = "body") As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        If '$IsObject(pFilters) {
+            If pFilters = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' is required for the " _ pAction _ " action: a list of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+            }
+            Else {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must be an array of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+            }
+        }
+        ElseIf 'pFilters.%IsA("%Library.DynamicArray") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must be an array of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+        }
+        ElseIf (pFilters.%Size() < 1) || (pFilters.%Size() > ..#MAXBODYFILTERS) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must hold from 1 to " _ ..#MAXBODYFILTERS _ " filters")
+        }
+        Else {
+            For tI = 0:1:pFilters.%Size() - 1 {
+                Set tIndex = tI
+                Set tSC = ..FilterShape(pFilters, tI)
+                If $$$ISERR(tSC) Quit
+            }
+        }
+    } Catch ex {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ $Select($Data(tIndex): "filters[" _ tIndex _ "]", 1: "filters") _ "' could not be read")
+    }
+    Quit tSC
+}
+
+/// Check filter number <var>pIndex</var> (from 0) of the array <var>pFilters</var>; see
+/// <method>BodyFilterShape</method>.
+ClassMethod FilterShape(pFilters As %DynamicArray, pIndex As %Integer) As %Status
+{
+    Set tPath = "filters[" _ pIndex _ "]"
+    If pFilters.%GetTypeOf(pIndex) '= "object" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ "' must be an object holding property, op and value")
+    }
+    Set tFilter = pFilters.%Get(pIndex)
+    ; Counting the keys that are present avoids iterating, which would also convert every value.
+    Set tKnownKeys = tFilter.%IsDefined("property") + tFilter.%IsDefined("op") + tFilter.%IsDefined("value")
+    If tFilter.%Size() '= tKnownKeys {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ "' may hold only property, op and value")
+    }
+
+    If tFilter.%GetTypeOf("property") '= "string" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is required and must be a string")
+    }
+    Set tProperty = tFilter.%Get("property")
+    If ($Length(tProperty) > 128) || '$Match(tProperty, "^[A-Za-z][A-Za-z0-9]*$") {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' must be a property name of 1 to 128 letters and digits, starting with a letter")
+    }
+
+    If tFilter.%GetTypeOf("op") '= "string" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' is required and must be one of: eq, ne, lt, le, gt, ge, contains, startsWith, isNull, notNull")
+    }
+    Set tOp = tFilter.%Get("op")
+    If ..BodyOpSql(tOp) = "" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' must be one of: eq, ne, lt, le, gt, ge, contains, startsWith, isNull, notNull")
+    }
+
+    Set tValueType = tFilter.%GetTypeOf("value")
+    If (tOp = "isNull") || (tOp = "notNull") {
+        If (tValueType '= "unassigned") && (tValueType '= "null") {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be absent for the isNull and notNull operators")
+        }
+        Quit $$$OK
+    }
+    If tValueType = "string" {
+        Set tLength = $Length(tFilter.%Get("value"))
+        If (tLength < 1) || (tLength > ..#MAXFILTERVALUE) {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be a string of 1 to " _ ..#MAXFILTERVALUE _ " characters, a number or a boolean")
+        }
+        Quit $$$OK
+    }
+    If tValueType = "boolean" Quit $$$OK
+    If tValueType = "number" {
+        Set tSC = ..ReadFilterNumber(tFilter, .tNumber)
+        If $$$ISERR(tSC) {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be a finite number")
+        }
+        Quit $$$OK
+    }
+    Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' is required and must be a string of 1 to " _ ..#MAXFILTERVALUE _ " characters, a number or a boolean")
+}
+
+/// Read the number <code>value</code> of <var>pFilter</var> into <var>pNumber</var>. Fails, without text,
+/// for a number IRIS cannot hold (an exponent beyond its range).
+ClassMethod ReadFilterNumber(pFilter As %DynamicObject, Output pNumber As %Numeric) As %Status
+{
+    Set tSC = $$$OK
+    Set pNumber = ""
+    Try {
+        Set pNumber = pFilter.%Get("value")
+    } Catch {
+        Set pNumber = ""
+        Set tSC = $$$ERROR($$$GeneralError, "Not a finite number")
+    }
+    Quit tSC
+}
+
+/// Resolve the body class <var>pClassName</var> to its SQL table, in <var>pTable</var> as
+/// <code>"schema"."table"</code> with both names in double quotes, taken from the class dictionary. The
+/// class must be compiled in this namespace, its name must equal <var>pClassName</var> exactly (a case
+/// variant is another name), it must be persistent, and its schema and table names must be non-empty and
+/// hold no double quote. Otherwise the status names the parameter <var>pParam</var> (<code>bodyClass</code>
+/// unless the caller says otherwise), without its value, and <var>pTable</var> is empty.
+ClassMethod BodyTable(pClassName As %String, Output pTable As %String, pParam As %String = "bodyClass") As %Status
+{
+    Set pTable = ""
+    Set tFound = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        If $IsObject(tClass) && (tClass.Name = pClassName) && (tClass.ClassType = "persistent") {
+            Set tSchema = tClass.SqlSchemaName
+            Set tTable = tClass.SqlTableName
+            If (tSchema '= "") && (tTable '= "") && (tSchema '[ """") && (tTable '[ """") {
+                Set pTable = """" _ tSchema _ """.""" _ tTable _ """"
+                Set tFound = 1
+            }
+        }
+    } Catch {
+        Set tFound = 0
+    }
+    If tFound Quit $$$OK
+    Set pTable = ""
+    Quit $$$ERROR($$$GeneralError, "Parameter '" _ pParam _ "' must name a compiled persistent class with an SQL table in this namespace")
+}
+
+/// How the property <var>pProperty</var> of the class <var>pClassName</var> may be searched, from the
+/// compiled class dictionary, and its SQL column in <var>pField</var> (the compiled <code>SqlFieldName</code>).
+/// The first rule that holds decides:
+/// <ol>
+/// <li>no compiled property of exactly that name: <code>refused</code>;</li>
+/// <li>multidimensional: <code>refused</code>;</li>
+/// <li>transient or calculated, and not SQL-computed (it has no column): <code>refused</code>;</li>
+/// <li>a list or an array collection: <code>refused</code>;</li>
+/// <li>a relationship: <code>refused</code>;</li>
+/// <li>a serial object (its columns are its sub-properties): <code>refused</code>;</li>
+/// <li>a stream (SQL allows only a null test on it): <code>stream</code>;</li>
+/// <li>an empty column name or one that holds a double quote: <code>refused</code>;</li>
+/// <li>anything else, which includes a reference to a persistent class (its column holds the ID):
+/// <code>value</code>.</li>
+/// </ol>
+/// Anything that cannot be determined is <code>refused</code>.
+ClassMethod PropertyKind(pClassName As %String, pProperty As %String, Output pField As %String) As %String
+{
+    Set pField = ""
+    Set tKind = "refused"
+    Try {
+        Set tProp = ##class(%Dictionary.CompiledProperty).%OpenId(pClassName _ "||" _ pProperty)
+        If '$IsObject(tProp) || (tProp.Name '= pProperty) { Set tKind = "refused" }
+        ElseIf tProp.MultiDimensional { Set tKind = "refused" }
+        ElseIf (tProp.Transient || tProp.Calculated) && 'tProp.SqlComputed { Set tKind = "refused" }
+        ElseIf tProp.Collection '= "" { Set tKind = "refused" }
+        ElseIf tProp.Relationship { Set tKind = "refused" }
+        ElseIf $ClassMethod(tProp.Type, "%IsA", "%Library.SerialObject") { Set tKind = "refused" }
+        Else {
+            Set tField = tProp.SqlFieldName
+            If (tField = "") || (tField [ """") { Set tKind = "refused" }
+            Else {
+                Set pField = tField
+                Set tKind = $Select($ClassMethod(tProp.Type, "%IsA", "%Stream.Object"): "stream", 1: "value")
+            }
+        }
+    } Catch {
+        Set pField = ""
+        Set tKind = "refused"
+    }
+    Quit tKind
+}
+
+/// Translate the body filters <var>pFilters</var> of the class <var>pClassName</var> into a WHERE clause
+/// body and its parameters, <var>pWhere</var> and <var>pParams</var> as <method>HeaderWhere</method>
+/// returns them. Each filter becomes <code>alias."SqlFieldName" fragment</code>: the column name comes
+/// from <method>PropertyKind</method>, the fragment from <method>BodyOpSql</method>, and the value, a
+/// string, a number or a boolean bound as 1 or 0, only into <var>pParams</var>. The fragments are joined
+/// with <code>" AND "</code>. A property <method>PropertyKind</method> refuses is refused, and so is any
+/// operator other than <code>isNull</code> and <code>notNull</code> on a stream, with a status naming
+/// <code>filters[i].property</code> or <code>filters[i].op</code>, never the value. The shape is checked
+/// again here with <method>BodyFilterShape</method>, so a caller cannot skip it.
+ClassMethod BodyFilterWhere(pClassName As %String, pFilters As %RawString, pAlias As %String, Output pWhere As %String, Output pParams) As %Status
+{
+    Set pWhere = ""
+    Kill pParams
+    Set pParams = 0
+    Set tSC = ..BodyFilterShape(pFilters)
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        Set tQ = $Select(pAlias = "": "", 1: pAlias _ ".")
+        For tI = 0:1:pFilters.%Size() - 1 {
+            Set tPath = "filters[" _ tI _ "]"
+            Set tFilter = pFilters.%Get(tI)
+            Set tOp = tFilter.%Get("op")
+            Set tKind = ..PropertyKind(pClassName, tFilter.%Get("property"), .tField)
+            If tKind = "refused" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is not a searchable property of the body class")
+                Quit
+            }
+            If (tKind = "stream") && (tOp '= "isNull") && (tOp '= "notNull") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' must be isNull or notNull for a stream property")
+                Quit
+            }
+            Set tFragment = ..BodyOpSql(tOp)
+            Set pWhere = pWhere _ $Select(tI > 0: " AND ", 1: "") _ tQ _ """" _ tField _ """ " _ tFragment
+            If tFragment [ "?" {
+                Set pParams = pParams + 1
+                Set pParams(pParams) = tFilter.%Get("value")
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    If $$$ISERR(tSC) {
+        Set pWhere = ""
+        Kill pParams
+        Set pParams = 0
+    }
+    Quit tSC
+}
+
+/// The text of the body search statement. It reads the headers (alias <code>h</code>) first, in window
+/// order, and each body row (alias <code>b</code>, the table <var>pBodyTable</var> from
+/// <method>BodyTable</method>) by its ID, joined on the header's body ID. The select list is the header
+/// columns of <parameter>COLUMNS</parameter> and nothing of the body. <var>pWhere</var> is
+/// <method>HeaderWhere</method>'s clause (alias <code>h</code>) and <var>pBodyWhere</var>
+/// <method>BodyFilterWhere</method>'s (alias <code>b</code>); with <var>pCursor</var> the keyset clause
+/// follows them. Every other character is fixed text or a parameter marker, in the order the caller binds:
+/// the page size, <var>pWhere</var>'s, <var>pBodyWhere</var>'s, then the cursor's three.
+/// <p>With an empty <var>pBodyTable</var> there is no joined table: the statement reads the headers alone and
+/// <var>pBodyWhere</var> is a set of conditions on the header (alias <code>h</code>), as the Search Table
+/// lookup's <method>SearchTableClause</method> clauses are.</p>
+ClassMethod BodyStatement(pBodyTable As %String, pWhere As %String, pBodyWhere As %String, pCursor As %Boolean = 0) As %String
+{
+    If pBodyTable = "" {
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h WHERE " _ pWhere _ " AND " _ pBodyWhere
+    }
+    Else {
+        Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER " _ ..#HEADERHINT _ " Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+    }
+    If pCursor {
+        Set tSQL = tSQL _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))"
+    }
+    Quit tSQL _ " ORDER BY h.TimeCreated, h.ID"
+}
+
+/// The text of the <code>headers</code> action's statement: the columns of <parameter>COLUMNS</parameter>
+/// read from <class>Ens.MessageHeader</class> (unaliased) with <parameter>HEADERHINT</parameter> right after
+/// <code>FROM</code>, then <code>WHERE</code> <var>pWhere</var> (<method>HeaderWhere</method>'s clause with no
+/// alias). With <var>pCursor</var> the keyset clause follows it. The order is always
+/// <code>TimeCreated, ID</code>. Every other character is fixed text or a parameter marker, in the order the
+/// caller binds: the page size, <var>pWhere</var>'s, then the cursor's three.
+ClassMethod HeaderStatement(pWhere As %String, pCursor As %Boolean = 0) As %String
+{
+    Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM " _ ..#HEADERHINT _ " Ens.MessageHeader WHERE " _ pWhere
+    If pCursor {
+        Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
+    }
+    Quit tSQL _ " ORDER BY TimeCreated, ID"
+}
+
+/// Resolve the Search Table class <var>pClassName</var>: in <var>pTable</var> the delimited SQL table of its
+/// extent root (<code>"schema"."table"</code>, taken from the class dictionary by <method>BodyTable</method>)
+/// and in <var>pDocClass</var> its <code>DOCCLASS</code>. The class must be compiled in this namespace under
+/// exactly that name (a case variant is another name), persistent, not abstract and a subclass of
+/// <class>Ens.VDoc.SearchTable</class>; it must have an extent root with an SQL table; and its
+/// <code>DOCCLASS</code> must name a compiled class. Otherwise the status names
+/// <code>searchTableClass</code>, without its value, and both outputs are empty.
+ClassMethod SearchTableClass(pClassName As %String, Output pTable As %String, Output pDocClass As %String) As %Status
+{
+    Set pTable = ""
+    Set pDocClass = ""
+    Set tFound = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        If $IsObject(tClass) && (tClass.Name = pClassName) && (tClass.ClassType = "persistent") && 'tClass.Abstract && $ClassMethod(pClassName, "%Extends", "Ens.VDoc.SearchTable") {
+            Set tRoot = ##class(Ens.VDoc.SearchTableGenerator).GetExtentSuperclass(pClassName)
+            If tRoot '= "" {
+                Set tDocClass = $Parameter(pClassName, "DOCCLASS")
+                If (tDocClass '= "") && ##class(%Dictionary.CompiledClass).%ExistsId(tDocClass) && $$$ISOK(..BodyTable(tRoot, .tTable, "searchTableClass")) {
+                    Set pTable = tTable
+                    Set pDocClass = tDocClass
+                    Set tFound = 1
+                }
+            }
+        }
+    } Catch {
+        Set tFound = 0
+    }
+    If tFound Quit $$$OK
+    Set pTable = ""
+    Set pDocClass = ""
+    Quit $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' must be the exact, case-sensitive name of a compiled Search Table class (a persistent subclass of Ens.VDoc.SearchTable with an SQL table and a document class) in this namespace")
+}
+
+/// Whether the body class <var>pBodyClass</var> is a compiled class, under exactly that name, that is or
+/// extends the document class <var>pDocClass</var>. Anything that cannot be determined is false.
+ClassMethod BodyClassExtends(pBodyClass As %String, pDocClass As %String) As %Boolean
+{
+    Set tResult = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pBodyClass)
+        If $IsObject(tClass) && (tClass.Name = pBodyClass) {
+            Set tResult = +$ClassMethod(pBodyClass, "%Extends", pDocClass)
+        }
+    } Catch {
+        Set tResult = 0
+    }
+    Quit tResult
+}
+
+/// Whether this namespace has any Search Table property, a row of <class>Ens.Config.SearchTableProp</class>.
+/// The statement is fixed. A SQL failure, when the statement is prepared or when its row is fetched, is
+/// thrown, so a caller's Try/Catch answers it with an error and it can never read as "none configured".
+ClassMethod SearchTablesConfigured() As %Boolean
+{
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TOP 1 PropId FROM Ens_Config.SearchTableProp")
+    If tRS.%SQLCODE < 0 {
+        Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+    }
+    Set tFound = tRS.%Next()
+    If tRS.%SQLCODE < 0 {
+        Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+    }
+    Quit tFound
+}
+
+/// The value <var>pValue</var> of a Search Table filter as the Search Table stores it for a property of
+/// type <var>pPropType</var>, which is how <class>Ens.VDoc.SearchTableGenerator</class> normalizes a value
+/// before it stores it: a case-insensitive string is lower-cased, an integer is truncated (<code>+v\\1</code>),
+/// a numeric is a number (<code>+v</code>), a boolean is 1 for true, yes and on and otherwise the truth of
+/// the value, and every other type (a case-sensitive string, a date and time, and any type this method does
+/// not know) is unchanged. A <code>|</code> is stored as <code>+</code>, so it is replaced last, in every type.
+ClassMethod SearchTableValue(pPropType As %String, pValue As %String) As %String
+{
+    Set tValue = $Case(pPropType, "String:CaseInsensitive": $ZConvert(pValue, "L"), "Integer": +pValue\\1, "Numeric": +pValue, "Boolean": $Case($ZConvert(pValue, "L"), "true": 1, "yes": 1, "on": 1, : ''pValue), : pValue)
+    Quit $Replace(tValue, "|", "+")
+}
+
+/// Whether the operator <var>pOp</var> may be used on a Search Table property of type <var>pPropType</var>.
+/// The ten operators of <method>BodyOpSql</method> may be used on a string or a date and time. An integer, a
+/// numeric and a boolean are stored as text, so a range, a substring or a prefix of one would compare text
+/// and mean nothing: they accept only <code>eq</code>, <code>ne</code>, <code>isNull</code> and
+/// <code>notNull</code>. Anything that is not one of the ten operators is refused.
+ClassMethod SearchTableOpAllowed(pPropType As %String, pOp As %String) As %Boolean
+{
+    If ..BodyOpSql(pOp) = "" Quit 0
+    If (pPropType = "Integer") || (pPropType = "Numeric") || (pPropType = "Boolean") {
+        Quit (pOp = "eq") || (pOp = "ne") || (pOp = "isNull") || (pOp = "notNull")
+    }
+    Quit 1
+}
+
+/// The condition on a header (alias <code>h</code>) for filter number <var>pIndex</var>: a correlated
+/// <code>EXISTS</code> or <code>NOT EXISTS</code> over the Search Table <var>pTable</var>
+/// (<method>SearchTableClass</method>'s delimited name, alias <code>s</code><var>pIndex</var>), probing it by
+/// the header's body ID and a PropId. The marker <code>?</code> stands for the PropId, then, except for
+/// <code>isNull</code> and <code>notNull</code>, for the value, so the caller binds them in that order.
+/// <code>eq lt le gt ge contains startsWith</code> need an entry whose value is not the empty StoreNulls
+/// marker and satisfies <method>BodyOpSql</method>'s fragment; <code>ne</code> needs that there is no entry
+/// equal to the value; <code>notNull</code> needs an entry that is not the marker and <code>isNull</code>
+/// that there is none. A <code>String:CaseSensitive</code> value is compared with <code>%EXACT</code>; any
+/// other type is compared by the column's collation. An operator that is not one of the ten gives
+/// <code>""</code>. This is the only place an operator becomes part of the lookup, and it returns no part of
+/// its arguments.
+ClassMethod SearchTableClause(pIndex As %Integer, pTable As %String, pPropType As %String, pOp As %String) As %String
+{
+    Set tFragment = ..BodyOpSql(pOp)
+    If tFragment = "" Quit ""
+    Set tAlias = "s" _ (+pIndex)
+    Set tColumn = $Select(pPropType = "String:CaseSensitive": "%EXACT(" _ tAlias _ ".PropValue)", 1: tAlias _ ".PropValue")
+    Set tProbe = "SELECT 1 FROM " _ pTable _ " " _ tAlias _ " WHERE " _ tAlias _ ".DocId = h.MessageBodyId AND " _ tAlias _ ".PropId = ?"
+    Set tEntry = tProbe _ " AND " _ tAlias _ ".PropValue <> ''"
+    If pOp = "ne" Quit "NOT EXISTS (" _ tProbe _ " AND " _ tColumn _ " = ?)"
+    If pOp = "notNull" Quit "EXISTS (" _ tEntry _ ")"
+    If pOp = "isNull" Quit "NOT EXISTS (" _ tEntry _ ")"
+    Quit "EXISTS (" _ tEntry _ " AND " _ tColumn _ " " _ tFragment _ ")"
+}
+
+/// The shape of the Search Table filters <var>pFilters</var>, checked before the namespace is switched and
+/// again by <method>SearchTableFilterWhere</method>: <method>BodyFilterShape</method>'s rules for the
+/// <code>searchTable</code> action, plus a value of at most <parameter>MAXSEARCHTABLEVALUE</parameter>
+/// characters for every operator that takes one (a Search Table stores no more, and an index lookup by a much
+/// longer value fails in IRIS). A refusal names <code>filters[i].value</code>, never the value. It touches no
+/// namespace and no dictionary.
+ClassMethod SearchTableShape(pFilters As %RawString) As %Status
+{
+    Set tSC = ..BodyFilterShape(pFilters, "searchTable")
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        For tI = 0:1:pFilters.%Size() - 1 {
+            Set tFilter = pFilters.%Get(tI)
+            Set tOp = tFilter.%Get("op")
+            If (tOp '= "isNull") && (tOp '= "notNull") && ($Length(tFilter.%Get("value")) > ..#MAXSEARCHTABLEVALUE) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters[" _ tI _ "].value' is longer than the " _ ..#MAXSEARCHTABLEVALUE _ " characters a Search Table stores")
+                Quit
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    Quit tSC
+}
+
+/// Translate the Search Table filters <var>pFilters</var> of the class <var>pClassName</var> (its extent
+/// table is <var>pTable</var>, from <method>SearchTableClass</method>) into a WHERE clause body and its
+/// parameters, <var>pWhere</var> and <var>pParams</var> as <method>HeaderWhere</method> returns them. The
+/// shape is checked again here with <method>SearchTableShape</method>, so a caller cannot skip it. The class's
+/// properties are listed once, by <class>Ens.VDoc.SearchTableGenerator</class>'s <code>getPropsList</code>,
+/// which returns those of the class and its Search Table superclasses; each filter's <code>property</code>
+/// must equal the name of one of them exactly. Each filter becomes the <method>SearchTableClause</method> of
+/// its operator and the property's type, and its parameters are the property's integer PropId, then, except
+/// for <code>isNull</code> and <code>notNull</code>, the value normalized by <method>SearchTableValue</method>.
+/// The clauses are joined with <code>" AND "</code>. A property that is not one of the class's is refused,
+/// and so is an operator the property's type does not allow, with a status naming
+/// <code>filters[i].property</code> or <code>filters[i].op</code>, never the value; the property refusal lists
+/// the class's property names (at most 50), which are configuration.
+ClassMethod SearchTableFilterWhere(pClassName As %String, pTable As %String, pFilters As %RawString, Output pWhere As %String, Output pParams) As %Status
+{
+    Set pWhere = ""
+    Kill pParams
+    Set pParams = 0
+    Set tSC = ..SearchTableShape(pFilters)
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        Kill tProps, tByName
+        Set tSC = ##class(Ens.VDoc.SearchTableGenerator).getPropsList(pClassName, .tProps)
+        If $$$ISERR(tSC) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' names a class whose Search Table properties cannot be listed")
+        }
+        Else {
+            For tN = 1:1:+$Get(tProps) {
+                Set tByName(tProps(tN)) = $ListBuild(tProps(tN, "PropId"), tProps(tN, "PropType"))
+            }
+            For tI = 0:1:pFilters.%Size() - 1 {
+                Set tPath = "filters[" _ tI _ "]"
+                Set tFilter = pFilters.%Get(tI)
+                Set tProperty = tFilter.%Get("property")
+                Set tOp = tFilter.%Get("op")
+                If '$Data(tByName(tProperty)) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is not a property of this Search Table class" _ ..PropertyNames(.tByName))
+                    Quit
+                }
+                Set tPropId = $List(tByName(tProperty), 1)
+                Set tPropType = $List(tByName(tProperty), 2)
+                If '..SearchTableOpAllowed(tPropType, tOp) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' is not allowed for a Search Table property of type " _ tPropType _ ": an integer, numeric or boolean property accepts only eq, ne, isNull and notNull")
+                    Quit
+                }
+                Set pWhere = pWhere _ $Select(tI > 0: " AND ", 1: "") _ ..SearchTableClause(tI, pTable, tPropType, tOp)
+                Set pParams = pParams + 1
+                Set pParams(pParams) = tPropId
+                If (tOp '= "isNull") && (tOp '= "notNull") {
+                    Set pParams = pParams + 1
+                    Set pParams(pParams) = ..SearchTableValue(tPropType, tFilter.%Get("value"))
+                }
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    If $$$ISERR(tSC) {
+        Set pWhere = ""
+        Kill pParams
+        Set pParams = 0
+    }
+    Quit tSC
+}
+
+/// The tail of a property refusal: the names in the array <var>pByName</var> (subscripts), in order, at most
+/// 50 of them and then how many more, or a note that there are none.
+ClassMethod PropertyNames(ByRef pByName) As %String
+{
+    Set tNames = ""
+    Set tCount = 0
+    Set tName = ""
+    For {
+        Set tName = $Order(pByName(tName))
+        If tName = "" Quit
+        Set tCount = tCount + 1
+        If tCount <= 50 {
+            Set tNames = tNames _ $Select(tNames = "": "", 1: ", ") _ tName
+        }
+    }
+    If tCount = 0 Quit ": the class has no configured properties"
+    Quit ". Use one of: " _ tNames _ $Select(tCount > 50: " and " _ (tCount - 50) _ " more", 1: "")
+}
+
+/// The label of an <code>Ens.DataType.MessageType</code> code, or <code>"Unknown"</code>.
+ClassMethod TypeLabel(pType As %Integer) As %String
+{
+    Quit $Select(pType = 1: "Request", pType = 2: "Response", pType = 3: "Terminate", 1: "Unknown")
+}
+
+/// The kind of a message body, from its class alone and never from its content. The first test that
+/// holds decides, in this order: an empty class name is <code>literal</code> (the header's body ID is
+/// the value); a class that is not compiled is <code>missing</code>; <class>EnsLib.HL7.Message</class> is
+/// <code>hl7v2</code>; <class>EnsLib.EDI.XML.Document</class> is <code>xmlvdoc</code>;
+/// <class>Ens.VDoc.Interface</class> is <code>vdoc</code>; <class>%Stream.Object</class> is
+/// <code>stream</code>; <class>Ens.StreamContainer</class> is <code>streamContainer</code>;
+/// <class>%Library.Persistent</class> is <code>persistent</code>; anything else is <code>other</code>.
+/// A class that cannot be tested at all is <code>other</code>, the kind that is never redactable.
+ClassMethod BodyKind(pClassName As %String) As %String
+{
+    Set tKind = "other"
+    Try {
+        If pClassName = "" { Set tKind = "literal" Quit }
+        If '##class(%Dictionary.CompiledClass).%ExistsId(pClassName) { Set tKind = "missing" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.HL7.Message") { Set tKind = "hl7v2" Quit }
+        If $ClassMethod(pClassName, "%Extends", "EnsLib.EDI.XML.Document") { Set tKind = "xmlvdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.VDoc.Interface") { Set tKind = "vdoc" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Stream.Object") { Set tKind = "stream" Quit }
+        If $ClassMethod(pClassName, "%Extends", "Ens.StreamContainer") { Set tKind = "streamContainer" Quit }
+        If $ClassMethod(pClassName, "%Extends", "%Library.Persistent") { Set tKind = "persistent" Quit }
+    } Catch {
+        Set tKind = "other"
+    }
+    Quit tKind
+}
+
+/// The number of characters in the complete ER7 text of the <class>EnsLib.HL7.Message</class> body
+/// <var>pBodyId</var> of class <var>pBodyClass</var>, summed from the stored segment sizes
+/// (<method>EnsLib.HL7.Message:GetFullSize</method>) without serializing anything. A batch is counted with all
+/// of its nested children: a batch is a chain of parents (FHS, then BHS, then the messages), and
+/// <code>GetFullSize</code> skips the segments that only point at children, so each node found adds its own
+/// size and one fixed query (<code>ParentId</code> equal to the node's ID, or starting with the ID and a colon)
+/// then finds that node's children. The sum stops at the first node that takes it past <var>pLimit</var>, so no
+/// node after that one is sized or queried. Each node that is sized costs one pass over its own stored segment
+/// index, and each node that is queried costs one pass over its children's IDs, which is far less than
+/// serializing the text but grows with the number of segments and children. The segment sizes assume a
+/// one-character segment terminator, which is what an opened body serializes with (the terminator of the text a
+/// message was imported from is not stored), so the sum equals the length the serialization writes. Returns
+/// <code>0</code> on any failure, which makes the caller serialize and check the length itself.
+ClassMethod Hl7Size(pBodyClass As %String, pBodyId As %String, pLimit As %Integer) As %Integer
+{
+    Set tSum = 0
+    Try {
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tSC = tStmt.%Prepare("SELECT %ID FROM EnsLib_HL7.Message WHERE ParentId = ? OR ParentId %STARTSWITH ?")
+        If $$$ISERR(tSC) { Set tSum = 0 Quit }
+        Set tQueue(1) = pBodyId
+        Set tTail = 1
+        Set tHead = 0
+        While tHead < tTail {
+            Set tHead = tHead + 1
+            Set tId = tQueue(tHead)
+            If $Data(tSeen(tId)) { Continue }
+            Set tSeen(tId) = ""
+            If tHead = 1 {
+                Set tSum = tSum + $ClassMethod(pBodyClass, "GetFullSize", tId)
+            }
+            Else {
+                Set tSum = tSum + ##class(EnsLib.HL7.Message).GetFullSize(tId)
+            }
+            If tSum > pLimit { Quit }
+            Set tRS = tStmt.%Execute(tId, tId _ ":")
+            If tRS.%SQLCODE < 0 { Set tSum = 0 Quit }
+            While tRS.%Next() {
+                Set tTail = tTail + 1
+                Set tQueue(tTail) = tRS.%GetData(1)
+            }
+            If tRS.%SQLCODE < 0 { Set tSum = 0 Quit }
+        }
+    }
+    Catch {
+        Set tSum = 0
+    }
+    Quit tSum
+}
+
+/// The complete ER7 text of the <class>EnsLib.HL7.Message</class> body <var>pBodyId</var> of class
+/// <var>pBodyClass</var>, in <var>pText</var>: children included, unsanitized and never cut, which is what
+/// a redaction engine needs. Returns <code>""</code> when <var>pText</var> holds the whole text,
+/// <code>tooLarge</code> when the text is longer than <var>pMaxChars</var> characters (then
+/// <var>pText</var> is empty), or <code>unreadable</code> on any failure. A failure never carries
+/// exception text. The size is checked against the stored segment sizes (<method>Hl7Size</method>) after
+/// the body opens and before anything is serialized, so a body that is over the limit costs a sum and not
+/// a serialization; the length of the serialized text is checked again.
+ClassMethod Hl7Text(pBodyClass As %String, pBodyId As %String, pMaxChars As %Integer, Output pText As %String) As %String
+{
+    Set pText = ""
+    Set tResult = "unreadable"
+    Try {
+        Set tObj = $ClassMethod(pBodyClass, "%OpenId", pBodyId)
+        If '$IsObject(tObj) { Quit }
+        If 'tObj.%Extends("EnsLib.HL7.Message") { Quit }
+        If ..Hl7Size(pBodyClass, pBodyId, pMaxChars) > pMaxChars { Set tResult = "tooLarge" Quit }
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tSC = tObj.OutputToLibraryStream(tStream)
+        If $$$ISERR(tSC) { Quit }
+        Set tSize = tStream.Size
+        If tSize > pMaxChars { Set tResult = "tooLarge" Quit }
+        Do tStream.Rewind()
+        Set tText = ""
+        While 'tStream.AtEnd { Set tText = tText _ tStream.Read(32000) }
+        If $Length(tText) '= tSize { Quit }
+        Set pText = tText
+        Set tResult = ""
+    } Catch {
+        Set pText = ""
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
+/// Build the header row for the current row of <var>pRS</var>, a result of a SELECT of
+/// <parameter>COLUMNS</parameter>. Times are the stored UTC strings: converting them is the caller's
+/// job. The row never carries <code>ErrorStatus</code> or <code>Description</code>.
+ClassMethod HeaderRow(pRS As %SQL.StatementResult) As %DynamicObject
+{
+    Set tRow = {}
+    Do tRow.%Set("id", +pRS.ID, "number")
+    Do tRow.%Set("sessionId", +pRS.SessionId, "number")
+    Do tRow.%Set("type", ..TypeLabel(+pRS.Type))
+    Do tRow.%Set("status", ##class(ExecuteMCPv2.REST.MessageResend).StatusCodeToLabel(+pRS.Status))
+    Do tRow.%Set("isError", +pRS.IsError, "boolean")
+    Do tRow.%Set("sourceItem", pRS.SourceConfigName)
+    Do tRow.%Set("targetItem", pRS.TargetConfigName)
+    Do tRow.%Set("bodyClassName", pRS.MessageBodyClassName)
+    Do tRow.%Set("bodyId", pRS.MessageBodyId)
+    Do tRow.%Set("timeCreated", pRS.TimeCreated)
+    Do tRow.%Set("timeProcessed", pRS.TimeProcessed)
+    If pRS.CorrespondingMessageId = "" {
+        Do tRow.%Set("correspondingMessageId", "", "null")
+    }
+    Else {
+        Do tRow.%Set("correspondingMessageId", +pRS.CorrespondingMessageId, "number")
+    }
+    Quit tRow
+}
+
+/// Read the optional string parameter <var>pName</var> of <var>pBody</var> into <var>pValue</var>
+/// (<code>""</code> when absent or null). Fails when it is not a string or is longer than
+/// <var>pMaxLen</var> characters; the text names the parameter and never the value.
+ClassMethod ReadString(pBody As %DynamicObject, pName As %String, pMaxLen As %Integer, Output pValue As %String) As %Status
+{
+    Set pValue = ""
+    If 'pBody.%IsDefined(pName) Quit $$$OK
+    Set tType = pBody.%GetTypeOf(pName)
+    If tType = "null" Quit $$$OK
+    If tType '= "string" Quit $$$ERROR($$$GeneralError, "Parameter '" _ pName _ "' must be a string")
+    Set pValue = pBody.%Get(pName)
+    If $Length(pValue) > pMaxLen Quit $$$ERROR($$$GeneralError, "Parameter '" _ pName _ "' exceeds the maximum length of " _ pMaxLen _ " characters")
+    Quit $$$OK
+}
+
+/// Read the optional integer parameter <var>pName</var> of <var>pBody</var> into <var>pValue</var>
+/// (<var>pDefault</var> when absent or null). It must be a JSON number or a string of digits, from
+/// <var>pMin</var> to <var>pMax</var>; the text names the parameter and never the value.
+ClassMethod ReadInteger(pBody As %DynamicObject, pName As %String, pDefault As %String, pMin As %Integer, pMax As %Integer, Output pValue As %String) As %Status
+{
+    Set pValue = pDefault
+    If 'pBody.%IsDefined(pName) Quit $$$OK
+    Set tType = pBody.%GetTypeOf(pName)
+    If tType = "null" Quit $$$OK
+    Set tRaw = pBody.%Get(pName)
+    If ((tType '= "number") && (tType '= "string")) || (tRaw '? 1.N) || ($Length(tRaw) > 18) || (+tRaw < pMin) || (+tRaw > pMax) {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ pName _ "' must be an integer from " _ pMin _ " to " _ pMax)
+    }
+    Set pValue = +tRaw
+    Quit $$$OK
+}
+
+/// Whether <var>pNorm</var> (a <method>ExecuteMCPv2.REST.MessageResend.NormalizeTimestamp</method>
+/// result) parses as a date and time.
+ClassMethod IsTimestamp(pNorm As %String) As %Boolean
+{
+    Quit $$$ISOK(##class(ExecuteMCPv2.REST.MessageResend).WindowDays(pNorm, pNorm, .tDays))
+}
+
+/// Search message headers. The JSON body holds <code>action</code> (<code>headers</code>,
+/// <code>body</code> or <code>searchTable</code>), <code>from</code> (required, ISO-8601 or ODBC UTC),
+/// optional <code>to</code> (default now, to the millisecond, so a header created in the current second is
+/// inside the window), at most 7 days after <code>from</code>, optional <code>item</code>,
+/// <code>source</code>, <code>target</code>, <code>status</code> (a label, <code>Errored</code> or
+/// <code>Error</code> for status 8), <code>sessionId</code>, <code>bodyClass</code>, <code>errorOnly</code>,
+/// <code>limit</code> (1 to 500, default 100), the keyset cursor <code>afterTimeCreated</code> with
+/// <code>afterId</code>, and <code>namespace</code>. The <code>body</code> action requires
+/// <code>bodyClass</code>, which is then the exact name of a persistent class and matches only the headers
+/// of that class, and <code>filters</code>, a list of 1 to 10 <code>{property, op, value}</code> objects (see
+/// <method>BodyFilterShape</method>). The <code>searchTable</code> action requires
+/// <code>searchTableClass</code> and <code>filters</code> and takes an optional <code>bodyClass</code>, the
+/// exact name of a compiled class that is, or extends, the Search Table's document class (it then replaces
+/// that class as the header class predicate). The <code>headers</code> action refuses a <code>filters</code>
+/// key, and <code>searchTableClass</code> is refused on every action but <code>searchTable</code>.
+/// <p>The result is <code>{action, interopEnabled, rows, hasMore, limit, from, to}</code>, and for
+/// <code>searchTable</code> also <code>searchTablesConfigured</code>.
+/// <code>interopEnabled</code> is false, with no rows, when the namespace has no
+/// <code>Ens.MessageHeader</code>; <code>searchTablesConfigured</code> is false, with no rows, when it has no
+/// <code>Ens.Config.SearchTableProp</code> row, a check that comes before the class is looked up. Every
+/// refusal is the standard envelope with <code>result:{}</code>; nothing is read before the input is valid,
+/// and nothing is written. A failure of the body or Search Table statement's preparation carries its
+/// sanitized status, which holds only dictionary names and parameter markers; a failure while it runs is the
+/// fixed text <code>The body search failed with SQLCODE n.</code> or <code>The Search Table lookup failed
+/// with SQLCODE n.</code>, so no response names a filter value or body content.</p>
+ClassMethod MessageSearch() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set tResult = ""
+    Try {
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) Quit
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) Quit
+        If (tAction '= "headers") && (tAction '= "body") && (tAction '= "searchTable") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: headers, body, searchTable")
+            Quit
+        }
+        If (tAction = "headers") && tBody.%IsDefined("filters") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' applies only to the body and searchTable actions")
+            Quit
+        }
+        If (tAction '= "searchTable") && tBody.%IsDefined("searchTableClass") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' applies only to the searchTable action")
+            Quit
+        }
+
+        Set tSC = ..ReadString(tBody, "from", 64, .tFrom)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tFrom, "from")
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "to", 64, .tTo)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "item", 128, .tItem)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "source", 128, .tSource)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "target", 128, .tTarget)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "bodyClass", 220, .tBodyClass)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "searchTableClass", 220, .tSearchTableClass)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "status", 64, .tStatusLabel)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "afterTimeCreated", 64, .tAfterTime)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadString(tBody, "namespace", 256, .tNamespace)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadInteger(tBody, "sessionId", "", 1, 999999999999999999, .tSessionId)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadInteger(tBody, "limit", ..#DEFAULTLIMIT, 1, ..#MAXLIMIT, .tLimit)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ..ReadInteger(tBody, "afterId", "", 1, 999999999999999999, .tAfterId)
+        If $$$ISERR(tSC) Quit
+
+        Set tErrorOnly = 0
+        If tBody.%IsDefined("errorOnly") && (tBody.%GetTypeOf("errorOnly") '= "null") {
+            Set tErrorType = tBody.%GetTypeOf("errorOnly")
+            Set tErrorRaw = tBody.%Get("errorOnly")
+            If (tErrorType = "boolean") || ((tErrorType = "number") && ((tErrorRaw = 0) || (tErrorRaw = 1))) {
+                Set tErrorOnly = +tErrorRaw
+            }
+            Else {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'errorOnly' must be a boolean")
+                Quit
+            }
+        }
+
+        Set tStatusCode = ""
+        If tStatusLabel '= "" {
+            Set tStatusCode = ##class(ExecuteMCPv2.REST.MessageResend).StatusLabelToCode(tStatusLabel)
+            If tStatusCode = 0 {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'status' must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed")
+                Quit
+            }
+        }
+
+        If (tAfterTime = "") '= (tAfterId = "") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameters 'afterTimeCreated' and 'afterId' must be given together")
+            Quit
+        }
+
+        Set tFromNorm = ##class(ExecuteMCPv2.REST.MessageResend).NormalizeTimestamp(tFrom)
+        If tTo = "" { Set tToNorm = $ZDATETIME($ZTIMESTAMP, 3, 1, 3) }
+        Else { Set tToNorm = ##class(ExecuteMCPv2.REST.MessageResend).NormalizeTimestamp(tTo) }
+        Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).WindowDays(tFromNorm, tToNorm, .tDays)
+        If $$$ISERR(tSC) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameters 'from'/'to' must be valid ISO-8601 or ODBC timestamps")
+            Quit
+        }
+        If tDays < 0 {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'from' must be earlier than 'to' (the requested window is negative)")
+            Quit
+        }
+        If tDays > ..#MAXWINDOWDAYS {
+            Set tSC = $$$ERROR($$$GeneralError, "The 'from'/'to' window exceeds the maximum of " _ ..#MAXWINDOWDAYS _ " days; narrow the range and retry")
+            Quit
+        }
+
+        Set tAfterNorm = ""
+        If tAfterTime '= "" {
+            Set tAfterNorm = ##class(ExecuteMCPv2.REST.MessageResend).NormalizeTimestamp(tAfterTime)
+            If '..IsTimestamp(tAfterNorm) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'afterTimeCreated' must be a valid timestamp")
+                Quit
+            }
+        }
+
+        ; The body and searchTable actions' whole input is checked here, before the namespace is switched.
+        Set tClassPattern = "^%?[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)*$"
+        Set tBodyFilters = ""
+        If tAction = "body" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tBodyClass, "bodyClass")
+            If $$$ISERR(tSC) Quit
+            If '$Match(tBodyClass, tClassPattern) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            Set tBodyFilters = tBody.%Get("filters")
+            Set tSC = ..BodyFilterShape(tBodyFilters)
+            If $$$ISERR(tSC) Quit
+        }
+        ElseIf tAction = "searchTable" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tSearchTableClass, "searchTableClass")
+            If $$$ISERR(tSC) Quit
+            If '$Match(tSearchTableClass, tClassPattern) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'searchTableClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            If (tBodyClass '= "") && '$Match(tBodyClass, tClassPattern) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            Set tBodyFilters = tBody.%Get("filters")
+            Set tSC = ..SearchTableShape(tBodyFilters)
+            If $$$ISERR(tSC) Quit
+        }
+
+        Set tFilters = {}
+        Do tFilters.%Set("item", tItem)
+        Do tFilters.%Set("source", tSource)
+        Do tFilters.%Set("target", tTarget)
+        Do tFilters.%Set("statusCode", tStatusCode)
+        Do tFilters.%Set("fromNorm", tFromNorm)
+        Do tFilters.%Set("toNorm", tToNorm)
+        Do tFilters.%Set("sessionId", tSessionId)
+        Do tFilters.%Set("bodyClass", tBodyClass)
+        Do tFilters.%Set("errorOnly", tErrorOnly, "boolean")
+        If tAction = "headers" {
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams)
+            If $$$ISERR(tSC) Quit
+        }
+
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) Quit
+        }
+
+        Set tResult = {}
+        Do tResult.%Set("action", tAction)
+        Do tResult.%Set("limit", tLimit, "number")
+        Do tResult.%Set("from", tFromNorm)
+        Do tResult.%Set("to", tToNorm)
+
+        If '##class(%Dictionary.CompiledClass).%ExistsId("Ens.MessageHeader") {
+            Do tResult.%Set("interopEnabled", 0, "boolean")
+            Do tResult.%Set("rows", [])
+            Do tResult.%Set("hasMore", 0, "boolean")
+            Quit
+        }
+
+        ; The body action reads the headers first, in window order, and each body row by its ID. Its
+        ; statement holds only fixed text, names from the class dictionary, and parameter markers.
+        If tAction = "body" {
+            Set tSC = ..BodyTable(tBodyClass, .tBodyTable)
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams, "h")
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..BodyFilterWhere(tBodyClass, tBodyFilters, "b", .tBodyWhere, .tBodyParams)
+            If $$$ISERR(tSC) Quit
+        }
+
+        ; The searchTable action reads the headers of the document class first, in window order, and probes
+        ; the Search Table by each header's body ID. It is checked in this order: a namespace with no Search
+        ; Table property at all is not applicable, then the class, then bodyClass, then each filter.
+        If tAction = "searchTable" {
+            If '..SearchTablesConfigured() {
+                Do tResult.%Set("interopEnabled", 1, "boolean")
+                Do tResult.%Set("searchTablesConfigured", 0, "boolean")
+                Do tResult.%Set("rows", [])
+                Do tResult.%Set("hasMore", 0, "boolean")
+                Quit
+            }
+            Set tSC = ..SearchTableClass(tSearchTableClass, .tSearchTable, .tDocClass)
+            If $$$ISERR(tSC) Quit
+            Set tHeaderClass = tDocClass
+            If tBodyClass '= "" {
+                If '..BodyClassExtends(tBodyClass, tDocClass) {
+                    Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must name a compiled class that is, or extends, the Search Table's document class " _ tDocClass)
+                    Quit
+                }
+                Set tHeaderClass = tBodyClass
+            }
+            Do tFilters.%Set("bodyClass", tHeaderClass)
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams, "h")
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..SearchTableFilterWhere(tSearchTableClass, tSearchTable, tBodyFilters, .tBodyWhere, .tBodyParams)
+            If $$$ISERR(tSC) Quit
+        }
+
+        ; TOP is a parameter and the keyset clause comes after the filters, so the parameters
+        ; are the page size, then HeaderWhere's, then the body or Search Table filters', then the cursor's.
+        If tAction = "body" {
+            Set tSQL = ..BodyStatement(tBodyTable, tWhere, tBodyWhere, tAfterNorm '= "")
+        }
+        ElseIf tAction = "searchTable" {
+            Set tSQL = ..BodyStatement("", tWhere, tBodyWhere, tAfterNorm '= "")
+        }
+        Else {
+            Set tSQL = ..HeaderStatement(tWhere, tAfterNorm '= "")
+        }
+        Set tArgs = 1
+        Set tArgs(1) = tLimit + 1
+        For tI = 1:1:tWhereParams {
+            Set tArgs = tArgs + 1, tArgs(tArgs) = tWhereParams(tI)
+        }
+        If (tAction = "body") || (tAction = "searchTable") {
+            For tI = 1:1:tBodyParams {
+                Set tArgs = tArgs + 1, tArgs(tArgs) = tBodyParams(tI)
+            }
+        }
+        If tAfterNorm '= "" {
+            Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterNorm
+            Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterNorm
+            Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterId
+        }
+
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tStmt.%SelectMode = 0
+        Set tSC = tStmt.%Prepare(tSQL)
+        If $$$ISERR(tSC) Quit
+        Set tRS = tStmt.%Execute(tArgs...)
+        If tRS.%SQLCODE < 0 {
+            If tAction = "body" {
+                Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            }
+            ElseIf tAction = "searchTable" {
+                Set tSC = $$$ERROR($$$GeneralError, "The Search Table lookup failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            }
+            Else {
+                Set tSC = $$$ERROR($$$GeneralError, "SQL error: " _ tRS.%Message)
+            }
+            Quit
+        }
+
+        Set tRows = []
+        Set tHasMore = 0
+        While tRS.%Next() {
+            If tRows.%Size() >= tLimit {
+                Set tHasMore = 1
+                Quit
+            }
+            Do tRows.%Push(..HeaderRow(tRS))
+        }
+        If (tAction = "body") && (tRS.%SQLCODE < 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            Quit
+        }
+        If (tAction = "searchTable") && (tRS.%SQLCODE < 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "The Search Table lookup failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            Quit
+        }
+        Do tResult.%Set("interopEnabled", 1, "boolean")
+        If tAction = "searchTable" {
+            Do tResult.%Set("searchTablesConfigured", 1, "boolean")
+        }
+        Do tResult.%Set("rows", tRows)
+        Do tResult.%Set("hasMore", tHasMore, "boolean")
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    If $$$ISERR(tSC) {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+    }
+    Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit $$$OK
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.REST.MessageBody.cls",
+    `/// REST handler for the Interoperability message body reader (Story 39.5).
+/// <p>Provides <method>MessageBody</method>, a read-only route that returns the body of 1 to
+/// <parameter>MAXIDS</parameter> message headers, rendered by kind as text. The kinds are those of
+/// <method>ExecuteMCPv2.REST.MessageSearch:BodyKind</method>:</p>
+/// <ul>
+/// <li><code>hl7v2</code>: the complete ER7 text, through
+/// <method>ExecuteMCPv2.REST.MessageResend:SetBodyDetail</method>, or <code>tooLarge</code> /
+/// <code>unreadable</code>. An HL7 v2 body is never cut, because a redaction engine needs it whole.</li>
+/// <li><code>xmlvdoc</code>: the XML text. <code>persistent</code>: JSON, from <code>%JSONExportToStream</code>
+/// when the class extends <class>%JSON.Adaptor</class>, otherwise a dump of its dictionary properties
+/// (<method>PropertyDump</method>, which also reads the text of each character-stream property within the
+/// read limit). <code>stream</code> and <code>streamContainer</code>: the stream text.
+/// <code>literal</code> (an empty body class): the header's body ID. These are read as a prefix of
+/// <code>bodyTextMaxChars</code> characters.</li>
+/// <li><code>vdoc</code> and <code>other</code>: no renderer (<code>noRenderer</code>); <code>missing</code>:
+/// not read.</li>
+/// </ul>
+/// <p>The request's <code>bodyRead</code> says which bodies IRIS may read at all, so that a body the caller
+/// may not see never leaves IRIS: <code>kind</code> reads none, <code>hl7</code> reads only HL7 v2 bodies, and
+/// <code>all</code> reads every kind above. The data policy is applied by the caller of this route (the MCP
+/// tool); this class returns raw data and decides nothing about what is allowed.</p>
+/// <p>Like <class>ExecuteMCPv2.REST.MessageResend</class>, the work runs in the <b>target namespace</b>.</p>
+Class ExecuteMCPv2.REST.MessageBody Extends ExecuteMCPv2.REST.Base
+{
+
+/// The most header IDs one request may name.
+Parameter MAXIDS As %Integer = 20;
+
+/// Whether a request with <code>bodyRead</code> <var>pBodyRead</var> lets IRIS read the text of an available
+/// body of kind <var>pKind</var>: <code>kind</code> reads none, <code>hl7</code> reads only
+/// <code>hl7v2</code>, and <code>all</code> reads every kind except <code>missing</code> (a class that is not
+/// compiled has no body to read).
+ClassMethod ReadsText(pBodyRead As %String, pKind As %String) As %Boolean
+{
+    If pBodyRead = "hl7" Quit (pKind = "hl7v2")
+    If pBodyRead = "all" Quit ($ListFind($ListBuild("hl7v2", "xmlvdoc", "vdoc", "stream", "streamContainer", "persistent", "literal", "other"), pKind) > 0)
+    Quit 0
+}
+
+/// The first <var>pMaxChars</var> characters of <var>pText</var>. <var>pComplete</var> is 1 when that is the
+/// whole text. A cut never ends inside a UTF-16 surrogate pair: a dangling high surrogate is dropped.
+ClassMethod CutText(pText As %String, pMaxChars As %Integer, Output pComplete As %Boolean) As %String
+{
+    If $Length(pText) <= pMaxChars {
+        Set pComplete = 1
+        Quit pText
+    }
+    Set pComplete = 0
+    Quit ..TrimSplitPair($Extract(pText, 1, pMaxChars))
+}
+
+/// <var>pText</var> without its last character when that is a high surrogate, the first half of a pair
+/// that a cut separated from its second half (<method>ExecuteMCPv2.Utils:SurrogateSafeCutLength</method>).
+ClassMethod TrimSplitPair(pText As %String) As %String
+{
+    Quit $Extract(pText, 1, ##class(ExecuteMCPv2.Utils).SurrogateSafeCutLength(pText, $Length(pText)))
+}
+
+/// Read the text of the stream <var>pStream</var> from its start, at most <var>pMaxChars</var> characters, into
+/// <var>pText</var>. <var>pComplete</var> is 1 when the stream holds no more. Returns <code>""</code> on
+/// success, or <code>unreadable</code> (empty <var>pText</var>) when the stream is not a stream or cannot be
+/// read. Never throws.
+ClassMethod ReadStreamText(pStream As %Stream.Object, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
+{
+    Set pText = ""
+    Set pComplete = 0
+    Set tResult = "unreadable"
+    Try {
+        If '$IsObject(pStream) { Quit }
+        Set tSC = pStream.Rewind()
+        If $$$ISERR(tSC) { Quit }
+        Set tText = ""
+        Set tRemaining = pMaxChars
+        While (tRemaining > 0) && 'pStream.AtEnd {
+            Set tLen = $Select(tRemaining > 32000: 32000, 1: tRemaining)
+            Set tChunk = pStream.Read(.tLen, .tSC)
+            If $$$ISERR(tSC) { Quit }
+            If tChunk = "" { Quit }
+            Set tText = tText _ tChunk
+            Set tRemaining = tRemaining - $Length(tChunk)
+        }
+        If $$$ISERR(tSC) { Quit }
+        Set tComplete = 1
+        If 'pStream.AtEnd {
+            Set tLen = 1
+            Set tMore = pStream.Read(.tLen, .tSC)
+            If $$$ISERR(tSC) { Quit }
+            Set tComplete = (tMore = "")
+        }
+        If 'tComplete { Set tText = ..TrimSplitPair(tText) }
+        Set pText = tText
+        Set pComplete = tComplete
+        Set tResult = ""
+    }
+    Catch {
+        Set pText = ""
+        Set pComplete = 0
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
+/// Read the XML text of the <class>EnsLib.EDI.XML.Document</class> <var>pDoc</var> (its whole serialization,
+/// then the first <var>pMaxChars</var> characters of it). Returns <code>""</code> or <code>unreadable</code>,
+/// as <method>ReadStreamText</method> does.
+ClassMethod XmlText(pDoc As %RegisteredObject, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
+{
+    Set pText = ""
+    Set pComplete = 0
+    Set tResult = "unreadable"
+    Try {
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        Set tSC = pDoc.OutputToLibraryStream(tStream)
+        If $$$ISERR(tSC) { Quit }
+        Set tResult = ..ReadStreamText(tStream, pMaxChars, .pText, .pComplete)
+    }
+    Catch {
+        Set pText = ""
+        Set pComplete = 0
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
+/// Read the JSON text of the persistent object <var>pObj</var>: <code>%JSONExportToStream</code> when its class
+/// extends <class>%JSON.Adaptor</class>, otherwise the <method>PropertyDump</method> with the limit
+/// <var>pMaxChars</var>, so that the text of its character streams is read within that limit. The whole text is
+/// built, then its first <var>pMaxChars</var> characters are returned; <var>pComplete</var> is 1 only when neither
+/// that cut nor the dump cut anything. Returns <code>""</code> or <code>unreadable</code>, as
+/// <method>ReadStreamText</method> does.
+ClassMethod JsonText(pObj As %RegisteredObject, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
+{
+    Set pText = ""
+    Set pComplete = 0
+    Set tResult = "unreadable"
+    Try {
+        If pObj.%Extends("%JSON.Adaptor") {
+            Set tStream = ##class(%Stream.TmpCharacter).%New()
+            Set tSC = pObj.%JSONExportToStream(tStream)
+            If $$$ISERR(tSC) { Quit }
+            Set tResult = ..ReadStreamText(tStream, pMaxChars, .pText, .pComplete)
+        }
+        Else {
+            Set tDump = ..PropertyDump(pObj, pMaxChars, .tDumpComplete)
+            Set tJson = tDump.%ToJSON()
+            Set pText = ..CutText(tJson, pMaxChars, .tCutComplete)
+            Set pComplete = (tCutComplete && tDumpComplete)
+            Set tResult = ""
+        }
+    }
+    Catch {
+        Set pText = ""
+        Set pComplete = 0
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
+/// A JSON object of the properties of <var>pObj</var>, from the compiled dictionary of its class, in
+/// <code>SequenceNumber</code> then <code>Name</code> order. A property is left out when it is private, internal,
+/// calculated, transient or multidimensional, or its name starts with <code>%</code>, or its value cannot be read.
+/// Each value is:
+/// <ul>
+/// <li>a datatype: its logical value as a JSON string, <code>null</code> when it is empty;</li>
+/// <li>a stream: <code>{"stream": class, "size": Size}</code>; with <var>pMaxChars</var> above 0 a character
+/// stream (<code>IsCharacter()</code>) also carries <code>"text"</code>, its first characters read by
+/// <method>ReadStreamText</method> within the budget the earlier streams of the dump left, <code>""</code> once
+/// the budget is spent. A binary stream, or any stream when <var>pMaxChars</var> is 0, is never read;</li>
+/// <li>an object: <code>{"class": class, "id": %Id}</code> when it is persistent, <code>{"class": class}</code>
+/// otherwise, and <code>null</code> when it is not set;</li>
+/// <li>a list or array collection: <code>{"collection": "list"|"array", "count": Count()}</code>.</li>
+/// </ul>
+/// <p><var>pMaxChars</var> is one budget shared across the whole dump (0, the default, reads no stream text, so
+/// the dump is what it was without the argument). <var>pComplete</var> is 0 when a stream's text was cut or could
+/// not be read, otherwise 1.</p>
+ClassMethod PropertyDump(pObj As %RegisteredObject, pMaxChars As %Integer = 0, Output pComplete As %Boolean) As %DynamicObject
+{
+    Set pComplete = 1
+    Set tOut = {}
+    Set tBudget = pMaxChars
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Name, Collection, Private, Internal, Calculated, Transient, MultiDimensional FROM %Dictionary.CompiledProperty WHERE parent = ? ORDER BY SequenceNumber, Name", $ClassName(pObj))
+    If '$IsObject(tRS) || (tRS.%SQLCODE < 0) Quit tOut
+    While tRS.%Next() {
+        Set tName = tRS.%Get("Name")
+        If $Extract(tName) = "%" { Continue }
+        If +tRS.%Get("Private") || +tRS.%Get("Internal") || +tRS.%Get("Calculated") || +tRS.%Get("Transient") || +tRS.%Get("MultiDimensional") { Continue }
+        Set tCollection = tRS.%Get("Collection")
+        Try {
+            Set tValue = $Property(pObj, tName)
+            If (tCollection = "list") || (tCollection = "array") {
+                Set tEntry = {}
+                Do tEntry.%Set("collection", tCollection, "string")
+                Do tEntry.%Set("count", tValue.Count(), "number")
+                Do tOut.%Set(tName, tEntry)
+            }
+            ElseIf $IsObject(tValue) {
+                Set tEntry = {}
+                If tValue.%Extends("%Stream.Object") {
+                    Do tEntry.%Set("stream", $ClassName(tValue), "string")
+                    Do tEntry.%Set("size", tValue.Size, "number")
+                    If (pMaxChars > 0) && tValue.IsCharacter() {
+                        Set tUnreadable = ..ReadStreamText(tValue, tBudget, .tText, .tStreamComplete)
+                        If tUnreadable '= "" { Set tStreamComplete = 0 }
+                        If 'tStreamComplete { Set pComplete = 0 }
+                        Set tBudget = tBudget - $Length(tText)
+                        Do tEntry.%Set("text", tText, "string")
+                    }
+                }
+                ElseIf tValue.%Extends("%Library.Persistent") {
+                    Do tEntry.%Set("class", $ClassName(tValue), "string")
+                    Do tEntry.%Set("id", tValue.%Id(), "string")
+                }
+                Else {
+                    Do tEntry.%Set("class", $ClassName(tValue), "string")
+                }
+                Do tOut.%Set(tName, tEntry)
+            }
+            ElseIf tValue = "" {
+                Do tOut.%Set(tName, "", "null")
+            }
+            Else {
+                Do tOut.%Set(tName, tValue, "string")
+            }
+        }
+        Catch {
+        }
+    }
+    Quit tOut
+}
+
+/// Render the text of one non-HL7 body of kind <var>pKind</var> from the opened object <var>pObj</var>, at most
+/// <var>pMaxChars</var> characters, into <var>pText</var>; <var>pComplete</var> is 1 when that is the whole
+/// text. Returns <code>""</code> when <var>pText</var> holds the text, or the token that says why it does not:
+/// <code>noRenderer</code> (kinds <code>vdoc</code> and <code>other</code>, and any kind not listed below,
+/// whatever <var>pObj</var> is) or <code>unreadable</code> (the object is missing or a read failed). The kinds
+/// read are <code>xmlvdoc</code> (<method>XmlText</method>), <code>persistent</code> (<method>JsonText</method>),
+/// <code>stream</code> and <code>streamContainer</code> (<method>ReadStreamText</method>). Never throws.
+ClassMethod RenderText(pKind As %String, pObj As %RegisteredObject, pMaxChars As %Integer, Output pText As %String, Output pComplete As %Boolean) As %String
+{
+    Set pText = ""
+    Set pComplete = 0
+    Set tResult = "unreadable"
+    Try {
+        If $ListFind($ListBuild("xmlvdoc", "persistent", "stream", "streamContainer"), pKind) < 1 {
+            Set tResult = "noRenderer"
+            Quit
+        }
+        If '$IsObject(pObj) { Quit }
+        If pKind = "xmlvdoc" { Set tResult = ..XmlText(pObj, pMaxChars, .pText, .pComplete) }
+        ElseIf pKind = "persistent" { Set tResult = ..JsonText(pObj, pMaxChars, .pText, .pComplete) }
+        ElseIf pKind = "stream" { Set tResult = ..ReadStreamText(pObj, pMaxChars, .pText, .pComplete) }
+        Else { Set tResult = ..ReadStreamText(pObj.Stream, pMaxChars, .pText, .pComplete) }
+    }
+    Catch {
+        Set pText = ""
+        Set pComplete = 0
+        Set tResult = "unreadable"
+    }
+    Quit tResult
+}
+
+/// Build the item for one header ID: <code>{id, found: false, error}</code> when the header does not exist or
+/// cannot be queried, otherwise <code>{id, found, bodyClassName, bodyId, bodyKind, bodyAvailable}</code> plus
+/// either <code>bodyText</code> and <code>bodyTextComplete</code>, or <code>bodyTextOmitted</code>
+/// (<code>tooLarge</code>, <code>unreadable</code> or <code>noRenderer</code>). <code>bodyId</code> is left out
+/// for a <code>literal</code> header that holds a value unless <var>pBodyRead</var> is <code>all</code>; a
+/// <code>literal</code> header with an empty body ID (a message sent with no body object) carries
+/// <code>bodyId</code> <code>""</code> in every mode, which says it has no body and holds no value. What is read follows
+/// <method>ReadsText</method>: <code>kind</code> reads nothing, <code>hl7</code> the text of an available HL7 v2
+/// body (<method>ExecuteMCPv2.REST.MessageResend:SetBodyDetail</method>, <var>pMaxChars</var> being its limit),
+/// <code>all</code> that and every other kind (<method>RenderText</method>) and the value of a literal header.
+/// An item never carries exception text; the caller wraps this call in a Try/Catch for the unexpected.
+ClassMethod BodyOne(pId As %Integer, pBodyRead As %String, pMaxChars As %Integer) As %DynamicObject
+{
+    Set tItem = {}
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT ID, MessageBodyClassName, MessageBodyId FROM Ens.MessageHeader WHERE ID = ?", pId)
+    If '$IsObject(tRS) || (tRS.%SQLCODE < 0) {
+        Do tItem.%Set("id", pId, "number")
+        Do tItem.%Set("found", 0, "boolean")
+        Do tItem.%Set("error", "Header " _ pId _ " could not be read.")
+        Quit tItem
+    }
+    If 'tRS.%Next() {
+        Do tItem.%Set("id", pId, "number")
+        Do tItem.%Set("found", 0, "boolean")
+        Do tItem.%Set("error", "Header " _ pId _ " not found")
+        Quit tItem
+    }
+
+    Set tClass = tRS.MessageBodyClassName
+    Set tBodyId = tRS.MessageBodyId
+    Set tClassExists = 0
+    If tClass '= "" { Set tClassExists = ##class(%Dictionary.CompiledClass).%ExistsId(tClass) }
+    Set tKind = ##class(ExecuteMCPv2.REST.MessageSearch).BodyKind(tClass)
+
+    Do tItem.%Set("id", pId, "number")
+    Do tItem.%Set("found", 1, "boolean")
+    Do tItem.%Set("bodyClassName", tClass, "string")
+    If (tKind '= "literal") || (pBodyRead = "all") || (tBodyId = "") { Do tItem.%Set("bodyId", tBodyId, "string") }
+    Set tReads = ..ReadsText(pBodyRead, tKind)
+    Do ##class(ExecuteMCPv2.REST.MessageResend).SetBodyDetail(tItem, $Select(tReads: "text", 1: "kind"), pMaxChars, tClass, tBodyId, tClassExists)
+    If tItem.%IsDefined("bodyText") { Do tItem.%Set("bodyTextComplete", 1, "boolean") }
+
+    If tReads && (tKind '= "hl7v2") {
+        If tKind = "literal" {
+            Set tText = ..CutText(tBodyId, pMaxChars, .tComplete)
+            Do tItem.%Set("bodyText", tText, "string")
+            Do tItem.%Set("bodyTextComplete", tComplete, "boolean")
+        }
+        ElseIf tItem.%Get("bodyAvailable") {
+            Set tObj = ""
+            If (tKind '= "vdoc") && (tKind '= "other") { Set tObj = $ClassMethod(tClass, "%OpenId", tBodyId) }
+            Set tOmitted = ..RenderText(tKind, tObj, pMaxChars, .tText, .tComplete)
+            If tOmitted = "" {
+                Do tItem.%Set("bodyText", tText, "string")
+                Do tItem.%Set("bodyTextComplete", tComplete, "boolean")
+            }
+            Else {
+                Do tItem.%Set("bodyTextOmitted", tOmitted, "string")
+            }
+        }
+    }
+    Quit tItem
+}
+
+/// Read message bodies. The JSON body holds <code>headerIds</code> (an array of 1 to
+/// <parameter>MAXIDS</parameter> numeric header IDs, required), optional <code>namespace</code>, optional
+/// <code>bodyRead</code> (<code>kind</code>, the default, <code>hl7</code> or <code>all</code>: which bodies IRIS
+/// may read, see <method>ReadsText</method>) and optional <code>bodyTextMaxChars</code> (an integer from 1 to
+/// <parameter>BODYTEXTMAX</parameter> of <class>ExecuteMCPv2.REST.MessageResend</class>, default
+/// <parameter>BODYTEXTDEFAULT</parameter> of that class: the limit of an HL7 v2 body and the longest prefix of
+/// any other kind).
+/// <p>The result is <code>{interopEnabled, items, count}</code>, one item per ID in request order, duplicates
+/// included (see <method>BodyOne</method>). <code>interopEnabled</code> is false, with no items, when the
+/// namespace has no <code>Ens.MessageHeader</code>. Every check of the input runs before the namespace switch and
+/// its text names the parameter. A header that fails to read is
+/// <code>{id, found: false, error}</code> with a fixed text, so no exception text is returned. Never writes.</p>
+ClassMethod MessageBody() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set tResult = ""
+    Try {
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) Quit
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Quit
+        }
+
+        Set tHeaderIdsArr = ""
+        If tBody.%IsDefined("headerIds") { Set tHeaderIdsArr = tBody.%Get("headerIds") }
+        Set tSC = ##class(ExecuteMCPv2.REST.MessageResend).ValidateHeaderIds(tHeaderIdsArr, .tIds, ..#MAXIDS)
+        If $$$ISERR(tSC) Quit
+
+        Set tBodyRead = "kind"
+        If tBody.%IsDefined("bodyRead") && (tBody.%GetTypeOf("bodyRead") '= "null") {
+            Set tBodyRead = tBody.%Get("bodyRead")
+            If (tBody.%GetTypeOf("bodyRead") '= "string") || ((tBodyRead '= "kind") && (tBodyRead '= "hl7") && (tBodyRead '= "all")) {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyRead' must be kind, hl7 or all")
+                Quit
+            }
+        }
+
+        Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).ReadInteger(tBody, "bodyTextMaxChars", ##class(ExecuteMCPv2.REST.MessageResend).#BODYTEXTDEFAULT, 1, ##class(ExecuteMCPv2.REST.MessageResend).#BODYTEXTMAX, .tMax)
+        If $$$ISERR(tSC) Quit
+        Set tSC = ##class(ExecuteMCPv2.REST.MessageSearch).ReadString(tBody, "namespace", 256, .tNamespace)
+        If $$$ISERR(tSC) Quit
+
+        If tNamespace '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSC) Quit
+        }
+
+        Set tResult = {}
+        If '##class(%Dictionary.CompiledClass).%ExistsId("Ens.MessageHeader") {
+            Do tResult.%Set("interopEnabled", 0, "boolean")
+            Do tResult.%Set("items", [])
+            Do tResult.%Set("count", 0, "number")
+            Quit
+        }
+
+        Set tItems = []
+        For tI = 1:1:tIds(0) {
+            Set tId = tIds(tI)
+            Try {
+                Set tItem = ..BodyOne(tId, tBodyRead, tMax)
+            }
+            Catch exItem {
+                Set tItem = {}
+                Do tItem.%Set("id", tId, "number")
+                Do tItem.%Set("found", 0, "boolean")
+                Do tItem.%Set("error", "Header " _ tId _ " could not be read.")
+            }
+            Do tItems.%Push(tItem)
+        }
+        Do tResult.%Set("interopEnabled", 1, "boolean")
+        Do tResult.%Set("items", tItems)
+        Do tResult.%Set("count", tItems.%Size(), "number")
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    If $$$ISERR(tSC) {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+    }
+    Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
     }
     Quit $$$OK
 }
@@ -16720,6 +18405,12 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <!-- Epic 26: Interoperability Message Resend -->
   <Route Url="/interop/message/resend" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResend" />
   <Route Url="/interop/message/resend/preview" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResendPreview" />
+
+  <!-- Epic 39 (Story 39.1): Interoperability message header search -->
+  <Route Url="/interop/message/search" Method="POST" Call="ExecuteMCPv2.REST.MessageSearch:MessageSearch" />
+
+  <!-- Epic 39 (Story 39.5): Interoperability message body reader -->
+  <Route Url="/interop/message/body" Method="POST" Call="ExecuteMCPv2.REST.MessageBody:MessageBody" />
 
   <!-- Epic 5: Credentials and Lookup Tables -->
   <Route Url="/interop/credential" Method="GET" Call="ExecuteMCPv2.REST.Interop:CredentialList" />

@@ -15,6 +15,7 @@ import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 import {
+  DOC_TYPE_DESCRIPTION,
   extractAtelierContentArray,
   MODIFIED_SINCE_DESCRIPTION,
   modifiedSinceUnsupported,
@@ -129,14 +130,7 @@ export const packageListTool: ToolDefinition = {
         "CSP = CSP/ZEN pages and other web-facing files under /csp/. " +
         "OTH = other Studio document types. * = all categories (default).",
       ),
-    type: z
-      .string()
-      .optional()
-      .describe(
-        "Document type filter within category — the file extension without " +
-        "the dot (e.g., 'cls' for CLS, 'mac' or 'inc' for RTN). Default: " +
-        "all types within the chosen category.",
-      ),
+    type: z.string().optional().describe(DOC_TYPE_DESCRIPTION),
     generated: booleanParam
       .optional()
       .describe("Include generated documents (default: false)"),

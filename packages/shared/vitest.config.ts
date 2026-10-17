@@ -6,8 +6,9 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/__tests__/**/*.test.ts"],
     exclude: ["src/**/*.integration.test.ts"],
-    // The logger reads LOG_LEVEL once at import. Pin its documented default so
-    // tests that assert on log lines do not depend on the runner's environment.
-    env: { LOG_LEVEL: "DEBUG" },
+    // Clears the operator's startup variables (LOG_LEVEL among them) before each
+    // test file is imported, so the logger, which reads LOG_LEVEL once at import,
+    // runs at its default level.
+    setupFiles: ["src/__tests__/startup-env.setup.ts"],
   },
 });

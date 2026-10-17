@@ -1145,6 +1145,33 @@ describe("iris_doc_load — BOM strip + string-status failure (Story 35.9 rework
     expect(result.isError).toBe(true);
   });
 
+  it("reports IRIS's reason for a document name it refuses with HTTP 400 and an empty error list as an upload failure (Story 39.7, DW-569)", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/ProbeR359/Plain"]);
+    mockReadFileSync.mockReturnValue("plain text\n");
+    const reason = "ERROR #16006: Document 'ProbeR359.Plain' name is invalid";
+    // The answer Atelier gives for a name with no document type (captured live 2026-10-17, IRIS 2026.2 build 221U): the
+    // shared client throws it as an IrisApiError that carries the envelope's result.
+    mockHttp.put.mockRejectedValue(
+      new IrisApiError(400, [], "/api/atelier/v7/USER/doc/ProbeR359.Plain", "IRIS returned HTTP 400", {
+        name: "ProbeR359.Plain",
+        db: "",
+        ts: "",
+        cat: "OTH",
+        enc: false,
+        content: "",
+        status: reason,
+      }),
+    );
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*" }, ctx);
+
+    const structured = result.structuredContent as { uploaded: number; failed: number; failures: Array<{ error: string }> };
+    expect(structured.uploaded).toBe(0);
+    expect(structured.failed).toBe(1);
+    expect(structured.failures[0]?.error).toBe(`IRIS refused the upload: ${reason}`);
+    expect(result.isError).toBe(true);
+  });
+
   it("counts a PUT whose result.status is an empty string as success (live-captured success shape)", async () => {
     // Pins the check against the REAL success shape so it cannot
     // false-positive: a successful PUT carries result.status === "".
