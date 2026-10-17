@@ -212,6 +212,9 @@ const gateTestFiles = [
   // block: the result, a failed read, the audit file and the console log) on the BUILT interop dist, against a local listener that answers the startup
   // handshake and records requests; no IRIS instance is contacted.
   "src/__tests__/story-39-7-qa-process.test.ts",
+  // Story 40.0: the Epic 39 deferred cleanup (the interop metrics counts, the Event Log type filter) on the BUILT iris-dev-mcp, iris-admin-mcp, iris-interop-mcp and iris-ops-mcp dists over real stdio JSON-RPC.
+  // Writes EXECMCPTMP400A and EXECMCPTMP400B (their database files too), Story400.* inside A, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-0-burn-down-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

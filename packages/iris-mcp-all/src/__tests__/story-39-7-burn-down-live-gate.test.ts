@@ -73,7 +73,7 @@ import {
   removeInteropNamespace,
   seedBurnDown,
 } from "./interop-namespace-fixture.js";
-import { HEADER_INDEX_HINT, bodyJoinOracle, expectedRow, headerPlanProblems, oracleColumns, squash } from "./header-row-oracle.js";
+import { HEADER_INDEX_HINT, bodyJoinOracle, eventLogOracle, expectedRow, headerPlanProblems, oracleColumns, squash } from "./header-row-oracle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -544,33 +544,6 @@ interface DiagramContent {
   dataPolicy?: { policy: string; redacted: number; blocked: number };
 }
 
-/**
- * The Event Log rows of the scratch namespace, newest first, as the tool maps them (an optional key only when it holds
- * a value). The raw Atelier query route renders a SQL NULL integer as 0, so whether `SessionId` is NULL is read from its
- * own column, `SessionIsNull`.
- */
-async function logOracle(): Promise<Row[]> {
-  const rows = await atelierQuery(
-    oracleTarget(),
-    "SELECT ID, TimeLogged, Type, ConfigName, Text, SourceClass, SourceMethod, SessionId, " +
-      "CASE WHEN SessionId IS NULL THEN 1 ELSE 0 END AS SessionIsNull FROM Ens_Util.Log ORDER BY ID DESC",
-  );
-  const present = (value: unknown): boolean => value !== null && value !== undefined && String(value) !== "";
-  return rows.map((row) => {
-    const entry: Row = {
-      id: Number(row["ID"]),
-      timestamp: row["TimeLogged"],
-      type: row["Type"],
-      itemName: row["ConfigName"],
-      text: row["Text"],
-    };
-    if (present(row["SourceClass"])) entry["sourceClass"] = row["SourceClass"];
-    if (present(row["SourceMethod"])) entry["sourceMethod"] = row["SourceMethod"];
-    if (Number(row["SessionIsNull"]) !== 1) entry["sessionId"] = Number(row["SessionId"]);
-    return entry;
-  });
-}
-
 function productionLogs(session: WireSession): Promise<WireToolResult> {
   return session.call("iris_production_logs", { namespace: NS_A, count: 10 });
 }
@@ -582,7 +555,7 @@ function messageDiagram(session: WireSession): Promise<WireToolResult> {
 describe("Story 39.7: DW-576, iris_production_logs and iris_message_diagram under the data policy (AC-5)", () => {
   it("logs under redact and allow equal the Atelier SQL oracle with the text shown, no dataPolicy and no textPolicy, and the two results are equal", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
-    const oracle = await logOracle();
+    const oracle = await eventLogOracle(oracleTarget());
     expect(oracle.map((entry) => entry["id"]), "the oracle holds the two rows, newest first").toEqual([2, 1]);
 
     const redact = await productionLogs(redactS.session);
@@ -601,7 +574,7 @@ describe("Story 39.7: DW-576, iris_production_logs and iris_message_diagram unde
 
   it("logs under block: no entry has text, each has textPolicy with the fixed reason, the other fields equal the oracle, dataPolicy counts 2, and no SYNTHPHI397 is anywhere", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
-    const oracle = await logOracle();
+    const oracle = await eventLogOracle(oracleTarget());
 
     const result = await productionLogs(blockS.session);
     const content = succeeded<LogsContent>(result);

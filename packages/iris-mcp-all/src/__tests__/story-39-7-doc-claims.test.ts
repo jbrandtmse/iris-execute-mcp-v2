@@ -53,8 +53,8 @@ const toolSupport = read("tool_support.md");
 
 const CHANGELOG_TITLE = /^## \[Pre-release \u2014 2026-10-17\] \u2014 Story 39\.7: Epic 39 burn-down$/;
 
-/** The `BOOTSTRAP_VERSION` the committed embed carries: what the CHANGELOG must name as the new value. */
-const BOOTSTRAP_VERSION = /export const BOOTSTRAP_VERSION = "([0-9a-f]{12})"/.exec(read("packages/shared/src/bootstrap-classes.ts"))?.[1] ?? "";
+/** The `BOOTSTRAP_VERSION` Story 39.7 moved to: history, pinned as a literal so a later story's move leaves this section true. */
+const BOOTSTRAP_VERSION = "7d12cd8b3a1e";
 
 describe("Story 39.7: the CHANGELOG section and the changeset (D11)", () => {
   const sections = sectionsOf(read("CHANGELOG.md"));
@@ -81,7 +81,6 @@ describe("Story 39.7: the CHANGELOG section and the changeset (D11)", () => {
     expect(text).toContain("the prompt pack stays at 13 prompts");
     expect(text).toContain("the Interoperability `core` roster stays at 12 runtime tools");
     expect(text).toContain("hash `1e62c5ad5bf7` (141 keys)");
-    expect(BOOTSTRAP_VERSION, "the committed embed names its version").toMatch(/^[0-9a-f]{12}$/);
     expect(text).toContain(`\`BOOTSTRAP_VERSION\` moves from \`2fd17b50a024\` to \`${BOOTSTRAP_VERSION}\``);
   });
 

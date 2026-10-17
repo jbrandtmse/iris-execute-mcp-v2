@@ -45,7 +45,11 @@
  * four headers, an XML message, two stream bodies and two Event Log rows, fixture nu), which `seedBurnDown`
  * compiles INSIDE a scratch namespace.
  *
- * Shared by Stories 39.1 to 39.7.
+ * Story 40.0 adds the `STORY400_*` seed source (`Story400.Seed`: ten Event Log rows and three headers placed
+ * relative to the moment the seed runs, fixture xi), which `seedEventLogCounts` compiles INSIDE a scratch
+ * namespace.
+ *
+ * Shared by Stories 39.1 to 40.0.
  */
 
 import { docFixtures, type WireSession } from "./process-gate-helpers.js";
@@ -1668,6 +1672,116 @@ export async function seedBurnDown(dev: WireSession, name: string): Promise<void
     { className: "Story397.Seed", args: [] },
     STORY397_IDS,
     "the burn-down fixture nu",
+  );
+}
+
+/**
+ * Story 40.0 fixture xi: Event Log rows and headers placed relative to the moment the seed runs (T0, its
+ * `$ZTimeStamp`), so a 24-hour window can be asserted live. Each time is T0 plus an offset, written by the seed's own
+ * `Shift` arithmetic, never by the code under test. Every log text is `SYNTHPHI400-L<n>`.
+ *
+ * | rows | kind | type | item | offset from T0 |
+ * |---|---|---|---|---|
+ * | L1 to L6 | Event Log | 1, 2, 3, 4, 5, 6 (Assert, Error, Warning, Info, Trace, Alert) | Story400.Item | -1 h |
+ * | L7 | Event Log | 2 | Story400.Item | -23 h |
+ * | L8 | Event Log | 2 | Story400.Item | -24 h 5 min |
+ * | L9 | Event Log | 3 | Story400.Item | -24 h 5 min |
+ * | L10 | Event Log | 2 | Story400.Other | -1 h |
+ * | H1, H2, H3 | header, session 400001, Request, Story400.Service to Story400.Operation, Completed, no body | 1 | - | -1 h, -23 h, -24 h 5 min |
+ *
+ * The logs carry no session, source class or source method. The window rows (L2, L7, L10, H1, H2) sit well inside
+ * 24 hours; L8, L9 and H3 sit 5 minutes outside it.
+ */
+export const STORY400_SEED_SOURCE = String.raw`Class Story400.Seed
+{
+
+/// Seed fixture xi into the current namespace, which must be an empty EXECMCPTMP400 scratch namespace.
+/// Returns the JSON ID map {"logs":"1,2,3,4,5,6,7,8,9,10","headers":"1,2,3"}, or the first error text.
+ClassMethod Seed() As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP400"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP400 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If $Order(^Ens.Util.LogD("")) '= "" { Quit "REFUSED: the namespace already holds Event Log rows" }
+    Set tNow = $ZTimeStamp
+    Set tHour = ..Shift(tNow, -3600)
+    Set tL = ""
+    For tType = 1:1:6 {
+        Set tL = tL_$ListBuild(..SaveLog(tType, "Story400.Item", tType, tHour))
+    }
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Item", 7, ..Shift(tNow, -82800)))
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Item", 8, ..Shift(tNow, -86700)))
+    Set tL = tL_$ListBuild(..SaveLog(3, "Story400.Item", 9, ..Shift(tNow, -86700)))
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Other", 10, tHour))
+    Set tError = ..FirstError(tL, 10)
+    If tError '= "" { Quit tError }
+    Set tH = ""
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", tHour))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", ..Shift(tNow, -82800)))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", ..Shift(tNow, -86700)))
+    Set tError = ..FirstError(tH, 3)
+    If tError '= "" { Quit tError }
+    Quit {"logs":($ListToString(tL)),"headers":($ListToString(tH))}.%ToJSON()
+}
+
+/// The UTC time pSeconds after the $ZTimeStamp value pStamp, as YYYY-MM-DD hh:mm:ss.nnn, by whole-second arithmetic on the day count.
+ClassMethod Shift(pStamp As %String, pSeconds As %Integer) As %String
+{
+    Set tTotal = (+$Piece(pStamp, ",", 1) * 86400) + $Piece(pStamp, ",", 2) + pSeconds
+    Set tDays = tTotal \ 86400
+    Quit $ZDateTime(tDays_","_(tTotal - (tDays * 86400)), 3, 1, 3)
+}
+
+/// The first ERROR: text among the first pCount items of the list pList, or "".
+ClassMethod FirstError(pList As %List, pCount As %Integer) As %String
+{
+    Set tError = ""
+    For tI = 1:1:pCount {
+        If $Extract($List(pList, tI), 1, 6) = "ERROR:" {
+            Set tError = $List(pList, tI)
+            Quit
+        }
+    }
+    Quit tError
+}
+
+/// Save one Event Log row directly and return its ID, or the error text. The text is SYNTHPHI400-L followed by pNumber.
+ClassMethod SaveLog(pType As %Integer, pItem As %String, pNumber As %Integer, pTime As %String) As %String
+{
+    Set tLog = ##class(Ens.Util.Log).%New()
+    Set tLog.Type = pType
+    Set tLog.ConfigName = pItem
+    Set tLog.Text = "SYNTHPHI400-L"_pNumber
+    Set tLog.TimeLogged = pTime
+    Set tSC = tLog.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tLog.%Id()
+}
+
+}
+`;
+
+/** The Story400 documents compiled into the scratch namespace, in compile order. */
+export const STORY400_DOCUMENTS: ReadonlyArray<readonly [string, string]> = [["Story400.Seed.cls", STORY400_SEED_SOURCE]];
+
+/** What `Story400.Seed.Seed` returns: ten Event Log rows and three headers, numbered from 1 in a fresh namespace. */
+export const STORY400_IDS = { logs: "1,2,3,4,5,6,7,8,9,10", headers: "1,2,3" } as const;
+
+/**
+ * Put and compile the `Story400` seed into the scratch namespace `name`, then seed fixture xi and check the IDs it
+ * received. The seed refuses a namespace that already holds Event Log rows or headers.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled or bare, empty `EXECMCPTMP400<capital letter>` namespace.
+ */
+export async function seedEventLogCounts(dev: WireSession, name: string): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY400_DOCUMENTS,
+    { className: "Story400.Seed", args: [] },
+    STORY400_IDS,
+    "the Event Log counts fixture xi",
   );
 }
 

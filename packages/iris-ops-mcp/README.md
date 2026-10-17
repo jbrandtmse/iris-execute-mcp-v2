@@ -366,6 +366,8 @@ processes on the instance — not per-process snapshots.
   "count": 1
 }
 ```
+
+`errorCount24h` counts Event Log entries of type Error and `messageCount24h` counts message headers, each over the 24 hours before the call, measured in UTC (a read, enabled by default).
 </details>
 
 <details>

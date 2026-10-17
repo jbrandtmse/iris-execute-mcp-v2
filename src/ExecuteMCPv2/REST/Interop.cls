@@ -1188,13 +1188,23 @@ ClassMethod AutoStart() As %Status
     Quit $$$OK
 }
 
+/// The stored <code>Ens_Util.Log.Type</code> number for an Event Log type display name.
+/// <p>The literal map mirrors <code>Ens.DataType.LogType</code> (Assert 1, Error 2,
+/// Warning 3, Info 4, Trace 5, Alert 6) without depending on that class, so a namespace
+/// with no interoperability answers exactly as before. Any other value, including a type
+/// number, is returned unchanged.</p>
+ClassMethod LogTypeValue(pType As %String) As %String
+{
+    Quit $Case(pType, "Assert":1, "Error":2, "Warning":3, "Info":4, "Trace":5, "Alert":6, :pType)
+}
+
 /// Query event log entries filtered by type, item name, and count.
 /// <p>Returns entries from <code>Ens_Util.Log</code> with timestamp, type,
 /// item name, and message text. Supports filtering by log type
 /// (Info/Warning/Error/Trace/Assert/Alert), config item name, and row count.</p>
 /// <p>Query parameters:
 /// <ul>
-///   <li><code>type</code> — Log type filter: Info, Warning, Error, Trace, Assert, Alert</li>
+///   <li><code>type</code> — Log type filter: a display name (Assert, Error, Warning, Info, Trace, Alert), mapped to its type number, or the type number itself</li>
 ///   <li><code>itemName</code> — Config item name filter (exact match on ConfigName)</li>
 ///   <li><code>count</code> — Maximum number of rows to return (default 100)</li>
 ///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
@@ -1225,7 +1235,7 @@ ClassMethod EventLog() As %Status
         If tType '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" Type = ?"
             Set tParamCount = tParamCount + 1
-            Set tParams(tParamCount) = tType
+            Set tParams(tParamCount) = ..LogTypeValue(tType)
         }
         If tItemName '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ConfigName = ?"

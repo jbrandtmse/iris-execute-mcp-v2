@@ -2,7 +2,8 @@
 title: 'Story 40.0: Epic 39 Deferred Cleanup'
 type: 'bugfix'
 created: '2026-10-17'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '9380bbdfac6c036b4928d1aef8bed9aec695e4be'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -13,7 +14,21 @@ context:
 warnings:
   - multiple-goals
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The reset path of `AlertsManage` in `Monitor.cls` builds `clearedAt` from the local `$Horolog` and appends a literal `Z`, so on an instance with a non-zero time zone it labels local time as UTC (the defect class DW-584 fixes for the cutoff).
+    evidence: |-
+      `ExecuteMCPv2.REST.Monitor` sets `tTimestamp = $Translate($ZDateTime($Horolog, 3, 1), " ", "T")_"Z"` and returns it as `clearedAt`. This instance runs at `$ZTimeZone` 0, so the value is only wrong elsewhere; no test covers it under a non-zero time zone. Pre-existing: the line is not in this story's diff.
+    location: >-
+      src/ExecuteMCPv2/REST/Monitor.cls:960
+    severity: low
+  - summary: >-
+      The `recover-stuck-production` prompt step 3 calls `iris_production_logs` with no rule to report the reason for Event Log text withheld under `block` and never to read it another way, the rule DW-587 adds to `trace-message-flow`.
+    evidence: |-
+      `recoverStuckProduction.ts:54` tells the agent to call `iris_production_logs` filtered by `itemName` and/or `type: "Error"` and says nothing about `textPolicy`. Under `block` the tool withholds each entry's `text` (DW-576), so an agent following that prompt has no instruction to stop at the reason. Pre-existing and outside decision #36, which scoped DW-587 to `trace-message-flow`; a prompt text change is a sanctioned AD-15 change that needs the lead's decision.
+    location: >-
+      packages/iris-interop-mcp/src/prompts/recoverStuckProduction.ts:54
+    severity: low
 ---
 
 <intent-contract>
@@ -261,15 +276,43 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-10-17 — Review pass
+- verdicts: 26 findings — high 0, medium 0, low 20, false 6, maybe-false 0
+- findings:
+  - `[low]` `[reject]` Blind: a lower-case or mistyped `type` still matches nothing, and the gate pins that — the matrix and Boundaries state it as the contract ("an unknown or lower-case value still matches nothing"), so the fix would alter specified behavior (spec-bound, by design).
+  - `[low]` `[reject]` Blind: the interop README `type` sentence lists only Error to 2 — the sentence is specified verbatim by Task 13, the tool's zod enum lists the six names, and the route doc comment and CHANGELOG state the mapping; a longer sentence is not worth the doc-claims churn.
+  - `[low]` `[reject]` Blind: root README line 506 says both prompts report a withheld body's reason — the sentence is still true (incomplete, not wrong), Task 13 lists the prompt rows as the doc changes, and the line is pinned by the 39.6 doc-claims test.
+  - `[low]` `[patch]` Blind: `BOOTSTRAP_TO` of the 40.0 doc-claims test is a literal nothing ties to the embed — patched: the test reads the embed's `BOOTSTRAP_VERSION` and asserts it equals `BOOTSTRAP_TO`; red when the embed is mutated (see the mutation lines).
+  - `[low]` `[reject]` Blind: `REPLACED_NAMES` names the removed `logOracle`, not the shared `eventLogOracle` — the list holds the replaced local names (Task 8 names `logOracle`), and no gate declares `eventLogOracle`.
+  - `[low]` `[patch]` Edge: `liveLogTypes()` may return an empty list, so the six-name row loops zero times — patched: `liveLogTypes` asserts six `DISPLAYLIST` pieces; the row is red alone when the dictionary query returns nothing.
+  - `[false]` `[reject]` Edge: the `Story400` listing runs in HSCUSTOM while the seed compiles in A — it is a leak guard (red if the seed were ever compiled into HSCUSTOM), and A's database holding `Story400.Seed` is removed and asserted by `leftovers`; the Verification section prescribes this listing.
+  - `[low]` `[patch]` Edge: the bootstrap literals are not checked against the embed — same root cause as the Blind finding on `BOOTSTRAP_TO`; patched with it.
+  - `[low]` `[reject]` Edge: AC-3's "identical text" is compared after `Details: ` only — the tool message names the request URL (`&type=Error`), so whole-message equality cannot hold without a TypeScript change the intent forbids; the gate also pins that the text names the missing table and not `LogType`, which is what the row proves. Fix would edit the spec.
+  - `[low]` `[reject]` Verification gap: `CollectInteropMetrics`' use of `UtcCutoff` is not pinned under a non-zero time zone — this instance runs at `$ZTimeZone` 0 (R1), the OS class is data-free by the spec, and a data-bearing test would read an Event Log; the helper is pinned in IRIS and the wiring by the gate's date-only and type mutations. A wiring regression needs a deliberate rewrite to a full-precision local cutoff. Residual risk recorded.
+  - `[low]` `[patch]` Verification gap: the 40.0 doc-claims literal bootstrap move is not tied to the embed — same root cause as the Blind and Edge findings; patched with them.
+  - `[low]` `[patch]` Verification gap: `story-39-7-doc-claims.test.ts` asserts that a constant matches `/^[0-9a-f]{12}$/`, which cannot fail — patched: the assertion is deleted; the next line still pins the literal in the document text.
+  - `[low]` `[patch]` Verification gap: the six-name row's loop can run zero times — same root cause as the Edge finding on `liveLogTypes`; patched with it.
+  - `[false]` `[reject]` Verification gap: tests and documentation rows without their own `mutation:` line — Rule 19 asks one demonstrated mutation per AC, and each AC (1 to 8) has at least one recorded line; the cited tests share the pinning test of an AC that has one.
+  - `[low]` `[reject]` Verification gap: the `^Ens.Util.LogD` seed guard is reached only by a substring test — the guard is test-fixture safety for a disposable namespace, the substring test went red under the recorded mutation, and a second live scenario (a namespace with only Event Log rows) adds a fixture path for no product behavior.
+  - `[low]` `[defer]` Verification gap: `AlertsManage` builds `clearedAt` from local `$Horolog` plus a literal `Z` — pre-existing (not in the diff), only wrong at a non-zero time zone; deferred.
+  - `[low]` `[defer]` Verification gap: the `recover-stuck-production` prompt calls `iris_production_logs` with no report-the-reason rule under `block` — pre-existing and outside decision #36, which scoped DW-587 to `trace-message-flow`; a prompt text change needs the lead's decision; deferred.
+  - `[low]` `[reject]` Intent: the process-time-zone half of DW-584 is pinned only by `EventLogMetricsTest`, which runs through `iris_execute_tests` and not in the vitest suite — same root cause as the wiring finding; the matrix itself labels that row "(OS)", and the `ExecuteMCPv2.Tests.*` classes are run on the instance by design.
+  - `[false]` `[reject]` Intent: the TypeScript unit tests of the `type` filter are mocked, so only the gate and the OS class exercise the mapping — descriptive; no bad outcome, since the armed gate runs in the default suite and the mapping is pinned there on all six names.
+  - `[low]` `[patch]` Intent: `build({})` is pinned verbatim for step 6 only, where the matrix row lists steps 4, 5 and 6 for every rendering — patched: `prompts.test.ts` also asserts steps 4 and 5 on `build({})`. (The SDK `getPrompt` with `arguments` omitted cannot render this prompt, because `sessionOrHeaderId` is required; the namespace-omitted SDK rendering is the practical form and its markers are extended.)
+  - `[low]` `[reject]` Intent: the not-configured "identical text" is compared as IRIS's detail only — same root cause as the Edge finding; rejected for the same reason.
+  - `[low]` `[reject]` Intent: `..UtcCutoff(86400)` runs outside both `Try` blocks, so a throw would no longer fall back to 0 — `UtcCutoff` is called here with no `pNow`, so it reads `$ZTimeStamp` and formats a valid horolog; no real input reaches a throw (Rule #54).
+  - `[false]` `[reject]` Intent: the README, `tool_support.md` and changeset edits are not listed in the intent, and the ops package is not bumped — Task 13 lists each document and the changeset map (`shared`, `interop`) verbatim; the ops README edit carries no code change.
+  - `[low]` `[reject]` Intent: the 39.1 guard's adjacency pattern was loosened from exactly one intervening line to at most one — the intent requires the 40.0 gate's `assertDeployedBootstrapVersion` directly after `openWireSession`, the 39.x gates keep their one line, and the pattern still requires the call within one line of the session (pinned by the guard's own row).
+  - `[false]` `[reject]` Intent: an em dash is added to ObjectScript source — the character is on the doc-comment line from before this story (`git show HEAD:src/ExecuteMCPv2/REST/Interop.cls`), and it is prose in a doc comment, which Rule 14 exempts.
+  - `[false]` `[reject]` Intent: no record of a revert-and-fail check appears in the diff — the diff file leaves out the spec; `## Verification` holds the mutation lines, 15 from the implement pass and 2 more from this review.
+
 ## Design Notes
 
-**Orchestrator decision needed:**
-- **OD-1.** Should `messageCount24h` move to the same UTC 24-hour cutoff? DW-584 names only `errorCount24h`.
-  - **Recommended:** yes, through the one `UtcCutoff(86400)` value. The evidence:
-    - `Monitor.cls:592` uses the identical `$ZDateTime($Horolog - 1, 3)` against `TimeCreated`, which is also `Ens.DataType.UTC`;
-    - both values sit in one result under the same `24h` suffix, so an error rate taken from them divides two different windows;
-    - the fix costs one bound argument.
-  - **If declined:** drop H1–H3 from fixture ξ, the `messageCount24h` assertions and the OD-1 lines, and file the residual as a `deferred:` item.
+**Orchestrator decision (decided 2026-10-17, orchestrator decision #38):**
+- **OD-1.** `messageCount24h` moves to the same UTC 24-hour cutoff, through the one `UtcCutoff(86400)` value. DW-584 names only `errorCount24h`. DECIDED as recommended; H1-H3, the `messageCount24h` assertions and the OD-1 lines stay. The evidence:
+  - `Monitor.cls:592` uses the identical `$ZDateTime($Horolog - 1, 3)` against `TimeCreated`, which is also `Ens.DataType.UTC`;
+  - both values sit in one result under the same `24h` suffix, so an error rate taken from them divides two different windows;
+  - the fix costs one bound argument.
 
 **AC interpretations** (apply and report):
 - **R1 (DW-584, "local `$Horolog` cutoff").** This instance runs at `$ZTIMEZONE` 0, so the local-versus-UTC half is invisible live. The observable live defect is the date-only cutoff. The fix covers both. The time-zone half is pinned by the OS test, which sets a per-process `$ZTimeZone`; the probe showed that this moves `$Horolog` by 7 h and leaves `$ZTimeStamp` alone.
@@ -393,16 +436,80 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - **AC-7:** restore the dynamic version read in `story-39-7-doc-claims` → red after the bootstrap move.
 - **AC-8:** remove the gate's ops freshness line → the 39.1 guard's source-order row.
 
+### Results (implement stage, 2026-10-17)
+
+Every command ran from `/Users/jbrandt/git/iris-execute-mcp-v2`, in the foreground. Every IRIS call named `server:"default"` and the namespace HSCUSTOM, `EXECMCPTMP400A` or `EXECMCPTMP400B`. Armed runs used `IRIS_HOST=localhost IRIS_PORT=52773 IRIS_NAMESPACE=HSCUSTOM IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS IRIS_HTTPS=false IRIS_REQUIRE_LIVE=1`.
+
+**BOOTSTRAP_VERSION:** `7d12cd8b3a1e` -> `08b8adeaadc6` (`pnpm gen:bootstrap`, 32 classes; a second run gave the identical file hash). A repeated generator run rewrites an identical `bootstrap-classes.ts` with a newer mtime, and `tsc` then emits nothing, so the shared dist looked stale to the armed gates (`checkDistFresh`); deleting `packages/shared/dist` and `tsconfig.tsbuildinfo` and rebuilding cleared it.
+
+**Commands and results**
+- Live capture (Rule #36), `ExecuteMCPv2.REST.Monitor:UtcCutoff` via `iris_execute_classmethod`: `(86400, "67860,79328.804084877")` -> `2026-10-16 22:02:08.804`; `(86400, "67860,3600.5")` -> `2026-10-16 01:00:00.500`; `(3600, "67860,1800.25")` -> `2026-10-16 23:30:00.250`; `(0, "67860,0")` -> `2026-10-17 00:00:00.000`. These are the `TestUtcCutoffFixedInstant` values.
+- `iris_doc_load` with glob paths for `Monitor.cls`, `Interop.cls`, `EventLogMetricsTest.cls`, each compiled: clean.
+- `iris_execute_tests` `ExecuteMCPv2.Tests.EventLogMetricsTest`: total 4, 0 failures (4 `Test*` methods; last run after all mutations reverted, runIndex 975).
+- Builds of shared, dev, admin, interop, ops: success. `pnpm gen:skills`: only `skills/trace-message-flow/SKILL.md` changed; `pnpm gen:skills:check`: OK, 14 files, no drift; `pnpm validate:prompts`: OK, 26 sources (13 prompts + 13 skills), 110 known tool names.
+- `@iris-mcp/interop` `prompts.test.ts`, `monitor.test.ts`, `logs-diagram-policy.test.ts`: 76 passed.
+- `@iris-mcp/all` loop batch (12 files: prompt-safety-invariants, 39.6 SDK-wire, skills-generated-frontmatter, validate-prompts, docs-prompt-sync, 39.6/39.7/40.0 doc-claims, gate-helper-copies, live-gate-roster, interop-namespace-fixture, bootstrap-version-check): 281 passed. `story-39-1-gate-guards.test.ts`: 45 passed (the 40.0 gate included, `extraDriven: ["iris-ops-mcp"]`).
+- Armed `story-40-0-burn-down-live-gate.test.ts`: 9 passed, none skipped (the first run had 1 failure: the not-configured logs row compared the whole tool text, which names the request URL, `&type=Error` included; it now compares the text after `Details: `, which is IRIS's own and is identical). Armed `story-39-7-burn-down-live-gate.test.ts` (with `eventLogOracle`): 18 passed.
+- Per package `build`, `test`, `lint`, `type-check` (all exit 0): shared 2065 tests (lint: 1 pre-existing warning in `cli/governance.ts`), dev 1434, admin 498, interop 670, ops 350, data 165, client-config 514. `@iris-mcp/all`: `build` and `lint` exit 0 (it has no `type-check` script); armed `test` in three groups by file name, each finishing inside the cap: `[a-r]*` 25 files / 254 tests, `se* sk* st[a-n]* story-38-* story-39-0/1/2*` 29 files / 530 passed + 2 skipped, `story-39-[3-7]* story-40-* t* v*` 27 files / 790 passed + 2 skipped. That is all 81 test files. The 4 skips are the existing capture-mode skips of the 39.1 to 39.4 live gates, which this story did not touch.
+- `pnpm gen:governance-baseline:check`: OK, 141 frozen keys all present (`governance-baseline.ts` unmodified); `pnpm gen:tools-list-snapshot:check`: OK, 114 entries unchanged, no re-pin; `pnpm measure:tools-payload`: rows equal the README (dev 32/15, admin 27/13, interop 25/12, ops 22/10, data 8/8); `node scripts/check-epics-sync.mjs`: OK.
+- After the armed runs: the gate's `afterAll` asserted `leftovers` for A and B empty; checked again independently: `iris_namespace_list` and `iris_database_list` show neither namespace nor database; `iris_doc_list` (HSCUSTOM, generated included) for `Story400` and `ExecuteMCPv2.Temp.` is empty. `EventLogMetricsTest` stays loaded in HSCUSTOM, as the other `ExecuteMCPv2.Tests.*` classes do.
+- AC-4: `git diff --stat -- src/ExecuteMCPv2/Diagram packages/iris-interop-mcp/src/tools/diagram.ts` is empty, and `logs-diagram-policy.test.ts` passes (22 tests).
+
+**DW-586 evidence for the lead's adjudication (AC-4, R4).** No code change. The plan-stage probes (Design Notes) show the generator's failure text cannot carry message-derived content: the only constructed statuses are the two `Loader.cls` SQL `%Message` templates (the first probe text is `Generation failed for session 400001: SQL error:  Table 'ENS.MESSAGEHEADER' not found`), every other status is a system exception's name and location, 230 CJK characters plus a marker in `ErrorStatus` rendered normally, and a 40,000-character subscript raises `<SUBSCRIPT>` without echoing the value. The AC-4 pin (`logs-diagram-policy.test.ts`, "a warning that is not an error warning is untouched") stays green and was mutation-verified below. Recommended ledger terminal: `wontfix-theoretical`, `reopen_if` a Diagram stage returns a `%Status` built from header field values.
+
+**Interpretation to confirm.** The matrix row "Not configured" says both logs calls carry "the identical text (the SQL table error)". The tool's message names the request, so the full texts differ by the `&type=Error` in the URL. The gate compares IRIS's own error text (after `Details: `), which is identical, and also asserts it names the missing table and not `LogType`.
+
+**Mutations (Rule 19).** Each was applied, observed red, reverted and reloaded or rebuilt; after the OS-class group, the prompt group and the doc and guard group, a hash of `git diff` plus the untracked files equalled the pre-mutation hash. The last one (the seed guards) was checked by the green re-run of the gate and by both guard lines being present in the diff. The old-cutoff mutation ran at 22:27 UTC (the UTC day was 22 h old).
+- mutation: `CollectInteropMetrics` `Type = 2` -> `Type = 3` -> gate row "metrics for A: errorCount24h 3 ..." red.
+- mutation: `UtcCutoff` default `pNow` `$ZTimeStamp` -> `$Horolog` -> `EventLogMetricsTest.TestUtcCutoffIgnoresProcessTimeZone` red (both zones, 420 and -600).
+- mutation: `CollectInteropMetrics` cutoff -> the old `$ZDateTime($Horolog - 1, 3)` -> gate row "metrics for A" red, reading `errorCount24h` 4 and `messageCount24h` 3.
+- mutation: `EventLog` binds `tType` directly instead of `..LogTypeValue(tType)` -> gate rows "each of the six display names", "Error plus itemName" and "the raw route still answers type=2" red.
+- mutation: `LogTypeValue` `"Error":2` -> `"Error":3` -> `EventLogMetricsTest.TestLogTypeValueMatchesLogType` red.
+- mutation: `LogTypeValue` calls `##class(Ens.DataType.LogType).DisplayToLogical` -> gate row "iris_production_logs for B is an error with and without type Error" red (`<CLASS DOES NOT EXIST>LogTypeValue *Ens.DataType.LogType` against the table error).
+- mutation: `diagram.ts` `ERROR_WARNING` also matches `Generation failed for session` -> `logs-diagram-policy.test.ts` "a warning that is not an error warning is untouched" red; reverted, `git diff` of `diagram.ts` empty.
+- mutation: drop the step-5 sentence of `traceMessageFlow.ts` -> `prompts.test.ts` "under `block`, reports the reason ..." red; after an interop rebuild, `prompt-safety-invariants.test.ts` "every trace-message-flow rendering reports the reason ..." red and `pnpm gen:skills:check` DRIFT (the stale-`SKILL.md` case of "skip `gen:skills`").
+- mutation: drop the step-6 clause of `traceMessageFlow.ts` -> `prompt-safety-invariants.test.ts` new `it` and `story-39-6-qa-forensics-prompts-sdk-wire.test.ts` "trace-message-flow with namespace omitted renders ..." red.
+- mutation: ops README "(a read, enabled by default)" -> "(a read)" -> `story-40-0-doc-claims.test.ts` "states what errorCount24h and messageCount24h count ..." red.
+- mutation: `story-39-7-doc-claims.test.ts` literal `7d12cd8b3a1e` -> the dynamic read of the embed -> its CHANGELOG-move row, its changeset row and its `tool_support.md` note row red.
+- mutation: remove the `skipReason ??= staleDistReason(REPO_ROOT, "iris-ops-mcp");` line of the 40.0 gate -> `story-39-1-gate-guards.test.ts` "'Story 40.0': ... derives its skip reason from the shared dist and every driven dist ..." red (the nested unarmed and armed rows stay green by design: a fresh ops dist gives the same reason text).
+- mutation: re-declare a local `logOracle` in the 39.7 gate -> `gate-helper-copies.test.ts` "no gate declares a replaced name" red.
+- mutation: remove the `^Ens.Util.LogD` guard line from `STORY400_SEED_SOURCE` -> `interop-namespace-fixture.test.ts` "the Story 40.0 seed refuses ..." red.
+- mutation: remove both guard lines (headers and Event Log) from `STORY400_SEED_SOURCE` -> gate row "the seed refuses a namespace that already holds rows" red (a re-seed returned `{"logs":"11,...","headers":"4,5,6"}`), plus the metrics and type rows.
+
+**Review pass (2026-10-17).** Seven patch rows, all test-only (no `.cls`, no embed change): the 40.0 doc-claims test reads the embed's `BOOTSTRAP_VERSION` and asserts it equals the documented `08b8adeaadc6`; the unfalsifiable constant assertion in `story-39-7-doc-claims.test.ts` is deleted; `liveLogTypes` asserts six `DISPLAYLIST` pieces; `prompts.test.ts` asserts steps 4 and 5 on `build({})`. Mutations (tree hash of `git diff` plus the untracked files equal before and after, `bootstrap-classes.ts` md5 `fd970cef3677bd2e5e6bf66faccf4c9e` before and after, the shared dist rebuilt after the embed edit):
+- mutation: embed `BOOTSTRAP_VERSION` `08b8adeaadc6` -> `000000000000` -> `story-40-0-doc-claims.test.ts` "states that no tool, key, preset row or count moves, and the bootstrap move as literals" red (`expected '000000000000' to be '08b8adeaadc6'`).
+- mutation: `liveLogTypes` query `parent = 'Ens.DataType.LogType'` -> `'Ens.DataType.LogTypeX'` -> gate row "each of the six display names ..." red on its own (`DISPLAYLIST holds the six types the tool offers: expected +0 to be 6`); before the patch the row passed with zero iterations.
+- The `build({})` step 4 and 5 assertions extend the `it` pinned by the "drop the step-5 text" and "drop the step-6 clause" mutations above; they fail on the same edits.
+
+**Re-verification after the patches.** The `(loop)` lines all re-ran green (`gen:bootstrap` idempotent at `08b8adeaadc6`, with the shared dist cleaned and rebuilt after it; loads and compiles clean; `EventLogMetricsTest` total 4; interop 76; the `@iris-mcp/all` batch 281; the guard 45; armed 40.0 gate 9; armed 39.7 gate 18). The `(once)` lines ran once after the last patch: shared 2065, dev 1434, admin 498, interop 670, ops 350, data 165, client-config 514 tests, with build, lint and type-check at exit 0 for each; `@iris-mcp/all` build and lint exit 0 and its armed tests in three groups (25 files / 254 tests; 29 files / 530 passed + 2 skipped; 27 files / 790 passed + 2 skipped, 81 files in all; the 4 skips are the 39.1 to 39.4 capture-mode skips); governance `:check` OK (141 frozen keys, baseline file unmodified); `gen:tools-list-snapshot:check` OK (114 entries, no re-pin); `measure:tools-payload` rows equal the README; `check-epics-sync.mjs` OK. After the armed runs `iris_namespace_list` and `iris_database_list` show no `EXECMCPTMP400` entry, and `iris_doc_list` (HSCUSTOM, generated included) for `Story400`, `Story391Fixture` and `ExecuteMCPv2.Temp.` is empty.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-- **Plan stage, 2026-10-17.** The spec is written after the live probes, and the probe artifacts are removed.
-- **Tree at dispatch.** The tree already held the lead's uncommitted write-ahead bookkeeping:
-  - `cycle-log-epic-40.md`, with the `stage_spawned` line;
-  - the untracked `epic-40-context.md`.
-
-  The plan stage edited neither and commits nothing. Commit them with this spec at the gate.
-- **Orchestrator decisions needed:** OD-1.
-- **Ledger inbox:** DW-584, DW-585 and DW-587 are addressed. DW-586 is closed with evidence (R4).
+- **Summary.** DW-584, DW-585 and DW-587 are fixed, and DW-586 is closed with evidence and no code change.
+  - DW-584: `Monitor.cls` gains `UtcCutoff`; `CollectInteropMetrics` computes one UTC cutoff, counts `Type = 2` for `errorCount24h`, and binds the same cutoff to `messageCount24h` (OD-1, decided as recommended by orchestrator decision #38).
+  - DW-585: `Interop.cls` gains `LogTypeValue`, bound in `EventLog`; a number or an unknown value passes through unchanged.
+  - DW-587: the three `trace-message-flow` step texts, verbatim, with `SKILL.md` regenerated.
+  - `BOOTSTRAP_VERSION` moves `7d12cd8b3a1e` -> `08b8adeaadc6`. No tool, action, key, preset row or count moves.
+- **Files changed.**
+  - Source: `src/ExecuteMCPv2/REST/Monitor.cls`, `src/ExecuteMCPv2/REST/Interop.cls`, `packages/iris-interop-mcp/src/prompts/traceMessageFlow.ts`, the generated `packages/shared/src/bootstrap-classes.ts` and `skills/trace-message-flow/SKILL.md`.
+  - New tests: `src/ExecuteMCPv2/Tests/EventLogMetricsTest.cls` (4 methods), `story-40-0-burn-down-live-gate.test.ts` (9 rows), `story-40-0-doc-claims.test.ts`.
+  - Changed tests and fixtures: `header-row-oracle.ts` (`eventLogOracle`), `interop-namespace-fixture.ts` and its test (fixture xi), `story-39-1-gate-guards.test.ts` (`extraDriven`), `story-39-7-burn-down-live-gate.test.ts`, `story-39-7-doc-claims.test.ts`, `gate-helper-copies.test.ts`, `prompts.test.ts`, `prompt-safety-invariants.test.ts`, `story-39-6-qa-forensics-prompts-sdk-wire.test.ts`, `prepublish-gate.mjs`.
+  - Docs: the ops and interop READMEs, the root README prompt row, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-40-0-epic-39-deferred-cleanup.md`.
+- **Review findings.** 26 findings from the four layers: low 20, false 6, high 0, medium 0 (counted from the triage log).
+  - Patched (7 rows, 4 root causes, test-only): the 40.0 doc-claims test now ties the documented bootstrap move to the embed (3 rows); an unfalsifiable constant assertion in the 39.7 doc-claims test is deleted; `liveLogTypes` asserts six pieces so the six-name row cannot loop zero times (2 rows); `build({})` asserts steps 4 and 5 verbatim.
+  - Deferred (2): `AlertsManage` `clearedAt` labels local time as UTC; the `recover-stuck-production` prompt has no report-the-reason rule under `block`.
+  - Rejected (17), each with its reason in the triage log: spec-bound (lower-case `type` matches nothing; "identical text" compared as IRIS's detail; the Task 13 document set), unreachable (a throw from `UtcCutoff`), already covered (mutation lines exist for every AC), and the TZ-wiring residual below.
+- **Follow-up review recommended:** false (no patched entry was high or medium).
+- **Verification.** Everything in `## Verification` ran green on the final tree, the `(loop)` lines again after the patches and the `(once)` lines once after the last patch; the numbers are in `## Verification`. 15 mutations from the implement pass and 2 from this review (17 `mutation:` lines) were applied, observed red and reverted, with the tree hash unchanged.
+- **For the lead.**
+  - Interpretation to confirm: the not-configured logs row compares IRIS's error text after `Details: `, because the tool's message names the request URL. (Records: `## Verification`, "Interpretation to confirm".)
+  - `gen:bootstrap` rewrites an identical `bootstrap-classes.ts` with a newer mtime, and `tsc` then emits nothing, so the shared dist looks stale to the armed gates (`checkDistFresh`). After every `gen:bootstrap` run, `rm -rf packages/shared/dist packages/shared/tsconfig.tsbuildinfo` and rebuild shared before any armed gate. Both paths are gitignored.
+  - DW-586 evidence is in `## Verification`; recommended ledger terminal `wontfix-theoretical`, `reopen_if` a Diagram stage returns a `%Status` built from header field values.
+  - Spine follow-up (Rule 20) is the lead's: AD-15's sanctioned list gains Story 40.0 and AD-26 may note the DW-586 finding.
+- **Residual risks.**
+  - The process-time-zone half of DW-584 is pinned on `UtcCutoff` in IRIS and not on `CollectInteropMetrics` itself: this instance runs at `$ZTimeZone` 0 and the OS class is data-free by design. A rewrite of the call to a full-precision local cutoff would pass the live gate.
+  - `EventLogMetricsTest` runs through `iris_execute_tests` on the instance, like the other `ExecuteMCPv2.Tests.*` classes, and is not part of the vitest default suite.
+  - The next story that moves `BOOTSTRAP_VERSION` must turn `BOOTSTRAP_FROM`/`BOOTSTRAP_TO` of `story-40-0-doc-claims.test.ts` into history literals, as this story did for 39.7.

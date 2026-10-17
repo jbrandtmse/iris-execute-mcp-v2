@@ -55,6 +55,7 @@ const REPLACED_NAMES = [
   "sqlLiteral",
   "squash",
   "HEADER_COLUMNS",
+  "logOracle",
 ] as const;
 
 /** Replaced names that are never a local variable, so a declaration at any depth is a copy. */

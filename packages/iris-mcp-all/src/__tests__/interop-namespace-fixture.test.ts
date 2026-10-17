@@ -17,6 +17,9 @@ import {
   STORY396_IDS,
   STORY397_DOCUMENTS,
   STORY397_IDS,
+  STORY400_DOCUMENTS,
+  STORY400_IDS,
+  STORY400_SEED_SOURCE,
   createInteropNamespace,
   hl7Fields,
   leftovers,
@@ -25,6 +28,7 @@ import {
   seedBodyReader,
   seedBurnDown,
   seedCapstone,
+  seedEventLogCounts,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
 
@@ -64,6 +68,7 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(seedBodyReader(dev as never, name, "a")).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedCapstone(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedBurnDown(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedEventLogCounts(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(createInteropNamespace(admin, dev, name, { interop: true, hsLib: true })).rejects.toThrow(
         /not a fixture namespace name/,
       );
@@ -166,6 +171,33 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       "xml",
       "stream",
     ]);
+  });
+
+  it("lets a scratch name through for the Story 40.0 Event Log counts seed, which compiles one class and seeds with no arguments", async () => {
+    const seeder = stubSession(JSON.stringify(STORY400_IDS));
+    seeder.call.mockImplementation(async () => ({
+      isError: false,
+      content: [],
+      structuredContent: { returnValue: JSON.stringify(STORY400_IDS), success: true },
+    }));
+    await expect(seedEventLogCounts(seeder as never, "EXECMCPTMP400A")).resolves.toBeUndefined();
+    const compiled = seeder.call.mock.calls
+      .filter(([tool]) => tool === "iris_doc_compile")
+      .map(([, args]) => (args as { doc: string }).doc);
+    expect(compiled, "the one class compiled").toEqual(["Story400.Seed.cls"]);
+    expect(STORY400_DOCUMENTS.map(([doc]) => doc)).toEqual(compiled);
+    expect(seeder.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP400A", className: "Story400.Seed", methodName: "Seed", args: [] }),
+    );
+    expect(STORY400_IDS).toEqual({ logs: "1,2,3,4,5,6,7,8,9,10", headers: "1,2,3" });
+    expect(Object.keys(STORY400_IDS), "the key order is the order the seed writes its map in").toEqual(["logs", "headers"]);
+  });
+
+  it("the Story 40.0 seed refuses any namespace but EXECMCPTMP400<letter>, and one that holds headers or Event Log rows", () => {
+    expect(STORY400_SEED_SOURCE).toContain('If $NAMESPACE \'? 1"EXECMCPTMP400"1U');
+    expect(STORY400_SEED_SOURCE).toContain('If $Order(^Ens.MessageHeaderD("")) \'= ""');
+    expect(STORY400_SEED_SOURCE).toContain('If $Order(^Ens.Util.LogD("")) \'= ""');
   });
 
   it("maps HS to HSLIB only when hsLib is set, and removes an HS mapping in every teardown", async () => {

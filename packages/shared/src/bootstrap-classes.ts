@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "7d12cd8b3a1e";
+export const BOOTSTRAP_VERSION = "08b8adeaadc6";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "7d12cd8b3a1e";
+Parameter BOOTSTRAPVERSION = "08b8adeaadc6";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -10270,13 +10270,23 @@ ClassMethod AutoStart() As %Status
     Quit $$$OK
 }
 
+/// The stored <code>Ens_Util.Log.Type</code> number for an Event Log type display name.
+/// <p>The literal map mirrors <code>Ens.DataType.LogType</code> (Assert 1, Error 2,
+/// Warning 3, Info 4, Trace 5, Alert 6) without depending on that class, so a namespace
+/// with no interoperability answers exactly as before. Any other value, including a type
+/// number, is returned unchanged.</p>
+ClassMethod LogTypeValue(pType As %String) As %String
+{
+    Quit $Case(pType, "Assert":1, "Error":2, "Warning":3, "Info":4, "Trace":5, "Alert":6, :pType)
+}
+
 /// Query event log entries filtered by type, item name, and count.
 /// <p>Returns entries from <code>Ens_Util.Log</code> with timestamp, type,
 /// item name, and message text. Supports filtering by log type
 /// (Info/Warning/Error/Trace/Assert/Alert), config item name, and row count.</p>
 /// <p>Query parameters:
 /// <ul>
-///   <li><code>type</code> — Log type filter: Info, Warning, Error, Trace, Assert, Alert</li>
+///   <li><code>type</code> — Log type filter: a display name (Assert, Error, Warning, Info, Trace, Alert), mapped to its type number, or the type number itself</li>
 ///   <li><code>itemName</code> — Config item name filter (exact match on ConfigName)</li>
 ///   <li><code>count</code> — Maximum number of rows to return (default 100)</li>
 ///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
@@ -10307,7 +10317,7 @@ ClassMethod EventLog() As %Status
         If tType '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" Type = ?"
             Set tParamCount = tParamCount + 1
-            Set tParams(tParamCount) = tType
+            Set tParams(tParamCount) = ..LogTypeValue(tType)
         }
         If tItemName '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ConfigName = ?"
@@ -14859,9 +14869,31 @@ ClassMethod AuditEvents() As %Status
     Quit $$$OK
 }
 
+/// The UTC instant <var>pSeconds</var> seconds before <var>pNow</var>, in the
+/// <class>Ens.DataType.UTC</class> logical form (<code>YYYY-MM-DD hh:mm:ss.nnn</code>).
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. The result is independent of the process time zone
+/// and never reads <code>$Horolog</code>, so it compares correctly with the UTC
+/// <code>TimeLogged</code> and <code>TimeCreated</code> columns.</p>
+ClassMethod UtcCutoff(pSeconds As %Integer, pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Set tSecs = +$Piece(pNow, ",", 2) - pSeconds
+    Set tDays = +$Piece(pNow, ",", 1) + (tSecs \\ 86400)
+    Set tSecs = tSecs - ((tSecs \\ 86400) * 86400)
+    If tSecs < 0 {
+        Set tSecs = tSecs + 86400
+        Set tDays = tDays - 1
+    }
+    Quit $ZDateTime(tDays_","_tSecs, 3, 1, 3)
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
+/// <p><code>errorCount24h</code> counts Event Log entries of type Error and
+/// <code>messageCount24h</code> counts message headers, each over the 86,400 seconds
+/// before the call, measured in UTC.</p>
 ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
 {
     Set tMetrics = {}
@@ -14902,11 +14934,13 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     }
     Do tMetrics.%Set("queueDepth", tQueueDepth, "number")
 
-    ; -- Error count in last 24 hours from Ens_Util.Log --
+    ; -- One UTC cutoff shared by both 24-hour counts --
+    Set tCutoff = ..UtcCutoff(86400)
+
+    ; -- Error count in last 24 hours from Ens_Util.Log (Type 2 = Error) --
     Set tErrorCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
-        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 3 AND TimeLogged > ?", tCutoff)
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 2 AND TimeLogged > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tErrorCount = +tRS.cnt
         }
@@ -14919,7 +14953,6 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     ; -- Total messages in last 24 hours --
     Set tMessageCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
         Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE TimeCreated > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tMessageCount = +tRS.cnt

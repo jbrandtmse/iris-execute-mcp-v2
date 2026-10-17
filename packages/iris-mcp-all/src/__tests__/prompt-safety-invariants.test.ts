@@ -529,6 +529,18 @@ describe("trace-message-flow and find-patient-messages - the message forensic lo
     }
   });
 
+  it("every trace-message-flow rendering reports the reason for withheld error and log text and never reads either another way", async () => {
+    let checked = 0;
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "trace-message-flow") continue;
+      expect(body, label).toContain("never read the error text another way");
+      expect(body, label).toContain("never read the log text another way");
+      expect(body, label).toContain("give its reason instead of the text");
+      checked += 1;
+    }
+    expect(checked).toBe(3);
+  });
+
   it("find-patient-messages checks the policy, fixes the window, searches the Search Table, lists, reads, diagrams and reports, in that order", async () => {
     for (const { label, name, body } of await renderings()) {
       if (name !== "find-patient-messages") continue;

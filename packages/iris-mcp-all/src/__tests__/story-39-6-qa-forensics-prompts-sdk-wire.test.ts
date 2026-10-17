@@ -279,9 +279,9 @@ describe("Story 39.6 QA: the forensic prompts through a real SDK Client over an 
       [1, ["`iris_production_messages`", "`sessionId: 7`", "`headerId: 7`", "earliest and latest"]],
       [2, ["`iris_message_search`", '`action: "headers"`', "`from` and `to`", "at most 7 days", "`nextCursor`", "do not read the headers another way"]],
       [3, ["`iris_message_body`", "up to 20", "`bodyPolicy`", "`redact`", "`block`", "never read it another way"]],
-      [4, ["`iris_message_diagram`", "`sessionIds: [7]`"]],
-      [5, ["`iris_production_logs`", "`itemName`"]],
-      [6, ["Summarize the failure point", "do NOT execute a recovery action without the user's confirmation"]],
+      [4, ["`iris_message_diagram`", "`sessionIds: [7]`", "`block`", "never read the error text another way"]],
+      [5, ["`iris_production_logs`", "`itemName`", "`textPolicy`", "never read the log text another way"]],
+      [6, ["Summarize the failure point", "give its reason instead of the text", "do NOT execute a recovery action without the user's confirmation"]],
     ]);
     expect(text, "no unresolved placeholder for the omitted argument").not.toMatch(/<namespace>|<sessionOrHeaderId>|undefined/);
   });

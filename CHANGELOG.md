@@ -2,6 +2,65 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 40.0: Epic 39 deferred cleanup
+
+Four ledger entries are closed (DW-584, DW-585, DW-586 and DW-587). No tool, action, governance key, preset row,
+annotation, input schema or environment variable is added, so no default state and no tool count moves: the suite stays
+at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the Interoperability `core` roster stays at
+12 runtime tools, the Operations `core` roster stays at 10, and the frozen governance baseline stays at hash
+`1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `7d12cd8b3a1e` to `08b8adeaadc6`, because `Monitor.cls` and
+`Interop.cls` changed.
+
+### Changed
+
+- **The `trace-message-flow` prompt reports the reason for withheld text under `block` (DW-587).** Under the `block`
+  data policy, step 4 tells the agent that the text of each `Error on message` warning and its `%%` diagram line is
+  replaced by a reason, step 5 that each Event Log entry's `text` is withheld with its `textPolicy` reason, and both say
+  to report that reason to the user and never to read the text another way (for example through SQL, global or document
+  tools). Step 6 asks the summary to say where the log or diagram text was withheld and to give its reason instead of the
+  text. The name, title, arguments, description and the six steps are unchanged. Sanctioned change (AD-15, orchestrator
+  decision #36).
+
+### Fixed
+
+- **`iris_metrics_interop` counts Error entries over the last 24 hours in UTC (DW-584).** `errorCount24h` counted
+  Warning entries (type 3, where Error is 2), and its window started at midnight of the previous local day because the
+  cutoff was the date-only text of `$Horolog - 1`, compared with UTC times: it covered 24 to 48 hours, in local time.
+  The count is now the Error entries (type 2) over the 86,400 seconds before the call, taken from `$ZTimeStamp`. By
+  orchestrator decision OD-1, `messageCount24h` uses the same cutoff, so the two values in one result cover one window.
+  Sanctioned change (AD-15). It is a read, enabled by default.
+- **The `type` filter of `iris_production_logs` maps a display name to its stored number (DW-585).** The filter bound
+  the name (`Error`) to the stored type number in logical mode, so `type: "Error"` matched nothing. The Event Log route
+  now maps `Assert`, `Error`, `Warning`, `Info`, `Trace` and `Alert` to 1 to 6; any other value, including a number,
+  is bound as before, so an older request (`type=2`) still returns the same entries (AD-33). Sanctioned change (AD-15).
+  It is a read, enabled by default.
+- **DW-586 is closed with evidence and no code change.** The diagram generator's own `Generation failed for session N:`
+  text carries only a SQL schema error or a system error name and location, never message content, so it is not
+  withheld under `block`.
+
+### Documentation
+
+- **The Operations README** states what `errorCount24h` and `messageCount24h` count, in UTC (a read, enabled by default).
+- **The Interoperability README** shows the real `iris_production_logs` entry (`id`, `timestamp`, `type` as a number,
+  `itemName`, `text`) and says `type` takes a display name (a read, enabled by default). Its prompt row and the suite
+  README's say that, under `block`, the reason for withheld diagram error text and Event Log text is reported the same
+  way and never read another way.
+- **`tool_support.md`** has a Story 40.0 note.
+
+### Tests
+
+- **`story-40-0-burn-down-live-gate.test.ts`** drives the built dev, admin, interop and ops servers over the SDK client
+  on two disposable namespaces: fixture xi (`Story400.Seed`, ten Event Log rows and three headers placed relative to the
+  time of the seed) in a mapping-only interop namespace, and a bare one. It pins the corrected counts, all six type
+  names against a hand-written SQL oracle read from the live `Ens.DataType.LogType` lists, the raw route for a number
+  and an unknown value, and the not-configured namespace. It is listed in the prepublish roster and the arming guard,
+  which learns `extraDriven` for the ops dist.
+- **`ExecuteMCPv2.Tests.EventLogMetricsTest`** pins `UtcCutoff` at a fixed instant and under two process time zones,
+  and `LogTypeValue` against the live `Ens.DataType.LogType` lists.
+- **`story-40-0-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
+  The prompt tests pin the three step texts, and the Story 39.7 doc-claims test pins its bootstrap move as history.
+  `eventLogOracle` moves from the 39.7 gate to `header-row-oracle.ts`.
+
 ## [Pre-release — 2026-10-17] — Story 39.7: Epic 39 burn-down
 
 Five ledger entries are fixed (DW-569, DW-571, DW-572, DW-576 and DW-583). No tool, action, governance key, preset row,

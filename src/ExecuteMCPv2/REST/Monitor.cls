@@ -529,9 +529,31 @@ ClassMethod AuditEvents() As %Status
     Quit $$$OK
 }
 
+/// The UTC instant <var>pSeconds</var> seconds before <var>pNow</var>, in the
+/// <class>Ens.DataType.UTC</class> logical form (<code>YYYY-MM-DD hh:mm:ss.nnn</code>).
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. The result is independent of the process time zone
+/// and never reads <code>$Horolog</code>, so it compares correctly with the UTC
+/// <code>TimeLogged</code> and <code>TimeCreated</code> columns.</p>
+ClassMethod UtcCutoff(pSeconds As %Integer, pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Set tSecs = +$Piece(pNow, ",", 2) - pSeconds
+    Set tDays = +$Piece(pNow, ",", 1) + (tSecs \ 86400)
+    Set tSecs = tSecs - ((tSecs \ 86400) * 86400)
+    If tSecs < 0 {
+        Set tSecs = tSecs + 86400
+        Set tDays = tDays - 1
+    }
+    Quit $ZDateTime(tDays_","_tSecs, 3, 1, 3)
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
+/// <p><code>errorCount24h</code> counts Event Log entries of type Error and
+/// <code>messageCount24h</code> counts message headers, each over the 86,400 seconds
+/// before the call, measured in UTC.</p>
 ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
 {
     Set tMetrics = {}
@@ -572,11 +594,13 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     }
     Do tMetrics.%Set("queueDepth", tQueueDepth, "number")
 
-    ; -- Error count in last 24 hours from Ens_Util.Log --
+    ; -- One UTC cutoff shared by both 24-hour counts --
+    Set tCutoff = ..UtcCutoff(86400)
+
+    ; -- Error count in last 24 hours from Ens_Util.Log (Type 2 = Error) --
     Set tErrorCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
-        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 3 AND TimeLogged > ?", tCutoff)
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 2 AND TimeLogged > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tErrorCount = +tRS.cnt
         }
@@ -589,7 +613,6 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     ; -- Total messages in last 24 hours --
     Set tMessageCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
         Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE TimeCreated > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tMessageCount = +tRS.cnt
